@@ -151,7 +151,17 @@ function deriveProductCode(styleCode) {
   return code;
 }
 
-const IMAGE_FIELD_CANDIDATES = ['image_url', 'photo_url', 'main_image_url', 'image', 'photo'];
+// Confirmed live (GET /api/debug/am/product/<code>): the image is NOT a flat
+// field on the product record -- `images` is an array of picture objects,
+// each with an `img` URL and an `is_catalog_image` flag. Prefer the one
+// flagged as the catalog image; fall back to the first if none is flagged.
+function extractImage(row) {
+  const images = Array.isArray(row.images) ? row.images : [];
+  if (!images.length) return null;
+  const catalogImage = images.find((img) => img.is_catalog_image === '1' || img.is_catalog_image === 1);
+  return (catalogImage || images[0]).img || null;
+}
+
 // WNDRR's AM account repurposes mid_code as Launch Date per style, and CORE
 // membership is the AM product group -- both confirmed in production
 // (demandplanning V2). '0' in mid_code means empty, not a real date.
@@ -188,13 +198,12 @@ async function getStyleCatalogue() {
     const description = (row.description || '').trim();
     const dashIdx = description.lastIndexOf(' - ');
     const productName = (dashIdx >= 0 ? description.slice(0, dashIdx) : description).trim() || null;
-    const imageField = IMAGE_FIELD_CANDIDATES.find((f) => row[f]);
     const midCode = (row.mid_code || '').trim();
     const launchDateRaw = midCode && midCode !== '0' ? midCode : null;
 
     map.set(style, {
       productName,
-      imageUrl: imageField ? row[imageField] : null,
+      imageUrl: extractImage(row),
       launchDateRaw,
       launchDate: parseLaunchDate(launchDateRaw),
       isCore: CORE_GROUPS.has(normGroupName(row.group)),
