@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WNDRR — Ad Creative Pipeline</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div id="password-screen">
+  <div class="pw-card">
+    <div class="wndrr-logo">
+      <div class="logo-mark">🎬</div>
+      <div class="logo-text">WNDRR<span>Ad Creative Pipeline</span></div>
+    </div>
+    <div class="pw-title">Ad Creative Pipeline</div>
+    <div class="pw-sub">Enter your password to access the tracker</div>
+    <input class="pw-input" type="password" id="pw-input" placeholder="Password" onkeydown="if(event.key==='Enter')login()">
+    <button class="pw-submit" onclick="login()">Access Tracker &rarr;</button>
+    <div class="pw-error" id="pw-error">Incorrect password. Please try again.</div>
+  </div>
+</div>
+
+<div id="app" style="display:none;">
+  <header class="topbar">
+    <div class="wndrr-logo">
+      <div class="logo-mark">🎬</div>
+      <div class="logo-text">WNDRR<span>Ad Creative Pipeline</span></div>
+    </div>
+    <nav class="tabs">
+      <button class="tab-btn active" data-tab="board">Board</button>
+      <button class="tab-btn" data-tab="admin">Styles &amp; Categories</button>
+    </nav>
+    <div class="topbar-actions">
+      <button class="btn btn-primary" id="new-asset-btn">+ New Creative Asset</button>
+      <button class="btn btn-ghost" onclick="logout()">Log out</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="tab-board" class="tab-panel active">
+      <div id="missing-ad-panel" class="missing-ad-panel" style="display:none;">
+        <div class="missing-ad-title">⚠ Missing-ad styles <span id="missing-ad-count">0</span></div>
+        <div class="missing-ad-sub">No Live creative asset, and not deliberately parked Awaiting Proven Concept.</div>
+        <div id="missing-ad-list" class="missing-ad-list"></div>
+      </div>
+
+      <div id="board" class="board"></div>
+    </section>
+
+    <section id="tab-admin" class="tab-panel">
+      <div class="admin-grid">
+        <div class="admin-col">
+          <div class="admin-header">
+            <h2>Styles</h2>
+            <button class="btn btn-primary btn-sm" id="new-style-btn">+ New Style</button>
+          </div>
+          <table class="admin-table" id="styles-table">
+            <thead><tr><th>Style Code</th><th>Name</th><th>Tier</th><th>Category</th><th>Assets</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="admin-col">
+          <div class="admin-header">
+            <h2>Categories</h2>
+            <button class="btn btn-primary btn-sm" id="new-category-btn">+ New Category</button>
+          </div>
+          <div class="admin-note">Manually maintained mapping to Meta campaign/ad set IDs — routes Phase 4 auto-upload. Not derived from Meta naming.</div>
+          <table class="admin-table" id="categories-table">
+            <thead><tr><th>Name</th><th>Meta Campaign ID</th><th>Meta Ad Set ID</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<!-- Creative asset modal -->
+<div id="asset-modal" class="modal-backdrop">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="asset-modal-title">New Creative Asset</h3>
+      <button class="modal-close" onclick="closeModal('asset-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="asset-id">
+      <label>Style
+        <select id="asset-style-id"></select>
+      </label>
+      <label>Concept name
+        <input type="text" id="asset-concept-name" placeholder="e.g. Wash Care UGC v2">
+      </label>
+      <div class="field-row">
+        <label>Format
+          <select id="asset-format">
+            <option value="video">Video</option>
+            <option value="static">Static</option>
+          </select>
+        </label>
+        <label>Concept classification
+          <select id="asset-classification">
+            <option value="new_experimental">New/Experimental</option>
+            <option value="tested_proven">Tested/Proven</option>
+          </select>
+        </label>
+      </div>
+      <label class="checkbox-label">
+        <input type="checkbox" id="asset-deliberate-trial">
+        Deliberate new-concept trial (bypasses the New Drop → Filming gate)
+      </label>
+      <label>Target date
+        <input type="date" id="asset-target-date">
+      </label>
+      <div class="field-row">
+        <label>Strategy owner
+          <input type="text" id="asset-strategy-owner">
+        </label>
+        <label>Filming owner
+          <input type="text" id="asset-filming-owner">
+        </label>
+      </div>
+      <div class="field-row">
+        <label>Editing owner
+          <input type="text" id="asset-editing-owner">
+        </label>
+        <label>QC owner
+          <input type="text" id="asset-qc-owner">
+        </label>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-danger" id="asset-delete-btn" style="display:none;" onclick="deleteAsset()">Delete</button>
+      <button class="btn btn-ghost" onclick="closeModal('asset-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveAsset()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Style modal -->
+<div id="style-modal" class="modal-backdrop">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>New Style</h3>
+      <button class="modal-close" onclick="closeModal('style-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <label>Style code <span class="hint">(same scheme as ApparelMagic)</span>
+        <input type="text" id="style-code" placeholder="e.g. WNDRR-1042">
+      </label>
+      <label>Name
+        <input type="text" id="style-name">
+      </label>
+      <div class="field-row">
+        <label>Tier
+          <select id="style-tier">
+            <option value="core_proven">Core/Proven</option>
+            <option value="new_drop">New Drop/Unproven</option>
+          </select>
+        </label>
+        <label>Category
+          <select id="style-category-id"><option value="">— none —</option></select>
+        </label>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('style-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveStyle()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Category modal -->
+<div id="category-modal" class="modal-backdrop">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>New Category</h3>
+      <button class="modal-close" onclick="closeModal('category-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <label>Name
+        <input type="text" id="category-name">
+      </label>
+      <div class="field-row">
+        <label>Meta campaign ID
+          <input type="text" id="category-campaign-id">
+        </label>
+        <label>Meta ad set ID
+          <input type="text" id="category-adset-id">
+        </label>
+      </div>
+      <label>Notes
+        <input type="text" id="category-notes">
+      </label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('category-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveCategory()">Save</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
