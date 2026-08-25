@@ -13,11 +13,17 @@ const SELECT_QUERY = `
 
 router.get('/', async (req, res, next) => {
   try {
-    const { style_id, status } = req.query;
+    const { style_id, style_ids, status } = req.query;
     const clauses = [];
     const params = [];
 
-    if (style_id) {
+    if (style_ids) {
+      const ids = String(style_ids).split(',').map((s) => Number(s.trim())).filter(Number.isFinite);
+      if (ids.length) {
+        params.push(ids);
+        clauses.push(`ca.style_id = ANY($${params.length}::int[])`);
+      }
+    } else if (style_id) {
       params.push(style_id);
       clauses.push(`ca.style_id = $${params.length}`);
     }

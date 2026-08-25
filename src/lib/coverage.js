@@ -45,12 +45,17 @@ function buildCoverage(styleRows, { assetCounts, amStock, amOnOrder, amDetails, 
     const memberSummaries = [];
 
     for (const style of members) {
-      const styleSoh = amStock ? amStock.get(style.style_code) : null;
+      // A style absent from a successfully-fetched AM map is a confident
+      // zero (no warehouse row / no open PO line for it), not "unknown" --
+      // same treatment demandplanning gives an absent SKU row. "Unavailable"
+      // is reserved for AM itself being unconfigured/errored (map is null),
+      // which the product-level soh/on_order fields below already surface.
+      const styleSoh = amStock ? amStock.get(style.style_code) ?? 0 : null;
       if (styleSoh != null) {
         soh += styleSoh;
         sohKnown = true;
       }
-      const styleOnOrder = amOnOrder ? amOnOrder.get(style.style_code) : null;
+      const styleOnOrder = amOnOrder ? amOnOrder.get(style.style_code) ?? 0 : null;
       if (styleOnOrder != null) onOrder += styleOnOrder;
       currentCoverage += assetCounts.get(style.id) || 0;
 
@@ -61,6 +66,12 @@ function buildCoverage(styleRows, { assetCounts, amStock, amOnOrder, amDetails, 
         style_code: style.style_code,
         tier: style.tier,
         image_url: details?.imageUrl || null,
+        // Per-colour figures, kept alongside (not instead of) the product-
+        // level totals below -- SOH/on-order are real per-SKU numbers and
+        // showing only a blended total risks reading as if one colour's
+        // stock is the other's, or that SOH and on-order are the same pool.
+        soh: styleSoh,
+        on_order: styleOnOrder,
       });
     }
 

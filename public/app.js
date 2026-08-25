@@ -11,7 +11,7 @@ const STATUS_LABELS = {
 const TIER_LABELS = { core_proven: 'Core/Proven', new_drop: 'New Drop' };
 const CLASSIFICATION_LABELS = { tested_proven: 'Tested/Proven', new_experimental: 'New/Experimental' };
 
-let state = { styles: [], categories: [], board: null, dashboard: null, drops: [], jobs: [], selectedDropId: null };
+let state = { styles: [], categories: [], board: null, dashboard: null, drops: [], jobs: [] };
 let dashboardWeekOffset = 0;
 
 // ── API helpers ──────────────────────────────────────
@@ -336,9 +336,44 @@ function renderPlanning() {
   renderDropsRow();
   renderJobsGrid();
   populateJobDropSelect();
-  if (state.selectedDropId) selectDrop(state.selectedDropId, { skipReload: true });
   loadDropSuggestions();
+  renderPlanningRoute();
 }
+
+// ── Planning sub-navigation (list / drop / product) ──
+// Hash-routed so a drop or product is a genuinely separate view (not an
+// inline expand), with working back/forward. Scheme:
+//   #planning/drop/<id>
+//   #planning/drop/<id>/product/<productCode>
+function parsePlanningHash() {
+  const parts = window.location.hash.replace(/^#planning\/?/, '').split('/').filter(Boolean);
+  if (parts[0] === 'drop' && parts[1]) {
+    if (parts[2] === 'product' && parts[3]) {
+      return { view: 'product', dropId: Number(parts[1]), productCode: decodeURIComponent(parts[3]) };
+    }
+    return { view: 'drop', dropId: Number(parts[1]) };
+  }
+  return { view: 'list' };
+}
+
+function goToPlanningList() {
+  window.location.hash = '#planning';
+}
+
+function renderPlanningRoute() {
+  const route = parsePlanningHash();
+  document.getElementById('planning-list-view').style.display = route.view === 'list' ? 'block' : 'none';
+  document.getElementById('planning-drop-view').style.display = route.view === 'drop' ? 'block' : 'none';
+  document.getElementById('planning-product-view').style.display = route.view === 'product' ? 'block' : 'none';
+
+  if (route.view === 'drop') {
+    loadDropView(route.dropId);
+  } else if (route.view === 'product') {
+    document.getElementById('product-view-back').onclick = () => { window.location.hash = `#planning/drop/${route.dropId}`; };
+    loadProductView(route.dropId, route.productCode);
+  }
+}
+window.addEventListener('hashchange', renderPlanningRoute);
 
 async function loadDropSuggestions() {
   try {
@@ -427,7 +462,7 @@ function renderDropsRow() {
     return;
   }
   row.innerHTML = state.drops.map((d) => `
-    <div class="drop-card ${d.id === state.selectedDropId ? 'selected' : ''}" data-drop-id="${d.id}">
+    <div class="drop-card" data-drop-id="${d.id}">
       <div class="drop-card-name">${escapeHtml(d.name)}</div>
       <div class="drop-card-date">${formatDate(d.launch_date)} · ${d.days_until_launch >= 0 ? d.days_until_launch + ' days to launch' : 'Launched'}</div>
       <div class="drop-card-counts">
@@ -439,18 +474,26 @@ function renderDropsRow() {
       ${d.most_urgent[0] ? `<div class="drop-card-urgent">Most urgent: ${escapeHtml(d.most_urgent[0].product_name)} (${d.most_urgent[0].current_coverage}/${d.most_urgent[0].creative_target ?? '—'})</div>` : ''}
     </div>`).join('');
   row.querySelectorAll('.drop-card').forEach((card) => {
-    card.addEventListener('click', () => selectDrop(Number(card.dataset.dropId)));
+    card.addEventListener('click', () => { window.location.hash = `#planning/drop/${card.dataset.dropId}`; });
   });
 }
 
-async function selectDrop(dropId, { skipReload } = {}) {
-  state.selectedDropId = dropId;
-  if (!skipReload) renderDropsRow();
+// One SOH/On Order figure per colour -- never blended, so two colours never
+// read as if they share (or double) the same pool of stock.
+function colourStatsLine(s) {
+  const parts = [];
+  parts.push(s.soh != null ? `SOH ${s.soh}` : 'SOH —');
+  parts.push(s.on_order != null ? `On Order ${s.on_order}` : null);
+  return parts.filter(Boolean).join(' · ');
+}
+
+async function loadDropView(dropId) {
+  state.currentDropId = dropId;
   try {
     const drop = await api(`/drops/${dropId}`);
-    document.getElementById('coverage-section').style.display = 'block';
-    document.getElementById('coverage-drop-title').textContent = `Coverage — ${drop.name}`;
-    const amNote = document.getElementById('coverage-am-note');
+    state.currentDrop = drop;
+    document.getElementById('drop-view-title').textContent = drop.name;
+    const amNote = document.getElementById('drop-view-am-note');
     if (!drop.apparelmagic.configured) {
       amNote.textContent = 'ApparelMagic is not connected — SOH, targets and gaps will show once AM_SUBDOMAIN / AM_TOKEN are set.';
     } else if (drop.apparelmagic.error) {
@@ -458,6 +501,12 @@ async function selectDrop(dropId, { skipReload } = {}) {
     } else {
       amNote.textContent = '';
     }
+    document.getElementById('drop-view-summary').innerHTML = `
+      <div><strong>${formatDate(drop.launch_date)}</strong><br>Launch date</div>
+      <div><strong>${drop.days_until_launch >= 0 ? drop.days_until_launch : 0}</strong><br>Days to launch</div>
+      <div><strong>${drop.summary.productCount}</strong><br>Products (${drop.summary.styleCount} colourways)</div>
+      <div><strong>${drop.summary.totalCovered} / ${drop.summary.totalTarget}</strong><br>Creatives${drop.summary.overallPct !== null ? ' — ' + drop.summary.overallPct + '%' : ''}</div>
+    `;
     renderCoverageGrid(drop.coverage);
   } catch (e) {
     toast(e.message, true);
@@ -470,39 +519,42 @@ function coverageGapLabel(c) {
   return `${icon} ${c.creative_gap} more required`;
 }
 
+// Coverage cards here are compact and purely navigational -- click one to
+// open its Product view (per-colour breakdown + existing concepts).
 function renderCoverageGrid(coverage) {
   const grid = document.getElementById('coverage-grid');
   if (!coverage.length) {
     grid.innerHTML = '<div class="attention-empty">No styles assigned to this drop yet — assign styles to it from Styles &amp; Categories.</div>';
     return;
   }
-  grid.innerHTML = coverage.map((c, i) => {
+  grid.innerHTML = coverage.map((c) => {
     const images = c.images.length
       ? c.images.slice(0, 4).map((url) => `<img src="${url}" alt="">`).join('')
       : '<span class="coverage-card-noimg">🖼</span>';
-    const colourNote = c.styles.length > 1 ? `${c.styles.length} colours` : c.styles[0]?.style_code || c.product_code;
     const pct = c.creative_target ? Math.min(100, Math.round((c.current_coverage / c.creative_target) * 100)) : 0;
+    const stockLines = c.soh !== null
+      ? c.styles.map((s) => `<div>${c.styles.length > 1 ? s.style_code + ': ' : ''}${colourStatsLine(s)}</div>`).join('')
+      : '<div class="coverage-card-unavailable">Stock unavailable</div>';
 
     return `
-    <div class="coverage-card">
+    <div class="coverage-card" data-product-code="${c.product_code}">
       <div class="coverage-card-imgrow">${images}</div>
       <div class="coverage-card-body">
         <div class="coverage-card-name">${escapeHtml(c.product_name)}</div>
-        <div class="coverage-card-code">${c.product_code} · ${colourNote}</div>
-        ${c.soh !== null
-          ? `<div class="coverage-card-stats">
-               <span>SOH: <strong>${c.soh}</strong></span>
-               ${c.on_order !== null ? `<span>On Order: <strong>${c.on_order}</strong></span>` : ''}
-             </div>
-             <div class="coverage-card-ratio">${c.current_coverage} / ${c.creative_target}</div>
-             <div class="coverage-progress-track"><div class="coverage-progress-fill ${c.status}" style="width:${pct}%;"></div></div>
-             <div class="coverage-card-gap ${c.status}">${coverageGapLabel(c)}</div>`
-          : `<div class="coverage-card-unavailable">SOH unavailable</div>`}
-        ${c.creative_gap > 0 || c.creative_gap === null ? `<button class="btn btn-primary btn-sm" onclick="planCreativeFromCoverage(${i}, ${state.selectedDropId})">+ Plan Creative</button>` : ''}
+        <div class="coverage-card-code">${c.product_code} · ${c.styles.length} colour${c.styles.length === 1 ? '' : 's'}</div>
+        <div class="coverage-card-stats-stack">${stockLines}</div>
+        ${c.soh !== null ? `
+          <div class="coverage-card-ratio">${c.current_coverage} / ${c.creative_target}</div>
+          <div class="coverage-progress-track"><div class="coverage-progress-fill ${c.status}" style="width:${pct}%;"></div></div>
+          <div class="coverage-card-gap ${c.status}">${coverageGapLabel(c)}</div>` : ''}
       </div>
     </div>`;
   }).join('');
-  state.selectedDropCoverage = coverage;
+  grid.querySelectorAll('.coverage-card').forEach((card) => {
+    card.addEventListener('click', () => {
+      window.location.hash = `#planning/drop/${state.currentDropId}/product/${encodeURIComponent(card.dataset.productCode)}`;
+    });
+  });
 }
 
 function checklistLine(label, resolved, statusText, notes) {
@@ -694,10 +746,88 @@ async function deleteJob() {
   }
 }
 
-function planCreativeFromCoverage(coverageIndex, dropId) {
-  const group = state.selectedDropCoverage?.[coverageIndex];
-  if (!group) return;
-  openJobModal(null, { styleIds: group.styles.map((s) => s.style_id), dropId });
+// ── Product view: per-colour breakdown + existing concepts ──
+const ASSET_STATUS_COLORS = {
+  not_started: ['var(--surface2)', 'var(--text-muted)'],
+  awaiting_proven_concept: ['var(--purple-light)', 'var(--purple)'],
+  concept_script: ['var(--blue-light)', 'var(--blue)'],
+  filming: ['var(--amber-light)', 'var(--amber)'],
+  editing: ['var(--amber-light)', 'var(--amber)'],
+  qc: ['var(--teal-light)', 'var(--teal-dark)'],
+  uploaded_live: ['var(--green-light)', 'var(--green)'],
+};
+
+async function loadProductView(dropId, productCode) {
+  try {
+    const drop = state.currentDrop && state.currentDropId === dropId ? state.currentDrop : await api(`/drops/${dropId}`);
+    state.currentDrop = drop;
+    state.currentDropId = dropId;
+    const group = drop.coverage.find((c) => c.product_code === productCode);
+    if (!group) {
+      toast('Product not found in this drop', true);
+      window.location.hash = `#planning/drop/${dropId}`;
+      return;
+    }
+    state.currentProduct = group;
+
+    document.getElementById('product-view-name').textContent = group.product_name;
+    document.getElementById('product-view-code').textContent = `${group.product_code} · ${group.styles.length} colour${group.styles.length === 1 ? '' : 's'}`;
+    document.getElementById('product-view-images').innerHTML = group.images.length
+      ? group.images.slice(0, 4).map((url) => `<img src="${url}" alt="">`).join('')
+      : '<span class="no-img">🖼</span>';
+
+    document.getElementById('product-view-colours').innerHTML = group.styles.map((s) => `
+      <div class="product-view-colour-card">
+        ${s.image_url ? `<img src="${s.image_url}" alt="">` : '<span class="no-img">🖼</span>'}
+        <div>
+          <div class="product-view-colour-code">${s.style_code}</div>
+          <div class="product-view-colour-stats">${colourStatsLine(s)}</div>
+        </div>
+      </div>`).join('');
+
+    const pct = group.creative_target ? Math.min(100, Math.round((group.current_coverage / group.creative_target) * 100)) : 0;
+    document.getElementById('product-view-overview').innerHTML = group.soh !== null ? `
+      <div class="coverage-card-ratio">${group.current_coverage} / ${group.creative_target} creatives</div>
+      <div class="coverage-progress-track"><div class="coverage-progress-fill ${group.status}" style="width:${pct}%;"></div></div>
+      <div class="coverage-card-gap ${group.status}">${coverageGapLabel(group)}</div>
+    ` : '<div class="coverage-card-unavailable">Stock unavailable</div>';
+
+    const planBtn = document.getElementById('product-view-plan-btn');
+    planBtn.style.display = group.creative_gap > 0 || group.creative_gap === null ? 'inline-block' : 'none';
+    planBtn.onclick = () => openJobModal(null, { styleIds: group.styles.map((s) => s.style_id), dropId });
+
+    const styleIds = group.styles.map((s) => s.style_id).join(',');
+    const assets = await api(`/creative-assets?style_ids=${styleIds}`);
+    renderProductConcepts(assets);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function renderProductConcepts(assets) {
+  const grid = document.getElementById('product-view-concepts');
+  if (!assets.length) {
+    grid.innerHTML = '<div class="attention-empty">No creative work started for this product yet.</div>';
+    return;
+  }
+  grid.innerHTML = assets.map((a) => {
+    const [bg, fg] = ASSET_STATUS_COLORS[a.status] || ASSET_STATUS_COLORS.not_started;
+    return `
+    <div class="job-card" data-asset-id="${a.id}">
+      <div class="job-card-concept">${escapeHtml(a.concept_name)}</div>
+      <div class="job-card-products">${a.style_code} · ${a.format}</div>
+      <div class="job-status-row">
+        <span class="job-status-pill" style="background:${bg};color:${fg};">${STATUS_LABELS[a.status]}</span>
+        <span class="badge badge-${a.concept_classification}">${CLASSIFICATION_LABELS[a.concept_classification]}</span>
+      </div>
+    </div>`;
+  }).join('');
+  grid.querySelectorAll('.job-card').forEach((card) => {
+    card.addEventListener('click', () => {
+      const asset = assets.find((a) => a.id === Number(card.dataset.assetId));
+      openAssetModal(asset);
+    });
+  });
 }
 
 document.getElementById('new-job-btn').addEventListener('click', () => openJobModal(null));
