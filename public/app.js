@@ -11,7 +11,8 @@ const STATUS_LABELS = {
 const TIER_LABELS = { core_proven: 'Core/Proven', new_drop: 'New Drop' };
 const CLASSIFICATION_LABELS = { tested_proven: 'Tested/Proven', new_experimental: 'New/Experimental' };
 
-let state = { styles: [], categories: [], board: null };
+let state = { styles: [], categories: [], board: null, dashboard: null };
+let dashboardWeekOffset = 0;
 
 // ── API helpers ──────────────────────────────────────
 async function api(path, opts = {}) {
@@ -82,28 +83,44 @@ function toast(message, isError = false) {
 }
 
 // ── Tabs ─────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === `tab-${name}`));
+}
+
 document.querySelectorAll('.tab-btn').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));
-    document.querySelectorAll('.tab-panel').forEach((p) => p.classList.remove('active'));
-    btn.classList.add('active');
-    document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
-  });
+  btn.addEventListener('click', () => switchTab(btn.dataset.tab));
 });
 
 // ── Load & render ────────────────────────────────────
 async function loadAll() {
   try {
-    const [board, styles, categories] = await Promise.all([api('/board'), api('/styles'), api('/categories')]);
+    const [board, styles, categories, dashboard] = await Promise.all([
+      api('/board'),
+      api('/styles'),
+      api('/categories'),
+      api(`/dashboard?weekOffset=${dashboardWeekOffset}`),
+    ]);
     state.board = board;
     state.styles = styles;
     state.categories = categories;
+    state.dashboard = dashboard;
     renderBoard();
     renderMissingAd();
     renderStylesTable();
     renderCategoriesTable();
     populateStyleSelect();
     populateCategorySelect();
+    renderDashboard();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function loadDashboard() {
+  try {
+    state.dashboard = await api(`/dashboard?weekOffset=${dashboardWeekOffset}`);
+    renderDashboard();
   } catch (e) {
     toast(e.message, true);
   }
@@ -190,6 +207,106 @@ async function changeStatus(id, status, selectEl) {
     if (selectEl && previous) selectEl.value = previous;
   }
 }
+
+// ── Dashboard ────────────────────────────────────────
+const STATUS_LABEL_TEXT = { on_track: 'On Track', at_risk: 'At Risk', off_track: 'Off Track' };
+
+const KPI_CARDS = [
+  { key: 'planned', icon: '▤', label: 'Planned', defaultSub: 'Committed for this week' },
+  { key: 'briefing', icon: '✎', label: 'Briefing', defaultSub: 'Currently being briefed' },
+  { key: 'in_production', icon: '●', label: 'In Production', defaultSub: 'Being shot / designed' },
+  { key: 'editing', icon: '✂', label: 'Editing', defaultSub: 'Currently being edited' },
+  { key: 'awaiting_review', icon: '⏳', label: 'Awaiting Review', defaultSub: 'Waiting for approval' },
+  { key: 'changes', icon: '↺', label: 'Changes', defaultSub: 'Changes requested' },
+  { key: 'approved', icon: '✓', label: 'Approved', defaultSub: 'Approved, not yet uploaded' },
+  { key: 'shipped', icon: '🚀', label: 'Shipped', defaultSub: 'Uploaded to Meta this week' },
+];
+
+function renderDashboard() {
+  const d = state.dashboard;
+  if (!d) return;
+
+  document.getElementById('hero-week-title').textContent = `Week ${d.week.number}`;
+  document.getElementById('hero-week-dates').textContent = d.week.label;
+  document.getElementById('hero-pct').textContent = `${d.current.completionPct}%`;
+  document.getElementById('hero-pct-sub').textContent = `${d.current.shipped} / ${d.current.planned} shipped`;
+  document.getElementById('hero-progress-fill').style.width = `${Math.min(100, d.current.completionPct)}%`;
+  document.getElementById('hero-shipped').textContent = d.current.shipped;
+  document.getElementById('hero-remaining').textContent = d.current.remaining;
+  document.getElementById('hero-planned').innerHTML = `${d.current.planned} <span class="sample-tag">sample</span>`;
+  document.getElementById('hero-days-remaining').textContent = d.week.daysRemaining;
+
+  const badge = document.getElementById('hero-status-badge');
+  badge.textContent = STATUS_LABEL_TEXT[d.current.status];
+  badge.className = `hero-status-badge ${d.current.status}`;
+
+  document.getElementById('pipeline-live-note').style.display = d.week.offset !== 0 ? 'block' : 'none';
+
+  const kpiGrid = document.getElementById('pipeline-kpi-grid');
+  kpiGrid.innerHTML = KPI_CARDS.map((cfg) => {
+    const v = d.pipeline[cfg.key] || {};
+    const numHtml =
+      v.count === null || v.count === undefined
+        ? '<span class="kpi-num muted">—</span>'
+        : `<span class="kpi-num">${v.count}</span>${v.sample ? ' <span class="sample-tag">sample</span>' : ''}`;
+    const sub = v.staleNote || v.note || cfg.defaultSub;
+    const subClass = v.staleNote ? 'kpi-sub warn' : 'kpi-sub';
+    return `
+      <button class="kpi-card" data-kpi="${cfg.key}">
+        <span class="kpi-icon">${cfg.icon}</span>
+        ${numHtml}
+        <span class="kpi-label">${cfg.label}</span>
+        <span class="${subClass}">${sub}</span>
+      </button>`;
+  }).join('');
+  kpiGrid.querySelectorAll('.kpi-card').forEach((btn) => {
+    btn.addEventListener('click', () => switchTab('board'));
+  });
+
+  const h = d.health;
+  const healthGrid = document.getElementById('health-grid');
+  healthGrid.innerHTML = `
+    <div class="health-card">
+      <span class="health-num ${h.overdue > 0 ? 'danger' : ''}">${h.overdue}</span>
+      <div class="health-label">Overdue</div>
+      <div class="health-sub ${h.overdue > 0 ? 'warn' : ''}">${h.overdue > 0 ? 'Requires attention' : 'All on schedule'}</div>
+    </div>
+    <div class="health-card">
+      <span class="health-num">${h.avgProductionDays !== null ? h.avgProductionDays.toFixed(1) + 'd' : '—'}</span>
+      <div class="health-label">Avg. Production Time</div>
+      <div class="health-sub">Brief &rarr; Shipped</div>
+    </div>
+    <div class="health-card">
+      <span class="health-num">${h.newConcepts.actual} / ${h.newConcepts.target} <span class="sample-tag">sample</span></span>
+      <div class="health-label">New Concepts</div>
+      <div class="health-sub">Weekly target</div>
+    </div>
+    <div class="health-card">
+      <span class="health-num">${h.adVariations.actual} / ${h.adVariations.target}${h.adVariations.targetIsSample ? ' <span class="sample-tag">sample target</span>' : ''}</span>
+      <div class="health-label">Ad Variations</div>
+      <div class="health-sub">Weekly target</div>
+    </div>`;
+}
+
+document.getElementById('week-prev').addEventListener('click', () => {
+  dashboardWeekOffset -= 1;
+  loadDashboard();
+});
+document.getElementById('week-next').addEventListener('click', () => {
+  dashboardWeekOffset += 1;
+  loadDashboard();
+});
+document.getElementById('week-current').addEventListener('click', () => {
+  dashboardWeekOffset = 0;
+  loadDashboard();
+});
+
+document.getElementById('action-new-creative').addEventListener('click', () => openAssetModal(null));
+document.getElementById('action-pipeline').addEventListener('click', () => switchTab('board'));
+document.getElementById('action-library').addEventListener('click', () => switchTab('board'));
+document.getElementById('action-brief-builder').addEventListener('click', () => {
+  toast("Brief Builder isn't built yet — coming in a future phase.");
+});
 
 // ── Styles/categories tables ─────────────────────────
 function renderStylesTable() {

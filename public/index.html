@@ -31,7 +31,8 @@
       <div class="logo-text">WNDRR<span>Ad Creative Pipeline</span></div>
     </div>
     <nav class="tabs">
-      <button class="tab-btn active" data-tab="board">Board</button>
+      <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+      <button class="tab-btn" data-tab="board">Board</button>
       <button class="tab-btn" data-tab="admin">Styles &amp; Categories</button>
     </nav>
     <div class="topbar-actions">
@@ -41,7 +42,69 @@
   </header>
 
   <main>
-    <section id="tab-board" class="tab-panel active">
+    <section id="tab-dashboard" class="tab-panel active">
+      <div class="action-cards">
+        <button class="action-card action-purple" id="action-new-creative">
+          <span class="action-icon">✎</span>
+          <span class="action-title">New Creative</span>
+          <span class="action-sub">Quickly create a new creative/brief</span>
+        </button>
+        <button class="action-card action-orange" id="action-pipeline">
+          <span class="action-icon">▤</span>
+          <span class="action-title">Creative Pipeline</span>
+          <span class="action-sub">Open the full production pipeline</span>
+        </button>
+        <button class="action-card action-teal" id="action-brief-builder">
+          <span class="action-icon">✒</span>
+          <span class="action-title">Brief Builder</span>
+          <span class="action-sub">Briefs, hooks, concepts &amp; scripts</span>
+        </button>
+        <button class="action-card action-blue" id="action-library">
+          <span class="action-icon">▦</span>
+          <span class="action-title">Creative Library</span>
+          <span class="action-sub">Completed &amp; live creative work</span>
+        </button>
+      </div>
+
+      <div class="hero-card">
+        <div class="hero-top">
+          <div>
+            <div class="hero-label">Current Week</div>
+            <div class="hero-week" id="hero-week-title">Week —</div>
+            <div class="hero-dates" id="hero-week-dates">—</div>
+          </div>
+          <div class="hero-week-nav">
+            <button class="week-nav-btn" id="week-prev" title="Previous week">&larr;</button>
+            <button class="week-nav-btn" id="week-current" title="Jump to current week">Today</button>
+            <button class="week-nav-btn" id="week-next" title="Next week">&rarr;</button>
+          </div>
+          <div class="hero-pct-block">
+            <div class="hero-pct" id="hero-pct">—%</div>
+            <div class="hero-pct-sub" id="hero-pct-sub">— / — shipped</div>
+          </div>
+        </div>
+        <div class="hero-progress-track">
+          <div class="hero-progress-fill" id="hero-progress-fill" style="width:0%;"></div>
+        </div>
+        <div class="hero-bottom">
+          <div class="hero-stat"><span class="hero-stat-num" id="hero-shipped">—</span><span class="hero-stat-label">Shipped</span></div>
+          <div class="hero-stat"><span class="hero-stat-num" id="hero-remaining">—</span><span class="hero-stat-label">Remaining</span></div>
+          <div class="hero-stat"><span class="hero-stat-num" id="hero-planned">— <span class="sample-tag">sample</span></span><span class="hero-stat-label">Planned</span></div>
+          <div class="hero-stat"><span class="hero-stat-num" id="hero-days-remaining">—</span><span class="hero-stat-label">Days Remaining</span></div>
+          <div class="hero-status-badge" id="hero-status-badge">—</div>
+        </div>
+      </div>
+
+      <div class="live-state-note" id="pipeline-live-note" style="display:none;">Pipeline cards below show the live board right now, not a historical snapshot for this week.</div>
+      <div class="kpi-grid" id="pipeline-kpi-grid"></div>
+
+      <div class="health-row">
+        <div class="health-header">Creative Machine Health</div>
+        <div class="health-grid" id="health-grid"></div>
+      </div>
+    </section>
+
+    <section id="tab-board" class="tab-panel">
       <div id="missing-ad-panel" class="missing-ad-panel" style="display:none;">
         <div class="missing-ad-title">⚠ Missing-ad styles <span id="missing-ad-count">0</span></div>
         <div class="missing-ad-sub">No Live creative asset, and not deliberately parked Awaiting Proven Concept.</div>
