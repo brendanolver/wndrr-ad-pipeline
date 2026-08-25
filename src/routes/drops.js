@@ -7,13 +7,17 @@ const router = express.Router();
 
 async function fetchAmData() {
   if (!apparelmagic.configured()) {
-    return { amStock: null, amDetails: null, amError: null, amConfigured: false };
+    return { amStock: null, amDetails: null, amOnOrder: null, amError: null, amConfigured: false };
   }
   try {
-    const [amStock, amDetails] = await Promise.all([apparelmagic.getStockByStyle(), apparelmagic.getStyleCatalogue()]);
-    return { amStock, amDetails, amError: null, amConfigured: true };
+    const [amStock, amDetails, amOnOrder] = await Promise.all([
+      apparelmagic.getStockByStyle(),
+      apparelmagic.getStyleCatalogue(),
+      apparelmagic.getOnOrderByStyle(),
+    ]);
+    return { amStock, amDetails, amOnOrder, amError: null, amConfigured: true };
   } catch (err) {
-    return { amStock: null, amDetails: null, amError: err.message, amConfigured: true };
+    return { amStock: null, amDetails: null, amOnOrder: null, amError: err.message, amConfigured: true };
   }
 }
 
@@ -38,7 +42,8 @@ function summarize(coverage) {
   const totalCovered = coverage.reduce((sum, c) => sum + c.current_coverage, 0);
   const totalTarget = coverage.reduce((sum, c) => sum + (c.creative_target || 0), 0);
   const overallPct = totalTarget > 0 ? Math.round((totalCovered / totalTarget) * 100) : null;
-  return { styleCount: coverage.length, green, amber, red, totalCovered, totalTarget, overallPct };
+  const styleCount = coverage.reduce((sum, c) => sum + c.styles.length, 0);
+  return { productCount: coverage.length, styleCount, green, amber, red, totalCovered, totalTarget, overallPct };
 }
 
 function sortByUrgency(coverage) {
@@ -69,7 +74,7 @@ router.get('/', async (req, res, next) => {
     const drops = dropsResult.rows.map((drop) => {
       const styleRows = stylesByDrop.get(drop.id) || [];
       const coverage = sortByUrgency(
-        buildCoverage(styleRows, { assetCounts, amStock: am.amStock, amDetails: am.amDetails, rules })
+        buildCoverage(styleRows, { assetCounts, amStock: am.amStock, amOnOrder: am.amOnOrder, amDetails: am.amDetails, rules })
       );
       const daysUntilLaunch = Math.ceil((new Date(drop.launch_date) - new Date()) / 86400000);
       return {
@@ -205,7 +210,7 @@ router.get('/:id', async (req, res, next) => {
     ]);
     const assetCounts = await getAssetCounts(stylesResult.rows.map((s) => s.id));
     const coverage = sortByUrgency(
-      buildCoverage(stylesResult.rows, { assetCounts, amStock: am.amStock, amDetails: am.amDetails, rules })
+      buildCoverage(stylesResult.rows, { assetCounts, amStock: am.amStock, amOnOrder: am.amOnOrder, amDetails: am.amDetails, rules })
     );
     const daysUntilLaunch = Math.ceil((new Date(drop.launch_date) - new Date()) / 86400000);
 

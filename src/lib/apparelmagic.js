@@ -119,6 +119,38 @@ async function getStockByStyle() {
   return stockByStyle; // Map<style_code, total SOH>
 }
 
+// Units currently on order from suppliers (open purchase orders, not yet
+// received) -- account 1068 is WNDRR's purchase-order account in AM,
+// confirmed in production (demandplanning's fetchAMOrdersFromAPI). With
+// is_open=1, AM embeds order_items directly in each order.
+async function getOnOrderByStyle() {
+  const orders = await fetchAllPages('orders', { account_number: '1068', is_open: 1 });
+  const onOrderByStyle = new Map();
+  for (const order of orders) {
+    for (const item of order.order_items || []) {
+      const qty = parseFloat(item.qty_open || 0);
+      if (qty <= 0) continue;
+      const style = (item.style_number || '').trim();
+      if (!style) continue;
+      onOrderByStyle.set(style, (onOrderByStyle.get(style) || 0) + qty);
+    }
+  }
+  return onOrderByStyle; // Map<style_code, qty on order>
+}
+
+// WNDRR's modern style codes are a fixed 11 characters: W + 2-digit year +
+// 2-letter collection code + 3-digit number + 3-letter colour (e.g.
+// "W26IA004NAV"), confirmed in production (demandplanning's styleFromSku
+// pattern). The base product -- what coverage/creative targets should group
+// by, since colourways of the same product share one creative need -- is
+// the first 8 characters; the colour is the last 3. Older/non-standard
+// codes that don't match fall back to being their own group of one.
+function deriveProductCode(styleCode) {
+  const code = (styleCode || '').toUpperCase().trim();
+  if (/^W\d{2}[A-Z]{2}\d{3}[A-Z]{3}$/.test(code)) return code.slice(0, 8);
+  return code;
+}
+
 const IMAGE_FIELD_CANDIDATES = ['image_url', 'photo_url', 'main_image_url', 'image', 'photo'];
 // WNDRR's AM account repurposes mid_code as Launch Date per style, and CORE
 // membership is the AM product group -- both confirmed in production
@@ -177,4 +209,12 @@ async function rawRequest(endpoint, params) {
   return amRequest('GET', endpoint, params);
 }
 
-module.exports = { configured, getStockByStyle, getStyleCatalogue, parseLaunchDate, rawRequest };
+module.exports = {
+  configured,
+  getStockByStyle,
+  getStyleCatalogue,
+  getOnOrderByStyle,
+  deriveProductCode,
+  parseLaunchDate,
+  rawRequest,
+};
