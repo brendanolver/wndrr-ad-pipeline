@@ -13,7 +13,8 @@ router.get('/am/product/:styleCode', async (req, res, next) => {
     }
     const result = await apparelmagic.rawRequest('products', {
       style_number: req.params.styleCode,
-      'pagination[page_size]': 5,
+      // ApparelMagic rejects page sizes below 10 ("must be between 10 and 1000").
+      'pagination[page_size]': 10,
     });
     res.status(result.status).json(result.data);
   } catch (err) {
