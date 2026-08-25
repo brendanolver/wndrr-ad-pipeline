@@ -3,6 +3,7 @@ const { pool } = require('../db');
 const { STATUSES, CONCEPT_CLASSIFICATIONS, FORMATS } = require('../lib/statuses');
 const { assertCanEnterFilming, RuleViolationError } = require('../lib/rules');
 const { deriveProductCode } = require('../lib/apparelmagic');
+const { insertCreativeAsset } = require('../lib/assets');
 
 const router = express.Router();
 
@@ -112,30 +113,18 @@ router.post('/', async (req, res, next) => {
       }
     }
 
-    const result = await db.query(
-      `INSERT INTO creative_assets
-        (style_id, concept_name, concept_classification, format, is_deliberate_trial, target_date,
-         strategy_owner, filming_owner, editing_owner, qc_owner)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
-      [
-        style_id,
-        concept_name.trim(),
-        concept_classification,
-        format,
-        !!is_deliberate_trial,
-        target_date || null,
-        strategy_owner || null,
-        filming_owner || null,
-        editing_owner || null,
-        qc_owner || null,
-      ]
-    );
-
-    const asset = result.rows[0];
-    await db.query(
-      `INSERT INTO status_history (creative_asset_id, from_status, to_status, changed_by) VALUES ($1, NULL, $2, $3)`,
-      [asset.id, asset.status, strategy_owner || null]
-    );
+    const asset = await insertCreativeAsset(db, {
+      style_id,
+      concept_name: concept_name.trim(),
+      concept_classification,
+      format,
+      is_deliberate_trial,
+      target_date: target_date || null,
+      strategy_owner: strategy_owner || null,
+      filming_owner: filming_owner || null,
+      editing_owner: editing_owner || null,
+      qc_owner: qc_owner || null,
+    });
 
     if (fulfills_slot_id) {
       await client.query(`UPDATE drop_product_plan_slots SET fulfilled_by_asset_id = $1 WHERE id = $2`, [

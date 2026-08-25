@@ -861,9 +861,15 @@ const ASSET_STATUS_COLORS = {
 
 async function loadProductView(dropId, productCode) {
   try {
-    const drop = state.currentDrop && state.currentDropId === dropId ? state.currentDrop : await api(`/drops/${dropId}`);
-    state.currentDrop = drop;
     state.currentDropId = dropId;
+    // Generating/topping-up the plan can create real Creative Assets (see
+    // loadProductPlan) -- run it before fetching the drop, always fresh
+    // (never the drop-view's cache), so current_coverage below is never
+    // one step behind assets this same view just created.
+    await loadProductPlan(dropId, productCode);
+
+    const drop = await api(`/drops/${dropId}`);
+    state.currentDrop = drop;
     const group = drop.coverage.find((c) => c.product_code === productCode);
     if (!group) {
       toast('Product not found in this drop', true);
@@ -902,7 +908,9 @@ async function loadProductView(dropId, productCode) {
     const assets = await api(`/creative-assets?style_ids=${styleIds}`);
     state.currentProductAssets = assets;
     renderProductConcepts(assets);
-    await loadProductPlan(dropId, productCode, group);
+    // Re-render now that state.currentProductAssets is fresh (it feeds the
+    // fallback "Link existing" list on any still-unfulfilled slot).
+    renderRequiredConcepts(currentProductPlan);
   } catch (e) {
     toast(e.message, true);
   }
@@ -942,7 +950,10 @@ function renderProductConcepts(assets) {
 // slots already there" is true with no manual click.
 let currentProductPlan = null;
 
-async function loadProductPlan(dropId, productCode, group) {
+// Fetches and returns the plan only -- does not render (renderRequiredConcepts
+// depends on state.currentProductAssets, which isn't fetched yet at this
+// point in loadProductView; the caller renders once everything is ready).
+async function loadProductPlan(dropId, productCode) {
   try {
     let data = await api(`/drop-product-plans?drop_id=${dropId}&product_code=${encodeURIComponent(productCode)}`);
     if (data.target != null && (data.plan === null || data.shortfall > 0)) {
@@ -952,13 +963,13 @@ async function loadProductPlan(dropId, productCode, group) {
       });
     }
     currentProductPlan = data;
-    renderRequiredConcepts(data, group);
+    return data;
   } catch (e) {
     toast(e.message, true);
   }
 }
 
-function renderRequiredConcepts(data, group) {
+function renderRequiredConcepts(data) {
   const list = document.getElementById('product-plan-slots');
   const note = document.getElementById('product-plan-shortfall-note');
   const addBtn = document.getElementById('product-plan-add-new-btn');
@@ -993,8 +1004,14 @@ function renderRequiredConcepts(data, group) {
     const fulfilledLine = fulfilled
       ? `<span class="job-status-pill">${assetStatusLabel(s.asset_status)}</span>`
       : '';
+    // A slot's asset is created automatically the moment the slot exists
+    // (Settings already decided the concept name/format/classification),
+    // so the normal path is just editing it -- style/target date/owner, or
+    // moving it through the pipeline. "+ Create Asset" only resurfaces as a
+    // fallback for a slot that somehow has no asset (e.g. its asset was
+    // deleted, or a slot generated before this behavior shipped).
     const actions = fulfilled ? `
-        <button type="button" class="btn btn-ghost btn-sm" onclick="unlinkConceptSlot(${s.id})">Unlink</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="editConceptAsset(${s.asset_id})">Edit</button>
       ` : `
         <button type="button" class="btn btn-ghost btn-sm" onclick="fulfillWithNewAsset(${s.id}, '${escapeHtml(s.concept_name).replace(/'/g, "\\'")}', '${s.source}', '${s.default_format || ''}', '${s.default_classification || ''}')">+ Create Asset</button>
         ${eligibleAssets.length ? `
@@ -1062,10 +1079,14 @@ async function linkExistingAsset(slotId, assetId) {
   }
 }
 
-async function unlinkConceptSlot(slotId) {
+// Fulfilled rows only ever show "Edit" -- deleting the asset from there
+// (the modal's existing Delete button) unlinks the slot automatically
+// (fulfilled_by_asset_id is ON DELETE SET NULL), so there's no separate
+// "Unlink" action to expose.
+async function editConceptAsset(assetId) {
   try {
-    await api(`/drop-product-plans/${currentProductPlan.plan.id}/slots/${slotId}/fulfill`, { method: 'DELETE' });
-    loadProductView(state.currentDropId, state.currentProduct.product_code);
+    const asset = await api(`/creative-assets/${assetId}`);
+    openAssetModal(asset);
   } catch (e) {
     toast(e.message, true);
   }
@@ -1091,22 +1112,22 @@ function hideAddNewConceptForm() {
 
 async function addNewConceptSlot() {
   const name = document.getElementById('new-concept-name').value;
+  const format = document.getElementById('new-concept-format').value;
   const description = document.getElementById('new-concept-description').value || null;
   if (!name.trim()) return toast('Concept name is required', true);
   try {
-    // POST /:id/slots returns { plan, slots } only -- target doesn't change
-    // by adding a manual slot, so carry it over and recompute shortfall.
-    const { plan, slots } = await api(`/drop-product-plans/${currentProductPlan.plan.id}/slots`, {
+    // Creates the slot AND its Creative Asset together, so a full reload
+    // (rather than local state patching) picks up both the new Required
+    // Concepts row and the new Existing Concepts card in one go.
+    await api(`/drop-product-plans/${currentProductPlan.plan.id}/slots`, {
       method: 'POST',
-      body: JSON.stringify({ concept_name: name, description }),
+      body: JSON.stringify({ concept_name: name, format, description }),
     });
-    const target = currentProductPlan.target;
-    currentProductPlan = { plan, slots, target, shortfall: Math.max(0, target - slots.length) };
-    renderRequiredConcepts(currentProductPlan, state.currentProduct);
     document.getElementById('new-concept-name').value = '';
     document.getElementById('new-concept-description').value = '';
     hideAddNewConceptForm();
     toast('Concept added');
+    loadProductView(state.currentDropId, state.currentProduct.product_code);
   } catch (e) {
     toast(e.message, true);
   }
@@ -1305,13 +1326,9 @@ async function deleteAsset() {
 
 // Saving/deleting an asset changes the product's raw creative_assets count
 // (current_coverage), which loadAll() doesn't know how to refresh (it isn't
-// part of loadAll's fetch set -- see loadProductView) and which
-// loadProductView's own drop cache would otherwise mask -- that cache
-// exists to skip a refetch when just navigating drop->product, not to
-// survive an actual data change, so it must be dropped here.
+// part of loadAll's fetch set -- see loadProductView).
 function refreshProductViewIfOpen() {
   if (document.getElementById('planning-product-view').style.display !== 'none' && state.currentProduct) {
-    state.currentDrop = null;
     loadProductView(state.currentDropId, state.currentProduct.product_code);
   }
 }
