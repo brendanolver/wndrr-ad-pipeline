@@ -106,45 +106,70 @@
     </section>
 
     <section id="tab-planning" class="tab-panel">
-      <div class="planning-header">
-        <div>
-          <div class="planning-title" id="planning-week-title">Planning</div>
-          <div class="planning-sub" id="planning-job-summary">—</div>
-        </div>
-        <div class="planning-actions">
-          <button class="btn btn-ghost btn-sm" id="new-drop-btn">+ New Drop</button>
-          <button class="btn btn-primary btn-sm" id="new-job-btn">+ New Creative Job</button>
-        </div>
-      </div>
 
-      <div id="planning-attention" class="planning-attention" style="display:none;">
-        <div class="attention-col">
-          <div class="attention-title">⛔ Needs Attention</div>
-          <div id="attention-blocked-list" class="attention-list"></div>
+      <div id="planning-list-view">
+        <div class="planning-header">
+          <div>
+            <div class="planning-title" id="planning-week-title">Planning</div>
+            <div class="planning-sub" id="planning-job-summary">—</div>
+          </div>
+          <div class="planning-actions">
+            <button class="btn btn-ghost btn-sm" id="new-drop-btn">+ New Drop</button>
+            <button class="btn btn-primary btn-sm" id="new-job-btn">+ New Creative Job</button>
+          </div>
         </div>
-        <div class="attention-col">
-          <div class="attention-title">📅 Upcoming Production</div>
-          <div id="attention-upcoming-list" class="attention-list"></div>
+
+        <div id="planning-attention" class="planning-attention" style="display:none;">
+          <div class="attention-col">
+            <div class="attention-title">⛔ Needs Attention</div>
+            <div id="attention-blocked-list" class="attention-list"></div>
+          </div>
+          <div class="attention-col">
+            <div class="attention-title">📅 Upcoming Production</div>
+            <div id="attention-upcoming-list" class="attention-list"></div>
+          </div>
         </div>
-      </div>
 
-      <div class="planning-section-header">
-        <h2>Upcoming Drops</h2>
-      </div>
-      <div id="drops-row" class="drops-row"></div>
-
-      <div id="coverage-section" style="display:none;">
         <div class="planning-section-header">
-          <h2 id="coverage-drop-title">Coverage</h2>
-          <span class="admin-note" id="coverage-am-note"></span>
+          <h2>Upcoming Drops</h2>
         </div>
+        <div id="drops-row" class="drops-row"></div>
+
+        <div class="planning-section-header">
+          <h2>Creative Jobs</h2>
+        </div>
+        <div id="jobs-grid" class="jobs-grid"></div>
+      </div>
+
+      <div id="planning-drop-view" style="display:none;">
+        <button class="back-link" onclick="goToPlanningList()">&larr; Back to Planning</button>
+        <div class="planning-section-header">
+          <h2 id="drop-view-title">Drop</h2>
+          <span class="admin-note" id="drop-view-am-note"></span>
+        </div>
+        <div id="drop-view-summary" class="drop-view-summary"></div>
         <div id="coverage-grid" class="coverage-grid"></div>
       </div>
 
-      <div class="planning-section-header">
-        <h2>Creative Jobs</h2>
+      <div id="planning-product-view" style="display:none;">
+        <button class="back-link" id="product-view-back">&larr; Back to Drop</button>
+        <div class="product-view-header">
+          <div id="product-view-images" class="product-view-images"></div>
+          <div>
+            <h2 id="product-view-name">Product</h2>
+            <div class="admin-note" id="product-view-code"></div>
+          </div>
+        </div>
+        <div id="product-view-colours" class="product-view-colours"></div>
+        <div id="product-view-overview" class="product-view-overview"></div>
+        <button class="btn btn-primary" id="product-view-plan-btn">+ Plan Creative</button>
+
+        <div class="planning-section-header">
+          <h2>Existing Concepts</h2>
+        </div>
+        <div id="product-view-concepts" class="jobs-grid"></div>
       </div>
-      <div id="jobs-grid" class="jobs-grid"></div>
+
     </section>
 
     <section id="tab-board" class="tab-panel">
