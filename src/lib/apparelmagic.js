@@ -171,4 +171,10 @@ async function getStyleCatalogue() {
   return map; // Map<style_code, { productName, imageUrl, launchDateRaw, launchDate, isCore }>
 }
 
-module.exports = { configured, getStockByStyle, getStyleCatalogue, parseLaunchDate };
+// Exposed only for the debug route -- lets us see a raw response shape
+// (e.g. to find the real image field) without guessing.
+async function rawRequest(endpoint, params) {
+  return amRequest('GET', endpoint, params);
+}
+
+module.exports = { configured, getStockByStyle, getStyleCatalogue, parseLaunchDate, rawRequest };
