@@ -3,17 +3,27 @@ const { pool } = require('../db');
 const { fetchAmData, getRules } = require('../lib/planningData');
 const { buildCoverage } = require('../lib/coverage');
 const { deriveProductCode } = require('../lib/apparelmagic');
+const { insertCreativeAsset } = require('../lib/assets');
+const { FORMATS } = require('../lib/statuses');
 
 const router = express.Router();
 
 // "Products" have no table of their own -- they're a derived grouping of a
-// drop's styles by shared 8-char product code (same as coverage.js). This
-// recomputes the live creative_target for one product the exact same way
-// the Drop coverage grid does, so the two always agree.
-async function computeProductTarget(dropId, productCode) {
+// drop's styles by shared 8-char product code (same as coverage.js).
+async function getProductStyles(dropId, productCode) {
   const stylesResult = await pool.query('SELECT * FROM styles WHERE drop_id = $1', [dropId]);
-  const matching = stylesResult.rows.filter((s) => deriveProductCode(s.style_code) === productCode);
-  if (!matching.length) return { found: false, target: null };
+  return stylesResult.rows.filter((s) => deriveProductCode(s.style_code) === productCode);
+}
+
+// Recomputes the live creative_target for one product the exact same way
+// the Drop coverage grid does, so the two always agree. Also returns the
+// product's styles -- a Required Concept slot's auto-created asset needs a
+// style_id, and the product's first colourway (same fallback used
+// elsewhere, e.g. the Plan Creative modal) is the sensible default; the
+// team can change it via Edit.
+async function computeProductTarget(dropId, productCode) {
+  const matching = await getProductStyles(dropId, productCode);
+  if (!matching.length) return { found: false, target: null, styles: [] };
 
   const [rules, am] = await Promise.all([getRules(), fetchAmData()]);
   const coverage = buildCoverage(matching, {
@@ -23,7 +33,7 @@ async function computeProductTarget(dropId, productCode) {
     amDetails: am.amDetails,
     rules,
   });
-  return { found: true, target: coverage[0] ? coverage[0].creative_target : null };
+  return { found: true, target: coverage[0] ? coverage[0].creative_target : null, styles: matching };
 }
 
 async function fetchPlanWithSlots(planId) {
@@ -71,13 +81,20 @@ router.get('/', async (req, res, next) => {
 // Winners not already used on this plan) up to the live target -- existing
 // slots are never edited, reordered, or removed, so a later playbook edit
 // (rename/reorder/deactivate/delete) can never rewrite committed work.
+//
+// Each new Proven slot's Creative Asset is created immediately, using the
+// concept name/format/classification already decided in Settings -- there
+// is nothing left for the team to fill in to bring the concept into the
+// pipeline, so there's no separate "create" step. It starts against the
+// product's first colourway; the team can change that (and add target
+// date/owner) via Edit.
 router.post('/', async (req, res, next) => {
   const client = await pool.connect();
   try {
     const { drop_id, product_code } = req.body || {};
     if (!drop_id || !product_code) return res.status(400).json({ error: 'drop_id and product_code are required' });
 
-    const { found, target } = await computeProductTarget(drop_id, product_code);
+    const { found, target, styles } = await computeProductTarget(drop_id, product_code);
     if (!found) return res.status(404).json({ error: 'Product not found in this drop' });
     if (target == null) {
       return res.json({ plan: null, slots: [], target: null, shortfall: null, reason: 'stock_unavailable' });
@@ -110,12 +127,22 @@ router.post('/', async (req, res, next) => {
       );
       let nextRank = existingCount + 1;
       for (const pw of pwResult.rows) {
-        await client.query(
+        const slotResult = await client.query(
           `INSERT INTO drop_product_plan_slots
             (plan_id, slot_rank, source, concept_name, proven_winner_id, default_format, default_classification)
-           VALUES ($1, $2, 'proven', $3, $4, $5, $6)`,
+           VALUES ($1, $2, 'proven', $3, $4, $5, $6) RETURNING id`,
           [planId, nextRank, pw.name, pw.id, pw.default_format, pw.default_classification]
         );
+        const asset = await insertCreativeAsset(client, {
+          style_id: styles[0].id,
+          concept_name: pw.name,
+          concept_classification: pw.default_classification,
+          format: pw.default_format,
+        });
+        await client.query(`UPDATE drop_product_plan_slots SET fulfilled_by_asset_id = $1 WHERE id = $2`, [
+          asset.id,
+          slotResult.rows[0].id,
+        ]);
         nextRank += 1;
       }
     }
@@ -132,30 +159,57 @@ router.post('/', async (req, res, next) => {
   }
 });
 
+// A manually-added New/Test concept has no Proven Winner to default from,
+// so this is the one place the team still picks a Format -- classification
+// is fixed to 'new_experimental' since that's definitionally what a New/
+// Test slot is. Its asset is created immediately too, same as a Proven
+// slot, so every Required Concept row behaves the same way from here on.
 router.post('/:id/slots', async (req, res, next) => {
+  const client = await pool.connect();
   try {
-    const { concept_name, description } = req.body || {};
+    const { concept_name, description, format = 'video' } = req.body || {};
     if (!concept_name || !concept_name.trim()) return res.status(400).json({ error: 'concept_name is required' });
+    if (!FORMATS.includes(format)) return res.status(400).json({ error: `format must be one of: ${FORMATS.join(', ')}` });
 
-    const planCheck = await pool.query('SELECT id FROM drop_product_plans WHERE id = $1', [req.params.id]);
-    if (!planCheck.rows.length) return res.status(404).json({ error: 'Plan not found' });
+    const planResult = await client.query('SELECT * FROM drop_product_plans WHERE id = $1', [req.params.id]);
+    if (!planResult.rows.length) return res.status(404).json({ error: 'Plan not found' });
+    const plan = planResult.rows[0];
 
-    const maxRank = await pool.query(
+    const styles = await getProductStyles(plan.drop_id, plan.product_code);
+    if (!styles.length) return res.status(404).json({ error: 'Product not found in this drop' });
+
+    const maxRank = await client.query(
       'SELECT COALESCE(MAX(slot_rank), 0) AS max_rank FROM drop_product_plan_slots WHERE plan_id = $1',
       [req.params.id]
     );
     const nextRank = maxRank.rows[0].max_rank + 1;
 
-    await pool.query(
-      `INSERT INTO drop_product_plan_slots (plan_id, slot_rank, source, concept_name, description)
-       VALUES ($1, $2, 'new', $3, $4)`,
-      [req.params.id, nextRank, concept_name.trim(), description || null]
+    await client.query('BEGIN');
+    const slotResult = await client.query(
+      `INSERT INTO drop_product_plan_slots
+        (plan_id, slot_rank, source, concept_name, description, default_format, default_classification)
+       VALUES ($1, $2, 'new', $3, $4, $5, 'new_experimental') RETURNING id`,
+      [req.params.id, nextRank, concept_name.trim(), description || null, format]
     );
+    const asset = await insertCreativeAsset(client, {
+      style_id: styles[0].id,
+      concept_name: concept_name.trim(),
+      concept_classification: 'new_experimental',
+      format,
+    });
+    await client.query(`UPDATE drop_product_plan_slots SET fulfilled_by_asset_id = $1 WHERE id = $2`, [
+      asset.id,
+      slotResult.rows[0].id,
+    ]);
+    await client.query('COMMIT');
 
     const data = await fetchPlanWithSlots(req.params.id);
     res.status(201).json(data);
   } catch (err) {
+    await client.query('ROLLBACK');
     next(err);
+  } finally {
+    client.release();
   }
 });
 

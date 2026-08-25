@@ -175,6 +175,10 @@
         </div>
         <div id="product-plan-add-new-form" class="stock-request-form" style="display:none;">
           <input type="text" id="new-concept-name" placeholder="Concept name">
+          <select id="new-concept-format">
+            <option value="video">Video</option>
+            <option value="static">Static</option>
+          </select>
           <input type="text" id="new-concept-description" placeholder="Description (optional)">
           <button type="button" class="btn btn-primary btn-sm" onclick="addNewConceptSlot()">Add</button>
           <button type="button" class="btn btn-ghost btn-sm" onclick="hideAddNewConceptForm()">Cancel</button>
