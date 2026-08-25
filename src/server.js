@@ -4,6 +4,7 @@ const express = require('express');
 const cookieParser = require('cookie-parser');
 const { runMigrations } = require('./db');
 const { requireAuth } = require('./auth');
+const { warmAmCache } = require('./lib/apparelmagic');
 
 const authRoutes = require('./routes/auth');
 const styleRoutes = require('./routes/styles');
@@ -43,6 +44,7 @@ app.use((err, req, res, next) => {
 
 async function start() {
   await runMigrations();
+  warmAmCache(); // fire-and-forget -- don't block server startup on a multi-minute AM crawl
   app.listen(PORT, () => {
     console.log(`WNDRR Ad Pipeline listening on port ${PORT}`);
   });
