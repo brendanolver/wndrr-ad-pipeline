@@ -12,6 +12,14 @@
 // Planning is opened before these are set up.
 
 const https = require('https');
+const { getCached, cacheStatus } = require('./amCache');
+
+// TTLs match the values already proven in production (demandplanning):
+// stock/on-order need to be fresher, the full catalogue (launch dates, CORE
+// group, images) barely changes so it can go longer between crawls.
+const STOCK_TTL = 45 * 60 * 1000;
+const ON_ORDER_TTL = 45 * 60 * 1000;
+const CATALOGUE_TTL = 6 * 60 * 60 * 1000;
 
 const AM_SUBDOMAIN = process.env.AM_SUBDOMAIN;
 const AM_TOKEN = process.env.AM_TOKEN;
@@ -97,6 +105,10 @@ async function fetchAllPages(endpoint, params, maxPages = 500) {
 // /warehouses) to be "Shopify Online Store" -- the natural default for
 // AM_WAREHOUSE_IDS here, same warehouse aminventory/adcreationworkflow used.
 async function getStockByStyle() {
+  return getCached('stock', STOCK_TTL, fetchStockByStyleUncached);
+}
+
+async function fetchStockByStyleUncached() {
   const skuRows = await fetchAllPages('inventory', {});
   const styleBySku = new Map();
   for (const row of skuRows) {
@@ -124,6 +136,10 @@ async function getStockByStyle() {
 // confirmed in production (demandplanning's fetchAMOrdersFromAPI). With
 // is_open=1, AM embeds order_items directly in each order.
 async function getOnOrderByStyle() {
+  return getCached('onOrder', ON_ORDER_TTL, fetchOnOrderByStyleUncached);
+}
+
+async function fetchOnOrderByStyleUncached() {
   const orders = await fetchAllPages('orders', { account_number: '1068', is_open: 1 });
   const onOrderByStyle = new Map();
   for (const order of orders) {
@@ -190,6 +206,10 @@ function parseLaunchDate(value) {
 // style: display name/image (from `description`, "PRODUCT NAME - COLOUR"),
 // launch date (`mid_code`), and CORE/Proven status (`group`).
 async function getStyleCatalogue() {
+  return getCached('catalogue', CATALOGUE_TTL, fetchStyleCatalogueUncached);
+}
+
+async function fetchStyleCatalogueUncached() {
   const rows = await fetchAllPages('products', {});
   const map = new Map();
   for (const row of rows) {
@@ -218,6 +238,25 @@ async function rawRequest(endpoint, params) {
   return amRequest('GET', endpoint, params);
 }
 
+// Fire off all three crawls once at server boot (not awaited by the
+// caller) so the cache is warm by the time a real request arrives, instead
+// of the first Planning page load after every deploy blocking for however
+// long a cold full-catalogue crawl takes. Safe no-op if AM isn't configured.
+function warmAmCache() {
+  if (!configured()) return;
+  Promise.all([getStockByStyle(), getStyleCatalogue(), getOnOrderByStyle()]).catch((err) => {
+    console.error('ApparelMagic cache warm-up failed (will retry on first real request):', err.message);
+  });
+}
+
+function getAmCacheStatus() {
+  return {
+    stock: cacheStatus('stock'),
+    catalogue: cacheStatus('catalogue'),
+    onOrder: cacheStatus('onOrder'),
+  };
+}
+
 module.exports = {
   configured,
   getStockByStyle,
@@ -226,4 +265,6 @@ module.exports = {
   deriveProductCode,
   parseLaunchDate,
   rawRequest,
+  warmAmCache,
+  getAmCacheStatus,
 };
