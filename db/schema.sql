@@ -187,3 +187,60 @@ CREATE TABLE IF NOT EXISTS creative_job_stock_requests (
 );
 
 CREATE INDEX IF NOT EXISTS idx_creative_job_stock_requests_job_id ON creative_job_stock_requests(job_id);
+
+-- ---------------------------------------------------------------------------
+-- Proven Winners concept playbook: a ranked, reusable list of concept names
+-- that auto-populate a new-drop product's required-concept plan. Settings-
+-- owned; independent of any one drop or product. Ranking is 100% manual --
+-- no scoring/AI/auto-reranking.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS proven_winners (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  description TEXT,
+  rank INTEGER NOT NULL,
+  active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_proven_winners_rank ON proven_winners(rank);
+
+-- A "product" has no table of its own -- it's a derived grouping computed by
+-- deriveProductCode/buildCoverage on every request (coverage.js). This table
+-- is the stable anchor a generated concept plan snapshots against, keyed on
+-- the same (drop_id, product_code) pair the frontend already uses as its
+-- hash-route identity (#planning/drop/<id>/product/<code>).
+CREATE TABLE IF NOT EXISTS drop_product_plans (
+  id SERIAL PRIMARY KEY,
+  drop_id INTEGER NOT NULL REFERENCES drops(id) ON DELETE CASCADE,
+  product_code VARCHAR(64) NOT NULL,
+  last_known_target INTEGER NOT NULL,
+  generated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (drop_id, product_code)
+);
+
+-- One row per required concept slot. concept_name is a SNAPSHOT (copied at
+-- generation time) so later renaming/reordering/deactivating/deleting a
+-- Proven Winner never rewrites an already-generated plan -- proven_winner_id
+-- is optional traceability only (ON DELETE SET NULL, never CASCADE).
+CREATE TABLE IF NOT EXISTS drop_product_plan_slots (
+  id SERIAL PRIMARY KEY,
+  plan_id INTEGER NOT NULL REFERENCES drop_product_plans(id) ON DELETE CASCADE,
+  slot_rank INTEGER NOT NULL,
+  source VARCHAR(10) NOT NULL CHECK (source IN ('proven', 'new')),
+  concept_name VARCHAR(255) NOT NULL,
+  description TEXT,
+  proven_winner_id INTEGER REFERENCES proven_winners(id) ON DELETE SET NULL,
+  -- The specific Creative Asset that fulfils THIS slot (concept-diversity
+  -- fulfillment, not raw count). Lives here, not on creative_assets, so no
+  -- existing ca.*/SELECT_QUERY/CARD_QUERY read path needs to change.
+  fulfilled_by_asset_id INTEGER REFERENCES creative_assets(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (plan_id, slot_rank)
+);
+
+CREATE INDEX IF NOT EXISTS idx_dpps_plan_id ON drop_product_plan_slots(plan_id);
+CREATE INDEX IF NOT EXISTS idx_dpps_fulfilled_by ON drop_product_plan_slots(fulfilled_by_asset_id);

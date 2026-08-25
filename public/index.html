@@ -35,6 +35,7 @@
       <button class="tab-btn" data-tab="planning">Planning</button>
       <button class="tab-btn" data-tab="board">Board</button>
       <button class="tab-btn" data-tab="admin">Styles &amp; Categories</button>
+      <button class="tab-btn" data-tab="settings">Settings</button>
     </nav>
     <div class="topbar-actions">
       <button class="btn btn-primary" id="new-asset-btn">+ New Creative Asset</button>
@@ -165,6 +166,21 @@
         <button class="btn btn-primary" id="product-view-plan-btn">+ Plan Creative</button>
 
         <div class="planning-section-header">
+          <h2>Required Concepts</h2>
+          <span class="admin-note" id="product-plan-shortfall-note"></span>
+        </div>
+        <div id="product-plan-slots" class="pw-slot-list"></div>
+        <div class="field-row">
+          <button class="btn btn-ghost btn-sm" id="product-plan-add-new-btn">+ Add New Concept</button>
+        </div>
+        <div id="product-plan-add-new-form" class="stock-request-form" style="display:none;">
+          <input type="text" id="new-concept-name" placeholder="Concept name">
+          <input type="text" id="new-concept-description" placeholder="Description (optional)">
+          <button type="button" class="btn btn-primary btn-sm" onclick="addNewConceptSlot()">Add</button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="hideAddNewConceptForm()">Cancel</button>
+        </div>
+
+        <div class="planning-section-header">
           <h2>Existing Concepts</h2>
         </div>
         <div id="product-view-concepts" class="jobs-grid"></div>
@@ -207,6 +223,15 @@
         </div>
       </div>
     </section>
+
+    <section id="tab-settings" class="tab-panel">
+      <div class="planning-section-header">
+        <h2>Proven Winners</h2>
+        <span class="admin-note">Ranked concept playbook. Highest-ranked active entries auto-fill a new product's Required Concepts up to its SOH-driven creative target.</span>
+      </div>
+      <div id="pw-list" class="pw-list"></div>
+      <button class="btn btn-primary btn-sm" id="pw-add-btn">+ Add Proven Winner</button>
+    </section>
   </main>
 </div>
 
@@ -221,6 +246,7 @@
     </div>
     <div class="modal-body">
       <input type="hidden" id="asset-id">
+      <input type="hidden" id="asset-fulfills-slot-id">
       <label>Style
         <select id="asset-style-id"></select>
       </label>
@@ -548,6 +574,37 @@
       <button class="btn btn-ghost" onclick="saveJobBlocker()">Update Blocker</button>
       <button class="btn btn-primary" onclick="saveJob()">Save</button>
       <button class="btn btn-primary" id="job-ready-btn" style="display:none;" onclick="markJobReadyForBriefing()">Ready for Briefing &rarr;</button>
+    </div>
+  </div>
+</div>
+
+<!-- Proven Winner modal -->
+<div id="pw-modal" class="modal-backdrop">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="pw-modal-title">New Proven Winner</h3>
+      <button class="modal-close" onclick="closeModal('pw-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="pw-id">
+      <label>Concept name
+        <input type="text" id="pw-name" placeholder="e.g. Product Detail Reel">
+      </label>
+      <label>Description <span class="hint">(optional)</span>
+        <input type="text" id="pw-description" placeholder="e.g. Fast-paced product-led reel focusing on fit, details and on-body shots.">
+      </label>
+      <label id="pw-position-row">Insert at position <span class="hint">(optional — default: bottom of the list)</span>
+        <input type="number" id="pw-position" min="1">
+      </label>
+      <label class="checkbox-label" id="pw-active-row" style="display:none;">
+        <input type="checkbox" id="pw-active">
+        Active (used in new drop planning)
+      </label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-danger" id="pw-delete-btn" style="display:none;" onclick="deletePw()">Delete</button>
+      <button class="btn btn-ghost" onclick="closeModal('pw-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="savePw()">Save</button>
     </div>
   </div>
 </div>

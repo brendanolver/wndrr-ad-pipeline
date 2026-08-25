@@ -11,7 +11,7 @@ const STATUS_LABELS = {
 const TIER_LABELS = { core_proven: 'Core/Proven', new_drop: 'New Drop' };
 const CLASSIFICATION_LABELS = { tested_proven: 'Tested/Proven', new_experimental: 'New/Experimental' };
 
-let state = { styles: [], categories: [], board: null, dashboard: null, drops: [], jobs: [] };
+let state = { styles: [], categories: [], board: null, dashboard: null, drops: [], jobs: [], provenWinners: [] };
 let dashboardWeekOffset = 0;
 
 // ── API helpers ──────────────────────────────────────
@@ -95,13 +95,14 @@ document.querySelectorAll('.tab-btn').forEach((btn) => {
 // ── Load & render ────────────────────────────────────
 async function loadAll() {
   try {
-    const [board, styles, categories, dashboard, dropsRes, jobs] = await Promise.all([
+    const [board, styles, categories, dashboard, dropsRes, jobs, provenWinners] = await Promise.all([
       api('/board'),
       api('/styles'),
       api('/categories'),
       api(`/dashboard?weekOffset=${dashboardWeekOffset}`),
       api('/drops'),
       api('/creative-jobs'),
+      api('/proven-winners'),
     ]);
     state.board = board;
     state.styles = styles;
@@ -111,6 +112,7 @@ async function loadAll() {
     state.amConfigured = dropsRes.apparelmagic.configured;
     state.amError = dropsRes.apparelmagic.error;
     state.jobs = jobs;
+    state.provenWinners = provenWinners;
     renderBoard();
     renderMissingAd();
     renderStylesTable();
@@ -119,6 +121,7 @@ async function loadAll() {
     populateCategorySelect();
     renderDashboard();
     renderPlanning();
+    renderProvenWinners();
   } catch (e) {
     toast(e.message, true);
   }
@@ -897,7 +900,9 @@ async function loadProductView(dropId, productCode) {
 
     const styleIds = group.styles.map((s) => s.style_id).join(',');
     const assets = await api(`/creative-assets?style_ids=${styleIds}`);
+    state.currentProductAssets = assets;
     renderProductConcepts(assets);
+    await loadProductPlan(dropId, productCode, group);
   } catch (e) {
     toast(e.message, true);
   }
@@ -918,6 +923,7 @@ function renderProductConcepts(assets) {
       <div class="job-status-row">
         <span class="job-status-pill" style="background:${bg};color:${fg};">${STATUS_LABELS[a.status]}</span>
         <span class="badge badge-${a.concept_classification}">${CLASSIFICATION_LABELS[a.concept_classification]}</span>
+        ${a.fulfills_slot_rank ? `<span class="badge badge-tested_proven">Required Concept #${a.fulfills_slot_rank}</span>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -928,6 +934,179 @@ function renderProductConcepts(assets) {
     });
   });
 }
+
+// ── Product view: Required Concepts (Proven Winners feature) ────────────
+// Lazily generates-or-tops-up the product's concept plan on every view (the
+// server-side POST is idempotent -- it only ever appends new proven slots
+// up to the live target, never rewrites existing ones), so "SOH 327 -> 8
+// slots already there" is true with no manual click.
+let currentProductPlan = null;
+
+async function loadProductPlan(dropId, productCode, group) {
+  try {
+    let data = await api(`/drop-product-plans?drop_id=${dropId}&product_code=${encodeURIComponent(productCode)}`);
+    if (data.target != null && (data.plan === null || data.shortfall > 0)) {
+      data = await api('/drop-product-plans', {
+        method: 'POST',
+        body: JSON.stringify({ drop_id: dropId, product_code: productCode }),
+      });
+    }
+    currentProductPlan = data;
+    renderRequiredConcepts(data, group);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function renderRequiredConcepts(data, group) {
+  const list = document.getElementById('product-plan-slots');
+  const note = document.getElementById('product-plan-shortfall-note');
+  const addBtn = document.getElementById('product-plan-add-new-btn');
+
+  if (data.target == null) {
+    list.innerHTML = '<div class="attention-empty">Stock unavailable — Required Concepts can\'t be generated until SOH is known.</div>';
+    note.textContent = '';
+    addBtn.style.display = 'none';
+    return;
+  }
+
+  note.textContent = `${data.slots.length} / ${data.target} Concepts Assigned`
+    + (data.shortfall > 0 ? ` · ${data.shortfall} Additional Concept${data.shortfall === 1 ? '' : 's'} Required` : '');
+  addBtn.style.display = 'inline-block';
+
+  const linkedAssetIds = new Set(data.slots.filter((s) => s.asset_id).map((s) => s.asset_id));
+  const eligibleAssets = (state.currentProductAssets || []).filter((a) => !linkedAssetIds.has(a.id));
+
+  if (!data.slots.length) {
+    list.innerHTML = '<div class="attention-empty">No required concepts yet.</div>';
+    return;
+  }
+
+  list.innerHTML = data.slots.map((s) => {
+    const fulfilled = !!s.asset_id;
+    const sourceBadge = s.source === 'proven'
+      ? '<span class="badge badge-tested_proven">Proven</span>'
+      : '<span class="badge badge-new_experimental">New/Test</span>';
+    const statusIcon = fulfilled
+      ? '<span class="pw-slot-status fulfilled">✓</span>'
+      : '<span class="pw-slot-status unfulfilled">○</span>';
+    const fulfilledLine = fulfilled
+      ? `<span class="job-status-pill">${assetStatusLabel(s.asset_status)}</span>`
+      : '';
+    const actions = fulfilled ? `
+        <button type="button" class="btn btn-ghost btn-sm" onclick="unlinkConceptSlot(${s.id})">Unlink</button>
+      ` : `
+        <button type="button" class="btn btn-ghost btn-sm" onclick="fulfillWithNewAsset(${s.id}, '${escapeHtml(s.concept_name).replace(/'/g, "\\'")}', '${s.source}')">+ Create Asset</button>
+        ${eligibleAssets.length ? `
+          <select class="pw-slot-link-select" data-slot-id="${s.id}">
+            <option value="">Link existing…</option>
+            ${eligibleAssets.map((a) => `<option value="${a.id}">${a.style_code} — ${escapeHtml(a.concept_name)}</option>`).join('')}
+          </select>
+        ` : ''}
+        ${s.source === 'new' ? `<button type="button" class="btn btn-ghost btn-sm" onclick="deleteConceptSlot(${s.id})">Remove</button>` : ''}
+      `;
+    return `
+    <div class="pw-slot-row">
+      ${statusIcon}
+      <span class="pw-slot-rank">${s.slot_rank}</span>
+      <span class="pw-slot-name">${escapeHtml(s.concept_name)}</span>
+      ${sourceBadge}
+      ${fulfilledLine}
+      ${actions}
+    </div>`;
+  }).join('');
+
+  list.querySelectorAll('.pw-slot-link-select').forEach((sel) => {
+    sel.addEventListener('change', () => {
+      if (!sel.value) return;
+      linkExistingAsset(Number(sel.dataset.slotId), Number(sel.value));
+    });
+  });
+}
+
+function assetStatusLabel(status) {
+  return STATUS_LABELS[status] || status;
+}
+
+
+function fulfillWithNewAsset(slotId, conceptName, source) {
+  const group = state.currentProduct;
+  openAssetModal(null, {
+    presetConceptName: conceptName,
+    presetStyleIds: group.styles.map((s) => s.style_id),
+    defaultClassification: source === 'proven' ? 'tested_proven' : 'new_experimental',
+    fulfillsSlotId: slotId,
+  });
+}
+
+// Link/unlink/remove all reload the whole product view (drop + plan +
+// existing-concepts) rather than hand-patching local state -- matches this
+// app's established pattern of a full reload after any mutation (saveAsset,
+// saveJob, etc.), and keeps the "Required Concept #N" badge on the linked
+// asset's Existing Concepts card in sync too.
+async function linkExistingAsset(slotId, assetId) {
+  try {
+    await api(`/drop-product-plans/${currentProductPlan.plan.id}/slots/${slotId}/fulfill`, {
+      method: 'PATCH',
+      body: JSON.stringify({ asset_id: assetId }),
+    });
+    loadProductView(state.currentDropId, state.currentProduct.product_code);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function unlinkConceptSlot(slotId) {
+  try {
+    await api(`/drop-product-plans/${currentProductPlan.plan.id}/slots/${slotId}/fulfill`, { method: 'DELETE' });
+    loadProductView(state.currentDropId, state.currentProduct.product_code);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function deleteConceptSlot(slotId) {
+  if (!confirm('Remove this concept slot? This only works for manually-added New/Test slots with no linked asset.')) return;
+  try {
+    await api(`/drop-product-plans/${currentProductPlan.plan.id}/slots/${slotId}`, { method: 'DELETE' });
+    loadProductView(state.currentDropId, state.currentProduct.product_code);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function showAddNewConceptForm() {
+  document.getElementById('product-plan-add-new-form').style.display = 'flex';
+}
+
+function hideAddNewConceptForm() {
+  document.getElementById('product-plan-add-new-form').style.display = 'none';
+}
+
+async function addNewConceptSlot() {
+  const name = document.getElementById('new-concept-name').value;
+  const description = document.getElementById('new-concept-description').value || null;
+  if (!name.trim()) return toast('Concept name is required', true);
+  try {
+    // POST /:id/slots returns { plan, slots } only -- target doesn't change
+    // by adding a manual slot, so carry it over and recompute shortfall.
+    const { plan, slots } = await api(`/drop-product-plans/${currentProductPlan.plan.id}/slots`, {
+      method: 'POST',
+      body: JSON.stringify({ concept_name: name, description }),
+    });
+    const target = currentProductPlan.target;
+    currentProductPlan = { plan, slots, target, shortfall: Math.max(0, target - slots.length) };
+    renderRequiredConcepts(currentProductPlan, state.currentProduct);
+    document.getElementById('new-concept-name').value = '';
+    document.getElementById('new-concept-description').value = '';
+    hideAddNewConceptForm();
+    toast('Concept added');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+document.getElementById('product-plan-add-new-btn').addEventListener('click', showAddNewConceptForm);
 
 document.getElementById('new-job-btn').addEventListener('click', () => openJobModal(null));
 document.getElementById('new-drop-btn').addEventListener('click', () => {
@@ -1017,9 +1196,10 @@ function renderCategoriesTable() {
     .join('');
 }
 
-function populateStyleSelect() {
+function populateStyleSelect(filterIds) {
   const sel = document.getElementById('asset-style-id');
-  sel.innerHTML = state.styles.map((s) => `<option value="${s.id}">${s.style_code} — ${escapeHtml(s.name)}</option>`).join('');
+  const styles = filterIds ? state.styles.filter((s) => filterIds.includes(s.id)) : state.styles;
+  sel.innerHTML = styles.map((s) => `<option value="${s.id}">${s.style_code} — ${escapeHtml(s.name)}</option>`).join('');
 }
 
 function populateCategorySelect() {
@@ -1045,13 +1225,14 @@ document.getElementById('new-category-btn').addEventListener('click', () => {
   openModal('category-modal');
 });
 
-function openAssetModal(card) {
+function openAssetModal(card, presets = {}) {
   document.getElementById('asset-modal-title').textContent = card ? 'Edit Creative Asset' : 'New Creative Asset';
   document.getElementById('asset-id').value = card ? card.id : '';
-  document.getElementById('asset-style-id').value = card ? card.style_id : (state.styles[0] ? state.styles[0].id : '');
-  document.getElementById('asset-concept-name').value = card ? card.concept_name : '';
+  populateStyleSelect(presets.presetStyleIds);
+  document.getElementById('asset-style-id').value = card ? card.style_id : (presets.presetStyleIds ? presets.presetStyleIds[0] : (state.styles[0] ? state.styles[0].id : ''));
+  document.getElementById('asset-concept-name').value = card ? card.concept_name : (presets.presetConceptName || '');
   document.getElementById('asset-format').value = card ? card.format : 'video';
-  document.getElementById('asset-classification').value = card ? card.concept_classification : 'new_experimental';
+  document.getElementById('asset-classification').value = card ? card.concept_classification : (presets.defaultClassification || 'new_experimental');
   document.getElementById('asset-deliberate-trial').checked = card ? !!card.is_deliberate_trial : false;
   document.getElementById('asset-target-date').value = card && card.target_date ? card.target_date.slice(0, 10) : '';
   document.getElementById('asset-strategy-owner').value = (card && card.strategy_owner) || '';
@@ -1059,6 +1240,7 @@ function openAssetModal(card) {
   document.getElementById('asset-editing-owner').value = (card && card.editing_owner) || '';
   document.getElementById('asset-qc-owner').value = (card && card.qc_owner) || '';
   document.getElementById('asset-delete-btn').style.display = card ? 'inline-block' : 'none';
+  document.getElementById('asset-fulfills-slot-id').value = card ? '' : (presets.fulfillsSlotId || '');
   openModal('asset-modal');
 }
 
@@ -1076,6 +1258,8 @@ async function saveAsset() {
     editing_owner: document.getElementById('asset-editing-owner').value || null,
     qc_owner: document.getElementById('asset-qc-owner').value || null,
   };
+  const fulfillsSlotId = document.getElementById('asset-fulfills-slot-id').value;
+  if (!id && fulfillsSlotId) payload.fulfills_slot_id = Number(fulfillsSlotId);
   if (!payload.concept_name.trim()) return toast('Concept name is required', true);
   if (!payload.style_id) return toast('Select a style', true);
 
@@ -1088,6 +1272,7 @@ async function saveAsset() {
     closeModal('asset-modal');
     toast('Creative asset saved');
     loadAll();
+    refreshProductViewIfOpen();
   } catch (e) {
     toast(e.message, true);
   }
@@ -1102,8 +1287,22 @@ async function deleteAsset() {
     closeModal('asset-modal');
     toast('Creative asset deleted');
     loadAll();
+    refreshProductViewIfOpen();
   } catch (e) {
     toast(e.message, true);
+  }
+}
+
+// Saving/deleting an asset changes the product's raw creative_assets count
+// (current_coverage), which loadAll() doesn't know how to refresh (it isn't
+// part of loadAll's fetch set -- see loadProductView) and which
+// loadProductView's own drop cache would otherwise mask -- that cache
+// exists to skip a refetch when just navigating drop->product, not to
+// survive an actual data change, so it must be dropped here.
+function refreshProductViewIfOpen() {
+  if (document.getElementById('planning-product-view').style.display !== 'none' && state.currentProduct) {
+    state.currentDrop = null;
+    loadProductView(state.currentDropId, state.currentProduct.product_code);
   }
 }
 
@@ -1154,5 +1353,147 @@ function escapeHtml(str) {
   div.textContent = str == null ? '' : str;
   return div.innerHTML;
 }
+
+// ── Settings: Proven Winners ─────────────────────────
+// Rank order is the single source of truth for priority; every reorder path
+// (drag or up/down buttons) funnels into one PUT /proven-winners/reorder
+// call so the server's full-list rank rewrite is the only place order ever
+// actually changes.
+let pwDragId = null;
+
+function renderProvenWinners() {
+  const list = document.getElementById('pw-list');
+  if (!state.provenWinners.length) {
+    list.innerHTML = '<div class="attention-empty">No Proven Winners yet — add your first concept below.</div>';
+    return;
+  }
+  list.innerHTML = state.provenWinners.map((pw, i) => `
+    <div class="pw-row" draggable="true" data-id="${pw.id}">
+      <span class="pw-drag-handle" title="Drag to reorder">⠿</span>
+      <span class="pw-rank">${pw.rank}</span>
+      <span class="pw-name ${pw.active ? '' : 'inactive'}">${escapeHtml(pw.name)}</span>
+      <span class="badge ${pw.active ? 'badge-tested_proven' : 'badge-format'}">${pw.active ? 'Active' : 'Inactive'}</span>
+      <button type="button" class="btn btn-ghost btn-sm" ${i === 0 ? 'disabled' : ''} onclick="movePw(${pw.id}, -1)" title="Move up">&uarr;</button>
+      <button type="button" class="btn btn-ghost btn-sm" ${i === state.provenWinners.length - 1 ? 'disabled' : ''} onclick="movePw(${pw.id}, 1)" title="Move down">&darr;</button>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="openPwModal(${pw.id})">Edit</button>
+    </div>
+  `).join('');
+  wirePwDragEvents();
+}
+
+function wirePwDragEvents() {
+  document.querySelectorAll('#pw-list .pw-row').forEach((row) => {
+    row.addEventListener('dragstart', () => {
+      pwDragId = Number(row.dataset.id);
+      row.classList.add('dragging');
+    });
+    row.addEventListener('dragend', () => {
+      row.classList.remove('dragging');
+      document.querySelectorAll('#pw-list .pw-row').forEach((r) => r.classList.remove('drag-over'));
+    });
+    row.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      row.classList.add('drag-over');
+    });
+    row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
+    row.addEventListener('drop', (e) => {
+      e.preventDefault();
+      row.classList.remove('drag-over');
+      const targetId = Number(row.dataset.id);
+      if (pwDragId == null || pwDragId === targetId) return;
+      const ids = state.provenWinners.map((pw) => pw.id);
+      const fromIdx = ids.indexOf(pwDragId);
+      const toIdx = ids.indexOf(targetId);
+      if (fromIdx === -1 || toIdx === -1) return;
+      ids.splice(fromIdx, 1);
+      ids.splice(toIdx, 0, pwDragId);
+      submitPwReorder(ids);
+    });
+  });
+}
+
+function movePw(id, delta) {
+  const ids = state.provenWinners.map((pw) => pw.id);
+  const idx = ids.indexOf(id);
+  const swapWith = idx + delta;
+  if (idx === -1 || swapWith < 0 || swapWith >= ids.length) return;
+  [ids[idx], ids[swapWith]] = [ids[swapWith], ids[idx]];
+  submitPwReorder(ids);
+}
+
+async function submitPwReorder(orderedIds) {
+  try {
+    state.provenWinners = await api('/proven-winners/reorder', {
+      method: 'PUT',
+      body: JSON.stringify({ ordered_ids: orderedIds }),
+    });
+    renderProvenWinners();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function openPwModal(id) {
+  const pw = id ? state.provenWinners.find((p) => p.id === id) : null;
+  document.getElementById('pw-modal-title').textContent = pw ? 'Edit Proven Winner' : 'New Proven Winner';
+  document.getElementById('pw-id').value = pw ? pw.id : '';
+  document.getElementById('pw-name').value = pw ? pw.name : '';
+  document.getElementById('pw-description').value = (pw && pw.description) || '';
+  document.getElementById('pw-position-row').style.display = pw ? 'none' : 'flex';
+  document.getElementById('pw-position').value = '';
+  document.getElementById('pw-active-row').style.display = pw ? 'flex' : 'none';
+  document.getElementById('pw-active').checked = pw ? pw.active : true;
+  document.getElementById('pw-delete-btn').style.display = pw ? 'inline-block' : 'none';
+  openModal('pw-modal');
+}
+
+async function refreshProvenWinners() {
+  state.provenWinners = await api('/proven-winners');
+  renderProvenWinners();
+}
+
+async function savePw() {
+  const id = document.getElementById('pw-id').value;
+  const name = document.getElementById('pw-name').value;
+  const description = document.getElementById('pw-description').value || null;
+  if (!name.trim()) return toast('Concept name is required', true);
+
+  try {
+    if (id) {
+      await api(`/proven-winners/${id}`, { method: 'PUT', body: JSON.stringify({ name, description }) });
+      await api(`/proven-winners/${id}/active`, {
+        method: 'PATCH',
+        body: JSON.stringify({ active: document.getElementById('pw-active').checked }),
+      });
+    } else {
+      const position = document.getElementById('pw-position').value;
+      await api('/proven-winners', {
+        method: 'POST',
+        body: JSON.stringify({ name, description, position: position ? Number(position) : undefined }),
+      });
+    }
+    closeModal('pw-modal');
+    toast('Proven Winner saved');
+    refreshProvenWinners();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function deletePw() {
+  const id = document.getElementById('pw-id').value;
+  if (!id) return;
+  if (!confirm('Delete this Proven Winner? Concepts already used in drop plans keep their name/history and are not affected.')) return;
+  try {
+    await api(`/proven-winners/${id}`, { method: 'DELETE' });
+    closeModal('pw-modal');
+    toast('Proven Winner deleted');
+    refreshProvenWinners();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+document.getElementById('pw-add-btn').addEventListener('click', () => openPwModal(null));
 
 checkSession();

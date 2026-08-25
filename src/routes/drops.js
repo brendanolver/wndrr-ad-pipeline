@@ -1,39 +1,9 @@
 const express = require('express');
 const { pool } = require('../db');
-const apparelmagic = require('../lib/apparelmagic');
 const { buildCoverage } = require('../lib/coverage');
+const { fetchAmData, getRules, getAssetCounts } = require('../lib/planningData');
 
 const router = express.Router();
-
-async function fetchAmData() {
-  if (!apparelmagic.configured()) {
-    return { amStock: null, amDetails: null, amOnOrder: null, amError: null, amConfigured: false };
-  }
-  try {
-    const [amStock, amDetails, amOnOrder] = await Promise.all([
-      apparelmagic.getStockByStyle(),
-      apparelmagic.getStyleCatalogue(),
-      apparelmagic.getOnOrderByStyle(),
-    ]);
-    return { amStock, amDetails, amOnOrder, amError: null, amConfigured: true };
-  } catch (err) {
-    return { amStock: null, amDetails: null, amOnOrder: null, amError: err.message, amConfigured: true };
-  }
-}
-
-async function getRules() {
-  const result = await pool.query('SELECT * FROM creative_target_rules ORDER BY soh_min ASC');
-  return result.rows;
-}
-
-async function getAssetCounts(styleIds) {
-  if (!styleIds.length) return new Map();
-  const result = await pool.query(
-    `SELECT style_id, COUNT(*)::int AS count FROM creative_assets WHERE style_id = ANY($1::int[]) GROUP BY style_id`,
-    [styleIds]
-  );
-  return new Map(result.rows.map((r) => [r.style_id, r.count]));
-}
 
 function summarize(coverage) {
   const green = coverage.filter((c) => c.status === 'green').length;
