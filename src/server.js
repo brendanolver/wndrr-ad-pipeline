@@ -11,6 +11,9 @@ const categoryRoutes = require('./routes/categories');
 const creativeAssetRoutes = require('./routes/creativeAssets');
 const boardRoutes = require('./routes/board');
 const dashboardRoutes = require('./routes/dashboard');
+const dropRoutes = require('./routes/drops');
+const creativeJobRoutes = require('./routes/creativeJobs');
+const creativeTargetRuleRoutes = require('./routes/creativeTargetRules');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -24,6 +27,9 @@ app.use('/api/categories', requireAuth, categoryRoutes);
 app.use('/api/creative-assets', requireAuth, creativeAssetRoutes);
 app.use('/api/board', requireAuth, boardRoutes);
 app.use('/api/dashboard', requireAuth, dashboardRoutes);
+app.use('/api/drops', requireAuth, dropRoutes);
+app.use('/api/creative-jobs', requireAuth, creativeJobRoutes);
+app.use('/api/creative-target-rules', requireAuth, creativeTargetRuleRoutes);
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
 

@@ -198,6 +198,71 @@ main{padding:20px 24px;}
 .health-sub{font-size:11px;color:var(--text-secondary);margin-top:2px;}
 .health-sub.warn{color:var(--amber);font-weight:600;}
 
+/* ── PLANNING ── */
+.planning-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;}
+.planning-title{font-size:19px;font-weight:700;}
+.planning-sub{font-size:12px;color:var(--text-secondary);margin-top:3px;}
+.planning-actions{display:flex;gap:8px;}
+
+.planning-attention{display:grid;grid-template-columns:1fr 1fr;gap:14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:14px 16px;margin-bottom:20px;}
+.attention-title{font-size:12px;font-weight:700;margin-bottom:8px;}
+.attention-list{display:flex;flex-direction:column;gap:6px;}
+.attention-row{font-size:11.5px;background:var(--surface2);border-radius:var(--r);padding:6px 10px;}
+.attention-row .attention-main{font-weight:600;color:var(--text);}
+.attention-row .attention-sub{color:var(--text-muted);}
+.attention-empty{font-size:11.5px;color:var(--text-muted);}
+
+.planning-section-header{display:flex;justify-content:space-between;align-items:center;margin:20px 0 10px;}
+.planning-section-header h2{font-size:14px;}
+
+.drops-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;margin-bottom:8px;}
+.drop-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:14px 16px;cursor:pointer;box-shadow:var(--shadow-xs);}
+.drop-card.selected{border-color:var(--teal);box-shadow:0 0 0 2px var(--teal-light);}
+.drop-card-name{font-size:13.5px;font-weight:700;}
+.drop-card-date{font-size:11px;color:var(--text-muted);margin:2px 0 10px;}
+.drop-card-counts{display:flex;gap:10px;font-size:11px;font-weight:600;margin-bottom:8px;}
+.drop-card-counts span.green{color:var(--green);}
+.drop-card-counts span.amber{color:var(--amber);}
+.drop-card-counts span.red{color:var(--red);}
+.drop-card-pct{font-size:11.5px;color:var(--text-secondary);font-weight:600;}
+.drop-card-urgent{font-size:10.5px;color:var(--text-muted);margin-top:8px;border-top:1px solid var(--border);padding-top:8px;}
+
+.coverage-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;margin-bottom:8px;}
+.coverage-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;box-shadow:var(--shadow-xs);}
+.coverage-card-img{width:100%;height:120px;background:var(--surface2);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:22px;}
+.coverage-card-img img{width:100%;height:100%;object-fit:cover;}
+.coverage-card-body{padding:12px 14px;}
+.coverage-card-name{font-size:12.5px;font-weight:700;}
+.coverage-card-code{font-size:10.5px;color:var(--text-muted);margin-bottom:8px;}
+.coverage-card-soh{font-size:11px;color:var(--text-secondary);margin-bottom:8px;}
+.coverage-card-ratio{font-size:20px;font-weight:800;}
+.coverage-card-gap{font-size:11px;font-weight:700;margin:4px 0 10px;}
+.coverage-card-gap.green{color:var(--green);}
+.coverage-card-gap.amber{color:var(--amber);}
+.coverage-card-gap.red{color:var(--red);}
+.coverage-card-unavailable{font-size:11px;color:var(--text-muted);font-style:italic;padding:10px 0;}
+
+.jobs-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;}
+.job-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:14px 16px;cursor:pointer;box-shadow:var(--shadow-xs);}
+.job-card:hover{border-color:var(--teal);}
+.job-card-concept{font-size:13px;font-weight:700;margin-bottom:2px;}
+.job-card-products{font-size:11px;color:var(--text-muted);margin-bottom:8px;}
+.job-card-meta{font-size:11px;color:var(--text-secondary);display:flex;flex-direction:column;gap:2px;margin-bottom:10px;}
+.job-checklist{display:flex;flex-direction:column;gap:3px;font-size:11px;margin-bottom:10px;}
+.job-checklist .ok{color:var(--green);}
+.job-checklist .warn{color:var(--amber);}
+.job-status-row{display:flex;justify-content:space-between;align-items:center;}
+.job-status-pill{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;padding:3px 9px;border-radius:var(--r-pill);}
+.job-status-pill.not_started{background:var(--surface2);color:var(--text-muted);}
+.job-status-pill.organising{background:var(--amber-light);color:var(--amber);}
+.job-status-pill.blocked{background:var(--red-light);color:var(--red);}
+.job-status-pill.ready_for_briefing{background:var(--green-light);color:var(--green);}
+.job-blocker-line{font-size:11px;color:var(--red);margin-top:6px;}
+
+.checklist-section-title{font-size:12px;font-weight:700;color:var(--text-secondary);border-top:1px solid var(--border);padding-top:12px;margin-top:4px;}
+.readiness-note{font-size:11.5px;color:var(--text-muted);background:var(--surface2);border-radius:var(--r);padding:8px 10px;}
+.modal-wide{width:560px;}
+
 @media (max-width: 1100px){
   .board{grid-template-columns:1fr;}
   .admin-grid{grid-template-columns:1fr;}
@@ -205,4 +270,5 @@ main{padding:20px 24px;}
   .kpi-grid{grid-template-columns:repeat(2,1fr);}
   .health-grid{grid-template-columns:repeat(2,1fr);}
   .hero-status-badge{margin-left:0;}
+  .planning-attention{grid-template-columns:1fr;}
 }

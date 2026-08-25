@@ -11,7 +11,7 @@ const STATUS_LABELS = {
 const TIER_LABELS = { core_proven: 'Core/Proven', new_drop: 'New Drop' };
 const CLASSIFICATION_LABELS = { tested_proven: 'Tested/Proven', new_experimental: 'New/Experimental' };
 
-let state = { styles: [], categories: [], board: null, dashboard: null };
+let state = { styles: [], categories: [], board: null, dashboard: null, drops: [], jobs: [], selectedDropId: null };
 let dashboardWeekOffset = 0;
 
 // ── API helpers ──────────────────────────────────────
@@ -95,16 +95,22 @@ document.querySelectorAll('.tab-btn').forEach((btn) => {
 // ── Load & render ────────────────────────────────────
 async function loadAll() {
   try {
-    const [board, styles, categories, dashboard] = await Promise.all([
+    const [board, styles, categories, dashboard, dropsRes, jobs] = await Promise.all([
       api('/board'),
       api('/styles'),
       api('/categories'),
       api(`/dashboard?weekOffset=${dashboardWeekOffset}`),
+      api('/drops'),
+      api('/creative-jobs'),
     ]);
     state.board = board;
     state.styles = styles;
     state.categories = categories;
     state.dashboard = dashboard;
+    state.drops = dropsRes.drops;
+    state.amConfigured = dropsRes.apparelmagic.configured;
+    state.amError = dropsRes.apparelmagic.error;
+    state.jobs = jobs;
     renderBoard();
     renderMissingAd();
     renderStylesTable();
@@ -112,6 +118,7 @@ async function loadAll() {
     populateStyleSelect();
     populateCategorySelect();
     renderDashboard();
+    renderPlanning();
   } catch (e) {
     toast(e.message, true);
   }
@@ -308,22 +315,389 @@ document.getElementById('action-brief-builder').addEventListener('click', () => 
   toast("Brief Builder isn't built yet — coming in a future phase.");
 });
 
+// ── Planning ─────────────────────────────────────────
+const CONCEPT_TYPE_LABELS = {
+  proven_concept: 'Proven Concept', new_concept: 'New Concept', winning_concept_iteration: 'Winning Concept Iteration',
+  product_content: 'Product Content', ugc_creator: 'UGC / Creator', static: 'Static',
+  existing_content_variation: 'Existing Content Variation', other: 'Other',
+};
+const PLANNING_STATUS_LABELS = { not_started: 'Not Started', organising: 'Organising', blocked: 'Blocked', ready_for_briefing: 'Ready for Briefing' };
+const STOCK_RESOLVED = ['not_required', 'available'];
+const TALENT_RESOLVED = ['not_required', 'internal_team', 'confirmed'];
+const LOCATION_RESOLVED = ['not_required', 'office', 'warehouse', 'studio', 'external_location', 'confirmed'];
+const PROPS_RESOLVED = ['not_required', 'organised'];
+
+function formatDate(value) {
+  return value ? String(value).slice(0, 10) : null;
+}
+
+function renderPlanning() {
+  renderPlanningSummary();
+  renderDropsRow();
+  renderJobsGrid();
+  populateJobDropSelect();
+  if (state.selectedDropId) selectDrop(state.selectedDropId, { skipReload: true });
+}
+
+function renderPlanningSummary() {
+  const jobs = state.jobs;
+  const counts = {
+    ready: jobs.filter((j) => j.planning_status === 'ready_for_briefing').length,
+    blocked: jobs.filter((j) => j.planning_status === 'blocked').length,
+    organising: jobs.filter((j) => j.planning_status === 'organising').length,
+    not_started: jobs.filter((j) => j.planning_status === 'not_started').length,
+  };
+  document.getElementById('planning-week-title').textContent = state.dashboard ? `Planning — Week ${state.dashboard.week.number}` : 'Planning';
+  document.getElementById('planning-job-summary').textContent =
+    `${jobs.length} Creative Jobs — ${counts.ready} Ready for Briefing, ${counts.blocked} Blocked, ${counts.organising} Organising, ${counts.not_started} Not Started`;
+
+  const blocked = jobs.filter((j) => j.planning_status === 'blocked');
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
+  const upcoming = jobs.filter((j) => {
+    if (!j.production_date) return false;
+    const d = new Date(j.production_date);
+    return d >= today && d <= tomorrow;
+  });
+
+  const panel = document.getElementById('planning-attention');
+  panel.style.display = blocked.length || upcoming.length ? 'grid' : 'none';
+
+  document.getElementById('attention-blocked-list').innerHTML = blocked.length
+    ? blocked.map((j) => `<div class="attention-row"><span class="attention-main">${escapeHtml(j.high_level_concept)}</span><br><span class="attention-sub">${escapeHtml(j.blocker_reason || '')}</span></div>`).join('')
+    : '<div class="attention-empty">No blocked jobs</div>';
+
+  document.getElementById('attention-upcoming-list').innerHTML = upcoming.length
+    ? upcoming.map((j) => `<div class="attention-row"><span class="attention-main">${escapeHtml(j.high_level_concept)}</span> — ${formatDate(j.production_date)}<br><span class="attention-sub">${j.readiness.ready ? 'Ready' : 'Not yet ready'}</span></div>`).join('')
+    : '<div class="attention-empty">Nothing scheduled today or tomorrow</div>';
+}
+
+function renderDropsRow() {
+  const row = document.getElementById('drops-row');
+  if (!state.drops.length) {
+    row.innerHTML = '<div class="attention-empty">No upcoming drops yet — add one to start planning creative coverage.</div>';
+    return;
+  }
+  row.innerHTML = state.drops.map((d) => `
+    <div class="drop-card ${d.id === state.selectedDropId ? 'selected' : ''}" data-drop-id="${d.id}">
+      <div class="drop-card-name">${escapeHtml(d.name)}</div>
+      <div class="drop-card-date">${formatDate(d.launch_date)} · ${d.days_until_launch >= 0 ? d.days_until_launch + ' days to launch' : 'Launched'}</div>
+      <div class="drop-card-counts">
+        <span class="green">🟢 ${d.summary.green}</span>
+        <span class="amber">🟠 ${d.summary.amber}</span>
+        <span class="red">🔴 ${d.summary.red}</span>
+      </div>
+      <div class="drop-card-pct">${d.summary.totalCovered} / ${d.summary.totalTarget} creatives${d.summary.overallPct !== null ? ' — ' + d.summary.overallPct + '%' : ''}</div>
+      ${d.most_urgent[0] ? `<div class="drop-card-urgent">Most urgent: ${escapeHtml(d.most_urgent[0].product_name)} (${d.most_urgent[0].current_coverage}/${d.most_urgent[0].creative_target ?? '—'})</div>` : ''}
+    </div>`).join('');
+  row.querySelectorAll('.drop-card').forEach((card) => {
+    card.addEventListener('click', () => selectDrop(Number(card.dataset.dropId)));
+  });
+}
+
+async function selectDrop(dropId, { skipReload } = {}) {
+  state.selectedDropId = dropId;
+  if (!skipReload) renderDropsRow();
+  try {
+    const drop = await api(`/drops/${dropId}`);
+    document.getElementById('coverage-section').style.display = 'block';
+    document.getElementById('coverage-drop-title').textContent = `Coverage — ${drop.name}`;
+    const amNote = document.getElementById('coverage-am-note');
+    if (!drop.apparelmagic.configured) {
+      amNote.textContent = 'ApparelMagic is not connected — SOH, targets and gaps will show once AM_SUBDOMAIN / AM_TOKEN are set.';
+    } else if (drop.apparelmagic.error) {
+      amNote.textContent = `ApparelMagic error: ${drop.apparelmagic.error}`;
+    } else {
+      amNote.textContent = '';
+    }
+    renderCoverageGrid(drop.coverage);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function coverageGapLabel(c) {
+  if (c.status === 'green') return '🟢 COVERAGE COMPLETE';
+  const icon = c.status === 'amber' ? '🟠' : '🔴';
+  return `${icon} ${c.creative_gap} more required`;
+}
+
+function renderCoverageGrid(coverage) {
+  const grid = document.getElementById('coverage-grid');
+  if (!coverage.length) {
+    grid.innerHTML = '<div class="attention-empty">No styles assigned to this drop yet — assign styles to it from Styles &amp; Categories.</div>';
+    return;
+  }
+  grid.innerHTML = coverage.map((c) => `
+    <div class="coverage-card">
+      <div class="coverage-card-img">${c.image_url ? `<img src="${c.image_url}" alt="">` : '🖼'}</div>
+      <div class="coverage-card-body">
+        <div class="coverage-card-name">${escapeHtml(c.product_name)}</div>
+        <div class="coverage-card-code">${c.style_code}</div>
+        ${c.soh !== null
+          ? `<div class="coverage-card-soh">SOH: <strong>${c.soh}</strong></div>
+             <div class="coverage-card-ratio">${c.current_coverage} / ${c.creative_target}</div>
+             <div class="coverage-card-gap ${c.status}">${coverageGapLabel(c)}</div>`
+          : `<div class="coverage-card-unavailable">SOH unavailable</div>`}
+        ${c.creative_gap > 0 || c.creative_gap === null ? `<button class="btn btn-primary btn-sm" onclick="planCreativeFromCoverage(${c.style_id}, ${state.selectedDropId})">+ Plan Creative</button>` : ''}
+      </div>
+    </div>`).join('');
+}
+
+function checklistLine(label, resolved, statusText, notes) {
+  const icon = resolved ? '<span class="ok">✓</span>' : '<span class="warn">⚠</span>';
+  const detail = notes ? `${statusText} — ${notes}` : statusText;
+  return `<div>${icon} ${label}: ${escapeHtml(detail)}</div>`;
+}
+
+function renderJobsGrid() {
+  const grid = document.getElementById('jobs-grid');
+  if (!state.jobs.length) {
+    grid.innerHTML = '<div class="attention-empty">No creative jobs yet. Plan one from a drop\'s coverage gap, or create one directly.</div>';
+    return;
+  }
+  grid.innerHTML = state.jobs.map((j) => {
+    const products = j.products.map((p) => p.style_code).join(', ') || 'No product linked';
+    return `
+    <div class="job-card" data-job-id="${j.id}">
+      <div class="job-card-concept">${escapeHtml(j.high_level_concept)}</div>
+      <div class="job-card-products">${escapeHtml(products)} · ${CONCEPT_TYPE_LABELS[j.concept_type]}</div>
+      <div class="job-card-meta">
+        <span>Owner: ${escapeHtml(j.owner || '—')}</span>
+        <span>Production: ${formatDate(j.production_date) || '—'}</span>
+        <span>Expected output: ${j.expected_ad_variations ?? '—'} ad variations</span>
+      </div>
+      <div class="job-checklist">
+        ${checklistLine('Stock', STOCK_RESOLVED.includes(j.stock_status), j.stock_status.replace(/_/g, ' '), j.stock_notes)}
+        ${checklistLine('Talent', TALENT_RESOLVED.includes(j.talent_status), j.talent_status.replace(/_/g, ' '), j.talent_assignee)}
+        ${checklistLine('Location', LOCATION_RESOLVED.includes(j.location_status), j.location_status.replace(/_/g, ' '), j.location_notes)}
+        ${checklistLine('Props', PROPS_RESOLVED.includes(j.props_status), j.props_status.replace(/_/g, ' '), j.props_notes)}
+      </div>
+      <div class="job-status-row">
+        <span class="job-status-pill ${j.planning_status}">${PLANNING_STATUS_LABELS[j.planning_status]}</span>
+      </div>
+      ${j.blocker_reason ? `<div class="job-blocker-line">Blocker: ${escapeHtml(j.blocker_reason)}</div>` : ''}
+    </div>`;
+  }).join('');
+  grid.querySelectorAll('.job-card').forEach((card) => {
+    card.addEventListener('click', () => openJobModal(state.jobs.find((j) => j.id === Number(card.dataset.jobId))));
+  });
+}
+
+function populateJobDropSelect() {
+  const sel = document.getElementById('job-drop-id');
+  sel.innerHTML = '<option value="">— none —</option>' + state.drops.map((d) => `<option value="${d.id}">${escapeHtml(d.name)}</option>`).join('');
+}
+
+function populateJobStyleSelect(selectedIds = []) {
+  const sel = document.getElementById('job-style-ids');
+  sel.innerHTML = state.styles.map((s) => `<option value="${s.id}" ${selectedIds.includes(s.id) ? 'selected' : ''}>${s.style_code} — ${escapeHtml(s.name)}</option>`).join('');
+}
+
+function openJobModal(job = null, preset = {}) {
+  document.getElementById('job-modal-title').textContent = job ? 'Edit Creative Job' : 'New Creative Job';
+  document.getElementById('job-id').value = job ? job.id : '';
+  populateJobStyleSelect(job ? job.products.map((p) => p.style_id) : preset.styleIds || []);
+  document.getElementById('job-drop-id').value = job ? job.drop_id || '' : preset.dropId || '';
+  document.getElementById('job-concept').value = job ? job.high_level_concept : '';
+  document.getElementById('job-status-quick').value = job && ['not_started', 'organising'].includes(job.planning_status) ? job.planning_status : 'not_started';
+  document.getElementById('job-concept-type').value = job ? job.concept_type : 'other';
+  document.getElementById('job-expected-variations').value = job && job.expected_ad_variations != null ? job.expected_ad_variations : '';
+  document.getElementById('job-deliverables').value = (job && job.expected_deliverables) || '';
+  document.getElementById('job-owner').value = (job && job.owner) || '';
+  document.getElementById('job-production-date').value = job && job.production_date ? job.production_date.slice(0, 10) : '';
+  document.getElementById('job-production-session').value = (job && job.production_session) || '';
+  document.getElementById('job-ship-by-date').value = job && job.ship_by_date ? job.ship_by_date.slice(0, 10) : '';
+  document.getElementById('job-stock-status').value = job ? job.stock_status : 'not_required';
+  document.getElementById('job-stock-notes').value = (job && job.stock_notes) || '';
+  document.getElementById('job-talent-status').value = job ? job.talent_status : 'not_required';
+  document.getElementById('job-talent-assignee').value = (job && job.talent_assignee) || '';
+  document.getElementById('job-location-status').value = job ? job.location_status : 'not_required';
+  document.getElementById('job-location-notes').value = (job && job.location_notes) || '';
+  document.getElementById('job-props-status').value = job ? job.props_status : 'not_required';
+  document.getElementById('job-props-notes').value = (job && job.props_notes) || '';
+  document.getElementById('job-equipment').value = job && job.equipment_needed ? job.equipment_needed.join(', ') : '';
+  document.getElementById('job-logistics-notes').value = (job && job.logistics_notes) || '';
+  document.getElementById('job-is-blocked').checked = Boolean(job && job.blocker_reason);
+  document.getElementById('job-blocker-reason').value = (job && job.blocker_reason) || '';
+  document.getElementById('job-blocker-owner').value = (job && job.blocker_owner) || '';
+  document.getElementById('job-blocker-resolution').value = job && job.blocker_expected_resolution ? job.blocker_expected_resolution.slice(0, 10) : '';
+  document.getElementById('job-delete-btn').style.display = job ? 'inline-block' : 'none';
+
+  const readyBtn = document.getElementById('job-ready-btn');
+  const note = document.getElementById('job-readiness-note');
+  if (job && job.planning_status !== 'ready_for_briefing') {
+    readyBtn.style.display = job.readiness.ready ? 'inline-block' : 'none';
+    const failed = Object.entries(job.readiness.checks).filter(([, v]) => !v).map(([k]) => k.replace(/_/g, ' '));
+    note.textContent = job.readiness.ready ? '' : `Not ready for Briefing yet — unresolved: ${failed.join(', ')}`;
+  } else {
+    readyBtn.style.display = 'none';
+    note.textContent = job && job.planning_status === 'ready_for_briefing' ? '✓ Ready for Briefing' : '';
+  }
+
+  openModal('job-modal');
+}
+
+async function saveJob() {
+  const id = document.getElementById('job-id').value;
+  const styleIds = Array.from(document.getElementById('job-style-ids').selectedOptions).map((o) => Number(o.value));
+  const equipment = document.getElementById('job-equipment').value.split(',').map((s) => s.trim()).filter(Boolean);
+  const payload = {
+    drop_id: document.getElementById('job-drop-id').value || null,
+    style_ids: styleIds,
+    high_level_concept: document.getElementById('job-concept').value,
+    concept_type: document.getElementById('job-concept-type').value,
+    expected_ad_variations: document.getElementById('job-expected-variations').value || null,
+    expected_deliverables: document.getElementById('job-deliverables').value || null,
+    owner: document.getElementById('job-owner').value || null,
+    production_date: document.getElementById('job-production-date').value || null,
+    production_session: document.getElementById('job-production-session').value || null,
+    ship_by_date: document.getElementById('job-ship-by-date').value || null,
+    stock_status: document.getElementById('job-stock-status').value,
+    stock_notes: document.getElementById('job-stock-notes').value || null,
+    talent_status: document.getElementById('job-talent-status').value,
+    talent_assignee: document.getElementById('job-talent-assignee').value || null,
+    location_status: document.getElementById('job-location-status').value,
+    location_notes: document.getElementById('job-location-notes').value || null,
+    props_status: document.getElementById('job-props-status').value,
+    props_notes: document.getElementById('job-props-notes').value || null,
+    equipment_needed: equipment,
+    logistics_notes: document.getElementById('job-logistics-notes').value || null,
+  };
+  if (!payload.high_level_concept.trim()) return toast('High-level concept is required', true);
+
+  try {
+    let jobId = id;
+    if (id) {
+      await api(`/creative-jobs/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+    } else {
+      const created = await api('/creative-jobs', { method: 'POST', body: JSON.stringify(payload) });
+      jobId = created.id;
+    }
+    const quickStatus = document.getElementById('job-status-quick').value;
+    const current = state.jobs.find((j) => j.id === Number(jobId));
+    if (!current || (current.planning_status !== quickStatus && ['not_started', 'organising'].includes(current.planning_status || 'not_started'))) {
+      await api(`/creative-jobs/${jobId}/status`, { method: 'PATCH', body: JSON.stringify({ status: quickStatus }) }).catch(() => {});
+    }
+    closeModal('job-modal');
+    toast('Creative job saved');
+    loadAll();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function saveJobBlocker() {
+  const id = document.getElementById('job-id').value;
+  if (!id) return toast('Save the job first before setting a blocker', true);
+  const isBlocked = document.getElementById('job-is-blocked').checked;
+  const payload = {
+    blocker_reason: isBlocked ? document.getElementById('job-blocker-reason').value : null,
+    blocker_owner: isBlocked ? document.getElementById('job-blocker-owner').value : null,
+    blocker_expected_resolution: isBlocked ? document.getElementById('job-blocker-resolution').value || null : null,
+  };
+  if (isBlocked && !payload.blocker_reason.trim()) return toast('Blocker reason is required', true);
+  try {
+    await api(`/creative-jobs/${id}/blocker`, { method: 'PATCH', body: JSON.stringify(payload) });
+    closeModal('job-modal');
+    toast('Blocker updated');
+    loadAll();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function markJobReadyForBriefing() {
+  const id = document.getElementById('job-id').value;
+  try {
+    await api(`/creative-jobs/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status: 'ready_for_briefing' }) });
+    closeModal('job-modal');
+    toast('Marked Ready for Briefing');
+    loadAll();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function deleteJob() {
+  const id = document.getElementById('job-id').value;
+  if (!id) return;
+  if (!confirm('Delete this creative job? This cannot be undone.')) return;
+  try {
+    await api(`/creative-jobs/${id}`, { method: 'DELETE' });
+    closeModal('job-modal');
+    toast('Creative job deleted');
+    loadAll();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function planCreativeFromCoverage(styleId, dropId) {
+  openJobModal(null, { styleIds: [styleId], dropId });
+}
+
+document.getElementById('new-job-btn').addEventListener('click', () => openJobModal(null));
+document.getElementById('new-drop-btn').addEventListener('click', () => {
+  document.getElementById('drop-name').value = '';
+  document.getElementById('drop-launch-date').value = '';
+  document.getElementById('drop-notes').value = '';
+  openModal('drop-modal');
+});
+
+async function saveDrop() {
+  const payload = {
+    name: document.getElementById('drop-name').value,
+    launch_date: document.getElementById('drop-launch-date').value,
+    notes: document.getElementById('drop-notes').value || null,
+  };
+  if (!payload.name.trim()) return toast('Drop name is required', true);
+  if (!payload.launch_date) return toast('Launch date is required', true);
+  try {
+    await api('/drops', { method: 'POST', body: JSON.stringify(payload) });
+    closeModal('drop-modal');
+    toast('Drop saved');
+    loadAll();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
 // ── Styles/categories tables ─────────────────────────
 function renderStylesTable() {
   const tbody = document.querySelector('#styles-table tbody');
   tbody.innerHTML = state.styles
     .map(
       (s) => `
-      <tr>
+      <tr data-style-id="${s.id}" style="cursor:pointer;">
         <td>${s.style_code}</td>
         <td>${escapeHtml(s.name)}</td>
         <td><span class="badge badge-tier-${s.tier}">${TIER_LABELS[s.tier]}</span></td>
         <td>${s.category_name || '—'}</td>
+        <td>${s.drop_name || '—'}</td>
         <td>${s.creative_asset_count}</td>
         <td>${s.missing_ad ? '<span class="badge" style="background:var(--amber-light);color:var(--amber);">Missing Ad</span>' : ''}</td>
       </tr>`
     )
     .join('');
+  tbody.querySelectorAll('tr').forEach((row) => {
+    row.addEventListener('click', () => openStyleModal(state.styles.find((s) => s.id === Number(row.dataset.styleId))));
+  });
+}
+
+function populateStyleDropSelect(selectedId) {
+  const sel = document.getElementById('style-drop-id');
+  sel.innerHTML = '<option value="">— none —</option>' + state.drops.map((d) => `<option value="${d.id}" ${d.id === selectedId ? 'selected' : ''}>${escapeHtml(d.name)}</option>`).join('');
+}
+
+function openStyleModal(style) {
+  document.getElementById('style-id').value = style ? style.id : '';
+  document.getElementById('style-code').value = style ? style.style_code : '';
+  document.getElementById('style-name').value = style ? style.name : '';
+  document.getElementById('style-tier').value = style ? style.tier : 'core_proven';
+  document.getElementById('style-category-id').value = style ? style.category_id || '' : '';
+  populateStyleDropSelect(style ? style.drop_id : null);
+  openModal('style-modal');
 }
 
 function renderCategoriesTable() {
@@ -360,13 +734,7 @@ function openModal(id) {
 }
 
 document.getElementById('new-asset-btn').addEventListener('click', () => openAssetModal(null));
-document.getElementById('new-style-btn').addEventListener('click', () => {
-  document.getElementById('style-code').value = '';
-  document.getElementById('style-name').value = '';
-  document.getElementById('style-tier').value = 'core_proven';
-  document.getElementById('style-category-id').value = '';
-  openModal('style-modal');
-});
+document.getElementById('new-style-btn').addEventListener('click', () => openStyleModal(null));
 document.getElementById('new-category-btn').addEventListener('click', () => {
   document.getElementById('category-name').value = '';
   document.getElementById('category-campaign-id').value = '';
@@ -438,15 +806,21 @@ async function deleteAsset() {
 }
 
 async function saveStyle() {
+  const id = document.getElementById('style-id').value;
   const payload = {
     style_code: document.getElementById('style-code').value,
     name: document.getElementById('style-name').value,
     tier: document.getElementById('style-tier').value,
     category_id: document.getElementById('style-category-id').value || null,
+    drop_id: document.getElementById('style-drop-id').value || null,
   };
   if (!payload.style_code.trim() || !payload.name.trim()) return toast('Style code and name are required', true);
   try {
-    await api('/styles', { method: 'POST', body: JSON.stringify(payload) });
+    if (id) {
+      await api(`/styles/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+    } else {
+      await api('/styles', { method: 'POST', body: JSON.stringify(payload) });
+    }
     closeModal('style-modal');
     toast('Style saved');
     loadAll();
