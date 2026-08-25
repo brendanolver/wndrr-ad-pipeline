@@ -337,6 +337,44 @@ function renderPlanning() {
   renderJobsGrid();
   populateJobDropSelect();
   if (state.selectedDropId) selectDrop(state.selectedDropId, { skipReload: true });
+  loadDropSuggestions();
+}
+
+async function loadDropSuggestions() {
+  try {
+    const { suggestions } = await api('/drops/suggestions');
+    const section = document.getElementById('suggested-drops-section');
+    section.style.display = suggestions.length ? 'block' : 'none';
+    document.getElementById('suggested-drops-row').innerHTML = suggestions.map((s, i) => `
+      <div class="drop-card suggested">
+        <div class="drop-card-name">${formatDate(s.launch_date)}</div>
+        <div class="drop-card-date">${s.styles.length} style${s.styles.length === 1 ? '' : 's'} launching this date, not yet in a drop</div>
+        <div class="drop-card-styles">${s.styles.map((st) => escapeHtml(st.style_code)).join(', ')}</div>
+        <button class="btn btn-primary btn-sm" onclick="createDropFromSuggestion(${i})">+ Create Drop</button>
+      </div>`).join('');
+    state.dropSuggestions = suggestions;
+  } catch (e) {
+    // ApparelMagic not configured or errored -- silently skip, coverage
+    // cards already surface that state clearly when a drop is opened.
+  }
+}
+
+async function createDropFromSuggestion(index) {
+  const suggestion = state.dropSuggestions[index];
+  if (!suggestion) return;
+  const defaultName = `Launch — ${formatDate(suggestion.launch_date)}`;
+  const name = prompt('Name this drop:', defaultName);
+  if (!name) return;
+  try {
+    await api('/drops/from-suggestion', {
+      method: 'POST',
+      body: JSON.stringify({ name, launch_date: suggestion.launch_date, styles: suggestion.styles }),
+    });
+    toast('Drop created');
+    loadAll();
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 function renderPlanningSummary() {

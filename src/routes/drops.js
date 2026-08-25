@@ -10,7 +10,7 @@ async function fetchAmData() {
     return { amStock: null, amDetails: null, amError: null, amConfigured: false };
   }
   try {
-    const [amStock, amDetails] = await Promise.all([apparelmagic.getStockByStyle(), apparelmagic.getStyleDetails()]);
+    const [amStock, amDetails] = await Promise.all([apparelmagic.getStockByStyle(), apparelmagic.getStyleCatalogue()]);
     return { amStock, amDetails, amError: null, amConfigured: true };
   } catch (err) {
     return { amStock: null, amDetails: null, amError: err.message, amConfigured: true };
@@ -83,6 +83,95 @@ router.get('/', async (req, res, next) => {
     res.json({ drops, apparelmagic: { configured: am.amConfigured, error: am.amError } });
   } catch (err) {
     next(err);
+  }
+});
+
+// Suggested drops: cluster ApparelMagic styles by shared launch date
+// (mid_code), so the team doesn't have to manually notice "these 12 styles
+// all land the same week" -- ApparelMagic has no drop-grouping field of its
+// own, so this is inference from a shared date, not a real AM entity.
+router.get('/suggestions', async (req, res, next) => {
+  try {
+    const days = Number.parseInt(req.query.days, 10) || 120;
+    const am = await fetchAmData();
+    if (!am.amConfigured) {
+      return res.json({ suggestions: [], apparelmagic: { configured: false, error: null } });
+    }
+    if (am.amError) {
+      return res.json({ suggestions: [], apparelmagic: { configured: true, error: am.amError } });
+    }
+
+    const existingResult = await pool.query('SELECT style_code, drop_id FROM styles');
+    const alreadyPlanned = new Set(existingResult.rows.filter((r) => r.drop_id != null).map((r) => r.style_code));
+
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const horizon = new Date(today); horizon.setDate(horizon.getDate() + days);
+
+    const groups = new Map(); // ISO date string -> styles[]
+    for (const [styleCode, details] of am.amDetails.entries()) {
+      if (!details.launchDate) continue;
+      if (details.launchDate < today || details.launchDate > horizon) continue;
+      if (alreadyPlanned.has(styleCode)) continue;
+
+      const key = details.launchDate.toISOString().slice(0, 10);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push({
+        style_code: styleCode,
+        product_name: details.productName || styleCode,
+        image_url: details.imageUrl,
+        is_core: details.isCore,
+      });
+    }
+
+    const suggestions = [...groups.entries()]
+      .map(([launch_date, styles]) => ({ launch_date, styles: styles.sort((a, b) => a.style_code.localeCompare(b.style_code)) }))
+      .sort((a, b) => a.launch_date.localeCompare(b.launch_date));
+
+    res.json({ suggestions, apparelmagic: { configured: true, error: null } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Create a Drop from a suggestion cluster (or any manual style list) in one
+// step: creates any styles that don't exist locally yet (name + tier seeded
+// from ApparelMagic's product name / CORE group), and assigns all of them to
+// the new drop.
+router.post('/from-suggestion', async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const { name, launch_date, styles } = req.body || {};
+    if (!name || !name.trim()) return res.status(400).json({ error: 'name is required' });
+    if (!launch_date) return res.status(400).json({ error: 'launch_date is required' });
+    if (!Array.isArray(styles) || !styles.length) return res.status(400).json({ error: 'styles is required' });
+
+    await client.query('BEGIN');
+    const dropResult = await client.query(
+      `INSERT INTO drops (name, launch_date) VALUES ($1, $2) RETURNING *`,
+      [name.trim(), launch_date]
+    );
+    const drop = dropResult.rows[0];
+
+    for (const s of styles) {
+      if (!s.style_code) continue;
+      const existing = await client.query('SELECT id FROM styles WHERE style_code = $1', [s.style_code]);
+      if (existing.rows.length) {
+        await client.query('UPDATE styles SET drop_id = $1, updated_at = now() WHERE id = $2', [drop.id, existing.rows[0].id]);
+      } else {
+        await client.query(
+          `INSERT INTO styles (style_code, name, tier, drop_id) VALUES ($1, $2, $3, $4)`,
+          [s.style_code, s.product_name || s.style_code, s.is_core ? 'core_proven' : 'new_drop', drop.id]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+    res.status(201).json(drop);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    next(err);
+  } finally {
+    client.release();
   }
 });
 

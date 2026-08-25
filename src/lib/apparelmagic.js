@@ -87,6 +87,15 @@ async function fetchAllPages(endpoint, params, maxPages = 500) {
 // Total Stock On Hand per style, summed across configured warehouses (or all
 // warehouses if AM_WAREHOUSE_IDS is unset). Style-level only, per the
 // Planning brief -- never size/SKU-level.
+//
+// Field is `qty_avail_sell` from /sku_warehouse, not `qty_inventory` --
+// verified in production (demandplanning's V2 branch, AM data migration):
+// AM's plain /inventory endpoint has no warehouse dimension at all (a
+// company-wide blend across every warehouse), and /sku_warehouse's
+// `qty_avail_sell` is the field that actually matches what AM's own UI shows
+// filtered to a specific warehouse. warehouse_id 1002 is confirmed (via
+// /warehouses) to be "Shopify Online Store" -- the natural default for
+// AM_WAREHOUSE_IDS here, same warehouse aminventory/adcreationworkflow used.
 async function getStockByStyle() {
   const skuRows = await fetchAllPages('inventory', {});
   const styleBySku = new Map();
@@ -104,20 +113,41 @@ async function getStockByStyle() {
     if (WAREHOUSE_IDS.length > 1 && !WAREHOUSE_IDS.includes(String(row.warehouse_id))) continue;
     const style = styleBySku.get(String(row.sku_id));
     if (!style) continue;
-    const qty = parseFloat(row.qty_inventory) || 0;
+    const qty = parseFloat(row.qty_avail_sell) || 0;
     stockByStyle.set(style, (stockByStyle.get(style) || 0) + qty);
   }
   return stockByStyle; // Map<style_code, total SOH>
 }
 
-// Product name + image per style, straight from ApparelMagic's own
-// `products` record where available. Image field name is unconfirmed
-// against a live account (like adcreationworkflow's order_items caveat) --
-// tries plausible variants and degrades to null rather than throwing, since
-// the brief marks the image as "if available", not required.
 const IMAGE_FIELD_CANDIDATES = ['image_url', 'photo_url', 'main_image_url', 'image', 'photo'];
+// WNDRR's AM account repurposes mid_code as Launch Date per style, and CORE
+// membership is the AM product group -- both confirmed in production
+// (demandplanning V2). '0' in mid_code means empty, not a real date.
+const CORE_GROUPS = new Set(['AA CORE STYLES', 'ACCESSORIES CURRENT']);
+function normGroupName(g) {
+  return String(g || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+}
 
-async function getStyleDetails() {
+// AU day-first date parsing ("30-07-26", "30/07/2026"), also accepts ISO.
+// Returns a Date or null if unparseable.
+function parseLaunchDate(value) {
+  if (!value) return null;
+  const s = String(value).trim();
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
+  m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
+  if (m) {
+    const y = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3]);
+    return new Date(y, Number(m[2]) - 1, Number(m[1]));
+  }
+  const t = Date.parse(s);
+  return Number.isNaN(t) ? null : new Date(t);
+}
+
+// One catalogue crawl of /products, returning everything Planning needs per
+// style: display name/image (from `description`, "PRODUCT NAME - COLOUR"),
+// launch date (`mid_code`), and CORE/Proven status (`group`).
+async function getStyleCatalogue() {
   const rows = await fetchAllPages('products', {});
   const map = new Map();
   for (const row of rows) {
@@ -127,9 +157,18 @@ async function getStyleDetails() {
     const dashIdx = description.lastIndexOf(' - ');
     const productName = (dashIdx >= 0 ? description.slice(0, dashIdx) : description).trim() || null;
     const imageField = IMAGE_FIELD_CANDIDATES.find((f) => row[f]);
-    map.set(style, { productName, imageUrl: imageField ? row[imageField] : null });
+    const midCode = (row.mid_code || '').trim();
+    const launchDateRaw = midCode && midCode !== '0' ? midCode : null;
+
+    map.set(style, {
+      productName,
+      imageUrl: imageField ? row[imageField] : null,
+      launchDateRaw,
+      launchDate: parseLaunchDate(launchDateRaw),
+      isCore: CORE_GROUPS.has(normGroupName(row.group)),
+    });
   }
-  return map; // Map<style_code, { productName, imageUrl }>
+  return map; // Map<style_code, { productName, imageUrl, launchDateRaw, launchDate, isCore }>
 }
 
-module.exports = { configured, getStockByStyle, getStyleDetails };
+module.exports = { configured, getStockByStyle, getStyleCatalogue, parseLaunchDate };
