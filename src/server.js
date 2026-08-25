@@ -10,6 +10,7 @@ const styleRoutes = require('./routes/styles');
 const categoryRoutes = require('./routes/categories');
 const creativeAssetRoutes = require('./routes/creativeAssets');
 const boardRoutes = require('./routes/board');
+const dashboardRoutes = require('./routes/dashboard');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -22,6 +23,7 @@ app.use('/api/styles', requireAuth, styleRoutes);
 app.use('/api/categories', requireAuth, categoryRoutes);
 app.use('/api/creative-assets', requireAuth, creativeAssetRoutes);
 app.use('/api/board', requireAuth, boardRoutes);
+app.use('/api/dashboard', requireAuth, dashboardRoutes);
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
 

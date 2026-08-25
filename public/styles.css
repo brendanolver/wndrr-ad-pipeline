@@ -20,6 +20,10 @@
   --red-light: #fee2e2;
   --purple: #7c3aed;
   --purple-light: #ede9fe;
+  --blue: #2563eb;
+  --blue-light: #dbeafe;
+  --orange: #ea580c;
+  --orange-light: #fff0e8;
   --shadow: 0 4px 12px rgba(0,0,0,0.08);
   --shadow-xs: 0 1px 2px rgba(0,0,0,0.05);
   --r: 6px;
@@ -134,7 +138,71 @@ main{padding:20px 24px;}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
 .toast.error{background:var(--red);}
 
+/* ── DASHBOARD: ACTION CARDS ── */
+.action-cards{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px;}
+.action-card{display:flex;flex-direction:column;align-items:flex-start;gap:4px;border:none;border-radius:var(--r-lg);padding:16px 18px;cursor:pointer;color:white;text-align:left;font-family:inherit;transition:transform 0.12s, box-shadow 0.12s;}
+.action-card:hover{transform:translateY(-1px);box-shadow:var(--shadow);}
+.action-icon{font-size:18px;opacity:0.9;margin-bottom:4px;}
+.action-title{font-size:14px;font-weight:700;}
+.action-sub{font-size:11px;opacity:0.85;font-weight:500;}
+.action-purple{background:var(--purple);}
+.action-orange{background:var(--orange);}
+.action-teal{background:var(--teal);}
+.action-blue{background:var(--blue);}
+
+/* ── DASHBOARD: HERO CARD ── */
+.hero-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:20px 22px;margin-bottom:18px;box-shadow:var(--shadow-xs);}
+.hero-top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;}
+.hero-label{font-size:10.5px;text-transform:uppercase;letter-spacing:0.6px;color:var(--text-muted);font-weight:700;margin-bottom:4px;}
+.hero-week{font-size:19px;font-weight:700;}
+.hero-dates{font-size:12px;color:var(--text-secondary);margin-top:2px;}
+.hero-week-nav{display:flex;gap:6px;align-items:center;}
+.week-nav-btn{background:var(--surface2);border:1px solid var(--border);border-radius:var(--r);padding:6px 12px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;color:var(--text-secondary);}
+.week-nav-btn:hover{background:var(--border);}
+.hero-pct-block{text-align:right;}
+.hero-pct{font-size:32px;font-weight:800;line-height:1;color:var(--teal-dark);}
+.hero-pct-sub{font-size:11.5px;color:var(--text-muted);margin-top:4px;font-weight:600;}
+.hero-progress-track{background:var(--surface2);border-radius:var(--r-pill);height:10px;margin:16px 0 14px;overflow:hidden;}
+.hero-progress-fill{background:var(--teal);height:100%;border-radius:var(--r-pill);transition:width 0.3s;}
+.hero-bottom{display:flex;align-items:center;gap:28px;flex-wrap:wrap;}
+.hero-stat{display:flex;flex-direction:column;gap:2px;}
+.hero-stat-num{font-size:16px;font-weight:700;}
+.hero-stat-label{font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);font-weight:600;}
+.hero-status-badge{margin-left:auto;padding:6px 14px;border-radius:var(--r-pill);font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;}
+.hero-status-badge.on_track{background:var(--green-light);color:var(--green);}
+.hero-status-badge.at_risk{background:var(--amber-light);color:var(--amber);}
+.hero-status-badge.off_track{background:var(--red-light);color:var(--red);}
+.sample-tag{font-size:8.5px;text-transform:uppercase;letter-spacing:0.3px;font-weight:700;color:var(--text-muted);background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-pill);padding:1px 5px;vertical-align:middle;}
+
+.live-state-note{font-size:11px;color:var(--text-muted);margin-bottom:8px;font-style:italic;}
+
+/* ── DASHBOARD: KPI GRID ── */
+.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px;}
+.kpi-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:14px 16px;box-shadow:var(--shadow-xs);cursor:pointer;text-align:left;font-family:inherit;display:flex;flex-direction:column;gap:2px;}
+.kpi-card:hover{border-color:var(--teal);}
+.kpi-icon{font-size:14px;margin-bottom:6px;opacity:0.7;}
+.kpi-num{font-size:24px;font-weight:800;}
+.kpi-num.muted{color:var(--text-muted);font-size:20px;}
+.kpi-label{font-size:10.5px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);font-weight:700;margin-top:2px;}
+.kpi-sub{font-size:11px;color:var(--text-secondary);margin-top:2px;}
+.kpi-sub.warn{color:var(--amber);font-weight:600;}
+
+/* ── DASHBOARD: HEALTH ROW ── */
+.health-row{margin-bottom:8px;}
+.health-header{font-size:12.5px;font-weight:700;color:var(--text-secondary);margin-bottom:10px;}
+.health-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
+.health-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:14px 16px;box-shadow:var(--shadow-xs);}
+.health-num{font-size:22px;font-weight:800;}
+.health-num.danger{color:var(--red);}
+.health-label{font-size:10.5px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);font-weight:700;margin-top:4px;}
+.health-sub{font-size:11px;color:var(--text-secondary);margin-top:2px;}
+.health-sub.warn{color:var(--amber);font-weight:600;}
+
 @media (max-width: 1100px){
   .board{grid-template-columns:1fr;}
   .admin-grid{grid-template-columns:1fr;}
+  .action-cards{grid-template-columns:repeat(2,1fr);}
+  .kpi-grid{grid-template-columns:repeat(2,1fr);}
+  .health-grid{grid-template-columns:repeat(2,1fr);}
+  .hero-status-badge{margin-left:0;}
 }
