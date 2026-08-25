@@ -8,6 +8,7 @@ const LIST_QUERY = `
   SELECT
     s.*,
     c.name AS category_name,
+    d.name AS drop_name,
     EXISTS(
       SELECT 1 FROM creative_assets ca
       WHERE ca.style_id = s.id AND ca.status = 'uploaded_live'
@@ -19,6 +20,7 @@ const LIST_QUERY = `
     (SELECT COUNT(*) FROM creative_assets ca WHERE ca.style_id = s.id)::int AS creative_asset_count
   FROM styles s
   LEFT JOIN categories c ON c.id = s.category_id
+  LEFT JOIN drops d ON d.id = s.drop_id
 `;
 
 function withMissingAdFlag(row) {
@@ -50,14 +52,14 @@ router.get('/:id', async (req, res, next) => {
 
 router.post('/', async (req, res, next) => {
   try {
-    const { style_code, name, tier, category_id } = req.body || {};
+    const { style_code, name, tier, category_id, drop_id } = req.body || {};
     if (!style_code || !style_code.trim()) return res.status(400).json({ error: 'style_code is required' });
     if (!name || !name.trim()) return res.status(400).json({ error: 'name is required' });
     if (!TIERS.includes(tier)) return res.status(400).json({ error: `tier must be one of: ${TIERS.join(', ')}` });
 
     const result = await pool.query(
-      `INSERT INTO styles (style_code, name, tier, category_id) VALUES ($1, $2, $3, $4) RETURNING *`,
-      [style_code.trim(), name.trim(), tier, category_id || null]
+      `INSERT INTO styles (style_code, name, tier, category_id, drop_id) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [style_code.trim(), name.trim(), tier, category_id || null, drop_id || null]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -70,7 +72,7 @@ router.post('/', async (req, res, next) => {
 
 router.put('/:id', async (req, res, next) => {
   try {
-    const { style_code, name, tier, category_id } = req.body || {};
+    const { style_code, name, tier, category_id, drop_id } = req.body || {};
     if (tier && !TIERS.includes(tier)) {
       return res.status(400).json({ error: `tier must be one of: ${TIERS.join(', ')}` });
     }
@@ -81,9 +83,17 @@ router.put('/:id', async (req, res, next) => {
            name = COALESCE($2, name),
            tier = COALESCE($3, tier),
            category_id = $4,
+           drop_id = $5,
            updated_at = now()
-       WHERE id = $5 RETURNING *`,
-      [style_code ? style_code.trim() : null, name ? name.trim() : null, tier || null, category_id || null, req.params.id]
+       WHERE id = $6 RETURNING *`,
+      [
+        style_code ? style_code.trim() : null,
+        name ? name.trim() : null,
+        tier || null,
+        category_id || null,
+        drop_id || null,
+        req.params.id,
+      ]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Style not found' });
     res.json(result.rows[0]);
