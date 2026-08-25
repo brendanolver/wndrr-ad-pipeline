@@ -1,4 +1,5 @@
 const { computeCreativeTarget } = require('./creativeTarget');
+const { deriveProductCode } = require('./apparelmagic');
 
 // "Current Creative Coverage" = count of Creative Assets (Phase 1's "one row
 // per ad concept per style" entity) linked to the style, any status. This is
@@ -15,27 +16,67 @@ function coverageStatus(coverage, target) {
   return 'red';
 }
 
+// Groups individual style rows (one per colourway, matching ApparelMagic's
+// own style_number scheme) into one coverage entry per base product --
+// colourways of the same product share one creative need, so SOH, on-order
+// and current coverage are summed across every colourway in the group, and
+// one creative target is computed from the summed SOH rather than per
+// colourway. See apparelmagic.js: deriveProductCode.
+//
 // styleRows: rows from the styles table (id, style_code, name, tier, ...).
 // assetCounts: Map<style_id, creative_asset_count>.
-// amStock: Map<style_code, soh> or null if ApparelMagic isn't configured.
+// amStock / amOnOrder: Map<style_code, qty> or null if AM isn't configured.
 // amDetails: Map<style_code, { productName, imageUrl }> or null.
 // rules: creative_target_rules rows.
-function buildCoverage(styleRows, { assetCounts, amStock, amDetails, rules }) {
-  return styleRows.map((style) => {
-    const soh = amStock ? amStock.get(style.style_code) ?? null : null;
-    const details = amDetails ? amDetails.get(style.style_code) : null;
-    const creativeTarget = soh != null ? computeCreativeTarget(soh, rules) : null;
-    const currentCoverage = assetCounts.get(style.id) || 0;
+function buildCoverage(styleRows, { assetCounts, amStock, amOnOrder, amDetails, rules }) {
+  const groups = new Map(); // product_code -> style rows
+  for (const style of styleRows) {
+    const productCode = deriveProductCode(style.style_code);
+    if (!groups.has(productCode)) groups.set(productCode, []);
+    groups.get(productCode).push(style);
+  }
+
+  return [...groups.entries()].map(([productCode, members]) => {
+    let soh = 0;
+    let onOrder = 0;
+    let currentCoverage = 0;
+    let sohKnown = false;
+    const images = [];
+    const memberSummaries = [];
+
+    for (const style of members) {
+      const styleSoh = amStock ? amStock.get(style.style_code) : null;
+      if (styleSoh != null) {
+        soh += styleSoh;
+        sohKnown = true;
+      }
+      const styleOnOrder = amOnOrder ? amOnOrder.get(style.style_code) : null;
+      if (styleOnOrder != null) onOrder += styleOnOrder;
+      currentCoverage += assetCounts.get(style.id) || 0;
+
+      const details = amDetails ? amDetails.get(style.style_code) : null;
+      if (details?.imageUrl) images.push(details.imageUrl);
+      memberSummaries.push({
+        style_id: style.id,
+        style_code: style.style_code,
+        tier: style.tier,
+        image_url: details?.imageUrl || null,
+      });
+    }
+
+    const first = members[0];
+    const firstDetails = amDetails ? amDetails.get(first.style_code) : null;
+    const creativeTarget = sohKnown ? computeCreativeTarget(soh, rules) : null;
     const gap = creativeTarget != null ? Math.max(0, creativeTarget - currentCoverage) : null;
 
     return {
-      style_id: style.id,
-      style_code: style.style_code,
-      name: style.name,
-      tier: style.tier,
-      product_name: details?.productName || style.name,
-      image_url: details?.imageUrl || null,
-      soh,
+      product_code: productCode,
+      product_name: firstDetails?.productName || first.name,
+      tier: first.tier,
+      styles: memberSummaries,
+      images,
+      soh: sohKnown ? soh : null,
+      on_order: amOnOrder ? onOrder : null,
       creative_target: creativeTarget,
       current_coverage: currentCoverage,
       creative_gap: gap,

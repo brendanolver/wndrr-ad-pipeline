@@ -375,32 +375,15 @@ function renderDropQuickpicks(selectedDate) {
 function onDropDateChange() {
   const date = document.getElementById('drop-launch-date').value;
   renderDropQuickpicks(date);
-  const suggestion = date ? suggestionForDate(date) : null;
-  const stylesSection = document.getElementById('drop-styles-section');
-  const emptyNote = document.getElementById('drop-styles-empty');
-
+  const note = document.getElementById('drop-date-note');
   if (!date) {
-    stylesSection.style.display = 'none';
-    emptyNote.style.display = 'none';
+    note.textContent = '';
     return;
   }
-  if (suggestion && suggestion.styles.length) {
-    stylesSection.style.display = 'block';
-    emptyNote.style.display = 'none';
-    document.getElementById('drop-styles-list').innerHTML = suggestion.styles.map((s) => `
-      <label class="drop-style-item">
-        <input type="checkbox" class="drop-style-check" value="${s.style_code}" checked>
-        ${s.image_url ? `<img src="${s.image_url}" alt="">` : '<span class="no-img">🖼</span>'}
-        <span class="drop-style-info">
-          <span class="drop-style-name">${escapeHtml(s.product_name)}</span><br>
-          <span class="drop-style-code">${s.style_code}</span>
-          ${s.is_core ? '<span class="drop-style-core"> · CORE</span>' : ''}
-        </span>
-      </label>`).join('');
-  } else {
-    stylesSection.style.display = 'none';
-    emptyNote.style.display = 'block';
-  }
+  const suggestion = suggestionForDate(date);
+  note.textContent = suggestion && suggestion.styles.length
+    ? `${suggestion.styles.length} style${suggestion.styles.length === 1 ? '' : 's'} launching this date will be auto-included from ApparelMagic.`
+    : 'No ApparelMagic styles found for this date — the drop will be created without any styles pre-assigned. Add styles manually afterwards from Styles & Categories.';
 }
 document.getElementById('drop-launch-date').addEventListener('change', onDropDateChange);
 
@@ -493,20 +476,33 @@ function renderCoverageGrid(coverage) {
     grid.innerHTML = '<div class="attention-empty">No styles assigned to this drop yet — assign styles to it from Styles &amp; Categories.</div>';
     return;
   }
-  grid.innerHTML = coverage.map((c) => `
+  grid.innerHTML = coverage.map((c, i) => {
+    const images = c.images.length
+      ? c.images.slice(0, 4).map((url) => `<img src="${url}" alt="">`).join('')
+      : '<span class="coverage-card-noimg">🖼</span>';
+    const colourNote = c.styles.length > 1 ? `${c.styles.length} colours` : c.styles[0]?.style_code || c.product_code;
+    const pct = c.creative_target ? Math.min(100, Math.round((c.current_coverage / c.creative_target) * 100)) : 0;
+
+    return `
     <div class="coverage-card">
-      <div class="coverage-card-img">${c.image_url ? `<img src="${c.image_url}" alt="">` : '🖼'}</div>
+      <div class="coverage-card-imgrow">${images}</div>
       <div class="coverage-card-body">
         <div class="coverage-card-name">${escapeHtml(c.product_name)}</div>
-        <div class="coverage-card-code">${c.style_code}</div>
+        <div class="coverage-card-code">${c.product_code} · ${colourNote}</div>
         ${c.soh !== null
-          ? `<div class="coverage-card-soh">SOH: <strong>${c.soh}</strong></div>
+          ? `<div class="coverage-card-stats">
+               <span>SOH: <strong>${c.soh}</strong></span>
+               ${c.on_order !== null ? `<span>On Order: <strong>${c.on_order}</strong></span>` : ''}
+             </div>
              <div class="coverage-card-ratio">${c.current_coverage} / ${c.creative_target}</div>
+             <div class="coverage-progress-track"><div class="coverage-progress-fill ${c.status}" style="width:${pct}%;"></div></div>
              <div class="coverage-card-gap ${c.status}">${coverageGapLabel(c)}</div>`
           : `<div class="coverage-card-unavailable">SOH unavailable</div>`}
-        ${c.creative_gap > 0 || c.creative_gap === null ? `<button class="btn btn-primary btn-sm" onclick="planCreativeFromCoverage(${c.style_id}, ${state.selectedDropId})">+ Plan Creative</button>` : ''}
+        ${c.creative_gap > 0 || c.creative_gap === null ? `<button class="btn btn-primary btn-sm" onclick="planCreativeFromCoverage(${i}, ${state.selectedDropId})">+ Plan Creative</button>` : ''}
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
+  state.selectedDropCoverage = coverage;
 }
 
 function checklistLine(label, resolved, statusText, notes) {
@@ -698,8 +694,10 @@ async function deleteJob() {
   }
 }
 
-function planCreativeFromCoverage(styleId, dropId) {
-  openJobModal(null, { styleIds: [styleId], dropId });
+function planCreativeFromCoverage(coverageIndex, dropId) {
+  const group = state.selectedDropCoverage?.[coverageIndex];
+  if (!group) return;
+  openJobModal(null, { styleIds: group.styles.map((s) => s.style_id), dropId });
 }
 
 document.getElementById('new-job-btn').addEventListener('click', () => openJobModal(null));
@@ -707,8 +705,7 @@ document.getElementById('new-drop-btn').addEventListener('click', () => {
   document.getElementById('drop-name').value = '';
   document.getElementById('drop-launch-date').value = '';
   document.getElementById('drop-notes').value = '';
-  document.getElementById('drop-styles-section').style.display = 'none';
-  document.getElementById('drop-styles-empty').style.display = 'none';
+  document.getElementById('drop-date-note').textContent = '';
   renderDropQuickpicks(null);
   openModal('drop-modal');
 });
@@ -720,9 +717,10 @@ async function saveDrop() {
   if (!name.trim()) return toast('Drop name is required', true);
   if (!launch_date) return toast('Launch date is required', true);
 
+  // Any ApparelMagic styles launching this exact date are auto-included --
+  // no manual review step, per how this flow is meant to work.
   const suggestion = suggestionForDate(launch_date);
-  const checkedCodes = Array.from(document.querySelectorAll('.drop-style-check:checked')).map((el) => el.value);
-  const styles = suggestion ? suggestion.styles.filter((s) => checkedCodes.includes(s.style_code)) : [];
+  const styles = suggestion ? suggestion.styles : [];
 
   try {
     if (styles.length) {
