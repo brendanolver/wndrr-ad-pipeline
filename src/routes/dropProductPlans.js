@@ -104,15 +104,17 @@ router.post('/', async (req, res, next) => {
     if (existingCount < target) {
       const need = target - existingCount;
       const pwResult = await client.query(
-        `SELECT id, name FROM proven_winners WHERE active AND NOT (id = ANY($1::int[])) ORDER BY rank ASC LIMIT $2`,
+        `SELECT id, name, default_format, default_classification FROM proven_winners
+         WHERE active AND NOT (id = ANY($1::int[])) ORDER BY rank ASC LIMIT $2`,
         [usedPwIds, need]
       );
       let nextRank = existingCount + 1;
       for (const pw of pwResult.rows) {
         await client.query(
-          `INSERT INTO drop_product_plan_slots (plan_id, slot_rank, source, concept_name, proven_winner_id)
-           VALUES ($1, $2, 'proven', $3, $4)`,
-          [planId, nextRank, pw.name, pw.id]
+          `INSERT INTO drop_product_plan_slots
+            (plan_id, slot_rank, source, concept_name, proven_winner_id, default_format, default_classification)
+           VALUES ($1, $2, 'proven', $3, $4, $5, $6)`,
+          [planId, nextRank, pw.name, pw.id, pw.default_format, pw.default_classification]
         );
         nextRank += 1;
       }

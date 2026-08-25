@@ -207,6 +207,15 @@ CREATE TABLE IF NOT EXISTS proven_winners (
 
 CREATE INDEX IF NOT EXISTS idx_proven_winners_rank ON proven_winners(rank);
 
+-- Default Format/Classification for assets created from this Proven Winner
+-- (see "+ Create Asset" on a Required Concept slot) -- set once here so the
+-- team never has to re-pick them per product; a New/Test concept has no
+-- Proven Winner to default from, so its create-asset flow still asks.
+ALTER TABLE proven_winners ADD COLUMN IF NOT EXISTS default_format VARCHAR(10) NOT NULL DEFAULT 'video'
+  CHECK (default_format IN ('video', 'static'));
+ALTER TABLE proven_winners ADD COLUMN IF NOT EXISTS default_classification VARCHAR(20) NOT NULL DEFAULT 'tested_proven'
+  CHECK (default_classification IN ('tested_proven', 'new_experimental'));
+
 -- A "product" has no table of its own -- it's a derived grouping computed by
 -- deriveProductCode/buildCoverage on every request (coverage.js). This table
 -- is the stable anchor a generated concept plan snapshots against, keyed on
@@ -244,3 +253,11 @@ CREATE TABLE IF NOT EXISTS drop_product_plan_slots (
 
 CREATE INDEX IF NOT EXISTS idx_dpps_plan_id ON drop_product_plan_slots(plan_id);
 CREATE INDEX IF NOT EXISTS idx_dpps_fulfilled_by ON drop_product_plan_slots(fulfilled_by_asset_id);
+
+-- Snapshot of the source Proven Winner's default_format/default_classification
+-- at generation time (same "snapshot, don't live-rewrite" principle as
+-- concept_name) -- NULL for a 'new' source slot, which has no preset.
+ALTER TABLE drop_product_plan_slots ADD COLUMN IF NOT EXISTS default_format VARCHAR(10)
+  CHECK (default_format IS NULL OR default_format IN ('video', 'static'));
+ALTER TABLE drop_product_plan_slots ADD COLUMN IF NOT EXISTS default_classification VARCHAR(20)
+  CHECK (default_classification IS NULL OR default_classification IN ('tested_proven', 'new_experimental'));

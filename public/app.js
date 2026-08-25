@@ -996,7 +996,7 @@ function renderRequiredConcepts(data, group) {
     const actions = fulfilled ? `
         <button type="button" class="btn btn-ghost btn-sm" onclick="unlinkConceptSlot(${s.id})">Unlink</button>
       ` : `
-        <button type="button" class="btn btn-ghost btn-sm" onclick="fulfillWithNewAsset(${s.id}, '${escapeHtml(s.concept_name).replace(/'/g, "\\'")}', '${s.source}')">+ Create Asset</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="fulfillWithNewAsset(${s.id}, '${escapeHtml(s.concept_name).replace(/'/g, "\\'")}', '${s.source}', '${s.default_format || ''}', '${s.default_classification || ''}')">+ Create Asset</button>
         ${eligibleAssets.length ? `
           <select class="pw-slot-link-select" data-slot-id="${s.id}">
             <option value="">Link existing…</option>
@@ -1029,13 +1029,19 @@ function assetStatusLabel(status) {
 }
 
 
-function fulfillWithNewAsset(slotId, conceptName, source) {
+// Proven slots snapshot their Format/Classification from the Proven Winner
+// at generation time (Settings), so there's nothing to re-pick -- those two
+// fields are locked to the preset. A New/Test slot has no preset, so they
+// stay fully editable, same as creating any other asset.
+function fulfillWithNewAsset(slotId, conceptName, source, defaultFormat, defaultClassification) {
   const group = state.currentProduct;
   openAssetModal(null, {
     presetConceptName: conceptName,
     presetStyleIds: group.styles.map((s) => s.style_id),
-    defaultClassification: source === 'proven' ? 'tested_proven' : 'new_experimental',
+    presetFormat: defaultFormat || 'video',
+    defaultClassification: defaultClassification || (source === 'proven' ? 'tested_proven' : 'new_experimental'),
     fulfillsSlotId: slotId,
+    lockFormatClassification: source === 'proven',
   });
 }
 
@@ -1231,8 +1237,12 @@ function openAssetModal(card, presets = {}) {
   populateStyleSelect(presets.presetStyleIds);
   document.getElementById('asset-style-id').value = card ? card.style_id : (presets.presetStyleIds ? presets.presetStyleIds[0] : (state.styles[0] ? state.styles[0].id : ''));
   document.getElementById('asset-concept-name').value = card ? card.concept_name : (presets.presetConceptName || '');
-  document.getElementById('asset-format').value = card ? card.format : 'video';
+  document.getElementById('asset-format').value = card ? card.format : (presets.presetFormat || 'video');
   document.getElementById('asset-classification').value = card ? card.concept_classification : (presets.defaultClassification || 'new_experimental');
+  const lockPresets = !card && !!presets.lockFormatClassification;
+  document.getElementById('asset-format').disabled = lockPresets;
+  document.getElementById('asset-classification').disabled = lockPresets;
+  document.getElementById('asset-format-locked-hint').style.display = lockPresets ? 'block' : 'none';
   document.getElementById('asset-deliberate-trial').checked = card ? !!card.is_deliberate_trial : false;
   document.getElementById('asset-target-date').value = card && card.target_date ? card.target_date.slice(0, 10) : '';
   document.getElementById('asset-strategy-owner').value = (card && card.strategy_owner) || '';
@@ -1439,6 +1449,8 @@ function openPwModal(id) {
   document.getElementById('pw-id').value = pw ? pw.id : '';
   document.getElementById('pw-name').value = pw ? pw.name : '';
   document.getElementById('pw-description').value = (pw && pw.description) || '';
+  document.getElementById('pw-format').value = pw ? pw.default_format : 'video';
+  document.getElementById('pw-classification').value = pw ? pw.default_classification : 'tested_proven';
   document.getElementById('pw-position-row').style.display = pw ? 'none' : 'flex';
   document.getElementById('pw-position').value = '';
   document.getElementById('pw-active-row').style.display = pw ? 'flex' : 'none';
@@ -1456,11 +1468,16 @@ async function savePw() {
   const id = document.getElementById('pw-id').value;
   const name = document.getElementById('pw-name').value;
   const description = document.getElementById('pw-description').value || null;
+  const default_format = document.getElementById('pw-format').value;
+  const default_classification = document.getElementById('pw-classification').value;
   if (!name.trim()) return toast('Concept name is required', true);
 
   try {
     if (id) {
-      await api(`/proven-winners/${id}`, { method: 'PUT', body: JSON.stringify({ name, description }) });
+      await api(`/proven-winners/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ name, description, default_format, default_classification }),
+      });
       await api(`/proven-winners/${id}/active`, {
         method: 'PATCH',
         body: JSON.stringify({ active: document.getElementById('pw-active').checked }),
@@ -1469,7 +1486,10 @@ async function savePw() {
       const position = document.getElementById('pw-position').value;
       await api('/proven-winners', {
         method: 'POST',
-        body: JSON.stringify({ name, description, position: position ? Number(position) : undefined }),
+        body: JSON.stringify({
+          name, description, default_format, default_classification,
+          position: position ? Number(position) : undefined,
+        }),
       });
     }
     closeModal('pw-modal');

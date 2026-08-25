@@ -1,7 +1,20 @@
 const express = require('express');
 const { pool } = require('../db');
+const { FORMATS, CONCEPT_CLASSIFICATIONS } = require('../lib/statuses');
 
 const router = express.Router();
+
+function validateDefaults(body, res) {
+  if (body.default_format && !FORMATS.includes(body.default_format)) {
+    res.status(400).json({ error: `default_format must be one of: ${FORMATS.join(', ')}` });
+    return false;
+  }
+  if (body.default_classification && !CONCEPT_CLASSIFICATIONS.includes(body.default_classification)) {
+    res.status(400).json({ error: `default_classification must be one of: ${CONCEPT_CLASSIFICATIONS.join(', ')}` });
+    return false;
+  }
+  return true;
+}
 
 // Rank is a plain integer column; every order-changing mutation rewrites
 // the full list's ranks (1..N) inside a transaction rather than juggling
@@ -25,16 +38,18 @@ router.get('/', async (req, res, next) => {
 router.post('/', async (req, res, next) => {
   const client = await pool.connect();
   try {
-    const { name, description, position } = req.body || {};
+    const { name, description, position, default_format, default_classification } = req.body || {};
     if (!name || !name.trim()) return res.status(400).json({ error: 'name is required' });
+    if (!validateDefaults(req.body || {}, res)) return;
 
     await client.query('BEGIN');
     const existing = await client.query('SELECT id FROM proven_winners ORDER BY rank ASC');
     const existingIds = existing.rows.map((r) => r.id);
 
     const inserted = await client.query(
-      `INSERT INTO proven_winners (name, description, rank) VALUES ($1, $2, $3) RETURNING id`,
-      [name.trim(), description || null, existingIds.length + 1]
+      `INSERT INTO proven_winners (name, description, rank, default_format, default_classification)
+       VALUES ($1, $2, $3, COALESCE($4, 'video'), COALESCE($5, 'tested_proven')) RETURNING id`,
+      [name.trim(), description || null, existingIds.length + 1, default_format || null, default_classification || null]
     );
     const newId = inserted.rows[0].id;
 
@@ -91,12 +106,17 @@ router.put('/reorder', async (req, res, next) => {
 
 router.put('/:id', async (req, res, next) => {
   try {
-    const { name, description } = req.body || {};
+    const { name, description, default_format, default_classification } = req.body || {};
     if (name != null && !name.trim()) return res.status(400).json({ error: 'name cannot be blank' });
+    if (!validateDefaults(req.body || {}, res)) return;
 
     const result = await pool.query(
-      `UPDATE proven_winners SET name = COALESCE($1, name), description = $2, updated_at = now() WHERE id = $3 RETURNING *`,
-      [name ? name.trim() : null, description || null, req.params.id]
+      `UPDATE proven_winners SET
+         name = COALESCE($1, name), description = $2,
+         default_format = COALESCE($3, default_format), default_classification = COALESCE($4, default_classification),
+         updated_at = now()
+       WHERE id = $5 RETURNING *`,
+      [name ? name.trim() : null, description || null, default_format || null, default_classification || null, req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Proven Winner not found' });
     res.json(result.rows[0]);
