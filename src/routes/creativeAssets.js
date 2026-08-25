@@ -2,11 +2,13 @@ const express = require('express');
 const { pool } = require('../db');
 const { STATUSES, CONCEPT_CLASSIFICATIONS, FORMATS } = require('../lib/statuses');
 const { assertCanEnterFilming, RuleViolationError } = require('../lib/rules');
+const { deriveProductCode } = require('../lib/apparelmagic');
 
 const router = express.Router();
 
 const SELECT_QUERY = `
-  SELECT ca.*, s.style_code, s.name AS style_name, s.tier AS style_tier
+  SELECT ca.*, s.style_code, s.name AS style_name, s.tier AS style_tier,
+    (SELECT slot_rank FROM drop_product_plan_slots WHERE fulfilled_by_asset_id = ca.id LIMIT 1) AS fulfills_slot_rank
   FROM creative_assets ca
   JOIN styles s ON s.id = ca.style_id
 `;
@@ -63,6 +65,12 @@ router.get('/:id/history', async (req, res, next) => {
 });
 
 router.post('/', async (req, res, next) => {
+  // fulfills_slot_id links the new asset to a Required Concept slot
+  // (Proven Winners feature) as part of the same create -- optional, and
+  // every existing caller omits it, so their behavior is unaffected.
+  const { fulfills_slot_id } = req.body || {};
+  const client = fulfills_slot_id ? await pool.connect() : null;
+  const db = client || pool;
   try {
     const {
       style_id,
@@ -84,7 +92,27 @@ router.post('/', async (req, res, next) => {
       return res.status(400).json({ error: `concept_classification must be one of: ${CONCEPT_CLASSIFICATIONS.join(', ')}` });
     }
 
-    const result = await pool.query(
+    if (client) await client.query('BEGIN');
+
+    if (fulfills_slot_id) {
+      const slot = await client.query(
+        `SELECT s.id, p.product_code FROM drop_product_plan_slots s
+         JOIN drop_product_plans p ON p.id = s.plan_id
+         WHERE s.id = $1 AND s.fulfilled_by_asset_id IS NULL FOR UPDATE OF s`,
+        [fulfills_slot_id]
+      );
+      if (!slot.rows.length) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: 'Concept slot is already fulfilled or does not exist' });
+      }
+      const style = await client.query('SELECT style_code FROM styles WHERE id = $1', [style_id]);
+      if (!style.rows.length || deriveProductCode(style.rows[0].style_code) !== slot.rows[0].product_code) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'style_id does not belong to the concept slot\'s product' });
+      }
+    }
+
+    const result = await db.query(
       `INSERT INTO creative_assets
         (style_id, concept_name, concept_classification, format, is_deliberate_trial, target_date,
          strategy_owner, filming_owner, editing_owner, qc_owner)
@@ -104,15 +132,26 @@ router.post('/', async (req, res, next) => {
     );
 
     const asset = result.rows[0];
-    await pool.query(
+    await db.query(
       `INSERT INTO status_history (creative_asset_id, from_status, to_status, changed_by) VALUES ($1, NULL, $2, $3)`,
       [asset.id, asset.status, strategy_owner || null]
     );
 
+    if (fulfills_slot_id) {
+      await client.query(`UPDATE drop_product_plan_slots SET fulfilled_by_asset_id = $1 WHERE id = $2`, [
+        asset.id,
+        fulfills_slot_id,
+      ]);
+      await client.query('COMMIT');
+    }
+
     res.status(201).json(asset);
   } catch (err) {
+    if (client) await client.query('ROLLBACK');
     if (err.code === '23503') return res.status(400).json({ error: 'style_id does not reference a real style' });
     next(err);
+  } finally {
+    if (client) client.release();
   }
 });
 

@@ -16,6 +16,8 @@ const dropRoutes = require('./routes/drops');
 const creativeJobRoutes = require('./routes/creativeJobs');
 const creativeTargetRuleRoutes = require('./routes/creativeTargetRules');
 const debugRoutes = require('./routes/debug');
+const provenWinnerRoutes = require('./routes/provenWinners');
+const dropProductPlanRoutes = require('./routes/dropProductPlans');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -33,6 +35,8 @@ app.use('/api/drops', requireAuth, dropRoutes);
 app.use('/api/creative-jobs', requireAuth, creativeJobRoutes);
 app.use('/api/creative-target-rules', requireAuth, creativeTargetRuleRoutes);
 app.use('/api/debug', requireAuth, debugRoutes);
+app.use('/api/proven-winners', requireAuth, provenWinnerRoutes);
+app.use('/api/drop-product-plans', requireAuth, dropProductPlanRoutes);
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
