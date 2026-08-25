@@ -607,10 +607,16 @@ function populateJobStyleSelect(selectedIds = []) {
   sel.innerHTML = state.styles.map((s) => `<option value="${s.id}" ${selectedIds.includes(s.id) ? 'selected' : ''}>${s.style_code} — ${escapeHtml(s.name)}</option>`).join('');
 }
 
+let jobModalJob = null;
+
 function openJobModal(job = null, preset = {}) {
+  jobModalJob = job;
   document.getElementById('job-modal-title').textContent = job ? 'Edit Creative Job' : 'New Creative Job';
   document.getElementById('job-id').value = job ? job.id : '';
   populateJobStyleSelect(job ? job.products.map((p) => p.style_id) : preset.styleIds || []);
+  populateStockRequestStyleSelect(job);
+  renderStockRequests(job ? job.stock_requests : []);
+  hideAddStockRequestRow();
   document.getElementById('job-drop-id').value = job ? job.drop_id || '' : preset.dropId || '';
   document.getElementById('job-concept').value = job ? job.high_level_concept : '';
   document.getElementById('job-status-quick').value = job && ['not_started', 'organising'].includes(job.planning_status) ? job.planning_status : 'not_started';
@@ -637,6 +643,12 @@ function openJobModal(job = null, preset = {}) {
   document.getElementById('job-blocker-resolution').value = job && job.blocker_expected_resolution ? job.blocker_expected_resolution.slice(0, 10) : '';
   document.getElementById('job-delete-btn').style.display = job ? 'inline-block' : 'none';
 
+  applyJobReadiness(job);
+
+  openModal('job-modal');
+}
+
+function applyJobReadiness(job) {
   const readyBtn = document.getElementById('job-ready-btn');
   const note = document.getElementById('job-readiness-note');
   if (job && job.planning_status !== 'ready_for_briefing') {
@@ -647,8 +659,95 @@ function openJobModal(job = null, preset = {}) {
     readyBtn.style.display = 'none';
     note.textContent = job && job.planning_status === 'ready_for_briefing' ? '✓ Ready for Briefing' : '';
   }
+}
 
-  openModal('job-modal');
+function populateStockRequestStyleSelect(job) {
+  const sel = document.getElementById('stock-request-style');
+  const products = job ? job.products : [];
+  sel.innerHTML = products.map((p) => `<option value="${p.style_id}">${p.style_code} — ${escapeHtml(p.name)}</option>`).join('');
+}
+
+function renderStockRequests(requests = []) {
+  const list = document.getElementById('job-stock-requests-list');
+  if (!requests.length) {
+    list.innerHTML = '<div class="stock-request-empty">No stock needs added yet.</div>';
+    return;
+  }
+  list.innerHTML = requests.map((r) => `
+    <div class="stock-request-row ${r.status === 'pulled' ? 'is-pulled' : ''}">
+      <label class="checkbox-label">
+        <input type="checkbox" ${r.status === 'pulled' ? 'checked' : ''} onchange="toggleStockRequestPulled(${r.id}, this.checked)">
+      </label>
+      <span class="stock-request-desc">${escapeHtml(r.style_code)} · ${escapeHtml(r.size)} × ${r.quantity}${r.notes ? ` — ${escapeHtml(r.notes)}` : ''}</span>
+      <button type="button" class="stock-request-remove" onclick="deleteStockRequest(${r.id})" title="Remove">&times;</button>
+    </div>
+  `).join('');
+}
+
+function showAddStockRequestRow() {
+  if (!jobModalJob) return toast('Save the job first before adding stock needs', true);
+  if (!jobModalJob.products.length) return toast('Add at least one product to this job first', true);
+  document.getElementById('job-stock-request-form').style.display = 'flex';
+}
+
+function hideAddStockRequestRow() {
+  const form = document.getElementById('job-stock-request-form');
+  if (form) form.style.display = 'none';
+}
+
+function applyStockRequestUpdate(updated) {
+  jobModalJob = updated;
+  renderStockRequests(updated.stock_requests);
+  document.getElementById('job-stock-status').value = updated.stock_status;
+  applyJobReadiness(updated);
+  const idx = state.jobs.findIndex((j) => j.id === updated.id);
+  if (idx !== -1) state.jobs[idx] = updated;
+  renderJobsGrid();
+}
+
+async function addStockRequest() {
+  const jobId = jobModalJob.id;
+  const styleId = Number(document.getElementById('stock-request-style').value);
+  const size = document.getElementById('stock-request-size').value;
+  const quantity = Number(document.getElementById('stock-request-qty').value) || 1;
+  const notes = document.getElementById('stock-request-notes').value || null;
+  if (!styleId) return toast('Add at least one product to this job first', true);
+  try {
+    const updated = await api(`/creative-jobs/${jobId}/stock-requests`, {
+      method: 'POST',
+      body: JSON.stringify({ style_id: styleId, size, quantity, notes }),
+    });
+    applyStockRequestUpdate(updated);
+    document.getElementById('stock-request-notes').value = '';
+    document.getElementById('stock-request-qty').value = '1';
+    hideAddStockRequestRow();
+    toast('Stock need added');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function toggleStockRequestPulled(reqId, checked) {
+  const jobId = jobModalJob.id;
+  try {
+    const updated = await api(`/creative-jobs/${jobId}/stock-requests/${reqId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: checked ? 'pulled' : 'needed' }),
+    });
+    applyStockRequestUpdate(updated);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function deleteStockRequest(reqId) {
+  const jobId = jobModalJob.id;
+  try {
+    const updated = await api(`/creative-jobs/${jobId}/stock-requests/${reqId}`, { method: 'DELETE' });
+    applyStockRequestUpdate(updated);
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 async function saveJob() {
