@@ -140,15 +140,15 @@ router.get('/suggestions', async (req, res, next) => {
 router.post('/from-suggestion', async (req, res, next) => {
   const client = await pool.connect();
   try {
-    const { name, launch_date, styles } = req.body || {};
+    const { name, launch_date, notes, styles } = req.body || {};
     if (!name || !name.trim()) return res.status(400).json({ error: 'name is required' });
     if (!launch_date) return res.status(400).json({ error: 'launch_date is required' });
     if (!Array.isArray(styles) || !styles.length) return res.status(400).json({ error: 'styles is required' });
 
     await client.query('BEGIN');
     const dropResult = await client.query(
-      `INSERT INTO drops (name, launch_date) VALUES ($1, $2) RETURNING *`,
-      [name.trim(), launch_date]
+      `INSERT INTO drops (name, launch_date, notes) VALUES ($1, $2, $3) RETURNING *`,
+      [name.trim(), launch_date, notes || null]
     );
     const drop = dropResult.rows[0];
 
