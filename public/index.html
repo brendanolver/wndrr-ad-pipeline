@@ -267,6 +267,7 @@
           </select>
         </label>
       </div>
+      <div class="hint" id="asset-format-locked-hint" style="display:none;">Format and classification are set by this Proven Winner (Settings).</div>
       <label class="checkbox-label">
         <input type="checkbox" id="asset-deliberate-trial">
         Deliberate new-concept trial (bypasses the New Drop → Filming gate)
@@ -593,6 +594,21 @@
       <label>Description <span class="hint">(optional)</span>
         <input type="text" id="pw-description" placeholder="e.g. Fast-paced product-led reel focusing on fit, details and on-body shots.">
       </label>
+      <div class="field-row">
+        <label>Default format
+          <select id="pw-format">
+            <option value="video">Video</option>
+            <option value="static">Static</option>
+          </select>
+        </label>
+        <label>Default classification
+          <select id="pw-classification">
+            <option value="tested_proven">Tested/Proven</option>
+            <option value="new_experimental">New/Experimental</option>
+          </select>
+        </label>
+      </div>
+      <div class="hint">Used automatically when creating a Creative Asset for this concept from the Planning page — no need to re-pick them each time.</div>
       <label id="pw-position-row">Insert at position <span class="hint">(optional — default: bottom of the list)</span>
         <input type="number" id="pw-position" min="1">
       </label>
