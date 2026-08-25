@@ -445,6 +445,30 @@
         </label>
       </div>
 
+      <div class="stock-requests-section">
+        <div class="stock-requests-header">
+          <span>Stock to bring down for the shoot</span>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="showAddStockRequestRow()">+ Add stock need</button>
+        </div>
+        <div id="job-stock-requests-list"></div>
+        <div id="job-stock-request-form" class="stock-request-form" style="display:none;">
+          <select id="stock-request-style"></select>
+          <select id="stock-request-size">
+            <option value="XS">XS</option>
+            <option value="S">S</option>
+            <option value="M">M</option>
+            <option value="L">L</option>
+            <option value="XL">XL</option>
+            <option value="XXL">XXL</option>
+            <option value="One Size">One Size</option>
+          </select>
+          <input type="number" id="stock-request-qty" min="1" value="1" title="Quantity">
+          <input type="text" id="stock-request-notes" placeholder="Notes (optional)">
+          <button type="button" class="btn btn-primary btn-sm" onclick="addStockRequest()">Add</button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="hideAddStockRequestRow()">Cancel</button>
+        </div>
+      </div>
+
       <div class="field-row">
         <label>Talent / Model / Creator
           <select id="job-talent-status">

@@ -170,3 +170,20 @@ CREATE TABLE IF NOT EXISTS creative_job_products (
 );
 
 CREATE INDEX IF NOT EXISTS idx_creative_job_products_style_id ON creative_job_products(style_id);
+
+-- Line items under a Job's "What do we need to make this happen?" stock
+-- checklist item: specific size/quantity to pull for a shoot, per style.
+-- Separate from stock_status (a summary state) so the team can work a real
+-- pull list rather than just a status dropdown + free-text note.
+CREATE TABLE IF NOT EXISTS creative_job_stock_requests (
+  id SERIAL PRIMARY KEY,
+  job_id INTEGER NOT NULL REFERENCES creative_jobs(id) ON DELETE CASCADE,
+  style_id INTEGER NOT NULL REFERENCES styles(id) ON DELETE CASCADE,
+  size VARCHAR(20) NOT NULL,
+  quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity > 0),
+  status VARCHAR(20) NOT NULL DEFAULT 'needed' CHECK (status IN ('needed', 'pulled')),
+  notes TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_creative_job_stock_requests_job_id ON creative_job_stock_requests(job_id);

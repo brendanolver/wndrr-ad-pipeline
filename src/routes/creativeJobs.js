@@ -12,6 +12,8 @@ const STOCK_STATUSES = ['not_required', 'available', 'needs_organising', 'in_tra
 const TALENT_STATUSES = ['not_required', 'internal_team', 'model_required', 'creator_required', 'confirmed', 'not_confirmed'];
 const LOCATION_STATUSES = ['not_required', 'office', 'warehouse', 'studio', 'external_location', 'needs_organising', 'confirmed'];
 const PROPS_STATUSES = ['not_required', 'required', 'organised', 'not_organised'];
+const STOCK_REQUEST_SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'One Size'];
+const STOCK_REQUEST_STATUSES = ['needed', 'pulled'];
 
 // Statuses per readiness category that count as "resolved" for the
 // Ready-for-Briefing exit check (section 14 of the Planning brief).
@@ -43,10 +45,40 @@ const SELECT_JOB = `
        FROM creative_job_products cjp JOIN styles s ON s.id = cjp.style_id
        WHERE cjp.job_id = cj.id),
       '[]'
-    ) AS products
+    ) AS products,
+    COALESCE(
+      (SELECT json_agg(json_build_object(
+          'id', csr.id, 'style_id', csr.style_id, 'style_code', s.style_code, 'size', csr.size,
+          'quantity', csr.quantity, 'status', csr.status, 'notes', csr.notes
+        ) ORDER BY s.style_code, csr.id)
+       FROM creative_job_stock_requests csr JOIN styles s ON s.id = csr.style_id
+       WHERE csr.job_id = cj.id),
+      '[]'
+    ) AS stock_requests
   FROM creative_jobs cj
   LEFT JOIN drops d ON d.id = cj.drop_id
 `;
+
+// Adding an unresolved stock need should surface on the summary stock_status
+// dropdown (which drives the Ready-for-Briefing gate), and clearing every
+// need back down should relax it -- otherwise the two would silently drift
+// apart and the gate would stop meaning anything.
+async function syncStockStatus(client, jobId) {
+  const { rows: requests } = await client.query(
+    `SELECT status FROM creative_job_stock_requests WHERE job_id = $1`,
+    [jobId]
+  );
+  if (!requests.length) return;
+  const { rows: jobRows } = await client.query(`SELECT stock_status FROM creative_jobs WHERE id = $1`, [jobId]);
+  const currentStatus = jobRows[0]?.stock_status;
+  const allPulled = requests.every((r) => r.status === 'pulled');
+  let next = null;
+  if (allPulled && currentStatus !== 'available') next = 'available';
+  else if (!allPulled && ['not_required', 'available'].includes(currentStatus)) next = 'needs_organising';
+  if (next) {
+    await client.query(`UPDATE creative_jobs SET stock_status = $1, updated_at = now() WHERE id = $2`, [next, jobId]);
+  }
+}
 
 function withReadiness(job) {
   const { ready, checks } = computeReadiness(job, job.products.length);
@@ -300,6 +332,103 @@ router.patch('/:id/blocker', async (req, res, next) => {
     res.json(result.rows[0]);
   } catch (err) {
     next(err);
+  }
+});
+
+router.post('/:id/stock-requests', async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const { style_id, size, quantity, notes } = req.body || {};
+    if (!style_id) return res.status(400).json({ error: 'style_id is required' });
+    if (!STOCK_REQUEST_SIZES.includes(size)) {
+      return res.status(400).json({ error: `size must be one of: ${STOCK_REQUEST_SIZES.join(', ')}` });
+    }
+    const qty = quantity != null ? Number(quantity) : 1;
+    if (!Number.isInteger(qty) || qty < 1) return res.status(400).json({ error: 'quantity must be a positive integer' });
+
+    await client.query('BEGIN');
+    await client.query(
+      `INSERT INTO creative_job_stock_requests (job_id, style_id, size, quantity, notes) VALUES ($1, $2, $3, $4, $5)`,
+      [req.params.id, style_id, size, qty, notes || null]
+    );
+    await syncStockStatus(client, req.params.id);
+    await client.query('COMMIT');
+
+    const full = await pool.query(`${SELECT_JOB} WHERE cj.id = $1`, [req.params.id]);
+    if (full.rows.length === 0) return res.status(404).json({ error: 'Creative job not found' });
+    res.status(201).json(withReadiness(full.rows[0]));
+  } catch (err) {
+    await client.query('ROLLBACK');
+    if (err.code === '23503') return res.status(400).json({ error: 'style_id does not reference a real style, or job not found' });
+    next(err);
+  } finally {
+    client.release();
+  }
+});
+
+router.patch('/:id/stock-requests/:reqId', async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const { size, quantity, status, notes } = req.body || {};
+    if (size && !STOCK_REQUEST_SIZES.includes(size)) {
+      return res.status(400).json({ error: `size must be one of: ${STOCK_REQUEST_SIZES.join(', ')}` });
+    }
+    if (status && !STOCK_REQUEST_STATUSES.includes(status)) {
+      return res.status(400).json({ error: `status must be one of: ${STOCK_REQUEST_STATUSES.join(', ')}` });
+    }
+    let qty = null;
+    if (quantity != null) {
+      qty = Number(quantity);
+      if (!Number.isInteger(qty) || qty < 1) return res.status(400).json({ error: 'quantity must be a positive integer' });
+    }
+
+    await client.query('BEGIN');
+    const updated = await client.query(
+      `UPDATE creative_job_stock_requests SET
+         size = COALESCE($1, size), quantity = COALESCE($2, quantity), status = COALESCE($3, status), notes = $4
+       WHERE id = $5 AND job_id = $6 RETURNING id`,
+      [size || null, qty, status || null, notes !== undefined ? notes || null : null, req.params.reqId, req.params.id]
+    );
+    if (updated.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Stock request not found' });
+    }
+    await syncStockStatus(client, req.params.id);
+    await client.query('COMMIT');
+
+    const full = await pool.query(`${SELECT_JOB} WHERE cj.id = $1`, [req.params.id]);
+    res.json(withReadiness(full.rows[0]));
+  } catch (err) {
+    await client.query('ROLLBACK');
+    next(err);
+  } finally {
+    client.release();
+  }
+});
+
+router.delete('/:id/stock-requests/:reqId', async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const deleted = await client.query(
+      `DELETE FROM creative_job_stock_requests WHERE id = $1 AND job_id = $2 RETURNING id`,
+      [req.params.reqId, req.params.id]
+    );
+    if (deleted.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Stock request not found' });
+    }
+    await syncStockStatus(client, req.params.id);
+    await client.query('COMMIT');
+
+    const full = await pool.query(`${SELECT_JOB} WHERE cj.id = $1`, [req.params.id]);
+    if (full.rows.length === 0) return res.status(404).json({ error: 'Creative job not found' });
+    res.json(withReadiness(full.rows[0]));
+  } catch (err) {
+    await client.query('ROLLBACK');
+    next(err);
+  } finally {
+    client.release();
   }
 });
 
