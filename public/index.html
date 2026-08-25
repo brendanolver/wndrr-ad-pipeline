@@ -128,13 +128,6 @@
         </div>
       </div>
 
-      <div id="suggested-drops-section" style="display:none;">
-        <div class="planning-section-header">
-          <h2>Suggested Drops <span class="hint">(from ApparelMagic launch dates)</span></h2>
-        </div>
-        <div id="suggested-drops-row" class="drops-row"></div>
-      </div>
-
       <div class="planning-section-header">
         <h2>Upcoming Drops</h2>
       </div>
@@ -324,7 +317,7 @@
 
 <!-- Drop modal -->
 <div id="drop-modal" class="modal-backdrop">
-  <div class="modal">
+  <div class="modal modal-wide">
     <div class="modal-header">
       <h3>New Drop</h3>
       <button class="modal-close" onclick="closeModal('drop-modal')">&times;</button>
@@ -336,9 +329,16 @@
       <label>Launch date
         <input type="date" id="drop-launch-date">
       </label>
-      <label>Notes
+      <div id="drop-date-quickpicks" class="quickpick-row"></div>
+      <label>Notes <span class="hint">(optional)</span>
         <input type="text" id="drop-notes">
       </label>
+
+      <div id="drop-styles-section" style="display:none;">
+        <div class="checklist-section-title">Styles launching this date <span class="hint">(from ApparelMagic — untick any to exclude)</span></div>
+        <div id="drop-styles-list" class="drop-styles-list"></div>
+      </div>
+      <div id="drop-styles-empty" class="admin-note" style="display:none;">No ApparelMagic styles found for this date — the drop will be created without any styles pre-assigned. You can still add styles manually afterwards from Styles &amp; Categories.</div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('drop-modal')">Cancel</button>

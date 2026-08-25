@@ -226,8 +226,20 @@ main{padding:20px 24px;}
 .drop-card-counts span.red{color:var(--red);}
 .drop-card-pct{font-size:11.5px;color:var(--text-secondary);font-weight:600;}
 .drop-card-urgent{font-size:10.5px;color:var(--text-muted);margin-top:8px;border-top:1px solid var(--border);padding-top:8px;}
-.drop-card.suggested{border-style:dashed;border-color:var(--purple);cursor:default;}
-.drop-card.suggested .drop-card-styles{font-size:11px;color:var(--text-secondary);margin:6px 0 10px;line-height:1.5;}
+
+/* ── DROP MODAL: date quickpicks + auto-populated style checklist ── */
+.quickpick-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:-6px;}
+.quickpick-chip{background:var(--purple-light);color:var(--purple);border:1px solid transparent;border-radius:var(--r-pill);padding:5px 11px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;}
+.quickpick-chip:hover{border-color:var(--purple);}
+.quickpick-chip.active{background:var(--purple);color:white;}
+.drop-styles-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px;max-height:280px;overflow-y:auto;}
+.drop-style-item{display:flex;gap:8px;align-items:center;border:1px solid var(--border);border-radius:var(--r);padding:6px;}
+.drop-style-item img{width:36px;height:36px;object-fit:cover;border-radius:4px;background:var(--surface2);flex-shrink:0;}
+.drop-style-item .no-img{width:36px;height:36px;border-radius:4px;background:var(--surface2);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:14px;flex-shrink:0;}
+.drop-style-item .drop-style-info{min-width:0;}
+.drop-style-item .drop-style-name{font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.drop-style-item .drop-style-code{font-size:10px;color:var(--text-muted);}
+.drop-style-item .drop-style-core{font-size:9px;color:var(--teal-dark);font-weight:700;}
 
 .coverage-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;margin-bottom:8px;}
 .coverage-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;box-shadow:var(--shadow-xs);}

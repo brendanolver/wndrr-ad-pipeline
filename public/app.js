@@ -343,39 +343,66 @@ function renderPlanning() {
 async function loadDropSuggestions() {
   try {
     const { suggestions } = await api('/drops/suggestions');
-    const section = document.getElementById('suggested-drops-section');
-    section.style.display = suggestions.length ? 'block' : 'none';
-    document.getElementById('suggested-drops-row').innerHTML = suggestions.map((s, i) => `
-      <div class="drop-card suggested">
-        <div class="drop-card-name">${formatDate(s.launch_date)}</div>
-        <div class="drop-card-date">${s.styles.length} style${s.styles.length === 1 ? '' : 's'} launching this date, not yet in a drop</div>
-        <div class="drop-card-styles">${s.styles.map((st) => escapeHtml(st.style_code)).join(', ')}</div>
-        <button class="btn btn-primary btn-sm" onclick="createDropFromSuggestion(${i})">+ Create Drop</button>
-      </div>`).join('');
     state.dropSuggestions = suggestions;
   } catch (e) {
-    // ApparelMagic not configured or errored -- silently skip, coverage
-    // cards already surface that state clearly when a drop is opened.
+    state.dropSuggestions = [];
   }
 }
 
-async function createDropFromSuggestion(index) {
-  const suggestion = state.dropSuggestions[index];
-  if (!suggestion) return;
-  const defaultName = `Launch — ${formatDate(suggestion.launch_date)}`;
-  const name = prompt('Name this drop:', defaultName);
-  if (!name) return;
-  try {
-    await api('/drops/from-suggestion', {
-      method: 'POST',
-      body: JSON.stringify({ name, launch_date: suggestion.launch_date, styles: suggestion.styles }),
+function suggestionForDate(dateStr) {
+  return (state.dropSuggestions || []).find((s) => s.launch_date === dateStr);
+}
+
+function renderDropQuickpicks(selectedDate) {
+  const row = document.getElementById('drop-date-quickpicks');
+  const suggestions = state.dropSuggestions || [];
+  if (!suggestions.length) {
+    row.innerHTML = '';
+    return;
+  }
+  row.innerHTML = suggestions.map((s) => `
+    <button type="button" class="quickpick-chip ${s.launch_date === selectedDate ? 'active' : ''}" data-date="${s.launch_date}">
+      ${formatDate(s.launch_date)} (${s.styles.length})
+    </button>`).join('');
+  row.querySelectorAll('.quickpick-chip').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      document.getElementById('drop-launch-date').value = chip.dataset.date;
+      onDropDateChange();
     });
-    toast('Drop created');
-    loadAll();
-  } catch (e) {
-    toast(e.message, true);
+  });
+}
+
+function onDropDateChange() {
+  const date = document.getElementById('drop-launch-date').value;
+  renderDropQuickpicks(date);
+  const suggestion = date ? suggestionForDate(date) : null;
+  const stylesSection = document.getElementById('drop-styles-section');
+  const emptyNote = document.getElementById('drop-styles-empty');
+
+  if (!date) {
+    stylesSection.style.display = 'none';
+    emptyNote.style.display = 'none';
+    return;
+  }
+  if (suggestion && suggestion.styles.length) {
+    stylesSection.style.display = 'block';
+    emptyNote.style.display = 'none';
+    document.getElementById('drop-styles-list').innerHTML = suggestion.styles.map((s) => `
+      <label class="drop-style-item">
+        <input type="checkbox" class="drop-style-check" value="${s.style_code}" checked>
+        ${s.image_url ? `<img src="${s.image_url}" alt="">` : '<span class="no-img">🖼</span>'}
+        <span class="drop-style-info">
+          <span class="drop-style-name">${escapeHtml(s.product_name)}</span><br>
+          <span class="drop-style-code">${s.style_code}</span>
+          ${s.is_core ? '<span class="drop-style-core"> · CORE</span>' : ''}
+        </span>
+      </label>`).join('');
+  } else {
+    stylesSection.style.display = 'none';
+    emptyNote.style.display = 'block';
   }
 }
+document.getElementById('drop-launch-date').addEventListener('change', onDropDateChange);
 
 function renderPlanningSummary() {
   const jobs = state.jobs;
@@ -680,19 +707,29 @@ document.getElementById('new-drop-btn').addEventListener('click', () => {
   document.getElementById('drop-name').value = '';
   document.getElementById('drop-launch-date').value = '';
   document.getElementById('drop-notes').value = '';
+  document.getElementById('drop-styles-section').style.display = 'none';
+  document.getElementById('drop-styles-empty').style.display = 'none';
+  renderDropQuickpicks(null);
   openModal('drop-modal');
 });
 
 async function saveDrop() {
-  const payload = {
-    name: document.getElementById('drop-name').value,
-    launch_date: document.getElementById('drop-launch-date').value,
-    notes: document.getElementById('drop-notes').value || null,
-  };
-  if (!payload.name.trim()) return toast('Drop name is required', true);
-  if (!payload.launch_date) return toast('Launch date is required', true);
+  const name = document.getElementById('drop-name').value;
+  const launch_date = document.getElementById('drop-launch-date').value;
+  const notes = document.getElementById('drop-notes').value || null;
+  if (!name.trim()) return toast('Drop name is required', true);
+  if (!launch_date) return toast('Launch date is required', true);
+
+  const suggestion = suggestionForDate(launch_date);
+  const checkedCodes = Array.from(document.querySelectorAll('.drop-style-check:checked')).map((el) => el.value);
+  const styles = suggestion ? suggestion.styles.filter((s) => checkedCodes.includes(s.style_code)) : [];
+
   try {
-    await api('/drops', { method: 'POST', body: JSON.stringify(payload) });
+    if (styles.length) {
+      await api('/drops/from-suggestion', { method: 'POST', body: JSON.stringify({ name, launch_date, notes, styles }) });
+    } else {
+      await api('/drops', { method: 'POST', body: JSON.stringify({ name, launch_date, notes }) });
+    }
     closeModal('drop-modal');
     toast('Drop saved');
     loadAll();
