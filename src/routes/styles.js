@@ -15,7 +15,7 @@ const LIST_QUERY = `
     ) AS has_live_asset,
     EXISTS(
       SELECT 1 FROM creative_assets ca
-      WHERE ca.style_id = s.id AND ca.status = 'awaiting_proven_concept'
+      WHERE ca.style_id = s.id AND ca.status IN ('awaiting_proven_concept', 'awaiting_concept_development')
     ) AS has_awaiting_hold,
     (SELECT COUNT(*) FROM creative_assets ca WHERE ca.style_id = s.id)::int AS creative_asset_count
   FROM styles s

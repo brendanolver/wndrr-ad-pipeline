@@ -127,10 +127,12 @@ main{padding:20px 24px;}
 .modal-body{padding:16px 18px;display:flex;flex-direction:column;gap:12px;}
 .modal-body label{display:flex;flex-direction:column;gap:5px;font-size:11px;font-weight:600;color:var(--text-secondary);}
 .modal-body .hint{font-weight:400;color:var(--text-muted);}
-.modal-body input,.modal-body select{font-family:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r);}
+.modal-body input,.modal-body select,.modal-body textarea{font-family:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r);}
+.modal-body textarea{resize:vertical;}
 .field-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
 .checkbox-label{flex-direction:row !important;align-items:center;gap:8px !important;}
 .checkbox-label input{width:auto;}
+.shoot-plan-colours-list{display:flex;flex-direction:column;gap:4px;max-height:140px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--r);padding:8px 10px;}
 .modal-footer{display:flex;justify-content:flex-end;gap:8px;padding:14px 18px;border-top:1px solid var(--border);}
 .confirm-modal{width:360px;}
 .confirm-modal .modal-body{align-items:center;text-align:center;padding:28px 22px 8px;}
@@ -277,6 +279,7 @@ main{padding:20px 24px;}
 .coverage-card-gap.amber{color:var(--amber);}
 .coverage-card-gap.red{color:var(--red);}
 .coverage-card-unavailable{font-size:11px;color:var(--text-muted);font-style:italic;padding:10px 0;}
+.coverage-card-shoot-btn{width:100%;margin-top:2px;}
 
 .back-link{background:none;border:none;color:var(--teal-dark);font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;padding:0;margin-bottom:14px;display:inline-block;}
 .back-link:hover{text-decoration:underline;}
@@ -414,7 +417,7 @@ main{padding:20px 24px;}
    products scan on one screen. Column-aligned via CSS grid (same grid on
    the header row and every product row) rather than individual cards. */
 .core-products-list{overflow-x:auto;}
-.core-priority-row-grid{display:grid;grid-template-columns:2.4fr 0.9fr 1fr 1fr 2.2fr 0.8fr;gap:10px;align-items:center;min-width:640px;padding:6px 4px;}
+.core-priority-row-grid{display:grid;grid-template-columns:2.2fr 0.9fr 1fr 1fr 2fr 1.6fr;gap:10px;align-items:center;min-width:700px;padding:6px 4px;}
 .core-priority-header-grid{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);border-bottom:1px solid var(--border);padding-bottom:5px;margin-bottom:2px;}
 .core-priority-row{border-bottom:1px solid var(--border);}
 .core-priority-row:last-child{border-bottom:none;}
@@ -428,7 +431,7 @@ main{padding:20px 24px;}
 .core-priority-col{font-size:12px;font-weight:600;color:var(--text-secondary);white-space:nowrap;}
 .core-priority-col-chips{display:flex;flex-wrap:wrap;gap:4px;}
 .core-reason-chip{display:inline-block;background:var(--surface2);border:1px solid var(--border);color:var(--text-secondary);font-size:10px;font-weight:600;padding:1px 7px;border-radius:var(--r-pill);white-space:nowrap;}
-.core-priority-col-action{text-align:right;}
+.core-priority-col-action{text-align:right;display:flex;gap:6px;justify-content:flex-end;}
 .core-trend-down{color:var(--red);}
 .core-trend-up{color:var(--green);}
 .core-trend-flat{color:var(--text-muted);}
@@ -445,6 +448,14 @@ main{padding:20px 24px;}
 .core-colours-inner-table{width:100%;border-collapse:collapse;font-size:12px;}
 .core-colours-inner-table th{text-align:left;color:var(--text-muted);font-weight:600;padding:4px 6px;border-bottom:1px solid var(--border);}
 .core-colours-inner-table td{padding:4px 6px;border-bottom:1px solid var(--border);}
+
+/* This Week's Shoot Plan -- clean, compact list, one row per product. */
+.shoot-plan-list{display:flex;flex-direction:column;gap:6px;overflow-x:auto;}
+.shoot-plan-row{display:grid;grid-template-columns:2fr 1.4fr 1fr 2fr 1.4fr 0.8fr;gap:10px;align-items:center;min-width:700px;background:white;border:1px solid var(--border);border-radius:var(--r);padding:8px 10px;font-size:12.5px;}
+.shoot-plan-header{background:none;border:none;padding:0 10px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);}
+.shoot-plan-col-product{font-weight:700;}
+.shoot-plan-col-idea{color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.shoot-plan-col-action{text-align:right;}
 
 @media (max-width: 1100px){
   .board{grid-template-columns:1fr;}

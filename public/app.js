@@ -15,6 +15,7 @@ let state = {
   styles: [], categories: [], board: null, dashboard: null, drops: [], jobs: [], provenWinners: [],
   coreProducts: [], planningSettings: null, coreView: 'priority',
   coreExpandedCategories: new Set(), coreExpandedProducts: new Set(),
+  shootPlan: [],
 };
 let dashboardWeekOffset = 0;
 
@@ -99,7 +100,7 @@ document.querySelectorAll('.tab-btn').forEach((btn) => {
 // ── Load & render ────────────────────────────────────
 async function loadAll() {
   try {
-    const [board, styles, categories, dashboard, dropsRes, jobs, provenWinners, coreRes, planningSettings] = await Promise.all([
+    const [board, styles, categories, dashboard, dropsRes, jobs, provenWinners, coreRes, planningSettings, shootPlan] = await Promise.all([
       api('/board'),
       api('/styles'),
       api('/categories'),
@@ -109,6 +110,7 @@ async function loadAll() {
       api('/proven-winners'),
       api('/core-products'),
       api('/planning-settings'),
+      api('/shoot-plan'),
     ]);
     state.board = board;
     state.styles = styles;
@@ -122,6 +124,7 @@ async function loadAll() {
     state.coreProducts = coreRes.products;
     state.coreWeekly = { target: coreRes.weekly_target, planned: coreRes.weekly_planned, remaining: coreRes.weekly_remaining };
     state.planningSettings = planningSettings;
+    state.shootPlan = shootPlan;
     renderBoard();
     renderMissingAd();
     renderStylesTable();
@@ -352,6 +355,7 @@ function renderPlanning() {
   populateJobDropSelect();
   loadDropSuggestions();
   renderPlanningRoute();
+  renderShootPlan();
 }
 
 // ── Planning sub-navigation (list / drop / product) ──
@@ -651,8 +655,9 @@ function coverageGapLabel(c) {
   return `${icon} ${c.creative_gap} more required`;
 }
 
-// Coverage cards here are compact and purely navigational -- click one to
-// open its Product view (per-colour breakdown + existing concepts).
+// Coverage cards here are compact and mostly navigational -- click one to
+// open its Product view (per-colour breakdown + existing concepts) -- with
+// one action of their own: deciding this product needs shooting this week.
 function renderCoverageGrid(coverage) {
   const grid = document.getElementById('coverage-grid');
   if (!coverage.length) {
@@ -679,6 +684,7 @@ function renderCoverageGrid(coverage) {
           <div class="coverage-card-ratio">${c.current_coverage} / ${c.creative_target}</div>
           <div class="coverage-progress-track"><div class="coverage-progress-fill ${c.status}" style="width:${pct}%;"></div></div>
           <div class="coverage-card-gap ${c.status}">${coverageGapLabel(c)}</div>` : ''}
+        <button type="button" class="btn btn-primary btn-sm coverage-card-shoot-btn" onclick="event.stopPropagation(); shootThisWeekForCoverage('${c.product_code}')">+ Shoot This Week</button>
       </div>
     </div>`;
   }).join('');
@@ -1673,7 +1679,8 @@ function corePriorityRowHtml(p, opts = {}) {
         <div class="core-priority-col">${p.days_since_last_new_concept != null ? `${p.days_since_last_new_concept}d` : 'Never'}</div>
         <div class="core-priority-col-chips">${chips}</div>
         <div class="core-priority-col-action">
-          <button type="button" class="btn btn-primary btn-sm" onclick="event.stopPropagation(); planNewConceptForCore('${p.product_code}')">+ Plan</button>
+          <button type="button" class="btn btn-primary btn-sm" onclick="event.stopPropagation(); shootThisWeekForCore('${p.product_code}')">+ Shoot</button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); planNewConceptForCore('${p.product_code}')">+ Plan</button>
         </div>
       </div>
       ${isOpen ? corePriorityDetailHtml(p) : ''}
@@ -1785,6 +1792,116 @@ function planNewConceptForCore(productCode) {
     concept: `New Concept — ${product.product_name}`,
     conceptType: 'new_concept',
   });
+}
+
+// ── Monday Planning: This Week's Shoot Plan ──────────
+// Fast path for deciding WHAT gets shot this week -- no talent/location/
+// props/scripts here, that's the existing Creative Job flow, for later
+// once the content creator has developed a concept.
+let shootPlanModalContext = null;
+
+function shootThisWeekForCore(productCode) {
+  const product = state.coreProducts.find((p) => p.product_code === productCode);
+  if (!product) return;
+  openShootPlanModal({
+    productCode: product.product_code,
+    productName: product.product_name,
+    colours: product.colours,
+  });
+}
+
+function shootThisWeekForCoverage(productCode) {
+  const c = (state.currentDrop && state.currentDrop.coverage || []).find((x) => x.product_code === productCode);
+  if (!c) return;
+  openShootPlanModal({
+    productCode: c.product_code,
+    productName: c.product_name,
+    colours: c.styles,
+  });
+}
+
+function openShootPlanModal(preset) {
+  shootPlanModalContext = preset;
+  document.getElementById('shoot-plan-product-name').textContent = preset.productName;
+  document.getElementById('shoot-plan-product-code').textContent = preset.productCode;
+  document.getElementById('shoot-plan-colours').innerHTML = preset.colours.map((c) => `
+    <label class="checkbox-label">
+      <input type="checkbox" value="${c.style_id}" checked>
+      ${escapeHtml(c.style_code)}
+    </label>`).join('');
+  document.getElementById('shoot-plan-stock-status').value = 'in_office';
+  document.getElementById('shoot-plan-creator').value = '';
+  document.getElementById('shoot-plan-initial-idea').value = '';
+  openModal('shoot-plan-modal');
+}
+
+async function saveShootPlanItem() {
+  const styleIds = Array.from(document.querySelectorAll('#shoot-plan-colours input:checked')).map((el) => Number(el.value));
+  const creator = document.getElementById('shoot-plan-creator').value.trim();
+  if (!styleIds.length) return toast('Select at least one colourway', true);
+  if (!creator) return toast('Content creator is required', true);
+
+  const payload = {
+    product_code: shootPlanModalContext.productCode,
+    product_name: shootPlanModalContext.productName,
+    style_ids: styleIds,
+    stock_status: document.getElementById('shoot-plan-stock-status').value,
+    creator,
+    initial_idea: document.getElementById('shoot-plan-initial-idea').value.trim() || null,
+  };
+  try {
+    await api('/shoot-plan', { method: 'POST', body: JSON.stringify(payload) });
+    closeModal('shoot-plan-modal');
+    toast("Added to this week's shoot plan");
+    loadAll();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function removeShootPlanItem(id) {
+  if (!(await confirmDialog("Remove this product from this week's shoot plan? The creator's in-progress concept work is not affected."))) return;
+  try {
+    await api(`/shoot-plan/${id}`, { method: 'DELETE' });
+    toast('Removed from shoot plan');
+    loadAll();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function shootPlanHeaderHtml() {
+  return `
+    <div class="shoot-plan-row shoot-plan-header">
+      <div class="shoot-plan-col-product">Product</div>
+      <div class="shoot-plan-col">Stock Needed</div>
+      <div class="shoot-plan-col">Creator</div>
+      <div class="shoot-plan-col-idea">Initial Idea</div>
+      <div class="shoot-plan-col">Status</div>
+      <div class="shoot-plan-col-action"></div>
+    </div>`;
+}
+
+function shootPlanRowHtml(item) {
+  const stockLabel = item.stock_status === 'in_office' ? 'In Office' : 'Needs to be Brought In';
+  return `
+    <div class="shoot-plan-row">
+      <div class="shoot-plan-col-product">${escapeHtml(item.product_name)}</div>
+      <div class="shoot-plan-col">${stockLabel}</div>
+      <div class="shoot-plan-col">${escapeHtml(item.creator)}</div>
+      <div class="shoot-plan-col-idea">${item.initial_idea ? escapeHtml(item.initial_idea) : '—'}</div>
+      <div class="shoot-plan-col"><span class="core-reason-chip">${escapeHtml(item.asset_status_label || '—')}</span></div>
+      <div class="shoot-plan-col-action"><button type="button" class="btn btn-ghost btn-sm" onclick="removeShootPlanItem(${item.id})">Remove</button></div>
+    </div>`;
+}
+
+function renderShootPlan() {
+  const list = document.getElementById('shoot-plan-list');
+  if (!state.shootPlan.length) {
+    list.innerHTML = '<div class="attention-empty">Nothing planned yet this week — use + Shoot This Week on a Core or Upcoming Drops product to add one.</div>';
+    return;
+  }
+  list.innerHTML = shootPlanHeaderHtml() + state.shootPlan.map(shootPlanRowHtml).join('');
 }
 
 // ── Settings: Weekly New Concept Target ──────────────

@@ -287,3 +287,38 @@ CREATE TABLE IF NOT EXISTS planning_settings (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 INSERT INTO planning_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
+-- ---------------------------------------------------------------------------
+-- Weekly Shoot Plan (Monday Planning: deciding WHAT gets shot this week
+-- and whether the product is in hand). Deliberately minimal -- talent,
+-- location, props and scripts are handled later via the existing Creative
+-- Job flow once the content creator has developed concepts.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS shoot_plan_items (
+  id SERIAL PRIMARY KEY,
+  product_code VARCHAR(64) NOT NULL,
+  product_name VARCHAR(255) NOT NULL,
+  stock_status VARCHAR(30) NOT NULL CHECK (stock_status IN ('in_office', 'needs_to_be_brought_in')),
+  creator VARCHAR(255) NOT NULL,
+  initial_idea TEXT,
+  asset_id INTEGER REFERENCES creative_assets(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_shoot_plan_items_created_at ON shoot_plan_items(created_at);
+
+-- Which colourways within the product family are actually being shot.
+CREATE TABLE IF NOT EXISTS shoot_plan_item_styles (
+  shoot_plan_item_id INTEGER NOT NULL REFERENCES shoot_plan_items(id) ON DELETE CASCADE,
+  style_id INTEGER NOT NULL REFERENCES styles(id) ON DELETE CASCADE,
+  PRIMARY KEY (shoot_plan_item_id, style_id)
+);
+
+-- New pre-concept-development hold state, entered automatically when
+-- Monday Planning confirms a product needs shooting -- distinct from the
+-- generic 'not_started' default and from 'awaiting_proven_concept' (which
+-- means something narrower: waiting on a Tested/Proven slot specifically).
+ALTER TABLE creative_assets DROP CONSTRAINT IF EXISTS creative_assets_status_check;
+ALTER TABLE creative_assets ADD CONSTRAINT creative_assets_status_check
+  CHECK (status IN ('not_started', 'awaiting_proven_concept', 'awaiting_concept_development',
+                     'concept_script', 'filming', 'editing', 'qc', 'uploaded_live'));

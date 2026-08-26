@@ -44,7 +44,7 @@ router.get('/', async (req, res, next) => {
     const stylesResult = await pool.query(`
       SELECT s.id, s.style_code, s.name, s.tier,
         EXISTS(SELECT 1 FROM creative_assets ca WHERE ca.style_id = s.id AND ca.status = 'uploaded_live') AS has_live_asset,
-        EXISTS(SELECT 1 FROM creative_assets ca WHERE ca.style_id = s.id AND ca.status = 'awaiting_proven_concept') AS has_awaiting_hold
+        EXISTS(SELECT 1 FROM creative_assets ca WHERE ca.style_id = s.id AND ca.status IN ('awaiting_proven_concept', 'awaiting_concept_development')) AS has_awaiting_hold
       FROM styles s
     `);
     const missingAdStyles = stylesResult.rows
