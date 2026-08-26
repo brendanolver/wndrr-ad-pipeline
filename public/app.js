@@ -479,13 +479,8 @@ function renderPlanningSummary() {
     : '<div class="attention-empty">Nothing scheduled today or tomorrow</div>';
 }
 
-function renderDropsRow() {
-  const row = document.getElementById('drops-row');
-  if (!state.drops.length) {
-    row.innerHTML = '<div class="attention-empty">No upcoming drops yet — add one to start planning creative coverage.</div>';
-    return;
-  }
-  row.innerHTML = state.drops.map((d) => `
+function dropCardHtml(d) {
+  return `
     <div class="drop-card" data-drop-id="${d.id}">
       <div class="drop-card-header">
         <div class="drop-card-name ${d.name ? '' : 'untitled'}" data-drop-id="${d.id}" title="Click to rename">${d.name ? escapeHtml(d.name) : 'Untitled'}</div>
@@ -499,7 +494,10 @@ function renderDropsRow() {
       </div>
       <div class="drop-card-pct">${d.summary.totalCovered} / ${d.summary.totalTarget} creatives${d.summary.overallPct !== null ? ' — ' + d.summary.overallPct + '%' : ''}</div>
       ${d.most_urgent[0] ? `<div class="drop-card-urgent">Most urgent: ${escapeHtml(d.most_urgent[0].product_name)} (${d.most_urgent[0].current_coverage}/${d.most_urgent[0].creative_target ?? '—'})</div>` : ''}
-    </div>`).join('');
+    </div>`;
+}
+
+function wireDropCardRow(row) {
   row.querySelectorAll('.drop-card').forEach((card) => {
     card.addEventListener('click', () => { window.location.hash = `#planning/drop/${card.dataset.dropId}`; });
   });
@@ -517,6 +515,37 @@ function renderDropsRow() {
     });
   });
 }
+
+// Split by launch date -- a drop moves itself from Upcoming to Past the
+// moment its launch date passes, no manual housekeeping needed.
+function renderDropsRow() {
+  const upcoming = state.drops.filter((d) => d.days_until_launch >= 0);
+  const past = state.drops.filter((d) => d.days_until_launch < 0);
+
+  const upcomingRow = document.getElementById('drops-row-upcoming');
+  upcomingRow.innerHTML = upcoming.length
+    ? upcoming.map(dropCardHtml).join('')
+    : '<div class="attention-empty">No upcoming drops yet — add one to start planning creative coverage.</div>';
+  wireDropCardRow(upcomingRow);
+
+  const pastRow = document.getElementById('drops-row-past');
+  pastRow.innerHTML = past.length
+    ? past.map(dropCardHtml).join('')
+    : '<div class="attention-empty">No past drops.</div>';
+  wireDropCardRow(pastRow);
+}
+
+function togglePlanningSection(key) {
+  const body = document.getElementById(`section-body-${key}`);
+  const btn = document.querySelector(`.accordion-toggle[data-section="${key}"]`);
+  const isOpen = body.style.display !== 'none';
+  body.style.display = isOpen ? 'none' : '';
+  btn.classList.toggle('open', !isOpen);
+}
+
+document.querySelectorAll('.accordion-toggle').forEach((btn) => {
+  btn.addEventListener('click', () => togglePlanningSection(btn.dataset.section));
+});
 
 // Click-to-edit right on the Planning home page's drop card -- no modal,
 // since renaming is the one thing an auto-created "Untitled" drop always

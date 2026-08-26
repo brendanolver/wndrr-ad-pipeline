@@ -131,10 +131,35 @@
           </div>
         </div>
 
-        <div class="planning-section-header">
-          <h2>Upcoming Drops</h2>
+        <div class="planning-accordion">
+          <button type="button" class="accordion-toggle" data-section="core">
+            <span class="accordion-arrow">&#9656;</span> Core
+          </button>
+          <div class="accordion-body" id="section-body-core" style="display:none;">
+            <div class="attention-empty">Nothing here yet.</div>
+          </div>
+
+          <button type="button" class="accordion-toggle open" data-section="upcoming-drops">
+            <span class="accordion-arrow">&#9656;</span> Upcoming Drops
+          </button>
+          <div class="accordion-body" id="section-body-upcoming-drops">
+            <div id="drops-row-upcoming" class="drops-row"></div>
+          </div>
+
+          <button type="button" class="accordion-toggle" data-section="high-stocks">
+            <span class="accordion-arrow">&#9656;</span> High Stocks
+          </button>
+          <div class="accordion-body" id="section-body-high-stocks" style="display:none;">
+            <div class="attention-empty">Nothing here yet.</div>
+          </div>
+
+          <button type="button" class="accordion-toggle" data-section="past-drops">
+            <span class="accordion-arrow">&#9656;</span> Past Drops
+          </button>
+          <div class="accordion-body" id="section-body-past-drops" style="display:none;">
+            <div id="drops-row-past" class="drops-row"></div>
+          </div>
         </div>
-        <div id="drops-row" class="drops-row"></div>
 
         <div class="planning-section-header">
           <h2>Creative Jobs</h2>
