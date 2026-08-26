@@ -1279,11 +1279,26 @@ function openDropModal(drop) {
   document.getElementById('drop-notes').value = (drop && drop.notes) || '';
   document.getElementById('drop-date-note').textContent = '';
   document.getElementById('drop-save-btn').textContent = drop ? 'Save' : 'Add';
+  document.getElementById('drop-delete-btn').style.display = drop ? 'inline-block' : 'none';
   // Quickpicks/auto-style-population are a create-time convenience only --
   // editing an existing drop doesn't re-cluster ApparelMagic styles.
   document.getElementById('drop-date-quickpicks').style.display = drop ? 'none' : 'flex';
   if (!drop) renderDropQuickpicks(null);
   openModal('drop-modal');
+}
+
+async function deleteDrop() {
+  const id = document.getElementById('drop-id').value;
+  if (!id) return;
+  if (!confirm('Delete this drop? Its styles are unassigned, not deleted, and can be added to another drop later.')) return;
+  try {
+    await api(`/drops/${id}`, { method: 'DELETE' });
+    closeModal('drop-modal');
+    toast('Drop deleted');
+    loadAll();
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 async function saveDrop() {
