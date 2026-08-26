@@ -2,8 +2,20 @@ const express = require('express');
 const { pool } = require('../db');
 const { buildCoverage } = require('../lib/coverage');
 const { fetchAmData, getRules, getAssetCounts } = require('../lib/planningData');
+const { isAdExcludedCategory } = require('../lib/apparelmagic');
 
 const router = express.Router();
+
+// The team doesn't run ads for Accessories, so they're excluded from
+// Upcoming/Past Drops entirely (same rule + shared helper as Core
+// Creative Testing) -- both from the coverage grid (so an Accessories
+// style already attached to a drop never shows as a product card) and
+// from suggestions (so a launch-date cluster never pulls Accessories
+// styles into a new drop in the first place).
+function excludeAdExcludedStyles(styleRows, amDetails) {
+  if (!amDetails) return styleRows;
+  return styleRows.filter((s) => !isAdExcludedCategory(amDetails.get(s.style_code)));
+}
 
 function summarize(coverage) {
   const green = coverage.filter((c) => c.status === 'green').length;
@@ -42,7 +54,7 @@ router.get('/', async (req, res, next) => {
     const assetCounts = await getAssetCounts(stylesResult.rows.map((s) => s.id));
 
     const drops = dropsResult.rows.map((drop) => {
-      const styleRows = stylesByDrop.get(drop.id) || [];
+      const styleRows = excludeAdExcludedStyles(stylesByDrop.get(drop.id) || [], am.amDetails);
       const coverage = sortByUrgency(
         buildCoverage(styleRows, { assetCounts, amStock: am.amStock, amOnOrder: am.amOnOrder, amDetails: am.amDetails, rules })
       );
@@ -93,6 +105,7 @@ router.get('/suggestions', async (req, res, next) => {
       if (!details.launchDate) continue;
       if (details.launchDate < windowStart || details.launchDate > horizon) continue;
       if (alreadyPlanned.has(styleCode)) continue;
+      if (isAdExcludedCategory(details)) continue;
 
       const key = details.launchDate.toISOString().slice(0, 10);
       if (!groups.has(key)) groups.set(key, []);
@@ -204,8 +217,9 @@ router.get('/:id', async (req, res, next) => {
       fetchAmData(),
     ]);
     const assetCounts = await getAssetCounts(stylesResult.rows.map((s) => s.id));
+    const styleRows = excludeAdExcludedStyles(stylesResult.rows, am.amDetails);
     const coverage = sortByUrgency(
-      buildCoverage(stylesResult.rows, { assetCounts, amStock: am.amStock, amOnOrder: am.amOnOrder, amDetails: am.amDetails, rules })
+      buildCoverage(styleRows, { assetCounts, amStock: am.amStock, amOnOrder: am.amOnOrder, amDetails: am.amDetails, rules })
     );
     const daysUntilLaunch = Math.ceil((new Date(drop.launch_date) - new Date()) / 86400000);
 

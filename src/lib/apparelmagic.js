@@ -271,6 +271,15 @@ function normGroupName(g) {
   return String(g || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
 }
 
+// The team doesn't run ads for Accessories -- checked against AM's own
+// `category` field (distinct from `group`, used for isCore/CORE_GROUPS
+// above). Shared by Core Creative Testing and Upcoming/Past Drops so the
+// exclusion rule lives in exactly one place.
+const AD_EXCLUDED_CATEGORY = 'ACCESSORIES';
+function isAdExcludedCategory(details) {
+  return details?.category === AD_EXCLUDED_CATEGORY;
+}
+
 // AU day-first date parsing ("30-07-26", "30/07/2026"), also accepts ISO.
 // Returns a Date or null if unparseable.
 function parseLaunchDate(value) {
@@ -361,4 +370,6 @@ module.exports = {
   rawRequest,
   warmAmCache,
   getAmCacheStatus,
+  AD_EXCLUDED_CATEGORY,
+  isAdExcludedCategory,
 };
