@@ -145,7 +145,10 @@
       <div id="planning-drop-view" style="display:none;">
         <button class="back-link" onclick="goToPlanningList()">&larr; Back to Planning</button>
         <div class="planning-section-header">
-          <h2 id="drop-view-title">Drop</h2>
+          <div class="drop-view-title-row">
+            <h2 id="drop-view-title">Drop</h2>
+            <button type="button" class="btn btn-ghost btn-sm" id="drop-view-edit-btn">Edit</button>
+          </div>
           <span class="admin-note" id="drop-view-am-note"></span>
         </div>
         <div id="drop-view-summary" class="drop-view-summary"></div>
@@ -375,11 +378,12 @@
 <div id="drop-modal" class="modal-backdrop">
   <div class="modal">
     <div class="modal-header">
-      <h3>New Drop</h3>
+      <h3 id="drop-modal-title">New Drop</h3>
       <button class="modal-close" onclick="closeModal('drop-modal')">&times;</button>
     </div>
     <div class="modal-body">
-      <label>Drop name
+      <input type="hidden" id="drop-id">
+      <label>Drop name <span class="hint">(optional — leave blank to name it later)</span>
         <input type="text" id="drop-name" placeholder="e.g. August Drop 02">
       </label>
       <label>Launch date
@@ -393,7 +397,7 @@
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('drop-modal')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveDrop()">Add</button>
+      <button class="btn btn-primary" id="drop-save-btn" onclick="saveDrop()">Add</button>
     </div>
   </div>
 </div>
