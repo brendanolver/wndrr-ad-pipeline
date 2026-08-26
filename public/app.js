@@ -1546,6 +1546,18 @@ const CORE_ATTENTION_BADGE_CLASS = {
   product_review: 'core-attention-review',
 };
 
+// Presentational-only sales-trend read from the same vel7/vel30 fields the
+// server already returns -- its own human-readable thresholds, purely for
+// a quick glance in the headline row. Never feeds back into the attention
+// flag/reason, which are decided entirely server-side.
+function coreTrendInfo(p) {
+  if (!(p.vel30 > 0)) return { label: 'No recent sales', cls: 'core-trend-flat', arrow: '·' };
+  const ratio = p.vel7 / p.vel30;
+  if (ratio < 0.85) return { label: 'Declining', cls: 'core-trend-down', arrow: '▼' };
+  if (ratio > 1.15) return { label: 'Rising', cls: 'core-trend-up', arrow: '▲' };
+  return { label: 'Steady', cls: 'core-trend-flat', arrow: '▬' };
+}
+
 function toggleCoreCategory(cat) {
   if (state.coreExpandedCategories.has(cat)) state.coreExpandedCategories.delete(cat);
   else state.coreExpandedCategories.add(cat);
@@ -1573,17 +1585,39 @@ function coreColoursTableHtml(product) {
     </table>`;
 }
 
-// Clean metric columns (one unified strip, not a run-together text string
-// or separate boxed tiles) -- exactly the 7 data points requested.
+// The three decision-level data points -- Weeks Cover, Sales Trend, Last
+// New Concept -- shown big/bold right under the product name, since these
+// are what actually drive the recommendation.
+function coreHeadlineRowHtml(p) {
+  const trend = coreTrendInfo(p);
+  const freshnessCls = p.days_since_last_new_concept == null || p.days_since_last_new_concept > 21
+    ? 'core-headline-value-warn' : '';
+  return `
+    <div class="core-headline-row">
+      <div class="core-headline-stat">
+        <div class="core-headline-value">${p.weeks_cover != null ? p.weeks_cover : '—'}</div>
+        <div class="core-headline-label">Weeks Cover</div>
+      </div>
+      <div class="core-headline-stat">
+        <div class="core-headline-value core-trend ${trend.cls}">${trend.arrow} ${trend.label}</div>
+        <div class="core-headline-label">Sales Trend</div>
+      </div>
+      <div class="core-headline-stat">
+        <div class="core-headline-value ${freshnessCls}">${p.days_since_last_new_concept != null ? `${p.days_since_last_new_concept}d ago` : 'Never'}</div>
+        <div class="core-headline-label">Last New Concept</div>
+      </div>
+    </div>`;
+}
+
+// Supporting metric strip -- SOH / On Order / 7D / 30D / 365D velocity --
+// one compact unified strip, secondary to the headline row above.
 function coreMetricRowHtml(p) {
   const metrics = [
     ['SOH', p.soh != null ? p.soh : '—'],
-    ['Weeks Cover', p.weeks_cover != null ? p.weeks_cover : '—'],
     ['On Order', p.on_order != null ? p.on_order : '—'],
     ['7D Velocity', `${p.vel7}/wk`],
     ['30D Velocity', `${p.vel30}/wk`],
     ['365D Avg', `${p.vel365}/wk`],
-    ['Last New Concept', p.days_since_last_new_concept != null ? `${p.days_since_last_new_concept}d ago` : 'Never'],
   ];
   return `
     <div class="core-metric-row">
@@ -1594,7 +1628,9 @@ function coreMetricRowHtml(p) {
 // Product + Recommendation -> Key Metrics -> Why -> + Plan New Concept.
 // Always fully visible (compact, no click-to-expand) so the data backing
 // every recommendation is scannable at a glance across many rows --
-// only the colourway breakdown stays behind its own toggle.
+// only the colourway breakdown stays behind its own toggle. product_code
+// shown small/muted next to the name so a split product family (e.g. two
+// cards for what should be one product) is visible without digging.
 function coreProductRowHtml(p, opts = {}) {
   const coloursOpen = state.coreExpandedColours.has(p.product_code);
   const categoryTag = opts.showCategory ? `<span class="core-product-category-tag">${escapeHtml(p.category)}</span>` : '';
@@ -1602,9 +1638,11 @@ function coreProductRowHtml(p, opts = {}) {
     <div class="core-product-row" data-product-code="${p.product_code}">
       <div class="core-product-header-line">
         <span class="core-product-name">${escapeHtml(p.product_name)}</span>
+        <span class="core-product-code">${escapeHtml(p.product_code)}</span>
         ${categoryTag}
         <span class="core-attention-badge ${CORE_ATTENTION_BADGE_CLASS[p.flag]}">${p.label}</span>
       </div>
+      ${coreHeadlineRowHtml(p)}
       ${coreMetricRowHtml(p)}
       <div class="core-why-callout ${CORE_ATTENTION_BADGE_CLASS[p.flag]}">
         <span class="core-why-label">Why</span> ${escapeHtml(p.reason)}
@@ -1634,7 +1672,7 @@ function renderCoreWeeklyCard() {
       <div class="core-weekly-left">
         <div class="core-weekly-icon">🎯</div>
         <div>
-          <div class="core-weekly-label">This Week</div>
+          <div class="core-weekly-label">Weekly Core Creative Target</div>
           <div class="core-weekly-title">New Concepts Planned</div>
         </div>
       </div>

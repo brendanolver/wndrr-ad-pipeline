@@ -56,11 +56,28 @@ function tierForQty(qty365, boundaries) {
   return 'low';
 }
 
+// Ranks candidate commercial reasons by severity (roughly: how far past its
+// own threshold each one is) and returns the top 2-3 as plain sentences.
+// Explanation only -- never affects which flag/branch buildAttention below
+// has already decided; a candidate is only ever included when its own
+// underlying condition is true.
+function rankReasons(candidates) {
+  return candidates
+    .filter(Boolean)
+    .sort((a, b) => b.weight - a.weight)
+    .slice(0, 3)
+    .map((c) => c.text);
+}
+
 // Simple, explainable rule-based flag -- not a black-box score, so it can
 // always say why. Do not simply rank by SOH/sales alone (per the brief):
 // this weighs inventory pressure, velocity trend, and creative freshness
 // together, and Product Review is deliberately the simplest case (no
 // commercial signal at all) rather than a fourth tier of the same scoring.
+// The flag/branch thresholds below are unchanged from the original
+// heuristic -- only the reason text was rebuilt, to surface specific
+// commercial drivers (weeks cover, velocity decline, on-order pressure,
+// creative freshness) instead of a generic template string.
 function buildAttention({ sohKnown, soh, onOrder, vel7, vel30, vel365, weeksCover, daysSinceLastNewConcept, tier }) {
   if (sohKnown && !soh && !onOrder && !vel365) {
     return {
@@ -74,21 +91,36 @@ function buildAttention({ sohKnown, soh, onOrder, vel7, vel30, vel365, weeksCove
   const staleRed = neverTested || daysSinceLastNewConcept > STALE_DAYS_RED;
   const staleOpportunity = neverTested || daysSinceLastNewConcept > STALE_DAYS_OPPORTUNITY;
   const declining = vel30 > 0 && vel7 < vel30 * VELOCITY_DECLINE_RATIO;
+  const declinePct = declining ? Math.round((1 - vel7 / vel30) * 100) : 0;
+  const onOrderWeeks = vel30 > 0 ? onOrder / vel30 : (onOrder > 0 ? Infinity : 0);
   const highPressure = (weeksCover != null && weeksCover > WEEKS_COVER_HIGH) || (soh > 0 && declining);
 
   if (highPressure && staleRed) {
-    const reasons = [];
-    reasons.push(weeksCover != null && weeksCover > WEEKS_COVER_HIGH ? 'High inventory' : 'Elevated stock');
-    if (declining) reasons.push('slowing sell-through');
-    reasons.push(neverTested ? 'never-tested creative' : 'stale creative');
-    return { flag: 'needs_attention', label: '🔴 Needs Creative Attention', reason: reasons.join(' + ') };
+    const reasons = rankReasons([
+      weeksCover != null && weeksCover > WEEKS_COVER_HIGH
+        ? { weight: (weeksCover - WEEKS_COVER_HIGH) * 4, text: `Weeks Cover is ${weeksCover} — well above the ${WEEKS_COVER_HIGH}-week healthy range` }
+        : null,
+      declining
+        ? { weight: 40 + declinePct, text: `Sales velocity is down ${declinePct}% over the last 7 days vs the 30-day average` }
+        : null,
+      onOrder > 0 && onOrderWeeks > 4
+        ? { weight: 30 + Math.min(onOrderWeeks, 40), text: `${onOrder} units on order will add further pressure` }
+        : null,
+      neverTested
+        ? { weight: 120, text: 'Creative has never been tested with a new concept' }
+        : { weight: daysSinceLastNewConcept, text: `Last new concept was ${daysSinceLastNewConcept} days ago — past the ${STALE_DAYS_RED}-day review window` },
+    ]);
+    return { flag: 'needs_attention', label: '🔴 Needs Creative Attention', reason: reasons.join('; ') };
   }
   if (!highPressure && staleOpportunity) {
-    const tierNote = tier === 'high' ? ' — a top-performing Core product' : '';
+    const freshnessReason = neverTested
+      ? 'Creative has never been tested with a new concept'
+      : `Last new concept was ${daysSinceLastNewConcept} days ago — past the ${STALE_DAYS_OPPORTUNITY}-day review window`;
+    const tierNote = tier === 'high' ? '; this is a top-performing Core product' : '';
     return {
       flag: 'opportunity',
       label: '🟠 New Concept Opportunity',
-      reason: `Healthy stock, but creative hasn't been refreshed recently${tierNote}.`,
+      reason: `Stock is healthy, so this is a good window to test something new. ${freshnessReason}${tierNote}.`,
     };
   }
   return { flag: 'healthy', label: '🟢 Healthy', reason: 'Recent new-concept test and no inventory pressure.' };
