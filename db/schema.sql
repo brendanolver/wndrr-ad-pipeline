@@ -269,3 +269,21 @@ ALTER TABLE drop_product_plan_slots ADD COLUMN IF NOT EXISTS default_format VARC
   CHECK (default_format IS NULL OR default_format IN ('video', 'static'));
 ALTER TABLE drop_product_plan_slots ADD COLUMN IF NOT EXISTS default_classification VARCHAR(20)
   CHECK (default_classification IS NULL OR default_classification IN ('tested_proven', 'new_experimental'));
+
+-- ---------------------------------------------------------------------------
+-- Core Creative Testing (Planning -> Core section). Everything else this
+-- feature needs already exists (styles.tier = 'core_proven', styles.drop_id
+-- nullable, creative_jobs.drop_id nullable, concept_classification =
+-- 'new_experimental', status = 'uploaded_live') -- this is the one new
+-- scalar setting it introduces. Singleton row, not a generic key/value
+-- table: this codebase's pattern is one purpose-built table per concern
+-- (see creative_target_rules), and a single INTEGER doesn't earn a KV
+-- abstraction.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS planning_settings (
+  id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  weekly_new_concept_target INTEGER NOT NULL DEFAULT 15,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO planning_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING;

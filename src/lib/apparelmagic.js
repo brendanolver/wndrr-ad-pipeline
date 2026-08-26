@@ -154,6 +154,91 @@ async function fetchOnOrderByStyleUncached() {
   return onOrderByStyle; // Map<style_code, qty on order>
 }
 
+// Online sales channel customer accounts in AM -- confirmed live in
+// production (demandplanning V2's syncAMSales). AM's /orders endpoint has
+// no date-RANGE filter, only an exact-date one, so a rolling window means
+// one request per (day, customer) pair -- 365 days x 2 customers -- run
+// with bounded concurrency below rather than serially.
+const AM_ONLINE_CUSTOMERS = ['ONLINE SALES', 'ICONIC ONLINE SALES'];
+const SALES_WINDOW_DAYS = 365;
+const SALES_TTL = 12 * 60 * 60 * 1000; // ~730-request crawl -- twice a day, not per request
+const SALES_CONCURRENCY = 10;
+// Same prefix pattern confirmed live in demandplanning V2 (AM_PRODUCT_STYLE_RE)
+// -- order_items[].style_number sometimes carries a trailing size/service
+// suffix, so this is a prefix match, not deriveProductCode's stricter one.
+const AM_STYLE_PREFIX_RE = /^[A-Z]\d{2}[A-Z]{2}\d{3}[A-Z]{3}/;
+
+async function runWithConcurrency(items, limit, fn) {
+  let i = 0;
+  async function worker() {
+    while (i < items.length) {
+      const item = items[i++];
+      await fn(item);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+}
+
+// Trailing-year rolling sales, summed straight into the three windows this
+// app surfaces (7D/30D/365D) rather than kept as a per-day breakdown like
+// demandplanning's salesBySkuDay -- nothing here needs a day-by-day trend.
+// Style-level only (this pipeline has no per-size SKU breakdown), so unlike
+// demandplanning no sku_id->SKU lookup is needed: AM's order_items already
+// carry style_number directly.
+async function getSalesByStyle() {
+  return getCached('sales', SALES_TTL, fetchSalesByStyleUncached);
+}
+
+async function fetchSalesByStyleUncached() {
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+
+  const jobs = [];
+  for (let daysAgo = 0; daysAgo < SALES_WINDOW_DAYS; daysAgo++) {
+    const d = new Date(today);
+    d.setUTCDate(d.getUTCDate() - daysAgo);
+    const usDate = `${String(d.getUTCMonth() + 1).padStart(2, '0')}/${String(d.getUTCDate()).padStart(2, '0')}/${d.getUTCFullYear()}`;
+    for (const customer of AM_ONLINE_CUSTOMERS) {
+      jobs.push({ daysAgo, customer, usDate });
+    }
+  }
+
+  const salesByStyle = new Map(); // style_code -> { qty7, qty30, qty365 }
+  function addQty(style, daysAgo, qty) {
+    if (qty <= 0) return;
+    let entry = salesByStyle.get(style);
+    if (!entry) {
+      entry = { qty7: 0, qty30: 0, qty365: 0 };
+      salesByStyle.set(style, entry);
+    }
+    if (daysAgo < 7) entry.qty7 += qty;
+    if (daysAgo < 30) entry.qty30 += qty;
+    entry.qty365 += qty;
+  }
+
+  await runWithConcurrency(jobs, SALES_CONCURRENCY, async ({ daysAgo, customer, usDate }) => {
+    let result;
+    try {
+      result = await amRequest('GET', 'orders', { customer_name: customer, date: usDate });
+    } catch {
+      return; // one bad day/customer combo shouldn't fail the whole crawl
+    }
+    if (result.status !== 200) return;
+    const orders = result.data?.response || [];
+    for (const order of orders) {
+      if ((order.credit_status || '') !== 'Approved') continue;
+      for (const item of order.order_items || []) {
+        const style = (item.style_number || '').trim().toUpperCase();
+        if (!AM_STYLE_PREFIX_RE.test(style)) continue;
+        const qty = (parseFloat(item.qty) || 0) - (parseFloat(item.qty_cxl) || 0);
+        addQty(style, daysAgo, qty);
+      }
+    }
+  });
+
+  return salesByStyle; // Map<style_code, { qty7, qty30, qty365 }>
+}
+
 // WNDRR's modern style codes are a fixed 11 characters: W + 2-digit year +
 // 2-letter collection code + 3-digit number + 3-letter colour (e.g.
 // "W26IA004NAV"), confirmed in production (demandplanning's styleFromSku
@@ -238,13 +323,16 @@ async function rawRequest(endpoint, params) {
   return amRequest('GET', endpoint, params);
 }
 
-// Fire off all three crawls once at server boot (not awaited by the
+// Fire off all four crawls once at server boot (not awaited by the
 // caller) so the cache is warm by the time a real request arrives, instead
 // of the first Planning page load after every deploy blocking for however
 // long a cold full-catalogue crawl takes. Safe no-op if AM isn't configured.
+// getSalesByStyle is by far the most expensive (~730 requests) -- Core
+// Creative Testing degrades gracefully (null velocity) while it's still
+// warming rather than blocking on it.
 function warmAmCache() {
   if (!configured()) return;
-  Promise.all([getStockByStyle(), getStyleCatalogue(), getOnOrderByStyle()]).catch((err) => {
+  Promise.all([getStockByStyle(), getStyleCatalogue(), getOnOrderByStyle(), getSalesByStyle()]).catch((err) => {
     console.error('ApparelMagic cache warm-up failed (will retry on first real request):', err.message);
   });
 }
@@ -254,6 +342,7 @@ function getAmCacheStatus() {
     stock: cacheStatus('stock'),
     catalogue: cacheStatus('catalogue'),
     onOrder: cacheStatus('onOrder'),
+    sales: cacheStatus('sales'),
   };
 }
 
@@ -262,6 +351,7 @@ module.exports = {
   getStockByStyle,
   getStyleCatalogue,
   getOnOrderByStyle,
+  getSalesByStyle,
   deriveProductCode,
   parseLaunchDate,
   rawRequest,
