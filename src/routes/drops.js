@@ -68,6 +68,11 @@ router.get('/', async (req, res, next) => {
 router.get('/suggestions', async (req, res, next) => {
   try {
     const days = Number.parseInt(req.query.days, 10) || 120;
+    // pastDays lets callers also surface already-launched styles (e.g. the
+    // Planning page's Past Drops window) that never got a Drop created for
+    // them -- without this, a style whose launch date came and went before
+    // anyone clicked "+ New Drop" would never appear anywhere.
+    const pastDays = Number.parseInt(req.query.pastDays, 10) || 0;
     const am = await fetchAmData();
     if (!am.amConfigured) {
       return res.json({ suggestions: [], apparelmagic: { configured: false, error: null } });
@@ -80,12 +85,13 @@ router.get('/suggestions', async (req, res, next) => {
     const alreadyPlanned = new Set(existingResult.rows.filter((r) => r.drop_id != null).map((r) => r.style_code));
 
     const today = new Date(); today.setHours(0, 0, 0, 0);
+    const windowStart = new Date(today); windowStart.setDate(windowStart.getDate() - pastDays);
     const horizon = new Date(today); horizon.setDate(horizon.getDate() + days);
 
     const groups = new Map(); // ISO date string -> styles[]
     for (const [styleCode, details] of am.amDetails.entries()) {
       if (!details.launchDate) continue;
-      if (details.launchDate < today || details.launchDate > horizon) continue;
+      if (details.launchDate < windowStart || details.launchDate > horizon) continue;
       if (alreadyPlanned.has(styleCode)) continue;
 
       const key = details.launchDate.toISOString().slice(0, 10);
