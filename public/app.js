@@ -378,17 +378,18 @@ function renderPlanningRoute() {
 }
 window.addEventListener('hashchange', renderPlanningRoute);
 
-// Every upcoming ApparelMagic launch date should already have a Drop card
-// on the Planning page without anyone clicking "+ New Drop" -- name is left
-// blank ("Untitled", see renderDropsRow/loadDropView) for the team to fill
-// in later via Edit. POST /from-suggestion is idempotent per launch_date
-// (reuses an existing drop for that date rather than duplicating it), and
-// once a cluster's styles are assigned they drop out of future /suggestions
-// results -- so calling this on every Planning load is safe and naturally
-// stops doing anything once the list is caught up.
+// Every ApparelMagic launch date -- upcoming AND already-launched within the
+// Past Drops window -- should already have a Drop card on the Planning page
+// without anyone clicking "+ New Drop" -- name is left blank ("Untitled",
+// see renderDropsRow/loadDropView) for the team to fill in later via Edit.
+// POST /from-suggestion is idempotent per launch_date (reuses an existing
+// drop for that date rather than duplicating it), and once a cluster's
+// styles are assigned they drop out of future /suggestions results -- so
+// calling this on every Planning load is safe and naturally stops doing
+// anything once the list is caught up.
 async function loadDropSuggestions() {
   try {
-    const { suggestions } = await api('/drops/suggestions');
+    const { suggestions } = await api(`/drops/suggestions?pastDays=${PAST_DROPS_WINDOW_DAYS}`);
     if (suggestions.length) {
       for (const s of suggestions) {
         await api('/drops/from-suggestion', {
