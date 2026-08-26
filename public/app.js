@@ -517,10 +517,14 @@ function wireDropCardRow(row) {
 }
 
 // Split by launch date -- a drop moves itself from Upcoming to Past the
-// moment its launch date passes, no manual housekeeping needed.
+// moment its launch date passes, no manual housekeeping needed. Past Drops
+// only looks back 60 days -- anything older isn't relevant to day-to-day
+// planning and would just be clutter to scroll past.
+const PAST_DROPS_WINDOW_DAYS = 60;
+
 function renderDropsRow() {
   const upcoming = state.drops.filter((d) => d.days_until_launch >= 0);
-  const past = state.drops.filter((d) => d.days_until_launch < 0);
+  const past = state.drops.filter((d) => d.days_until_launch < 0 && d.days_until_launch >= -PAST_DROPS_WINDOW_DAYS);
 
   const upcomingRow = document.getElementById('drops-row-upcoming');
   upcomingRow.innerHTML = upcoming.length
@@ -531,7 +535,7 @@ function renderDropsRow() {
   const pastRow = document.getElementById('drops-row-past');
   pastRow.innerHTML = past.length
     ? past.map(dropCardHtml).join('')
-    : '<div class="attention-empty">No past drops.</div>';
+    : `<div class="attention-empty">No drops launched in the past ${PAST_DROPS_WINDOW_DAYS} days.</div>`;
   wireDropCardRow(pastRow);
 }
 

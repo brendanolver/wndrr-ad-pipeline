@@ -219,6 +219,7 @@ main{padding:20px 24px;}
 
 .planning-accordion{margin:20px 0 10px;border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;background:var(--surface);}
 .accordion-toggle{display:flex;align-items:center;gap:8px;width:100%;background:var(--surface2);border:none;border-bottom:1px solid var(--border);padding:10px 14px;font-family:inherit;font-size:13px;font-weight:700;color:var(--text);cursor:pointer;text-align:left;}
+.accordion-subtitle{font-weight:400;font-size:11.5px;color:var(--text-muted);}
 .planning-accordion .accordion-toggle:last-of-type{border-bottom:none;}
 .accordion-toggle:hover{background:var(--border);}
 .accordion-arrow{display:inline-block;font-size:10px;color:var(--text-muted);transition:transform 0.15s;}
