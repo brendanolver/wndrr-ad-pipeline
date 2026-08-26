@@ -488,8 +488,8 @@ function renderDropsRow() {
   row.innerHTML = state.drops.map((d) => `
     <div class="drop-card" data-drop-id="${d.id}">
       <div class="drop-card-header">
-        <div class="drop-card-name ${d.name ? '' : 'untitled'}">${d.name ? escapeHtml(d.name) : 'Untitled'}</div>
-        <button type="button" class="drop-card-edit-btn" data-drop-id="${d.id}" title="Rename drop">Edit</button>
+        <div class="drop-card-name ${d.name ? '' : 'untitled'}" data-drop-id="${d.id}" title="Click to rename">${d.name ? escapeHtml(d.name) : 'Untitled'}</div>
+        <button type="button" class="drop-card-edit-btn" data-drop-id="${d.id}" title="Edit launch date / notes">Edit</button>
       </div>
       <div class="drop-card-date">${formatDate(d.launch_date)} · ${d.days_until_launch >= 0 ? d.days_until_launch + ' days to launch' : 'Launched'}</div>
       <div class="drop-card-counts">
@@ -509,6 +509,56 @@ function renderDropsRow() {
       const drop = state.drops.find((d) => d.id === Number(btn.dataset.dropId));
       openDropModal(drop);
     });
+  });
+  row.querySelectorAll('.drop-card-name').forEach((nameEl) => {
+    nameEl.addEventListener('click', (e) => {
+      e.stopPropagation();
+      startInlineDropRename(nameEl);
+    });
+  });
+}
+
+// Click-to-edit right on the Planning home page's drop card -- no modal,
+// since renaming is the one thing an auto-created "Untitled" drop always
+// needs. The Edit button/modal is still there for launch date and notes.
+function startInlineDropRename(nameEl) {
+  const dropId = Number(nameEl.dataset.dropId);
+  const drop = state.drops.find((d) => d.id === dropId);
+  const original = (drop && drop.name) || '';
+
+  nameEl.textContent = '';
+  nameEl.classList.remove('untitled');
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'drop-card-name-input';
+  input.value = original;
+  input.placeholder = 'Untitled';
+  nameEl.appendChild(input);
+  input.focus();
+  input.select();
+  input.addEventListener('click', (e) => e.stopPropagation());
+
+  let settled = false;
+  const finish = async (save) => {
+    if (settled) return;
+    settled = true;
+    const newValue = input.value.trim();
+    if (save && newValue !== original) {
+      try {
+        const updated = await api(`/drops/${dropId}`, { method: 'PUT', body: JSON.stringify({ name: newValue }) });
+        const idx = state.drops.findIndex((d) => d.id === dropId);
+        if (idx !== -1) state.drops[idx] = { ...state.drops[idx], name: updated.name };
+      } catch (e) {
+        toast(e.message, true);
+      }
+    }
+    renderDropsRow();
+  };
+
+  input.addEventListener('blur', () => finish(true));
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+    if (e.key === 'Escape') { e.preventDefault(); finish(false); }
   });
 }
 
