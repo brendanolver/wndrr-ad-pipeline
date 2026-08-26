@@ -11,7 +11,11 @@ const STATUS_LABELS = {
 const TIER_LABELS = { core_proven: 'Core/Proven', new_drop: 'New Drop' };
 const CLASSIFICATION_LABELS = { tested_proven: 'Tested/Proven', new_experimental: 'New/Experimental' };
 
-let state = { styles: [], categories: [], board: null, dashboard: null, drops: [], jobs: [], provenWinners: [], coreProducts: [], planningSettings: null };
+let state = {
+  styles: [], categories: [], board: null, dashboard: null, drops: [], jobs: [], provenWinners: [],
+  coreProducts: [], planningSettings: null,
+  coreExpandedCategories: new Set(), coreExpandedProducts: new Set(), coreExpandedColours: new Set(),
+};
 let dashboardWeekOffset = 0;
 
 // ── API helpers ──────────────────────────────────────
@@ -1522,6 +1526,12 @@ function escapeHtml(str) {
 }
 
 // ── Planning: Core Creative Testing ──────────────────
+// Three-level drill-down (Category -> Product -> Colour), collapsed by
+// default at every level so opening the section doesn't dump every Core
+// product's full stats at once. Expand state is tracked here (not just in
+// the DOM) so it survives a full re-render -- e.g. saving a "+ Plan New
+// Concept" job triggers loadAll(), which would otherwise collapse
+// everything the team had just drilled into.
 const CORE_ATTENTION_BADGE_CLASS = {
   needs_attention: 'core-attention-red',
   opportunity: 'core-attention-amber',
@@ -1529,19 +1539,43 @@ const CORE_ATTENTION_BADGE_CLASS = {
   product_review: 'core-attention-review',
 };
 
-function coreProductRowHtml(p) {
+function toggleCoreCategory(cat) {
+  if (state.coreExpandedCategories.has(cat)) state.coreExpandedCategories.delete(cat);
+  else state.coreExpandedCategories.add(cat);
+  renderCoreProducts();
+}
+
+function toggleCoreProduct(productCode) {
+  if (state.coreExpandedProducts.has(productCode)) state.coreExpandedProducts.delete(productCode);
+  else state.coreExpandedProducts.add(productCode);
+  renderCoreProducts();
+}
+
+function toggleCoreColours(productCode) {
+  if (state.coreExpandedColours.has(productCode)) state.coreExpandedColours.delete(productCode);
+  else state.coreExpandedColours.add(productCode);
+  renderCoreProducts();
+}
+
+function coreColoursTableHtml(product) {
+  return `
+    <table class="core-colours-inner-table">
+      <thead><tr><th>Colour</th><th>SOH</th><th>On Order</th></tr></thead>
+      <tbody>
+        ${product.colours.map((c) => `<tr><td>${escapeHtml(c.style_code)}</td><td>${c.soh != null ? c.soh : '—'}</td><td>${c.on_order != null ? c.on_order : '—'}</td></tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+function coreProductDetailHtml(p) {
   const soh = p.soh != null ? p.soh : '—';
   const weeksCover = p.weeks_cover != null ? `${p.weeks_cover} Weeks Cover` : 'Weeks Cover —';
   const freshness = p.days_since_last_new_concept != null
     ? `Last New Concept: ${p.days_since_last_new_concept} days ago`
     : 'Last New Concept: Never tested';
+  const coloursOpen = state.coreExpandedColours.has(p.product_code);
   return `
-    <div class="core-product-row" data-product-code="${p.product_code}">
-      <div class="core-product-header">
-        <span class="badge badge-tier-core_proven">Core</span>
-        <span class="core-product-name">${escapeHtml(p.product_name)}</span>
-        <span class="core-attention-badge ${CORE_ATTENTION_BADGE_CLASS[p.flag]}">${p.label}</span>
-      </div>
+    <div class="core-product-detail">
       <div class="core-product-stats">${soh} SOH · ${weeksCover} · ${p.vel7}/wk (7d) · ${p.vel30}/wk (30d) · ${p.vel365}/wk (365d avg)</div>
       <div class="core-product-stats">${freshness}</div>
       <div class="core-product-reason">Why: ${escapeHtml(p.reason)}</div>
@@ -1549,17 +1583,27 @@ function coreProductRowHtml(p) {
         <button type="button" class="btn btn-ghost btn-sm" onclick="toggleCoreColours('${p.product_code}')">&#9656; ${p.colours.length} colourway${p.colours.length === 1 ? '' : 's'}</button>
         <button type="button" class="btn btn-primary btn-sm" onclick="planNewConceptForCore('${p.product_code}')">+ Plan New Concept</button>
       </div>
-      <div class="core-colours-table" id="core-colours-${p.product_code}" style="display:none;"></div>
+      ${coloursOpen ? `<div class="core-colours-table">${coreColoursTableHtml(p)}</div>` : ''}
     </div>`;
 }
 
-function populateCoreCategoryFilter() {
-  const select = document.getElementById('core-category-filter');
-  const categories = [...new Set(state.coreProducts.map((p) => p.category))].sort();
-  const current = select.value;
-  select.innerHTML = '<option value="">All Categories</option>'
-    + categories.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
-  if (categories.includes(current)) select.value = current;
+function coreProductRowHtml(p) {
+  const isOpen = state.coreExpandedProducts.has(p.product_code);
+  return `
+    <div class="core-product-row" data-product-code="${p.product_code}">
+      <button type="button" class="accordion-toggle core-product-toggle ${isOpen ? 'open' : ''}" onclick="toggleCoreProduct('${p.product_code}')">
+        <span class="accordion-arrow">&#9656;</span>
+        <span class="core-product-name">${escapeHtml(p.product_name)}</span>
+        <span class="core-attention-badge ${CORE_ATTENTION_BADGE_CLASS[p.flag]}">${p.label}</span>
+      </button>
+      ${isOpen ? coreProductDetailHtml(p) : ''}
+    </div>`;
+}
+
+function wireCoreCategoryToggles(container) {
+  container.querySelectorAll('.core-category-toggle').forEach((btn) => {
+    btn.addEventListener('click', () => toggleCoreCategory(btn.dataset.category));
+  });
 }
 
 function renderCoreProducts() {
@@ -1567,51 +1611,35 @@ function renderCoreProducts() {
   const w = state.coreWeekly || {};
   stat.textContent = `New Concepts: ${w.planned} / ${w.target} planned this week · ${w.remaining} remaining`;
 
-  populateCoreCategoryFilter();
-  const filterValue = document.getElementById('core-category-filter').value;
-
   const list = document.getElementById('core-products-list');
   if (!state.coreProducts.length) {
     list.innerHTML = '<div class="attention-empty">No Core products found yet.</div>';
     return;
   }
-  const filtered = filterValue ? state.coreProducts.filter((p) => p.category === filterValue) : state.coreProducts;
-  if (!filtered.length) {
-    list.innerHTML = '<div class="attention-empty">No Core products in this category.</div>';
-    return;
-  }
 
-  // Group by category so it's clear at a glance which products sit where --
-  // each group keeps the existing urgency order (state.coreProducts already
-  // arrives sorted Red -> Orange -> Green -> Review from the server).
+  // Group by category -- each group keeps the existing urgency order
+  // (state.coreProducts already arrives sorted Red -> Orange -> Green ->
+  // Review from the server).
   const byCategory = new Map();
-  for (const p of filtered) {
+  for (const p of state.coreProducts) {
     if (!byCategory.has(p.category)) byCategory.set(p.category, []);
     byCategory.get(p.category).push(p);
   }
   const sortedCategories = [...byCategory.keys()].sort();
 
-  list.innerHTML = sortedCategories.map((cat) => `
-    <div class="core-category-group">
-      <div class="core-category-heading">${escapeHtml(cat)} <span class="core-category-count">(${byCategory.get(cat).length})</span></div>
-      ${byCategory.get(cat).map(coreProductRowHtml).join('')}
-    </div>
-  `).join('');
-}
-
-function toggleCoreColours(productCode) {
-  const el = document.getElementById(`core-colours-${productCode}`);
-  const isOpen = el.style.display !== 'none';
-  if (isOpen) { el.style.display = 'none'; return; }
-  const product = state.coreProducts.find((p) => p.product_code === productCode);
-  el.innerHTML = `
-    <table class="core-colours-inner-table">
-      <thead><tr><th>Colour</th><th>SOH</th><th>On Order</th></tr></thead>
-      <tbody>
-        ${product.colours.map((c) => `<tr><td>${escapeHtml(c.style_code)}</td><td>${c.soh != null ? c.soh : '—'}</td><td>${c.on_order != null ? c.on_order : '—'}</td></tr>`).join('')}
-      </tbody>
-    </table>`;
-  el.style.display = 'block';
+  list.innerHTML = sortedCategories.map((cat) => {
+    const products = byCategory.get(cat);
+    const isOpen = state.coreExpandedCategories.has(cat);
+    return `
+      <div class="core-category-group">
+        <button type="button" class="accordion-toggle core-category-toggle ${isOpen ? 'open' : ''}" data-category="${escapeHtml(cat)}">
+          <span class="accordion-arrow">&#9656;</span>
+          ${escapeHtml(cat)} <span class="core-category-count">(${products.length})</span>
+        </button>
+        ${isOpen ? `<div class="core-category-body">${products.map(coreProductRowHtml).join('')}</div>` : ''}
+      </div>`;
+  }).join('');
+  wireCoreCategoryToggles(list);
 }
 
 function planNewConceptForCore(productCode) {
@@ -1797,6 +1825,5 @@ async function deletePw() {
 
 document.getElementById('pw-add-btn').addEventListener('click', () => openPwModal(null));
 document.getElementById('weekly-target-save-btn').addEventListener('click', saveWeeklyTarget);
-document.getElementById('core-category-filter').addEventListener('change', renderCoreProducts);
 
 checkSession();
