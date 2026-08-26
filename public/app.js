@@ -1705,34 +1705,38 @@ function wireCoreCategoryToggles(container) {
   });
 }
 
+// Rendered on both Dashboard and Planning -- it's the shared basis for
+// both views, not a Planning-only stat -- so this updates every instance
+// on the page rather than a single hardcoded element.
 function renderCoreWeeklyCard() {
-  const card = document.getElementById('core-weekly-card');
   const w = state.coreWeekly || { planned: 0, target: 0, remaining: 0 };
   const pct = w.target > 0 ? Math.min(100, Math.round((w.planned / w.target) * 100)) : 0;
   const met = w.target > 0 && w.planned >= w.target;
-  card.className = `core-weekly-card ${met ? 'core-weekly-met' : ''}`;
-  card.innerHTML = `
-    <div class="core-weekly-top">
-      <div class="core-weekly-left">
-        <div class="core-weekly-icon">🎯</div>
-        <div>
-          <div class="core-weekly-label">Weekly Core Creative Target</div>
-          <div class="core-weekly-title">New Concepts Planned</div>
+  document.querySelectorAll('.core-weekly-card').forEach((card) => {
+    card.className = `core-weekly-card ${met ? 'core-weekly-met' : ''}`;
+    card.innerHTML = `
+      <div class="core-weekly-top">
+        <div class="core-weekly-left">
+          <div class="core-weekly-icon">🎯</div>
+          <div>
+            <div class="core-weekly-label">Weekly Core Creative Target</div>
+            <div class="core-weekly-title">New Concepts Planned</div>
+          </div>
+        </div>
+        <div class="core-weekly-pct-block">
+          <div class="core-weekly-pct">${pct}%</div>
+          <div class="core-weekly-pct-sub">${w.planned} / ${w.target} planned</div>
         </div>
       </div>
-      <div class="core-weekly-pct-block">
-        <div class="core-weekly-pct">${pct}%</div>
-        <div class="core-weekly-pct-sub">${w.planned} / ${w.target} planned</div>
+      <div class="core-weekly-progress-track">
+        <div class="core-weekly-progress-fill" style="width:${pct}%;"></div>
       </div>
-    </div>
-    <div class="core-weekly-progress-track">
-      <div class="core-weekly-progress-fill" style="width:${pct}%;"></div>
-    </div>
-    <div class="core-weekly-pills">
-      <span class="core-weekly-pill core-weekly-pill-planned">${w.planned} Planned</span>
-      <span class="core-weekly-pill core-weekly-pill-remaining">${w.remaining} Remaining</span>
-    </div>
-    <div class="core-weekly-footer">Counts genuinely new Core concepts only — Proven Winner concepts on Upcoming Drops don't count</div>`;
+      <div class="core-weekly-pills">
+        <span class="core-weekly-pill core-weekly-pill-planned">${w.planned} Planned</span>
+        <span class="core-weekly-pill core-weekly-pill-remaining">${w.remaining} Remaining</span>
+      </div>
+      <div class="core-weekly-footer">Counts genuinely new Core concepts only — Proven Winner concepts on Upcoming Drops don't count</div>`;
+  });
 }
 
 function renderCoreViewToggle() {
