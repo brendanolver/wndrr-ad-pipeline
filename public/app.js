@@ -11,7 +11,7 @@ const STATUS_LABELS = {
 const TIER_LABELS = { core_proven: 'Core/Proven', new_drop: 'New Drop' };
 const CLASSIFICATION_LABELS = { tested_proven: 'Tested/Proven', new_experimental: 'New/Experimental' };
 
-let state = { styles: [], categories: [], board: null, dashboard: null, drops: [], jobs: [], provenWinners: [] };
+let state = { styles: [], categories: [], board: null, dashboard: null, drops: [], jobs: [], provenWinners: [], coreProducts: [], planningSettings: null };
 let dashboardWeekOffset = 0;
 
 // ── API helpers ──────────────────────────────────────
@@ -95,7 +95,7 @@ document.querySelectorAll('.tab-btn').forEach((btn) => {
 // ── Load & render ────────────────────────────────────
 async function loadAll() {
   try {
-    const [board, styles, categories, dashboard, dropsRes, jobs, provenWinners] = await Promise.all([
+    const [board, styles, categories, dashboard, dropsRes, jobs, provenWinners, coreRes, planningSettings] = await Promise.all([
       api('/board'),
       api('/styles'),
       api('/categories'),
@@ -103,6 +103,8 @@ async function loadAll() {
       api('/drops'),
       api('/creative-jobs'),
       api('/proven-winners'),
+      api('/core-products'),
+      api('/planning-settings'),
     ]);
     state.board = board;
     state.styles = styles;
@@ -113,6 +115,9 @@ async function loadAll() {
     state.amError = dropsRes.apparelmagic.error;
     state.jobs = jobs;
     state.provenWinners = provenWinners;
+    state.coreProducts = coreRes.products;
+    state.coreWeekly = { target: coreRes.weekly_target, planned: coreRes.weekly_planned, remaining: coreRes.weekly_remaining };
+    state.planningSettings = planningSettings;
     renderBoard();
     renderMissingAd();
     renderStylesTable();
@@ -122,6 +127,8 @@ async function loadAll() {
     renderDashboard();
     renderPlanning();
     renderProvenWinners();
+    renderCoreProducts();
+    renderPlanningSettingsForm();
   } catch (e) {
     toast(e.message, true);
   }
@@ -739,9 +746,9 @@ function openJobModal(job = null, preset = {}) {
   renderStockRequests(job ? job.stock_requests : []);
   hideAddStockRequestRow();
   document.getElementById('job-drop-id').value = job ? job.drop_id || '' : preset.dropId || '';
-  document.getElementById('job-concept').value = job ? job.high_level_concept : '';
+  document.getElementById('job-concept').value = job ? job.high_level_concept : (preset.concept || '');
   document.getElementById('job-status-quick').value = job && ['not_started', 'organising'].includes(job.planning_status) ? job.planning_status : 'not_started';
-  document.getElementById('job-concept-type').value = job ? job.concept_type : 'other';
+  document.getElementById('job-concept-type').value = job ? job.concept_type : (preset.conceptType || 'other');
   document.getElementById('job-expected-variations').value = job && job.expected_ad_variations != null ? job.expected_ad_variations : '';
   document.getElementById('job-deliverables').value = (job && job.expected_deliverables) || '';
   document.getElementById('job-owner').value = (job && job.owner) || '';
@@ -1514,6 +1521,97 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+// ── Planning: Core Creative Testing ──────────────────
+const CORE_ATTENTION_BADGE_CLASS = {
+  needs_attention: 'core-attention-red',
+  opportunity: 'core-attention-amber',
+  healthy: 'core-attention-green',
+  product_review: 'core-attention-review',
+};
+
+function coreProductRowHtml(p) {
+  const soh = p.soh != null ? p.soh : '—';
+  const weeksCover = p.weeks_cover != null ? `${p.weeks_cover} Weeks Cover` : 'Weeks Cover —';
+  const freshness = p.days_since_last_new_concept != null
+    ? `Last New Concept: ${p.days_since_last_new_concept} days ago`
+    : 'Last New Concept: Never tested';
+  return `
+    <div class="core-product-row" data-product-code="${p.product_code}">
+      <div class="core-product-header">
+        <span class="badge badge-tier-core_proven">Core</span>
+        <span class="core-product-name">${escapeHtml(p.product_name)}</span>
+        <span class="core-attention-badge ${CORE_ATTENTION_BADGE_CLASS[p.flag]}">${p.label}</span>
+      </div>
+      <div class="core-product-stats">${soh} SOH · ${weeksCover} · ${p.vel7}/wk (7d) · ${p.vel30}/wk (30d) · ${p.vel365}/wk (365d avg)</div>
+      <div class="core-product-stats">${freshness}</div>
+      <div class="core-product-reason">Why: ${escapeHtml(p.reason)}</div>
+      <div class="core-product-actions">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="toggleCoreColours('${p.product_code}')">&#9656; ${p.colours.length} colourway${p.colours.length === 1 ? '' : 's'}</button>
+        <button type="button" class="btn btn-primary btn-sm" onclick="planNewConceptForCore('${p.product_code}')">+ Plan New Concept</button>
+      </div>
+      <div class="core-colours-table" id="core-colours-${p.product_code}" style="display:none;"></div>
+    </div>`;
+}
+
+function renderCoreProducts() {
+  const stat = document.getElementById('core-weekly-stat');
+  const w = state.coreWeekly || {};
+  stat.textContent = `New Concepts: ${w.planned} / ${w.target} planned this week · ${w.remaining} remaining`;
+
+  const list = document.getElementById('core-products-list');
+  if (!state.coreProducts.length) {
+    list.innerHTML = '<div class="attention-empty">No Core products found yet.</div>';
+    return;
+  }
+  list.innerHTML = state.coreProducts.map(coreProductRowHtml).join('');
+}
+
+function toggleCoreColours(productCode) {
+  const el = document.getElementById(`core-colours-${productCode}`);
+  const isOpen = el.style.display !== 'none';
+  if (isOpen) { el.style.display = 'none'; return; }
+  const product = state.coreProducts.find((p) => p.product_code === productCode);
+  el.innerHTML = `
+    <table class="core-colours-inner-table">
+      <thead><tr><th>Colour</th><th>SOH</th><th>On Order</th></tr></thead>
+      <tbody>
+        ${product.colours.map((c) => `<tr><td>${escapeHtml(c.style_code)}</td><td>${c.soh != null ? c.soh : '—'}</td><td>${c.on_order != null ? c.on_order : '—'}</td></tr>`).join('')}
+      </tbody>
+    </table>`;
+  el.style.display = 'block';
+}
+
+function planNewConceptForCore(productCode) {
+  const product = state.coreProducts.find((p) => p.product_code === productCode);
+  if (!product) return;
+  openJobModal(null, {
+    styleIds: product.colours.map((c) => c.style_id),
+    concept: `New Concept — ${product.product_name}`,
+    conceptType: 'new_concept',
+  });
+}
+
+// ── Settings: Weekly New Concept Target ──────────────
+function renderPlanningSettingsForm() {
+  if (!state.planningSettings) return;
+  document.getElementById('weekly-target-input').value = state.planningSettings.weekly_new_concept_target;
+}
+
+async function saveWeeklyTarget() {
+  const value = document.getElementById('weekly-target-input').value;
+  try {
+    const updated = await api('/planning-settings', { method: 'PUT', body: JSON.stringify({ weekly_new_concept_target: Number(value) }) });
+    state.planningSettings = updated;
+    toast('Weekly target saved');
+    const coreRes = await api('/core-products');
+    state.coreProducts = coreRes.products;
+    state.coreWeekly = { target: coreRes.weekly_target, planned: coreRes.weekly_planned, remaining: coreRes.weekly_remaining };
+    renderCoreProducts();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
 // ── Settings: Proven Winners ─────────────────────────
 // Rank order is the single source of truth for priority; every reorder path
 // (drag or up/down buttons) funnels into one PUT /proven-winners/reorder
@@ -1665,5 +1763,6 @@ async function deletePw() {
 }
 
 document.getElementById('pw-add-btn').addEventListener('click', () => openPwModal(null));
+document.getElementById('weekly-target-save-btn').addEventListener('click', saveWeeklyTarget);
 
 checkSession();

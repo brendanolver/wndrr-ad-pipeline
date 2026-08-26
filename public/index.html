@@ -133,10 +133,11 @@
 
         <div class="planning-accordion">
           <button type="button" class="accordion-toggle" data-section="core">
-            <span class="accordion-arrow">&#9656;</span> Core
+            <span class="accordion-arrow">&#9656;</span> Core Creative Testing
           </button>
           <div class="accordion-body" id="section-body-core" style="display:none;">
-            <div class="attention-empty">Nothing here yet.</div>
+            <div class="core-weekly-stat" id="core-weekly-stat"></div>
+            <div id="core-products-list" class="core-products-list"></div>
           </div>
 
           <button type="button" class="accordion-toggle open" data-section="upcoming-drops">
@@ -257,6 +258,16 @@
     </section>
 
     <section id="tab-settings" class="tab-panel">
+      <div class="planning-section-header">
+        <h2>Core Creative Testing</h2>
+        <span class="admin-note">How many genuinely new concepts the team aims to test on Core products each week.</span>
+      </div>
+      <div class="settings-field-row">
+        <label for="weekly-target-input">Weekly New Concept Target</label>
+        <input type="number" id="weekly-target-input" min="0" step="1">
+        <button class="btn btn-primary btn-sm" id="weekly-target-save-btn">Save</button>
+      </div>
+
       <div class="planning-section-header">
         <h2>Proven Winners</h2>
         <span class="admin-note">Ranked concept playbook. Highest-ranked active entries auto-fill a new product's Required Concepts up to its SOH-driven creative target.</span>
