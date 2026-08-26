@@ -13,23 +13,20 @@ const STALE_DAYS_RED = 21;
 const STALE_DAYS_OPPORTUNITY = 14;
 const VELOCITY_DECLINE_RATIO = 0.7;
 
-// Core Creative Testing excludes Accessories entirely -- AM's own
-// `category` field (distinct from the `group` field CORE_GROUPS matches
-// against), not a local concept. Checked wherever a style is considered
-// for this feature, not just at sync time, so a style whose AM category
-// changes after being locally synced still gets excluded live.
-const EXCLUDED_CATEGORY = 'ACCESSORIES';
-
 // Ensures every AM catalogue style flagged isCore (AM's "AA CORE STYLES"
 // group, see apparelmagic.js's CORE_GROUPS) has a local styles row --
 // purely additive (INSERT ... ON CONFLICT DO NOTHING), same idempotent
 // sync pattern as POST /drops/from-suggestion. Never updates an existing
 // row's tier -- a style already locally tracked keeps whatever the team
-// has set for it.
+// has set for it. Accessories are excluded (apparelmagic.js's
+// isAdExcludedCategory, shared with Upcoming/Past Drops) -- checked
+// wherever a style is considered for this feature, not just at sync time,
+// so a style whose AM category changes after being locally synced still
+// gets excluded live.
 async function syncCoreStylesFromAm(amDetails) {
   if (!amDetails) return;
   for (const [styleCode, details] of amDetails.entries()) {
-    if (!details.isCore || details.category === EXCLUDED_CATEGORY) continue;
+    if (!details.isCore || apparelmagic.isAdExcludedCategory(details)) continue;
     await pool.query(
       `INSERT INTO styles (style_code, name, tier) VALUES ($1, $2, 'core_proven') ON CONFLICT (style_code) DO NOTHING`,
       [styleCode, details.productName || styleCode]
@@ -150,7 +147,7 @@ router.get('/', async (req, res, next) => {
     // excluded here.
     const coreStyles = stylesResult.rows.filter((s) => {
       const details = am.amDetails ? am.amDetails.get(s.style_code) : null;
-      return details?.category !== EXCLUDED_CATEGORY;
+      return !apparelmagic.isAdExcludedCategory(details);
     });
     const styleIds = coreStyles.map((s) => s.id);
 
