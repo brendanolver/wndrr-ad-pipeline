@@ -14,7 +14,7 @@ const CLASSIFICATION_LABELS = { tested_proven: 'Tested/Proven', new_experimental
 let state = {
   styles: [], categories: [], board: null, dashboard: null, drops: [], jobs: [], provenWinners: [],
   coreProducts: [], planningSettings: null, coreView: 'priority',
-  coreExpandedCategories: new Set(), coreExpandedColours: new Set(),
+  coreExpandedCategories: new Set(), coreExpandedProducts: new Set(),
 };
 let dashboardWeekOffset = 0;
 
@@ -1527,9 +1527,9 @@ function escapeHtml(str) {
 
 // ── Planning: Core Creative Testing ──────────────────
 // A weekly decision dashboard: a prominent weekly-target progress card up
-// top, then a Priority view (default -- every Core product in one
-// attention-sorted list, ignoring category) or a By Category view
-// (secondary, for browsing). Colourway expand state is tracked here (not
+// top, then Priority (default) -- a compact decision table, ~one row per
+// product, so 15-20 Core products can be scanned on one screen -- or By
+// Category (secondary, for browsing). Expand state is tracked here (not
 // just in the DOM) so it survives a full re-render -- e.g. saving a
 // "+ Plan New Concept" job triggers loadAll(), which would otherwise
 // collapse everything the team had just opened.
@@ -1537,8 +1537,8 @@ function escapeHtml(str) {
 // Nothing here recomputes or overrides the server's attention flag/reason
 // or any commercial metric -- state.coreProducts already arrives sorted
 // Red -> Orange -> Green -> Review, and every value rendered below (soh,
-// weeks_cover, on_order, vel7/30/365, days_since_last_new_concept, reason)
-// is read straight from the API response.
+// weeks_cover, on_order, vel7/30/365, days_since_last_new_concept, reason,
+// reason_chips) is read straight from the API response.
 const CORE_ATTENTION_BADGE_CLASS = {
   needs_attention: 'core-attention-red',
   opportunity: 'core-attention-amber',
@@ -1548,7 +1548,7 @@ const CORE_ATTENTION_BADGE_CLASS = {
 
 // Presentational-only sales-trend read from the same vel7/vel30 fields the
 // server already returns -- its own human-readable thresholds, purely for
-// a quick glance in the headline row. Never feeds back into the attention
+// a quick glance in the compact row. Never feeds back into the attention
 // flag/reason, which are decided entirely server-side.
 function coreTrendInfo(p) {
   if (!(p.vel30 > 0)) return { label: 'No recent sales', cls: 'core-trend-flat', arrow: '·' };
@@ -1564,9 +1564,9 @@ function toggleCoreCategory(cat) {
   renderCoreProducts();
 }
 
-function toggleCoreColours(productCode) {
-  if (state.coreExpandedColours.has(productCode)) state.coreExpandedColours.delete(productCode);
-  else state.coreExpandedColours.add(productCode);
+function toggleCoreProduct(productCode) {
+  if (state.coreExpandedProducts.has(productCode)) state.coreExpandedProducts.delete(productCode);
+  else state.coreExpandedProducts.add(productCode);
   renderCoreProducts();
 }
 
@@ -1585,32 +1585,9 @@ function coreColoursTableHtml(product) {
     </table>`;
 }
 
-// The three decision-level data points -- Weeks Cover, Sales Trend, Last
-// New Concept -- shown big/bold right under the product name, since these
-// are what actually drive the recommendation.
-function coreHeadlineRowHtml(p) {
-  const trend = coreTrendInfo(p);
-  const freshnessCls = p.days_since_last_new_concept == null || p.days_since_last_new_concept > 21
-    ? 'core-headline-value-warn' : '';
-  return `
-    <div class="core-headline-row">
-      <div class="core-headline-stat">
-        <div class="core-headline-value">${p.weeks_cover != null ? p.weeks_cover : '—'}</div>
-        <div class="core-headline-label">Weeks Cover</div>
-      </div>
-      <div class="core-headline-stat">
-        <div class="core-headline-value core-trend ${trend.cls}">${trend.arrow} ${trend.label}</div>
-        <div class="core-headline-label">Sales Trend</div>
-      </div>
-      <div class="core-headline-stat">
-        <div class="core-headline-value ${freshnessCls}">${p.days_since_last_new_concept != null ? `${p.days_since_last_new_concept}d ago` : 'Never'}</div>
-        <div class="core-headline-label">Last New Concept</div>
-      </div>
-    </div>`;
-}
-
 // Supporting metric strip -- SOH / On Order / 7D / 30D / 365D velocity --
-// one compact unified strip, secondary to the headline row above.
+// shown only in the expanded detail (Weeks Cover and Last New Concept
+// already appear in the compact row, so they aren't repeated here).
 function coreMetricRowHtml(p) {
   const metrics = [
     ['SOH', p.soh != null ? p.soh : '—'],
@@ -1625,33 +1602,56 @@ function coreMetricRowHtml(p) {
     </div>`;
 }
 
-// Product + Recommendation -> Key Metrics -> Why -> + Plan New Concept.
-// Always fully visible (compact, no click-to-expand) so the data backing
-// every recommendation is scannable at a glance across many rows --
-// only the colourway breakdown stays behind its own toggle. product_code
-// shown small/muted next to the name so a split product family (e.g. two
-// cards for what should be one product) is visible without digging.
-function coreProductRowHtml(p, opts = {}) {
-  const coloursOpen = state.coreExpandedColours.has(p.product_code);
-  const categoryTag = opts.showCategory ? `<span class="core-product-category-tag">${escapeHtml(p.category)}</span>` : '';
+// Expanded detail: SOH/On Order/velocity strip, colourways, and the full
+// reasoning sentences (the compact row above only shows short chips).
+function corePriorityDetailHtml(p) {
   return `
-    <div class="core-product-row" data-product-code="${p.product_code}">
-      <div class="core-product-header-line">
-        <span class="core-product-name">${escapeHtml(p.product_name)}</span>
-        <span class="core-product-code">${escapeHtml(p.product_code)}</span>
-        ${categoryTag}
-        <span class="core-attention-badge ${CORE_ATTENTION_BADGE_CLASS[p.flag]}">${p.label}</span>
-      </div>
-      ${coreHeadlineRowHtml(p)}
+    <div class="core-priority-detail">
       ${coreMetricRowHtml(p)}
-      <div class="core-why-callout ${CORE_ATTENTION_BADGE_CLASS[p.flag]}">
-        <span class="core-why-label">Why</span> ${escapeHtml(p.reason)}
+      <div class="core-priority-reasoning"><strong>Why:</strong> ${escapeHtml(p.reason)}</div>
+      ${coreColoursTableHtml(p)}
+    </div>`;
+}
+
+// Compact table row -- Product | Weeks Cover | Sales Trend | Last New
+// Concept | Key Reasons | + Plan -- roughly one row per product so 15-20
+// Core products scan on one screen. Clicking the row expands it in place.
+function corePriorityRowHtml(p, opts = {}) {
+  const isOpen = state.coreExpandedProducts.has(p.product_code);
+  const trend = coreTrendInfo(p);
+  const emoji = p.label.split(' ')[0];
+  const categoryTag = opts.showCategory ? `<span class="core-priority-category-tag">${escapeHtml(p.category)}</span>` : '';
+  const chips = (p.reason_chips || []).map((c) => `<span class="core-reason-chip">${escapeHtml(c)}</span>`).join('');
+  return `
+    <div class="core-priority-row ${isOpen ? 'open' : ''}" data-product-code="${p.product_code}">
+      <div class="core-priority-row-grid" onclick="toggleCoreProduct('${p.product_code}')">
+        <div class="core-priority-col-product">
+          <span class="accordion-arrow">&#9656;</span>
+          <span class="core-priority-emoji">${emoji}</span>
+          <span class="core-product-name">${escapeHtml(p.product_name)}</span>
+          ${categoryTag}
+        </div>
+        <div class="core-priority-col">${p.weeks_cover != null ? `${p.weeks_cover} wks` : '—'}</div>
+        <div class="core-priority-col core-trend ${trend.cls}">${trend.arrow} ${trend.label}</div>
+        <div class="core-priority-col">${p.days_since_last_new_concept != null ? `${p.days_since_last_new_concept}d` : 'Never'}</div>
+        <div class="core-priority-col-chips">${chips}</div>
+        <div class="core-priority-col-action">
+          <button type="button" class="btn btn-primary btn-sm" onclick="event.stopPropagation(); planNewConceptForCore('${p.product_code}')">+ Plan</button>
+        </div>
       </div>
-      <div class="core-product-actions">
-        <button type="button" class="btn btn-ghost btn-sm" onclick="toggleCoreColours('${p.product_code}')">&#9656; ${p.colours.length} colourway${p.colours.length === 1 ? '' : 's'}</button>
-        <button type="button" class="btn btn-primary btn-sm" onclick="planNewConceptForCore('${p.product_code}')">+ Plan New Concept</button>
-      </div>
-      ${coloursOpen ? `<div class="core-colours-table">${coreColoursTableHtml(p)}</div>` : ''}
+      ${isOpen ? corePriorityDetailHtml(p) : ''}
+    </div>`;
+}
+
+function corePriorityHeaderHtml() {
+  return `
+    <div class="core-priority-row-grid core-priority-header-grid">
+      <div class="core-priority-col-product">Product</div>
+      <div class="core-priority-col">Weeks Cover</div>
+      <div class="core-priority-col">Sales Trend</div>
+      <div class="core-priority-col">Last New Concept</div>
+      <div class="core-priority-col-chips">Key Reasons</div>
+      <div class="core-priority-col-action"></div>
     </div>`;
 }
 
@@ -1698,7 +1698,7 @@ function renderCoreViewToggle() {
 }
 
 function renderCoreProductsPriority() {
-  return state.coreProducts.map((p) => coreProductRowHtml(p, { showCategory: true })).join('');
+  return corePriorityHeaderHtml() + state.coreProducts.map((p) => corePriorityRowHtml(p, { showCategory: true })).join('');
 }
 
 function renderCoreProductsByCategory() {
@@ -1721,7 +1721,7 @@ function renderCoreProductsByCategory() {
           <span class="core-category-name">${escapeHtml(cat)}</span>
           <span class="core-category-count">${products.length}</span>
         </button>
-        ${isOpen ? `<div class="core-category-body">${products.map((p) => coreProductRowHtml(p)).join('')}</div>` : ''}
+        ${isOpen ? `<div class="core-category-body">${corePriorityHeaderHtml()}${products.map((p) => corePriorityRowHtml(p)).join('')}</div>` : ''}
       </div>`;
   }).join('');
 }

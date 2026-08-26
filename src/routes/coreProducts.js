@@ -57,16 +57,14 @@ function tierForQty(qty365, boundaries) {
 }
 
 // Ranks candidate commercial reasons by severity (roughly: how far past its
-// own threshold each one is) and returns the top 2-3 as plain sentences.
-// Explanation only -- never affects which flag/branch buildAttention below
-// has already decided; a candidate is only ever included when its own
-// underlying condition is true.
+// own threshold each one is) and returns the top 2-3, both as short chip
+// labels (Priority view's compact row) and full sentences (the expanded
+// detail's reasoning). Explanation only -- never affects which flag/branch
+// buildAttention below has already decided; a candidate is only ever
+// included when its own underlying condition is true.
 function rankReasons(candidates) {
-  return candidates
-    .filter(Boolean)
-    .sort((a, b) => b.weight - a.weight)
-    .slice(0, 3)
-    .map((c) => c.text);
+  const ranked = candidates.filter(Boolean).sort((a, b) => b.weight - a.weight).slice(0, 3);
+  return { reason: ranked.map((c) => c.text).join('; '), reason_chips: ranked.map((c) => c.chip) };
 }
 
 // Simple, explainable rule-based flag -- not a black-box score, so it can
@@ -84,6 +82,7 @@ function buildAttention({ sohKnown, soh, onOrder, vel7, vel30, vel365, weeksCove
       flag: 'product_review',
       label: '⚠️ Product Review',
       reason: 'No stock, on-order, or sales activity in the last year — check this product is still active.',
+      reason_chips: ['No Activity'],
     };
   }
 
@@ -96,23 +95,24 @@ function buildAttention({ sohKnown, soh, onOrder, vel7, vel30, vel365, weeksCove
   const highPressure = (weeksCover != null && weeksCover > WEEKS_COVER_HIGH) || (soh > 0 && declining);
 
   if (highPressure && staleRed) {
-    const reasons = rankReasons([
+    const { reason, reason_chips } = rankReasons([
       weeksCover != null && weeksCover > WEEKS_COVER_HIGH
-        ? { weight: (weeksCover - WEEKS_COVER_HIGH) * 4, text: `Weeks Cover is ${weeksCover} — well above the ${WEEKS_COVER_HIGH}-week healthy range` }
+        ? { weight: (weeksCover - WEEKS_COVER_HIGH) * 4, chip: 'High Cover', text: `Weeks Cover is ${weeksCover} — well above the ${WEEKS_COVER_HIGH}-week healthy range` }
         : null,
       declining
-        ? { weight: 40 + declinePct, text: `Sales velocity is down ${declinePct}% over the last 7 days vs the 30-day average` }
+        ? { weight: 40 + declinePct, chip: `Declining -${declinePct}%`, text: `Sales velocity is down ${declinePct}% over the last 7 days vs the 30-day average` }
         : null,
       onOrder > 0 && onOrderWeeks > 4
-        ? { weight: 30 + Math.min(onOrderWeeks, 40), text: `${onOrder} units on order will add further pressure` }
+        ? { weight: 30 + Math.min(onOrderWeeks, 40), chip: `+${onOrder} Incoming`, text: `${onOrder} units on order will add further pressure` }
         : null,
       neverTested
-        ? { weight: 120, text: 'Creative has never been tested with a new concept' }
-        : { weight: daysSinceLastNewConcept, text: `Last new concept was ${daysSinceLastNewConcept} days ago — past the ${STALE_DAYS_RED}-day review window` },
+        ? { weight: 120, chip: 'Never Tested', text: 'Creative has never been tested with a new concept' }
+        : { weight: daysSinceLastNewConcept, chip: `Stale ${daysSinceLastNewConcept}d`, text: `Last new concept was ${daysSinceLastNewConcept} days ago — past the ${STALE_DAYS_RED}-day review window` },
     ]);
-    return { flag: 'needs_attention', label: '🔴 Needs Creative Attention', reason: reasons.join('; ') };
+    return { flag: 'needs_attention', label: '🔴 Needs Creative Attention', reason, reason_chips };
   }
   if (!highPressure && staleOpportunity) {
+    const freshnessChip = neverTested ? 'Never Tested' : `Stale ${daysSinceLastNewConcept}d`;
     const freshnessReason = neverTested
       ? 'Creative has never been tested with a new concept'
       : `Last new concept was ${daysSinceLastNewConcept} days ago — past the ${STALE_DAYS_OPPORTUNITY}-day review window`;
@@ -121,9 +121,15 @@ function buildAttention({ sohKnown, soh, onOrder, vel7, vel30, vel365, weeksCove
       flag: 'opportunity',
       label: '🟠 New Concept Opportunity',
       reason: `Stock is healthy, so this is a good window to test something new. ${freshnessReason}${tierNote}.`,
+      reason_chips: tier === 'high' ? [freshnessChip, 'Top Performer'] : [freshnessChip],
     };
   }
-  return { flag: 'healthy', label: '🟢 Healthy', reason: 'Recent new-concept test and no inventory pressure.' };
+  return {
+    flag: 'healthy',
+    label: '🟢 Healthy',
+    reason: 'Recent new-concept test and no inventory pressure.',
+    reason_chips: ['On Track'],
+  };
 }
 
 const ATTENTION_ORDER = { needs_attention: 0, opportunity: 1, healthy: 2, product_review: 3 };
