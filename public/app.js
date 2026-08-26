@@ -966,7 +966,7 @@ async function markJobReadyForBriefing() {
 async function deleteJob() {
   const id = document.getElementById('job-id').value;
   if (!id) return;
-  if (!confirm('Delete this creative job? This cannot be undone.')) return;
+  if (!(await confirmDialog('Delete this creative job? This cannot be undone.'))) return;
   try {
     await api(`/creative-jobs/${id}`, { method: 'DELETE' });
     closeModal('job-modal');
@@ -1222,7 +1222,7 @@ async function editConceptAsset(assetId) {
 }
 
 async function deleteConceptSlot(slotId) {
-  if (!confirm('Remove this concept slot? This only works for manually-added New/Test slots with no linked asset.')) return;
+  if (!(await confirmDialog('Remove this concept slot? This only works for manually-added New/Test slots with no linked asset.'))) return;
   try {
     await api(`/drop-product-plans/${currentProductPlan.plan.id}/slots/${slotId}`, { method: 'DELETE' });
     loadProductView(state.currentDropId, state.currentProduct.product_code);
@@ -1290,7 +1290,7 @@ function openDropModal(drop) {
 async function deleteDrop() {
   const id = document.getElementById('drop-id').value;
   if (!id) return;
-  if (!confirm('Delete this drop? Its styles are unassigned, not deleted, and can be added to another drop later.')) return;
+  if (!(await confirmDialog('Delete this drop? Its styles are unassigned, not deleted, and can be added to another drop later.'))) return;
   try {
     await api(`/drops/${id}`, { method: 'DELETE' });
     closeModal('drop-modal');
@@ -1401,6 +1401,28 @@ function openModal(id) {
   document.getElementById(id).classList.add('show');
 }
 
+// In-app replacement for the browser's native confirm() -- resolves true/false.
+function confirmDialog(message, opts) {
+  const okLabel = (opts && opts.okLabel) || 'Delete';
+  return new Promise((resolve) => {
+    document.getElementById('confirm-message').textContent = message;
+    const okBtn = document.getElementById('confirm-ok-btn');
+    const cancelBtn = document.getElementById('confirm-cancel-btn');
+    okBtn.textContent = okLabel;
+    const cleanup = (result) => {
+      okBtn.removeEventListener('click', onOk);
+      cancelBtn.removeEventListener('click', onCancel);
+      closeModal('confirm-modal');
+      resolve(result);
+    };
+    const onOk = () => cleanup(true);
+    const onCancel = () => cleanup(false);
+    okBtn.addEventListener('click', onOk);
+    cancelBtn.addEventListener('click', onCancel);
+    openModal('confirm-modal');
+  });
+}
+
 document.getElementById('new-asset-btn').addEventListener('click', () => openAssetModal(null));
 document.getElementById('new-style-btn').addEventListener('click', () => openStyleModal(null));
 document.getElementById('new-category-btn').addEventListener('click', () => {
@@ -1471,7 +1493,7 @@ async function saveAsset() {
 async function deleteAsset() {
   const id = document.getElementById('asset-id').value;
   if (!id) return;
-  if (!confirm('Delete this creative asset? This cannot be undone.')) return;
+  if (!(await confirmDialog('Delete this creative asset? This cannot be undone.'))) return;
   try {
     await api(`/creative-assets/${id}`, { method: 'DELETE' });
     closeModal('asset-modal');
@@ -1925,7 +1947,7 @@ async function savePw() {
 async function deletePw() {
   const id = document.getElementById('pw-id').value;
   if (!id) return;
-  if (!confirm('Delete this Proven Winner? Concepts already used in drop plans keep their name/history and are not affected.')) return;
+  if (!(await confirmDialog('Delete this Proven Winner? Concepts already used in drop plans keep their name/history and are not affected.'))) return;
   try {
     await api(`/proven-winners/${id}`, { method: 'DELETE' });
     closeModal('pw-modal');
