@@ -398,59 +398,47 @@ main{padding:20px 24px;}
 .core-category-count{font-weight:400;color:var(--text-muted);}
 .core-category-body{display:flex;flex-direction:column;padding-left:18px;}
 
-/* Product row -- Product+Recommendation -> Key Metrics -> Why -> action,
-   always fully visible (compact) for easy scanning across many rows.
-   Divider between rows, no per-row card border. */
-.core-product-row{padding:10px 4px;border-bottom:1px solid var(--border);}
-.core-product-row:last-child{border-bottom:none;}
-.core-product-header-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
-.core-product-name{font-weight:700;font-size:13.5px;}
-.core-product-code{font-size:10px;font-weight:600;color:var(--text-muted);font-family:ui-monospace,"SF Mono",Menlo,monospace;}
-.core-product-category-tag{font-size:10.5px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px;}
 .core-attention-badge{display:inline-block;padding:2px 8px;border-radius:var(--r-pill);font-size:11px;font-weight:700;}
 .core-attention-red{background:var(--red-light);color:var(--red);}
 .core-attention-amber{background:var(--amber-light);color:var(--amber);}
 .core-attention-green{background:var(--green-light);color:var(--green);}
 .core-attention-review{background:var(--surface2);color:var(--text-secondary);}
 
-/* Headline row -- the 3 decision-level data points (Weeks Cover, Sales
-   Trend, Last New Concept), made most prominent since these drive the
-   recommendation. Larger type than the supporting strip below. */
-.core-headline-row{display:flex;gap:20px;margin:8px 0 6px;}
-.core-headline-stat{min-width:90px;}
-.core-headline-value{font-size:16px;font-weight:800;color:var(--text);}
-.core-headline-value.core-headline-value-warn{color:var(--amber);}
-.core-headline-label{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);margin-top:1px;}
+/* Priority compact decision table -- ~one row per product so 15-20 Core
+   products scan on one screen. Column-aligned via CSS grid (same grid on
+   the header row and every product row) rather than individual cards. */
+.core-products-list{overflow-x:auto;}
+.core-priority-row-grid{display:grid;grid-template-columns:2.4fr 0.9fr 1fr 1fr 2.2fr 0.8fr;gap:10px;align-items:center;min-width:640px;padding:6px 4px;}
+.core-priority-header-grid{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);border-bottom:1px solid var(--border);padding-bottom:5px;margin-bottom:2px;}
+.core-priority-row{border-bottom:1px solid var(--border);}
+.core-priority-row:last-child{border-bottom:none;}
+.core-priority-row > .core-priority-row-grid{cursor:pointer;}
+.core-priority-row > .core-priority-row-grid:hover{background:var(--surface2);}
+.core-priority-row.open .accordion-arrow{transform:rotate(90deg);}
+.core-priority-col-product{display:flex;align-items:center;gap:6px;min-width:0;}
+.core-priority-emoji{font-size:12px;flex-shrink:0;}
+.core-product-name{font-weight:700;font-size:12.5px;}
+.core-priority-category-tag{font-size:9.5px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.2px;}
+.core-priority-col{font-size:12px;font-weight:600;color:var(--text-secondary);white-space:nowrap;}
+.core-priority-col-chips{display:flex;flex-wrap:wrap;gap:4px;}
+.core-reason-chip{display:inline-block;background:var(--surface2);border:1px solid var(--border);color:var(--text-secondary);font-size:10px;font-weight:600;padding:1px 7px;border-radius:var(--r-pill);white-space:nowrap;}
+.core-priority-col-action{text-align:right;}
 .core-trend-down{color:var(--red);}
 .core-trend-up{color:var(--green);}
 .core-trend-flat{color:var(--text-muted);}
 
-/* Supporting metric strip -- SOH / On Order / 7D / 30D / 365D velocity --
-   one unified strip with internal dividers (not separate boxed tiles),
-   secondary in size/weight to the headline row above. */
-.core-metric-row{display:grid;grid-template-columns:repeat(5,1fr);background:var(--surface2);border-radius:var(--r);padding:6px 0;margin:0 0 8px;}
+/* Expanded detail -- SOH/On Order/velocity strip, colourways, and the
+   full reasoning sentences (the compact row above only shows chips). */
+.core-priority-detail{padding:2px 4px 12px 26px;}
+.core-metric-row{display:grid;grid-template-columns:repeat(5,1fr);background:var(--surface2);border-radius:var(--r);padding:6px 0;margin:4px 0 10px;}
 .core-metric-col{text-align:center;padding:0 4px;border-right:1px solid var(--border);}
 .core-metric-col:last-child{border-right:none;}
 .core-metric-value{font-size:12px;font-weight:700;color:var(--text-secondary);white-space:nowrap;}
 .core-metric-label{font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.2px;color:var(--text-muted);margin-top:2px;white-space:nowrap;}
-
-.core-why-callout{border-radius:var(--r);padding:7px 10px;font-size:12px;margin-bottom:8px;}
-.core-why-label{font-weight:800;text-transform:uppercase;font-size:10px;letter-spacing:0.3px;margin-right:4px;}
-.core-product-actions{display:flex;align-items:center;gap:8px;}
-.core-colours-table{margin-top:8px;}
+.core-priority-reasoning{font-size:12px;color:var(--text-secondary);margin-bottom:10px;}
 .core-colours-inner-table{width:100%;border-collapse:collapse;font-size:12px;}
 .core-colours-inner-table th{text-align:left;color:var(--text-muted);font-weight:600;padding:4px 6px;border-bottom:1px solid var(--border);}
 .core-colours-inner-table td{padding:4px 6px;border-bottom:1px solid var(--border);}
-
-@media (max-width: 900px){
-  .core-headline-row{flex-wrap:wrap;gap:14px;}
-  .core-metric-row{grid-template-columns:repeat(3,1fr);}
-  .core-metric-col:nth-child(3n){border-right:none;}
-}
-@media (max-width: 480px){
-  .core-metric-row{grid-template-columns:repeat(2,1fr);}
-  .core-metric-col:nth-child(2n){border-right:none;}
-}
 
 @media (max-width: 1100px){
   .board{grid-template-columns:1fr;}
