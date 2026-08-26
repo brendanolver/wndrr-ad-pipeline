@@ -120,6 +120,8 @@
           </div>
         </div>
 
+        <div class="core-weekly-card" id="core-weekly-card"></div>
+
         <div id="planning-attention" class="planning-attention" style="display:none;">
           <div class="attention-col">
             <div class="attention-title">⛔ Needs Attention</div>
@@ -132,11 +134,10 @@
         </div>
 
         <div class="planning-accordion">
-          <button type="button" class="accordion-toggle" data-section="core">
+          <button type="button" class="accordion-toggle open" data-section="core">
             <span class="accordion-arrow">&#9656;</span> Core Creative Testing
           </button>
-          <div class="accordion-body" id="section-body-core" style="display:none;">
-            <div class="core-weekly-card" id="core-weekly-card"></div>
+          <div class="accordion-body" id="section-body-core">
             <div class="core-view-toggle" id="core-view-toggle">
               <button type="button" class="core-view-btn" data-view="priority">Priority</button>
               <button type="button" class="core-view-btn" data-view="category">By Category</button>
@@ -144,10 +145,10 @@
             <div id="core-products-list" class="core-products-list"></div>
           </div>
 
-          <button type="button" class="accordion-toggle open" data-section="upcoming-drops">
+          <button type="button" class="accordion-toggle" data-section="upcoming-drops">
             <span class="accordion-arrow">&#9656;</span> Upcoming Drops
           </button>
-          <div class="accordion-body" id="section-body-upcoming-drops">
+          <div class="accordion-body" id="section-body-upcoming-drops" style="display:none;">
             <div id="drops-row-upcoming" class="drops-row"></div>
           </div>
 
