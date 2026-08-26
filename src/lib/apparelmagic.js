@@ -312,9 +312,13 @@ async function fetchStyleCatalogueUncached() {
       launchDateRaw,
       launchDate: parseLaunchDate(launchDateRaw),
       isCore: CORE_GROUPS.has(normGroupName(row.group)),
+      // AM's own `category` field -- confirmed live in production
+      // (demandplanning's per-style AM product lookup) -- distinct from
+      // `group` (used for isCore above). '' when AM has no category set.
+      category: (row.category || '').trim().toUpperCase(),
     });
   }
-  return map; // Map<style_code, { productName, imageUrl, launchDateRaw, launchDate, isCore }>
+  return map; // Map<style_code, { productName, imageUrl, launchDateRaw, launchDate, isCore, category }>
 }
 
 // Exposed only for the debug route -- lets us see a raw response shape

@@ -372,6 +372,14 @@ main{padding:20px 24px;}
 .core-colours-inner-table th{text-align:left;color:var(--text-muted);font-weight:600;padding:4px 6px;border-bottom:1px solid var(--border);}
 .core-colours-inner-table td{padding:4px 6px;border-bottom:1px solid var(--border);}
 
+.core-category-filter-row{display:flex;align-items:center;gap:8px;margin-bottom:12px;}
+.core-category-filter-row label{font-size:12px;font-weight:600;color:var(--text-secondary);}
+.core-category-filter-row select{padding:5px 8px;border:1px solid var(--border);border-radius:var(--r);font-size:12.5px;}
+.core-category-group{margin-bottom:14px;}
+.core-category-group .core-product-row{margin-bottom:8px;}
+.core-category-heading{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-muted);margin-bottom:6px;}
+.core-category-count{font-weight:400;text-transform:none;letter-spacing:0;}
+
 @media (max-width: 1100px){
   .board{grid-template-columns:1fr;}
   .admin-grid{grid-template-columns:1fr;}
