@@ -13,7 +13,7 @@ const CLASSIFICATION_LABELS = { tested_proven: 'Tested/Proven', new_experimental
 
 let state = {
   styles: [], categories: [], board: null, dashboard: null, drops: [], jobs: [], provenWinners: [],
-  coreProducts: [], planningSettings: null,
+  coreProducts: [], planningSettings: null, coreView: 'priority',
   coreExpandedCategories: new Set(), coreExpandedProducts: new Set(), coreExpandedColours: new Set(),
 };
 let dashboardWeekOffset = 0;
@@ -1526,18 +1526,35 @@ function escapeHtml(str) {
 }
 
 // ── Planning: Core Creative Testing ──────────────────
-// Three-level drill-down (Category -> Product -> Colour), collapsed by
-// default at every level so opening the section doesn't dump every Core
-// product's full stats at once. Expand state is tracked here (not just in
-// the DOM) so it survives a full re-render -- e.g. saving a "+ Plan New
+// A weekly decision dashboard: a prominent weekly-target progress card up
+// top, then a Priority view (default -- every Core product in one
+// attention-sorted list, ignoring category) or a By Category view
+// (secondary, for browsing). Expand state is tracked here (not just in the
+// DOM) so it survives a full re-render -- e.g. saving a "+ Plan New
 // Concept" job triggers loadAll(), which would otherwise collapse
 // everything the team had just drilled into.
+//
+// Nothing here recomputes or overrides the server's attention flag/reason
+// -- state.coreProducts already arrives sorted Red -> Orange -> Green ->
+// Review, and that order is preserved everywhere below. The one
+// presentational-only derivation is the sales-trend arrow (coreTrendInfo),
+// which reads the same vel7/vel30 fields the server already returns but
+// uses its own human-readable thresholds purely for a quick glance --
+// it never feeds back into the attention flag itself.
 const CORE_ATTENTION_BADGE_CLASS = {
   needs_attention: 'core-attention-red',
   opportunity: 'core-attention-amber',
   healthy: 'core-attention-green',
   product_review: 'core-attention-review',
 };
+
+function coreTrendInfo(p) {
+  if (!(p.vel30 > 0)) return { label: 'No recent sales', cls: 'core-trend-flat', arrow: '·' };
+  const ratio = p.vel7 / p.vel30;
+  if (ratio < 0.85) return { label: 'Declining', cls: 'core-trend-down', arrow: '▼' };
+  if (ratio > 1.15) return { label: 'Rising', cls: 'core-trend-up', arrow: '▲' };
+  return { label: 'Steady', cls: 'core-trend-flat', arrow: '▬' };
+}
 
 function toggleCoreCategory(cat) {
   if (state.coreExpandedCategories.has(cat)) state.coreExpandedCategories.delete(cat);
@@ -1557,6 +1574,11 @@ function toggleCoreColours(productCode) {
   renderCoreProducts();
 }
 
+function setCoreView(view) {
+  state.coreView = view;
+  renderCoreProducts();
+}
+
 function coreColoursTableHtml(product) {
   return `
     <table class="core-colours-inner-table">
@@ -1567,18 +1589,25 @@ function coreColoursTableHtml(product) {
     </table>`;
 }
 
+// Expanded view: SOH/Weeks Cover/velocity as clean metric columns (not one
+// text string) + a clearly labelled Why callout.
 function coreProductDetailHtml(p) {
-  const soh = p.soh != null ? p.soh : '—';
-  const weeksCover = p.weeks_cover != null ? `${p.weeks_cover} Weeks Cover` : 'Weeks Cover —';
-  const freshness = p.days_since_last_new_concept != null
-    ? `Last New Concept: ${p.days_since_last_new_concept} days ago`
-    : 'Last New Concept: Never tested';
+  const metrics = [
+    ['SOH', p.soh != null ? p.soh : '—'],
+    ['Weeks Cover', p.weeks_cover != null ? p.weeks_cover : '—'],
+    ['7D Velocity', `${p.vel7}/wk`],
+    ['30D Velocity', `${p.vel30}/wk`],
+    ['365D Velocity', `${p.vel365}/wk`],
+  ];
   const coloursOpen = state.coreExpandedColours.has(p.product_code);
   return `
     <div class="core-product-detail">
-      <div class="core-product-stats">${soh} SOH · ${weeksCover} · ${p.vel7}/wk (7d) · ${p.vel30}/wk (30d) · ${p.vel365}/wk (365d avg)</div>
-      <div class="core-product-stats">${freshness}</div>
-      <div class="core-product-reason">Why: ${escapeHtml(p.reason)}</div>
+      <div class="core-metric-grid">
+        ${metrics.map(([label, value]) => `<div class="core-metric"><div class="core-metric-value">${value}</div><div class="core-metric-label">${label}</div></div>`).join('')}
+      </div>
+      <div class="core-why-callout ${CORE_ATTENTION_BADGE_CLASS[p.flag]}">
+        <span class="core-why-label">Why</span> ${escapeHtml(p.reason)}
+      </div>
       <div class="core-product-actions">
         <button type="button" class="btn btn-ghost btn-sm" onclick="toggleCoreColours('${p.product_code}')">&#9656; ${p.colours.length} colourway${p.colours.length === 1 ? '' : 's'}</button>
         <button type="button" class="btn btn-primary btn-sm" onclick="planNewConceptForCore('${p.product_code}')">+ Plan New Concept</button>
@@ -1587,14 +1616,33 @@ function coreProductDetailHtml(p) {
     </div>`;
 }
 
-function coreProductRowHtml(p) {
+// Collapsed row: everything needed for a decision without expanding --
+// attention badge, Weeks Cover, sales trend, freshness, recommendation.
+function coreProductRowHtml(p, opts = {}) {
   const isOpen = state.coreExpandedProducts.has(p.product_code);
+  const trend = coreTrendInfo(p);
+  const weeksCover = p.weeks_cover != null ? `${p.weeks_cover} Weeks Cover` : 'Weeks Cover —';
+  const freshness = p.days_since_last_new_concept != null
+    ? `Last New Concept: ${p.days_since_last_new_concept}d ago`
+    : 'Never tested';
+  const categoryTag = opts.showCategory ? `<span class="core-product-category-tag">${escapeHtml(p.category)}</span>` : '';
   return `
     <div class="core-product-row" data-product-code="${p.product_code}">
-      <button type="button" class="accordion-toggle core-product-toggle ${isOpen ? 'open' : ''}" onclick="toggleCoreProduct('${p.product_code}')">
+      <button type="button" class="core-product-toggle ${isOpen ? 'open' : ''}" onclick="toggleCoreProduct('${p.product_code}')">
         <span class="accordion-arrow">&#9656;</span>
-        <span class="core-product-name">${escapeHtml(p.product_name)}</span>
-        <span class="core-attention-badge ${CORE_ATTENTION_BADGE_CLASS[p.flag]}">${p.label}</span>
+        <div class="core-product-summary">
+          <div class="core-product-title-line">
+            <span class="core-product-name">${escapeHtml(p.product_name)}</span>
+            ${categoryTag}
+            <span class="core-attention-badge ${CORE_ATTENTION_BADGE_CLASS[p.flag]}">${p.label}</span>
+          </div>
+          <div class="core-product-quickfacts">
+            <span>${weeksCover}</span>
+            <span class="core-trend ${trend.cls}">${trend.arrow} ${trend.label}</span>
+            <span>${freshness}</span>
+          </div>
+          <div class="core-product-recommendation">${escapeHtml(p.reason)}</div>
+        </div>
       </button>
       ${isOpen ? coreProductDetailHtml(p) : ''}
     </div>`;
@@ -1606,20 +1654,34 @@ function wireCoreCategoryToggles(container) {
   });
 }
 
-function renderCoreProducts() {
-  const stat = document.getElementById('core-weekly-stat');
-  const w = state.coreWeekly || {};
-  stat.textContent = `New Concepts: ${w.planned} / ${w.target} planned this week · ${w.remaining} remaining`;
+function renderCoreWeeklyCard() {
+  const card = document.getElementById('core-weekly-card');
+  const w = state.coreWeekly || { planned: 0, target: 0, remaining: 0 };
+  const pct = w.target > 0 ? Math.min(100, Math.round((w.planned / w.target) * 100)) : 0;
+  card.innerHTML = `
+    <div class="core-weekly-top">
+      <span class="core-weekly-label">New Concepts Planned This Week</span>
+      <span class="core-weekly-fraction">${w.planned} <span class="core-weekly-fraction-of">/ ${w.target}</span></span>
+    </div>
+    <div class="coverage-progress-track core-weekly-progress-track">
+      <div class="coverage-progress-fill core-weekly-progress-fill" style="width:${pct}%;"></div>
+    </div>
+    <div class="core-weekly-remaining">${w.remaining} remaining this week</div>`;
+}
 
-  const list = document.getElementById('core-products-list');
-  if (!state.coreProducts.length) {
-    list.innerHTML = '<div class="attention-empty">No Core products found yet.</div>';
-    return;
-  }
+function renderCoreViewToggle() {
+  document.querySelectorAll('.core-view-btn').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.view === state.coreView);
+  });
+}
 
-  // Group by category -- each group keeps the existing urgency order
-  // (state.coreProducts already arrives sorted Red -> Orange -> Green ->
-  // Review from the server).
+function renderCoreProductsPriority() {
+  return state.coreProducts.map((p) => coreProductRowHtml(p, { showCategory: true })).join('');
+}
+
+function renderCoreProductsByCategory() {
+  // Each group keeps the existing urgency order -- state.coreProducts
+  // already arrives sorted Red -> Orange -> Green -> Review from the server.
   const byCategory = new Map();
   for (const p of state.coreProducts) {
     if (!byCategory.has(p.category)) byCategory.set(p.category, []);
@@ -1627,18 +1689,32 @@ function renderCoreProducts() {
   }
   const sortedCategories = [...byCategory.keys()].sort();
 
-  list.innerHTML = sortedCategories.map((cat) => {
+  return sortedCategories.map((cat) => {
     const products = byCategory.get(cat);
     const isOpen = state.coreExpandedCategories.has(cat);
     return `
       <div class="core-category-group">
-        <button type="button" class="accordion-toggle core-category-toggle ${isOpen ? 'open' : ''}" data-category="${escapeHtml(cat)}">
+        <button type="button" class="core-category-toggle ${isOpen ? 'open' : ''}" data-category="${escapeHtml(cat)}">
           <span class="accordion-arrow">&#9656;</span>
-          ${escapeHtml(cat)} <span class="core-category-count">(${products.length})</span>
+          <span class="core-category-name">${escapeHtml(cat)}</span>
+          <span class="core-category-count">${products.length}</span>
         </button>
-        ${isOpen ? `<div class="core-category-body">${products.map(coreProductRowHtml).join('')}</div>` : ''}
+        ${isOpen ? `<div class="core-category-body">${products.map((p) => coreProductRowHtml(p)).join('')}</div>` : ''}
       </div>`;
   }).join('');
+}
+
+function renderCoreProducts() {
+  renderCoreWeeklyCard();
+  renderCoreViewToggle();
+
+  const list = document.getElementById('core-products-list');
+  if (!state.coreProducts.length) {
+    list.innerHTML = '<div class="attention-empty">No Core products found yet.</div>';
+    return;
+  }
+
+  list.innerHTML = state.coreView === 'category' ? renderCoreProductsByCategory() : renderCoreProductsPriority();
   wireCoreCategoryToggles(list);
 }
 
@@ -1825,5 +1901,8 @@ async function deletePw() {
 
 document.getElementById('pw-add-btn').addEventListener('click', () => openPwModal(null));
 document.getElementById('weekly-target-save-btn').addEventListener('click', saveWeeklyTarget);
+document.querySelectorAll('.core-view-btn').forEach((btn) => {
+  btn.addEventListener('click', () => setCoreView(btn.dataset.view));
+});
 
 checkSession();
