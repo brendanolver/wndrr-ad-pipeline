@@ -13,6 +13,13 @@ const STALE_DAYS_RED = 21;
 const STALE_DAYS_OPPORTUNITY = 14;
 const VELOCITY_DECLINE_RATIO = 0.7;
 
+// Core Creative Testing excludes Accessories entirely -- AM's own
+// `category` field (distinct from the `group` field CORE_GROUPS matches
+// against), not a local concept. Checked wherever a style is considered
+// for this feature, not just at sync time, so a style whose AM category
+// changes after being locally synced still gets excluded live.
+const EXCLUDED_CATEGORY = 'ACCESSORIES';
+
 // Ensures every AM catalogue style flagged isCore (AM's "AA CORE STYLES"
 // group, see apparelmagic.js's CORE_GROUPS) has a local styles row --
 // purely additive (INSERT ... ON CONFLICT DO NOTHING), same idempotent
@@ -22,7 +29,7 @@ const VELOCITY_DECLINE_RATIO = 0.7;
 async function syncCoreStylesFromAm(amDetails) {
   if (!amDetails) return;
   for (const [styleCode, details] of amDetails.entries()) {
-    if (!details.isCore) continue;
+    if (!details.isCore || details.category === EXCLUDED_CATEGORY) continue;
     await pool.query(
       `INSERT INTO styles (style_code, name, tier) VALUES ($1, $2, 'core_proven') ON CONFLICT (style_code) DO NOTHING`,
       [styleCode, details.productName || styleCode]
@@ -100,7 +107,13 @@ router.get('/', async (req, res, next) => {
     await syncCoreStylesFromAm(am.amDetails);
 
     const stylesResult = await pool.query(`SELECT * FROM styles WHERE tier = 'core_proven' ORDER BY style_code ASC`);
-    const coreStyles = stylesResult.rows;
+    // Live category check (not just at sync time) -- a style synced before
+    // this exclusion existed, or whose AM category changed since, is still
+    // excluded here.
+    const coreStyles = stylesResult.rows.filter((s) => {
+      const details = am.amDetails ? am.amDetails.get(s.style_code) : null;
+      return details?.category !== EXCLUDED_CATEGORY;
+    });
     const styleIds = coreStyles.map((s) => s.id);
 
     // getSalesByStyle()'s cache is stale-while-revalidate EXCEPT on a true
@@ -181,6 +194,7 @@ router.get('/', async (req, res, next) => {
       return {
         product_code: productCode,
         product_name: firstDetails?.productName || first.name,
+        category: firstDetails?.category || 'UNCATEGORISED',
         colours,
         soh: sohKnown ? soh : null,
         on_order: am.amOnOrder ? onOrder : null,

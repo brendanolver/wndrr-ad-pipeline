@@ -1553,17 +1553,50 @@ function coreProductRowHtml(p) {
     </div>`;
 }
 
+function populateCoreCategoryFilter() {
+  const select = document.getElementById('core-category-filter');
+  const categories = [...new Set(state.coreProducts.map((p) => p.category))].sort();
+  const current = select.value;
+  select.innerHTML = '<option value="">All Categories</option>'
+    + categories.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+  if (categories.includes(current)) select.value = current;
+}
+
 function renderCoreProducts() {
   const stat = document.getElementById('core-weekly-stat');
   const w = state.coreWeekly || {};
   stat.textContent = `New Concepts: ${w.planned} / ${w.target} planned this week · ${w.remaining} remaining`;
+
+  populateCoreCategoryFilter();
+  const filterValue = document.getElementById('core-category-filter').value;
 
   const list = document.getElementById('core-products-list');
   if (!state.coreProducts.length) {
     list.innerHTML = '<div class="attention-empty">No Core products found yet.</div>';
     return;
   }
-  list.innerHTML = state.coreProducts.map(coreProductRowHtml).join('');
+  const filtered = filterValue ? state.coreProducts.filter((p) => p.category === filterValue) : state.coreProducts;
+  if (!filtered.length) {
+    list.innerHTML = '<div class="attention-empty">No Core products in this category.</div>';
+    return;
+  }
+
+  // Group by category so it's clear at a glance which products sit where --
+  // each group keeps the existing urgency order (state.coreProducts already
+  // arrives sorted Red -> Orange -> Green -> Review from the server).
+  const byCategory = new Map();
+  for (const p of filtered) {
+    if (!byCategory.has(p.category)) byCategory.set(p.category, []);
+    byCategory.get(p.category).push(p);
+  }
+  const sortedCategories = [...byCategory.keys()].sort();
+
+  list.innerHTML = sortedCategories.map((cat) => `
+    <div class="core-category-group">
+      <div class="core-category-heading">${escapeHtml(cat)} <span class="core-category-count">(${byCategory.get(cat).length})</span></div>
+      ${byCategory.get(cat).map(coreProductRowHtml).join('')}
+    </div>
+  `).join('');
 }
 
 function toggleCoreColours(productCode) {
@@ -1764,5 +1797,6 @@ async function deletePw() {
 
 document.getElementById('pw-add-btn').addEventListener('click', () => openPwModal(null));
 document.getElementById('weekly-target-save-btn').addEventListener('click', saveWeeklyTarget);
+document.getElementById('core-category-filter').addEventListener('change', renderCoreProducts);
 
 checkSession();
