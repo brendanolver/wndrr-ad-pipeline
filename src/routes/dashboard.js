@@ -52,7 +52,8 @@ router.get('/', async (req, res, next) => {
 
     const stageCounts = Object.fromEntries(stageCountsResult.rows.map((r) => [r.status, r.count]));
     const briefing =
-      (stageCounts.not_started || 0) + (stageCounts.awaiting_proven_concept || 0) + (stageCounts.concept_script || 0);
+      (stageCounts.not_started || 0) + (stageCounts.awaiting_proven_concept || 0)
+      + (stageCounts.awaiting_concept_development || 0) + (stageCounts.concept_script || 0);
     const inProduction = stageCounts.filming || 0;
     const editing = stageCounts.editing || 0;
     const awaitingReview = stageCounts.qc || 0;

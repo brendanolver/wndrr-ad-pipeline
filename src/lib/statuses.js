@@ -4,6 +4,7 @@
 const STATUSES = [
   'not_started',
   'awaiting_proven_concept',
+  'awaiting_concept_development',
   'concept_script',
   'filming',
   'editing',
@@ -14,6 +15,7 @@ const STATUSES = [
 const STATUS_LABELS = {
   not_started: 'Not Started',
   awaiting_proven_concept: 'Awaiting Proven Concept',
+  awaiting_concept_development: 'Awaiting Concept Development',
   concept_script: 'Concept/Script',
   filming: 'Filming',
   editing: 'Editing',
@@ -27,6 +29,7 @@ const STATUS_LABELS = {
 const STATUS_OWNER_FIELD = {
   not_started: 'strategy_owner',
   awaiting_proven_concept: 'strategy_owner',
+  awaiting_concept_development: 'strategy_owner',
   concept_script: 'strategy_owner',
   filming: 'filming_owner',
   editing: 'editing_owner',

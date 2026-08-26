@@ -14,12 +14,13 @@ async function insertCreativeAsset(db, {
   filming_owner = null,
   editing_owner = null,
   qc_owner = null,
+  status = 'not_started',
 }) {
   const result = await db.query(
     `INSERT INTO creative_assets
       (style_id, concept_name, concept_classification, format, is_deliberate_trial, target_date,
-       strategy_owner, filming_owner, editing_owner, qc_owner)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+       strategy_owner, filming_owner, editing_owner, qc_owner, status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
     [
       style_id,
       concept_name,
@@ -31,6 +32,7 @@ async function insertCreativeAsset(db, {
       filming_owner,
       editing_owner,
       qc_owner,
+      status,
     ]
   );
   const asset = result.rows[0];
