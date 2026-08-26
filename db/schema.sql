@@ -81,6 +81,14 @@ CREATE TABLE IF NOT EXISTS drops (
 
 CREATE INDEX IF NOT EXISTS idx_drops_launch_date ON drops(launch_date);
 
+-- Drops can now be auto-created from an ApparelMagic launch-date cluster
+-- before anyone has named them (see POST /drops/from-suggestion) -- a NULL
+-- name displays as "Untitled" until the team edits it. UNIQUE still holds
+-- for any drop that IS named (Postgres allows unlimited NULLs under a
+-- UNIQUE constraint), so this is a plain nullability change, not a drop of
+-- the uniqueness guarantee.
+ALTER TABLE drops ALTER COLUMN name DROP NOT NULL;
+
 ALTER TABLE styles ADD COLUMN IF NOT EXISTS drop_id INTEGER REFERENCES drops(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_styles_drop_id ON styles(drop_id);
 

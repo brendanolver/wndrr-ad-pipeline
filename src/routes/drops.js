@@ -111,21 +111,41 @@ router.get('/suggestions', async (req, res, next) => {
 // Create a Drop from a suggestion cluster (or any manual style list) in one
 // step: creates any styles that don't exist locally yet (name + tier seeded
 // from ApparelMagic's product name / CORE group), and assigns all of them to
-// the new drop.
+// the new drop. name is optional -- a NULL name displays as "Untitled" until
+// someone edits it (see the auto-create-from-launch-dates flow on the
+// Planning page, which calls this with no name at all).
+//
+// Idempotent per launch_date: reuses an existing drop for that exact date
+// rather than creating a duplicate, and never overwrites an already-set
+// name. This is what makes it safe to call repeatedly (e.g. once per
+// Planning page load) without piling up duplicate drops for the same date.
 router.post('/from-suggestion', async (req, res, next) => {
   const client = await pool.connect();
   try {
     const { name, launch_date, notes, styles } = req.body || {};
-    if (!name || !name.trim()) return res.status(400).json({ error: 'name is required' });
     if (!launch_date) return res.status(400).json({ error: 'launch_date is required' });
     if (!Array.isArray(styles) || !styles.length) return res.status(400).json({ error: 'styles is required' });
 
     await client.query('BEGIN');
-    const dropResult = await client.query(
-      `INSERT INTO drops (name, launch_date, notes) VALUES ($1, $2, $3) RETURNING *`,
-      [name.trim(), launch_date, notes || null]
-    );
-    const drop = dropResult.rows[0];
+
+    const existingDrop = await client.query('SELECT * FROM drops WHERE launch_date = $1 FOR UPDATE', [launch_date]);
+    let drop;
+    if (existingDrop.rows.length) {
+      drop = existingDrop.rows[0];
+      if (name && name.trim() && !drop.name) {
+        const renamed = await client.query(
+          'UPDATE drops SET name = $1, updated_at = now() WHERE id = $2 RETURNING *',
+          [name.trim(), drop.id]
+        );
+        drop = renamed.rows[0];
+      }
+    } else {
+      const dropResult = await client.query(
+        `INSERT INTO drops (name, launch_date, notes) VALUES ($1, $2, $3) RETURNING *`,
+        [name && name.trim() ? name.trim() : null, launch_date, notes || null]
+      );
+      drop = dropResult.rows[0];
+    }
 
     for (const s of styles) {
       if (!s.style_code) continue;
@@ -153,12 +173,11 @@ router.post('/from-suggestion', async (req, res, next) => {
 router.post('/', async (req, res, next) => {
   try {
     const { name, launch_date, notes } = req.body || {};
-    if (!name || !name.trim()) return res.status(400).json({ error: 'name is required' });
     if (!launch_date) return res.status(400).json({ error: 'launch_date is required' });
 
     const result = await pool.query(
       `INSERT INTO drops (name, launch_date, notes) VALUES ($1, $2, $3) RETURNING *`,
-      [name.trim(), launch_date, notes || null]
+      [name && name.trim() ? name.trim() : null, launch_date, notes || null]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -207,6 +226,7 @@ router.put('/:id', async (req, res, next) => {
     if (result.rows.length === 0) return res.status(404).json({ error: 'Drop not found' });
     res.json(result.rows[0]);
   } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'A drop with that name already exists' });
     next(err);
   }
 });

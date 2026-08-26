@@ -378,9 +378,27 @@ function renderPlanningRoute() {
 }
 window.addEventListener('hashchange', renderPlanningRoute);
 
+// Every upcoming ApparelMagic launch date should already have a Drop card
+// on the Planning page without anyone clicking "+ New Drop" -- name is left
+// blank ("Untitled", see renderDropsRow/loadDropView) for the team to fill
+// in later via Edit. POST /from-suggestion is idempotent per launch_date
+// (reuses an existing drop for that date rather than duplicating it), and
+// once a cluster's styles are assigned they drop out of future /suggestions
+// results -- so calling this on every Planning load is safe and naturally
+// stops doing anything once the list is caught up.
 async function loadDropSuggestions() {
   try {
     const { suggestions } = await api('/drops/suggestions');
+    if (suggestions.length) {
+      for (const s of suggestions) {
+        await api('/drops/from-suggestion', {
+          method: 'POST',
+          body: JSON.stringify({ launch_date: s.launch_date, styles: s.styles }),
+        });
+      }
+      loadAll();
+      return;
+    }
     state.dropSuggestions = suggestions;
   } catch (e) {
     state.dropSuggestions = [];
@@ -411,6 +429,9 @@ function renderDropQuickpicks(selectedDate) {
 }
 
 function onDropDateChange() {
+  // Editing an existing drop doesn't re-cluster ApparelMagic styles for a
+  // changed date -- the quickpicks/note are a create-time convenience only.
+  if (document.getElementById('drop-id').value) return;
   const date = document.getElementById('drop-launch-date').value;
   renderDropQuickpicks(date);
   const note = document.getElementById('drop-date-note');
@@ -466,7 +487,10 @@ function renderDropsRow() {
   }
   row.innerHTML = state.drops.map((d) => `
     <div class="drop-card" data-drop-id="${d.id}">
-      <div class="drop-card-name">${escapeHtml(d.name)}</div>
+      <div class="drop-card-header">
+        <div class="drop-card-name ${d.name ? '' : 'untitled'}">${d.name ? escapeHtml(d.name) : 'Untitled'}</div>
+        <button type="button" class="drop-card-edit-btn" data-drop-id="${d.id}" title="Rename drop">Edit</button>
+      </div>
       <div class="drop-card-date">${formatDate(d.launch_date)} · ${d.days_until_launch >= 0 ? d.days_until_launch + ' days to launch' : 'Launched'}</div>
       <div class="drop-card-counts">
         <span class="green">🟢 ${d.summary.green}</span>
@@ -478,6 +502,13 @@ function renderDropsRow() {
     </div>`).join('');
   row.querySelectorAll('.drop-card').forEach((card) => {
     card.addEventListener('click', () => { window.location.hash = `#planning/drop/${card.dataset.dropId}`; });
+  });
+  row.querySelectorAll('.drop-card-edit-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const drop = state.drops.find((d) => d.id === Number(btn.dataset.dropId));
+      openDropModal(drop);
+    });
   });
 }
 
@@ -495,7 +526,10 @@ async function loadDropView(dropId) {
   try {
     const drop = await api(`/drops/${dropId}`);
     state.currentDrop = drop;
-    document.getElementById('drop-view-title').textContent = drop.name;
+    const titleEl = document.getElementById('drop-view-title');
+    titleEl.textContent = drop.name || 'Untitled';
+    titleEl.classList.toggle('untitled', !drop.name);
+    document.getElementById('drop-view-edit-btn').onclick = () => openDropModal(drop);
     const amNote = document.getElementById('drop-view-am-note');
     if (!drop.apparelmagic.configured) {
       amNote.textContent = 'ApparelMagic is not connected — SOH, targets and gaps will show once AM_SUBDOMAIN / AM_TOKEN are set.';
@@ -602,7 +636,7 @@ function renderJobsGrid() {
 
 function populateJobDropSelect() {
   const sel = document.getElementById('job-drop-id');
-  sel.innerHTML = '<option value="">— none —</option>' + state.drops.map((d) => `<option value="${d.id}">${escapeHtml(d.name)}</option>`).join('');
+  sel.innerHTML = '<option value="">— none —</option>' + state.drops.map((d) => `<option value="${d.id}">${escapeHtml(d.name || 'Untitled')}</option>`).join('');
 }
 
 function populateJobStyleSelect(selectedIds = []) {
@@ -1136,32 +1170,47 @@ async function addNewConceptSlot() {
 document.getElementById('product-plan-add-new-btn').addEventListener('click', showAddNewConceptForm);
 
 document.getElementById('new-job-btn').addEventListener('click', () => openJobModal(null));
-document.getElementById('new-drop-btn').addEventListener('click', () => {
-  document.getElementById('drop-name').value = '';
-  document.getElementById('drop-launch-date').value = '';
-  document.getElementById('drop-notes').value = '';
+document.getElementById('new-drop-btn').addEventListener('click', () => openDropModal(null));
+
+// drop=null for a fresh manual drop (name optional -- most drops now arrive
+// already-created via loadDropSuggestions' auto-create pass, so this is
+// mainly for a custom/off-catalogue drop); drop=existing to rename/edit one
+// (most commonly, giving an auto-created "Untitled" drop its real name).
+function openDropModal(drop) {
+  document.getElementById('drop-modal-title').textContent = drop ? 'Edit Drop' : 'New Drop';
+  document.getElementById('drop-id').value = drop ? drop.id : '';
+  document.getElementById('drop-name').value = (drop && drop.name) || '';
+  document.getElementById('drop-launch-date').value = drop ? drop.launch_date.slice(0, 10) : '';
+  document.getElementById('drop-notes').value = (drop && drop.notes) || '';
   document.getElementById('drop-date-note').textContent = '';
-  renderDropQuickpicks(null);
+  document.getElementById('drop-save-btn').textContent = drop ? 'Save' : 'Add';
+  // Quickpicks/auto-style-population are a create-time convenience only --
+  // editing an existing drop doesn't re-cluster ApparelMagic styles.
+  document.getElementById('drop-date-quickpicks').style.display = drop ? 'none' : 'flex';
+  if (!drop) renderDropQuickpicks(null);
   openModal('drop-modal');
-});
+}
 
 async function saveDrop() {
-  const name = document.getElementById('drop-name').value;
+  const id = document.getElementById('drop-id').value;
+  const name = document.getElementById('drop-name').value || null;
   const launch_date = document.getElementById('drop-launch-date').value;
   const notes = document.getElementById('drop-notes').value || null;
-  if (!name.trim()) return toast('Drop name is required', true);
   if (!launch_date) return toast('Launch date is required', true);
 
-  // Any ApparelMagic styles launching this exact date are auto-included --
-  // no manual review step, per how this flow is meant to work.
-  const suggestion = suggestionForDate(launch_date);
-  const styles = suggestion ? suggestion.styles : [];
-
   try {
-    if (styles.length) {
-      await api('/drops/from-suggestion', { method: 'POST', body: JSON.stringify({ name, launch_date, notes, styles }) });
+    if (id) {
+      await api(`/drops/${id}`, { method: 'PUT', body: JSON.stringify({ name, launch_date, notes }) });
     } else {
-      await api('/drops', { method: 'POST', body: JSON.stringify({ name, launch_date, notes }) });
+      // Any ApparelMagic styles launching this exact date are auto-included
+      // -- no manual review step, per how this flow is meant to work.
+      const suggestion = suggestionForDate(launch_date);
+      const styles = suggestion ? suggestion.styles : [];
+      if (styles.length) {
+        await api('/drops/from-suggestion', { method: 'POST', body: JSON.stringify({ name, launch_date, notes, styles }) });
+      } else {
+        await api('/drops', { method: 'POST', body: JSON.stringify({ name, launch_date, notes }) });
+      }
     }
     closeModal('drop-modal');
     toast('Drop saved');
@@ -1195,7 +1244,7 @@ function renderStylesTable() {
 
 function populateStyleDropSelect(selectedId) {
   const sel = document.getElementById('style-drop-id');
-  sel.innerHTML = '<option value="">— none —</option>' + state.drops.map((d) => `<option value="${d.id}" ${d.id === selectedId ? 'selected' : ''}>${escapeHtml(d.name)}</option>`).join('');
+  sel.innerHTML = '<option value="">— none —</option>' + state.drops.map((d) => `<option value="${d.id}" ${d.id === selectedId ? 'selected' : ''}>${escapeHtml(d.name || 'Untitled')}</option>`).join('');
 }
 
 function openStyleModal(style) {
