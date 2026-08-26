@@ -218,10 +218,18 @@ router.get('/:id', async (req, res, next) => {
 router.put('/:id', async (req, res, next) => {
   try {
     const { name, launch_date, notes } = req.body || {};
+    // Distinguish "name not sent" (keep existing) from "name explicitly
+    // sent, even as blank" (revert to Untitled) -- inline rename on the
+    // Planning page needs to be able to clear a name back to blank, which
+    // a plain COALESCE(name, existing) can never do.
+    const nameProvided = Object.prototype.hasOwnProperty.call(req.body || {}, 'name');
+    const nextName = nameProvided ? (name && name.trim() ? name.trim() : null) : null;
     const result = await pool.query(
-      `UPDATE drops SET name = COALESCE($1, name), launch_date = COALESCE($2, launch_date), notes = $3, updated_at = now()
-       WHERE id = $4 RETURNING *`,
-      [name ? name.trim() : null, launch_date || null, notes || null, req.params.id]
+      `UPDATE drops SET
+         name = CASE WHEN $1 THEN $2 ELSE name END,
+         launch_date = COALESCE($3, launch_date), notes = $4, updated_at = now()
+       WHERE id = $5 RETURNING *`,
+      [nameProvided, nextName, launch_date || null, notes || null, req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Drop not found' });
     res.json(result.rows[0]);
