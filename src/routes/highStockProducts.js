@@ -11,23 +11,47 @@ const router = express.Router();
 // products the way a single cross-product priority score needs to be).
 // Tunable later if needed.
 const HIGH_STOCK_WEEKS_COVER_REF = 12;
-const HIGH_STOCK_DECLINE_RATIO = 0.7;
+const HIGH_STOCK_RECENT_DECLINE_RATIO = 0.7; // vel7 vs vel30 -- a smaller, hidden "recent trend" pressure signal, deliberately separate from the displayed indicator below
 const HIGH_STOCK_ON_ORDER_WEEKS_REF = 4;
 const HIGH_STOCK_STALE_DAYS = 21;
+const HIGH_STOCK_TREND_DEADZONE_PCT = 10; // matches Core's own ±10% steady-state threshold
+const HIGH_STOCK_MIN_RELIABLE_HIST_VEL = 1; // vel365 below this (units/week) isn't enough sales history for a trustworthy % comparison
 
-// Same weighted-candidate pattern as coreProducts.js's rankReasons(), kept
-// as a small local duplicate rather than imported -- it's a 3-line pure
-// function, not worth a cross-module dependency for.
-function rankTopReasons(candidates) {
-  return candidates.filter(Boolean).sort((a, b) => b.weight - a.weight).slice(0, 3);
+// Fixed single-line coverage read (never a ranked list) -- always resolves
+// to something, so the recommendation row always has exactly its three
+// fields: SOH, Sales Performance, Creative Coverage.
+function creativeCoverageLabel(currentCoverage, daysSinceLastLive) {
+  if (currentCoverage === 0) return 'No Creative Coverage';
+  if (daysSinceLastLive == null) return 'No Live Creative';
+  if (daysSinceLastLive > HIGH_STOCK_STALE_DAYS) return `Stale Creative (${daysSinceLastLive}d)`;
+  if (currentCoverage === 1) return 'Low Creative Coverage';
+  return 'Recent Creative Coverage';
+}
+
+// The displayed Sales Performance indicator: 30D weekly average vs. a 365D
+// trailing weekly baseline (same vel365 pattern coreProducts.js already
+// uses for its own velocity strip) -- NOT the volatile 7D figure, since a
+// single week is too noisy for a High Stock product that may not move fast.
+// When the baseline itself is too thin to trust a percentage off of (a
+// near-zero trailing year), that's a signal in its own right -- lots of
+// stock against almost no sales history -- so it gets its own label rather
+// than a misleading/undefined-looking percentage.
+function salesPerformanceInfo(vel30, vel365) {
+  if (vel365 < HIGH_STOCK_MIN_RELIABLE_HIST_VEL) {
+    return { display: 'Low Sell-Through', cls: 'core-trend-down', reliable: false, pct: null };
+  }
+  const pct = Math.round((vel30 / vel365 - 1) * 100);
+  if (pct <= -HIGH_STOCK_TREND_DEADZONE_PCT) return { display: `↓ Sales ${Math.abs(pct)}%`, cls: 'core-trend-down', reliable: true, pct };
+  if (pct >= HIGH_STOCK_TREND_DEADZONE_PCT) return { display: `↑ Sales ${pct}%`, cls: 'core-trend-up', reliable: true, pct };
+  return { display: `→ Sales ${Math.abs(pct)}%`, cls: 'core-trend-flat', reliable: true, pct };
 }
 
 // Deliberately NOT coreProducts.js's buildAttention() -- High Stock products
 // may be unproven, so this never emits a flag/label/emoji implying "needs a
 // New Concept" the way Core's 🔴/🟠 badges do. It produces a continuous
-// priority score (for ranking) and up to 3 explanatory chips (for display),
-// prefixed with the SOH figure that made the product eligible in the first
-// place.
+// priority score (for ranking, using every signal available) and the fixed
+// three-field display (SOH is read straight off the product elsewhere;
+// Sales Performance and Creative Coverage come from here).
 //
 // The brief asks to surface products with BOTH inventory pressure AND a
 // creative gap -- a conjunction, not a sum. Pure addition would let a
@@ -37,21 +61,42 @@ function rankTopReasons(candidates) {
 // floored at 0.2, never zero), but a product where a real creative gap
 // exists too ranks meaningfully higher than pressure alone would.
 //
-// Sell-through is explicitly not included -- this codebase has no
-// order-quantity/COGS data anywhere to compute it from (confirmed absent
-// from apparelmagic.js), so it's left out rather than approximated.
-function scoreHighStock({ soh, onOrder, vel7, vel30, weeksCover, currentCoverage, daysSinceLastLive }) {
-  const declining = vel30 > 0 && vel7 < vel30 * HIGH_STOCK_DECLINE_RATIO;
-  const declinePct = declining ? Math.round((1 - vel7 / vel30) * 100) : 0;
+// Sell-through: this codebase has no order-received/COGS data to compute a
+// textbook sold/received rate, so it's approximated from what IS available
+// -- recent sales vs. sales+remaining stock. A low ratio means a lot of
+// stock sitting against very little recent movement.
+function scoreHighStock({ soh, onOrder, vel7, vel30, vel365, weeksCover, currentCoverage, daysSinceLastLive }) {
+  const salesPerformance = salesPerformanceInfo(vel30, vel365);
   const onOrderWeeks = vel30 > 0 ? onOrder / vel30 : (onOrder > 0 ? Infinity : 0);
   const neverLive = daysSinceLastLive == null;
 
   // Inventory-pressure terms, each capped so no single signal dominates
-  // unboundedly.
+  // unboundedly. Weeks Cover stays purely a hidden ranking input here --
+  // never surfaced in the recommendation row, per the brief.
   const weeksCoverTerm = weeksCover != null ? Math.min(Math.max(weeksCover - HIGH_STOCK_WEEKS_COVER_REF, 0) * 3, 60) : 0;
-  const declineTerm = declining ? Math.min(20 + declinePct, 60) : 0;
   const onOrderTerm = onOrder > 0 ? Math.min(15 + Math.min(onOrderWeeks, 40) * 3, 40) : 0;
-  const pressureScore = weeksCoverTerm + declineTerm + onOrderTerm;
+
+  // Historical-trend pressure -- driven by the same number behind the
+  // displayed indicator: a real decline adds pressure, and "not enough
+  // history to say" gets a comparable flat bonus of its own (likely
+  // near-dead stock, itself worth a look).
+  const historicalDeclineTerm = !salesPerformance.reliable
+    ? 45
+    : salesPerformance.pct < 0
+      ? Math.min(20 + Math.abs(salesPerformance.pct), 60)
+      : 0;
+
+  // Recent (7D vs 30D) trend -- a smaller, separate "recent sales trend"
+  // ranking signal, deliberately NOT surfaced in the display (7D is too
+  // noisy for the single visible number on a High Stock product).
+  const recentDeclining = vel30 > 0 && vel7 < vel30 * HIGH_STOCK_RECENT_DECLINE_RATIO;
+  const recentTrendTerm = recentDeclining ? 15 : 0;
+
+  // Sell-through proxy (see function comment above).
+  const sellThroughRatio = (vel30 + soh) > 0 ? vel30 / (vel30 + soh) : 0;
+  const sellThroughTerm = (1 - sellThroughRatio) * 25;
+
+  const pressureScore = weeksCoverTerm + onOrderTerm + historicalDeclineTerm + recentTrendTerm + sellThroughTerm;
 
   // Creative-gap multiplier: the stronger of a coverage-based and a
   // staleness-based signal, floored at 0.2 -- a high-pressure product with
@@ -67,35 +112,10 @@ function scoreHighStock({ soh, onOrder, vel7, vel30, weeksCover, currentCoverage
 
   const priorityScore = pressureScore * gapMultiplier;
 
-  // Display chips, ranked separately from the score -- sort order and chip
-  // selection don't need to use the same numbers. Sales trend is NOT a
-  // candidate here -- it's rendered on the frontend as its own colour-coded
-  // arrow/percentage pill (same coreCategoryTrendInfo() Core's category
-  // header already uses), computed straight from vel7/vel30 on the product,
-  // so it stays out of the ranked-reasons text to avoid showing it twice.
-  const candidates = [
-    weeksCover != null && weeksCover > HIGH_STOCK_WEEKS_COVER_REF
-      ? { weight: weeksCoverTerm, chip: `${weeksCover} wks cover` }
-      : null,
-    onOrder > 0 && onOrderWeeks > HIGH_STOCK_ON_ORDER_WEEKS_REF
-      ? { weight: onOrderTerm, chip: `+${onOrder} Incoming` }
-      : null,
-    currentCoverage === 0
-      ? { weight: 50, chip: 'No Creative Coverage' }
-      : currentCoverage === 1
-        ? { weight: 20, chip: 'Low Creative Coverage' }
-        : null,
-    neverLive
-      ? { weight: 40, chip: 'No Live Creative' }
-      : daysSinceLastLive > HIGH_STOCK_STALE_DAYS
-        ? { weight: 20, chip: `Stale ${daysSinceLastLive}d` }
-        : null,
-  ];
-  const topReasons = rankTopReasons(candidates);
-
   return {
     priority_score: priorityScore,
-    reason_chips: [`${soh} SOH`, ...topReasons.map((c) => c.chip)],
+    sales_performance: { display: salesPerformance.display, cls: salesPerformance.cls },
+    creative_coverage_label: creativeCoverageLabel(currentCoverage, daysSinceLastLive),
   };
 }
 
@@ -242,6 +262,7 @@ router.get('/', async (req, res, next) => {
       let onOrder = 0;
       let qty7 = 0;
       let qty30 = 0;
+      let qty365 = 0;
       let currentCoverage = 0;
       let lastLiveAt = null;
       const colours = [];
@@ -256,7 +277,7 @@ router.get('/', async (req, res, next) => {
         onOrder += styleOnOrder;
 
         const sales = salesByStyle.get(styleCode);
-        if (sales) { qty7 += sales.qty7; qty30 += sales.qty30; }
+        if (sales) { qty7 += sales.qty7; qty30 += sales.qty30; qty365 += sales.qty365; }
 
         currentCoverage += assetCounts.get(local.id) || 0;
 
@@ -284,6 +305,7 @@ router.get('/', async (req, res, next) => {
       const firstDetails = am.amDetails.get(firstCode);
       const vel7 = qty7; // already a weekly figure (7 days)
       const vel30 = qty30 / 30 * 7;
+      const vel365 = qty365 / 365 * 7; // same trailing-year weekly baseline pattern coreProducts.js uses
       const weeksCover = vel30 > 0 ? +(soh / vel30).toFixed(1) : null;
       const daysSinceLastLive = lastLiveAt
         ? Math.floor((Date.now() - new Date(lastLiveAt).getTime()) / 86400000)
@@ -298,6 +320,7 @@ router.get('/', async (req, res, next) => {
         on_order: am.amOnOrder ? onOrder : null,
         vel7: +vel7.toFixed(1),
         vel30: +vel30.toFixed(1),
+        vel365: +vel365.toFixed(1),
         weeks_cover: weeksCover,
         current_coverage: currentCoverage,
         days_since_last_creative: daysSinceLastLive,
@@ -305,16 +328,17 @@ router.get('/', async (req, res, next) => {
     }).filter(Boolean);
 
     const products = rawProducts.map((p) => {
-      const { priority_score, reason_chips } = scoreHighStock({
+      const { priority_score, sales_performance, creative_coverage_label } = scoreHighStock({
         soh: p.soh,
         onOrder: p.on_order || 0,
         vel7: p.vel7,
         vel30: p.vel30,
+        vel365: p.vel365,
         weeksCover: p.weeks_cover,
         currentCoverage: p.current_coverage,
         daysSinceLastLive: p.days_since_last_creative,
       });
-      return { ...p, priority_score, reason_chips };
+      return { ...p, priority_score, sales_performance, creative_coverage_label };
     });
     products.sort((a, b) => b.priority_score - a.priority_score);
 
