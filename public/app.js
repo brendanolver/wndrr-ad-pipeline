@@ -1927,10 +1927,14 @@ function coreCategoryTrendInfo(categoryName) {
     : null;
   if (!row) return { display: '—', cls: 'core-trend-flat', title: 'No Sales Cadence data for this category' };
   const title = `LY MTD: ${row.last_year_units} · This MTD: ${row.this_period_units}`;
-  if (row.pct_change == null) return { display: 'New', cls: 'core-trend-up', title };
-  if (row.pct_change > 0) return { display: `↗ ${row.pct_change}%`, cls: 'core-trend-up', title };
-  if (row.pct_change < 0) return { display: `↘ ${Math.abs(row.pct_change)}%`, cls: 'core-trend-down', title };
-  return { display: '→ 0%', cls: 'core-trend-flat', title };
+  // Lead with the actual unit figures (last year -> this year), not just
+  // the percentage -- easier to see how you're actually tracking, not just
+  // the direction of travel.
+  const units = `${row.last_year_units} → ${row.this_period_units}`;
+  if (row.pct_change == null) return { display: `${units} (New)`, cls: 'core-trend-up', title };
+  if (row.pct_change > 0) return { display: `${units} (↗${row.pct_change}%)`, cls: 'core-trend-up', title };
+  if (row.pct_change < 0) return { display: `${units} (↘${Math.abs(row.pct_change)}%)`, cls: 'core-trend-down', title };
+  return { display: `${units} (→0%)`, cls: 'core-trend-flat', title };
 }
 
 function coreShootCategoryRowHtml(cat, selectedCodes) {
