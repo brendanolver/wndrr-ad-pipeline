@@ -331,9 +331,8 @@ ALTER TABLE creative_assets ADD CONSTRAINT creative_assets_status_check
 -- Shoot This Week item -- previously a single hardcoded default ('Mark')
 -- in the frontend. Exactly one row is_default at a time (enforced by the
 -- partial unique index below); the Shoot This Week modal's creator
--- dropdown pre-selects it, and sample-size defaults are still looked up
--- by creator name (app.js's CONTENT_CREATOR_SIZE_DEFAULTS), unaffected by
--- this table.
+-- dropdown pre-selects it, and (once the sizes below are set) auto-fills
+-- each colourway's size control from this same row.
 CREATE TABLE IF NOT EXISTS content_creators (
   id SERIAL PRIMARY KEY,
   name VARCHAR(255) UNIQUE NOT NULL,
@@ -342,3 +341,20 @@ CREATE TABLE IF NOT EXISTS content_creators (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_content_creators_one_default ON content_creators(is_default) WHERE is_default;
 INSERT INTO content_creators (name, is_default) VALUES ('Mark', true) ON CONFLICT (name) DO NOTHING;
+
+-- Per-creator default sample size, by garment shape -- replaces the
+-- hardcoded CONTENT_CREATOR_SIZE_DEFAULTS object app.js used to key off
+-- creator name. A colourway's own resolved size list still decides what's
+-- actually selectable; these are just what to pre-select when a match is
+-- found (see app.js's defaultSizeForColourway). All nullable -- a creator
+-- with no sizes set here simply gets no size pre-filled, same graceful
+-- fallback as before.
+ALTER TABLE content_creators ADD COLUMN IF NOT EXISTS default_top_size VARCHAR(20);
+ALTER TABLE content_creators ADD COLUMN IF NOT EXISTS default_bottom_alpha_size VARCHAR(20);
+ALTER TABLE content_creators ADD COLUMN IF NOT EXISTS default_bottom_waist_size VARCHAR(20);
+-- One-time backfill of Mark's sizes to match the values that used to be
+-- hardcoded -- guarded so it never overwrites a value someone has since
+-- set via Settings.
+UPDATE content_creators SET
+  default_top_size = 'Small', default_bottom_alpha_size = 'Small', default_bottom_waist_size = '30'
+  WHERE name = 'Mark' AND default_top_size IS NULL AND default_bottom_alpha_size IS NULL AND default_bottom_waist_size IS NULL;

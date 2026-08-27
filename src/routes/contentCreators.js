@@ -50,6 +50,27 @@ router.put('/:id', async (req, res, next) => {
   }
 });
 
+// A full replace of all three size fields at once (the Settings form
+// always submits them together) rather than a partial update -- an empty
+// string clears a field back to "no default for this garment shape."
+router.put('/:id/sizes', async (req, res, next) => {
+  try {
+    const { default_top_size, default_bottom_alpha_size, default_bottom_waist_size } = req.body || {};
+    const norm = (v) => (v && String(v).trim() ? String(v).trim() : null);
+
+    const result = await pool.query(
+      `UPDATE content_creators SET
+         default_top_size = $1, default_bottom_alpha_size = $2, default_bottom_waist_size = $3
+       WHERE id = $4 RETURNING *`,
+      [norm(default_top_size), norm(default_bottom_alpha_size), norm(default_bottom_waist_size), req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Content creator not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.put('/:id/default', async (req, res, next) => {
   const client = await pool.connect();
   try {
