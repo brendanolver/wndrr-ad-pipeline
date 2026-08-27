@@ -20,6 +20,7 @@ const { getCached, cacheStatus } = require('./amCache');
 const STOCK_TTL = 45 * 60 * 1000;
 const ON_ORDER_TTL = 45 * 60 * 1000;
 const CATALOGUE_TTL = 6 * 60 * 60 * 1000;
+const SIZE_RANGES_TTL = 24 * 60 * 60 * 1000; // size ranges essentially never change
 
 const AM_SUBDOMAIN = process.env.AM_SUBDOMAIN;
 const AM_TOKEN = process.env.AM_TOKEN;
@@ -312,6 +313,10 @@ async function fetchStyleCatalogueUncached() {
     const description = (row.description || '').trim();
     const dashIdx = description.lastIndexOf(' - ');
     const productName = (dashIdx >= 0 ? description.slice(0, dashIdx) : description).trim() || null;
+    // The segment after the last " - " in description is conventionally the
+    // colourway name (e.g. "Pulse Heavy Weight Tee - Faded Black") -- kept
+    // separate from productName rather than re-parsed by every caller.
+    const colourNameFromDescription = dashIdx >= 0 ? description.slice(dashIdx + 3).trim() || null : null;
     const midCode = (row.mid_code || '').trim();
     const launchDateRaw = midCode && midCode !== '0' ? midCode : null;
 
@@ -325,9 +330,66 @@ async function fetchStyleCatalogueUncached() {
       // (demandplanning's per-style AM product lookup) -- distinct from
       // `group` (used for isCore above). '' when AM has no category set.
       category: (row.category || '').trim().toUpperCase(),
+      // Unverified against live WNDRR AM data (see resolveColourLabel/
+      // resolveStyleSizing) -- read defensively, never assumed present.
+      colorCode: row.color_code != null ? String(row.color_code).trim() || null : null,
+      sizeRangeId: row.size_range_id != null ? String(row.size_range_id).trim() || null : null,
+      colourNameFromDescription,
     });
   }
-  return map; // Map<style_code, { productName, imageUrl, launchDateRaw, launchDate, isCore, category }>
+  return map; // Map<style_code, { productName, imageUrl, launchDateRaw, launchDate, isCore, category, colorCode, sizeRangeId, colourNameFromDescription }>
+}
+
+// Resolves a display-friendly colour name for a style, falling back to null
+// (caller shows the raw style code instead) when AM has neither a
+// description-derived colour segment nor a color_code. Unverified field
+// names -- see the module-level caveat on fetchStyleCatalogueUncached.
+function resolveColourLabel(amDetails, styleCode) {
+  const details = amDetails ? amDetails.get(styleCode) : null;
+  if (!details) return null;
+  return details.colourNameFromDescription || details.colorCode || null;
+}
+
+// Resolves the sizes selectable for a style, plus whether they read as a
+// waist-measurement range (every value parses as a plain integer, e.g.
+// "28","30","32") or an alpha range (e.g. "S","M","L") -- computed purely
+// from the observed size strings rather than a hardcoded assumption, so it
+// degrades safely for any product/account where size_range_id isn't
+// resolvable. Returns { sizes: [], system: null } when nothing resolves.
+function resolveStyleSizing(amDetails, sizeRanges, styleCode) {
+  const details = amDetails ? amDetails.get(styleCode) : null;
+  const rangeId = details ? details.sizeRangeId : null;
+  const range = rangeId && sizeRanges ? sizeRanges.get(rangeId) : null;
+  const sizes = range ? range.sizes : [];
+  if (!sizes.length) return { sizes: [], system: null };
+  const system = sizes.every((s) => /^\d+$/.test(s)) ? 'waist' : 'alpha';
+  return { sizes, system };
+}
+
+// Dedicated size-range entity -- not currently called anywhere else in this
+// codebase. Each row is one named size range (e.g. "Mens Alpha", "Waist
+// 28-40") with its ordered size slots in size_01..size_16 (unused slots are
+// empty strings, filtered out here). Unverified field names -- see the
+// module-level caveat on fetchStyleCatalogueUncached.
+async function getSizeRanges() {
+  return getCached('sizeRanges', SIZE_RANGES_TTL, fetchSizeRangesUncached);
+}
+
+async function fetchSizeRangesUncached() {
+  const rows = await fetchAllPages('size_ranges', {});
+  const map = new Map();
+  for (const row of rows) {
+    const id = row.id != null ? String(row.id).trim() : null;
+    if (!id) continue;
+    const sizes = [];
+    for (let i = 1; i <= 16; i++) {
+      const key = `size_${String(i).padStart(2, '0')}`;
+      const val = (row[key] || '').trim();
+      if (val) sizes.push(val);
+    }
+    map.set(id, { name: (row.name || '').trim() || null, sizes });
+  }
+  return map; // Map<size_range_id, { name, sizes: string[] }>
 }
 
 // Exposed only for the debug route -- lets us see a raw response shape
@@ -345,7 +407,7 @@ async function rawRequest(endpoint, params) {
 // warming rather than blocking on it.
 function warmAmCache() {
   if (!configured()) return;
-  Promise.all([getStockByStyle(), getStyleCatalogue(), getOnOrderByStyle(), getSalesByStyle()]).catch((err) => {
+  Promise.all([getStockByStyle(), getStyleCatalogue(), getOnOrderByStyle(), getSalesByStyle(), getSizeRanges()]).catch((err) => {
     console.error('ApparelMagic cache warm-up failed (will retry on first real request):', err.message);
   });
 }
@@ -356,6 +418,7 @@ function getAmCacheStatus() {
     catalogue: cacheStatus('catalogue'),
     onOrder: cacheStatus('onOrder'),
     sales: cacheStatus('sales'),
+    sizeRanges: cacheStatus('sizeRanges'),
   };
 }
 
@@ -365,6 +428,9 @@ module.exports = {
   getStyleCatalogue,
   getOnOrderByStyle,
   getSalesByStyle,
+  getSizeRanges,
+  resolveColourLabel,
+  resolveStyleSizing,
   deriveProductCode,
   parseLaunchDate,
   rawRequest,

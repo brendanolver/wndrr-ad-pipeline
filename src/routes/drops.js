@@ -56,7 +56,7 @@ router.get('/', async (req, res, next) => {
     const drops = dropsResult.rows.map((drop) => {
       const styleRows = excludeAdExcludedStyles(stylesByDrop.get(drop.id) || [], am.amDetails);
       const coverage = sortByUrgency(
-        buildCoverage(styleRows, { assetCounts, amStock: am.amStock, amOnOrder: am.amOnOrder, amDetails: am.amDetails, rules })
+        buildCoverage(styleRows, { assetCounts, amStock: am.amStock, amOnOrder: am.amOnOrder, amDetails: am.amDetails, amSizeRanges: am.amSizeRanges, rules })
       );
       const daysUntilLaunch = Math.ceil((new Date(drop.launch_date) - new Date()) / 86400000);
       return {
@@ -219,7 +219,7 @@ router.get('/:id', async (req, res, next) => {
     const assetCounts = await getAssetCounts(stylesResult.rows.map((s) => s.id));
     const styleRows = excludeAdExcludedStyles(stylesResult.rows, am.amDetails);
     const coverage = sortByUrgency(
-      buildCoverage(styleRows, { assetCounts, amStock: am.amStock, amOnOrder: am.amOnOrder, amDetails: am.amDetails, rules })
+      buildCoverage(styleRows, { assetCounts, amStock: am.amStock, amOnOrder: am.amOnOrder, amDetails: am.amDetails, amSizeRanges: am.amSizeRanges, rules })
     );
     const daysUntilLaunch = Math.ceil((new Date(drop.launch_date) - new Date()) / 86400000);
 

@@ -207,12 +207,16 @@ router.get('/', async (req, res, next) => {
         if (liveAt && (!lastLiveAt || liveAt > lastLiveAt)) lastLiveAt = liveAt;
 
         const details = am.amDetails ? am.amDetails.get(style.style_code) : null;
+        const sizing = apparelmagic.resolveStyleSizing(am.amDetails, am.amSizeRanges, style.style_code);
         colours.push({
           style_id: style.id,
           style_code: style.style_code,
           image_url: details?.imageUrl || null,
           soh: styleSoh,
           on_order: styleOnOrder,
+          colour_label: apparelmagic.resolveColourLabel(am.amDetails, style.style_code),
+          sizes: sizing.sizes,
+          sizing_system: sizing.system,
         });
       }
 

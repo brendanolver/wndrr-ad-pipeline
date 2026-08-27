@@ -314,6 +314,10 @@ CREATE TABLE IF NOT EXISTS shoot_plan_item_styles (
   PRIMARY KEY (shoot_plan_item_id, style_id)
 );
 
+-- Physical sample size to pull for this colourway -- nullable since older
+-- rows (and any AM account where sizing can't be resolved) predate this.
+ALTER TABLE shoot_plan_item_styles ADD COLUMN IF NOT EXISTS size VARCHAR(20);
+
 -- New pre-concept-development hold state, entered automatically when
 -- Monday Planning confirms a product needs shooting -- distinct from the
 -- generic 'not_started' default and from 'awaiting_proven_concept' (which
