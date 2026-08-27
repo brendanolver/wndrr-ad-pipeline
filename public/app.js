@@ -1948,7 +1948,10 @@ function coreShootCategoryRowHtml(cat, selectedCodes) {
         <span class="core-shoot-category-count">${cat.total} product${cat.total === 1 ? '' : 's'}</span>
         <span class="core-shoot-category-stats">
           ${cat.needsAttention ? `<span class="core-shoot-stat core-shoot-stat-red">🔴 ${cat.needsAttention} needing attention</span>` : ''}
-          <span class="core-shoot-stat core-category-trend ${trend.cls}" title="${escapeHtml(trend.title)}">${trend.display}</span>
+          <span class="core-shoot-stat core-category-trend-wrap">
+            <span class="core-category-trend-label">Last Year &rarr; This Year (MTD)</span>
+            <span class="core-category-trend ${trend.cls}" title="${escapeHtml(trend.title)}">${trend.display}</span>
+          </span>
           ${cat.stale ? `<span class="core-shoot-stat">${cat.stale} stale/untested</span>` : ''}
           ${cat.selectedCount ? `<span class="core-shoot-stat core-shoot-stat-selected">✓ ${cat.selectedCount} selected this week</span>` : ''}
         </span>
