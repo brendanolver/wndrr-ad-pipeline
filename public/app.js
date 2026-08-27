@@ -113,13 +113,12 @@ document.querySelectorAll('.tab-btn').forEach((btn) => {
 // ── Load & render ────────────────────────────────────
 async function loadAll() {
   try {
-    const [board, styles, categories, dashboard, dropsRes, jobs, provenWinners, coreRes, planningSettings, shootPlan, contentCreators, highStockRes, promotions, weeklyConfirmation, salesCadence] = await Promise.all([
+    const [board, styles, categories, dashboard, dropsRes, provenWinners, coreRes, planningSettings, shootPlan, contentCreators, highStockRes, promotions, weeklyConfirmation, salesCadence] = await Promise.all([
       api('/board'),
       api('/styles'),
       api('/categories'),
       api(`/dashboard?weekOffset=${dashboardWeekOffset}`),
       api('/drops'),
-      api('/creative-jobs'),
       api('/proven-winners'),
       api('/core-products'),
       api('/planning-settings'),
@@ -137,7 +136,6 @@ async function loadAll() {
     state.drops = dropsRes.drops;
     state.amConfigured = dropsRes.apparelmagic.configured;
     state.amError = dropsRes.apparelmagic.error;
-    state.jobs = jobs;
     state.provenWinners = provenWinners;
     state.coreProducts = coreRes.products;
     state.coreWeekly = { target: coreRes.weekly_target, planned: coreRes.weekly_planned, remaining: coreRes.weekly_remaining };
@@ -360,16 +358,6 @@ document.getElementById('action-brief-builder').addEventListener('click', () => 
 });
 
 // ── Planning ─────────────────────────────────────────
-const CONCEPT_TYPE_LABELS = {
-  proven_concept: 'Proven Concept', new_concept: 'New Concept', winning_concept_iteration: 'Winning Concept Iteration',
-  product_content: 'Product Content', ugc_creator: 'UGC / Creator', static: 'Static',
-  existing_content_variation: 'Existing Content Variation', other: 'Other',
-};
-const PLANNING_STATUS_LABELS = { not_started: 'Not Started', organising: 'Organising', blocked: 'Blocked', ready_for_briefing: 'Ready for Briefing' };
-const STOCK_RESOLVED = ['not_required', 'available'];
-const TALENT_RESOLVED = ['not_required', 'internal_team', 'confirmed'];
-const LOCATION_RESOLVED = ['not_required', 'office', 'warehouse', 'studio', 'external_location', 'confirmed'];
-const PROPS_RESOLVED = ['not_required', 'organised'];
 
 function formatDate(value) {
   return value ? String(value).slice(0, 10) : null;
@@ -378,11 +366,10 @@ function formatDate(value) {
 function renderPlanning() {
   renderPlanningSummary();
   renderDropsRow();
-  renderJobsGrid();
-  populateJobDropSelect();
   loadDropSuggestions();
   renderPlanningRoute();
   renderShootPlanStep();
+  renderPlanningShootPlanSummary();
 }
 
 // ── Planning steps (Monday's guided workflow) ────────
@@ -520,36 +507,7 @@ function onDropDateChange() {
 document.getElementById('drop-launch-date').addEventListener('change', onDropDateChange);
 
 function renderPlanningSummary() {
-  const jobs = state.jobs;
-  const counts = {
-    ready: jobs.filter((j) => j.planning_status === 'ready_for_briefing').length,
-    blocked: jobs.filter((j) => j.planning_status === 'blocked').length,
-    organising: jobs.filter((j) => j.planning_status === 'organising').length,
-    not_started: jobs.filter((j) => j.planning_status === 'not_started').length,
-  };
   document.getElementById('planning-week-title').textContent = state.dashboard ? `Planning — Week ${state.dashboard.week.number}` : 'Planning';
-  document.getElementById('planning-job-summary').textContent =
-    `${jobs.length} Creative Jobs — ${counts.ready} Ready for Briefing, ${counts.blocked} Blocked, ${counts.organising} Organising, ${counts.not_started} Not Started`;
-
-  const blocked = jobs.filter((j) => j.planning_status === 'blocked');
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
-  const upcoming = jobs.filter((j) => {
-    if (!j.production_date) return false;
-    const d = new Date(j.production_date);
-    return d >= today && d <= tomorrow;
-  });
-
-  const panel = document.getElementById('planning-attention');
-  panel.style.display = blocked.length || upcoming.length ? 'grid' : 'none';
-
-  document.getElementById('attention-blocked-list').innerHTML = blocked.length
-    ? blocked.map((j) => `<div class="attention-row"><span class="attention-main">${escapeHtml(j.high_level_concept)}</span><br><span class="attention-sub">${escapeHtml(j.blocker_reason || '')}</span></div>`).join('')
-    : '<div class="attention-empty">No blocked jobs</div>';
-
-  document.getElementById('attention-upcoming-list').innerHTML = upcoming.length
-    ? upcoming.map((j) => `<div class="attention-row"><span class="attention-main">${escapeHtml(j.high_level_concept)}</span> — ${formatDate(j.production_date)}<br><span class="attention-sub">${j.readiness.ready ? 'Ready' : 'Not yet ready'}</span></div>`).join('')
-    : '<div class="attention-empty">Nothing scheduled today or tomorrow</div>';
 }
 
 // Compact, exception-based card for Step 3 (Upcoming Drops): "are we on
@@ -785,294 +743,6 @@ function cycleCoverageImage(productCode, delta) {
   renderCoverageGrid(state.currentDrop.coverage);
 }
 
-function checklistLine(label, resolved, statusText, notes) {
-  const icon = resolved ? '<span class="ok">✓</span>' : '<span class="warn">⚠</span>';
-  const detail = notes ? `${statusText} — ${notes}` : statusText;
-  return `<div>${icon} ${label}: ${escapeHtml(detail)}</div>`;
-}
-
-function renderJobsGrid() {
-  const grid = document.getElementById('jobs-grid');
-  if (!state.jobs.length) {
-    grid.innerHTML = '<div class="attention-empty">No creative jobs yet. Plan one from a drop\'s coverage gap, or create one directly.</div>';
-    return;
-  }
-  grid.innerHTML = state.jobs.map((j) => {
-    const products = j.products.map((p) => p.style_code).join(', ') || 'No product linked';
-    return `
-    <div class="job-card" data-job-id="${j.id}">
-      <div class="job-card-concept">${escapeHtml(j.high_level_concept)}</div>
-      <div class="job-card-products">${escapeHtml(products)} · ${CONCEPT_TYPE_LABELS[j.concept_type]}</div>
-      <div class="job-card-meta">
-        <span>Owner: ${escapeHtml(j.owner || '—')}</span>
-        <span>Production: ${formatDate(j.production_date) || '—'}</span>
-        <span>Expected output: ${j.expected_ad_variations ?? '—'} ad variations</span>
-      </div>
-      <div class="job-checklist">
-        ${checklistLine('Stock', STOCK_RESOLVED.includes(j.stock_status), j.stock_status.replace(/_/g, ' '), j.stock_notes)}
-        ${checklistLine('Talent', TALENT_RESOLVED.includes(j.talent_status), j.talent_status.replace(/_/g, ' '), j.talent_assignee)}
-        ${checklistLine('Location', LOCATION_RESOLVED.includes(j.location_status), j.location_status.replace(/_/g, ' '), j.location_notes)}
-        ${checklistLine('Props', PROPS_RESOLVED.includes(j.props_status), j.props_status.replace(/_/g, ' '), j.props_notes)}
-      </div>
-      <div class="job-status-row">
-        <span class="job-status-pill ${j.planning_status}">${PLANNING_STATUS_LABELS[j.planning_status]}</span>
-      </div>
-      ${j.blocker_reason ? `<div class="job-blocker-line">Blocker: ${escapeHtml(j.blocker_reason)}</div>` : ''}
-    </div>`;
-  }).join('');
-  grid.querySelectorAll('.job-card').forEach((card) => {
-    card.addEventListener('click', () => openJobModal(state.jobs.find((j) => j.id === Number(card.dataset.jobId))));
-  });
-}
-
-function populateJobDropSelect() {
-  const sel = document.getElementById('job-drop-id');
-  sel.innerHTML = '<option value="">— none —</option>' + state.drops.map((d) => `<option value="${d.id}">${escapeHtml(d.name || 'Untitled')}</option>`).join('');
-}
-
-function populateJobStyleSelect(selectedIds = []) {
-  const sel = document.getElementById('job-style-ids');
-  sel.innerHTML = state.styles.map((s) => `<option value="${s.id}" ${selectedIds.includes(s.id) ? 'selected' : ''}>${s.style_code} — ${escapeHtml(s.name)}</option>`).join('');
-}
-
-let jobModalJob = null;
-
-function openJobModal(job = null, preset = {}) {
-  jobModalJob = job;
-  document.getElementById('job-modal-title').textContent = job ? 'Edit Creative Job' : 'New Creative Job';
-  document.getElementById('job-id').value = job ? job.id : '';
-  populateJobStyleSelect(job ? job.products.map((p) => p.style_id) : preset.styleIds || []);
-  populateStockRequestStyleSelect(job);
-  renderStockRequests(job ? job.stock_requests : []);
-  hideAddStockRequestRow();
-  document.getElementById('job-drop-id').value = job ? job.drop_id || '' : preset.dropId || '';
-  document.getElementById('job-concept').value = job ? job.high_level_concept : (preset.concept || '');
-  document.getElementById('job-status-quick').value = job && ['not_started', 'organising'].includes(job.planning_status) ? job.planning_status : 'not_started';
-  document.getElementById('job-concept-type').value = job ? job.concept_type : (preset.conceptType || 'other');
-  document.getElementById('job-expected-variations').value = job && job.expected_ad_variations != null ? job.expected_ad_variations : '';
-  document.getElementById('job-deliverables').value = (job && job.expected_deliverables) || '';
-  document.getElementById('job-owner').value = (job && job.owner) || '';
-  document.getElementById('job-production-date').value = job && job.production_date ? job.production_date.slice(0, 10) : '';
-  document.getElementById('job-production-session').value = (job && job.production_session) || '';
-  document.getElementById('job-ship-by-date').value = job && job.ship_by_date ? job.ship_by_date.slice(0, 10) : '';
-  document.getElementById('job-stock-status').value = job ? job.stock_status : 'not_required';
-  document.getElementById('job-stock-notes').value = (job && job.stock_notes) || '';
-  document.getElementById('job-talent-status').value = job ? job.talent_status : 'not_required';
-  document.getElementById('job-talent-assignee').value = (job && job.talent_assignee) || '';
-  document.getElementById('job-location-status').value = job ? job.location_status : 'not_required';
-  document.getElementById('job-location-notes').value = (job && job.location_notes) || '';
-  document.getElementById('job-props-status').value = job ? job.props_status : 'not_required';
-  document.getElementById('job-props-notes').value = (job && job.props_notes) || '';
-  document.getElementById('job-equipment').value = job && job.equipment_needed ? job.equipment_needed.join(', ') : '';
-  document.getElementById('job-logistics-notes').value = (job && job.logistics_notes) || '';
-  document.getElementById('job-is-blocked').checked = Boolean(job && job.blocker_reason);
-  document.getElementById('job-blocker-reason').value = (job && job.blocker_reason) || '';
-  document.getElementById('job-blocker-owner').value = (job && job.blocker_owner) || '';
-  document.getElementById('job-blocker-resolution').value = job && job.blocker_expected_resolution ? job.blocker_expected_resolution.slice(0, 10) : '';
-  document.getElementById('job-delete-btn').style.display = job ? 'inline-block' : 'none';
-
-  applyJobReadiness(job);
-
-  openModal('job-modal');
-}
-
-function applyJobReadiness(job) {
-  const readyBtn = document.getElementById('job-ready-btn');
-  const note = document.getElementById('job-readiness-note');
-  if (job && job.planning_status !== 'ready_for_briefing') {
-    readyBtn.style.display = job.readiness.ready ? 'inline-block' : 'none';
-    const failed = Object.entries(job.readiness.checks).filter(([, v]) => !v).map(([k]) => k.replace(/_/g, ' '));
-    note.textContent = job.readiness.ready ? '' : `Not ready for Briefing yet — unresolved: ${failed.join(', ')}`;
-  } else {
-    readyBtn.style.display = 'none';
-    note.textContent = job && job.planning_status === 'ready_for_briefing' ? '✓ Ready for Briefing' : '';
-  }
-}
-
-function populateStockRequestStyleSelect(job) {
-  const sel = document.getElementById('stock-request-style');
-  const products = job ? job.products : [];
-  sel.innerHTML = products.map((p) => `<option value="${p.style_id}">${p.style_code} — ${escapeHtml(p.name)}</option>`).join('');
-}
-
-function renderStockRequests(requests = []) {
-  const list = document.getElementById('job-stock-requests-list');
-  if (!requests.length) {
-    list.innerHTML = '<div class="stock-request-empty">No stock needs added yet.</div>';
-    return;
-  }
-  list.innerHTML = requests.map((r) => `
-    <div class="stock-request-row ${r.status === 'pulled' ? 'is-pulled' : ''}">
-      <label class="checkbox-label">
-        <input type="checkbox" ${r.status === 'pulled' ? 'checked' : ''} onchange="toggleStockRequestPulled(${r.id}, this.checked)">
-      </label>
-      <span class="stock-request-desc">${escapeHtml(r.style_code)} · ${escapeHtml(r.size)} × ${r.quantity}${r.notes ? ` — ${escapeHtml(r.notes)}` : ''}</span>
-      <button type="button" class="stock-request-remove" onclick="deleteStockRequest(${r.id})" title="Remove">&times;</button>
-    </div>
-  `).join('');
-}
-
-function showAddStockRequestRow() {
-  if (!jobModalJob) return toast('Save the job first before adding stock needs', true);
-  if (!jobModalJob.products.length) return toast('Add at least one product to this job first', true);
-  document.getElementById('job-stock-request-form').style.display = 'flex';
-}
-
-function hideAddStockRequestRow() {
-  const form = document.getElementById('job-stock-request-form');
-  if (form) form.style.display = 'none';
-}
-
-function applyStockRequestUpdate(updated) {
-  jobModalJob = updated;
-  renderStockRequests(updated.stock_requests);
-  document.getElementById('job-stock-status').value = updated.stock_status;
-  applyJobReadiness(updated);
-  const idx = state.jobs.findIndex((j) => j.id === updated.id);
-  if (idx !== -1) state.jobs[idx] = updated;
-  renderJobsGrid();
-}
-
-async function addStockRequest() {
-  const jobId = jobModalJob.id;
-  const styleId = Number(document.getElementById('stock-request-style').value);
-  const size = document.getElementById('stock-request-size').value;
-  const quantity = Number(document.getElementById('stock-request-qty').value) || 1;
-  const notes = document.getElementById('stock-request-notes').value || null;
-  if (!styleId) return toast('Add at least one product to this job first', true);
-  try {
-    const updated = await api(`/creative-jobs/${jobId}/stock-requests`, {
-      method: 'POST',
-      body: JSON.stringify({ style_id: styleId, size, quantity, notes }),
-    });
-    applyStockRequestUpdate(updated);
-    document.getElementById('stock-request-notes').value = '';
-    document.getElementById('stock-request-qty').value = '1';
-    hideAddStockRequestRow();
-    toast('Stock need added');
-  } catch (e) {
-    toast(e.message, true);
-  }
-}
-
-async function toggleStockRequestPulled(reqId, checked) {
-  const jobId = jobModalJob.id;
-  try {
-    const updated = await api(`/creative-jobs/${jobId}/stock-requests/${reqId}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ status: checked ? 'pulled' : 'needed' }),
-    });
-    applyStockRequestUpdate(updated);
-  } catch (e) {
-    toast(e.message, true);
-  }
-}
-
-async function deleteStockRequest(reqId) {
-  const jobId = jobModalJob.id;
-  try {
-    const updated = await api(`/creative-jobs/${jobId}/stock-requests/${reqId}`, { method: 'DELETE' });
-    applyStockRequestUpdate(updated);
-  } catch (e) {
-    toast(e.message, true);
-  }
-}
-
-async function saveJob() {
-  const id = document.getElementById('job-id').value;
-  const styleIds = Array.from(document.getElementById('job-style-ids').selectedOptions).map((o) => Number(o.value));
-  const equipment = document.getElementById('job-equipment').value.split(',').map((s) => s.trim()).filter(Boolean);
-  const payload = {
-    drop_id: document.getElementById('job-drop-id').value || null,
-    style_ids: styleIds,
-    high_level_concept: document.getElementById('job-concept').value,
-    concept_type: document.getElementById('job-concept-type').value,
-    expected_ad_variations: document.getElementById('job-expected-variations').value || null,
-    expected_deliverables: document.getElementById('job-deliverables').value || null,
-    owner: document.getElementById('job-owner').value || null,
-    production_date: document.getElementById('job-production-date').value || null,
-    production_session: document.getElementById('job-production-session').value || null,
-    ship_by_date: document.getElementById('job-ship-by-date').value || null,
-    stock_status: document.getElementById('job-stock-status').value,
-    stock_notes: document.getElementById('job-stock-notes').value || null,
-    talent_status: document.getElementById('job-talent-status').value,
-    talent_assignee: document.getElementById('job-talent-assignee').value || null,
-    location_status: document.getElementById('job-location-status').value,
-    location_notes: document.getElementById('job-location-notes').value || null,
-    props_status: document.getElementById('job-props-status').value,
-    props_notes: document.getElementById('job-props-notes').value || null,
-    equipment_needed: equipment,
-    logistics_notes: document.getElementById('job-logistics-notes').value || null,
-  };
-  if (!payload.high_level_concept.trim()) return toast('High-level concept is required', true);
-
-  try {
-    let jobId = id;
-    if (id) {
-      await api(`/creative-jobs/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
-    } else {
-      const created = await api('/creative-jobs', { method: 'POST', body: JSON.stringify(payload) });
-      jobId = created.id;
-    }
-    const quickStatus = document.getElementById('job-status-quick').value;
-    const current = state.jobs.find((j) => j.id === Number(jobId));
-    if (!current || (current.planning_status !== quickStatus && ['not_started', 'organising'].includes(current.planning_status || 'not_started'))) {
-      await api(`/creative-jobs/${jobId}/status`, { method: 'PATCH', body: JSON.stringify({ status: quickStatus }) }).catch(() => {});
-    }
-    closeModal('job-modal');
-    toast('Creative job saved');
-    loadAll();
-  } catch (e) {
-    toast(e.message, true);
-  }
-}
-
-async function saveJobBlocker() {
-  const id = document.getElementById('job-id').value;
-  if (!id) return toast('Save the job first before setting a blocker', true);
-  const isBlocked = document.getElementById('job-is-blocked').checked;
-  const payload = {
-    blocker_reason: isBlocked ? document.getElementById('job-blocker-reason').value : null,
-    blocker_owner: isBlocked ? document.getElementById('job-blocker-owner').value : null,
-    blocker_expected_resolution: isBlocked ? document.getElementById('job-blocker-resolution').value || null : null,
-  };
-  if (isBlocked && !payload.blocker_reason.trim()) return toast('Blocker reason is required', true);
-  try {
-    await api(`/creative-jobs/${id}/blocker`, { method: 'PATCH', body: JSON.stringify(payload) });
-    closeModal('job-modal');
-    toast('Blocker updated');
-    loadAll();
-  } catch (e) {
-    toast(e.message, true);
-  }
-}
-
-async function markJobReadyForBriefing() {
-  const id = document.getElementById('job-id').value;
-  try {
-    await api(`/creative-jobs/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status: 'ready_for_briefing' }) });
-    closeModal('job-modal');
-    toast('Marked Ready for Briefing');
-    loadAll();
-  } catch (e) {
-    toast(e.message, true);
-  }
-}
-
-async function deleteJob() {
-  const id = document.getElementById('job-id').value;
-  if (!id) return;
-  if (!(await confirmDialog('Delete this creative job? This cannot be undone.'))) return;
-  try {
-    await api(`/creative-jobs/${id}`, { method: 'DELETE' });
-    closeModal('job-modal');
-    toast('Creative job deleted');
-    loadAll();
-  } catch (e) {
-    toast(e.message, true);
-  }
-}
-
 // ── Product view: per-colour breakdown + existing concepts ──
 const ASSET_STATUS_COLORS = {
   not_started: ['var(--surface2)', 'var(--text-muted)'],
@@ -1127,7 +797,7 @@ async function loadProductView(dropId, productCode) {
 
     const planBtn = document.getElementById('product-view-plan-btn');
     planBtn.style.display = group.creative_gap > 0 || group.creative_gap === null ? 'inline-block' : 'none';
-    planBtn.onclick = () => openJobModal(null, { styleIds: group.styles.map((s) => s.style_id), dropId });
+    planBtn.onclick = () => openAssetModal(null, { presetStyleIds: group.styles.map((s) => s.style_id) });
 
     const styleIds = group.styles.map((s) => s.style_id).join(',');
     const assets = await api(`/creative-assets?style_ids=${styleIds}`);
@@ -1290,8 +960,8 @@ function fulfillWithNewAsset(slotId, conceptName, source, defaultFormat, default
 // Link/unlink/remove all reload the whole product view (drop + plan +
 // existing-concepts) rather than hand-patching local state -- matches this
 // app's established pattern of a full reload after any mutation (saveAsset,
-// saveJob, etc.), and keeps the "Required Concept #N" badge on the linked
-// asset's Existing Concepts card in sync too.
+// etc.), and keeps the "Required Concept #N" badge on the linked asset's
+// Existing Concepts card in sync too.
 async function linkExistingAsset(slotId, assetId) {
   try {
     await api(`/drop-product-plans/${currentProductPlan.plan.id}/slots/${slotId}/fulfill`, {
@@ -1360,7 +1030,6 @@ async function addNewConceptSlot() {
 
 document.getElementById('product-plan-add-new-btn').addEventListener('click', showAddNewConceptForm);
 
-document.getElementById('new-job-btn').addEventListener('click', () => openJobModal(null));
 document.getElementById('new-drop-btn').addEventListener('click', () => openDropModal(null));
 
 // drop=null for a fresh manual drop (name optional -- most drops now arrive
@@ -2194,10 +1863,10 @@ function shootThisWeekForHighStock(styleCode) {
 function planNewConceptForCore(productCode) {
   const product = state.coreProducts.find((p) => p.product_code === productCode);
   if (!product) return;
-  openJobModal(null, {
-    styleIds: product.colours.map((c) => c.style_id),
-    concept: `New Concept — ${product.product_name}`,
-    conceptType: 'new_concept',
+  openAssetModal(null, {
+    presetStyleIds: product.colours.map((c) => c.style_id),
+    presetConceptName: `New Concept — ${product.product_name}`,
+    defaultClassification: 'new_experimental',
   });
 }
 
@@ -2531,28 +2200,46 @@ function shootPlanProductRowHtml(item) {
     </div>`;
 }
 
+// Shared by the dedicated "Shoot Plan" step and the persistent summary
+// below every Planning step -- both are just this same state.shootPlan
+// list, grouped by where each product was added from.
+function shootPlanGroupedHtml(emptyMessage) {
+  if (!state.shootPlan.length) {
+    return `<div class="attention-empty">${emptyMessage}</div>`;
+  }
+  const bySource = new Map();
+  for (const item of state.shootPlan) {
+    const key = SHOOT_PLAN_SOURCE_ORDER.includes(item.source) ? item.source : 'other';
+    if (!bySource.has(key)) bySource.set(key, []);
+    bySource.get(key).push(item);
+  }
+  return SHOOT_PLAN_SOURCE_ORDER
+    .filter((key) => bySource.has(key))
+    .map((key) => `
+      <div class="shoot-plan-source-group">
+        <div class="shoot-plan-source-label">${SHOOT_PLAN_SOURCE_LABELS[key]}</div>
+        ${bySource.get(key).map(shootPlanProductRowHtml).join('')}
+      </div>`)
+    .join('');
+}
+
+// Persistent across every Planning step (not just the "Shoot Plan" tab) --
+// a product added at any stage (Core, High Stock, Upcoming Drops,
+// Promotions) shows up here immediately, so you don't have to switch tabs
+// to see what's already selected for the week.
+function renderPlanningShootPlanSummary() {
+  const count = state.shootPlan.length;
+  document.getElementById('planning-shoot-plan-summary-count').textContent =
+    `${count} product${count === 1 ? '' : 's'} selected`;
+  document.getElementById('planning-shoot-plan-summary-list').innerHTML =
+    shootPlanGroupedHtml('Nothing selected yet this week — use + Shoot This Week on a Core, High Stock, Upcoming Drop, or Promotion product to add one.');
+}
+
 function renderShootPlanStep() {
   document.getElementById('shoot-plan-step-count').textContent = `${state.shootPlan.length} Product${state.shootPlan.length === 1 ? '' : 's'} Selected`;
 
-  const grouped = document.getElementById('shoot-plan-grouped');
-  if (!state.shootPlan.length) {
-    grouped.innerHTML = '<div class="attention-empty">Nothing planned yet this week — use + Shoot This Week on a Core, High Stock, Upcoming Drop, or Promotion product to add one.</div>';
-  } else {
-    const bySource = new Map();
-    for (const item of state.shootPlan) {
-      const key = SHOOT_PLAN_SOURCE_ORDER.includes(item.source) ? item.source : 'other';
-      if (!bySource.has(key)) bySource.set(key, []);
-      bySource.get(key).push(item);
-    }
-    grouped.innerHTML = SHOOT_PLAN_SOURCE_ORDER
-      .filter((key) => bySource.has(key))
-      .map((key) => `
-        <div class="shoot-plan-source-group">
-          <div class="shoot-plan-source-label">${SHOOT_PLAN_SOURCE_LABELS[key]}</div>
-          ${bySource.get(key).map(shootPlanProductRowHtml).join('')}
-        </div>`)
-      .join('');
-  }
+  document.getElementById('shoot-plan-grouped').innerHTML =
+    shootPlanGroupedHtml('Nothing planned yet this week — use + Shoot This Week on a Core, High Stock, Upcoming Drop, or Promotion product to add one.');
 
   // Only "Bring from Warehouse" items contribute -- "In Office" samples
   // never need a pull-list entry, per the brief.

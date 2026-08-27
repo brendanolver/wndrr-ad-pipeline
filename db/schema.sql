@@ -109,6 +109,14 @@ INSERT INTO creative_target_rules (soh_min, soh_max, required_creatives) VALUES
   (401, NULL, 10)
 ON CONFLICT (soh_min) DO NOTHING;
 
+-- RETIRED: the Creative Jobs feature (modal, +New Creative Job button, the
+-- persistent grid on the Planning page) has been removed from the app in
+-- favour of the This Week's Shoot Plan summary (state.shootPlan), which
+-- covers the same "what are we planning to shoot/produce" need with a
+-- simpler, always-visible view. These tables are kept as-is (this codebase
+-- never drops tables/columns) so any historical rows already in them are
+-- preserved, but nothing in the app reads from or writes to them anymore.
+--
 -- A Creative Job is the Planning-stage unit of work: operational prep for a
 -- concept, before it's briefed. It is NOT a Creative Asset (Phase 1's Kanban
 -- entity) -- a Job only becomes tracked production work once it's briefed,
