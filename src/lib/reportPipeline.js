@@ -154,6 +154,28 @@ function sumUnitsInWindow(dayMap, startMs, endMs) {
   return Math.round(total);
 }
 
+// Downloads + parses the shopify_sales report once, reduced to just the
+// fields either consumer (tier cohort math, category sales cadence) needs --
+// cached so both derive from a single fetch+parse per TTL window rather than
+// each downloading and re-parsing what can be a multi-MB CSV.
+async function fetchSalesRowsUncached() {
+  const csvText = await downloadReportCsv('shopify_sales');
+  const raw = parseCsv(csvText);
+  const rows = [];
+  for (const r of raw) {
+    const sku = (r['Product variant SKU'] || '').trim();
+    const day = (r['Day'] || '').trim();
+    const qty = parseFloat(r['Quantity ordered'] || 0) || 0;
+    if (!sku || !day || qty <= 0) continue;
+    rows.push({ sku, day, qty, category: (r['Product type'] || '').trim().toUpperCase() });
+  }
+  return rows;
+}
+
+async function getSalesRows() {
+  return getCached('pipelineSalesRows', TIER_TTL, fetchSalesRowsUncached);
+}
+
 // Verbatim port of demandplanning's buildPerfData (index.html ~10486-10727),
 // keyed by AM style_code instead of Shopify productName+'||'+colour -- our
 // style_code already IS the colourway-level identity demand-v2 reconstructs
@@ -165,18 +187,13 @@ function sumUnitsInWindow(dayMap, startMs, endMs) {
 // which will themselves be High Stock eligible. Partial data would corrupt
 // the averages, so this always processes the full shopify_sales CSV.
 async function buildStyleTiersUncached() {
-  const csvText = await downloadReportCsv('shopify_sales');
-  const rows = parseCsv(csvText);
+  const rows = await getSalesRows();
 
   const salesBySkuDay = new Map(); // sku -> Map<day, qty>
   for (const r of rows) {
-    const sku = (r['Product variant SKU'] || '').trim();
-    const day = (r['Day'] || '').trim();
-    const qty = parseFloat(r['Quantity ordered'] || 0) || 0;
-    if (!sku || !day || qty <= 0) continue;
-    if (!salesBySkuDay.has(sku)) salesBySkuDay.set(sku, new Map());
-    const dayMap = salesBySkuDay.get(sku);
-    dayMap.set(day, (dayMap.get(day) || 0) + qty);
+    if (!salesBySkuDay.has(r.sku)) salesBySkuDay.set(r.sku, new Map());
+    const dayMap = salesBySkuDay.get(r.sku);
+    dayMap.set(r.day, (dayMap.get(r.day) || 0) + r.qty);
   }
 
   const styleSkus = new Map(); // style_code -> sku[]
@@ -274,6 +291,69 @@ async function getStyleTiers() {
   return getCached('pipelineStyleTiers', TIER_TTL, buildStyleTiersUncached);
 }
 
+// "This month to date vs the same days last year" per category -- the exact
+// comparison demand-v2's own Sales Cadence view highlights (its "LY MTD vs
+// THIS MTD" column), just without the full 12-month grid. Computed fresh
+// from the already-cached getSalesRows() (cheap: a filter + sum), so this
+// carries no cache of its own -- the expensive download+parse is shared with
+// the tier computation via getSalesRows()'s own TTL.
+function clampToMonth(year, month, day) {
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  return new Date(year, month, Math.min(day, daysInMonth));
+}
+
+async function buildCategorySalesCadence() {
+  const rows = await getSalesRows();
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const thisStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  const thisEnd = today;
+  const lastYearStart = new Date(today.getFullYear() - 1, today.getMonth(), 1);
+  const lastYearEnd = clampToMonth(today.getFullYear() - 1, today.getMonth(), today.getDate());
+
+  const totals = new Map(); // category -> { thisPeriod, lastYear }
+  function inWindow(day, start, end) {
+    const t = new Date(day).setHours(0, 0, 0, 0);
+    return t >= start.getTime() && t <= end.getTime();
+  }
+  for (const r of rows) {
+    if (!totals.has(r.category)) totals.set(r.category, { thisPeriod: 0, lastYear: 0 });
+    const entry = totals.get(r.category);
+    if (inWindow(r.day, thisStart, thisEnd)) entry.thisPeriod += r.qty;
+    if (inWindow(r.day, lastYearStart, lastYearEnd)) entry.lastYear += r.qty;
+  }
+
+  const categories = [...totals.entries()]
+    .filter(([category]) => category) // drop rows with no Product type set
+    .map(([category, { thisPeriod, lastYear }]) => ({
+      category,
+      this_period_units: Math.round(thisPeriod),
+      last_year_units: Math.round(lastYear),
+      pct_change: lastYear > 0 ? Math.round(((thisPeriod - lastYear) / lastYear) * 100) : (thisPeriod > 0 ? null : 0),
+    }))
+    .sort((a, b) => a.category.localeCompare(b.category));
+
+  const totalThis = categories.reduce((sum, c) => sum + c.this_period_units, 0);
+  const totalLastYear = categories.reduce((sum, c) => sum + c.last_year_units, 0);
+
+  return {
+    as_of: today.toISOString().slice(0, 10),
+    period_start: thisStart.toISOString().slice(0, 10),
+    categories,
+    total: {
+      this_period_units: totalThis,
+      last_year_units: totalLastYear,
+      pct_change: totalLastYear > 0 ? Math.round(((totalThis - totalLastYear) / totalLastYear) * 100) : (totalThis > 0 ? null : 0),
+    },
+  };
+}
+
+async function getCategorySalesCadence() {
+  return buildCategorySalesCadence();
+}
+
 function warmPipelineCache() {
   if (!configured()) return;
   getStyleTiers().catch((err) => {
@@ -285,4 +365,4 @@ function getPipelineCacheStatus() {
   return { styleTiers: cacheStatus('pipelineStyleTiers') };
 }
 
-module.exports = { configured, getStyleTiers, warmPipelineCache, getPipelineCacheStatus };
+module.exports = { configured, getStyleTiers, getCategorySalesCadence, warmPipelineCache, getPipelineCacheStatus };
