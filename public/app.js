@@ -1819,9 +1819,23 @@ function coreShootPlanCountsByCategory() {
   return counts;
 }
 
+// Category-level macro sales signal only: 7D vs the 30D weekly average,
+// ±10% thresholds, arrow+percentage display. Deliberately separate from
+// coreTrendInfo() (±15%, arrow+label, drives the per-product compact row
+// everywhere else) -- this is a Monday-meeting glance for the category
+// row alone and never feeds into any Core Attention flag/decision.
+function coreCategoryTrendInfo(vel7, vel30) {
+  if (!(vel30 > 0)) return { display: '· No recent sales', cls: 'core-trend-flat', title: '' };
+  const pct = Math.round((vel7 / vel30 - 1) * 100);
+  const title = `7D: ${vel7.toFixed(1)}/wk · 30D avg: ${vel30.toFixed(1)}/wk`;
+  if (pct >= 10) return { display: `↗ ${pct}%`, cls: 'core-trend-up', title };
+  if (pct <= -10) return { display: `↘ ${Math.abs(pct)}%`, cls: 'core-trend-down', title };
+  return { display: `→ ${Math.abs(pct)}%`, cls: 'core-trend-flat', title };
+}
+
 function coreShootCategoryRowHtml(cat) {
   const isOpen = state.coreShootExpandedCategories.has(cat.name);
-  const trend = coreTrendInfo({ vel7: cat.vel7, vel30: cat.vel30 });
+  const trend = coreCategoryTrendInfo(cat.vel7, cat.vel30);
   return `
     <div class="core-shoot-category-group">
       <button type="button" class="core-shoot-category-toggle ${isOpen ? 'open' : ''}" data-category="${escapeHtml(cat.name)}">
@@ -1830,7 +1844,7 @@ function coreShootCategoryRowHtml(cat) {
         <span class="core-shoot-category-count">${cat.total} product${cat.total === 1 ? '' : 's'}</span>
         <span class="core-shoot-category-stats">
           ${cat.needsAttention ? `<span class="core-shoot-stat core-shoot-stat-red">🔴 ${cat.needsAttention} needing attention</span>` : ''}
-          <span class="core-shoot-stat core-trend ${trend.cls}">${trend.arrow} ${trend.label}</span>
+          <span class="core-shoot-stat core-category-trend ${trend.cls}" title="${escapeHtml(trend.title)}">${trend.display}</span>
           ${cat.stale ? `<span class="core-shoot-stat">${cat.stale} stale/untested</span>` : ''}
           ${cat.selectedCount ? `<span class="core-shoot-stat core-shoot-stat-selected">✓ ${cat.selectedCount} selected this week</span>` : ''}
         </span>
