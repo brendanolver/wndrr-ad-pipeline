@@ -259,8 +259,11 @@ main{padding:20px 24px;}
 
 .coverage-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px;margin-bottom:8px;}
 .coverage-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;box-shadow:var(--shadow-xs);}
-.coverage-card-imgrow{display:flex;height:130px;background:var(--surface2);}
-.coverage-card-imgrow img{flex:1;min-width:0;height:100%;object-fit:cover;border-left:1px solid var(--surface);}
+/* AM's product images are wide technical flats (front+back side by side),
+   not square product photos -- object-fit:contain (not cover) so the full
+   flat is always visible, never cropped, letterboxed on the surface2 bg. */
+.coverage-card-imgrow{display:flex;height:170px;background:var(--surface2);}
+.coverage-card-imgrow img{flex:1;min-width:0;height:100%;object-fit:contain;border-left:1px solid var(--surface);}
 .coverage-card-imgrow img:first-child{border-left:none;}
 .coverage-card-noimg{width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:24px;}
 .coverage-card-body{padding:14px 16px;}
