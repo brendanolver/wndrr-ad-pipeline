@@ -17,6 +17,7 @@ let state = {
   coreExpandedCategories: new Set(), coreExpandedProducts: new Set(),
   coreShootExpandedCategories: new Set(),
   shootPlan: [], coverageImageIndex: new Map(),
+  contentCreators: [],
 };
 let dashboardWeekOffset = 0;
 
@@ -101,7 +102,7 @@ document.querySelectorAll('.tab-btn').forEach((btn) => {
 // ── Load & render ────────────────────────────────────
 async function loadAll() {
   try {
-    const [board, styles, categories, dashboard, dropsRes, jobs, provenWinners, coreRes, planningSettings, shootPlan] = await Promise.all([
+    const [board, styles, categories, dashboard, dropsRes, jobs, provenWinners, coreRes, planningSettings, shootPlan, contentCreators] = await Promise.all([
       api('/board'),
       api('/styles'),
       api('/categories'),
@@ -112,6 +113,7 @@ async function loadAll() {
       api('/core-products'),
       api('/planning-settings'),
       api('/shoot-plan'),
+      api('/content-creators'),
     ]);
     state.board = board;
     state.styles = styles;
@@ -126,6 +128,7 @@ async function loadAll() {
     state.coreWeekly = { target: coreRes.weekly_target, planned: coreRes.weekly_planned, remaining: coreRes.weekly_remaining };
     state.planningSettings = planningSettings;
     state.shootPlan = shootPlan;
+    state.contentCreators = contentCreators;
     renderBoard();
     renderMissingAd();
     renderStylesTable();
@@ -137,6 +140,7 @@ async function loadAll() {
     renderProvenWinners();
     renderCoreProducts();
     renderPlanningSettingsForm();
+    renderContentCreators();
   } catch (e) {
     toast(e.message, true);
   }
@@ -1956,11 +1960,12 @@ function planNewConceptForCore(productCode) {
 // once the content creator has developed a concept.
 let shootPlanModalContext = null;
 
-// Whoever shoots most Core/Drop content by default -- the one seam a future
-// Settings-managed table would replace (per-creator default sample sizes).
-// Every other function reads through this object rather than special-casing
-// "Mark" inline, so swapping it for a DB-backed lookup later is a
-// one-function change, not a rewrite.
+// Fallback only -- the actual default creator is Settings-managed
+// (state.contentCreators' is_default row, populated into the dropdown by
+// populateShootPlanCreatorSelect below). This constant is just what a
+// brand-new install with no content_creators rows falls back to, and the
+// key CONTENT_CREATOR_SIZE_DEFAULTS still looks sample-size defaults up
+// by, unaffected by the Settings-managed name list.
 const DEFAULT_CREATOR = 'Mark';
 const CONTENT_CREATOR_SIZE_DEFAULTS = {
   Mark: { top: 'Small', bottom_alpha: 'Small', bottom_waist: '30' },
@@ -2042,11 +2047,23 @@ function openShootPlanModal(preset) {
   // pulled, and defaulting here means the size fields the warehouse pull
   // list depends on are visible unless someone actively says otherwise.
   document.getElementById('shoot-plan-stock-status').value = 'needs_to_be_brought_in';
-  document.getElementById('shoot-plan-creator').value = DEFAULT_CREATOR;
+  populateShootPlanCreatorSelect();
   document.getElementById('shoot-plan-initial-idea').value = '';
   applyShootPlanSizeDefaults();
   updateShootPlanSampleStatusVisibility();
   openModal('shoot-plan-modal');
+}
+
+// Populates the Content Creator dropdown from the Settings-managed list
+// (state.contentCreators) and selects whichever is flagged is_default --
+// falling back to DEFAULT_CREATOR, then the first creator, if the list is
+// missing a default for some reason (e.g. a brand-new install before the
+// seed row lands).
+function populateShootPlanCreatorSelect() {
+  const sel = document.getElementById('shoot-plan-creator');
+  sel.innerHTML = state.contentCreators.map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join('');
+  const defaultEntry = state.contentCreators.find((c) => c.is_default) || state.contentCreators[0];
+  sel.value = defaultEntry ? defaultEntry.name : DEFAULT_CREATOR;
 }
 
 // Sizes only matter when something has to be picked and brought in -- if
@@ -2330,6 +2347,68 @@ async function deletePw() {
 
 document.getElementById('pw-add-btn').addEventListener('click', () => openPwModal(null));
 document.getElementById('weekly-target-save-btn').addEventListener('click', saveWeeklyTarget);
+
+// ── Settings: Content Creators ───────────────────────
+function renderContentCreators() {
+  const list = document.getElementById('cc-list');
+  if (!state.contentCreators.length) {
+    list.innerHTML = '<div class="attention-empty">No content creators yet — add one below.</div>';
+    return;
+  }
+  list.innerHTML = state.contentCreators.map((c) => `
+    <div class="cc-row">
+      <span class="cc-name">${escapeHtml(c.name)}</span>
+      ${c.is_default
+        ? '<span class="badge badge-tested_proven">Default</span>'
+        : `<button type="button" class="btn btn-ghost btn-sm" onclick="setDefaultContentCreator(${c.id})">Set Default</button>`}
+      <button type="button" class="btn btn-ghost btn-sm" onclick="deleteContentCreator(${c.id})">Remove</button>
+    </div>
+  `).join('');
+}
+
+async function refreshContentCreators() {
+  state.contentCreators = await api('/content-creators');
+  renderContentCreators();
+}
+
+async function addContentCreator() {
+  const input = document.getElementById('cc-new-name');
+  const name = input.value.trim();
+  if (!name) return toast('Name is required', true);
+  try {
+    await api('/content-creators', { method: 'POST', body: JSON.stringify({ name }) });
+    input.value = '';
+    toast('Content creator added');
+    refreshContentCreators();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function setDefaultContentCreator(id) {
+  try {
+    state.contentCreators = await api(`/content-creators/${id}/default`, { method: 'PUT' });
+    renderContentCreators();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function deleteContentCreator(id) {
+  if (!(await confirmDialog('Remove this content creator? This does not affect any past Shoot This Week items already recorded with their name.'))) return;
+  try {
+    await api(`/content-creators/${id}`, { method: 'DELETE' });
+    toast('Content creator removed');
+    refreshContentCreators();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+document.getElementById('cc-add-btn').addEventListener('click', addContentCreator);
+document.getElementById('cc-new-name').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') addContentCreator();
+});
 document.querySelectorAll('.core-view-btn').forEach((btn) => {
   btn.addEventListener('click', () => setCoreView(btn.dataset.view));
 });

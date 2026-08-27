@@ -301,6 +301,16 @@
       </div>
       <div id="pw-list" class="pw-list"></div>
       <button class="btn btn-primary btn-sm" id="pw-add-btn">+ Add Proven Winner</button>
+
+      <div class="planning-section-header">
+        <h2>Content Creators</h2>
+        <span class="admin-note">Who can be assigned as Content Creator in Shoot This Week. The default pre-selects there and drives sample-size defaults.</span>
+      </div>
+      <div id="cc-list" class="cc-list"></div>
+      <div class="cc-add-row">
+        <input type="text" id="cc-new-name" placeholder="e.g. Jess">
+        <button class="btn btn-primary btn-sm" id="cc-add-btn">+ Add Creator</button>
+      </div>
     </section>
   </main>
 </div>
@@ -725,7 +735,7 @@
         <div id="shoot-plan-colours" class="shoot-plan-colours-list"></div>
       </label>
       <label>Content Creator / Owner
-        <input type="text" id="shoot-plan-creator" placeholder="e.g. Mark" oninput="applyShootPlanSizeDefaults()">
+        <select id="shoot-plan-creator" onchange="applyShootPlanSizeDefaults()"></select>
       </label>
       <label>Quick Note <span class="hint">(optional — not a creative brief)</span>
         <textarea id="shoot-plan-initial-idea" rows="2" placeholder="e.g. Show all colours together"></textarea>

@@ -372,6 +372,12 @@ main{padding:20px 24px;}
 .pw-name{flex:1;font-size:13px;font-weight:600;}
 .pw-name.inactive{color:var(--text-muted);text-decoration:line-through;}
 
+.cc-list{display:flex;flex-direction:column;gap:6px;margin-bottom:10px;}
+.cc-row{display:flex;align-items:center;gap:10px;background:white;border:1px solid var(--border);border-radius:var(--r);padding:8px 10px;}
+.cc-name{flex:1;font-size:13px;font-weight:600;}
+.cc-add-row{display:flex;gap:8px;margin-bottom:14px;}
+.cc-add-row input{flex:1;font-family:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r);}
+
 .pw-slot-list{display:flex;flex-direction:column;gap:7px;margin-bottom:11px;}
 .pw-slot-row{display:flex;align-items:center;gap:11px;background:white;border:1px solid var(--border);border-radius:var(--r);padding:9px 12px;font-size:13.5px;flex-wrap:wrap;}
 .pw-slot-rank{font-weight:700;color:var(--text-muted);width:22px;}

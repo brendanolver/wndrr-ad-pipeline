@@ -326,3 +326,19 @@ ALTER TABLE creative_assets DROP CONSTRAINT IF EXISTS creative_assets_status_che
 ALTER TABLE creative_assets ADD CONSTRAINT creative_assets_status_check
   CHECK (status IN ('not_started', 'awaiting_proven_concept', 'awaiting_concept_development',
                      'concept_script', 'filming', 'editing', 'qc', 'uploaded_live'));
+
+-- Settings-managed list of who can be assigned as Content Creator on a
+-- Shoot This Week item -- previously a single hardcoded default ('Mark')
+-- in the frontend. Exactly one row is_default at a time (enforced by the
+-- partial unique index below); the Shoot This Week modal's creator
+-- dropdown pre-selects it, and sample-size defaults are still looked up
+-- by creator name (app.js's CONTENT_CREATOR_SIZE_DEFAULTS), unaffected by
+-- this table.
+CREATE TABLE IF NOT EXISTS content_creators (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(255) UNIQUE NOT NULL,
+  is_default BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_content_creators_one_default ON content_creators(is_default) WHERE is_default;
+INSERT INTO content_creators (name, is_default) VALUES ('Mark', true) ON CONFLICT (name) DO NOTHING;
