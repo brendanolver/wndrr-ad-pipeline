@@ -26,6 +26,7 @@ const contentCreatorRoutes = require('./routes/contentCreators');
 const highStockProductRoutes = require('./routes/highStockProducts');
 const promotionRoutes = require('./routes/promotions');
 const weeklyShootPlanConfirmationRoutes = require('./routes/weeklyShootPlanConfirmation');
+const salesCadenceRoutes = require('./routes/salesCadence');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -52,6 +53,7 @@ app.use('/api/content-creators', requireAuth, contentCreatorRoutes);
 app.use('/api/high-stock-products', requireAuth, highStockProductRoutes);
 app.use('/api/promotions', requireAuth, promotionRoutes);
 app.use('/api/weekly-shoot-plan-confirmation', requireAuth, weeklyShootPlanConfirmationRoutes);
+app.use('/api/sales-cadence', requireAuth, salesCadenceRoutes);
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
 

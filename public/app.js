@@ -28,6 +28,7 @@ let state = {
   planningStep: 'core',
   promotions: [], promotionExpandedIds: new Set(),
   weeklyShootPlanConfirmation: null,
+  salesCadence: null,
 };
 let dashboardWeekOffset = 0;
 
@@ -112,7 +113,7 @@ document.querySelectorAll('.tab-btn').forEach((btn) => {
 // ── Load & render ────────────────────────────────────
 async function loadAll() {
   try {
-    const [board, styles, categories, dashboard, dropsRes, jobs, provenWinners, coreRes, planningSettings, shootPlan, contentCreators, highStockRes, promotions, weeklyConfirmation] = await Promise.all([
+    const [board, styles, categories, dashboard, dropsRes, jobs, provenWinners, coreRes, planningSettings, shootPlan, contentCreators, highStockRes, promotions, weeklyConfirmation, salesCadence] = await Promise.all([
       api('/board'),
       api('/styles'),
       api('/categories'),
@@ -127,6 +128,7 @@ async function loadAll() {
       api('/high-stock-products'),
       api('/promotions'),
       api('/weekly-shoot-plan-confirmation'),
+      api('/sales-cadence'),
     ]);
     state.board = board;
     state.styles = styles;
@@ -145,6 +147,7 @@ async function loadAll() {
     state.highStockProducts = highStockRes.products;
     state.promotions = promotions;
     state.weeklyShootPlanConfirmation = weeklyConfirmation;
+    state.salesCadence = salesCadence;
     renderBoard();
     renderMissingAd();
     renderStylesTable();
@@ -155,6 +158,7 @@ async function loadAll() {
     renderPlanning();
     renderProvenWinners();
     renderCoreProducts();
+    renderSalesCadence();
     renderPlanningSettingsForm();
     renderContentCreators();
     renderHighStockProducts();
@@ -2022,6 +2026,62 @@ function renderCoreProducts() {
 
   list.innerHTML = state.coreView === 'category' ? renderCoreProductsByCategory() : renderCoreProductsPriority();
   wireCoreCategoryToggles(list);
+}
+
+// Compact "this month to date vs the same days last year" per category --
+// ported from demand-v2's Sales Cadence view (its "LY MTD vs THIS MTD"
+// column), without the full 12-month grid. Purely informational context at
+// the top of Core Shoot Planning -- reads state.salesCadence as-is, no
+// ranking/eligibility logic here.
+function salesCadencePctHtml(pct) {
+  if (pct == null) return '<span class="sales-cadence-pct sales-cadence-pct-new">New</span>';
+  if (pct === 0) return '<span class="sales-cadence-pct sales-cadence-pct-flat">—</span>';
+  const cls = pct > 0 ? 'sales-cadence-pct-up' : 'sales-cadence-pct-down';
+  const arrow = pct > 0 ? '↑' : '↓';
+  return `<span class="sales-cadence-pct ${cls}">${arrow} ${Math.abs(pct)}%</span>`;
+}
+
+function salesCadenceRowHtml(row) {
+  return `
+    <div class="sales-cadence-row">
+      <span class="sales-cadence-category">${escapeHtml(row.category)}</span>
+      <span class="sales-cadence-units">${row.last_year_units}</span>
+      <span class="sales-cadence-units">${row.this_period_units}</span>
+      ${salesCadencePctHtml(row.pct_change)}
+    </div>`;
+}
+
+function renderSalesCadence() {
+  const container = document.getElementById('sales-cadence-table');
+  const asOfEl = document.getElementById('sales-cadence-asof');
+  const data = state.salesCadence;
+
+  if (!data || !data.configured) {
+    asOfEl.textContent = '';
+    container.innerHTML = '<div class="attention-empty">Sales Cadence needs the Report Pipeline configured to show category trends.</div>';
+    return;
+  }
+  if (!data.categories.length) {
+    asOfEl.textContent = '';
+    container.innerHTML = '<div class="attention-empty">No sales data available yet.</div>';
+    return;
+  }
+
+  asOfEl.textContent = `Month starting ${formatDate(data.period_start)} · as of ${formatDate(data.as_of)}`;
+  container.innerHTML = `
+    <div class="sales-cadence-row sales-cadence-header-row">
+      <span class="sales-cadence-category">Category</span>
+      <span class="sales-cadence-units">Last Year</span>
+      <span class="sales-cadence-units">This Year</span>
+      <span>Change</span>
+    </div>
+    ${data.categories.map(salesCadenceRowHtml).join('')}
+    <div class="sales-cadence-row sales-cadence-total-row">
+      <span class="sales-cadence-category">Total</span>
+      <span class="sales-cadence-units">${data.total.last_year_units}</span>
+      <span class="sales-cadence-units">${data.total.this_period_units}</span>
+      ${salesCadencePctHtml(data.total.pct_change)}
+    </div>`;
 }
 
 // ── Planning: High Stocks ─────────────────────────────
