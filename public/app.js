@@ -501,6 +501,11 @@ function renderPlanningSummary() {
 }
 
 function dropCardHtml(d) {
+  const pct = d.summary.overallPct;
+  // Same green/amber/red bracket coverageStatus() uses server-side --
+  // there's no single overall status field, so it's derived from the
+  // already-computed overallPct rather than re-summing per-product statuses.
+  const barStatus = pct === null ? '' : (pct >= 100 ? 'green' : pct >= 50 ? 'amber' : 'red');
   return `
     <div class="drop-card" data-drop-id="${d.id}">
       <div class="drop-card-header">
@@ -513,7 +518,8 @@ function dropCardHtml(d) {
         <span class="amber">🟠 ${d.summary.amber}</span>
         <span class="red">🔴 ${d.summary.red}</span>
       </div>
-      <div class="drop-card-pct">${d.summary.totalCovered} / ${d.summary.totalTarget} creatives${d.summary.overallPct !== null ? ' — ' + d.summary.overallPct + '%' : ''}</div>
+      <div class="drop-card-pct">${d.summary.totalCovered} / ${d.summary.totalTarget} creatives${pct !== null ? ' — ' + pct + '%' : ''}</div>
+      ${pct !== null ? `<div class="coverage-progress-track"><div class="coverage-progress-fill ${barStatus}" style="width:${Math.min(100, pct)}%;"></div></div>` : ''}
       ${d.most_urgent[0] ? `<div class="drop-card-urgent">Most urgent: ${escapeHtml(d.most_urgent[0].product_name)} (${d.most_urgent[0].current_coverage}/${d.most_urgent[0].creative_target ?? '—'})</div>` : ''}
     </div>`;
 }
