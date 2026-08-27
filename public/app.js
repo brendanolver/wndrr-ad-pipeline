@@ -1963,13 +1963,8 @@ let shootPlanModalContext = null;
 // Fallback only -- the actual default creator is Settings-managed
 // (state.contentCreators' is_default row, populated into the dropdown by
 // populateShootPlanCreatorSelect below). This constant is just what a
-// brand-new install with no content_creators rows falls back to, and the
-// key CONTENT_CREATOR_SIZE_DEFAULTS still looks sample-size defaults up
-// by, unaffected by the Settings-managed name list.
+// brand-new install with no content_creators rows falls back to.
 const DEFAULT_CREATOR = 'Mark';
-const CONTENT_CREATOR_SIZE_DEFAULTS = {
-  Mark: { top: 'Small', bottom_alpha: 'Small', bottom_waist: '30' },
-};
 
 // Simple keyword heuristic -- unrecognised categories get no default applied
 // rather than guessing wrong.
@@ -1980,14 +1975,18 @@ function classifyGarmentType(category) {
   return null;
 }
 
-// Returns '' (no default) whenever the creator has no configured defaults --
-// this is the literal "if changed away from Mark, do not assume Mark's
-// sizing" rule -- or when this colourway has no resolved size list at all.
+// Returns '' (no default) whenever the selected creator isn't in
+// state.contentCreators, has no size configured for this garment shape in
+// Settings, or this colourway has no resolved size list at all -- the
+// literal "if changed to a creator with no sizes set, do not assume
+// another creator's sizing" rule. Sizes are Settings-managed per creator
+// (content_creators.default_top_size / default_bottom_alpha_size /
+// default_bottom_waist_size) rather than hardcoded.
 function defaultSizeForColourway(creator, garmentType, sizingSystem, sizes) {
-  const defaults = CONTENT_CREATOR_SIZE_DEFAULTS[creator];
-  if (!defaults || !sizes || !sizes.length || !garmentType) return '';
-  const key = garmentType === 'top' ? 'top' : (sizingSystem === 'waist' ? 'bottom_waist' : 'bottom_alpha');
-  const label = defaults[key];
+  const creatorRow = state.contentCreators.find((c) => c.name === creator);
+  if (!creatorRow || !sizes || !sizes.length || !garmentType) return '';
+  const key = garmentType === 'top' ? 'default_top_size' : (sizingSystem === 'waist' ? 'default_bottom_waist_size' : 'default_bottom_alpha_size');
+  const label = creatorRow[key];
   if (!label) return '';
   const match = sizes.find((s) => s.toLowerCase() === String(label).toLowerCase());
   return match || sizes[0];
@@ -2357,11 +2356,19 @@ function renderContentCreators() {
   }
   list.innerHTML = state.contentCreators.map((c) => `
     <div class="cc-row">
-      <span class="cc-name">${escapeHtml(c.name)}</span>
-      ${c.is_default
-        ? '<span class="badge badge-tested_proven">Default</span>'
-        : `<button type="button" class="btn btn-ghost btn-sm" onclick="setDefaultContentCreator(${c.id})">Set Default</button>`}
-      <button type="button" class="btn btn-ghost btn-sm" onclick="deleteContentCreator(${c.id})">Remove</button>
+      <div class="cc-row-main">
+        <span class="cc-name">${escapeHtml(c.name)}</span>
+        ${c.is_default
+          ? '<span class="badge badge-tested_proven">Default</span>'
+          : `<button type="button" class="btn btn-ghost btn-sm" onclick="setDefaultContentCreator(${c.id})">Set Default</button>`}
+        <button type="button" class="btn btn-ghost btn-sm" onclick="deleteContentCreator(${c.id})">Remove</button>
+      </div>
+      <div class="cc-row-sizes">
+        <label>Top <input type="text" class="cc-size-input" id="cc-size-top-${c.id}" value="${escapeHtml(c.default_top_size || '')}" placeholder="e.g. Small"></label>
+        <label>Bottom (Alpha) <input type="text" class="cc-size-input" id="cc-size-bottom-alpha-${c.id}" value="${escapeHtml(c.default_bottom_alpha_size || '')}" placeholder="e.g. Small"></label>
+        <label>Bottom (Waist) <input type="text" class="cc-size-input" id="cc-size-bottom-waist-${c.id}" value="${escapeHtml(c.default_bottom_waist_size || '')}" placeholder="e.g. 30"></label>
+        <button type="button" class="btn btn-primary btn-sm" onclick="saveContentCreatorSizes(${c.id})">Save Sizes</button>
+      </div>
     </div>
   `).join('');
 }
@@ -2389,6 +2396,22 @@ async function setDefaultContentCreator(id) {
   try {
     state.contentCreators = await api(`/content-creators/${id}/default`, { method: 'PUT' });
     renderContentCreators();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function saveContentCreatorSizes(id) {
+  const payload = {
+    default_top_size: document.getElementById(`cc-size-top-${id}`).value.trim() || null,
+    default_bottom_alpha_size: document.getElementById(`cc-size-bottom-alpha-${id}`).value.trim() || null,
+    default_bottom_waist_size: document.getElementById(`cc-size-bottom-waist-${id}`).value.trim() || null,
+  };
+  try {
+    const updated = await api(`/content-creators/${id}/sizes`, { method: 'PUT', body: JSON.stringify(payload) });
+    state.contentCreators = state.contentCreators.map((c) => (c.id === id ? updated : c));
+    renderContentCreators();
+    toast('Sizes saved');
   } catch (e) {
     toast(e.message, true);
   }
