@@ -250,9 +250,12 @@ main{padding:20px 24px;}
 .planning-step-footer span{font-size:13px;color:var(--text-secondary);font-weight:600;}
 .core-shoot-selected-badge{display:inline-block;padding:5px 12px;border-radius:var(--r-pill);background:var(--green-light);color:var(--green);font-size:12.5px;font-weight:700;white-space:nowrap;}
 
-/* Step 4 -- Promotions: reuses .drop-card/.drop-card-status from Drops
-   (same exception-based on-track/needs-attention look) plus its own
-   minimal checklist editor, only shown once a promotion is expanded. */
+/* Step 4 -- Promotions: reuses .drop-card's card shell plus its own
+   .drop-card-status on-track/needs-attention pill (Drops itself reverted
+   to its original progress-bar layout, but Promotions -- with no
+   inventory-driven coverage number to show a bar for -- still wants the
+   plain exception-based pill) and a minimal checklist editor, only shown
+   once a promotion is expanded. */
 .promotion-item-list{margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:6px;}
 .promotion-item-row{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px;}
 .promotion-add-item-row{display:flex;gap:8px;margin-top:8px;}
@@ -281,11 +284,16 @@ main{padding:20px 24px;}
 .drop-card-edit-btn{background:none;border:1px solid var(--border);border-radius:var(--r);color:var(--text-muted);font-size:11.5px;padding:3px 9px;cursor:pointer;flex-shrink:0;}
 .drop-card-edit-btn:hover{background:var(--surface2);color:var(--text-secondary);}
 .drop-card-date{font-size:12.5px;color:var(--text-muted);margin:3px 0 11px;}
-.drop-card-meta{font-size:12.5px;color:var(--text-secondary);margin-bottom:9px;}
+.drop-card-counts{display:flex;gap:11px;font-size:12.5px;font-weight:600;margin-bottom:9px;}
+.drop-card-counts span.green{color:var(--green);}
+.drop-card-counts span.amber{color:var(--amber);}
+.drop-card-counts span.red{color:var(--red);}
+.drop-card-pct{font-size:13px;color:var(--text-secondary);font-weight:600;}
+.drop-card-urgent{font-size:11.5px;color:var(--text-muted);margin-top:9px;border-top:1px solid var(--border);padding-top:9px;}
 .drop-card-status{display:inline-block;padding:3px 9px;border-radius:var(--r-pill);font-size:12px;font-weight:700;}
 .drop-card-status.on-track{background:var(--green-light);color:var(--green);}
 .drop-card-status.needs-attention{background:var(--red-light);color:var(--red);margin-bottom:6px;}
-.drop-card-review-link,.drop-card-review-link-btn{font-size:12px;font-weight:600;color:var(--teal-dark);background:none;border:none;padding:0;cursor:pointer;font-family:inherit;display:block;}
+.drop-card-review-link-btn{font-size:12px;font-weight:600;color:var(--teal-dark);background:none;border:none;padding:0;cursor:pointer;font-family:inherit;display:block;}
 
 /* ── DROP MODAL: date quickpicks + auto-populated style checklist ── */
 .quickpick-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:-6px;}

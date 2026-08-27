@@ -556,20 +556,25 @@ function renderPlanningSummary() {
 // nothing needs attention.
 function dropCardHtml(d) {
   const pct = d.summary.overallPct;
-  const needsAttentionCount = d.summary.red + d.summary.amber;
-  const onTrack = needsAttentionCount === 0;
+  // Same green/amber/red bracket coverageStatus() uses server-side --
+  // there's no single overall status field, so it's derived from the
+  // already-computed overallPct rather than re-summing per-product statuses.
+  const barStatus = pct === null ? '' : (pct >= 100 ? 'green' : pct >= 50 ? 'amber' : 'red');
   return `
-    <div class="drop-card ${onTrack ? 'on-track' : 'needs-attention'}" data-drop-id="${d.id}">
+    <div class="drop-card" data-drop-id="${d.id}">
       <div class="drop-card-header">
         <div class="drop-card-name ${d.name ? '' : 'untitled'}" data-drop-id="${d.id}" title="Click to rename">${d.name ? escapeHtml(d.name) : 'Untitled'}</div>
         <button type="button" class="drop-card-edit-btn" data-drop-id="${d.id}" title="Edit launch date / notes">Edit</button>
       </div>
       <div class="drop-card-date">${formatDate(d.launch_date)} · ${d.days_until_launch >= 0 ? d.days_until_launch + ' days to launch' : 'Launched'}</div>
-      <div class="drop-card-meta">${d.summary.productCount} product${d.summary.productCount === 1 ? '' : 's'} · ${d.summary.totalCovered}/${d.summary.totalTarget} creatives covered${pct !== null ? ' · ' + pct + '%' : ''}</div>
-      ${onTrack
-        ? `<div class="drop-card-status on-track">✓ On Track</div>`
-        : `<div class="drop-card-status needs-attention">⚠ ${needsAttentionCount} product${needsAttentionCount === 1 ? '' : 's'} require attention</div>
-           <div class="drop-card-review-link">Review Drop →</div>`}
+      <div class="drop-card-counts">
+        <span class="green">🟢 ${d.summary.green}</span>
+        <span class="amber">🟠 ${d.summary.amber}</span>
+        <span class="red">🔴 ${d.summary.red}</span>
+      </div>
+      <div class="drop-card-pct">${d.summary.totalCovered} / ${d.summary.totalTarget} creatives${pct !== null ? ' — ' + pct + '%' : ''}</div>
+      ${pct !== null ? `<div class="coverage-progress-track"><div class="coverage-progress-fill ${barStatus}" style="width:${Math.min(100, pct)}%;"></div></div>` : ''}
+      ${d.most_urgent[0] ? `<div class="drop-card-urgent">Most urgent: ${escapeHtml(d.most_urgent[0].product_name)} (${d.most_urgent[0].current_coverage}/${d.most_urgent[0].creative_target ?? '—'})</div>` : ''}
     </div>`;
 }
 

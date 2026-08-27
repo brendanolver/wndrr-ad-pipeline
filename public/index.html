@@ -185,6 +185,15 @@
 
         <div class="planning-step-panel" data-step="drops" id="planning-step-drops">
           <div id="drops-row-upcoming" class="drops-row"></div>
+
+          <div class="planning-accordion">
+            <button type="button" class="accordion-toggle" data-section="past-drops">
+              <span class="accordion-arrow">&#9656;</span> Past Drops <span class="accordion-subtitle">(last 60 days)</span>
+            </button>
+            <div class="accordion-body" id="section-body-past-drops" style="display:none;">
+              <div id="drops-row-past" class="drops-row"></div>
+            </div>
+          </div>
         </div>
 
         <div class="planning-step-panel" data-step="promotions" id="planning-step-promotions">
@@ -218,15 +227,6 @@
           <h2>Creative Jobs</h2>
         </div>
         <div id="jobs-grid" class="jobs-grid"></div>
-
-        <div class="planning-accordion">
-          <button type="button" class="accordion-toggle" data-section="past-drops">
-            <span class="accordion-arrow">&#9656;</span> Past Drops <span class="accordion-subtitle">(last 60 days)</span>
-          </button>
-          <div class="accordion-body" id="section-body-past-drops" style="display:none;">
-            <div id="drops-row-past" class="drops-row"></div>
-          </div>
-        </div>
       </div>
 
       <div id="planning-drop-view" style="display:none;">
