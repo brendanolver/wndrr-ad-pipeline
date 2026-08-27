@@ -1944,15 +1944,21 @@ function coreShootCategoryRowHtml(cat, selectedCodes) {
     <div class="core-shoot-category-group">
       <button type="button" class="core-shoot-category-toggle ${isOpen ? 'open' : ''}" data-category="${escapeHtml(cat.name)}">
         <span class="accordion-arrow">&#9656;</span>
-        <span class="core-shoot-category-name">${escapeHtml(cat.name)}</span>
-        <span class="core-shoot-category-count">${cat.total} product${cat.total === 1 ? '' : 's'}</span>
-        <span class="core-shoot-category-stats">
+        <span class="core-shoot-category-namecol">
+          <span class="core-shoot-category-name">${escapeHtml(cat.name)}</span>
+          <span class="core-shoot-category-count">${cat.total} product${cat.total === 1 ? '' : 's'}</span>
+        </span>
+        <span class="core-shoot-stat-col core-category-trend-wrap">
+          <span class="core-category-trend-label">Last Year &rarr; This Year (MTD)</span>
+          <span class="core-category-trend ${trend.cls}" title="${escapeHtml(trend.title)}">${trend.display}</span>
+        </span>
+        <span class="core-shoot-stat-col">
           ${cat.needsAttention ? `<span class="core-shoot-stat core-shoot-stat-red">🔴 ${cat.needsAttention} needing attention</span>` : ''}
-          <span class="core-shoot-stat core-category-trend-wrap">
-            <span class="core-category-trend-label">Last Year &rarr; This Year (MTD)</span>
-            <span class="core-category-trend ${trend.cls}" title="${escapeHtml(trend.title)}">${trend.display}</span>
-          </span>
+        </span>
+        <span class="core-shoot-stat-col">
           ${cat.stale ? `<span class="core-shoot-stat">${cat.stale} stale/untested</span>` : ''}
+        </span>
+        <span class="core-shoot-stat-col">
           ${cat.selectedCount ? `<span class="core-shoot-stat core-shoot-stat-selected">✓ ${cat.selectedCount} selected this week</span>` : ''}
         </span>
       </button>
