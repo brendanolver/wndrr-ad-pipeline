@@ -18,7 +18,7 @@ let state = {
   coreShootExpandedCategories: new Set(),
   shootPlan: [], coverageImageIndex: new Map(),
   contentCreators: [],
-  highStockProducts: [], highStockAllOpen: false,
+  highStockProducts: [], highStockAllOpen: false, highStockExpandedProducts: new Set(),
   // Monday Planning's 5-step guided workflow -- always starts at Core on
   // load (not persisted to localStorage): this is a recurring weekly
   // ritual, not a session to resume, so a stale mid-flow step from a prior
@@ -2032,28 +2032,107 @@ function renderCoreProducts() {
 // Status) -- deliberately not a variable ranked-reasons list, so it stays
 // scannable in a few seconds. Reuses the exact same compact row format and
 // "+ Shoot This Week" modal Core already has -- no parallel workflow.
+// Collapsed row = "should we look at this?" (unchanged fixed four-field
+// glance). Clicking the row (anywhere but the action button) expands a
+// detail panel answering "why is it being recommended?" -- the button
+// itself always means "we've decided to action it," so its click never
+// toggles the row (event.stopPropagation()).
+function toggleHighStockProduct(productCode) {
+  if (state.highStockExpandedProducts.has(productCode)) state.highStockExpandedProducts.delete(productCode);
+  else state.highStockExpandedProducts.add(productCode);
+  renderHighStockProducts();
+}
+
+function highStockColourStockRowHtml(c) {
+  return `
+    <div class="high-stock-detail-row">
+      <span>${escapeHtml(c.colour_label || c.style_code)}</span>
+      <span>${c.soh} SOH${c.on_order ? ` · +${c.on_order} on order` : ''}</span>
+    </div>`;
+}
+
+function highStockAssetRowHtml(a) {
+  const icon = a.format === 'video' ? '🎥' : '🖼';
+  const classificationLabel = a.concept_classification === 'tested_proven' ? 'Proven Winner' : 'New/Test';
+  return `
+    <div class="high-stock-asset-row">
+      <span class="high-stock-asset-icon" title="${escapeHtml(classificationLabel)}">${icon}</span>
+      <span class="high-stock-asset-name">${escapeHtml(a.concept_name)}</span>
+      <span class="high-stock-asset-status">${escapeHtml(a.status_label)}</span>
+    </div>`;
+}
+
+// Compact 3-column Inventory | Sales | Creative breakdown, plus the
+// auto-generated "why recommended" summary -- entirely reads fields the
+// backend already returns (recommendation_reasons included), no ranking
+// logic lives here. Weeks Cover is deliberately never shown, per the brief.
+function highStockDetailHtml(p) {
+  const reasons = (p.recommendation_reasons || []).join(' · ');
+  const lastLiveText = p.days_since_last_creative != null ? `${p.days_since_last_creative}d ago` : 'Never';
+  const lastNewConceptText = p.days_since_last_new_concept != null ? `${p.days_since_last_new_concept}d ago` : 'Never';
+  const trend = p.sales_trend || { display: '—', cls: 'core-trend-flat' };
+  const assets = p.creative_assets || [];
+
+  return `
+    <div class="high-stock-detail">
+      ${reasons ? `<div class="high-stock-detail-why"><strong>Why it's recommended:</strong> ${escapeHtml(reasons)}</div>` : ''}
+      <div class="high-stock-detail-grid">
+        <div class="high-stock-detail-col">
+          <div class="high-stock-detail-col-title">Inventory</div>
+          <div class="high-stock-detail-row"><span>SOH</span><span>${p.soh}</span></div>
+          <div class="high-stock-detail-row"><span>On Order</span><span>${p.on_order != null ? p.on_order : '—'}</span></div>
+          <div class="high-stock-detail-row"><span>Colourways</span><span>${p.colours.length}</span></div>
+          <div class="high-stock-detail-subtitle">Stock by colourway</div>
+          ${p.colours.map(highStockColourStockRowHtml).join('')}
+        </div>
+        <div class="high-stock-detail-col">
+          <div class="high-stock-detail-col-title">Sales</div>
+          <div class="high-stock-detail-row"><span>Last 7D units sold</span><span>${p.vel7}</span></div>
+          <div class="high-stock-detail-row"><span>Last 30D units sold</span><span>${p.units_sold_30d}</span></div>
+          <div class="high-stock-detail-row"><span>30D Sell-Through</span><span>${p.sell_through_pct}%</span></div>
+          <div class="high-stock-detail-row"><span>Historical weekly avg</span><span>${p.vel365}/wk</span></div>
+          <div class="high-stock-detail-row"><span>30D weekly avg</span><span>${p.vel30}/wk</span></div>
+          <div class="high-stock-detail-row"><span>Sales Trend</span><span class="${trend.cls}">${escapeHtml(trend.display)}</span></div>
+        </div>
+        <div class="high-stock-detail-col">
+          <div class="high-stock-detail-col-title">Creative</div>
+          <div class="high-stock-detail-row"><span>Creative Assets</span><span>${p.current_coverage}</span></div>
+          <div class="high-stock-detail-row"><span>Last Creative</span><span>${lastLiveText}</span></div>
+          <div class="high-stock-detail-row"><span>Last New Concept</span><span>${lastNewConceptText}</span></div>
+          <div class="high-stock-detail-subtitle">Existing creative</div>
+          ${assets.length ? assets.map(highStockAssetRowHtml).join('') : '<div class="attention-empty">No creative assets yet.</div>'}
+        </div>
+      </div>
+    </div>`;
+}
+
 function highStockProductRowHtml(p, selectedCodes) {
   const trend = p.sales_trend || { display: '', cls: 'core-trend-flat' };
   const firstImage = (p.colours || []).find((c) => c.image_url);
   const thumb = firstImage
     ? `<img class="high-stock-thumb" src="${firstImage.image_url}" alt="">`
     : '<span class="high-stock-thumb high-stock-noimg">🖼</span>';
+  const isOpen = state.highStockExpandedProducts.has(p.product_code);
   return `
-    <div class="core-shoot-review-row">
-      <div class="core-shoot-review-col-product">
-        ${thumb}
-        <span class="core-shoot-review-name">${escapeHtml(p.product_name)}</span>
+    <div class="high-stock-row-wrap">
+      <div class="core-shoot-review-row high-stock-clickable-row" onclick="toggleHighStockProduct('${p.product_code}')">
+        <div class="core-shoot-review-col-product">
+          <span class="accordion-arrow ${isOpen ? 'open' : ''}">&#9656;</span>
+          ${thumb}
+          <span class="core-shoot-review-name">${escapeHtml(p.product_name)}</span>
+        </div>
+        <div class="core-shoot-review-col-reasons">
+          <span class="core-shoot-review-soh">${p.soh} SOH</span>
+          <span class="core-shoot-review-sep">·</span>
+          <span class="core-shoot-review-soh">${p.sell_through_pct}% 30D Sell-Through</span>
+          <span class="core-shoot-review-sep">·</span>
+          <span class="core-shoot-stat core-category-trend ${trend.cls}">${escapeHtml(trend.display)}</span>
+          <span class="core-shoot-review-sep">·</span>
+          <span class="core-shoot-review-reasons-text">${escapeHtml(p.creative_status_label || '')}</span>
+        </div>
+        <div class="core-shoot-review-col-action" onclick="event.stopPropagation()">${shootActionHtml(p.product_code, 'shootThisWeekForHighStock', selectedCodes)}</div>
       </div>
-      <div class="core-shoot-review-col-reasons">
-        <span class="core-shoot-review-soh">${p.soh} SOH</span>
-        <span class="core-shoot-review-sep">·</span>
-        <span class="core-shoot-review-soh">${p.sell_through_pct}% 30D Sell-Through</span>
-        <span class="core-shoot-review-sep">·</span>
-        <span class="core-shoot-stat core-category-trend ${trend.cls}">${escapeHtml(trend.display)}</span>
-        <span class="core-shoot-review-sep">·</span>
-        <span class="core-shoot-review-reasons-text">${escapeHtml(p.creative_status_label || '')}</span>
-      </div>
-      <div class="core-shoot-review-col-action">${shootActionHtml(p.product_code, 'shootThisWeekForHighStock', selectedCodes)}</div>
+      ${isOpen ? highStockDetailHtml(p) : ''}
     </div>`;
 }
 

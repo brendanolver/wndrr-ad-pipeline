@@ -2,6 +2,7 @@ const express = require('express');
 const { pool } = require('../db');
 const apparelmagic = require('../lib/apparelmagic');
 const { fetchAmData, getAssetCounts } = require('../lib/planningData');
+const { STATUS_LABELS } = require('../lib/statuses');
 
 const router = express.Router();
 
@@ -16,6 +17,8 @@ const HIGH_STOCK_ON_ORDER_WEEKS_REF = 4;
 const HIGH_STOCK_STALE_DAYS = 21;
 const HIGH_STOCK_TREND_DEADZONE_PCT = 10; // matches Core's own ±10% steady-state threshold
 const HIGH_STOCK_MIN_RELIABLE_HIST_VEL = 1; // vel365 below this (units/week) isn't enough sales history for a trustworthy % comparison
+const HIGH_STOCK_LOW_SELL_THROUGH_PCT = 25; // below this, the "why recommended" summary calls sell-through out by name
+const HIGH_STOCK_ASSET_LIST_LIMIT = 8; // expanded-detail creative list is a glance, not a full history -- most recent first
 
 // Fixed single-line read (never a ranked list) -- always resolves to
 // something, so the recommendation row always has its four fields: SOH,
@@ -119,12 +122,27 @@ function scoreHighStock({ soh, onOrder, vel7, vel30, vel365, weeksCover, current
   const gapMultiplier = Math.max(coverageGap, stalenessGap, 0.2);
 
   const priorityScore = pressureScore * gapMultiplier;
+  const creativeStatus = creativeStatusLabel(currentCoverage, daysSinceLastLive);
+
+  // "Why it's recommended" -- purely explanatory, built from the exact same
+  // signals already computed above for the score, never a separate
+  // recomputation that could drift from what actually drove the ranking.
+  // Each phrase only appears when its underlying signal genuinely fired.
+  const reasons = [
+    weeksCoverTerm > 0 ? 'High stock' : null,
+    sellThrough.pct < HIGH_STOCK_LOW_SELL_THROUGH_PCT ? 'Low 30D sell-through' : null,
+    !salesTrend.reliable ? 'Limited sales history'
+      : salesTrend.cls === 'core-trend-down' ? 'Sales below historical average' : null,
+    onOrderTerm > 0 ? 'Significant stock incoming' : null,
+    creativeStatus === 'No Recent Creative' ? 'Limited recent creative' : null,
+  ].filter(Boolean);
 
   return {
     priority_score: priorityScore,
     sell_through_pct: sellThrough.pct,
     sales_trend: { display: salesTrend.display, cls: salesTrend.cls },
-    creative_status_label: creativeStatusLabel(currentCoverage, daysSinceLastLive),
+    creative_status_label: creativeStatus,
+    recommendation_reasons: reasons,
   };
 }
 
@@ -249,7 +267,7 @@ router.get('/', async (req, res, next) => {
     // still show as "never tested"/stale, exactly the auto-New-Concept
     // assumption this feature must avoid.
     const salesReady = apparelmagic.getAmCacheStatus().sales.hasData;
-    const [salesByStyle, freshnessRows, assetCounts] = await Promise.all([
+    const [salesByStyle, freshnessRows, assetCounts, newConceptRows, assetRows] = await Promise.all([
       salesReady ? apparelmagic.getSalesByStyle() : Promise.resolve(new Map()),
       styleIds.length
         ? pool.query(
@@ -263,8 +281,42 @@ router.get('/', async (req, res, next) => {
           )
         : Promise.resolve({ rows: [] }),
       getAssetCounts(styleIds),
+      // "Last New Concept" -- unlike the freshness query above (which
+      // deliberately counts ANY live creative, Proven Winner reshoots
+      // included, so eligibility/scoring never auto-assumes a New Concept
+      // is needed), the expanded detail view's own "Last New Concept" field
+      // is explicitly asking the narrower question Core's equivalent field
+      // asks -- purely informational, touches no ranking/eligibility input.
+      styleIds.length
+        ? pool.query(
+            `SELECT ca.style_id, MAX(sh.changed_at) AS last_new_concept_at
+             FROM status_history sh
+             JOIN creative_assets ca ON ca.id = sh.creative_asset_id
+             WHERE sh.to_status = 'uploaded_live'
+               AND ca.concept_classification = 'new_experimental'
+               AND ca.style_id = ANY($1::int[])
+             GROUP BY ca.style_id`,
+            [styleIds]
+          )
+        : Promise.resolve({ rows: [] }),
+      // Raw asset rows for the expanded detail's Creative list -- getAssetCounts
+      // above stays a plain count (still what scoring's creative-gap
+      // multiplier reads), this is purely additive display detail.
+      styleIds.length
+        ? pool.query(
+            `SELECT id, style_id, concept_name, status, format, concept_classification, created_at
+             FROM creative_assets WHERE style_id = ANY($1::int[]) ORDER BY created_at DESC`,
+            [styleIds]
+          )
+        : Promise.resolve({ rows: [] }),
     ]);
     const lastLiveByStyleId = new Map(freshnessRows.rows.map((r) => [r.style_id, r.last_live_at]));
+    const lastNewConceptByStyleId = new Map(newConceptRows.rows.map((r) => [r.style_id, r.last_new_concept_at]));
+    const assetRowsByStyleId = new Map();
+    for (const row of assetRows.rows) {
+      if (!assetRowsByStyleId.has(row.style_id)) assetRowsByStyleId.set(row.style_id, []);
+      assetRowsByStyleId.get(row.style_id).push(row);
+    }
 
     // A family with a mix of Core and non-Core colourways only shows its
     // non-Core colourways here (their Core siblings already appear under
@@ -279,7 +331,9 @@ router.get('/', async (req, res, next) => {
       let qty365 = 0;
       let currentCoverage = 0;
       let lastLiveAt = null;
+      let lastNewConceptAt = null;
       const colours = [];
+      const productAssetRows = [];
 
       for (const styleCode of styleCodes) {
         const local = localStyleByCode.get(styleCode);
@@ -297,6 +351,11 @@ router.get('/', async (req, res, next) => {
 
         const liveAt = lastLiveByStyleId.get(local.id);
         if (liveAt && (!lastLiveAt || liveAt > lastLiveAt)) lastLiveAt = liveAt;
+
+        const newConceptAt = lastNewConceptByStyleId.get(local.id);
+        if (newConceptAt && (!lastNewConceptAt || newConceptAt > lastNewConceptAt)) lastNewConceptAt = newConceptAt;
+
+        for (const row of assetRowsByStyleId.get(local.id) || []) productAssetRows.push(row);
 
         const details = am.amDetails.get(styleCode);
         const sizing = apparelmagic.resolveStyleSizing(am.amDetails, am.amSizeRanges, styleCode);
@@ -324,6 +383,9 @@ router.get('/', async (req, res, next) => {
       const daysSinceLastLive = lastLiveAt
         ? Math.floor((Date.now() - new Date(lastLiveAt).getTime()) / 86400000)
         : null;
+      const daysSinceLastNewConcept = lastNewConceptAt
+        ? Math.floor((Date.now() - new Date(lastNewConceptAt).getTime()) / 86400000)
+        : null;
 
       return {
         product_code: productCode,
@@ -335,14 +397,30 @@ router.get('/', async (req, res, next) => {
         vel7: +vel7.toFixed(1),
         vel30: +vel30.toFixed(1),
         vel365: +vel365.toFixed(1),
+        units_sold_30d: +qty30.toFixed(1),
         weeks_cover: weeksCover,
         current_coverage: currentCoverage,
         days_since_last_creative: daysSinceLastLive,
+        last_live_at: lastLiveAt,
+        days_since_last_new_concept: daysSinceLastNewConcept,
+        last_new_concept_at: lastNewConceptAt,
+        creative_assets: productAssetRows
+          .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+          .slice(0, HIGH_STOCK_ASSET_LIST_LIMIT)
+          .map((a) => ({
+            id: a.id,
+            concept_name: a.concept_name,
+            status: a.status,
+            status_label: STATUS_LABELS[a.status] || a.status,
+            format: a.format,
+            concept_classification: a.concept_classification,
+            created_at: a.created_at,
+          })),
       };
     }).filter(Boolean);
 
     const products = rawProducts.map((p) => {
-      const { priority_score, sell_through_pct, sales_trend, creative_status_label } = scoreHighStock({
+      const { priority_score, sell_through_pct, sales_trend, creative_status_label, recommendation_reasons } = scoreHighStock({
         soh: p.soh,
         onOrder: p.on_order || 0,
         vel7: p.vel7,
@@ -352,7 +430,7 @@ router.get('/', async (req, res, next) => {
         currentCoverage: p.current_coverage,
         daysSinceLastLive: p.days_since_last_creative,
       });
-      return { ...p, priority_score, sell_through_pct, sales_trend, creative_status_label };
+      return { ...p, priority_score, sell_through_pct, sales_trend, creative_status_label, recommendation_reasons };
     });
     products.sort((a, b) => b.priority_score - a.priority_score);
 
