@@ -20,13 +20,17 @@ function coverageStatus(coverage, target) {
 // Groups individual style rows (one per colourway, matching ApparelMagic's
 // own style_number scheme) into one coverage entry per base product --
 // colourways of the same product share one creative need, so SOH, on-order
-// and current coverage are summed across every colourway in the group, and
-// one creative target is computed from the summed SOH + on-order rather
-// than per colourway. On-order is included in the target figure (not just
-// shown alongside it) because it's the same physical stock, just not
-// receipted yet -- a new-drop style that's fully pre-ordered but shows 0
-// SOH still needs the same creative coverage it will once that on-order
-// stock is receipted and becomes SOH. See apparelmagic.js: deriveProductCode.
+// and current coverage are summed across every colourway in the group for
+// display. The creative TARGET, though, is driven by the single busiest
+// colourway's SOH + on-order, not the sum across colours -- both colours
+// are typically shot together in the same ad, so a 2-colour style doesn't
+// need double the creatives just for having a second colourway; it needs
+// enough to cover whichever colour is under the most inventory pressure.
+// On-order counts alongside SOH in that per-colour figure (not just shown
+// next to it) because it's the same physical stock, just not receipted yet
+// -- a colourway that's fully pre-ordered but shows 0 SOH still needs the
+// creative coverage it will once that stock is receipted and becomes SOH.
+// See apparelmagic.js: deriveProductCode.
 //
 // styleRows: rows from the styles table (id, style_code, name, tier, ...).
 // assetCounts: Map<style_id, creative_asset_count>.
@@ -48,6 +52,7 @@ function buildCoverage(styleRows, { assetCounts, amStock, amOnOrder, amDetails, 
     let onOrder = 0;
     let currentCoverage = 0;
     let sohKnown = false;
+    let maxColourCombined = 0;
     const images = [];
     const memberSummaries = [];
 
@@ -65,6 +70,9 @@ function buildCoverage(styleRows, { assetCounts, amStock, amOnOrder, amDetails, 
       const styleOnOrder = amOnOrder ? amOnOrder.get(style.style_code) ?? 0 : null;
       if (styleOnOrder != null) onOrder += styleOnOrder;
       currentCoverage += assetCounts.get(style.id) || 0;
+
+      const colourCombined = (styleSoh || 0) + (styleOnOrder || 0);
+      if (colourCombined > maxColourCombined) maxColourCombined = colourCombined;
 
       const details = amDetails ? amDetails.get(style.style_code) : null;
       if (details?.imageUrl) images.push(details.imageUrl);
@@ -90,11 +98,11 @@ function buildCoverage(styleRows, { assetCounts, amStock, amOnOrder, amDetails, 
 
     const first = members[0];
     const firstDetails = amDetails ? amDetails.get(first.style_code) : null;
-    // On-order stock is the same physical units as SOH, just not receipted
-    // yet -- a style waiting on a delivery (0 SOH, 200 on order) needs the
-    // same creative coverage it will the day that stock arrives, so the
-    // target bracket is looked up against the combined total, not SOH alone.
-    const creativeTarget = sohKnown ? computeCreativeTarget(soh + onOrder, rules) : null;
+    // Target bracket comes from the single busiest colourway's SOH +
+    // on-order, not the sum across colours -- see the comment above
+    // buildCoverage for why (colours are shot together, so a 2-colour
+    // style doesn't need double the creatives).
+    const creativeTarget = sohKnown ? computeCreativeTarget(maxColourCombined, rules) : null;
     const gap = creativeTarget != null ? Math.max(0, creativeTarget - currentCoverage) : null;
 
     return {
