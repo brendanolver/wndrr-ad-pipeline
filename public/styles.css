@@ -467,12 +467,24 @@ main{padding:20px 24px;}
 
 .core-shoot-category-group{border-bottom:1px solid var(--border);}
 .core-shoot-category-group:last-child{border-bottom:none;}
-.core-shoot-category-toggle{display:flex;align-items:center;gap:10px;flex-wrap:wrap;width:100%;background:none;border:none;padding:12px 6px;font-family:inherit;color:var(--text);cursor:pointer;text-align:left;}
+/* Grid, not flex-with-margin-left-auto: fixed column tracks keep every
+   category row aligned to the same positions, and since the tracks are
+   sized to their content (fixed px, not `fr`), the row's own width stops
+   well short of 100% -- the leftover space trails after the last column
+   instead of opening up between the category name and its data. The
+   max-width caps how far this can stretch on a wide desktop; the 900px
+   breakpoint switches to proportional (`fr`) tracks so the row can still
+   shrink to fit a narrower window instead of overflowing it. */
+.core-shoot-category-toggle{display:grid;grid-template-columns:16px 200px 170px 165px 135px 165px;column-gap:16px;align-items:center;width:100%;max-width:960px;background:none;border:none;padding:12px 6px;font-family:inherit;color:var(--text);cursor:pointer;text-align:left;}
+@media (max-width:900px){
+  .core-shoot-category-toggle{grid-template-columns:16px minmax(110px,1.3fr) minmax(130px,1.15fr) minmax(110px,1.1fr) minmax(90px,0.9fr) minmax(110px,1.1fr);column-gap:10px;max-width:100%;}
+}
 .core-shoot-category-toggle:hover{background:var(--surface2);border-radius:var(--r);}
 .core-shoot-category-toggle.open .accordion-arrow{transform:rotate(90deg);}
-.core-shoot-category-name{font-size:14px;font-weight:700;}
-.core-shoot-category-count{font-size:12px;color:var(--text-muted);font-weight:600;}
-.core-shoot-category-stats{display:flex;gap:16px;flex-wrap:wrap;margin-left:auto;font-size:12px;color:var(--text-secondary);}
+.core-shoot-category-namecol{display:flex;align-items:baseline;gap:8px;min-width:0;}
+.core-shoot-category-name{font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.core-shoot-category-count{font-size:12px;color:var(--text-muted);font-weight:600;white-space:nowrap;}
+.core-shoot-stat-col{display:flex;align-items:center;font-size:12px;color:var(--text-secondary);min-width:0;}
 .core-shoot-stat{white-space:nowrap;}
 .core-shoot-stat-red{color:var(--red);font-weight:700;}
 .core-shoot-stat-selected{color:var(--green);font-weight:700;}
@@ -480,7 +492,7 @@ main{padding:20px 24px;}
 .core-category-trend.core-trend-up{background:var(--green-light);color:var(--green);}
 .core-category-trend.core-trend-down{background:var(--red-light);color:var(--red);}
 .core-category-trend.core-trend-flat{background:var(--surface2);color:var(--text-muted);}
-.core-category-trend-wrap{display:flex;flex-direction:column;align-items:center;gap:2px;}
+.core-category-trend-wrap{display:flex;flex-direction:column;align-items:flex-start;gap:2px;}
 .core-category-trend-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.2px;color:var(--text-muted);white-space:nowrap;}
 .core-shoot-category-body{display:flex;flex-direction:column;gap:7px;padding:2px 6px 16px 32px;}
 
