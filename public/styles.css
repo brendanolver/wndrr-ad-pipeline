@@ -264,10 +264,16 @@ main{padding:20px 24px;}
 /* AM's product images are wide technical flats (front+back side by side),
    not square product photos -- object-fit:contain (not cover) so the full
    flat is always visible, never cropped, letterboxed on the surface2 bg. */
-.coverage-card-imgrow{display:flex;height:170px;background:var(--surface2);}
-.coverage-card-imgrow img{flex:1;min-width:0;height:100%;object-fit:contain;border-left:1px solid var(--surface);}
-.coverage-card-imgrow img:first-child{border-left:none;}
+/* One colourway image at a time -- not all of them squeezed into one row --
+   with prev/next arrows overlaid to step through the rest (cycleCoverageImage). */
+.coverage-card-imgrow{position:relative;height:170px;background:var(--surface2);}
+.coverage-card-imgrow img{width:100%;height:100%;object-fit:contain;}
 .coverage-card-noimg{width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:24px;}
+.coverage-card-img-nav{position:absolute;top:50%;transform:translateY(-50%);width:26px;height:26px;border-radius:50%;background:rgba(255,255,255,0.92);border:1px solid var(--border);color:var(--text-secondary);font-family:inherit;font-size:16px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:var(--shadow-xs);}
+.coverage-card-img-nav:hover{background:white;color:var(--text);border-color:var(--text-secondary);}
+.coverage-card-img-prev{left:8px;}
+.coverage-card-img-next{right:8px;}
+.coverage-card-img-count{position:absolute;bottom:8px;right:8px;background:rgba(17,24,39,0.65);color:white;font-size:10px;font-weight:600;padding:2px 8px;border-radius:var(--r-pill);}
 .coverage-card-body{padding:14px 16px;}
 .coverage-card-name{font-size:13.5px;font-weight:700;}
 .coverage-card-code{font-size:11.5px;color:var(--text-muted);margin-bottom:9px;}
