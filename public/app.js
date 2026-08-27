@@ -2353,7 +2353,7 @@ document.getElementById('weekly-target-save-btn').addEventListener('click', save
 // against each colourway's own resolved AM size list.
 const TOP_SIZE_OPTIONS = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', '3XL'];
 const BOTTOM_ALPHA_SIZE_OPTIONS = ['XS', 'S', 'M', 'L', 'XL', 'XXL', '3XL'];
-const BOTTOM_WAIST_SIZE_OPTIONS = Array.from({ length: 40 - 28 + 1 }, (_, i) => String(28 + i));
+const BOTTOM_WAIST_SIZE_OPTIONS = ['28', '30', '32', '34', '36', '38', '40'];
 
 function sizeSelectHtml(id, options, currentValue) {
   const opts = ['<option value="">— none —</option>']
