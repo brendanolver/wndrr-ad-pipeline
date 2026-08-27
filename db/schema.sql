@@ -288,6 +288,13 @@ CREATE TABLE IF NOT EXISTS planning_settings (
 );
 INSERT INTO planning_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
 
+-- High Stocks (Planning -> High Stocks section): non-Core products with
+-- meaningful stock exposure that may deserve creative attention. Same
+-- singleton-row/one-column-per-setting pattern as weekly_new_concept_target
+-- above -- not a generic key/value table.
+ALTER TABLE planning_settings ADD COLUMN IF NOT EXISTS high_stock_min_soh INTEGER NOT NULL DEFAULT 150;
+ALTER TABLE planning_settings ADD COLUMN IF NOT EXISTS high_stock_recommendations_shown INTEGER NOT NULL DEFAULT 5;
+
 -- ---------------------------------------------------------------------------
 -- Weekly Shoot Plan (Monday Planning: deciding WHAT gets shot this week
 -- and whether the product is in hand). Deliberately minimal -- talent,
