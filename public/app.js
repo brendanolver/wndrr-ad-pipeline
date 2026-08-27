@@ -2348,6 +2348,19 @@ document.getElementById('pw-add-btn').addEventListener('click', () => openPwModa
 document.getElementById('weekly-target-save-btn').addEventListener('click', saveWeeklyTarget);
 
 // ── Settings: Content Creators ───────────────────────
+// Fixed scales rather than free text -- keeps entries consistent and
+// matches the case-insensitive comparison defaultSizeForColourway runs
+// against each colourway's own resolved AM size list.
+const TOP_SIZE_OPTIONS = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', '3XL'];
+const BOTTOM_ALPHA_SIZE_OPTIONS = ['XS', 'S', 'M', 'L', 'XL', 'XXL', '3XL'];
+const BOTTOM_WAIST_SIZE_OPTIONS = Array.from({ length: 40 - 28 + 1 }, (_, i) => String(28 + i));
+
+function sizeSelectHtml(id, options, currentValue) {
+  const opts = ['<option value="">— none —</option>']
+    .concat(options.map((s) => `<option value="${escapeHtml(s)}" ${s === currentValue ? 'selected' : ''}>${escapeHtml(s)}</option>`));
+  return `<select class="cc-size-input" id="${id}">${opts.join('')}</select>`;
+}
+
 function renderContentCreators() {
   const list = document.getElementById('cc-list');
   if (!state.contentCreators.length) {
@@ -2364,9 +2377,9 @@ function renderContentCreators() {
         <button type="button" class="btn btn-ghost btn-sm" onclick="deleteContentCreator(${c.id})">Remove</button>
       </div>
       <div class="cc-row-sizes">
-        <label>Top <input type="text" class="cc-size-input" id="cc-size-top-${c.id}" value="${escapeHtml(c.default_top_size || '')}" placeholder="e.g. Small"></label>
-        <label>Bottom (Alpha) <input type="text" class="cc-size-input" id="cc-size-bottom-alpha-${c.id}" value="${escapeHtml(c.default_bottom_alpha_size || '')}" placeholder="e.g. Small"></label>
-        <label>Bottom (Waist) <input type="text" class="cc-size-input" id="cc-size-bottom-waist-${c.id}" value="${escapeHtml(c.default_bottom_waist_size || '')}" placeholder="e.g. 30"></label>
+        <label>Top ${sizeSelectHtml(`cc-size-top-${c.id}`, TOP_SIZE_OPTIONS, c.default_top_size)}</label>
+        <label>Bottom (Alpha) ${sizeSelectHtml(`cc-size-bottom-alpha-${c.id}`, BOTTOM_ALPHA_SIZE_OPTIONS, c.default_bottom_alpha_size)}</label>
+        <label>Bottom (Waist) ${sizeSelectHtml(`cc-size-bottom-waist-${c.id}`, BOTTOM_WAIST_SIZE_OPTIONS, c.default_bottom_waist_size)}</label>
         <button type="button" class="btn btn-primary btn-sm" onclick="saveContentCreatorSizes(${c.id})">Save Sizes</button>
       </div>
     </div>

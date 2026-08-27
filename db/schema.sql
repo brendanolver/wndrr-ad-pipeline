@@ -354,7 +354,16 @@ ALTER TABLE content_creators ADD COLUMN IF NOT EXISTS default_bottom_alpha_size 
 ALTER TABLE content_creators ADD COLUMN IF NOT EXISTS default_bottom_waist_size VARCHAR(20);
 -- One-time backfill of Mark's sizes to match the values that used to be
 -- hardcoded -- guarded so it never overwrites a value someone has since
--- set via Settings.
+-- set via Settings. Uses the abbreviated scale (see TOP_SIZE_OPTIONS /
+-- BOTTOM_ALPHA_SIZE_OPTIONS in app.js) so it pre-selects correctly in the
+-- Settings dropdowns, not the old full-word 'Small'.
 UPDATE content_creators SET
-  default_top_size = 'Small', default_bottom_alpha_size = 'Small', default_bottom_waist_size = '30'
+  default_top_size = 'S', default_bottom_alpha_size = 'S', default_bottom_waist_size = '30'
   WHERE name = 'Mark' AND default_top_size IS NULL AND default_bottom_alpha_size IS NULL AND default_bottom_waist_size IS NULL;
+
+-- Normalises anyone who already picked up the earlier 'Small'-labelled
+-- backfill (before the fields became fixed dropdowns) to the same
+-- abbreviated scale -- idempotent, and only ever touches this exact
+-- legacy value, never a value someone has deliberately set since.
+UPDATE content_creators SET default_top_size = 'S' WHERE default_top_size = 'Small';
+UPDATE content_creators SET default_bottom_alpha_size = 'S' WHERE default_bottom_alpha_size = 'Small';
