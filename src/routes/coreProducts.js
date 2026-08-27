@@ -266,9 +266,15 @@ router.get('/', async (req, res, next) => {
     });
     products.sort((a, b) => ATTENTION_ORDER[a.flag] - ATTENTION_ORDER[b.flag]);
 
+    // Creative Jobs (which this used to count) is retired -- the still-active
+    // concept-production pipeline is creative_assets, so a "new concept
+    // planned this week" is now a new_experimental asset on a Core-tier
+    // style, created this week.
     const weeklyCountResult = await pool.query(
-      `SELECT COUNT(*)::int AS count FROM creative_jobs
-       WHERE concept_type = 'new_concept' AND drop_id IS NULL AND created_at >= date_trunc('week', now())`
+      `SELECT COUNT(*)::int AS count FROM creative_assets ca
+       JOIN styles s ON s.id = ca.style_id
+       WHERE ca.concept_classification = 'new_experimental' AND s.tier = 'core_proven'
+         AND ca.created_at >= date_trunc('week', now())`
     );
     const weeklyPlanned = weeklyCountResult.rows[0].count;
     const weeklyTarget = settings.weekly_new_concept_target;

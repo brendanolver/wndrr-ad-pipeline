@@ -114,22 +114,9 @@
         <div class="planning-header">
           <div>
             <div class="planning-title" id="planning-week-title">Planning</div>
-            <div class="planning-sub" id="planning-job-summary">—</div>
           </div>
           <div class="planning-actions">
             <button class="btn btn-ghost btn-sm" id="new-drop-btn">+ New Drop</button>
-            <button class="btn btn-primary btn-sm" id="new-job-btn">+ New Creative Job</button>
-          </div>
-        </div>
-
-        <div id="planning-attention" class="planning-attention" style="display:none;">
-          <div class="attention-col">
-            <div class="attention-title">⛔ Needs Attention</div>
-            <div id="attention-blocked-list" class="attention-list"></div>
-          </div>
-          <div class="attention-col">
-            <div class="attention-title">📅 Upcoming Production</div>
-            <div id="attention-upcoming-list" class="attention-list"></div>
           </div>
         </div>
 
@@ -235,10 +222,15 @@
           </div>
         </div>
 
+        <!-- Persistent across every Planning step (not just the "Shoot Plan"
+             tab) -- a product added at any stage (Core, High Stock, Upcoming
+             Drops, Promotions) shows up here immediately, so you don't have
+             to switch tabs to see what's already selected for the week. -->
         <div class="planning-section-header">
-          <h2>Creative Jobs</h2>
+          <h2>This Week's Shoot Plan</h2>
+          <span class="admin-note" id="planning-shoot-plan-summary-count"></span>
         </div>
-        <div id="jobs-grid" class="jobs-grid"></div>
+        <div id="planning-shoot-plan-summary-list" class="core-shoot-planning-list"></div>
       </div>
 
       <div id="planning-drop-view" style="display:none;">
@@ -528,191 +520,6 @@
       <button class="btn btn-danger" id="drop-delete-btn" style="display:none;" onclick="deleteDrop()">Delete</button>
       <button class="btn btn-ghost" onclick="closeModal('drop-modal')">Cancel</button>
       <button class="btn btn-primary" id="drop-save-btn" onclick="saveDrop()">Add</button>
-    </div>
-  </div>
-</div>
-
-<!-- Creative Job modal -->
-<div id="job-modal" class="modal-backdrop">
-  <div class="modal modal-wide">
-    <div class="modal-header">
-      <h3 id="job-modal-title">New Creative Job</h3>
-      <button class="modal-close" onclick="closeModal('job-modal')">&times;</button>
-    </div>
-    <div class="modal-body">
-      <input type="hidden" id="job-id">
-      <label>Products <span class="hint">(select one or more)</span>
-        <select id="job-style-ids" multiple size="4"></select>
-      </label>
-      <label>Drop <span class="hint">(optional)</span>
-        <select id="job-drop-id"><option value="">— none —</option></select>
-      </label>
-      <label>High-level concept
-        <input type="text" id="job-concept" placeholder="e.g. 3 Ways To Style The Panel Tee">
-      </label>
-      <label>Planning status <span class="hint">(Blocked / Ready for Briefing are set via the controls below)</span>
-        <select id="job-status-quick">
-          <option value="not_started">Not Started</option>
-          <option value="organising">Organising</option>
-        </select>
-      </label>
-      <div class="field-row">
-        <label>Concept type
-          <select id="job-concept-type">
-            <option value="proven_concept">Proven Concept</option>
-            <option value="new_concept">New Concept</option>
-            <option value="winning_concept_iteration">Winning Concept Iteration</option>
-            <option value="product_content">Product Content</option>
-            <option value="ugc_creator">UGC / Creator</option>
-            <option value="static">Static</option>
-            <option value="existing_content_variation">Existing Content Variation</option>
-            <option value="other">Other</option>
-          </select>
-        </label>
-        <label>Expected ad variations
-          <input type="number" id="job-expected-variations" min="0" placeholder="e.g. 4">
-        </label>
-      </div>
-      <label>Expected deliverables
-        <input type="text" id="job-deliverables" placeholder="e.g. 1 Production Session">
-      </label>
-      <div class="field-row">
-        <label>Owner
-          <input type="text" id="job-owner">
-        </label>
-        <label>Production date
-          <input type="date" id="job-production-date">
-        </label>
-      </div>
-      <div class="field-row">
-        <label>Production session <span class="hint">(optional)</span>
-          <input type="text" id="job-production-session" placeholder="e.g. Melbourne Shoot — Thursday AM">
-        </label>
-        <label>Ship by date
-          <input type="date" id="job-ship-by-date">
-        </label>
-      </div>
-
-      <div class="checklist-section-title">What do we need to make this happen?</div>
-
-      <div class="field-row">
-        <label>Stock / Product
-          <select id="job-stock-status">
-            <option value="not_required">Not Required</option>
-            <option value="available">Available</option>
-            <option value="needs_organising">Needs To Be Organised</option>
-            <option value="in_transit">In Transit</option>
-            <option value="blocked">Blocked</option>
-          </select>
-        </label>
-        <label>Stock notes
-          <input type="text" id="job-stock-notes">
-        </label>
-      </div>
-
-      <div class="stock-requests-section">
-        <div class="stock-requests-header">
-          <span>Stock to bring down for the shoot</span>
-          <button type="button" class="btn btn-ghost btn-sm" onclick="showAddStockRequestRow()">+ Add stock need</button>
-        </div>
-        <div id="job-stock-requests-list"></div>
-        <div id="job-stock-request-form" class="stock-request-form" style="display:none;">
-          <select id="stock-request-style"></select>
-          <select id="stock-request-size">
-            <option value="XS">XS</option>
-            <option value="S">S</option>
-            <option value="M">M</option>
-            <option value="L">L</option>
-            <option value="XL">XL</option>
-            <option value="XXL">XXL</option>
-            <option value="One Size">One Size</option>
-          </select>
-          <input type="number" id="stock-request-qty" min="1" value="1" title="Quantity">
-          <input type="text" id="stock-request-notes" placeholder="Notes (optional)">
-          <button type="button" class="btn btn-primary btn-sm" onclick="addStockRequest()">Add</button>
-          <button type="button" class="btn btn-ghost btn-sm" onclick="hideAddStockRequestRow()">Cancel</button>
-        </div>
-      </div>
-
-      <div class="field-row">
-        <label>Talent / Model / Creator
-          <select id="job-talent-status">
-            <option value="not_required">Not Required</option>
-            <option value="internal_team">Internal Team</option>
-            <option value="model_required">Model Required</option>
-            <option value="creator_required">Creator Required</option>
-            <option value="confirmed">Confirmed</option>
-            <option value="not_confirmed">Not Confirmed</option>
-          </select>
-        </label>
-        <label>Talent assignee / notes
-          <input type="text" id="job-talent-assignee" placeholder="Who">
-        </label>
-      </div>
-
-      <div class="field-row">
-        <label>Location
-          <select id="job-location-status">
-            <option value="not_required">Not Required</option>
-            <option value="office">Office</option>
-            <option value="warehouse">Warehouse</option>
-            <option value="studio">Studio</option>
-            <option value="external_location">External Location</option>
-            <option value="needs_organising">Needs To Be Organised</option>
-            <option value="confirmed">Confirmed</option>
-          </select>
-        </label>
-        <label>Location notes
-          <input type="text" id="job-location-notes">
-        </label>
-      </div>
-
-      <div class="field-row">
-        <label>Props
-          <select id="job-props-status">
-            <option value="not_required">Not Required</option>
-            <option value="required">Required</option>
-            <option value="organised">Organised</option>
-            <option value="not_organised">Not Organised</option>
-          </select>
-        </label>
-        <label>Props notes
-          <input type="text" id="job-props-notes">
-        </label>
-      </div>
-
-      <label>Equipment needed <span class="hint">(comma separated)</span>
-        <input type="text" id="job-equipment" placeholder="Camera, Lighting, Backdrop">
-      </label>
-      <label>Logistics notes
-        <input type="text" id="job-logistics-notes" placeholder="e.g. Product needs to move from Ballarat to Melbourne">
-      </label>
-
-      <div class="checklist-section-title">Blocker</div>
-      <label class="checkbox-label">
-        <input type="checkbox" id="job-is-blocked">
-        This job is currently blocked
-      </label>
-      <div class="field-row">
-        <label>Blocker reason
-          <input type="text" id="job-blocker-reason" placeholder="e.g. Waiting for stock">
-        </label>
-        <label>Blocker owner
-          <input type="text" id="job-blocker-owner">
-        </label>
-      </div>
-      <label>Expected resolution date
-        <input type="date" id="job-blocker-resolution">
-      </label>
-
-      <div id="job-readiness-note" class="readiness-note"></div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-danger" id="job-delete-btn" style="display:none;" onclick="deleteJob()">Delete</button>
-      <button class="btn btn-ghost" onclick="closeModal('job-modal')">Cancel</button>
-      <button class="btn btn-ghost" onclick="saveJobBlocker()">Update Blocker</button>
-      <button class="btn btn-primary" onclick="saveJob()">Save</button>
-      <button class="btn btn-primary" id="job-ready-btn" style="display:none;" onclick="markJobReadyForBriefing()">Ready for Briefing &rarr;</button>
     </div>
   </div>
 </div>
