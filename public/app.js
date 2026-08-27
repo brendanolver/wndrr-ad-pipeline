@@ -158,7 +158,6 @@ async function loadAll() {
     renderPlanning();
     renderProvenWinners();
     renderCoreProducts();
-    renderSalesCadence();
     renderPlanningSettingsForm();
     renderContentCreators();
     renderHighStockProducts();
@@ -1915,23 +1914,28 @@ function coreShootPlanCountsByCategory() {
   return counts;
 }
 
-// Category-level macro sales signal only: 7D vs the 30D weekly average,
-// ±10% thresholds, arrow+percentage display. Deliberately separate from
-// coreTrendInfo() (±15%, arrow+label, drives the per-product compact row
-// everywhere else) -- this is a Monday-meeting glance for the category
-// row alone and never feeds into any Core Attention flag/decision.
-function coreCategoryTrendInfo(vel7, vel30) {
-  if (!(vel30 > 0)) return { display: '· No recent sales', cls: 'core-trend-flat', title: '' };
-  const pct = Math.round((vel7 / vel30 - 1) * 100);
-  const title = `7D: ${vel7.toFixed(1)}/wk · 30D avg: ${vel30.toFixed(1)}/wk`;
-  if (pct >= 10) return { display: `↗ ${pct}%`, cls: 'core-trend-up', title };
-  if (pct <= -10) return { display: `↘ ${Math.abs(pct)}%`, cls: 'core-trend-down', title };
-  return { display: `→ ${Math.abs(pct)}%`, cls: 'core-trend-flat', title };
+// Category-level "this month to date vs the same days last year" -- ported
+// from demand-v2's own Sales Cadence view (its "LY MTD vs THIS MTD"
+// column), same arrow+percentage display Core's category row already used
+// for its old vel7-vs-vel30 trend. No deadzone (unlike the old trend this
+// replaces) -- demand-v2 itself colours every non-zero change, so this
+// matches that read directly.
+function coreCategoryTrendInfo(categoryName) {
+  const cadence = state.salesCadence;
+  const row = cadence && cadence.categories
+    ? cadence.categories.find((c) => c.category === (categoryName || '').toUpperCase())
+    : null;
+  if (!row) return { display: '—', cls: 'core-trend-flat', title: 'No Sales Cadence data for this category' };
+  const title = `LY MTD: ${row.last_year_units} · This MTD: ${row.this_period_units}`;
+  if (row.pct_change == null) return { display: 'New', cls: 'core-trend-up', title };
+  if (row.pct_change > 0) return { display: `↗ ${row.pct_change}%`, cls: 'core-trend-up', title };
+  if (row.pct_change < 0) return { display: `↘ ${Math.abs(row.pct_change)}%`, cls: 'core-trend-down', title };
+  return { display: '→ 0%', cls: 'core-trend-flat', title };
 }
 
 function coreShootCategoryRowHtml(cat, selectedCodes) {
   const isOpen = state.coreShootExpandedCategories.has(cat.name);
-  const trend = coreCategoryTrendInfo(cat.vel7, cat.vel30);
+  const trend = coreCategoryTrendInfo(cat.name);
   return `
     <div class="core-shoot-category-group">
       <button type="button" class="core-shoot-category-toggle ${isOpen ? 'open' : ''}" data-category="${escapeHtml(cat.name)}">
@@ -1985,8 +1989,6 @@ function renderCoreShootPlanning() {
     needsAttention: products.filter((p) => p.flag === 'needs_attention').length,
     opportunity: products.filter((p) => p.flag === 'opportunity').length,
     stale: products.filter((p) => p.days_since_last_new_concept == null || p.days_since_last_new_concept > CORE_STALE_DAYS).length,
-    vel7: products.reduce((sum, p) => sum + (p.vel7 || 0), 0),
-    vel30: products.reduce((sum, p) => sum + (p.vel30 || 0), 0),
     selectedCount: selectedCounts.get(name) || 0,
     problemProducts: products.filter((p) => p.flag === 'needs_attention' || p.flag === 'opportunity'),
   }));
@@ -2026,62 +2028,6 @@ function renderCoreProducts() {
 
   list.innerHTML = state.coreView === 'category' ? renderCoreProductsByCategory() : renderCoreProductsPriority();
   wireCoreCategoryToggles(list);
-}
-
-// Compact "this month to date vs the same days last year" per category --
-// ported from demand-v2's Sales Cadence view (its "LY MTD vs THIS MTD"
-// column), without the full 12-month grid. Purely informational context at
-// the top of Core Shoot Planning -- reads state.salesCadence as-is, no
-// ranking/eligibility logic here.
-function salesCadencePctHtml(pct) {
-  if (pct == null) return '<span class="sales-cadence-pct sales-cadence-pct-new">New</span>';
-  if (pct === 0) return '<span class="sales-cadence-pct sales-cadence-pct-flat">—</span>';
-  const cls = pct > 0 ? 'sales-cadence-pct-up' : 'sales-cadence-pct-down';
-  const arrow = pct > 0 ? '↑' : '↓';
-  return `<span class="sales-cadence-pct ${cls}">${arrow} ${Math.abs(pct)}%</span>`;
-}
-
-function salesCadenceRowHtml(row) {
-  return `
-    <div class="sales-cadence-row">
-      <span class="sales-cadence-category">${escapeHtml(row.category)}</span>
-      <span class="sales-cadence-units">${row.last_year_units}</span>
-      <span class="sales-cadence-units">${row.this_period_units}</span>
-      ${salesCadencePctHtml(row.pct_change)}
-    </div>`;
-}
-
-function renderSalesCadence() {
-  const container = document.getElementById('sales-cadence-table');
-  const asOfEl = document.getElementById('sales-cadence-asof');
-  const data = state.salesCadence;
-
-  if (!data || !data.configured) {
-    asOfEl.textContent = '';
-    container.innerHTML = '<div class="attention-empty">Sales Cadence needs the Report Pipeline configured to show category trends.</div>';
-    return;
-  }
-  if (!data.categories.length) {
-    asOfEl.textContent = '';
-    container.innerHTML = '<div class="attention-empty">No sales data available yet.</div>';
-    return;
-  }
-
-  asOfEl.textContent = `Month starting ${formatDate(data.period_start)} · as of ${formatDate(data.as_of)}`;
-  container.innerHTML = `
-    <div class="sales-cadence-row sales-cadence-header-row">
-      <span class="sales-cadence-category">Category</span>
-      <span class="sales-cadence-units">Last Year</span>
-      <span class="sales-cadence-units">This Year</span>
-      <span>Change</span>
-    </div>
-    ${data.categories.map(salesCadenceRowHtml).join('')}
-    <div class="sales-cadence-row sales-cadence-total-row">
-      <span class="sales-cadence-category">Total</span>
-      <span class="sales-cadence-units">${data.total.last_year_units}</span>
-      <span class="sales-cadence-units">${data.total.this_period_units}</span>
-      ${salesCadencePctHtml(data.total.pct_change)}
-    </div>`;
 }
 
 // ── Planning: High Stocks ─────────────────────────────
