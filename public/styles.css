@@ -494,6 +494,26 @@ main{padding:20px 24px;}
 .high-stock-thumb{width:34px;height:34px;border-radius:var(--r);object-fit:contain;background:var(--surface2);flex-shrink:0;}
 .high-stock-noimg{display:flex;align-items:center;justify-content:center;font-size:15px;opacity:0.4;}
 
+/* High Stock expandable detail -- collapsed row stays the fixed 4-field
+   Monday glance; expanding answers "why is it being recommended?" via a
+   compact 3-column Inventory | Sales | Creative grid on desktop. */
+.high-stock-clickable-row{cursor:pointer;}
+.high-stock-clickable-row:hover{background:var(--surface2);}
+.high-stock-detail{padding:12px 14px 16px 44px;}
+.high-stock-detail-why{font-size:13px;color:var(--text-secondary);margin-bottom:12px;}
+.high-stock-detail-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;background:var(--surface2);border-radius:var(--r);padding:14px 16px;}
+.high-stock-detail-col-title{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);margin-bottom:8px;}
+.high-stock-detail-subtitle{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.2px;color:var(--text-muted);margin:10px 0 4px;}
+.high-stock-detail-row{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;color:var(--text-secondary);padding:3px 0;}
+.high-stock-detail-row span:first-child{color:var(--text-muted);}
+.high-stock-detail-row span:last-child{font-weight:600;color:var(--text);white-space:nowrap;}
+.high-stock-asset-row{display:flex;align-items:center;gap:6px;font-size:12px;padding:3px 0;}
+.high-stock-asset-icon{flex-shrink:0;}
+.high-stock-asset-name{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text-secondary);}
+.high-stock-asset-status{flex-shrink:0;font-size:11px;color:var(--text-muted);white-space:nowrap;}
+
+@media (max-width:900px){.high-stock-detail-grid{grid-template-columns:1fr;}}
+
 .core-view-all-toggle{display:flex;align-items:center;gap:6px;width:100%;background:none;border:none;color:var(--teal-dark);font-family:inherit;font-size:12.5px;font-weight:600;cursor:pointer;padding:8px 4px;text-align:left;}
 .core-view-all-toggle:hover{text-decoration:underline;}
 .core-view-all-toggle .accordion-arrow{color:var(--teal-dark);}
