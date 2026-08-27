@@ -162,7 +162,7 @@
 
           <div class="planning-step-footer">
             <span id="core-step-footer-count">0 Core products selected</span>
-            <button type="button" class="btn btn-primary btn-sm" onclick="setPlanningStep('high-stocks')">Continue to High Stocks &rarr;</button>
+            <button type="button" class="btn btn-primary planning-step-continue-btn" onclick="setPlanningStep('high-stocks')">Continue to High Stocks &rarr;</button>
           </div>
         </div>
 
@@ -179,7 +179,7 @@
 
           <div class="planning-step-footer">
             <span id="high-stock-step-footer-count">0 High Stock products selected</span>
-            <button type="button" class="btn btn-primary btn-sm" onclick="setPlanningStep('drops')">Continue to Upcoming Drops &rarr;</button>
+            <button type="button" class="btn btn-primary planning-step-continue-btn" onclick="setPlanningStep('drops')">Continue to Upcoming Drops &rarr;</button>
           </div>
         </div>
 
@@ -194,6 +194,11 @@
               <div id="drops-row-past" class="drops-row"></div>
             </div>
           </div>
+
+          <div class="planning-step-footer">
+            <span id="drops-step-footer-count">0 upcoming drops</span>
+            <button type="button" class="btn btn-primary planning-step-continue-btn" onclick="setPlanningStep('promotions')">Continue to Promotions &rarr;</button>
+          </div>
         </div>
 
         <div class="planning-step-panel" data-step="promotions" id="planning-step-promotions">
@@ -202,6 +207,11 @@
             <input type="text" id="new-promotion-name" placeholder="Promotion name">
             <input type="date" id="new-promotion-date">
             <button type="button" class="btn btn-primary btn-sm" onclick="addPromotion()">+ Add Promotion</button>
+          </div>
+
+          <div class="planning-step-footer">
+            <span id="promotions-step-footer-count">0 upcoming promotions</span>
+            <button type="button" class="btn btn-primary planning-step-continue-btn" onclick="setPlanningStep('shoot-plan')">Continue to Shoot Plan &rarr;</button>
           </div>
         </div>
 
