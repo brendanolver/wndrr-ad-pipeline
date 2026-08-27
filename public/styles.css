@@ -497,6 +497,7 @@ main{padding:20px 24px;}
 /* High Stock expandable detail -- collapsed row stays the fixed 4-field
    Monday glance; expanding answers "why is it being recommended?" via a
    compact 3-column Inventory | Sales | Creative grid on desktop. */
+.high-stock-tier-badge{display:inline-block;padding:2px 8px;border-radius:var(--r-pill);font-weight:700;font-size:11.5px;background:var(--surface2);white-space:nowrap;}
 .high-stock-clickable-row{cursor:pointer;}
 .high-stock-clickable-row:hover{background:var(--surface2);}
 .high-stock-detail{padding:12px 14px 16px 44px;}

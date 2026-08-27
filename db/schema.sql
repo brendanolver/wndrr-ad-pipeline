@@ -295,6 +295,14 @@ INSERT INTO planning_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
 ALTER TABLE planning_settings ADD COLUMN IF NOT EXISTS high_stock_min_soh INTEGER NOT NULL DEFAULT 150;
 ALTER TABLE planning_settings ADD COLUMN IF NOT EXISTS high_stock_recommendations_shown INTEGER NOT NULL DEFAULT 5;
 
+-- High Stocks redesign: replaced the multi-signal pressure heuristic with a
+-- flat "over 100 SOH" gate (see highStockProducts.js). Only rewrite rows
+-- still on the OLD default (150) -- an admin who already customised this
+-- keeps their value. high_stock_recommendations_shown is no longer read
+-- anywhere (every eligible product is shown now); column kept, just unused.
+UPDATE planning_settings SET high_stock_min_soh = 100 WHERE id = 1 AND high_stock_min_soh = 150;
+ALTER TABLE planning_settings ALTER COLUMN high_stock_min_soh SET DEFAULT 100;
+
 -- ---------------------------------------------------------------------------
 -- Weekly Shoot Plan (Monday Planning: deciding WHAT gets shot this week
 -- and whether the product is in hand). Deliberately minimal -- talent,
