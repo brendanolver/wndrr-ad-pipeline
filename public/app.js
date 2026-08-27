@@ -618,6 +618,8 @@ function renderDropsRow() {
     ? past.map(dropCardHtml).join('')
     : `<div class="attention-empty">No drops launched in the past ${PAST_DROPS_WINDOW_DAYS} days.</div>`;
   wireDropCardRow(pastRow);
+
+  document.getElementById('drops-step-footer-count').textContent = `${upcoming.length} upcoming drop${upcoming.length === 1 ? '' : 's'}`;
 }
 
 function togglePlanningSection(key) {
@@ -2363,6 +2365,8 @@ function renderPromotions() {
   list.innerHTML = upcoming.length
     ? upcoming.map(promotionCardHtml).join('')
     : '<div class="attention-empty">No upcoming promotions yet — add one below.</div>';
+
+  document.getElementById('promotions-step-footer-count').textContent = `${upcoming.length} upcoming promotion${upcoming.length === 1 ? '' : 's'}`;
 }
 
 async function addPromotion() {

@@ -248,6 +248,7 @@ main{padding:20px 24px;}
 .planning-step-panel.active{display:block;}
 .planning-step-footer{display:flex;justify-content:space-between;align-items:center;margin-top:16px;padding-top:14px;border-top:1px solid var(--border);}
 .planning-step-footer span{font-size:13px;color:var(--text-secondary);font-weight:600;}
+.planning-step-continue-btn{padding:13px 24px;font-size:14.5px;font-weight:700;border-radius:var(--r-pill);}
 .core-shoot-selected-badge{display:inline-block;padding:5px 12px;border-radius:var(--r-pill);background:var(--green-light);color:var(--green);font-size:12.5px;font-weight:700;white-space:nowrap;}
 
 /* Step 4 -- Promotions: reuses .drop-card's card shell plus its own
