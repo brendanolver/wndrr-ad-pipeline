@@ -2,6 +2,7 @@ const express = require('express');
 const apparelmagic = require('../lib/apparelmagic');
 const reportPipeline = require('../lib/reportPipeline');
 const { fetchAmData } = require('../lib/planningData');
+const { pool } = require('../db');
 
 const router = express.Router();
 
@@ -32,30 +33,50 @@ router.get('/high-stock/lookup', async (req, res, next) => {
     const query = (req.query.name || '').trim().toLowerCase();
     if (!query) return res.status(400).json({ error: 'Provide ?name=<product name substring>' });
 
-    const [am, tiers] = await Promise.all([
+    const salesReady = apparelmagic.getAmCacheStatus().sales.hasData;
+    const [am, tiers, salesByStyle] = await Promise.all([
       fetchAmData(),
       reportPipeline.configured() ? reportPipeline.getStyleTiers() : Promise.resolve(new Map()),
+      salesReady ? apparelmagic.getSalesByStyle() : Promise.resolve(new Map()),
     ]);
     if (!am.amConfigured || !am.amDetails) {
       return res.status(503).json({ error: 'ApparelMagic is not configured' });
     }
 
-    const matches = [];
+    const candidateCodes = [];
     for (const [styleCode, details] of am.amDetails.entries()) {
-      if (!(details.productName || '').toLowerCase().includes(query)) continue;
+      if ((details.productName || '').toLowerCase().includes(query)) candidateCodes.push(styleCode);
+    }
+    const localRows = candidateCodes.length
+      ? (await pool.query(`SELECT style_code, tier, drop_id FROM styles WHERE style_code = ANY($1::text[])`, [candidateCodes])).rows
+      : [];
+    const localByCode = new Map(localRows.map((r) => [r.style_code, r]));
+
+    const matches = candidateCodes.map((styleCode) => {
+      const details = am.amDetails.get(styleCode);
       const soh = am.amStock ? (am.amStock.get(styleCode) ?? 0) : null;
       const tierEntry = tiers.get(styleCode) || null;
-      matches.push({
+      const qty7 = salesByStyle.get(styleCode)?.qty7 ?? 0;
+      const sellThrough7Pct = (qty7 + soh) > 0 ? Math.round((qty7 / (qty7 + soh)) * 100) : 0;
+      const local = localByCode.get(styleCode) || null;
+      return {
         style_code: styleCode,
         product_name: details.productName,
         is_core: details.isCore,
         category: details.category,
         soh,
         is_wndrr_style_code: apparelmagic.isWndrrStyleCode(styleCode),
+        qty7,
+        sell_through_7d_pct: sellThrough7Pct,
         tier_lookup: tierEntry ? { tier: tierEntry.tier, index_score: tierEntry.indexScore } : 'not found in Report Pipeline tier map',
-      });
-    }
-    res.json({ query, pipeline_configured: reportPipeline.configured(), total_tier_map_size: tiers.size, matches });
+        local_exclusion: local
+          ? (local.tier === 'core_proven' ? 'already tracked locally as core_proven'
+            : local.drop_id != null ? `already tied to drop_id ${local.drop_id}`
+              : null)
+          : null,
+      };
+    });
+    res.json({ query, pipeline_configured: reportPipeline.configured(), total_tier_map_size: tiers.size, sales_data_ready: salesReady, matches });
   } catch (err) {
     next(err);
   }
