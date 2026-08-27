@@ -12,6 +12,8 @@
   --teal: #0ea5a0;
   --teal-light: #e6f7f7;
   --teal-dark: #0c8f8a;
+  --black: #111827;
+  --black-dark: #000000;
   --green: #16a34a;
   --green-light: #dcfce7;
   --amber: #d97706;
@@ -45,8 +47,8 @@ body{font-family:'Inter',sans-serif;font-size:13px;background:var(--bg);color:va
 .pw-title{font-size:20px;font-weight:700;margin-bottom:6px;}
 .pw-sub{color:var(--navy-text);font-size:12px;margin-bottom:20px;}
 .pw-input{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:var(--r);font-family:inherit;font-size:13px;margin-bottom:12px;}
-.pw-submit{width:100%;background:var(--teal);color:white;border:none;padding:11px;border-radius:var(--r);font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;}
-.pw-submit:hover{background:var(--teal-dark);}
+.pw-submit{width:100%;background:var(--black);color:white;border:none;padding:11px;border-radius:var(--r);font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;}
+.pw-submit:hover{background:var(--black-dark);}
 .pw-error{display:none;color:var(--red);font-size:11px;margin-top:10px;}
 .pw-error.show{display:block;}
 
@@ -59,8 +61,8 @@ body{font-family:'Inter',sans-serif;font-size:13px;background:var(--bg);color:va
 .topbar-actions{display:flex;gap:8px;}
 
 .btn{border:none;border-radius:var(--r);padding:9px 14px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;}
-.btn-primary{background:var(--teal);color:white;}
-.btn-primary:hover{background:var(--teal-dark);}
+.btn-primary{background:var(--black);color:white;}
+.btn-primary:hover{background:var(--black-dark);}
 .btn-ghost{background:none;border:1px solid var(--border);color:var(--text-secondary);}
 .btn-ghost:hover{background:var(--surface2);}
 .btn-danger{background:var(--red-light);color:var(--red);margin-right:auto;}
@@ -434,7 +436,7 @@ main{padding:20px 24px;}
 .core-view-toggle{display:flex;gap:5px;margin-bottom:12px;}
 .core-view-btn{background:none;border:1px solid var(--border);border-radius:var(--r-pill);padding:6px 14px;font-family:inherit;font-size:13px;font-weight:600;color:var(--text-secondary);cursor:pointer;}
 .core-view-btn:hover{border-color:var(--teal);}
-.core-view-btn.active{background:var(--teal);border-color:var(--teal);color:white;}
+.core-view-btn.active{background:var(--black);border-color:var(--black);color:white;}
 
 .core-products-list{display:flex;flex-direction:column;gap:2px;}
 
