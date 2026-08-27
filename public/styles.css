@@ -391,14 +391,30 @@ main{padding:20px 24px;}
 .core-weekly-pill-remaining{background:var(--amber-light);color:var(--amber);}
 .core-weekly-footer{font-size:10.5px;color:var(--text-muted);}
 
-/* Core Shoot Review -- the default Monday-morning view: top 5 Core
-   products only, ranked by the existing Core Attention logic, with just
-   enough context per row to decide whether to shoot this week. No metric
-   columns, no expand -- one line, 2-3 reasons, one action. The full
-   Priority/By Category views are unchanged, just tucked behind
-   "View All Core Products" instead of being the default. */
-.core-shoot-review-title{font-size:14px;font-weight:700;margin-bottom:10px;}
-.core-shoot-review-list{display:flex;flex-direction:column;gap:7px;margin-bottom:4px;}
+/* Core Shoot Planning -- the default Monday-morning view: category first
+   (Category -> Problem Products -> Select for Shoot), so a meeting sees
+   which categories need attention before drilling into products. Collapsed
+   category rows show only aggregate counts, never per-product metrics.
+   Expanding a category surfaces just its problem products (needs_attention/
+   opportunity), one line each -- 2-3 reasons, one action, no metric
+   columns. The full Priority/By Category views are unchanged, just tucked
+   behind "View All Core Products" instead of being the default. */
+.core-shoot-planning-title{font-size:14px;font-weight:700;margin-bottom:10px;}
+.core-shoot-planning-list{display:flex;flex-direction:column;margin-bottom:4px;}
+
+.core-shoot-category-group{border-bottom:1px solid var(--border);}
+.core-shoot-category-group:last-child{border-bottom:none;}
+.core-shoot-category-toggle{display:flex;align-items:center;gap:10px;flex-wrap:wrap;width:100%;background:none;border:none;padding:12px 6px;font-family:inherit;color:var(--text);cursor:pointer;text-align:left;}
+.core-shoot-category-toggle:hover{background:var(--surface2);border-radius:var(--r);}
+.core-shoot-category-toggle.open .accordion-arrow{transform:rotate(90deg);}
+.core-shoot-category-name{font-size:14px;font-weight:700;}
+.core-shoot-category-count{font-size:12px;color:var(--text-muted);font-weight:600;}
+.core-shoot-category-stats{display:flex;gap:16px;flex-wrap:wrap;margin-left:auto;font-size:12px;color:var(--text-secondary);}
+.core-shoot-stat{white-space:nowrap;}
+.core-shoot-stat-red{color:var(--red);font-weight:700;}
+.core-shoot-stat-selected{color:var(--green);font-weight:700;}
+.core-shoot-category-body{display:flex;flex-direction:column;gap:7px;padding:2px 6px 16px 32px;}
+
 .core-shoot-review-row{display:grid;grid-template-columns:2fr 3fr auto;gap:16px;align-items:center;background:white;border:1px solid var(--border);border-radius:var(--r);padding:11px 14px;}
 .core-shoot-review-col-product{min-width:0;}
 .core-shoot-review-name{font-weight:700;font-size:13.5px;}

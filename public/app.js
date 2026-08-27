@@ -15,6 +15,7 @@ let state = {
   styles: [], categories: [], board: null, dashboard: null, drops: [], jobs: [], provenWinners: [],
   coreProducts: [], planningSettings: null, coreView: 'priority', coreAllProductsOpen: false,
   coreExpandedCategories: new Set(), coreExpandedProducts: new Set(),
+  coreShootExpandedCategories: new Set(),
   shootPlan: [],
 };
 let dashboardWeekOffset = 0;
@@ -1774,12 +1775,17 @@ function renderCoreProductsByCategory() {
   }).join('');
 }
 
-// Monday-morning default: only the top 5 Core products, ranked by the same
-// attention order the server already sorts by -- no separate metric
-// columns, just enough to decide whether to shoot this week. The full
-// Priority/By Category views (unchanged) stay reachable via "View All
-// Core Products" for anyone who wants the underlying detail.
-function coreShootReviewRowHtml(p) {
+// Core Shoot Planning (default view): category-first, so a Monday meeting
+// sees which categories need attention before drilling into individual
+// products -- Category -> Problem Products -> Select for Shoot. Collapsed
+// rows show only aggregate counts, never per-product metrics; expanding a
+// category surfaces just its problem products (needs_attention/opportunity)
+// using the same compact row format as before. The full Priority/By
+// Category views (unchanged, every product, full metrics) stay reachable
+// via "View All Core Products".
+const CORE_STALE_DAYS = 14; // mirrors coreProducts.js's STALE_DAYS_OPPORTUNITY -- display aggregate only, doesn't touch the server's own flag decision
+
+function coreProblemProductRowHtml(p) {
   const badge = p.flag === 'needs_attention' ? '🔴' : p.flag === 'opportunity' ? '🟠' : '';
   const reasons = (p.reason_chips || []).join(' · ');
   return `
@@ -1792,12 +1798,89 @@ function coreShootReviewRowHtml(p) {
     </div>`;
 }
 
-function renderCoreShootReview() {
-  const list = document.getElementById('core-shoot-review-list');
-  const top5 = state.coreProducts.slice(0, 5);
-  list.innerHTML = top5.length
-    ? top5.map(coreShootReviewRowHtml).join('')
-    : '<div class="attention-empty">No Core products found yet.</div>';
+function toggleCoreShootCategory(cat) {
+  if (state.coreShootExpandedCategories.has(cat)) state.coreShootExpandedCategories.delete(cat);
+  else state.coreShootExpandedCategories.add(cat);
+  renderCoreShootPlanning();
+}
+
+// How many of this week's already-selected Shoot Plan items belong to each
+// Core category -- cross-referenced via product_code, since shoot_plan_items
+// doesn't store category itself (a Shoot Plan entry from Upcoming Drops
+// simply won't match any Core product_code here, which is correct).
+function coreShootPlanCountsByCategory() {
+  const productCodeToCategory = new Map(state.coreProducts.map((p) => [p.product_code, p.category]));
+  const counts = new Map();
+  for (const item of state.shootPlan) {
+    const cat = productCodeToCategory.get(item.product_code);
+    if (!cat) continue;
+    counts.set(cat, (counts.get(cat) || 0) + 1);
+  }
+  return counts;
+}
+
+function coreShootCategoryRowHtml(cat) {
+  const isOpen = state.coreShootExpandedCategories.has(cat.name);
+  const trend = coreTrendInfo({ vel7: cat.vel7, vel30: cat.vel30 });
+  return `
+    <div class="core-shoot-category-group">
+      <button type="button" class="core-shoot-category-toggle ${isOpen ? 'open' : ''}" data-category="${escapeHtml(cat.name)}">
+        <span class="accordion-arrow">&#9656;</span>
+        <span class="core-shoot-category-name">${escapeHtml(cat.name)}</span>
+        <span class="core-shoot-category-count">${cat.total} product${cat.total === 1 ? '' : 's'}</span>
+        <span class="core-shoot-category-stats">
+          ${cat.needsAttention ? `<span class="core-shoot-stat core-shoot-stat-red">🔴 ${cat.needsAttention} needing attention</span>` : ''}
+          <span class="core-shoot-stat core-trend ${trend.cls}">${trend.arrow} ${trend.label}</span>
+          ${cat.stale ? `<span class="core-shoot-stat">${cat.stale} stale/untested</span>` : ''}
+          ${cat.selectedCount ? `<span class="core-shoot-stat core-shoot-stat-selected">✓ ${cat.selectedCount} selected this week</span>` : ''}
+        </span>
+      </button>
+      ${isOpen ? `<div class="core-shoot-category-body">
+        ${cat.problemProducts.length
+          ? cat.problemProducts.map(coreProblemProductRowHtml).join('')
+          : '<div class="attention-empty">No problem products in this category right now.</div>'}
+      </div>` : ''}
+    </div>`;
+}
+
+function renderCoreShootPlanning() {
+  const list = document.getElementById('core-shoot-planning-list');
+  if (!state.coreProducts.length) {
+    list.innerHTML = '<div class="attention-empty">No Core products found yet.</div>';
+    return;
+  }
+
+  const selectedCounts = coreShootPlanCountsByCategory();
+  const byCategory = new Map();
+  for (const p of state.coreProducts) {
+    if (!byCategory.has(p.category)) byCategory.set(p.category, []);
+    byCategory.get(p.category).push(p);
+  }
+
+  const categories = [...byCategory.entries()].map(([name, products]) => ({
+    name,
+    total: products.length,
+    needsAttention: products.filter((p) => p.flag === 'needs_attention').length,
+    opportunity: products.filter((p) => p.flag === 'opportunity').length,
+    stale: products.filter((p) => p.days_since_last_new_concept == null || p.days_since_last_new_concept > CORE_STALE_DAYS).length,
+    vel7: products.reduce((sum, p) => sum + (p.vel7 || 0), 0),
+    vel30: products.reduce((sum, p) => sum + (p.vel30 || 0), 0),
+    selectedCount: selectedCounts.get(name) || 0,
+    problemProducts: products.filter((p) => p.flag === 'needs_attention' || p.flag === 'opportunity'),
+  }));
+
+  // Rank by how much creative attention each category currently needs.
+  categories.sort((a, b) => {
+    if (b.needsAttention !== a.needsAttention) return b.needsAttention - a.needsAttention;
+    if (b.opportunity !== a.opportunity) return b.opportunity - a.opportunity;
+    if (b.stale !== a.stale) return b.stale - a.stale;
+    return a.name.localeCompare(b.name);
+  });
+
+  list.innerHTML = categories.map(coreShootCategoryRowHtml).join('');
+  list.querySelectorAll('.core-shoot-category-toggle').forEach((btn) => {
+    btn.addEventListener('click', () => toggleCoreShootCategory(btn.dataset.category));
+  });
 }
 
 function toggleCoreAllProducts() {
@@ -1808,7 +1891,7 @@ function toggleCoreAllProducts() {
 
 function renderCoreProducts() {
   renderCoreWeeklyCard();
-  renderCoreShootReview();
+  renderCoreShootPlanning();
   renderCoreViewToggle();
   document.getElementById('core-all-products-section').style.display = state.coreAllProductsOpen ? '' : 'none';
   document.getElementById('core-view-all-btn').classList.toggle('open', state.coreAllProductsOpen);
