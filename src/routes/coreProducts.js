@@ -94,22 +94,22 @@ function buildAttention({ sohKnown, soh, onOrder, vel7, vel30, vel365, weeksCove
   if (highPressure && staleRed) {
     const { reason, reason_chips } = rankReasons([
       weeksCover != null && weeksCover > WEEKS_COVER_HIGH
-        ? { weight: (weeksCover - WEEKS_COVER_HIGH) * 4, chip: 'High Cover', text: `Weeks Cover is ${weeksCover} — well above the ${WEEKS_COVER_HIGH}-week healthy range` }
+        ? { weight: (weeksCover - WEEKS_COVER_HIGH) * 4, chip: `${weeksCover} wks cover`, text: `Weeks Cover is ${weeksCover} — well above the ${WEEKS_COVER_HIGH}-week healthy range` }
         : null,
       declining
-        ? { weight: 40 + declinePct, chip: `Declining -${declinePct}%`, text: `Sales velocity is down ${declinePct}% over the last 7 days vs the 30-day average` }
+        ? { weight: 40 + declinePct, chip: `↓ Sales ${declinePct}%`, text: `Sales velocity is down ${declinePct}% over the last 7 days vs the 30-day average` }
         : null,
       onOrder > 0 && onOrderWeeks > 4
         ? { weight: 30 + Math.min(onOrderWeeks, 40), chip: `+${onOrder} Incoming`, text: `${onOrder} units on order will add further pressure` }
         : null,
       neverTested
-        ? { weight: 120, chip: 'Never Tested', text: 'Creative has never been tested with a new concept' }
+        ? { weight: 120, chip: 'Never tested', text: 'Creative has never been tested with a new concept' }
         : { weight: daysSinceLastNewConcept, chip: `Stale ${daysSinceLastNewConcept}d`, text: `Last new concept was ${daysSinceLastNewConcept} days ago — past the ${STALE_DAYS_RED}-day review window` },
     ]);
     return { flag: 'needs_attention', label: '🔴 Needs Creative Attention', reason, reason_chips };
   }
   if (!highPressure && staleOpportunity) {
-    const freshnessChip = neverTested ? 'Never Tested' : `Stale ${daysSinceLastNewConcept}d`;
+    const freshnessChip = neverTested ? 'Never tested' : `Stale ${daysSinceLastNewConcept}d`;
     const freshnessReason = neverTested
       ? 'Creative has never been tested with a new concept'
       : `Last new concept was ${daysSinceLastNewConcept} days ago — past the ${STALE_DAYS_OPPORTUNITY}-day review window`;
