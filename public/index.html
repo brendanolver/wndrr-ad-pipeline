@@ -715,14 +715,14 @@
           <div id="shoot-plan-product-category" class="shoot-plan-category-tag"></div>
         </div>
       </div>
+      <label>Sample Status
+        <select id="shoot-plan-stock-status" onchange="updateShootPlanSampleStatusVisibility()">
+          <option value="needs_to_be_brought_in">Bring from Warehouse</option>
+          <option value="in_office">In Office</option>
+        </select>
+      </label>
       <label>Colourways &amp; sizes needed
         <div id="shoot-plan-colours" class="shoot-plan-colours-list"></div>
-      </label>
-      <label>Stock status
-        <select id="shoot-plan-stock-status">
-          <option value="in_office">Already in Office</option>
-          <option value="needs_to_be_brought_in">Needs to be Brought In</option>
-        </select>
       </label>
       <label>Content Creator / Owner
         <input type="text" id="shoot-plan-creator" placeholder="e.g. Mark" oninput="applyShootPlanSizeDefaults()">
