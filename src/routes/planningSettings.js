@@ -35,13 +35,6 @@ router.put('/', async (req, res, next) => {
       }
       updates.high_stock_min_soh = v;
     }
-    if (body.high_stock_recommendations_shown !== undefined) {
-      const v = Number.parseInt(body.high_stock_recommendations_shown, 10);
-      if (!Number.isInteger(v) || v < 1 || v > 50) {
-        return res.status(400).json({ error: 'high_stock_recommendations_shown must be between 1 and 50' });
-      }
-      updates.high_stock_recommendations_shown = v;
-    }
 
     const keys = Object.keys(updates);
     if (!keys.length) {

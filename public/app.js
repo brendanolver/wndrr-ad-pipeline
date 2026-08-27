@@ -18,7 +18,7 @@ let state = {
   coreShootExpandedCategories: new Set(),
   shootPlan: [], coverageImageIndex: new Map(),
   contentCreators: [],
-  highStockProducts: [], highStockAllOpen: false, highStockExpandedProducts: new Set(),
+  highStockProducts: [], highStockExpandedProducts: new Set(),
   // Monday Planning's 5-step guided workflow -- always starts at Core on
   // load (not persisted to localStorage): this is a recurring weekly
   // ritual, not a session to resume, so a stale mid-flow step from a prior
@@ -2025,30 +2025,21 @@ function renderCoreProducts() {
 }
 
 // ── Planning: High Stocks ─────────────────────────────
-// Non-Core products with meaningful stock exposure that may deserve
-// creative attention -- distinct from Core, so this never shows a
-// needs-attention-style emoji/flag or implies a New Concept is required.
-// Fixed four-field row (SOH, 30D Sell-Through, Sales Trend, Creative
-// Status) -- deliberately not a variable ranked-reasons list, so it stays
-// scannable in a few seconds. Reuses the exact same compact row format and
-// "+ Shoot This Week" modal Core already has -- no parallel workflow.
-// Collapsed row = "should we look at this?" (unchanged fixed four-field
-// glance). Clicking the row (anywhere but the action button) expands a
-// detail panel answering "why is it being recommended?" -- the button
-// itself always means "we've decided to action it," so its click never
-// toggles the row (event.stopPropagation()).
-function toggleHighStockProduct(productCode) {
-  if (state.highStockExpandedProducts.has(productCode)) state.highStockExpandedProducts.delete(productCode);
-  else state.highStockExpandedProducts.add(productCode);
+// Platinum/Rocket-tier (per the "demand planning v2" cohort-based sales
+// index), non-Core, over the SOH threshold with under 5% sell-through in
+// the last 7 days -- a flat eligibility gate, not a ranked heuristic, so
+// every matching colourway shows (no Top-5 cap), sorted SOH descending by
+// the backend. One row per colourway (style_code), matching the reference
+// report this was built from -- not rolled up by product family.
+// Collapsed row = "should we look at this?" (fixed glance: Tier, SOH, 7D
+// Sell-Through, Creative Status). Clicking the row (anywhere but the action
+// button) expands a detail panel answering "why is it being recommended?"
+// -- the button itself always means "we've decided to action it," so its
+// click never toggles the row (event.stopPropagation()).
+function toggleHighStockProduct(styleCode) {
+  if (state.highStockExpandedProducts.has(styleCode)) state.highStockExpandedProducts.delete(styleCode);
+  else state.highStockExpandedProducts.add(styleCode);
   renderHighStockProducts();
-}
-
-function highStockColourStockRowHtml(c) {
-  return `
-    <div class="high-stock-detail-row">
-      <span>${escapeHtml(c.colour_label || c.style_code)}</span>
-      <span>${c.soh} SOH${c.on_order ? ` · +${c.on_order} on order` : ''}</span>
-    </div>`;
 }
 
 function highStockAssetRowHtml(a) {
@@ -2079,15 +2070,15 @@ function highStockDetailHtml(p) {
       <div class="high-stock-detail-grid">
         <div class="high-stock-detail-col">
           <div class="high-stock-detail-col-title">Inventory</div>
+          <div class="high-stock-detail-row"><span>Tier</span><span>${p.tier_emoji} ${escapeHtml(p.tier_label)}</span></div>
+          <div class="high-stock-detail-row"><span>Index Score</span><span>${p.index_score}</span></div>
           <div class="high-stock-detail-row"><span>SOH</span><span>${p.soh}</span></div>
           <div class="high-stock-detail-row"><span>On Order</span><span>${p.on_order != null ? p.on_order : '—'}</span></div>
-          <div class="high-stock-detail-row"><span>Colourways</span><span>${p.colours.length}</span></div>
-          <div class="high-stock-detail-subtitle">Stock by colourway</div>
-          ${p.colours.map(highStockColourStockRowHtml).join('')}
         </div>
         <div class="high-stock-detail-col">
           <div class="high-stock-detail-col-title">Sales</div>
           <div class="high-stock-detail-row"><span>Last 7D units sold</span><span>${p.vel7}</span></div>
+          <div class="high-stock-detail-row"><span>7D Sell-Through</span><span>${p.sell_through_7d_pct}%</span></div>
           <div class="high-stock-detail-row"><span>Last 30D units sold</span><span>${p.units_sold_30d}</span></div>
           <div class="high-stock-detail-row"><span>30D Sell-Through</span><span>${p.sell_through_pct}%</span></div>
           <div class="high-stock-detail-row"><span>Historical weekly avg</span><span>${p.vel365}/wk</span></div>
@@ -2106,40 +2097,38 @@ function highStockDetailHtml(p) {
     </div>`;
 }
 
+function highStockActionHtml(p, selectedCodes) {
+  if (selectedCodes.has(p.product_code)) return '<span class="core-shoot-selected-badge">✓ Shooting</span>';
+  return `<button type="button" class="btn btn-primary btn-sm" onclick="shootThisWeekForHighStock('${p.style_code}')">+ Shoot</button>`;
+}
+
 function highStockProductRowHtml(p, selectedCodes) {
-  const trend = p.sales_trend || { display: '', cls: 'core-trend-flat' };
-  const firstImage = (p.colours || []).find((c) => c.image_url);
-  const thumb = firstImage
-    ? `<img class="high-stock-thumb" src="${firstImage.image_url}" alt="">`
+  const thumb = p.image_url
+    ? `<img class="high-stock-thumb" src="${p.image_url}" alt="">`
     : '<span class="high-stock-thumb high-stock-noimg">🖼</span>';
-  const isOpen = state.highStockExpandedProducts.has(p.product_code);
+  const isOpen = state.highStockExpandedProducts.has(p.style_code);
+  const displayName = `${p.product_name}${p.colour_label ? ` — ${p.colour_label}` : ''}`;
   return `
     <div class="high-stock-row-wrap">
-      <div class="core-shoot-review-row high-stock-clickable-row" onclick="toggleHighStockProduct('${p.product_code}')">
+      <div class="core-shoot-review-row high-stock-clickable-row" onclick="toggleHighStockProduct('${p.style_code}')">
         <div class="core-shoot-review-col-product">
           <span class="accordion-arrow ${isOpen ? 'open' : ''}">&#9656;</span>
           ${thumb}
-          <span class="core-shoot-review-name">${escapeHtml(p.product_name)}</span>
+          <span class="core-shoot-review-name">${escapeHtml(displayName)}</span>
         </div>
         <div class="core-shoot-review-col-reasons">
+          <span class="high-stock-tier-badge">${p.tier_emoji} ${escapeHtml(p.tier_label)}</span>
+          <span class="core-shoot-review-sep">·</span>
           <span class="core-shoot-review-soh">${p.soh} SOH</span>
           <span class="core-shoot-review-sep">·</span>
-          <span class="core-shoot-review-soh">${p.sell_through_pct}% 30D Sell-Through</span>
-          <span class="core-shoot-review-sep">·</span>
-          <span class="core-shoot-stat core-category-trend ${trend.cls}">${escapeHtml(trend.display)}</span>
+          <span class="core-shoot-review-soh">${p.sell_through_7d_pct}% 7D Sell-Through</span>
           <span class="core-shoot-review-sep">·</span>
           <span class="core-shoot-review-reasons-text">${escapeHtml(p.creative_status_label || '')}</span>
         </div>
-        <div class="core-shoot-review-col-action" onclick="event.stopPropagation()">${shootActionHtml(p.product_code, 'shootThisWeekForHighStock', selectedCodes)}</div>
+        <div class="core-shoot-review-col-action" onclick="event.stopPropagation()">${highStockActionHtml(p, selectedCodes)}</div>
       </div>
       ${isOpen ? highStockDetailHtml(p) : ''}
     </div>`;
-}
-
-function toggleHighStockAllProducts() {
-  state.highStockAllOpen = !state.highStockAllOpen;
-  document.getElementById('high-stock-all-products-section').style.display = state.highStockAllOpen ? '' : 'none';
-  document.getElementById('high-stock-view-all-btn').classList.toggle('open', state.highStockAllOpen);
 }
 
 // Bottom-of-step count for "X High Stock products selected · Continue to
@@ -2151,33 +2140,35 @@ function renderHighStockStepFooter() {
 }
 
 function renderHighStockProducts() {
-  const shown = (state.planningSettings && state.planningSettings.high_stock_recommendations_shown) || 5;
-  const top = state.highStockProducts.slice(0, shown);
   const selectedCodes = new Set(state.shootPlan.map((i) => i.product_code));
 
   const list = document.getElementById('high-stock-list');
-  list.innerHTML = top.length
-    ? top.map((p) => highStockProductRowHtml(p, selectedCodes)).join('')
-    : '<div class="attention-empty">No High Stock products currently meet the SOH threshold.</div>';
-
-  document.getElementById('high-stock-all-products-section').style.display = state.highStockAllOpen ? '' : 'none';
-  document.getElementById('high-stock-view-all-btn').classList.toggle('open', state.highStockAllOpen);
-  const allList = document.getElementById('high-stock-all-list');
-  allList.innerHTML = state.highStockProducts.length
+  list.innerHTML = state.highStockProducts.length
     ? state.highStockProducts.map((p) => highStockProductRowHtml(p, selectedCodes)).join('')
-    : '<div class="attention-empty">No eligible High Stock products right now.</div>';
+    : '<div class="attention-empty">No Platinum/Rocket products currently meet the High Stock threshold.</div>';
 
   renderHighStockStepFooter();
 }
 
-function shootThisWeekForHighStock(productCode) {
-  const product = state.highStockProducts.find((p) => p.product_code === productCode);
+function shootThisWeekForHighStock(styleCode) {
+  const product = state.highStockProducts.find((p) => p.style_code === styleCode);
   if (!product) return;
   openShootPlanModal({
     productCode: product.product_code,
     productName: product.product_name,
     category: product.category,
-    colours: product.colours,
+    // High Stock's shoot modal scopes to just this one colourway -- no
+    // sibling-colourway picker, unlike Core's whole-family modal.
+    colours: [{
+      style_id: product.style_id,
+      style_code: product.style_code,
+      colour_label: product.colour_label,
+      image_url: product.image_url,
+      soh: product.soh,
+      on_order: product.on_order,
+      sizes: product.sizes,
+      sizing_system: product.sizing_system,
+    }],
     source: 'high_stock',
   });
 }
@@ -2592,7 +2583,6 @@ function renderPlanningSettingsForm() {
   if (!state.planningSettings) return;
   document.getElementById('weekly-target-input').value = state.planningSettings.weekly_new_concept_target;
   document.getElementById('high-stock-min-soh-input').value = state.planningSettings.high_stock_min_soh;
-  document.getElementById('high-stock-recs-shown-input').value = state.planningSettings.high_stock_recommendations_shown;
 }
 
 async function saveWeeklyTarget() {
@@ -2618,18 +2608,6 @@ async function saveHighStockMinSoh() {
     toast('High Stock Minimum SOH saved');
     const res = await api('/high-stock-products');
     state.highStockProducts = res.products;
-    renderHighStockProducts();
-  } catch (e) {
-    toast(e.message, true);
-  }
-}
-
-async function saveHighStockRecommendationsShown() {
-  const value = document.getElementById('high-stock-recs-shown-input').value;
-  try {
-    const updated = await api('/planning-settings', { method: 'PUT', body: JSON.stringify({ high_stock_recommendations_shown: Number(value) }) });
-    state.planningSettings = updated;
-    toast('High Stock Recommendations Shown saved');
     renderHighStockProducts();
   } catch (e) {
     toast(e.message, true);
@@ -2789,7 +2767,6 @@ async function deletePw() {
 document.getElementById('pw-add-btn').addEventListener('click', () => openPwModal(null));
 document.getElementById('weekly-target-save-btn').addEventListener('click', saveWeeklyTarget);
 document.getElementById('high-stock-min-soh-save-btn').addEventListener('click', saveHighStockMinSoh);
-document.getElementById('high-stock-recs-shown-save-btn').addEventListener('click', saveHighStockRecommendationsShown);
 
 // ── Settings: Content Creators ───────────────────────
 // Fixed scales rather than free text -- keeps entries consistent and
@@ -2921,6 +2898,5 @@ document.querySelectorAll('.core-view-btn').forEach((btn) => {
   btn.addEventListener('click', () => setCoreView(btn.dataset.view));
 });
 document.getElementById('core-view-all-btn').addEventListener('click', toggleCoreAllProducts);
-document.getElementById('high-stock-view-all-btn').addEventListener('click', toggleHighStockAllProducts);
 
 checkSession();
