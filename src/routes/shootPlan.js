@@ -20,7 +20,7 @@ router.get('/', async (req, res, next) => {
 
     const stylesResult = items.length
       ? await pool.query(
-          `SELECT spis.shoot_plan_item_id, s.id AS style_id, s.style_code
+          `SELECT spis.shoot_plan_item_id, s.id AS style_id, s.style_code, spis.size
            FROM shoot_plan_item_styles spis
            JOIN styles s ON s.id = spis.style_id
            WHERE spis.shoot_plan_item_id = ANY($1::int[])`,
@@ -30,7 +30,7 @@ router.get('/', async (req, res, next) => {
     const stylesByItem = new Map();
     for (const row of stylesResult.rows) {
       if (!stylesByItem.has(row.shoot_plan_item_id)) stylesByItem.set(row.shoot_plan_item_id, []);
-      stylesByItem.get(row.shoot_plan_item_id).push({ style_id: row.style_id, style_code: row.style_code });
+      stylesByItem.get(row.shoot_plan_item_id).push({ style_id: row.style_id, style_code: row.style_code, size: row.size });
     }
 
     res.json(items.map((i) => ({
@@ -39,7 +39,7 @@ router.get('/', async (req, res, next) => {
       product_name: i.product_name,
       stock_status: i.stock_status,
       creator: i.creator,
-      initial_idea: i.initial_idea,
+      quick_note: i.initial_idea,
       created_at: i.created_at,
       asset_id: i.asset_id,
       asset_status: i.asset_status,
@@ -52,12 +52,12 @@ router.get('/', async (req, res, next) => {
 });
 
 router.post('/', async (req, res, next) => {
-  const { product_code, product_name, style_ids, stock_status, creator, initial_idea } = req.body || {};
+  const { product_code, product_name, colourways, stock_status, creator, quick_note } = req.body || {};
 
   if (!product_code || !product_name) {
     return res.status(400).json({ error: 'product_code and product_name are required' });
   }
-  if (!Array.isArray(style_ids) || !style_ids.length) {
+  if (!Array.isArray(colourways) || !colourways.length || !colourways.every((c) => c && Number.isFinite(Number(c.style_id)))) {
     return res.status(400).json({ error: 'At least one colourway must be selected' });
   }
   if (!STOCK_STATUSES.includes(stock_status)) {
@@ -72,11 +72,11 @@ router.post('/', async (req, res, next) => {
     await client.query('BEGIN');
 
     const trimmedCreator = creator.trim();
-    const trimmedIdea = initial_idea && initial_idea.trim() ? initial_idea.trim() : null;
+    const trimmedNote = quick_note && quick_note.trim() ? quick_note.trim() : null;
 
     const asset = await insertCreativeAsset(client, {
-      style_id: style_ids[0],
-      concept_name: trimmedIdea || `New Concept — ${product_name}`,
+      style_id: Number(colourways[0].style_id),
+      concept_name: trimmedNote || `New Concept — ${product_name}`,
       concept_classification: 'new_experimental',
       format: 'video',
       strategy_owner: trimmedCreator,
@@ -86,20 +86,21 @@ router.post('/', async (req, res, next) => {
     const itemResult = await client.query(
       `INSERT INTO shoot_plan_items (product_code, product_name, stock_status, creator, initial_idea, asset_id)
        VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [product_code, product_name, stock_status, trimmedCreator, trimmedIdea, asset.id]
+      [product_code, product_name, stock_status, trimmedCreator, trimmedNote, asset.id]
     );
     const item = itemResult.rows[0];
 
-    for (const styleId of style_ids) {
+    for (const c of colourways) {
       await client.query(
-        `INSERT INTO shoot_plan_item_styles (shoot_plan_item_id, style_id) VALUES ($1, $2)`,
-        [item.id, styleId]
+        `INSERT INTO shoot_plan_item_styles (shoot_plan_item_id, style_id, size) VALUES ($1, $2, $3)`,
+        [item.id, Number(c.style_id), c.size && String(c.size).trim() ? String(c.size).trim() : null]
       );
     }
 
     await client.query('COMMIT');
     res.status(201).json({
       ...item,
+      quick_note: item.initial_idea,
       asset_status: asset.status,
       asset_status_label: STATUS_LABELS[asset.status] || asset.status,
     });

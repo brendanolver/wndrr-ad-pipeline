@@ -707,11 +707,15 @@
       <button class="modal-close" onclick="closeModal('shoot-plan-modal')">&times;</button>
     </div>
     <div class="modal-body">
-      <div>
-        <div id="shoot-plan-product-name" style="font-weight:700;font-size:14px;"></div>
-        <div id="shoot-plan-product-code" class="hint"></div>
+      <div class="shoot-plan-product-header">
+        <div id="shoot-plan-product-image" class="shoot-plan-product-image"></div>
+        <div>
+          <div id="shoot-plan-product-name" style="font-weight:700;font-size:14px;"></div>
+          <div id="shoot-plan-product-code" class="hint"></div>
+          <div id="shoot-plan-product-category" class="shoot-plan-category-tag"></div>
+        </div>
       </div>
-      <label>Colourways required for the shoot
+      <label>Colourways &amp; sizes needed
         <div id="shoot-plan-colours" class="shoot-plan-colours-list"></div>
       </label>
       <label>Stock status
@@ -721,15 +725,15 @@
         </select>
       </label>
       <label>Content Creator / Owner
-        <input type="text" id="shoot-plan-creator" placeholder="e.g. Jess">
+        <input type="text" id="shoot-plan-creator" placeholder="e.g. Mark" oninput="applyShootPlanSizeDefaults()">
       </label>
-      <label>Initial Concept Idea / Direction <span class="hint">(optional)</span>
-        <textarea id="shoot-plan-initial-idea" rows="2" placeholder="Any early direction for the creator..."></textarea>
+      <label>Quick Note <span class="hint">(optional — not a creative brief)</span>
+        <textarea id="shoot-plan-initial-idea" rows="2" placeholder="e.g. Show all colours together"></textarea>
       </label>
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('shoot-plan-modal')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveShootPlanItem()">Add to Shoot Plan</button>
+      <button class="btn btn-primary" onclick="saveShootPlanItem()">Send to Concept Development</button>
     </div>
   </div>
 </div>

@@ -7,17 +7,18 @@ const apparelmagic = require('./apparelmagic');
 
 async function fetchAmData() {
   if (!apparelmagic.configured()) {
-    return { amStock: null, amDetails: null, amOnOrder: null, amError: null, amConfigured: false };
+    return { amStock: null, amDetails: null, amOnOrder: null, amSizeRanges: null, amError: null, amConfigured: false };
   }
   try {
-    const [amStock, amDetails, amOnOrder] = await Promise.all([
+    const [amStock, amDetails, amOnOrder, amSizeRanges] = await Promise.all([
       apparelmagic.getStockByStyle(),
       apparelmagic.getStyleCatalogue(),
       apparelmagic.getOnOrderByStyle(),
+      apparelmagic.getSizeRanges(),
     ]);
-    return { amStock, amDetails, amOnOrder, amError: null, amConfigured: true };
+    return { amStock, amDetails, amOnOrder, amSizeRanges, amError: null, amConfigured: true };
   } catch (err) {
-    return { amStock: null, amDetails: null, amOnOrder: null, amError: err.message, amConfigured: true };
+    return { amStock: null, amDetails: null, amOnOrder: null, amSizeRanges: null, amError: err.message, amConfigured: true };
   }
 }
 

@@ -1,5 +1,6 @@
 const { computeCreativeTarget } = require('./creativeTarget');
-const { deriveProductCode } = require('./apparelmagic');
+const apparelmagic = require('./apparelmagic');
+const { deriveProductCode } = apparelmagic;
 
 // "Current Creative Coverage" = count of Creative Assets (Phase 1's "one row
 // per ad concept per style" entity) linked to the style, any status. This is
@@ -27,8 +28,10 @@ function coverageStatus(coverage, target) {
 // assetCounts: Map<style_id, creative_asset_count>.
 // amStock / amOnOrder: Map<style_code, qty> or null if AM isn't configured.
 // amDetails: Map<style_code, { productName, imageUrl }> or null.
+// amSizeRanges: Map<size_range_id, { name, sizes }> or null -- only needed
+// for the Shoot This Week modal's size picker, not any coverage/target math.
 // rules: creative_target_rules rows.
-function buildCoverage(styleRows, { assetCounts, amStock, amOnOrder, amDetails, rules }) {
+function buildCoverage(styleRows, { assetCounts, amStock, amOnOrder, amDetails, amSizeRanges, rules }) {
   const groups = new Map(); // product_code -> style rows
   for (const style of styleRows) {
     const productCode = deriveProductCode(style.style_code);
@@ -61,6 +64,7 @@ function buildCoverage(styleRows, { assetCounts, amStock, amOnOrder, amDetails, 
 
       const details = amDetails ? amDetails.get(style.style_code) : null;
       if (details?.imageUrl) images.push(details.imageUrl);
+      const sizing = apparelmagic.resolveStyleSizing(amDetails, amSizeRanges, style.style_code);
       memberSummaries.push({
         style_id: style.id,
         style_code: style.style_code,
@@ -72,6 +76,11 @@ function buildCoverage(styleRows, { assetCounts, amStock, amOnOrder, amDetails, 
         // stock is the other's, or that SOH and on-order are the same pool.
         soh: styleSoh,
         on_order: styleOnOrder,
+        // Display-only, for the Shoot This Week modal -- no effect on any
+        // coverage/target/gap math below.
+        colour_label: apparelmagic.resolveColourLabel(amDetails, style.style_code),
+        sizes: sizing.sizes,
+        sizing_system: sizing.system,
       });
     }
 
@@ -83,6 +92,10 @@ function buildCoverage(styleRows, { assetCounts, amStock, amOnOrder, amDetails, 
     return {
       product_code: productCode,
       product_name: firstDetails?.productName || first.name,
+      // Display-only passthrough for the Shoot This Week modal, matching
+      // coreProducts.js's equivalent field -- not used in any target/gap/
+      // status computation above.
+      category: firstDetails?.category || null,
       tier: first.tier,
       styles: memberSummaries,
       images,

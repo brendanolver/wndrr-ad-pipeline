@@ -1956,12 +1956,45 @@ function planNewConceptForCore(productCode) {
 // once the content creator has developed a concept.
 let shootPlanModalContext = null;
 
+// Whoever shoots most Core/Drop content by default -- the one seam a future
+// Settings-managed table would replace (per-creator default sample sizes).
+// Every other function reads through this object rather than special-casing
+// "Mark" inline, so swapping it for a DB-backed lookup later is a
+// one-function change, not a rewrite.
+const DEFAULT_CREATOR = 'Mark';
+const CONTENT_CREATOR_SIZE_DEFAULTS = {
+  Mark: { top: 'Small', bottom_alpha: 'Small', bottom_waist: '30' },
+};
+
+// Simple keyword heuristic -- unrecognised categories get no default applied
+// rather than guessing wrong.
+function classifyGarmentType(category) {
+  const c = (category || '').toUpperCase();
+  if (/JEAN|PANT|SHORT|TROUSER|SKIRT/.test(c)) return 'bottom';
+  if (/TEE|SHIRT|HOODIE|JUMPER|JACKET/.test(c)) return 'top';
+  return null;
+}
+
+// Returns '' (no default) whenever the creator has no configured defaults --
+// this is the literal "if changed away from Mark, do not assume Mark's
+// sizing" rule -- or when this colourway has no resolved size list at all.
+function defaultSizeForColourway(creator, garmentType, sizingSystem, sizes) {
+  const defaults = CONTENT_CREATOR_SIZE_DEFAULTS[creator];
+  if (!defaults || !sizes || !sizes.length || !garmentType) return '';
+  const key = garmentType === 'top' ? 'top' : (sizingSystem === 'waist' ? 'bottom_waist' : 'bottom_alpha');
+  const label = defaults[key];
+  if (!label) return '';
+  const match = sizes.find((s) => s.toLowerCase() === String(label).toLowerCase());
+  return match || sizes[0];
+}
+
 function shootThisWeekForCore(productCode) {
   const product = state.coreProducts.find((p) => p.product_code === productCode);
   if (!product) return;
   openShootPlanModal({
     productCode: product.product_code,
     productName: product.product_name,
+    category: product.category,
     colours: product.colours,
   });
 }
@@ -1972,6 +2005,7 @@ function shootThisWeekForCoverage(productCode) {
   openShootPlanModal({
     productCode: c.product_code,
     productName: c.product_name,
+    category: c.category,
     colours: c.styles,
   });
 }
@@ -1980,35 +2014,82 @@ function openShootPlanModal(preset) {
   shootPlanModalContext = preset;
   document.getElementById('shoot-plan-product-name').textContent = preset.productName;
   document.getElementById('shoot-plan-product-code').textContent = preset.productCode;
-  document.getElementById('shoot-plan-colours').innerHTML = preset.colours.map((c) => `
-    <label class="checkbox-label">
-      <input type="checkbox" value="${c.style_id}" checked>
-      ${escapeHtml(c.style_code)}
-    </label>`).join('');
+  const categoryEl = document.getElementById('shoot-plan-product-category');
+  categoryEl.textContent = preset.category || '';
+  categoryEl.style.display = preset.category ? '' : 'none';
+
+  const headerImage = preset.colours.find((c) => c.image_url);
+  document.getElementById('shoot-plan-product-image').innerHTML = headerImage
+    ? `<img src="${headerImage.image_url}" alt="">`
+    : '<span class="shoot-plan-noimg">🖼</span>';
+
+  document.getElementById('shoot-plan-colours').innerHTML = preset.colours.map((c) => {
+    const sizeControl = c.sizes && c.sizes.length
+      ? `<select class="shoot-plan-colour-size" data-style-id="${c.style_id}">${c.sizes.map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('')}</select>`
+      : `<input type="text" class="shoot-plan-colour-size" data-style-id="${c.style_id}" placeholder="Size">`;
+    return `
+    <div class="shoot-plan-colour-row">
+      ${c.image_url ? `<img class="shoot-plan-colour-thumb" src="${c.image_url}" alt="">` : '<span class="shoot-plan-colour-thumb shoot-plan-noimg">🖼</span>'}
+      <label class="checkbox-label shoot-plan-colour-check">
+        <input type="checkbox" class="shoot-plan-colour-required" value="${c.style_id}" checked>
+        ${escapeHtml(c.colour_label || c.style_code)}
+      </label>
+      ${sizeControl}
+    </div>`;
+  }).join('');
+
   document.getElementById('shoot-plan-stock-status').value = 'in_office';
-  document.getElementById('shoot-plan-creator').value = '';
+  document.getElementById('shoot-plan-creator').value = DEFAULT_CREATOR;
   document.getElementById('shoot-plan-initial-idea').value = '';
+  applyShootPlanSizeDefaults();
   openModal('shoot-plan-modal');
 }
 
-async function saveShootPlanItem() {
-  const styleIds = Array.from(document.querySelectorAll('#shoot-plan-colours input:checked')).map((el) => Number(el.value));
+// Re-applies (or clears, per defaultSizeForColourway's Mark-only rule)
+// every still-required colourway's size default -- called on open and again
+// whenever the creator field changes.
+function applyShootPlanSizeDefaults() {
+  if (!shootPlanModalContext) return;
   const creator = document.getElementById('shoot-plan-creator').value.trim();
-  if (!styleIds.length) return toast('Select at least one colourway', true);
+  const garmentType = classifyGarmentType(shootPlanModalContext.category);
+  document.querySelectorAll('#shoot-plan-colours .shoot-plan-colour-size').forEach((el) => {
+    const styleId = Number(el.dataset.styleId);
+    const checkbox = document.querySelector(`#shoot-plan-colours .shoot-plan-colour-required[value="${styleId}"]`);
+    if (!checkbox || !checkbox.checked) return;
+    const colour = shootPlanModalContext.colours.find((c) => c.style_id === styleId);
+    if (!colour) return;
+    // Always overwrite (including back to blank) rather than only setting a
+    // truthy default -- a creator change with no configured defaults must
+    // actively clear a previous creator's size, not leave it looking chosen.
+    el.value = defaultSizeForColourway(creator, garmentType, colour.sizing_system, colour.sizes);
+  });
+}
+
+async function saveShootPlanItem() {
+  const colourways = [];
+  for (const row of document.querySelectorAll('#shoot-plan-colours .shoot-plan-colour-row')) {
+    const checkbox = row.querySelector('.shoot-plan-colour-required');
+    if (!checkbox.checked) continue;
+    const size = row.querySelector('.shoot-plan-colour-size').value.trim();
+    if (!size) return toast('Select a size for every required colourway', true);
+    colourways.push({ style_id: Number(checkbox.value), size });
+  }
+  const creator = document.getElementById('shoot-plan-creator').value.trim();
+  if (!colourways.length) return toast('Select at least one colourway', true);
   if (!creator) return toast('Content creator is required', true);
 
   const payload = {
     product_code: shootPlanModalContext.productCode,
     product_name: shootPlanModalContext.productName,
-    style_ids: styleIds,
+    colourways,
     stock_status: document.getElementById('shoot-plan-stock-status').value,
     creator,
-    initial_idea: document.getElementById('shoot-plan-initial-idea').value.trim() || null,
+    quick_note: document.getElementById('shoot-plan-initial-idea').value.trim() || null,
   };
   try {
     await api('/shoot-plan', { method: 'POST', body: JSON.stringify(payload) });
     closeModal('shoot-plan-modal');
-    toast("Added to this week's shoot plan");
+    toast('Sent to Concept Development');
     loadAll();
   } catch (e) {
     toast(e.message, true);
@@ -2032,7 +2113,7 @@ function shootPlanHeaderHtml() {
       <div class="shoot-plan-col-product">Product</div>
       <div class="shoot-plan-col">Stock Needed</div>
       <div class="shoot-plan-col">Creator</div>
-      <div class="shoot-plan-col-idea">Initial Idea</div>
+      <div class="shoot-plan-col-idea">Quick Note</div>
       <div class="shoot-plan-col">Status</div>
       <div class="shoot-plan-col-action"></div>
     </div>`;
@@ -2045,7 +2126,7 @@ function shootPlanRowHtml(item) {
       <div class="shoot-plan-col-product">${escapeHtml(item.product_name)}</div>
       <div class="shoot-plan-col">${stockLabel}</div>
       <div class="shoot-plan-col">${escapeHtml(item.creator)}</div>
-      <div class="shoot-plan-col-idea">${item.initial_idea ? escapeHtml(item.initial_idea) : '—'}</div>
+      <div class="shoot-plan-col-idea">${item.quick_note ? escapeHtml(item.quick_note) : '—'}</div>
       <div class="shoot-plan-col"><span class="core-reason-chip">${escapeHtml(item.asset_status_label || '—')}</span></div>
       <div class="shoot-plan-col-action"><button type="button" class="btn btn-ghost btn-sm" onclick="removeShootPlanItem(${item.id})">Remove</button></div>
     </div>`;

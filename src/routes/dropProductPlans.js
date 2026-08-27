@@ -31,6 +31,7 @@ async function computeProductTarget(dropId, productCode) {
     amStock: am.amStock,
     amOnOrder: am.amOnOrder,
     amDetails: am.amDetails,
+    amSizeRanges: am.amSizeRanges,
     rules,
   });
   return { found: true, target: coverage[0] ? coverage[0].creative_target : null, styles: matching };
