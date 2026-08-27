@@ -1825,7 +1825,7 @@ function coreProblemProductRowHtml(p) {
   return `
     <div class="core-shoot-review-row">
       <div class="core-shoot-review-col-product">${badge ? badge + ' ' : ''}<span class="core-shoot-review-name">${escapeHtml(p.product_name)}</span></div>
-      <div class="core-shoot-review-col-reasons">${escapeHtml(reasons)}</div>
+      <div class="core-shoot-review-col-reasons"><span class="core-shoot-review-reasons-text">${escapeHtml(reasons)}</span></div>
       <div class="core-shoot-review-col-action">
         <button type="button" class="btn btn-primary btn-sm" onclick="shootThisWeekForCore('${p.product_code}')">+ Shoot</button>
       </div>
@@ -1963,10 +1963,25 @@ function renderCoreProducts() {
 // modal Core already has -- no parallel workflow.
 function highStockProductRowHtml(p) {
   const reasons = (p.reason_chips || []).join(' · ');
+  // Same arrow/pill treatment as Core's category-level sales trend badge
+  // (coreCategoryTrendInfo, ±10% thresholds, green/red pill) -- computed
+  // straight from vel7/vel30 rather than folded into reason_chips, so it
+  // always shows regardless of which reasons made the ranked top 3.
+  const trend = coreCategoryTrendInfo(p.vel7, p.vel30);
+  const firstImage = (p.colours || []).find((c) => c.image_url);
+  const thumb = firstImage
+    ? `<img class="high-stock-thumb" src="${firstImage.image_url}" alt="">`
+    : '<span class="high-stock-thumb high-stock-noimg">🖼</span>';
   return `
     <div class="core-shoot-review-row">
-      <div class="core-shoot-review-col-product"><span class="core-shoot-review-name">${escapeHtml(p.product_name)}</span></div>
-      <div class="core-shoot-review-col-reasons">${escapeHtml(reasons)}</div>
+      <div class="core-shoot-review-col-product">
+        ${thumb}
+        <span class="core-shoot-review-name">${escapeHtml(p.product_name)}</span>
+      </div>
+      <div class="core-shoot-review-col-reasons">
+        <span class="core-shoot-stat core-category-trend ${trend.cls}" title="${escapeHtml(trend.title)}">${trend.display}</span>
+        <span class="core-shoot-review-reasons-text">${escapeHtml(reasons)}</span>
+      </div>
       <div class="core-shoot-review-col-action">
         <button type="button" class="btn btn-primary btn-sm" onclick="shootThisWeekForHighStock('${p.product_code}')">+ Shoot</button>
       </div>

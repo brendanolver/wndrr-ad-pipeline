@@ -68,13 +68,14 @@ function scoreHighStock({ soh, onOrder, vel7, vel30, weeksCover, currentCoverage
   const priorityScore = pressureScore * gapMultiplier;
 
   // Display chips, ranked separately from the score -- sort order and chip
-  // selection don't need to use the same numbers.
+  // selection don't need to use the same numbers. Sales trend is NOT a
+  // candidate here -- it's rendered on the frontend as its own colour-coded
+  // arrow/percentage pill (same coreCategoryTrendInfo() Core's category
+  // header already uses), computed straight from vel7/vel30 on the product,
+  // so it stays out of the ranked-reasons text to avoid showing it twice.
   const candidates = [
     weeksCover != null && weeksCover > HIGH_STOCK_WEEKS_COVER_REF
       ? { weight: weeksCoverTerm, chip: `${weeksCover} wks cover` }
-      : null,
-    declining
-      ? { weight: declineTerm, chip: `↓ Sales ${declinePct}%` }
       : null,
     onOrder > 0 && onOrderWeeks > HIGH_STOCK_ON_ORDER_WEEKS_REF
       ? { weight: onOrderTerm, chip: `+${onOrder} Incoming` }
