@@ -16,7 +16,7 @@ let state = {
   coreProducts: [], planningSettings: null, coreView: 'priority', coreAllProductsOpen: false,
   coreExpandedCategories: new Set(), coreExpandedProducts: new Set(),
   coreShootExpandedCategories: new Set(),
-  shootPlan: [],
+  shootPlan: [], coverageImageIndex: new Map(),
 };
 let dashboardWeekOffset = 0;
 
@@ -666,9 +666,17 @@ function renderCoverageGrid(coverage) {
     return;
   }
   grid.innerHTML = coverage.map((c) => {
-    const images = c.images.length
-      ? c.images.slice(0, 4).map((url) => `<img src="${url}" alt="">`).join('')
-      : '<span class="coverage-card-noimg">🖼</span>';
+    let images;
+    if (c.images.length) {
+      const idx = (state.coverageImageIndex.get(c.product_code) || 0) % c.images.length;
+      const nav = c.images.length > 1 ? `
+        <button type="button" class="coverage-card-img-nav coverage-card-img-prev" onclick="event.stopPropagation(); cycleCoverageImage('${c.product_code}', -1)">&#8249;</button>
+        <button type="button" class="coverage-card-img-nav coverage-card-img-next" onclick="event.stopPropagation(); cycleCoverageImage('${c.product_code}', 1)">&#8250;</button>
+        <span class="coverage-card-img-count">${idx + 1} / ${c.images.length}</span>` : '';
+      images = `<img src="${c.images[idx]}" alt="">${nav}`;
+    } else {
+      images = '<span class="coverage-card-noimg">🖼</span>';
+    }
     const pct = c.creative_target ? Math.min(100, Math.round((c.current_coverage / c.creative_target) * 100)) : 0;
     const stockLines = c.soh !== null
       ? c.styles.map((s) => `<div>${c.styles.length > 1 ? s.style_code + ': ' : ''}${colourStatsLine(s)}</div>`).join('')
@@ -694,6 +702,18 @@ function renderCoverageGrid(coverage) {
       window.location.hash = `#planning/drop/${state.currentDropId}/product/${encodeURIComponent(card.dataset.productCode)}`;
     });
   });
+}
+
+// Coverage cards show one colourway image at a time (not all of them
+// squeezed into one row) with prev/next arrows to step through the rest --
+// selection is remembered per product_code so it survives a re-render.
+function cycleCoverageImage(productCode, delta) {
+  const c = (state.currentDrop && state.currentDrop.coverage || []).find((x) => x.product_code === productCode);
+  if (!c || c.images.length < 2) return;
+  const current = state.coverageImageIndex.get(productCode) || 0;
+  const next = (current + delta + c.images.length) % c.images.length;
+  state.coverageImageIndex.set(productCode, next);
+  renderCoverageGrid(state.currentDrop.coverage);
 }
 
 function checklistLine(label, resolved, statusText, notes) {
