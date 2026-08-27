@@ -1958,12 +1958,12 @@ function renderCoreProducts() {
 // Non-Core products with meaningful stock exposure that may deserve
 // creative attention -- distinct from Core, so this never shows a
 // needs-attention-style emoji/flag or implies a New Concept is required.
-// Fixed three-field row (SOH, Sales Performance, Creative Coverage) --
-// deliberately not a variable ranked-reasons list, so it stays scannable
-// in a few seconds. Reuses the exact same compact row format and
+// Fixed four-field row (SOH, 30D Sell-Through, Sales Trend, Creative
+// Status) -- deliberately not a variable ranked-reasons list, so it stays
+// scannable in a few seconds. Reuses the exact same compact row format and
 // "+ Shoot This Week" modal Core already has -- no parallel workflow.
 function highStockProductRowHtml(p) {
-  const trend = p.sales_performance || { display: '', cls: 'core-trend-flat' };
+  const trend = p.sales_trend || { display: '', cls: 'core-trend-flat' };
   const firstImage = (p.colours || []).find((c) => c.image_url);
   const thumb = firstImage
     ? `<img class="high-stock-thumb" src="${firstImage.image_url}" alt="">`
@@ -1977,9 +1977,11 @@ function highStockProductRowHtml(p) {
       <div class="core-shoot-review-col-reasons">
         <span class="core-shoot-review-soh">${p.soh} SOH</span>
         <span class="core-shoot-review-sep">·</span>
+        <span class="core-shoot-review-soh">${p.sell_through_pct}% 30D Sell-Through</span>
+        <span class="core-shoot-review-sep">·</span>
         <span class="core-shoot-stat core-category-trend ${trend.cls}">${escapeHtml(trend.display)}</span>
         <span class="core-shoot-review-sep">·</span>
-        <span class="core-shoot-review-reasons-text">${escapeHtml(p.creative_coverage_label || '')}</span>
+        <span class="core-shoot-review-reasons-text">${escapeHtml(p.creative_status_label || '')}</span>
       </div>
       <div class="core-shoot-review-col-action">
         <button type="button" class="btn btn-primary btn-sm" onclick="shootThisWeekForHighStock('${p.product_code}')">+ Shoot</button>
