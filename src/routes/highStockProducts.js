@@ -154,10 +154,15 @@ router.get('/', async (req, res, next) => {
     // Core, there's no local "tier" to iterate from, since a High Stock
     // product only earns a local styles row once it's actually eligible
     // (step below). Not-core + not-ad-excluded mirrors Core's own
-    // eligibility check, inverted.
+    // eligibility check, inverted. The real-style-code check additionally
+    // excludes non-apparel catalogue entries (shipping/return protection
+    // add-ons, etc.) -- Core never sees these since it only ever iterates
+    // curated CORE_GROUPS-tagged rows, but High Stock scans everything
+    // non-Core in the catalogue, so it needs its own guard.
     const amGroups = new Map(); // productCode -> style_code[]
     for (const [styleCode, details] of am.amDetails.entries()) {
       if (details.isCore || apparelmagic.isAdExcludedCategory(details)) continue;
+      if (!apparelmagic.isWndrrStyleCode(styleCode)) continue;
       const productCode = apparelmagic.deriveProductCode(styleCode);
       if (!amGroups.has(productCode)) amGroups.set(productCode, []);
       amGroups.get(productCode).push(styleCode);

@@ -247,10 +247,20 @@ async function fetchSalesByStyleUncached() {
 // by, since colourways of the same product share one creative need -- is
 // the first 8 characters; the colour is the last 3. Older/non-standard
 // codes that don't match fall back to being their own group of one.
+const WNDRR_STYLE_CODE_RE = /^W\d{2}[A-Z]{2}\d{3}[A-Z]{3}$/;
 function deriveProductCode(styleCode) {
   const code = (styleCode || '').toUpperCase().trim();
-  if (/^W\d{2}[A-Z]{2}\d{3}[A-Z]{3}$/.test(code)) return code.slice(0, 8);
+  if (WNDRR_STYLE_CODE_RE.test(code)) return code.slice(0, 8);
   return code;
+}
+
+// True only for a real WNDRR apparel style code in the fixed format above.
+// AM's catalogue also contains non-apparel line items -- shipping/return
+// protection add-ons and similar third-party-app SKUs -- with their own
+// unrelated code formats; this excludes them structurally rather than via
+// a product-name blocklist that would need maintaining as new ones appear.
+function isWndrrStyleCode(styleCode) {
+  return WNDRR_STYLE_CODE_RE.test((styleCode || '').toUpperCase().trim());
 }
 
 // Confirmed live (GET /api/debug/am/product/<code>): the image is NOT a flat
@@ -432,6 +442,7 @@ module.exports = {
   resolveColourLabel,
   resolveStyleSizing,
   deriveProductCode,
+  isWndrrStyleCode,
   parseLaunchDate,
   rawRequest,
   warmAmCache,
