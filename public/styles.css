@@ -465,23 +465,6 @@ main{padding:20px 24px;}
 .core-shoot-planning-title{font-size:14px;font-weight:700;margin-bottom:10px;}
 .core-shoot-planning-list{display:flex;flex-direction:column;margin-bottom:4px;}
 
-/* Sales Cadence -- compact "this month to date vs same days last year" per
-   category, ported from demand-v2's own Sales Cadence view. */
-.sales-cadence-section{background:var(--surface2);border-radius:var(--r-lg);padding:14px 16px;margin-bottom:16px;}
-.sales-cadence-header{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px;margin-bottom:8px;}
-.sales-cadence-title{font-size:12.5px;font-weight:700;}
-.sales-cadence-asof{font-size:11px;color:var(--text-muted);}
-.sales-cadence-row{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:10px;align-items:center;padding:5px 4px;font-size:12.5px;border-bottom:1px solid var(--border);}
-.sales-cadence-row:last-child{border-bottom:none;}
-.sales-cadence-header-row{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);border-bottom:1px solid var(--border);}
-.sales-cadence-category{font-weight:600;}
-.sales-cadence-units{text-align:right;color:var(--text-secondary);}
-.sales-cadence-total-row{font-weight:700;border-top:1px solid var(--border);border-bottom:none;margin-top:2px;padding-top:8px;}
-.sales-cadence-pct{font-weight:700;text-align:right;}
-.sales-cadence-pct-up{color:var(--green);}
-.sales-cadence-pct-down{color:var(--red);}
-.sales-cadence-pct-flat, .sales-cadence-pct-new{color:var(--text-muted);font-weight:600;}
-
 .core-shoot-category-group{border-bottom:1px solid var(--border);}
 .core-shoot-category-group:last-child{border-bottom:none;}
 .core-shoot-category-toggle{display:flex;align-items:center;gap:10px;flex-wrap:wrap;width:100%;background:none;border:none;padding:12px 6px;font-family:inherit;color:var(--text);cursor:pointer;text-align:left;}
