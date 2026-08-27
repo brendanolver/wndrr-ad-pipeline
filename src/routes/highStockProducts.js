@@ -17,28 +17,39 @@ const HIGH_STOCK_STALE_DAYS = 21;
 const HIGH_STOCK_TREND_DEADZONE_PCT = 10; // matches Core's own ±10% steady-state threshold
 const HIGH_STOCK_MIN_RELIABLE_HIST_VEL = 1; // vel365 below this (units/week) isn't enough sales history for a trustworthy % comparison
 
-// Fixed single-line coverage read (never a ranked list) -- always resolves
-// to something, so the recommendation row always has exactly its three
-// fields: SOH, Sales Performance, Creative Coverage.
-function creativeCoverageLabel(currentCoverage, daysSinceLastLive) {
-  if (currentCoverage === 0) return 'No Creative Coverage';
-  if (daysSinceLastLive == null) return 'No Live Creative';
-  if (daysSinceLastLive > HIGH_STOCK_STALE_DAYS) return `Stale Creative (${daysSinceLastLive}d)`;
-  if (currentCoverage === 1) return 'Low Creative Coverage';
-  return 'Recent Creative Coverage';
+// Fixed single-line read (never a ranked list) -- always resolves to
+// something, so the recommendation row always has its four fields: SOH,
+// 30D Sell-Through, Sales Trend, Creative Status. Binary rather than the
+// finer coverage-count tiers used elsewhere -- "Creative Status" is meant
+// to answer one question (is there an obvious creative opportunity here),
+// not enumerate exactly how much coverage exists.
+function creativeStatusLabel(currentCoverage, daysSinceLastLive) {
+  const hasRecentLiveCreative = currentCoverage > 0 && daysSinceLastLive != null && daysSinceLastLive <= HIGH_STOCK_STALE_DAYS;
+  return hasRecentLiveCreative ? 'Recent Creative' : 'No Recent Creative';
 }
 
-// The displayed Sales Performance indicator: 30D weekly average vs. a 365D
+// 30D Sell-Through: this codebase has no order-received/COGS data to
+// compute a textbook sold/received rate, so it's approximated from what IS
+// available -- 30D sales vs. 30D sales + remaining stock. A low percentage
+// means a lot of stock sitting against very little recent movement. Always
+// computable (unlike the trend indicator below, it needs no sales history
+// baseline), so it's always shown.
+function sellThroughInfo(vel30, soh) {
+  const ratio = (vel30 + soh) > 0 ? vel30 / (vel30 + soh) : 0;
+  return { ratio, pct: Math.round(ratio * 100) };
+}
+
+// The displayed Sales Trend indicator: 30D weekly average vs. a 365D
 // trailing weekly baseline (same vel365 pattern coreProducts.js already
 // uses for its own velocity strip) -- NOT the volatile 7D figure, since a
 // single week is too noisy for a High Stock product that may not move fast.
 // When the baseline itself is too thin to trust a percentage off of (a
-// near-zero trailing year), that's a signal in its own right -- lots of
-// stock against almost no sales history -- so it gets its own label rather
-// than a misleading/undefined-looking percentage.
-function salesPerformanceInfo(vel30, vel365) {
+// near-zero trailing year), that's flagged rather than shown as a
+// misleading/undefined-looking percentage -- distinct from 30D Sell-Through
+// above, which answers a different question and is shown regardless.
+function salesTrendInfo(vel30, vel365) {
   if (vel365 < HIGH_STOCK_MIN_RELIABLE_HIST_VEL) {
-    return { display: 'Low Sell-Through', cls: 'core-trend-down', reliable: false, pct: null };
+    return { display: 'Limited Sales History', cls: 'core-trend-flat', reliable: false, pct: null };
   }
   const pct = Math.round((vel30 / vel365 - 1) * 100);
   if (pct <= -HIGH_STOCK_TREND_DEADZONE_PCT) return { display: `↓ Sales ${Math.abs(pct)}%`, cls: 'core-trend-down', reliable: true, pct };
@@ -50,8 +61,8 @@ function salesPerformanceInfo(vel30, vel365) {
 // may be unproven, so this never emits a flag/label/emoji implying "needs a
 // New Concept" the way Core's 🔴/🟠 badges do. It produces a continuous
 // priority score (for ranking, using every signal available) and the fixed
-// three-field display (SOH is read straight off the product elsewhere;
-// Sales Performance and Creative Coverage come from here).
+// four-field display (SOH is read straight off the product elsewhere; 30D
+// Sell-Through, Sales Trend, and Creative Status come from here).
 //
 // The brief asks to surface products with BOTH inventory pressure AND a
 // creative gap -- a conjunction, not a sum. Pure addition would let a
@@ -60,13 +71,9 @@ function salesPerformanceInfo(vel30, vel365) {
 // pressure * gapMultiplier: pressure alone still ranks (gapMultiplier is
 // floored at 0.2, never zero), but a product where a real creative gap
 // exists too ranks meaningfully higher than pressure alone would.
-//
-// Sell-through: this codebase has no order-received/COGS data to compute a
-// textbook sold/received rate, so it's approximated from what IS available
-// -- recent sales vs. sales+remaining stock. A low ratio means a lot of
-// stock sitting against very little recent movement.
 function scoreHighStock({ soh, onOrder, vel7, vel30, vel365, weeksCover, currentCoverage, daysSinceLastLive }) {
-  const salesPerformance = salesPerformanceInfo(vel30, vel365);
+  const sellThrough = sellThroughInfo(vel30, soh);
+  const salesTrend = salesTrendInfo(vel30, vel365);
   const onOrderWeeks = vel30 > 0 ? onOrder / vel30 : (onOrder > 0 ? Infinity : 0);
   const neverLive = daysSinceLastLive == null;
 
@@ -77,13 +84,13 @@ function scoreHighStock({ soh, onOrder, vel7, vel30, vel365, weeksCover, current
   const onOrderTerm = onOrder > 0 ? Math.min(15 + Math.min(onOrderWeeks, 40) * 3, 40) : 0;
 
   // Historical-trend pressure -- driven by the same number behind the
-  // displayed indicator: a real decline adds pressure, and "not enough
-  // history to say" gets a comparable flat bonus of its own (likely
+  // displayed Sales Trend indicator: a real decline adds pressure, and "not
+  // enough history to say" gets a comparable flat bonus of its own (likely
   // near-dead stock, itself worth a look).
-  const historicalDeclineTerm = !salesPerformance.reliable
+  const historicalDeclineTerm = !salesTrend.reliable
     ? 45
-    : salesPerformance.pct < 0
-      ? Math.min(20 + Math.abs(salesPerformance.pct), 60)
+    : salesTrend.pct < 0
+      ? Math.min(20 + Math.abs(salesTrend.pct), 60)
       : 0;
 
   // Recent (7D vs 30D) trend -- a smaller, separate "recent sales trend"
@@ -92,9 +99,10 @@ function scoreHighStock({ soh, onOrder, vel7, vel30, vel365, weeksCover, current
   const recentDeclining = vel30 > 0 && vel7 < vel30 * HIGH_STOCK_RECENT_DECLINE_RATIO;
   const recentTrendTerm = recentDeclining ? 15 : 0;
 
-  // Sell-through proxy (see function comment above).
-  const sellThroughRatio = (vel30 + soh) > 0 ? vel30 / (vel30 + soh) : 0;
-  const sellThroughTerm = (1 - sellThroughRatio) * 25;
+  // Sell-through pressure -- the same displayed 30D Sell-Through percentage
+  // also feeds ranking: a low ratio means a lot of stock sitting against
+  // very little recent movement.
+  const sellThroughTerm = (1 - sellThrough.ratio) * 25;
 
   const pressureScore = weeksCoverTerm + onOrderTerm + historicalDeclineTerm + recentTrendTerm + sellThroughTerm;
 
@@ -114,8 +122,9 @@ function scoreHighStock({ soh, onOrder, vel7, vel30, vel365, weeksCover, current
 
   return {
     priority_score: priorityScore,
-    sales_performance: { display: salesPerformance.display, cls: salesPerformance.cls },
-    creative_coverage_label: creativeCoverageLabel(currentCoverage, daysSinceLastLive),
+    sell_through_pct: sellThrough.pct,
+    sales_trend: { display: salesTrend.display, cls: salesTrend.cls },
+    creative_status_label: creativeStatusLabel(currentCoverage, daysSinceLastLive),
   };
 }
 
@@ -328,7 +337,7 @@ router.get('/', async (req, res, next) => {
     }).filter(Boolean);
 
     const products = rawProducts.map((p) => {
-      const { priority_score, sales_performance, creative_coverage_label } = scoreHighStock({
+      const { priority_score, sell_through_pct, sales_trend, creative_status_label } = scoreHighStock({
         soh: p.soh,
         onOrder: p.on_order || 0,
         vel7: p.vel7,
@@ -338,7 +347,7 @@ router.get('/', async (req, res, next) => {
         currentCoverage: p.current_coverage,
         daysSinceLastLive: p.days_since_last_creative,
       });
-      return { ...p, priority_score, sales_performance, creative_coverage_label };
+      return { ...p, priority_score, sell_through_pct, sales_trend, creative_status_label };
     });
     products.sort((a, b) => b.priority_score - a.priority_score);
 
