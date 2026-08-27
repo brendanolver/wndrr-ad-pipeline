@@ -51,6 +51,11 @@ router.get('/high-stock/lookup', async (req, res, next) => {
       ? (await pool.query(`SELECT style_code, tier, drop_id FROM styles WHERE style_code = ANY($1::text[])`, [candidateCodes])).rows
       : [];
     const localByCode = new Map(localRows.map((r) => [r.style_code, r]));
+    const dropIds = [...new Set(localRows.map((r) => r.drop_id).filter((id) => id != null))];
+    const upcomingDropIdsResult = dropIds.length
+      ? await pool.query(`SELECT id FROM drops WHERE id = ANY($1::int[]) AND launch_date >= CURRENT_DATE`, [dropIds])
+      : { rows: [] };
+    const upcomingDropIds = new Set(upcomingDropIdsResult.rows.map((r) => r.id));
 
     const matches = candidateCodes.map((styleCode) => {
       const details = am.amDetails.get(styleCode);
@@ -71,8 +76,9 @@ router.get('/high-stock/lookup', async (req, res, next) => {
         tier_lookup: tierEntry ? { tier: tierEntry.tier, index_score: tierEntry.indexScore } : 'not found in Report Pipeline tier map',
         local_exclusion: local
           ? (local.tier === 'core_proven' ? 'already tracked locally as core_proven'
-            : local.drop_id != null ? `already tied to drop_id ${local.drop_id}`
-              : null)
+            : (local.drop_id != null && upcomingDropIds.has(local.drop_id)) ? `already tied to UPCOMING drop_id ${local.drop_id}`
+              : local.drop_id != null ? `tied to PAST drop_id ${local.drop_id} -- not excluded`
+                : null)
           : null,
       };
     });
