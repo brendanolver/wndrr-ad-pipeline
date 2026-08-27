@@ -121,16 +121,27 @@ router.get('/', async (req, res, next) => {
     );
     const preCheckByCode = new Map(preCheckResult.rows.map((s) => [s.style_code, s]));
 
+    // A style tied to an UPCOMING drop already has its own recommendation
+    // flow via Drops -- don't show it in two places at once. A style tied
+    // to a PAST drop has no such active flow (that drop's window has
+    // closed), so it's fair game for High Stock like anything else. "Past"
+    // matches the same rule the Drops UI itself uses for days_until_launch
+    // (app.js) -- launch_date already behind today.
+    const dropIds = [...new Set(preCheckResult.rows.map((s) => s.drop_id).filter((id) => id != null))];
+    const upcomingDropIdsResult = dropIds.length
+      ? await pool.query(`SELECT id FROM drops WHERE id = ANY($1::int[]) AND launch_date >= CURRENT_DATE`, [dropIds])
+      : { rows: [] };
+    const upcomingDropIds = new Set(upcomingDropIdsResult.rows.map((r) => r.id));
+
     // Drop a style already locally tracked as Core (the team's own explicit
     // call, which -- per Core's own established "never auto-changes an
     // existing row's tier" rule -- persists even if AM's live category has
-    // since drifted) or already tied to an Upcoming/Past Drop (that product
-    // already has its own recommendation flow via Drops). Never touches an
+    // since drifted) or already tied to an UPCOMING Drop. Never touches an
     // existing row either way.
     const surviving = eligibleStyleCodes.filter((e) => {
       const local = preCheckByCode.get(e.styleCode);
       if (!local) return true;
-      return local.tier !== 'core_proven' && local.drop_id == null;
+      return local.tier !== 'core_proven' && !(local.drop_id != null && upcomingDropIds.has(local.drop_id));
     });
 
     if (!surviving.length) return res.json(emptyResponse());
