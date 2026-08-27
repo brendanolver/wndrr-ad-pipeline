@@ -2361,6 +2361,28 @@ function sizeSelectHtml(id, options, currentValue) {
   return `<select class="cc-size-input" id="${id}">${opts.join('')}</select>`;
 }
 
+// Which creator rows currently have their sizes in edit mode -- rows
+// default to a compact read-only summary + Edit button, matching the rest
+// of this list's at-rest density; only the row being edited shows the 3
+// dropdowns + Save Sizes.
+let ccSizeEditIds = new Set();
+
+function toggleContentCreatorSizeEdit(id) {
+  if (ccSizeEditIds.has(id)) ccSizeEditIds.delete(id);
+  else ccSizeEditIds.add(id);
+  renderContentCreators();
+}
+
+function contentCreatorSizesSummaryHtml(c) {
+  const parts = [
+    ['Top', c.default_top_size],
+    ['Bottom (Alpha)', c.default_bottom_alpha_size],
+    ['Bottom (Waist)', c.default_bottom_waist_size],
+  ];
+  if (!parts.some(([, v]) => v)) return '<span class="cc-sizes-summary hint">No sizes set</span>';
+  return `<span class="cc-sizes-summary">${parts.map(([label, v]) => `${label}: ${v ? escapeHtml(v) : '—'}`).join(' · ')}</span>`;
+}
+
 function renderContentCreators() {
   const list = document.getElementById('cc-list');
   if (!state.contentCreators.length) {
@@ -2377,10 +2399,15 @@ function renderContentCreators() {
         <button type="button" class="btn btn-ghost btn-sm" onclick="deleteContentCreator(${c.id})">Remove</button>
       </div>
       <div class="cc-row-sizes">
-        <label>Top ${sizeSelectHtml(`cc-size-top-${c.id}`, TOP_SIZE_OPTIONS, c.default_top_size)}</label>
-        <label>Bottom (Alpha) ${sizeSelectHtml(`cc-size-bottom-alpha-${c.id}`, BOTTOM_ALPHA_SIZE_OPTIONS, c.default_bottom_alpha_size)}</label>
-        <label>Bottom (Waist) ${sizeSelectHtml(`cc-size-bottom-waist-${c.id}`, BOTTOM_WAIST_SIZE_OPTIONS, c.default_bottom_waist_size)}</label>
-        <button type="button" class="btn btn-primary btn-sm" onclick="saveContentCreatorSizes(${c.id})">Save Sizes</button>
+        ${ccSizeEditIds.has(c.id) ? `
+          <label>Top ${sizeSelectHtml(`cc-size-top-${c.id}`, TOP_SIZE_OPTIONS, c.default_top_size)}</label>
+          <label>Bottom (Alpha) ${sizeSelectHtml(`cc-size-bottom-alpha-${c.id}`, BOTTOM_ALPHA_SIZE_OPTIONS, c.default_bottom_alpha_size)}</label>
+          <label>Bottom (Waist) ${sizeSelectHtml(`cc-size-bottom-waist-${c.id}`, BOTTOM_WAIST_SIZE_OPTIONS, c.default_bottom_waist_size)}</label>
+          <button type="button" class="btn btn-primary btn-sm" onclick="saveContentCreatorSizes(${c.id})">Save Sizes</button>
+        ` : `
+          ${contentCreatorSizesSummaryHtml(c)}
+          <button type="button" class="btn btn-ghost btn-sm" onclick="toggleContentCreatorSizeEdit(${c.id})">Edit</button>
+        `}
       </div>
     </div>
   `).join('');
@@ -2423,6 +2450,7 @@ async function saveContentCreatorSizes(id) {
   try {
     const updated = await api(`/content-creators/${id}/sizes`, { method: 'PUT', body: JSON.stringify(payload) });
     state.contentCreators = state.contentCreators.map((c) => (c.id === id ? updated : c));
+    ccSizeEditIds.delete(id);
     renderContentCreators();
     toast('Sizes saved');
   } catch (e) {
