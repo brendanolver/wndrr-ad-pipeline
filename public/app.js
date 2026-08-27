@@ -18,6 +18,7 @@ let state = {
   coreShootExpandedCategories: new Set(),
   shootPlan: [], coverageImageIndex: new Map(),
   contentCreators: [],
+  highStockProducts: [], highStockAllOpen: false,
 };
 let dashboardWeekOffset = 0;
 
@@ -102,7 +103,7 @@ document.querySelectorAll('.tab-btn').forEach((btn) => {
 // ── Load & render ────────────────────────────────────
 async function loadAll() {
   try {
-    const [board, styles, categories, dashboard, dropsRes, jobs, provenWinners, coreRes, planningSettings, shootPlan, contentCreators] = await Promise.all([
+    const [board, styles, categories, dashboard, dropsRes, jobs, provenWinners, coreRes, planningSettings, shootPlan, contentCreators, highStockRes] = await Promise.all([
       api('/board'),
       api('/styles'),
       api('/categories'),
@@ -114,6 +115,7 @@ async function loadAll() {
       api('/planning-settings'),
       api('/shoot-plan'),
       api('/content-creators'),
+      api('/high-stock-products'),
     ]);
     state.board = board;
     state.styles = styles;
@@ -129,6 +131,7 @@ async function loadAll() {
     state.planningSettings = planningSettings;
     state.shootPlan = shootPlan;
     state.contentCreators = contentCreators;
+    state.highStockProducts = highStockRes.products;
     renderBoard();
     renderMissingAd();
     renderStylesTable();
@@ -141,6 +144,7 @@ async function loadAll() {
     renderCoreProducts();
     renderPlanningSettingsForm();
     renderContentCreators();
+    renderHighStockProducts();
   } catch (e) {
     toast(e.message, true);
   }
@@ -1950,6 +1954,59 @@ function renderCoreProducts() {
   wireCoreCategoryToggles(list);
 }
 
+// ── Planning: High Stocks ─────────────────────────────
+// Non-Core products with meaningful stock exposure that may deserve
+// creative attention -- distinct from Core, so this never shows a
+// needs-attention-style emoji/flag or implies a New Concept is required
+// (state.highStockProducts' reason_chips are plain metric/reason strings
+// only). Reuses the exact same compact row format and "+ Shoot This Week"
+// modal Core already has -- no parallel workflow.
+function highStockProductRowHtml(p) {
+  const reasons = (p.reason_chips || []).join(' · ');
+  return `
+    <div class="core-shoot-review-row">
+      <div class="core-shoot-review-col-product"><span class="core-shoot-review-name">${escapeHtml(p.product_name)}</span></div>
+      <div class="core-shoot-review-col-reasons">${escapeHtml(reasons)}</div>
+      <div class="core-shoot-review-col-action">
+        <button type="button" class="btn btn-primary btn-sm" onclick="shootThisWeekForHighStock('${p.product_code}')">+ Shoot</button>
+      </div>
+    </div>`;
+}
+
+function toggleHighStockAllProducts() {
+  state.highStockAllOpen = !state.highStockAllOpen;
+  document.getElementById('high-stock-all-products-section').style.display = state.highStockAllOpen ? '' : 'none';
+  document.getElementById('high-stock-view-all-btn').classList.toggle('open', state.highStockAllOpen);
+}
+
+function renderHighStockProducts() {
+  const shown = (state.planningSettings && state.planningSettings.high_stock_recommendations_shown) || 5;
+  const top = state.highStockProducts.slice(0, shown);
+
+  const list = document.getElementById('high-stock-list');
+  list.innerHTML = top.length
+    ? top.map(highStockProductRowHtml).join('')
+    : '<div class="attention-empty">No High Stock products currently meet the SOH threshold.</div>';
+
+  document.getElementById('high-stock-all-products-section').style.display = state.highStockAllOpen ? '' : 'none';
+  document.getElementById('high-stock-view-all-btn').classList.toggle('open', state.highStockAllOpen);
+  const allList = document.getElementById('high-stock-all-list');
+  allList.innerHTML = state.highStockProducts.length
+    ? state.highStockProducts.map(highStockProductRowHtml).join('')
+    : '<div class="attention-empty">No eligible High Stock products right now.</div>';
+}
+
+function shootThisWeekForHighStock(productCode) {
+  const product = state.highStockProducts.find((p) => p.product_code === productCode);
+  if (!product) return;
+  openShootPlanModal({
+    productCode: product.product_code,
+    productName: product.product_name,
+    category: product.category,
+    colours: product.colours,
+  });
+}
+
 function planNewConceptForCore(productCode) {
   const product = state.coreProducts.find((p) => p.product_code === productCode);
   if (!product) return;
@@ -2183,6 +2240,8 @@ function renderShootPlan() {
 function renderPlanningSettingsForm() {
   if (!state.planningSettings) return;
   document.getElementById('weekly-target-input').value = state.planningSettings.weekly_new_concept_target;
+  document.getElementById('high-stock-min-soh-input').value = state.planningSettings.high_stock_min_soh;
+  document.getElementById('high-stock-recs-shown-input').value = state.planningSettings.high_stock_recommendations_shown;
 }
 
 async function saveWeeklyTarget() {
@@ -2195,6 +2254,32 @@ async function saveWeeklyTarget() {
     state.coreProducts = coreRes.products;
     state.coreWeekly = { target: coreRes.weekly_target, planned: coreRes.weekly_planned, remaining: coreRes.weekly_remaining };
     renderCoreProducts();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function saveHighStockMinSoh() {
+  const value = document.getElementById('high-stock-min-soh-input').value;
+  try {
+    const updated = await api('/planning-settings', { method: 'PUT', body: JSON.stringify({ high_stock_min_soh: Number(value) }) });
+    state.planningSettings = updated;
+    toast('High Stock Minimum SOH saved');
+    const res = await api('/high-stock-products');
+    state.highStockProducts = res.products;
+    renderHighStockProducts();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function saveHighStockRecommendationsShown() {
+  const value = document.getElementById('high-stock-recs-shown-input').value;
+  try {
+    const updated = await api('/planning-settings', { method: 'PUT', body: JSON.stringify({ high_stock_recommendations_shown: Number(value) }) });
+    state.planningSettings = updated;
+    toast('High Stock Recommendations Shown saved');
+    renderHighStockProducts();
   } catch (e) {
     toast(e.message, true);
   }
@@ -2352,6 +2437,8 @@ async function deletePw() {
 
 document.getElementById('pw-add-btn').addEventListener('click', () => openPwModal(null));
 document.getElementById('weekly-target-save-btn').addEventListener('click', saveWeeklyTarget);
+document.getElementById('high-stock-min-soh-save-btn').addEventListener('click', saveHighStockMinSoh);
+document.getElementById('high-stock-recs-shown-save-btn').addEventListener('click', saveHighStockRecommendationsShown);
 
 // ── Settings: Content Creators ───────────────────────
 // Fixed scales rather than free text -- keeps entries consistent and
@@ -2483,5 +2570,6 @@ document.querySelectorAll('.core-view-btn').forEach((btn) => {
   btn.addEventListener('click', () => setCoreView(btn.dataset.view));
 });
 document.getElementById('core-view-all-btn').addEventListener('click', toggleCoreAllProducts);
+document.getElementById('high-stock-view-all-btn').addEventListener('click', toggleHighStockAllProducts);
 
 checkSession();

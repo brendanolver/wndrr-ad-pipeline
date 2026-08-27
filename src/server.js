@@ -22,6 +22,7 @@ const planningSettingsRoutes = require('./routes/planningSettings');
 const coreProductRoutes = require('./routes/coreProducts');
 const shootPlanRoutes = require('./routes/shootPlan');
 const contentCreatorRoutes = require('./routes/contentCreators');
+const highStockProductRoutes = require('./routes/highStockProducts');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -45,6 +46,7 @@ app.use('/api/planning-settings', requireAuth, planningSettingsRoutes);
 app.use('/api/core-products', requireAuth, coreProductRoutes);
 app.use('/api/shoot-plan', requireAuth, shootPlanRoutes);
 app.use('/api/content-creators', requireAuth, contentCreatorRoutes);
+app.use('/api/high-stock-products', requireAuth, highStockProductRoutes);
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
 

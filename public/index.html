@@ -164,7 +164,15 @@
             <span class="accordion-arrow">&#9656;</span> High Stocks
           </button>
           <div class="accordion-body" id="section-body-high-stocks" style="display:none;">
-            <div class="attention-empty">Nothing here yet.</div>
+            <div class="core-shoot-planning-title">High Stock Recommendations</div>
+            <div id="high-stock-list" class="core-shoot-planning-list"></div>
+
+            <button type="button" class="core-view-all-toggle" id="high-stock-view-all-btn">
+              <span class="accordion-arrow">&#9656;</span> View All High Stock Products
+            </button>
+            <div class="core-all-products-section" id="high-stock-all-products-section" style="display:none;">
+              <div id="high-stock-all-list" class="core-shoot-planning-list"></div>
+            </div>
           </div>
 
           <button type="button" class="accordion-toggle" data-section="promotions">
@@ -293,6 +301,21 @@
         <label for="weekly-target-input">Weekly New Concept Target</label>
         <input type="number" id="weekly-target-input" min="0" step="1">
         <button class="btn btn-primary btn-sm" id="weekly-target-save-btn">Save</button>
+      </div>
+
+      <div class="planning-section-header">
+        <h2>High Stocks</h2>
+        <span class="admin-note">Non-Core products eligible for creative attention based on stock exposure.</span>
+      </div>
+      <div class="settings-field-row">
+        <label for="high-stock-min-soh-input">High Stock Minimum SOH</label>
+        <input type="number" id="high-stock-min-soh-input" min="0" step="1">
+        <button class="btn btn-primary btn-sm" id="high-stock-min-soh-save-btn">Save</button>
+      </div>
+      <div class="settings-field-row">
+        <label for="high-stock-recs-shown-input">High Stock Recommendations Shown</label>
+        <input type="number" id="high-stock-recs-shown-input" min="1" step="1">
+        <button class="btn btn-primary btn-sm" id="high-stock-recs-shown-save-btn">Save</button>
       </div>
 
       <div class="planning-section-header">
