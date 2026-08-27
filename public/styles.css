@@ -391,6 +391,25 @@ main{padding:20px 24px;}
 .core-weekly-pill-remaining{background:var(--amber-light);color:var(--amber);}
 .core-weekly-footer{font-size:10.5px;color:var(--text-muted);}
 
+/* Core Shoot Review -- the default Monday-morning view: top 5 Core
+   products only, ranked by the existing Core Attention logic, with just
+   enough context per row to decide whether to shoot this week. No metric
+   columns, no expand -- one line, 2-3 reasons, one action. The full
+   Priority/By Category views are unchanged, just tucked behind
+   "View All Core Products" instead of being the default. */
+.core-shoot-review-title{font-size:14px;font-weight:700;margin-bottom:10px;}
+.core-shoot-review-list{display:flex;flex-direction:column;gap:7px;margin-bottom:4px;}
+.core-shoot-review-row{display:grid;grid-template-columns:2fr 3fr auto;gap:16px;align-items:center;background:white;border:1px solid var(--border);border-radius:var(--r);padding:11px 14px;}
+.core-shoot-review-col-product{min-width:0;}
+.core-shoot-review-name{font-weight:700;font-size:13.5px;}
+.core-shoot-review-col-reasons{font-size:12.5px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+
+.core-view-all-toggle{display:flex;align-items:center;gap:6px;width:100%;background:none;border:none;color:var(--teal-dark);font-family:inherit;font-size:12.5px;font-weight:600;cursor:pointer;padding:8px 4px;text-align:left;}
+.core-view-all-toggle:hover{text-decoration:underline;}
+.core-view-all-toggle .accordion-arrow{color:var(--teal-dark);}
+.core-view-all-toggle.open .accordion-arrow{transform:rotate(90deg);}
+.core-all-products-section{border-top:1px solid var(--border);padding-top:16px;margin-top:6px;}
+
 /* Priority / By Category view toggle. */
 .core-view-toggle{display:flex;gap:5px;margin-bottom:12px;}
 .core-view-btn{background:none;border:1px solid var(--border);border-radius:var(--r-pill);padding:6px 14px;font-family:inherit;font-size:13px;font-weight:600;color:var(--text-secondary);cursor:pointer;}

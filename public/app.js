@@ -13,7 +13,7 @@ const CLASSIFICATION_LABELS = { tested_proven: 'Tested/Proven', new_experimental
 
 let state = {
   styles: [], categories: [], board: null, dashboard: null, drops: [], jobs: [], provenWinners: [],
-  coreProducts: [], planningSettings: null, coreView: 'priority',
+  coreProducts: [], planningSettings: null, coreView: 'priority', coreAllProductsOpen: false,
   coreExpandedCategories: new Set(), coreExpandedProducts: new Set(),
   shootPlan: [],
 };
@@ -1774,9 +1774,44 @@ function renderCoreProductsByCategory() {
   }).join('');
 }
 
+// Monday-morning default: only the top 5 Core products, ranked by the same
+// attention order the server already sorts by -- no separate metric
+// columns, just enough to decide whether to shoot this week. The full
+// Priority/By Category views (unchanged) stay reachable via "View All
+// Core Products" for anyone who wants the underlying detail.
+function coreShootReviewRowHtml(p) {
+  const badge = p.flag === 'needs_attention' ? '🔴' : p.flag === 'opportunity' ? '🟠' : '';
+  const reasons = (p.reason_chips || []).join(' · ');
+  return `
+    <div class="core-shoot-review-row">
+      <div class="core-shoot-review-col-product">${badge ? badge + ' ' : ''}<span class="core-shoot-review-name">${escapeHtml(p.product_name)}</span></div>
+      <div class="core-shoot-review-col-reasons">${escapeHtml(reasons)}</div>
+      <div class="core-shoot-review-col-action">
+        <button type="button" class="btn btn-primary btn-sm" onclick="shootThisWeekForCore('${p.product_code}')">+ Shoot</button>
+      </div>
+    </div>`;
+}
+
+function renderCoreShootReview() {
+  const list = document.getElementById('core-shoot-review-list');
+  const top5 = state.coreProducts.slice(0, 5);
+  list.innerHTML = top5.length
+    ? top5.map(coreShootReviewRowHtml).join('')
+    : '<div class="attention-empty">No Core products found yet.</div>';
+}
+
+function toggleCoreAllProducts() {
+  state.coreAllProductsOpen = !state.coreAllProductsOpen;
+  document.getElementById('core-all-products-section').style.display = state.coreAllProductsOpen ? '' : 'none';
+  document.getElementById('core-view-all-btn').classList.toggle('open', state.coreAllProductsOpen);
+}
+
 function renderCoreProducts() {
   renderCoreWeeklyCard();
+  renderCoreShootReview();
   renderCoreViewToggle();
+  document.getElementById('core-all-products-section').style.display = state.coreAllProductsOpen ? '' : 'none';
+  document.getElementById('core-view-all-btn').classList.toggle('open', state.coreAllProductsOpen);
 
   const list = document.getElementById('core-products-list');
   if (!state.coreProducts.length) {
@@ -2084,5 +2119,6 @@ document.getElementById('weekly-target-save-btn').addEventListener('click', save
 document.querySelectorAll('.core-view-btn').forEach((btn) => {
   btn.addEventListener('click', () => setCoreView(btn.dataset.view));
 });
+document.getElementById('core-view-all-btn').addEventListener('click', toggleCoreAllProducts);
 
 checkSession();
