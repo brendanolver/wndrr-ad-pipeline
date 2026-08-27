@@ -236,6 +236,30 @@ main{padding:20px 24px;}
 .planning-section-header{display:flex;justify-content:space-between;align-items:center;margin:24px 0 12px;}
 .planning-section-header h2{font-size:16px;}
 
+/* Monday's guided workflow: a compact step nav (pill-switch, same visual
+   language as .core-view-btn) + one mutually-exclusive panel at a time --
+   unlike .planning-accordion below, which allows independent open/close. */
+.planning-steps{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;}
+.planning-step-btn{background:none;border:1px solid var(--border);border-radius:var(--r-pill);padding:7px 16px;font-family:inherit;font-size:13px;font-weight:600;color:var(--text-secondary);cursor:pointer;}
+.planning-step-btn:hover{border-color:var(--teal);}
+.planning-step-btn.active{background:var(--black);border-color:var(--black);color:white;}
+.planning-shoot-summary{font-size:13px;color:var(--text-secondary);font-weight:600;margin-bottom:18px;}
+.planning-step-panel{display:none;}
+.planning-step-panel.active{display:block;}
+.planning-step-footer{display:flex;justify-content:space-between;align-items:center;margin-top:16px;padding-top:14px;border-top:1px solid var(--border);}
+.planning-step-footer span{font-size:13px;color:var(--text-secondary);font-weight:600;}
+.core-shoot-selected-badge{display:inline-block;padding:5px 12px;border-radius:var(--r-pill);background:var(--green-light);color:var(--green);font-size:12.5px;font-weight:700;white-space:nowrap;}
+
+/* Step 4 -- Promotions: reuses .drop-card/.drop-card-status from Drops
+   (same exception-based on-track/needs-attention look) plus its own
+   minimal checklist editor, only shown once a promotion is expanded. */
+.promotion-item-list{margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:6px;}
+.promotion-item-row{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px;}
+.promotion-add-item-row{display:flex;gap:8px;margin-top:8px;}
+.promotion-add-item-row input{flex:1;}
+.promotion-add-form{display:flex;gap:8px;margin-top:16px;padding-top:14px;border-top:1px solid var(--border);}
+.promotion-add-form input[type="text"]{flex:1;}
+
 .drops-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;margin-bottom:8px;}
 
 .planning-accordion{margin:24px 0 12px;border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;background:var(--surface);}
@@ -257,12 +281,11 @@ main{padding:20px 24px;}
 .drop-card-edit-btn{background:none;border:1px solid var(--border);border-radius:var(--r);color:var(--text-muted);font-size:11.5px;padding:3px 9px;cursor:pointer;flex-shrink:0;}
 .drop-card-edit-btn:hover{background:var(--surface2);color:var(--text-secondary);}
 .drop-card-date{font-size:12.5px;color:var(--text-muted);margin:3px 0 11px;}
-.drop-card-counts{display:flex;gap:11px;font-size:12.5px;font-weight:600;margin-bottom:9px;}
-.drop-card-counts span.green{color:var(--green);}
-.drop-card-counts span.amber{color:var(--amber);}
-.drop-card-counts span.red{color:var(--red);}
-.drop-card-pct{font-size:13px;color:var(--text-secondary);font-weight:600;}
-.drop-card-urgent{font-size:11.5px;color:var(--text-muted);margin-top:9px;border-top:1px solid var(--border);padding-top:9px;}
+.drop-card-meta{font-size:12.5px;color:var(--text-secondary);margin-bottom:9px;}
+.drop-card-status{display:inline-block;padding:3px 9px;border-radius:var(--r-pill);font-size:12px;font-weight:700;}
+.drop-card-status.on-track{background:var(--green-light);color:var(--green);}
+.drop-card-status.needs-attention{background:var(--red-light);color:var(--red);margin-bottom:6px;}
+.drop-card-review-link,.drop-card-review-link-btn{font-size:12px;font-weight:600;color:var(--teal-dark);background:none;border:none;padding:0;cursor:pointer;font-family:inherit;display:block;}
 
 /* ── DROP MODAL: date quickpicks + auto-populated style checklist ── */
 .quickpick-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:-6px;}
@@ -529,13 +552,21 @@ main{padding:20px 24px;}
 .core-colours-inner-table th{text-align:left;color:var(--text-muted);font-weight:600;padding:5px 7px;border-bottom:1px solid var(--border);}
 .core-colours-inner-table td{padding:5px 7px;border-bottom:1px solid var(--border);}
 
-/* This Week's Shoot Plan -- clean, compact list, one row per product. */
-.shoot-plan-list{display:flex;flex-direction:column;gap:7px;overflow-x:auto;}
-.shoot-plan-row{display:grid;grid-template-columns:2fr 1.4fr 1fr 2fr 1.4fr 0.8fr;gap:12px;align-items:center;min-width:760px;background:white;border:1px solid var(--border);border-radius:var(--r);padding:10px 12px;font-size:13.5px;}
-.shoot-plan-header{background:none;border:none;padding:0 12px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);}
-.shoot-plan-col-product{font-weight:700;}
-.shoot-plan-col-idea{color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.shoot-plan-col-action{text-align:right;}
+/* Planning Step 5 -- This Week's Shoot Plan: grouped by source, plus the
+   Bring From Warehouse pull list and the confirm action. */
+.shoot-plan-step-header{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px;}
+.shoot-plan-step-header h2{font-size:16px;}
+.shoot-plan-step-header span{font-size:13px;color:var(--text-secondary);font-weight:600;}
+.shoot-plan-source-group{margin-bottom:16px;}
+.shoot-plan-source-label{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);margin-bottom:6px;}
+.shoot-plan-product-row{display:flex;align-items:center;gap:10px;background:white;border:1px solid var(--border);border-radius:var(--r);padding:9px 12px;margin-bottom:6px;}
+.shoot-plan-product-name{font-weight:700;font-size:13.5px;flex:1;}
+.shoot-plan-product-meta{font-size:12px;color:var(--text-secondary);white-space:nowrap;}
+.shoot-plan-warehouse-list{display:flex;flex-direction:column;gap:2px;}
+.shoot-plan-warehouse-row{display:grid;grid-template-columns:2fr 1fr 0.6fr;gap:12px;background:white;border:1px solid var(--border);border-radius:var(--r);padding:9px 12px;font-size:13.5px;}
+.shoot-plan-confirm-row{margin-top:20px;padding-top:16px;border-top:1px solid var(--border);}
+.shoot-plan-confirm-banner{display:inline-block;padding:8px 14px;border-radius:var(--r);background:var(--green-light);color:var(--green);font-weight:700;font-size:13.5px;}
+.shoot-plan-confirm-row .btn:disabled{opacity:0.5;cursor:not-allowed;}
 
 @media (max-width: 1100px){
   .board{grid-template-columns:1fr;}

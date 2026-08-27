@@ -6,6 +6,7 @@ const { STATUS_LABELS } = require('../lib/statuses');
 const router = express.Router();
 
 const STOCK_STATUSES = ['in_office', 'needs_to_be_brought_in'];
+const SOURCES = ['core', 'high_stock', 'drop', 'promotion'];
 
 router.get('/', async (req, res, next) => {
   try {
@@ -20,7 +21,7 @@ router.get('/', async (req, res, next) => {
 
     const stylesResult = items.length
       ? await pool.query(
-          `SELECT spis.shoot_plan_item_id, s.id AS style_id, s.style_code, spis.size
+          `SELECT spis.shoot_plan_item_id, s.id AS style_id, s.style_code, spis.size, spis.colour_label
            FROM shoot_plan_item_styles spis
            JOIN styles s ON s.id = spis.style_id
            WHERE spis.shoot_plan_item_id = ANY($1::int[])`,
@@ -30,7 +31,7 @@ router.get('/', async (req, res, next) => {
     const stylesByItem = new Map();
     for (const row of stylesResult.rows) {
       if (!stylesByItem.has(row.shoot_plan_item_id)) stylesByItem.set(row.shoot_plan_item_id, []);
-      stylesByItem.get(row.shoot_plan_item_id).push({ style_id: row.style_id, style_code: row.style_code, size: row.size });
+      stylesByItem.get(row.shoot_plan_item_id).push({ style_id: row.style_id, style_code: row.style_code, size: row.size, colour_label: row.colour_label });
     }
 
     res.json(items.map((i) => ({
@@ -44,6 +45,8 @@ router.get('/', async (req, res, next) => {
       asset_id: i.asset_id,
       asset_status: i.asset_status,
       asset_status_label: i.asset_status ? (STATUS_LABELS[i.asset_status] || i.asset_status) : null,
+      source: i.source,
+      image_url: i.image_url,
       styles: stylesByItem.get(i.id) || [],
     })));
   } catch (err) {
@@ -52,7 +55,7 @@ router.get('/', async (req, res, next) => {
 });
 
 router.post('/', async (req, res, next) => {
-  const { product_code, product_name, colourways, stock_status, creator, quick_note } = req.body || {};
+  const { product_code, product_name, colourways, stock_status, creator, quick_note, source, image_url } = req.body || {};
 
   if (!product_code || !product_name) {
     return res.status(400).json({ error: 'product_code and product_name are required' });
@@ -65,6 +68,9 @@ router.post('/', async (req, res, next) => {
   }
   if (!creator || !creator.trim()) {
     return res.status(400).json({ error: 'Content creator is required' });
+  }
+  if (source !== undefined && source !== null && !SOURCES.includes(source)) {
+    return res.status(400).json({ error: `source must be one of ${SOURCES.join(', ')}` });
   }
 
   const client = await pool.connect();
@@ -84,16 +90,16 @@ router.post('/', async (req, res, next) => {
     });
 
     const itemResult = await client.query(
-      `INSERT INTO shoot_plan_items (product_code, product_name, stock_status, creator, initial_idea, asset_id)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [product_code, product_name, stock_status, trimmedCreator, trimmedNote, asset.id]
+      `INSERT INTO shoot_plan_items (product_code, product_name, stock_status, creator, initial_idea, asset_id, source, image_url)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [product_code, product_name, stock_status, trimmedCreator, trimmedNote, asset.id, source || null, image_url || null]
     );
     const item = itemResult.rows[0];
 
     for (const c of colourways) {
       await client.query(
-        `INSERT INTO shoot_plan_item_styles (shoot_plan_item_id, style_id, size) VALUES ($1, $2, $3)`,
-        [item.id, Number(c.style_id), c.size && String(c.size).trim() ? String(c.size).trim() : null]
+        `INSERT INTO shoot_plan_item_styles (shoot_plan_item_id, style_id, size, colour_label) VALUES ($1, $2, $3, $4)`,
+        [item.id, Number(c.style_id), c.size && String(c.size).trim() ? String(c.size).trim() : null, c.colour_label || null]
       );
     }
 
