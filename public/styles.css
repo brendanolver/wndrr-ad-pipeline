@@ -144,6 +144,8 @@ main{padding:20px 24px;}
 .shoot-plan-colour-thumb{width:32px;height:32px;border-radius:var(--r);object-fit:contain;background:var(--surface2);}
 .shoot-plan-colour-check{margin:0 !important;}
 .shoot-plan-colour-size{width:100%;font-size:12.5px !important;padding:6px 8px !important;}
+.shoot-plan-colours-list.hide-sizes .shoot-plan-colour-row{grid-template-columns:32px 1fr;}
+.shoot-plan-colours-list.hide-sizes .shoot-plan-colour-size{display:none;}
 .modal-footer{display:flex;justify-content:flex-end;gap:8px;padding:14px 18px;border-top:1px solid var(--border);}
 .confirm-modal{width:360px;}
 .confirm-modal .modal-body{align-items:center;text-align:center;padding:28px 22px 8px;}

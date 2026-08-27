@@ -2038,11 +2038,23 @@ function openShootPlanModal(preset) {
     </div>`;
   }).join('');
 
-  document.getElementById('shoot-plan-stock-status').value = 'in_office';
+  // Bring from Warehouse is the default -- most shoots need something
+  // pulled, and defaulting here means the size fields the warehouse pull
+  // list depends on are visible unless someone actively says otherwise.
+  document.getElementById('shoot-plan-stock-status').value = 'needs_to_be_brought_in';
   document.getElementById('shoot-plan-creator').value = DEFAULT_CREATOR;
   document.getElementById('shoot-plan-initial-idea').value = '';
   applyShootPlanSizeDefaults();
+  updateShootPlanSampleStatusVisibility();
   openModal('shoot-plan-modal');
+}
+
+// Sizes only matter when something has to be picked and brought in -- if
+// it's already in the office, hide the size controls entirely (colourway
+// checkboxes stay, since which colours are being shot is still recorded).
+function updateShootPlanSampleStatusVisibility() {
+  const bringingFromWarehouse = document.getElementById('shoot-plan-stock-status').value === 'needs_to_be_brought_in';
+  document.getElementById('shoot-plan-colours').classList.toggle('hide-sizes', !bringingFromWarehouse);
 }
 
 // Re-applies (or clears, per defaultSizeForColourway's Mark-only rule)
@@ -2066,13 +2078,17 @@ function applyShootPlanSizeDefaults() {
 }
 
 async function saveShootPlanItem() {
+  // Size is only meaningful when something needs to be picked and brought
+  // in -- if it's already in the office, nobody needs a size on a pull
+  // list that doesn't exist for this shoot.
+  const bringingFromWarehouse = document.getElementById('shoot-plan-stock-status').value === 'needs_to_be_brought_in';
   const colourways = [];
   for (const row of document.querySelectorAll('#shoot-plan-colours .shoot-plan-colour-row')) {
     const checkbox = row.querySelector('.shoot-plan-colour-required');
     if (!checkbox.checked) continue;
     const size = row.querySelector('.shoot-plan-colour-size').value.trim();
-    if (!size) return toast('Select a size for every required colourway', true);
-    colourways.push({ style_id: Number(checkbox.value), size });
+    if (bringingFromWarehouse && !size) return toast('Select a size for every required colourway', true);
+    colourways.push({ style_id: Number(checkbox.value), size: bringingFromWarehouse ? size : null });
   }
   const creator = document.getElementById('shoot-plan-creator').value.trim();
   if (!colourways.length) return toast('Select at least one colourway', true);
@@ -2111,7 +2127,7 @@ function shootPlanHeaderHtml() {
   return `
     <div class="shoot-plan-row shoot-plan-header">
       <div class="shoot-plan-col-product">Product</div>
-      <div class="shoot-plan-col">Stock Needed</div>
+      <div class="shoot-plan-col">Sample Status</div>
       <div class="shoot-plan-col">Creator</div>
       <div class="shoot-plan-col-idea">Quick Note</div>
       <div class="shoot-plan-col">Status</div>
@@ -2120,7 +2136,7 @@ function shootPlanHeaderHtml() {
 }
 
 function shootPlanRowHtml(item) {
-  const stockLabel = item.stock_status === 'in_office' ? 'In Office' : 'Needs to be Brought In';
+  const stockLabel = item.stock_status === 'in_office' ? 'In Office' : 'Bring from Warehouse';
   return `
     <div class="shoot-plan-row">
       <div class="shoot-plan-col-product">${escapeHtml(item.product_name)}</div>
