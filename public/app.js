@@ -19,6 +19,15 @@ let state = {
   shootPlan: [], coverageImageIndex: new Map(),
   contentCreators: [],
   highStockProducts: [], highStockAllOpen: false,
+  // Monday Planning's 5-step guided workflow -- always starts at Core on
+  // load (not persisted to localStorage): this is a recurring weekly
+  // ritual, not a session to resume, so a stale mid-flow step from a prior
+  // visit would only confuse. The one place it's overridden is entering
+  // the drop/product drill-in (see renderPlanningRoute), so "Back to
+  // Planning" always returns to the Drops step, not Core.
+  planningStep: 'core',
+  promotions: [], promotionExpandedIds: new Set(),
+  weeklyShootPlanConfirmation: null,
 };
 let dashboardWeekOffset = 0;
 
@@ -103,7 +112,7 @@ document.querySelectorAll('.tab-btn').forEach((btn) => {
 // ── Load & render ────────────────────────────────────
 async function loadAll() {
   try {
-    const [board, styles, categories, dashboard, dropsRes, jobs, provenWinners, coreRes, planningSettings, shootPlan, contentCreators, highStockRes] = await Promise.all([
+    const [board, styles, categories, dashboard, dropsRes, jobs, provenWinners, coreRes, planningSettings, shootPlan, contentCreators, highStockRes, promotions, weeklyConfirmation] = await Promise.all([
       api('/board'),
       api('/styles'),
       api('/categories'),
@@ -116,6 +125,8 @@ async function loadAll() {
       api('/shoot-plan'),
       api('/content-creators'),
       api('/high-stock-products'),
+      api('/promotions'),
+      api('/weekly-shoot-plan-confirmation'),
     ]);
     state.board = board;
     state.styles = styles;
@@ -132,6 +143,8 @@ async function loadAll() {
     state.shootPlan = shootPlan;
     state.contentCreators = contentCreators;
     state.highStockProducts = highStockRes.products;
+    state.promotions = promotions;
+    state.weeklyShootPlanConfirmation = weeklyConfirmation;
     renderBoard();
     renderMissingAd();
     renderStylesTable();
@@ -145,6 +158,8 @@ async function loadAll() {
     renderPlanningSettingsForm();
     renderContentCreators();
     renderHighStockProducts();
+    renderPromotions();
+    renderPlanningShootSummary();
   } catch (e) {
     toast(e.message, true);
   }
@@ -364,7 +379,29 @@ function renderPlanning() {
   populateJobDropSelect();
   loadDropSuggestions();
   renderPlanningRoute();
-  renderShootPlan();
+  renderShootPlanStep();
+}
+
+// ── Planning steps (Monday's guided workflow) ────────
+// Core -> High Stocks -> Upcoming Drops -> Promotions -> Shoot Plan: one
+// step visible at a time (mutually exclusive, unlike the accordion pattern
+// still used for the independent Past Drops section below), freely
+// clickable forward/backward. No refetch on switch -- everything's already
+// loaded by loadAll().
+const PLANNING_STEPS = ['core', 'high-stocks', 'drops', 'promotions', 'shoot-plan'];
+function setPlanningStep(key) {
+  state.planningStep = key;
+  document.querySelectorAll('.planning-step-btn').forEach((btn) => btn.classList.toggle('active', btn.dataset.step === key));
+  document.querySelectorAll('.planning-step-panel').forEach((panel) => panel.classList.toggle('active', panel.dataset.step === key));
+}
+document.querySelectorAll('.planning-step-btn').forEach((btn) => {
+  btn.addEventListener('click', () => setPlanningStep(btn.dataset.step));
+});
+
+function renderPlanningShootSummary() {
+  const totalSamples = state.shootPlan.reduce((sum, i) => sum + i.styles.length, 0);
+  document.getElementById('planning-shoot-summary').textContent =
+    `${state.shootPlan.length} product${state.shootPlan.length === 1 ? '' : 's'} selected · ${totalSamples} sample${totalSamples === 1 ? '' : 's'} required`;
 }
 
 // ── Planning sub-navigation (list / drop / product) ──
@@ -392,6 +429,14 @@ function renderPlanningRoute() {
   document.getElementById('planning-list-view').style.display = route.view === 'list' ? 'block' : 'none';
   document.getElementById('planning-drop-view').style.display = route.view === 'drop' ? 'block' : 'none';
   document.getElementById('planning-product-view').style.display = route.view === 'product' ? 'block' : 'none';
+
+  if (route.view === 'drop' || route.view === 'product') {
+    // So "Back to Planning" always lands on the Drops step, not Core --
+    // covers both clicking into a drop from Step 3 and a direct page
+    // reload on a #planning/drop/<id> hash (state.planningStep resets to
+    // 'core' on every fresh load otherwise).
+    setPlanningStep('drops');
+  }
 
   if (route.view === 'drop') {
     loadDropView(route.dropId);
@@ -504,27 +549,27 @@ function renderPlanningSummary() {
     : '<div class="attention-empty">Nothing scheduled today or tomorrow</div>';
 }
 
+// Compact, exception-based card for Step 3 (Upcoming Drops): "are we on
+// track?" not a per-product worksheet. Derived purely from the already-
+// computed d.summary (red/amber counts) -- never recomputes or re-sums
+// coverage, just conditionally renders less of the same server data when
+// nothing needs attention.
 function dropCardHtml(d) {
   const pct = d.summary.overallPct;
-  // Same green/amber/red bracket coverageStatus() uses server-side --
-  // there's no single overall status field, so it's derived from the
-  // already-computed overallPct rather than re-summing per-product statuses.
-  const barStatus = pct === null ? '' : (pct >= 100 ? 'green' : pct >= 50 ? 'amber' : 'red');
+  const needsAttentionCount = d.summary.red + d.summary.amber;
+  const onTrack = needsAttentionCount === 0;
   return `
-    <div class="drop-card" data-drop-id="${d.id}">
+    <div class="drop-card ${onTrack ? 'on-track' : 'needs-attention'}" data-drop-id="${d.id}">
       <div class="drop-card-header">
         <div class="drop-card-name ${d.name ? '' : 'untitled'}" data-drop-id="${d.id}" title="Click to rename">${d.name ? escapeHtml(d.name) : 'Untitled'}</div>
         <button type="button" class="drop-card-edit-btn" data-drop-id="${d.id}" title="Edit launch date / notes">Edit</button>
       </div>
       <div class="drop-card-date">${formatDate(d.launch_date)} · ${d.days_until_launch >= 0 ? d.days_until_launch + ' days to launch' : 'Launched'}</div>
-      <div class="drop-card-counts">
-        <span class="green">🟢 ${d.summary.green}</span>
-        <span class="amber">🟠 ${d.summary.amber}</span>
-        <span class="red">🔴 ${d.summary.red}</span>
-      </div>
-      <div class="drop-card-pct">${d.summary.totalCovered} / ${d.summary.totalTarget} creatives${pct !== null ? ' — ' + pct + '%' : ''}</div>
-      ${pct !== null ? `<div class="coverage-progress-track"><div class="coverage-progress-fill ${barStatus}" style="width:${Math.min(100, pct)}%;"></div></div>` : ''}
-      ${d.most_urgent[0] ? `<div class="drop-card-urgent">Most urgent: ${escapeHtml(d.most_urgent[0].product_name)} (${d.most_urgent[0].current_coverage}/${d.most_urgent[0].creative_target ?? '—'})</div>` : ''}
+      <div class="drop-card-meta">${d.summary.productCount} product${d.summary.productCount === 1 ? '' : 's'} · ${d.summary.totalCovered}/${d.summary.totalTarget} creatives covered${pct !== null ? ' · ' + pct + '%' : ''}</div>
+      ${onTrack
+        ? `<div class="drop-card-status on-track">✓ On Track</div>`
+        : `<div class="drop-card-status needs-attention">⚠ ${needsAttentionCount} product${needsAttentionCount === 1 ? '' : 's'} require attention</div>
+           <div class="drop-card-review-link">Review Drop →</div>`}
     </div>`;
 }
 
@@ -1819,16 +1864,22 @@ function renderCoreProductsByCategory() {
 // via "View All Core Products".
 const CORE_STALE_DAYS = 14; // mirrors coreProducts.js's STALE_DAYS_OPPORTUNITY -- display aggregate only, doesn't touch the server's own flag decision
 
-function coreProblemProductRowHtml(p) {
+// Static "✓ Shooting" badge once a product is already in this week's Shoot
+// Plan -- shared by Core and High Stock rows so both read the same way.
+// selectedCodes is built once per render pass (not per row) by the caller.
+function shootActionHtml(productCode, onclickFn, selectedCodes) {
+  if (selectedCodes.has(productCode)) return '<span class="core-shoot-selected-badge">✓ Shooting</span>';
+  return `<button type="button" class="btn btn-primary btn-sm" onclick="${onclickFn}('${productCode}')">+ Shoot</button>`;
+}
+
+function coreProblemProductRowHtml(p, selectedCodes) {
   const badge = p.flag === 'needs_attention' ? '🔴' : p.flag === 'opportunity' ? '🟠' : '';
   const reasons = (p.reason_chips || []).join(' · ');
   return `
     <div class="core-shoot-review-row">
       <div class="core-shoot-review-col-product">${badge ? badge + ' ' : ''}<span class="core-shoot-review-name">${escapeHtml(p.product_name)}</span></div>
       <div class="core-shoot-review-col-reasons"><span class="core-shoot-review-reasons-text">${escapeHtml(reasons)}</span></div>
-      <div class="core-shoot-review-col-action">
-        <button type="button" class="btn btn-primary btn-sm" onclick="shootThisWeekForCore('${p.product_code}')">+ Shoot</button>
-      </div>
+      <div class="core-shoot-review-col-action">${shootActionHtml(p.product_code, 'shootThisWeekForCore', selectedCodes)}</div>
     </div>`;
 }
 
@@ -1867,7 +1918,7 @@ function coreCategoryTrendInfo(vel7, vel30) {
   return { display: `→ ${Math.abs(pct)}%`, cls: 'core-trend-flat', title };
 }
 
-function coreShootCategoryRowHtml(cat) {
+function coreShootCategoryRowHtml(cat, selectedCodes) {
   const isOpen = state.coreShootExpandedCategories.has(cat.name);
   const trend = coreCategoryTrendInfo(cat.vel7, cat.vel30);
   return `
@@ -1885,20 +1936,32 @@ function coreShootCategoryRowHtml(cat) {
       </button>
       ${isOpen ? `<div class="core-shoot-category-body">
         ${cat.problemProducts.length
-          ? cat.problemProducts.map(coreProblemProductRowHtml).join('')
+          ? cat.problemProducts.map((p) => coreProblemProductRowHtml(p, selectedCodes)).join('')
           : '<div class="attention-empty">No problem products in this category right now.</div>'}
       </div>` : ''}
     </div>`;
 }
 
+// Bottom-of-step count for the "X Core products selected · Continue to
+// High Stocks →" footer -- same product_code cross-reference pattern
+// coreShootPlanCountsByCategory() already uses, just totaled for the
+// whole step instead of per-category.
+function renderCoreStepFooter() {
+  const coreCodes = new Set(state.coreProducts.map((p) => p.product_code));
+  const count = state.shootPlan.filter((i) => coreCodes.has(i.product_code)).length;
+  document.getElementById('core-step-footer-count').textContent = `${count} Core product${count === 1 ? '' : 's'} selected`;
+}
+
 function renderCoreShootPlanning() {
   const list = document.getElementById('core-shoot-planning-list');
+  renderCoreStepFooter();
   if (!state.coreProducts.length) {
     list.innerHTML = '<div class="attention-empty">No Core products found yet.</div>';
     return;
   }
 
   const selectedCounts = coreShootPlanCountsByCategory();
+  const selectedCodes = new Set(state.shootPlan.map((i) => i.product_code));
   const byCategory = new Map();
   for (const p of state.coreProducts) {
     if (!byCategory.has(p.category)) byCategory.set(p.category, []);
@@ -1925,7 +1988,7 @@ function renderCoreShootPlanning() {
     return a.name.localeCompare(b.name);
   });
 
-  list.innerHTML = categories.map(coreShootCategoryRowHtml).join('');
+  list.innerHTML = categories.map((cat) => coreShootCategoryRowHtml(cat, selectedCodes)).join('');
   list.querySelectorAll('.core-shoot-category-toggle').forEach((btn) => {
     btn.addEventListener('click', () => toggleCoreShootCategory(btn.dataset.category));
   });
@@ -1962,7 +2025,7 @@ function renderCoreProducts() {
 // Status) -- deliberately not a variable ranked-reasons list, so it stays
 // scannable in a few seconds. Reuses the exact same compact row format and
 // "+ Shoot This Week" modal Core already has -- no parallel workflow.
-function highStockProductRowHtml(p) {
+function highStockProductRowHtml(p, selectedCodes) {
   const trend = p.sales_trend || { display: '', cls: 'core-trend-flat' };
   const firstImage = (p.colours || []).find((c) => c.image_url);
   const thumb = firstImage
@@ -1983,9 +2046,7 @@ function highStockProductRowHtml(p) {
         <span class="core-shoot-review-sep">·</span>
         <span class="core-shoot-review-reasons-text">${escapeHtml(p.creative_status_label || '')}</span>
       </div>
-      <div class="core-shoot-review-col-action">
-        <button type="button" class="btn btn-primary btn-sm" onclick="shootThisWeekForHighStock('${p.product_code}')">+ Shoot</button>
-      </div>
+      <div class="core-shoot-review-col-action">${shootActionHtml(p.product_code, 'shootThisWeekForHighStock', selectedCodes)}</div>
     </div>`;
 }
 
@@ -1995,21 +2056,32 @@ function toggleHighStockAllProducts() {
   document.getElementById('high-stock-view-all-btn').classList.toggle('open', state.highStockAllOpen);
 }
 
+// Bottom-of-step count for "X High Stock products selected · Continue to
+// Upcoming Drops →", same cross-reference pattern as the Core step footer.
+function renderHighStockStepFooter() {
+  const hsCodes = new Set(state.highStockProducts.map((p) => p.product_code));
+  const count = state.shootPlan.filter((i) => hsCodes.has(i.product_code)).length;
+  document.getElementById('high-stock-step-footer-count').textContent = `${count} High Stock product${count === 1 ? '' : 's'} selected`;
+}
+
 function renderHighStockProducts() {
   const shown = (state.planningSettings && state.planningSettings.high_stock_recommendations_shown) || 5;
   const top = state.highStockProducts.slice(0, shown);
+  const selectedCodes = new Set(state.shootPlan.map((i) => i.product_code));
 
   const list = document.getElementById('high-stock-list');
   list.innerHTML = top.length
-    ? top.map(highStockProductRowHtml).join('')
+    ? top.map((p) => highStockProductRowHtml(p, selectedCodes)).join('')
     : '<div class="attention-empty">No High Stock products currently meet the SOH threshold.</div>';
 
   document.getElementById('high-stock-all-products-section').style.display = state.highStockAllOpen ? '' : 'none';
   document.getElementById('high-stock-view-all-btn').classList.toggle('open', state.highStockAllOpen);
   const allList = document.getElementById('high-stock-all-list');
   allList.innerHTML = state.highStockProducts.length
-    ? state.highStockProducts.map(highStockProductRowHtml).join('')
+    ? state.highStockProducts.map((p) => highStockProductRowHtml(p, selectedCodes)).join('')
     : '<div class="attention-empty">No eligible High Stock products right now.</div>';
+
+  renderHighStockStepFooter();
 }
 
 function shootThisWeekForHighStock(productCode) {
@@ -2020,6 +2092,7 @@ function shootThisWeekForHighStock(productCode) {
     productName: product.product_name,
     category: product.category,
     colours: product.colours,
+    source: 'high_stock',
   });
 }
 
@@ -2079,6 +2152,7 @@ function shootThisWeekForCore(productCode) {
     productName: product.product_name,
     category: product.category,
     colours: product.colours,
+    source: 'core',
   });
 }
 
@@ -2090,6 +2164,7 @@ function shootThisWeekForCoverage(productCode) {
     productName: c.product_name,
     category: c.category,
     colours: c.styles,
+    source: 'drop',
   });
 }
 
@@ -2183,11 +2258,19 @@ async function saveShootPlanItem() {
     if (!checkbox.checked) continue;
     const size = row.querySelector('.shoot-plan-colour-size').value.trim();
     if (bringingFromWarehouse && !size) return toast('Select a size for every required colourway', true);
-    colourways.push({ style_id: Number(checkbox.value), size: bringingFromWarehouse ? size : null });
+    const styleId = Number(checkbox.value);
+    const colour = shootPlanModalContext.colours.find((c) => c.style_id === styleId);
+    colourways.push({ style_id: styleId, size: bringingFromWarehouse ? size : null, colour_label: colour?.colour_label || null });
   }
   const creator = document.getElementById('shoot-plan-creator').value.trim();
   if (!colourways.length) return toast('Select at least one colourway', true);
   if (!creator) return toast('Content creator is required', true);
+
+  // Same find-first-truthy pattern the modal's own header image uses
+  // (colours[0] isn't guaranteed to have an image) -- snapshotted here so
+  // the Shoot Plan step can show a product thumbnail without re-resolving
+  // it from whichever source list happens to still be loaded.
+  const headerImage = shootPlanModalContext.colours.find((c) => c.image_url);
 
   const payload = {
     product_code: shootPlanModalContext.productCode,
@@ -2196,6 +2279,8 @@ async function saveShootPlanItem() {
     stock_status: document.getElementById('shoot-plan-stock-status').value,
     creator,
     quick_note: document.getElementById('shoot-plan-initial-idea').value.trim() || null,
+    source: shootPlanModalContext.source || null,
+    image_url: headerImage?.image_url || null,
   };
   try {
     await api('/shoot-plan', { method: 'POST', body: JSON.stringify(payload) });
@@ -2218,38 +2303,200 @@ async function removeShootPlanItem(id) {
   }
 }
 
-function shootPlanHeaderHtml() {
+// ── Planning: Step 4 -- Promotions ────────────────────
+// "Are upcoming promotions covered?" -- same exception-based philosophy as
+// Drops: an on-track promotion shows just a status line, nothing to open.
+// Deliberately minimal (no ApparelMagic/SOH integration, unlike Core/High
+// Stock/Drops) -- a manual name/date/checklist, since a promotion doesn't
+// have an inventory-driven creative target the way a product does.
+function togglePromotionExpanded(id) {
+  if (state.promotionExpandedIds.has(id)) state.promotionExpandedIds.delete(id);
+  else state.promotionExpandedIds.add(id);
+  renderPromotions();
+}
+
+function promotionItemRowHtml(promotionId, item) {
   return `
-    <div class="shoot-plan-row shoot-plan-header">
-      <div class="shoot-plan-col-product">Product</div>
-      <div class="shoot-plan-col">Sample Status</div>
-      <div class="shoot-plan-col">Creator</div>
-      <div class="shoot-plan-col-idea">Quick Note</div>
-      <div class="shoot-plan-col">Status</div>
-      <div class="shoot-plan-col-action"></div>
+    <div class="promotion-item-row">
+      <label class="checkbox-label">
+        <input type="checkbox" ${item.is_ready ? 'checked' : ''} onchange="togglePromotionItemReady(${promotionId}, ${item.id}, this.checked)">
+        ${escapeHtml(item.description)}
+      </label>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="removePromotionItem(${promotionId}, ${item.id})">Remove</button>
     </div>`;
 }
 
-function shootPlanRowHtml(item) {
+function promotionCardHtml(p) {
+  const isOpen = state.promotionExpandedIds.has(p.id);
+  const onTrack = p.status === 'on_track';
+  return `
+    <div class="drop-card ${onTrack ? 'on-track' : 'needs-attention'}">
+      <div class="drop-card-header">
+        <div class="drop-card-name">${escapeHtml(p.name)}</div>
+      </div>
+      <div class="drop-card-date">${formatDate(p.start_date)}</div>
+      ${onTrack
+        ? '<div class="drop-card-status on-track">✓ On Track</div>'
+        : `<div class="drop-card-status needs-attention">⚠ Needs Attention${p.item_count ? ` — ${p.ready_count}/${p.item_count} ready` : ' — nothing organised yet'}</div>
+           <button type="button" class="drop-card-review-link-btn" onclick="togglePromotionExpanded(${p.id})">${isOpen ? 'Hide' : 'Organise'} →</button>`}
+      ${isOpen ? `
+        <div class="promotion-item-list">
+          ${p.items.map((item) => promotionItemRowHtml(p.id, item)).join('')}
+        </div>
+        <div class="promotion-add-item-row">
+          <input type="text" id="promotion-new-item-${p.id}" placeholder="e.g. Hero banner">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="addPromotionItem(${p.id})">+ Add Item</button>
+        </div>` : ''}
+    </div>`;
+}
+
+function renderPromotions() {
+  const list = document.getElementById('promotions-list');
+  if (!list) return; // guards a load race before index.html's panel exists
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const upcoming = state.promotions.filter((p) => formatDate(p.start_date) >= todayStr);
+  list.innerHTML = upcoming.length
+    ? upcoming.map(promotionCardHtml).join('')
+    : '<div class="attention-empty">No upcoming promotions yet — add one below.</div>';
+}
+
+async function addPromotion() {
+  const nameEl = document.getElementById('new-promotion-name');
+  const dateEl = document.getElementById('new-promotion-date');
+  const name = nameEl.value.trim();
+  const startDate = dateEl.value;
+  if (!name) return toast('Promotion name is required', true);
+  if (!startDate) return toast('Start date is required', true);
+  try {
+    await api('/promotions', { method: 'POST', body: JSON.stringify({ name, start_date: startDate }) });
+    nameEl.value = '';
+    dateEl.value = '';
+    toast('Promotion added');
+    loadAll();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function addPromotionItem(promotionId) {
+  const input = document.getElementById(`promotion-new-item-${promotionId}`);
+  const description = input.value.trim();
+  if (!description) return toast('Item description is required', true);
+  try {
+    await api(`/promotions/${promotionId}/items`, { method: 'POST', body: JSON.stringify({ description }) });
+    state.promotionExpandedIds.add(promotionId);
+    loadAll();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function togglePromotionItemReady(promotionId, itemId, isReady) {
+  try {
+    await api(`/promotions/items/${itemId}`, { method: 'PUT', body: JSON.stringify({ is_ready: isReady }) });
+    state.promotionExpandedIds.add(promotionId);
+    loadAll();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function removePromotionItem(promotionId, itemId) {
+  try {
+    await api(`/promotions/items/${itemId}`, { method: 'DELETE' });
+    state.promotionExpandedIds.add(promotionId);
+    loadAll();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// ── Planning: Step 5 -- This Week's Shoot Plan ───────
+// The Monday meeting's output: everything selected across Core/High
+// Stock/Upcoming Drops/Promotions, grouped by where it came from, plus the
+// warehouse pull list every "Bring from Warehouse" selection produces.
+// 'other' catches any pre-migration item whose source is NULL, so it never
+// silently vanishes from the total.
+const SHOOT_PLAN_SOURCE_LABELS = { core: 'CORE', high_stock: 'HIGH STOCK', drop: 'UPCOMING DROPS', promotion: 'PROMOTIONS', other: 'OTHER' };
+const SHOOT_PLAN_SOURCE_ORDER = ['core', 'high_stock', 'drop', 'promotion', 'other'];
+
+function shootPlanProductRowHtml(item) {
+  const thumb = item.image_url
+    ? `<img class="high-stock-thumb" src="${item.image_url}" alt="">`
+    : '<span class="high-stock-thumb high-stock-noimg">🖼</span>';
   const stockLabel = item.stock_status === 'in_office' ? 'In Office' : 'Bring from Warehouse';
   return `
-    <div class="shoot-plan-row">
-      <div class="shoot-plan-col-product">${escapeHtml(item.product_name)}</div>
-      <div class="shoot-plan-col">${stockLabel}</div>
-      <div class="shoot-plan-col">${escapeHtml(item.creator)}</div>
-      <div class="shoot-plan-col-idea">${item.quick_note ? escapeHtml(item.quick_note) : '—'}</div>
-      <div class="shoot-plan-col"><span class="core-reason-chip">${escapeHtml(item.asset_status_label || '—')}</span></div>
-      <div class="shoot-plan-col-action"><button type="button" class="btn btn-ghost btn-sm" onclick="removeShootPlanItem(${item.id})">Remove</button></div>
+    <div class="shoot-plan-product-row">
+      ${thumb}
+      <span class="shoot-plan-product-name">${escapeHtml(item.product_name)}</span>
+      <span class="shoot-plan-product-meta">${stockLabel} · ${escapeHtml(item.asset_status_label || '—')}</span>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="removeShootPlanItem(${item.id})">Remove</button>
     </div>`;
 }
 
-function renderShootPlan() {
-  const list = document.getElementById('shoot-plan-list');
+function renderShootPlanStep() {
+  document.getElementById('shoot-plan-step-count').textContent = `${state.shootPlan.length} Product${state.shootPlan.length === 1 ? '' : 's'} Selected`;
+
+  const grouped = document.getElementById('shoot-plan-grouped');
   if (!state.shootPlan.length) {
-    list.innerHTML = '<div class="attention-empty">Nothing planned yet this week — use + Shoot This Week on a Core or Upcoming Drops product to add one.</div>';
-    return;
+    grouped.innerHTML = '<div class="attention-empty">Nothing planned yet this week — use + Shoot This Week on a Core, High Stock, Upcoming Drop, or Promotion product to add one.</div>';
+  } else {
+    const bySource = new Map();
+    for (const item of state.shootPlan) {
+      const key = SHOOT_PLAN_SOURCE_ORDER.includes(item.source) ? item.source : 'other';
+      if (!bySource.has(key)) bySource.set(key, []);
+      bySource.get(key).push(item);
+    }
+    grouped.innerHTML = SHOOT_PLAN_SOURCE_ORDER
+      .filter((key) => bySource.has(key))
+      .map((key) => `
+        <div class="shoot-plan-source-group">
+          <div class="shoot-plan-source-label">${SHOOT_PLAN_SOURCE_LABELS[key]}</div>
+          ${bySource.get(key).map(shootPlanProductRowHtml).join('')}
+        </div>`)
+      .join('');
   }
-  list.innerHTML = shootPlanHeaderHtml() + state.shootPlan.map(shootPlanRowHtml).join('');
+
+  // Only "Bring from Warehouse" items contribute -- "In Office" samples
+  // never need a pull-list entry, per the brief.
+  const warehouseRows = state.shootPlan
+    .filter((i) => i.stock_status === 'needs_to_be_brought_in')
+    .flatMap((i) => i.styles.map((s) => ({ product: i.product_name, colour: s.colour_label, size: s.size })));
+  const warehouseList = document.getElementById('shoot-plan-warehouse-list');
+  warehouseList.innerHTML = warehouseRows.length
+    ? warehouseRows.map((r) => `
+        <div class="shoot-plan-warehouse-row">
+          <span>${escapeHtml(r.product)}</span>
+          <span>${escapeHtml(r.colour || '—')}</span>
+          <span>${escapeHtml(r.size || '—')}</span>
+        </div>`).join('')
+    : '<div class="attention-empty">Nothing to bring from the warehouse this week.</div>';
+
+  renderWeeklyShootPlanConfirmation();
+}
+
+function renderWeeklyShootPlanConfirmation() {
+  const banner = document.getElementById('shoot-plan-confirm-banner');
+  const btn = document.getElementById('shoot-plan-confirm-btn');
+  if (state.weeklyShootPlanConfirmation) {
+    banner.style.display = '';
+    banner.textContent = `✓ Weekly Shoot Plan Confirmed — ${formatDate(state.weeklyShootPlanConfirmation.confirmed_at)}`;
+    btn.style.display = 'none';
+  } else {
+    banner.style.display = 'none';
+    btn.style.display = '';
+    btn.disabled = !state.shootPlan.length;
+  }
+}
+
+async function confirmWeeklyShootPlan() {
+  try {
+    state.weeklyShootPlanConfirmation = await api('/weekly-shoot-plan-confirmation', { method: 'POST' });
+    renderWeeklyShootPlanConfirmation();
+    toast('Weekly Shoot Plan confirmed');
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 // ── Settings: Weekly New Concept Target ──────────────

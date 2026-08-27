@@ -374,3 +374,45 @@ UPDATE content_creators SET
 -- legacy value, never a value someone has deliberately set since.
 UPDATE content_creators SET default_top_size = 'S' WHERE default_top_size = 'Small';
 UPDATE content_creators SET default_bottom_alpha_size = 'S' WHERE default_bottom_alpha_size = 'Small';
+
+-- ---------------------------------------------------------------------------
+-- Monday Planning 5-step workflow (Core -> High Stocks -> Upcoming Drops ->
+-- Promotions -> Shoot Plan). Which Planning step a shoot came from, and the
+-- product image/colourway label to show in the Shoot Plan step, weren't
+-- needed while Shoot Plan was a single flat list -- both nullable since
+-- existing rows predate this and simply won't group/display as richly.
+-- ---------------------------------------------------------------------------
+ALTER TABLE shoot_plan_items ADD COLUMN IF NOT EXISTS source VARCHAR(20) CHECK (source IN ('core', 'high_stock', 'drop', 'promotion'));
+ALTER TABLE shoot_plan_items ADD COLUMN IF NOT EXISTS image_url TEXT;
+ALTER TABLE shoot_plan_item_styles ADD COLUMN IF NOT EXISTS colour_label VARCHAR(255);
+
+-- Promotions: deliberately minimal, unlike Core/High Stocks/Drops -- no
+-- ApparelMagic/SOH-driven target, just a manual name/date/checklist so the
+-- Monday question ("are upcoming promotions covered?") has something to
+-- answer against. A promotion with zero items reads as Needs Attention
+-- (nothing organised yet), not On Track.
+CREATE TABLE IF NOT EXISTS promotions (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  start_date DATE NOT NULL,
+  notes TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS promotion_creative_items (
+  id SERIAL PRIMARY KEY,
+  promotion_id INTEGER NOT NULL REFERENCES promotions(id) ON DELETE CASCADE,
+  description VARCHAR(255) NOT NULL,
+  is_ready BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- One row per calendar week (Monday-start, matching shoot_plan_items' own
+-- week filter) once the team has confirmed that week's shoot plan --
+-- persisted rather than a client-side flag so it survives reload and is
+-- visible to the whole team, not just whoever clicked confirm.
+CREATE TABLE IF NOT EXISTS weekly_shoot_plan_confirmations (
+  week_start DATE PRIMARY KEY,
+  confirmed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
