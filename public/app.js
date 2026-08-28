@@ -1675,7 +1675,12 @@ function coreCategoryTrendInfo(categoryName) {
   return {
     hasData: true,
     title,
-    boxValue: row.this_period_units,
+    // The box's headline number is LAST year's MTD units (matching the "LY
+    // MTD" header above it) with this year's % change below it (the "vs
+    // This MTD" half of that header) -- deliberately NOT this year's MTD
+    // units, which would just duplicate the current-month column right next
+    // to it (both cover the exact same Aug 1 -> today window).
+    boxValue: row.last_year_units,
     boxPctLabel: pctLabel,
     boxCls: pctClass(row.pct_change),
     months: (row.months || []).map((m) => ({
