@@ -304,10 +304,13 @@ function clampToMonth(year, month, day) {
 }
 
 // How many trailing months (including the current, partial one) each
-// category's cadence carries -- the full 12-month monthly strip Core's own
-// page shows next to the MTD box, matching demand-v2's own Sales Cadence
-// grid one-for-one (see coreCategoryTrendInfo in app.js).
-const CADENCE_MONTHS_BACK = 12;
+// category's cadence carries -- the monthly strip Core's own page shows
+// next to the MTD box (see coreCategoryTrendInfo in app.js). Scaled back
+// down from a full 12-month grid (demand-v2's own Sales Cadence view) to
+// just 3 -- with 12, even widened/outlined boxes needed a drag-to-scroll
+// to see more than the first few, which was more than this glance-table
+// needed.
+const CADENCE_MONTHS_BACK = 3;
 
 async function buildCategorySalesCadence() {
   const rows = await getSalesRows();
