@@ -1684,6 +1684,7 @@ function coreCategoryTrendInfo(categoryName) {
     boxPctLabel: pctLabel,
     boxCls: pctClass(row.pct_change),
     last7dUnits: row.last_7d_units,
+    last7dPctChange: row.last_7d_pct_change,
     months: (row.months || []).map((m) => ({
       label: m.label,
       value: m.units,
@@ -1757,7 +1758,21 @@ function coreCadenceCellHtml(trend) {
 // "how does that compare."
 function core7dCellHtml(trend) {
   if (!trend.hasData || trend.last7dUnits == null) return '<span class="core-cadence-empty">—</span>';
-  return `<span class="core-shoot-7d-value">${trend.last7dUnits}</span> <span class="core-shoot-7d-label">units</span>`;
+  const pct = trend.last7dPctChange;
+  const cls = pctClass(pct);
+  const arrow = cls === 'up' ? '↑' : cls === 'down' ? '↓' : '→';
+  const trendText = pct == null ? 'New' : `${arrow} ${Math.abs(pct)}% vs last week`;
+  const title = pct == null
+    ? 'No sales in the prior 7 days to compare against'
+    : `This week: ${trend.last7dUnits} units, ${arrow} ${Math.abs(pct)}% vs the prior 7 days`;
+  return `
+    <div class="core-shoot-7d-cell">
+      <div class="core-shoot-7d-row">
+        <span class="core-shoot-7d-value">${trend.last7dUnits}</span>
+        <span class="core-shoot-7d-label">units</span>
+      </div>
+      <span class="core-shoot-7d-trend core-trend-${cls}" title="${escapeHtml(title)}">${trendText}</span>
+    </div>`;
 }
 
 function coreShootCategoryRowHtml(cat, selectedCodes) {
@@ -1771,11 +1786,11 @@ function coreShootCategoryRowHtml(cat, selectedCodes) {
           <span class="core-shoot-category-name">${escapeHtml(cat.name)}</span>
           <span class="core-shoot-category-count">${cat.total} product${cat.total === 1 ? '' : 's'}</span>
         </span>
-        <span class="core-shoot-stat-col core-cadence-col">
-          ${coreCadenceCellHtml(trend)}
-        </span>
         <span class="core-shoot-stat-col">
           ${core7dCellHtml(trend)}
+        </span>
+        <span class="core-shoot-stat-col core-cadence-col">
+          ${coreCadenceCellHtml(trend)}
         </span>
         <span class="core-shoot-stat-col">
           ${cat.needsAttention ? `<span class="core-shoot-stat">🔴 <span class="core-shoot-stat-count core-shoot-count-red">${cat.needsAttention}</span> needing attention</span>` : ''}
