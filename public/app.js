@@ -1683,6 +1683,7 @@ function coreCategoryTrendInfo(categoryName) {
     boxValue: row.last_year_units,
     boxPctLabel: pctLabel,
     boxCls: pctClass(row.pct_change),
+    last7dUnits: row.last_7d_units,
     months: (row.months || []).map((m) => ({
       label: m.label,
       value: m.units,
@@ -1710,6 +1711,15 @@ function coreCadenceCellHtml(trend) {
     </div>`;
 }
 
+// "How much have we actually sold lately" -- a plain rolling total (today
+// and the 6 days before it), deliberately not coloured/compared like the
+// cadence box/months above -- this column just answers "how much," not
+// "how does that compare."
+function core7dCellHtml(trend) {
+  if (!trend.hasData || trend.last7dUnits == null) return '<span class="core-cadence-empty">—</span>';
+  return `<span class="core-shoot-7d-value">${trend.last7dUnits}</span> <span class="core-shoot-7d-label">units</span>`;
+}
+
 function coreShootCategoryRowHtml(cat, selectedCodes) {
   const isOpen = state.coreShootExpandedCategories.has(cat.name);
   const trend = coreCategoryTrendInfo(cat.name);
@@ -1723,6 +1733,9 @@ function coreShootCategoryRowHtml(cat, selectedCodes) {
         </span>
         <span class="core-shoot-stat-col core-cadence-col">
           ${coreCadenceCellHtml(trend)}
+        </span>
+        <span class="core-shoot-stat-col">
+          ${core7dCellHtml(trend)}
         </span>
         <span class="core-shoot-stat-col">
           ${cat.needsAttention ? `<span class="core-shoot-stat">🔴 <span class="core-shoot-stat-count core-shoot-count-red">${cat.needsAttention}</span> needing attention</span>` : ''}
