@@ -6,6 +6,7 @@ const { runMigrations } = require('./db');
 const { requireAuth } = require('./auth');
 const { warmAmCache } = require('./lib/apparelmagic');
 const { warmPipelineCache } = require('./lib/reportPipeline');
+const { warmMetaAdsCache } = require('./lib/metaAds');
 
 const authRoutes = require('./routes/auth');
 const styleRoutes = require('./routes/styles');
@@ -67,6 +68,7 @@ async function start() {
   await runMigrations();
   warmAmCache(); // fire-and-forget -- don't block server startup on a multi-minute AM crawl
   warmPipelineCache(); // fire-and-forget -- same reasoning, for the Report Pipeline's tier CSV
+  warmMetaAdsCache(); // fire-and-forget -- same reasoning, for Meta's live ad list
   app.listen(PORT, () => {
     console.log(`WNDRR Ad Pipeline listening on port ${PORT}`);
   });

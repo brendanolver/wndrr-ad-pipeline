@@ -1,7 +1,7 @@
 const express = require('express');
 const { pool } = require('../db');
 const { buildCoverage } = require('../lib/coverage');
-const { fetchAmData, getRules, getAssetCounts } = require('../lib/planningData');
+const { fetchAmData, fetchMetaAdsData, getRules, getAssetCounts } = require('../lib/planningData');
 const { isAdExcludedCategory } = require('../lib/apparelmagic');
 
 const router = express.Router();
@@ -38,11 +38,12 @@ function sortByUrgency(coverage) {
 
 router.get('/', async (req, res, next) => {
   try {
-    const [dropsResult, stylesResult, rules, am] = await Promise.all([
+    const [dropsResult, stylesResult, rules, am, metaAdsData] = await Promise.all([
       pool.query('SELECT * FROM drops ORDER BY launch_date ASC'),
       pool.query('SELECT * FROM styles WHERE drop_id IS NOT NULL'),
       getRules(),
       fetchAmData(),
+      fetchMetaAdsData(),
     ]);
 
     const stylesByDrop = new Map();
@@ -56,7 +57,7 @@ router.get('/', async (req, res, next) => {
     const drops = dropsResult.rows.map((drop) => {
       const styleRows = excludeAdExcludedStyles(stylesByDrop.get(drop.id) || [], am.amDetails);
       const coverage = sortByUrgency(
-        buildCoverage(styleRows, { assetCounts, amStock: am.amStock, amOnOrder: am.amOnOrder, amDetails: am.amDetails, amSizeRanges: am.amSizeRanges, rules })
+        buildCoverage(styleRows, { assetCounts, amStock: am.amStock, amOnOrder: am.amOnOrder, amDetails: am.amDetails, amSizeRanges: am.amSizeRanges, rules, liveMetaCounts: metaAdsData.metaLiveCounts })
       );
       const daysUntilLaunch = Math.ceil((new Date(drop.launch_date) - new Date()) / 86400000);
       return {
@@ -67,7 +68,11 @@ router.get('/', async (req, res, next) => {
       };
     });
 
-    res.json({ drops, apparelmagic: { configured: am.amConfigured, error: am.amError } });
+    res.json({
+      drops,
+      apparelmagic: { configured: am.amConfigured, error: am.amError },
+      meta_ads: { configured: metaAdsData.metaAdsConfigured, error: metaAdsData.metaAdsError, unmapped: metaAdsData.metaAdsUnmapped },
+    });
   } catch (err) {
     next(err);
   }
@@ -211,15 +216,16 @@ router.get('/:id', async (req, res, next) => {
     if (dropResult.rows.length === 0) return res.status(404).json({ error: 'Drop not found' });
     const drop = dropResult.rows[0];
 
-    const [stylesResult, rules, am] = await Promise.all([
+    const [stylesResult, rules, am, metaAdsData] = await Promise.all([
       pool.query('SELECT * FROM styles WHERE drop_id = $1 ORDER BY style_code ASC', [drop.id]),
       getRules(),
       fetchAmData(),
+      fetchMetaAdsData(),
     ]);
     const assetCounts = await getAssetCounts(stylesResult.rows.map((s) => s.id));
     const styleRows = excludeAdExcludedStyles(stylesResult.rows, am.amDetails);
     const coverage = sortByUrgency(
-      buildCoverage(styleRows, { assetCounts, amStock: am.amStock, amOnOrder: am.amOnOrder, amDetails: am.amDetails, amSizeRanges: am.amSizeRanges, rules })
+      buildCoverage(styleRows, { assetCounts, amStock: am.amStock, amOnOrder: am.amOnOrder, amDetails: am.amDetails, amSizeRanges: am.amSizeRanges, rules, liveMetaCounts: metaAdsData.metaLiveCounts })
     );
     const daysUntilLaunch = Math.ceil((new Date(drop.launch_date) - new Date()) / 86400000);
 
@@ -229,6 +235,7 @@ router.get('/:id', async (req, res, next) => {
       summary: summarize(coverage),
       coverage,
       apparelmagic: { configured: am.amConfigured, error: am.amError },
+      meta_ads: { configured: metaAdsData.metaAdsConfigured, error: metaAdsData.metaAdsError, unmapped: metaAdsData.metaAdsUnmapped },
     });
   } catch (err) {
     next(err);
