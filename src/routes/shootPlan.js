@@ -11,9 +11,11 @@ const SOURCES = ['core', 'high_stock', 'drop', 'promotion'];
 router.get('/', async (req, res, next) => {
   try {
     const itemsResult = await pool.query(
-      `SELECT spi.*, ca.status AS asset_status
+      `SELECT spi.*, ca.status AS asset_status, p.id AS promotion_id, p.name AS promotion_name
        FROM shoot_plan_items spi
        LEFT JOIN creative_assets ca ON ca.id = spi.asset_id
+       LEFT JOIN promotion_stages ps ON ps.id = spi.promotion_stage_id
+       LEFT JOIN promotions p ON p.id = ps.promotion_id
        WHERE spi.created_at >= date_trunc('week', now())
        ORDER BY spi.created_at ASC`
     );
@@ -47,6 +49,9 @@ router.get('/', async (req, res, next) => {
       asset_status_label: i.asset_status ? (STATUS_LABELS[i.asset_status] || i.asset_status) : null,
       source: i.source,
       image_url: i.image_url,
+      promotion_stage_id: i.promotion_stage_id,
+      promotion_id: i.promotion_id,
+      promotion_name: i.promotion_name,
       styles: stylesByItem.get(i.id) || [],
     })));
   } catch (err) {
@@ -55,7 +60,7 @@ router.get('/', async (req, res, next) => {
 });
 
 router.post('/', async (req, res, next) => {
-  const { product_code, product_name, colourways, stock_status, creator, quick_note, source, image_url } = req.body || {};
+  const { product_code, product_name, colourways, stock_status, creator, quick_note, source, image_url, promotion_stage_id } = req.body || {};
 
   if (!product_code || !product_name) {
     return res.status(400).json({ error: 'product_code and product_name are required' });
@@ -77,6 +82,14 @@ router.post('/', async (req, res, next) => {
   try {
     await client.query('BEGIN');
 
+    if (promotion_stage_id) {
+      const stage = await client.query('SELECT id FROM promotion_stages WHERE id = $1', [promotion_stage_id]);
+      if (!stage.rows.length) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'promotion_stage_id does not reference a real stage' });
+      }
+    }
+
     const trimmedCreator = creator.trim();
     const trimmedNote = quick_note && quick_note.trim() ? quick_note.trim() : null;
 
@@ -90,9 +103,9 @@ router.post('/', async (req, res, next) => {
     });
 
     const itemResult = await client.query(
-      `INSERT INTO shoot_plan_items (product_code, product_name, stock_status, creator, initial_idea, asset_id, source, image_url)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-      [product_code, product_name, stock_status, trimmedCreator, trimmedNote, asset.id, source || null, image_url || null]
+      `INSERT INTO shoot_plan_items (product_code, product_name, stock_status, creator, initial_idea, asset_id, source, image_url, promotion_stage_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+      [product_code, product_name, stock_status, trimmedCreator, trimmedNote, asset.id, source || null, image_url || null, promotion_stage_id || null]
     );
     const item = itemResult.rows[0];
 

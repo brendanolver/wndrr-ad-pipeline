@@ -191,12 +191,11 @@
         </div>
 
         <div class="planning-step-panel" data-step="promotions" id="planning-step-promotions">
-          <div id="promotions-list" class="drops-row"></div>
-          <div class="promotion-add-form">
-            <input type="text" id="new-promotion-name" placeholder="Promotion name">
-            <input type="date" id="new-promotion-date">
-            <button type="button" class="btn btn-primary btn-sm" onclick="addPromotion()">+ Add Promotion</button>
+          <div class="planning-section-header">
+            <h2>Promotions</h2>
+            <button type="button" class="btn btn-ghost btn-sm" id="new-promotion-btn">+ New Promotion</button>
           </div>
+          <div id="promotions-list" class="drops-row"></div>
 
           <div class="planning-step-footer">
             <span id="promotions-step-footer-count">0 upcoming promotions</span>
@@ -282,6 +281,28 @@
           <h2>Existing Concepts</h2>
         </div>
         <div id="product-view-concepts" class="jobs-grid"></div>
+      </div>
+
+      <div id="planning-promotion-view" style="display:none;">
+        <button class="back-link" onclick="goToPlanningList()">&larr; Back to Planning</button>
+        <div class="planning-section-header">
+          <div class="drop-view-title-row">
+            <h2 id="promotion-view-title">Promotion</h2>
+            <button type="button" class="btn btn-ghost btn-sm" id="promotion-view-edit-btn">Edit</button>
+          </div>
+        </div>
+        <div id="promotion-view-summary" class="drop-view-summary"></div>
+
+        <div class="planning-section-header">
+          <h2>Campaign Stages</h2>
+          <span class="admin-note">Add, rename, reorder, delete, and set how many creatives each stage needs</span>
+        </div>
+        <div id="promotion-stage-grid" class="coverage-grid"></div>
+        <div class="stock-request-form">
+          <input type="text" id="new-stage-name" placeholder="e.g. Hype / Tease">
+          <input type="number" id="new-stage-count" min="0" value="1" title="Creatives required" style="width:80px;">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="addPromotionStage()">+ Add Stage</button>
+        </div>
       </div>
 
     </section>
@@ -524,6 +545,38 @@
   </div>
 </div>
 
+<!-- Promotion modal -->
+<div id="promotion-modal" class="modal-backdrop">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="promotion-modal-title">New Promotion</h3>
+      <button class="modal-close" onclick="closeModal('promotion-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="promotion-id">
+      <label>Promotion name
+        <input type="text" id="promotion-name" placeholder="e.g. Mystery Box">
+      </label>
+      <div class="field-row">
+        <label>Start date
+          <input type="date" id="promotion-start-date">
+        </label>
+        <label>End date <span class="hint">(optional)</span>
+          <input type="date" id="promotion-end-date">
+        </label>
+      </div>
+      <label>Notes <span class="hint">(optional)</span>
+        <input type="text" id="promotion-notes">
+      </label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-danger" id="promotion-delete-btn" style="display:none;" onclick="deletePromotion()">Delete</button>
+      <button class="btn btn-ghost" onclick="closeModal('promotion-modal')">Cancel</button>
+      <button class="btn btn-primary" id="promotion-save-btn" onclick="savePromotion()">Add</button>
+    </div>
+  </div>
+</div>
+
 <!-- Proven Winner modal -->
 <div id="pw-modal" class="modal-backdrop">
   <div class="modal">
@@ -607,6 +660,45 @@
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('shoot-plan-modal')">Cancel</button>
       <button class="btn btn-primary" onclick="saveShootPlanItem()">Send to Concept Development</button>
+    </div>
+  </div>
+</div>
+
+<!-- Cover a Promotion Campaign Stage requirement -- unlike the product-row
+     "Shoot This Week" modal above, there's no single pre-known product to
+     launch this from (a promotion may cover multiple products, a bundle,
+     or no SKU at all), so this picks any tracked style directly rather than
+     a pre-resolved colours/sizes list. Feeds the exact same Concept
+     Development pipeline via POST /shoot-plan (source: 'promotion'). -->
+<div id="promotion-shoot-modal" class="modal-backdrop">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="promotion-shoot-modal-title">Cover Requirement</h3>
+      <button class="modal-close" onclick="closeModal('promotion-shoot-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <label>Product / style <span class="hint">(whichever's most relevant to this stage — a bundle/GWP/sitewide message still shoots against some product, so pick the closest fit)</span>
+        <select id="promotion-shoot-style"></select>
+      </label>
+      <label>Sample Status
+        <select id="promotion-shoot-stock-status" onchange="updatePromotionShootSizeVisibility()">
+          <option value="needs_to_be_brought_in">Bring from Warehouse</option>
+          <option value="in_office">In Office</option>
+        </select>
+      </label>
+      <label id="promotion-shoot-size-row">Size
+        <input type="text" id="promotion-shoot-size" placeholder="Size (optional)">
+      </label>
+      <label>Content Creator / Owner
+        <select id="promotion-shoot-creator"></select>
+      </label>
+      <label>Quick Note <span class="hint">(optional — not a creative brief)</span>
+        <textarea id="promotion-shoot-note" rows="2" placeholder="e.g. Hero video for the launch push"></textarea>
+      </label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('promotion-shoot-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="savePromotionShootItem()">Send to Concept Development</button>
     </div>
   </div>
 </div>

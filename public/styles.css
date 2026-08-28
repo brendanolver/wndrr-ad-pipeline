@@ -244,19 +244,13 @@ main{padding:20px 24px;}
 .planning-step-continue-btn{padding:13px 24px;font-size:14.5px;font-weight:700;border-radius:var(--r-pill);}
 .core-shoot-selected-badge{display:inline-block;padding:5px 12px;border-radius:var(--r-pill);background:var(--green-light);color:var(--green);font-size:12.5px;font-weight:700;white-space:nowrap;}
 
-/* Step 4 -- Promotions: reuses .drop-card's card shell plus its own
-   .drop-card-status on-track/needs-attention pill (Drops itself reverted
-   to its original progress-bar layout, but Promotions -- with no
-   inventory-driven coverage number to show a bar for -- still wants the
-   plain exception-based pill) and a minimal checklist editor, only shown
-   once a promotion is expanded. */
-.promotion-item-list{margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:6px;}
-.promotion-item-row{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px;}
-.promotion-add-item-row{display:flex;gap:8px;margin-top:8px;}
-.promotion-add-item-row input{flex:1;}
-.promotion-add-form{display:flex;gap:8px;margin-top:16px;padding-top:14px;border-top:1px solid var(--border);}
-.promotion-add-form input[type="text"]{flex:1;}
-
+/* Step 4 -- Promotions: reuses .drop-card's card shell for the landing
+   list (same green/amber/red counts, progress bar, "Most urgent" line as
+   Upcoming Drops -- see promotionCardHtml) and .coverage-card for each
+   Campaign Stage on the detail page (same required/covered/progress-bar/
+   status treatment as a Drop product's coverage card -- see
+   promotionStageCardHtml), so Promotions reads as the same page family
+   rather than a separate UI. */
 .drops-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;margin-bottom:8px;}
 
 .planning-accordion{margin:24px 0 12px;border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;background:var(--surface);}
@@ -327,6 +321,24 @@ main{padding:20px 24px;}
 .coverage-card-gap.red{color:var(--red);}
 .coverage-card-unavailable{font-size:12px;color:var(--text-muted);font-style:italic;padding:11px 0;}
 .coverage-card-shoot-btn{width:100%;margin-top:2px;}
+
+/* Promotion Campaign Stage cards -- built on .coverage-card (same required/
+   covered/progress-bar/status pill as a Drop product), but each card is
+   its own inline editor (rename/reorder/delete/required-count) rather than
+   a click-to-navigate row, so the pointer cursor + hover border .coverage-
+   card gets by default are turned back off here. */
+.promotion-stage-card{cursor:default;}
+.promotion-stage-card:hover{border-color:var(--border);}
+.promotion-stage-card.dragging{opacity:0.4;}
+.promotion-stage-card.drag-over{border-color:var(--teal);box-shadow:0 0 0 2px var(--teal-light);}
+.promotion-stage-head{display:flex;align-items:center;gap:6px;margin-bottom:9px;}
+.promotion-stage-name-input{flex:1;min-width:0;font-size:13.5px;font-weight:700;font-family:inherit;border:1px solid transparent;border-radius:4px;padding:3px 5px;background:none;}
+.promotion-stage-name-input:hover,.promotion-stage-name-input:focus{border-color:var(--border);background:var(--surface2);}
+.promotion-stage-required-row{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-secondary);margin-bottom:9px;}
+.promotion-stage-count-input{width:56px;}
+.promotion-stage-item-list{display:flex;flex-direction:column;gap:6px;margin-bottom:9px;padding-top:9px;border-top:1px solid var(--border);}
+.promotion-stage-item-row{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;}
+.promotion-stage-item-name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 
 .back-link{background:none;border:none;color:var(--teal-dark);font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;padding:0;margin-bottom:14px;display:inline-block;}
 .back-link:hover{text-decoration:underline;}

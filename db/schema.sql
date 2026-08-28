@@ -402,11 +402,13 @@ ALTER TABLE shoot_plan_items ADD COLUMN IF NOT EXISTS source VARCHAR(20) CHECK (
 ALTER TABLE shoot_plan_items ADD COLUMN IF NOT EXISTS image_url TEXT;
 ALTER TABLE shoot_plan_item_styles ADD COLUMN IF NOT EXISTS colour_label VARCHAR(255);
 
--- Promotions: deliberately minimal, unlike Core/High Stocks/Drops -- no
--- ApparelMagic/SOH-driven target, just a manual name/date/checklist so the
--- Monday question ("are upcoming promotions covered?") has something to
--- answer against. A promotion with zero items reads as Needs Attention
--- (nothing organised yet), not On Track.
+-- Promotions: no ApparelMagic/SOH-driven target the way Core/High Stocks/
+-- Drops have, since a promotion isn't one product -- just a manual name/
+-- date range/notes shell. The requirement structure (customisable Campaign
+-- Stages, each with its own numeric target) lives in promotion_stages
+-- below, added once the flat is_ready checklist here was replaced. A
+-- promotion with zero stages reads as Needs Attention (nothing organised
+-- yet), not On Track.
 CREATE TABLE IF NOT EXISTS promotions (
   id SERIAL PRIMARY KEY,
   name VARCHAR(255) NOT NULL,
@@ -416,6 +418,9 @@ CREATE TABLE IF NOT EXISTS promotions (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- RETIRED: replaced by promotion_stages (see below the weekly shoot plan
+-- confirmations table further down). Kept in place, unused, same as every
+-- other retired table in this file.
 CREATE TABLE IF NOT EXISTS promotion_creative_items (
   id SERIAL PRIMARY KEY,
   promotion_id INTEGER NOT NULL REFERENCES promotions(id) ON DELETE CASCADE,
@@ -432,3 +437,60 @@ CREATE TABLE IF NOT EXISTS weekly_shoot_plan_confirmations (
   week_start DATE PRIMARY KEY,
   confirmed_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- ---------------------------------------------------------------------------
+-- Promotions redesign: Upcoming Drops' own structure (Drop -> Products ->
+-- Creative Requirements) mirrored for Promotions (Promotion -> Campaign
+-- Stages -> Creative Requirements), replacing the old flat is_ready
+-- checklist. A promotion isn't tied to one product/SKU the way a Drop is,
+-- so stages are the entity that carries the requirement (a numeric target,
+-- like a Drop product's creative_target), and are fully custom per
+-- promotion -- no hardcoded Hype/Launch/Mid-Sale/Last Chance set, since
+-- different campaigns need different structures. promotion_creative_items
+-- is left in place (this codebase never drops tables) but nothing reads or
+-- writes it going forward.
+-- ---------------------------------------------------------------------------
+ALTER TABLE promotions ADD COLUMN IF NOT EXISTS end_date DATE;
+
+CREATE TABLE IF NOT EXISTS promotion_stages (
+  id SERIAL PRIMARY KEY,
+  promotion_id INTEGER NOT NULL REFERENCES promotions(id) ON DELETE CASCADE,
+  name VARCHAR(255) NOT NULL,
+  required_count INTEGER NOT NULL DEFAULT 1 CHECK (required_count >= 0),
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_promotion_stages_promotion_id ON promotion_stages(promotion_id);
+
+-- A stage's requirement is "covered" by linking Shoot Plan items to it
+-- (below) -- the same Concept Development pipeline every other Planning
+-- step already feeds, rather than a separate parallel workflow. Deliberately
+-- NOT tied through creative_assets/style_id directly: a promotion's
+-- creative need is the stage/message, not a SKU, and plenty of promotion
+-- stages (sitewide sale messaging, a bundle, a GWP) have no single natural
+-- product to require a style_id for.
+ALTER TABLE shoot_plan_items ADD COLUMN IF NOT EXISTS promotion_stage_id INTEGER REFERENCES promotion_stages(id) ON DELETE SET NULL;
+
+-- Give any promotion that predates this redesign a single "General" stage
+-- (sized to its old flat item count, minimum 1) so it isn't left with a
+-- blank requirements list on first load -- coverage starts fresh under the
+-- new count-based model since the old is_ready flag has no equivalent here.
+-- Guarded to only ever run once per promotion (skips any promotion that
+-- already has a stage), same idempotent-on-every-boot pattern as the rest
+-- of this file.
+DO $$
+DECLARE
+  promo RECORD;
+BEGIN
+  FOR promo IN
+    SELECT p.id, COUNT(i.id)::int AS item_count
+    FROM promotions p
+    LEFT JOIN promotion_creative_items i ON i.promotion_id = p.id
+    WHERE p.id NOT IN (SELECT DISTINCT promotion_id FROM promotion_stages)
+    GROUP BY p.id
+  LOOP
+    INSERT INTO promotion_stages (promotion_id, name, required_count, sort_order)
+    VALUES (promo.id, 'General', GREATEST(promo.item_count, 1), 0);
+  END LOOP;
+END $$;
