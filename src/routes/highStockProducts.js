@@ -105,7 +105,12 @@ router.get('/', async (req, res, next) => {
 
       const qty7 = salesByStyle.get(styleCode)?.qty7 ?? 0;
       const sellThrough7 = sellThroughInfo(qty7, soh);
-      if (sellThrough7.pct >= HIGH_STOCK_MAX_SELL_THROUGH_7D_PCT) continue;
+      // Gate on the raw ratio, not the rounded display percentage -- e.g.
+      // 4.79% rounds to a displayed 5%, and comparing the ROUNDED value
+      // against the threshold would wrongly exclude a style that's
+      // genuinely under 5% (confirmed live: GLOBE PANEL HOOD SWEAT,
+      // W26EE014STO, true ratio 8/167 = 4.79%, displayed as 5%).
+      if (sellThrough7.ratio >= HIGH_STOCK_MAX_SELL_THROUGH_7D_PCT / 100) continue;
 
       eligibleStyleCodes.push({ styleCode, soh, tierInfo, sellThrough7Pct: sellThrough7.pct });
     }
