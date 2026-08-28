@@ -1,6 +1,7 @@
 const express = require('express');
 const apparelmagic = require('../lib/apparelmagic');
 const reportPipeline = require('../lib/reportPipeline');
+const metaAds = require('../lib/metaAds');
 const { fetchAmData } = require('../lib/planningData');
 const { pool } = require('../db');
 
@@ -93,6 +94,29 @@ router.get('/high-stock/lookup', async (req, res, next) => {
 // styles" apart from "still doing the first crawl since deploy."
 router.get('/am/status', (req, res) => {
   res.json({ configured: apparelmagic.configured(), cache: apparelmagic.getAmCacheStatus() });
+});
+
+// Whether the Meta Ads live sync (Drop cards' "N live on Meta" figure) is
+// configured and working -- useful right after setting META_AD_ACCOUNT_ID /
+// META_ACCESS_TOKEN in Railway, to confirm the token/account actually work
+// without waiting on a Drop page load or a 45m cache TTL. If configured,
+// forces a fresh fetch (bypassing the cache) so a bad token surfaces here
+// immediately rather than only on the next real request.
+router.get('/meta-ads/status', async (req, res, next) => {
+  try {
+    const status = { configured: metaAds.configured(), cache: metaAds.getMetaAdsCacheStatus() };
+    if (!metaAds.configured()) return res.json(status);
+    const { counts, totalLiveAds, unmapped, unparsed } = await metaAds.getLiveAdCoverage();
+    res.json({
+      ...status,
+      total_live_ads: totalLiveAds,
+      mapped_product_families: counts.size,
+      unmapped_live_ads: unmapped,
+      unparsed_ad_names: unparsed,
+    });
+  } catch (err) {
+    res.status(502).json({ configured: true, error: err.message });
+  }
 });
 
 // Diagnostic only -- returns a raw ApparelMagic product record so we can see
