@@ -1711,6 +1711,46 @@ function coreCadenceCellHtml(trend) {
     </div>`;
 }
 
+// Click-and-drag horizontal scroll for the Sales Cadence months strip.
+// Delegated once at the document level rather than wired per-element on
+// every render -- Core's category list re-renders on every state change
+// (a toggle, a shoot-plan edit, a full loadAll), and a listener attached
+// per .core-cadence-months element on each render would leak a new
+// mousemove/mouseup pair every time without ever being removed.
+(function setupCadenceDragScroll() {
+  let dragEl = null;
+  let startX = 0;
+  let startScrollLeft = 0;
+  let dragged = false;
+
+  document.addEventListener('mousedown', (e) => {
+    const el = e.target.closest('.core-cadence-months');
+    if (!el) return;
+    dragEl = el;
+    dragged = false;
+    startX = e.pageX;
+    startScrollLeft = el.scrollLeft;
+    el.classList.add('dragging');
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!dragEl) return;
+    const dx = e.pageX - startX;
+    if (Math.abs(dx) > 4) dragged = true;
+    dragEl.scrollLeft = startScrollLeft - dx;
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!dragEl) return;
+    dragEl.classList.remove('dragging');
+    // A real drag (not just a click) shouldn't also toggle the category
+    // row open/closed when the mouse happens to release back inside the
+    // same <button> -- swallow exactly the next click there.
+    if (dragged) dragEl.addEventListener('click', (e) => e.stopPropagation(), { once: true });
+    dragEl = null;
+  });
+})();
+
 // "How much have we actually sold lately" -- a plain rolling total (today
 // and the 6 days before it), deliberately not coloured/compared like the
 // cadence box/months above -- this column just answers "how much," not
