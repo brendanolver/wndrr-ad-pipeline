@@ -477,10 +477,10 @@ main{padding:20px 24px;}
    narrower window instead of overflowing it. The header and the row
    toggles share this template so their columns always line up. */
 .core-shoot-category-header,
-.core-shoot-category-toggle{display:grid;grid-template-columns:16px 180px 130px 420px 150px 120px 150px;column-gap:16px;align-items:center;width:100%;max-width:1300px;}
-@media (max-width:1200px){
+.core-shoot-category-toggle{display:grid;grid-template-columns:16px 180px 130px 360px 150px 120px 150px;column-gap:16px;align-items:center;width:100%;max-width:1240px;}
+@media (max-width:1150px){
   .core-shoot-category-header,
-  .core-shoot-category-toggle{grid-template-columns:16px minmax(110px,1fr) minmax(110px,0.9fr) minmax(260px,2.6fr) minmax(100px,1fr) minmax(90px,0.8fr) minmax(100px,1fr);column-gap:10px;max-width:100%;}
+  .core-shoot-category-toggle{grid-template-columns:16px minmax(110px,1fr) minmax(110px,0.9fr) minmax(220px,2.2fr) minmax(100px,1fr) minmax(90px,0.8fr) minmax(100px,1fr);column-gap:10px;max-width:100%;}
 }
 /* Each row gets its own divider line (not just the header) and more
    breathing room -- with the widened Sales Cadence column, rows read as
@@ -503,11 +503,11 @@ main{padding:20px 24px;}
 .core-shoot-stat-selected{color:var(--green);font-weight:700;}
 
 /* Sales Cadence widget: an "LY MTD -> This MTD" box (ported from demand-v2's
-   own Sales Cadence page, same light-green/red boxed-number look) plus the
-   full trailing-12-months strip matching that page's own grid one-for-one.
-   The box stays pinned/visible; the months scroll horizontally within their
-   own bounded width rather than forcing the whole row (and page) wider --
-   see .core-shoot-category-header/-toggle's 3rd track for the column width. */
+   own Sales Cadence page, same light-green/red boxed-number look) plus a
+   3-month trailing strip -- scaled back from that page's full 12-month grid
+   (see CADENCE_MONTHS_BACK in reportPipeline.js). overflow-x:auto/drag-scroll
+   stay wired on .core-cadence-months regardless, since a narrower viewport
+   (see the 1150px breakpoint) can still make even 3 boxes not all fit. */
 .core-cadence-header{display:flex;flex-direction:column;line-height:1.35;}
 .core-cadence-header-top{color:var(--text);font-weight:800;}
 .core-cadence-header-bottom{font-weight:600;}
@@ -522,10 +522,6 @@ main{padding:20px 24px;}
 .core-cadence-box.core-trend-up .core-cadence-box-pct{color:var(--green);}
 .core-cadence-box.core-trend-down .core-cadence-box-pct{color:var(--red);}
 .core-cadence-box.core-trend-flat .core-cadence-box-pct{color:var(--text-muted);}
-/* Spaced out so only ~3 months show at once within the column's fixed
-   width -- cursor:grab plus the drag-to-scroll wiring below (see
-   setupCadenceDragScroll in app.js) is what reveals the rest, rather than
-   cramming all 12 in at once. */
 .core-cadence-months{display:flex;gap:10px;overflow-x:auto;min-width:0;padding:2px 2px 4px;scrollbar-width:thin;cursor:grab;}
 .core-cadence-months.dragging{cursor:grabbing;}
 .core-cadence-month{display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:inherit;flex-shrink:0;min-width:88px;border:1px solid var(--border);border-radius:var(--r);padding:6px 10px;background:white;user-select:none;}
