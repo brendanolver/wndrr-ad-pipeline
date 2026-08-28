@@ -291,10 +291,11 @@ async function getStyleTiers() {
   return getCached('pipelineStyleTiers', TIER_TTL, buildStyleTiersUncached);
 }
 
-// "This month to date vs the same days last year" per category -- the exact
-// comparison demand-v2's own Sales Cadence view highlights (its "LY MTD vs
-// THIS MTD" column), just without the full 12-month grid. Computed fresh
-// from the already-cached getSalesRows() (cheap: a filter + sum), so this
+// "This month to date vs the same days last year" per category, plus the
+// full trailing 12-month grid and a last-7-days figure -- the same set of
+// numbers demand-v2's own Sales Cadence view shows, reused directly on
+// Core's page (see coreCategoryTrendInfo in app.js). Computed fresh from
+// the already-cached getSalesRows() (cheap: a filter + sum), so this
 // carries no cache of its own -- the expensive download+parse is shared with
 // the tier computation via getSalesRows()'s own TTL.
 function clampToMonth(year, month, day) {
@@ -303,10 +304,10 @@ function clampToMonth(year, month, day) {
 }
 
 // How many trailing months (including the current, partial one) each
-// category's cadence carries -- the small monthly strip Core's own page
-// shows next to the MTD box, ported in miniature from demand-v2's full
-// 12-month Sales Cadence grid (see coreCategoryTrendInfo in app.js).
-const CADENCE_MONTHS_BACK = 3;
+// category's cadence carries -- the full 12-month monthly strip Core's own
+// page shows next to the MTD box, matching demand-v2's own Sales Cadence
+// grid one-for-one (see coreCategoryTrendInfo in app.js).
+const CADENCE_MONTHS_BACK = 12;
 
 async function buildCategorySalesCadence() {
   const rows = await getSalesRows();
@@ -318,6 +319,12 @@ async function buildCategorySalesCadence() {
   const thisEnd = today;
   const lastYearStart = new Date(today.getFullYear() - 1, today.getMonth(), 1);
   const lastYearEnd = clampToMonth(today.getFullYear() - 1, today.getMonth(), today.getDate());
+  // Trailing 7 days (today and the 6 before it) -- the "how much have we
+  // sold lately" figure Core's new column shows, same window ApparelMagic's
+  // own qty7 velocity uses elsewhere in this app, just summed per category
+  // instead of per style.
+  const last7dStart = new Date(today); last7dStart.setDate(last7dStart.getDate() - 6);
+  const last7dEnd = today;
 
   function inWindow(day, start, end) {
     const t = new Date(day).setHours(0, 0, 0, 0);
@@ -345,14 +352,15 @@ async function buildCategorySalesCadence() {
     });
   }
 
-  const totals = new Map(); // category -> { thisPeriod, lastYear, months: [{units, lyUnits}, ...] }
+  const totals = new Map(); // category -> { thisPeriod, lastYear, last7d, months: [{units, lyUnits}, ...] }
   for (const r of rows) {
     if (!totals.has(r.category)) {
-      totals.set(r.category, { thisPeriod: 0, lastYear: 0, months: monthDefs.map(() => ({ units: 0, lyUnits: 0 })) });
+      totals.set(r.category, { thisPeriod: 0, lastYear: 0, last7d: 0, months: monthDefs.map(() => ({ units: 0, lyUnits: 0 })) });
     }
     const entry = totals.get(r.category);
     if (inWindow(r.day, thisStart, thisEnd)) entry.thisPeriod += r.qty;
     if (inWindow(r.day, lastYearStart, lastYearEnd)) entry.lastYear += r.qty;
+    if (inWindow(r.day, last7dStart, last7dEnd)) entry.last7d += r.qty;
     monthDefs.forEach((m, idx) => {
       if (inWindow(r.day, m.start, m.end)) entry.months[idx].units += r.qty;
       if (inWindow(r.day, m.lyStart, m.lyEnd)) entry.months[idx].lyUnits += r.qty;
@@ -361,11 +369,12 @@ async function buildCategorySalesCadence() {
 
   const categories = [...totals.entries()]
     .filter(([category]) => category) // drop rows with no Product type set
-    .map(([category, { thisPeriod, lastYear, months }]) => ({
+    .map(([category, { thisPeriod, lastYear, last7d, months }]) => ({
       category,
       this_period_units: Math.round(thisPeriod),
       last_year_units: Math.round(lastYear),
       pct_change: lastYear > 0 ? Math.round(((thisPeriod - lastYear) / lastYear) * 100) : (thisPeriod > 0 ? null : 0),
+      last_7d_units: Math.round(last7d),
       months: months.map((m, idx) => {
         const units = Math.round(m.units);
         const lyUnits = Math.round(m.lyUnits);
