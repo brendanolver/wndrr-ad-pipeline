@@ -522,13 +522,18 @@ main{padding:20px 24px;}
 .core-cadence-box.core-trend-up .core-cadence-box-pct{color:var(--green);}
 .core-cadence-box.core-trend-down .core-cadence-box-pct{color:var(--red);}
 .core-cadence-box.core-trend-flat .core-cadence-box-pct{color:var(--text-muted);}
-.core-cadence-months{display:flex;gap:6px;overflow-x:auto;min-width:0;padding:2px 2px 4px;scrollbar-width:thin;}
-.core-cadence-month{display:flex;flex-direction:column;align-items:center;cursor:default;flex-shrink:0;border:1px solid var(--border);border-radius:var(--r);padding:3px 6px;background:white;}
-.core-cadence-month-value{font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;}
+/* Spaced out so only ~3 months show at once within the column's fixed
+   width -- cursor:grab plus the drag-to-scroll wiring below (see
+   setupCadenceDragScroll in app.js) is what reveals the rest, rather than
+   cramming all 12 in at once. */
+.core-cadence-months{display:flex;gap:10px;overflow-x:auto;min-width:0;padding:2px 2px 4px;scrollbar-width:thin;cursor:grab;}
+.core-cadence-months.dragging{cursor:grabbing;}
+.core-cadence-month{display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:inherit;flex-shrink:0;min-width:88px;border:1px solid var(--border);border-radius:var(--r);padding:6px 10px;background:white;user-select:none;}
+.core-cadence-month-value{font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;}
 .core-cadence-month-value.core-trend-up{color:var(--green);}
 .core-cadence-month-value.core-trend-down{color:var(--red);}
 .core-cadence-month-value.core-trend-flat{color:var(--text-muted);}
-.core-cadence-month-label{font-size:9px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.2px;white-space:nowrap;}
+.core-cadence-month-label{font-size:9.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.2px;white-space:nowrap;margin-top:2px;}
 
 /* Last 7D Sales -- a plain rolling total, its own column (not part of the
    cadence widget) since it's not compared/coloured like everything else. */
