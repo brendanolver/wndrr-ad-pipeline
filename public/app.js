@@ -680,6 +680,14 @@ async function loadDropView(dropId) {
     } else {
       amNote.textContent = '';
     }
+    // Meta Ads is an optional enhancement (the "live on Meta" figure next to
+    // each product's coverage) -- unlike ApparelMagic it's not central to
+    // this page, so stay silent when it's simply not configured and only
+    // speak up if it's configured but erroring.
+    const metaAdsNote = document.getElementById('drop-view-meta-ads-note');
+    metaAdsNote.textContent = drop.meta_ads.configured && drop.meta_ads.error
+      ? `Meta Ads error: ${drop.meta_ads.error}`
+      : '';
     document.getElementById('drop-view-summary').innerHTML = `
       <div><strong>${formatDate(drop.launch_date)}</strong><br>Launch date</div>
       <div><strong>${drop.days_until_launch >= 0 ? drop.days_until_launch : 0}</strong><br>Days to launch</div>
@@ -735,6 +743,7 @@ function renderCoverageGrid(coverage) {
           <div class="coverage-card-ratio">${c.current_coverage} / ${c.creative_target}</div>
           <div class="coverage-progress-track"><div class="coverage-progress-fill ${c.status}" style="width:${pct}%;"></div></div>
           <div class="coverage-card-gap ${c.status}">${coverageGapLabel(c)}</div>` : ''}
+        ${c.live_meta_ads !== null ? `<div class="coverage-card-live-meta">📡 ${c.live_meta_ads} live on Meta</div>` : ''}
         <button type="button" class="btn btn-primary btn-sm coverage-card-shoot-btn" onclick="event.stopPropagation(); shootThisWeekForCoverage('${c.product_code}')">+ Shoot This Week</button>
       </div>
     </div>`;
@@ -804,11 +813,13 @@ async function loadProductView(dropId, productCode) {
       </div>`).join('');
 
     const pct = group.creative_target ? Math.min(100, Math.round((group.current_coverage / group.creative_target) * 100)) : 0;
+    const liveMetaLine = group.live_meta_ads !== null ? `<div class="coverage-card-live-meta">📡 ${group.live_meta_ads} live on Meta</div>` : '';
     document.getElementById('product-view-overview').innerHTML = group.soh !== null ? `
       <div class="coverage-card-ratio">${group.current_coverage} / ${group.creative_target} creatives</div>
       <div class="coverage-progress-track"><div class="coverage-progress-fill ${group.status}" style="width:${pct}%;"></div></div>
       <div class="coverage-card-gap ${group.status}">${coverageGapLabel(group)}</div>
-    ` : '<div class="coverage-card-unavailable">Stock unavailable</div>';
+      ${liveMetaLine}
+    ` : `<div class="coverage-card-unavailable">Stock unavailable</div>${liveMetaLine}`;
 
     const planBtn = document.getElementById('product-view-plan-btn');
     planBtn.style.display = group.creative_gap > 0 || group.creative_gap === null ? 'inline-block' : 'none';

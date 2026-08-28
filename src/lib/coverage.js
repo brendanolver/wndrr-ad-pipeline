@@ -39,7 +39,12 @@ function coverageStatus(coverage, target) {
 // amSizeRanges: Map<size_range_id, { name, sizes }> or null -- only needed
 // for the Shoot This Week modal's size picker, not any coverage/target math.
 // rules: creative_target_rules rows.
-function buildCoverage(styleRows, { assetCounts, amStock, amOnOrder, amDetails, amSizeRanges, rules }) {
+// liveMetaCounts: Map<product_code, live_ad_count> or null if Meta Ads isn't
+// configured -- an informational "Live on Meta" figure shown alongside
+// current_coverage, never folded into the target/gap/status math below (see
+// metaAds.js: a live ad count and a produced-concept count answer different
+// questions, so neither should silently stand in for the other).
+function buildCoverage(styleRows, { assetCounts, amStock, amOnOrder, amDetails, amSizeRanges, rules, liveMetaCounts }) {
   const groups = new Map(); // product_code -> style rows
   for (const style of styleRows) {
     const productCode = deriveProductCode(style.style_code);
@@ -119,6 +124,7 @@ function buildCoverage(styleRows, { assetCounts, amStock, amOnOrder, amDetails, 
       on_order: amOnOrder ? onOrder : null,
       creative_target: creativeTarget,
       current_coverage: currentCoverage,
+      live_meta_ads: liveMetaCounts ? (liveMetaCounts.get(productCode) ?? 0) : null,
       creative_gap: gap,
       status: creativeTarget != null ? coverageStatus(currentCoverage, creativeTarget) : null,
     };

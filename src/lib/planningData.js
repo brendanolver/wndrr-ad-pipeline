@@ -1,5 +1,6 @@
 const { pool } = require('../db');
 const apparelmagic = require('./apparelmagic');
+const metaAds = require('./metaAds');
 
 // Shared by drops.js (drop/product coverage) and dropProductPlans.js
 // (concept-plan generation) -- both need the exact same live SOH/on-order/
@@ -22,6 +23,21 @@ async function fetchAmData() {
   }
 }
 
+// Live "how many ads are actually running" counts per internal product
+// family, shown alongside (never replacing) the creative_assets-based
+// current_coverage number -- see metaAds.js for why.
+async function fetchMetaAdsData() {
+  if (!metaAds.configured()) {
+    return { metaLiveCounts: null, metaAdsError: null, metaAdsConfigured: false, metaAdsUnmapped: null, metaAdsUnparsed: null };
+  }
+  try {
+    const { counts, unmapped, unparsed } = await metaAds.getLiveAdCoverage();
+    return { metaLiveCounts: counts, metaAdsError: null, metaAdsConfigured: true, metaAdsUnmapped: unmapped, metaAdsUnparsed: unparsed };
+  } catch (err) {
+    return { metaLiveCounts: null, metaAdsError: err.message, metaAdsConfigured: true, metaAdsUnmapped: null, metaAdsUnparsed: null };
+  }
+}
+
 async function getRules() {
   const result = await pool.query('SELECT * FROM creative_target_rules ORDER BY soh_min ASC');
   return result.rows;
@@ -36,4 +52,4 @@ async function getAssetCounts(styleIds) {
   return new Map(result.rows.map((r) => [r.style_id, r.count]));
 }
 
-module.exports = { fetchAmData, getRules, getAssetCounts };
+module.exports = { fetchAmData, fetchMetaAdsData, getRules, getAssetCounts };
