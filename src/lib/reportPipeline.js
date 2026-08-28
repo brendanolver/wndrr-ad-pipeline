@@ -302,6 +302,12 @@ function clampToMonth(year, month, day) {
   return new Date(year, month, Math.min(day, daysInMonth));
 }
 
+// How many trailing months (including the current, partial one) each
+// category's cadence carries -- the small monthly strip Core's own page
+// shows next to the MTD box, ported in miniature from demand-v2's full
+// 12-month Sales Cadence grid (see coreCategoryTrendInfo in app.js).
+const CADENCE_MONTHS_BACK = 3;
+
 async function buildCategorySalesCadence() {
   const rows = await getSalesRows();
 
@@ -313,25 +319,62 @@ async function buildCategorySalesCadence() {
   const lastYearStart = new Date(today.getFullYear() - 1, today.getMonth(), 1);
   const lastYearEnd = clampToMonth(today.getFullYear() - 1, today.getMonth(), today.getDate());
 
-  const totals = new Map(); // category -> { thisPeriod, lastYear }
   function inWindow(day, start, end) {
     const t = new Date(day).setHours(0, 0, 0, 0);
     return t >= start.getTime() && t <= end.getTime();
   }
+
+  // Month windows, most-recent-first: index 0 is the current month
+  // (partial, up to today, so it lines up with the MTD figures above),
+  // the rest are complete prior calendar months. Each also carries its
+  // own same-month-last-year window, so every monthly figure gets the
+  // same YoY colour treatment as the MTD box rather than an arbitrary
+  // month-over-month comparison.
+  const monthDefs = [];
+  for (let i = 0; i < CADENCE_MONTHS_BACK; i++) {
+    const monthStart = new Date(today.getFullYear(), today.getMonth() - i, 1);
+    const isCurrent = i === 0;
+    const monthEnd = isCurrent ? today : new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0);
+    const lyMonthStart = new Date(monthStart.getFullYear() - 1, monthStart.getMonth(), 1);
+    const lyMonthEnd = isCurrent
+      ? clampToMonth(lyMonthStart.getFullYear(), lyMonthStart.getMonth(), today.getDate())
+      : new Date(lyMonthStart.getFullYear(), lyMonthStart.getMonth() + 1, 0);
+    monthDefs.push({
+      label: monthStart.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }).toUpperCase(),
+      start: monthStart, end: monthEnd, lyStart: lyMonthStart, lyEnd: lyMonthEnd,
+    });
+  }
+
+  const totals = new Map(); // category -> { thisPeriod, lastYear, months: [{units, lyUnits}, ...] }
   for (const r of rows) {
-    if (!totals.has(r.category)) totals.set(r.category, { thisPeriod: 0, lastYear: 0 });
+    if (!totals.has(r.category)) {
+      totals.set(r.category, { thisPeriod: 0, lastYear: 0, months: monthDefs.map(() => ({ units: 0, lyUnits: 0 })) });
+    }
     const entry = totals.get(r.category);
     if (inWindow(r.day, thisStart, thisEnd)) entry.thisPeriod += r.qty;
     if (inWindow(r.day, lastYearStart, lastYearEnd)) entry.lastYear += r.qty;
+    monthDefs.forEach((m, idx) => {
+      if (inWindow(r.day, m.start, m.end)) entry.months[idx].units += r.qty;
+      if (inWindow(r.day, m.lyStart, m.lyEnd)) entry.months[idx].lyUnits += r.qty;
+    });
   }
 
   const categories = [...totals.entries()]
     .filter(([category]) => category) // drop rows with no Product type set
-    .map(([category, { thisPeriod, lastYear }]) => ({
+    .map(([category, { thisPeriod, lastYear, months }]) => ({
       category,
       this_period_units: Math.round(thisPeriod),
       last_year_units: Math.round(lastYear),
       pct_change: lastYear > 0 ? Math.round(((thisPeriod - lastYear) / lastYear) * 100) : (thisPeriod > 0 ? null : 0),
+      months: months.map((m, idx) => {
+        const units = Math.round(m.units);
+        const lyUnits = Math.round(m.lyUnits);
+        return {
+          label: monthDefs[idx].label,
+          units,
+          pct_change: lyUnits > 0 ? Math.round(((units - lyUnits) / lyUnits) * 100) : (units > 0 ? null : 0),
+        };
+      }),
     }))
     .sort((a, b) => a.category.localeCompare(b.category));
 

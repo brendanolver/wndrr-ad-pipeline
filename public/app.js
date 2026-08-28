@@ -1651,26 +1651,58 @@ function coreShootPlanCountsByCategory() {
 }
 
 // Category-level "this month to date vs the same days last year" -- ported
-// from demand-v2's own Sales Cadence view (its "LY MTD vs THIS MTD"
-// column), same arrow+percentage display Core's category row already used
-// for its old vel7-vs-vel30 trend. No deadzone (unlike the old trend this
-// replaces) -- demand-v2 itself colours every non-zero change, so this
-// matches that read directly.
+// from demand-v2's own Sales Cadence view (its "LY MTD vs THIS MTD" box,
+// plus a miniature trailing-3-months strip standing in for that page's
+// full 12-month grid). Every figure (the MTD box and each month) is
+// coloured by its own YoY change, matching how demand-v2 colours its
+// monthly cells -- no deadzone, since a non-zero change is always shown.
+function pctClass(pct) {
+  if (pct == null || pct > 0) return 'up';
+  if (pct < 0) return 'down';
+  return 'flat';
+}
+
 function coreCategoryTrendInfo(categoryName) {
   const cadence = state.salesCadence;
   const row = cadence && cadence.categories
     ? cadence.categories.find((c) => c.category === (categoryName || '').toUpperCase())
     : null;
-  if (!row) return { display: '—', cls: 'core-trend-flat', title: 'No Sales Cadence data for this category' };
+  if (!row) {
+    return { hasData: false, title: 'No Sales Cadence data for this category' };
+  }
   const title = `LY MTD: ${row.last_year_units} · This MTD: ${row.this_period_units}`;
-  // Lead with the actual unit figures (last year -> this year), not just
-  // the percentage -- easier to see how you're actually tracking, not just
-  // the direction of travel.
-  const units = `${row.last_year_units} → ${row.this_period_units}`;
-  if (row.pct_change == null) return { display: `${units} (New)`, cls: 'core-trend-up', title };
-  if (row.pct_change > 0) return { display: `${units} (↗${row.pct_change}%)`, cls: 'core-trend-up', title };
-  if (row.pct_change < 0) return { display: `${units} (↘${Math.abs(row.pct_change)}%)`, cls: 'core-trend-down', title };
-  return { display: `${units} (→0%)`, cls: 'core-trend-flat', title };
+  const pctLabel = row.pct_change == null ? 'New' : `${row.pct_change > 0 ? '+' : ''}${row.pct_change}%`;
+  return {
+    hasData: true,
+    title,
+    boxValue: row.this_period_units,
+    boxPctLabel: pctLabel,
+    boxCls: pctClass(row.pct_change),
+    months: (row.months || []).map((m) => ({
+      label: m.label,
+      value: m.units,
+      cls: pctClass(m.pct_change),
+      title: `${m.label}: ${m.units} unit${m.units === 1 ? '' : 's'}${m.pct_change != null ? ` (${m.pct_change > 0 ? '+' : ''}${m.pct_change}% vs last year)` : ' (new)'}`,
+    })),
+  };
+}
+
+function coreCadenceCellHtml(trend) {
+  if (!trend.hasData) {
+    return `<span class="core-cadence-empty" title="${escapeHtml(trend.title)}">—</span>`;
+  }
+  return `
+    <div class="core-cadence-box core-trend-${trend.boxCls}" title="${escapeHtml(trend.title)}">
+      <span class="core-cadence-box-value">${trend.boxValue}</span>
+      <span class="core-cadence-box-pct">${trend.boxPctLabel}</span>
+    </div>
+    <div class="core-cadence-months">
+      ${trend.months.map((m) => `
+        <div class="core-cadence-month" title="${escapeHtml(m.title)}">
+          <span class="core-cadence-month-value core-trend-${m.cls}">${m.value}</span>
+          <span class="core-cadence-month-label">${escapeHtml(m.label)}</span>
+        </div>`).join('')}
+    </div>`;
 }
 
 function coreShootCategoryRowHtml(cat, selectedCodes) {
@@ -1684,8 +1716,8 @@ function coreShootCategoryRowHtml(cat, selectedCodes) {
           <span class="core-shoot-category-name">${escapeHtml(cat.name)}</span>
           <span class="core-shoot-category-count">${cat.total} product${cat.total === 1 ? '' : 's'}</span>
         </span>
-        <span class="core-shoot-stat-col">
-          <span class="core-category-trend ${trend.cls}" title="${escapeHtml(trend.title)}">${trend.display}</span>
+        <span class="core-shoot-stat-col core-cadence-col">
+          ${coreCadenceCellHtml(trend)}
         </span>
         <span class="core-shoot-stat-col">
           ${cat.needsAttention ? `<span class="core-shoot-stat">🔴 <span class="core-shoot-stat-count core-shoot-count-red">${cat.needsAttention}</span> needing attention</span>` : ''}
