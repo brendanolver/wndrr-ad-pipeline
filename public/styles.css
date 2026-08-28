@@ -477,10 +477,10 @@ main{padding:20px 24px;}
    narrower window instead of overflowing it. The header and the row
    toggles share this template so their columns always line up. */
 .core-shoot-category-header,
-.core-shoot-category-toggle{display:grid;grid-template-columns:16px 200px 170px 165px 135px 165px;column-gap:16px;align-items:center;width:100%;max-width:960px;}
-@media (max-width:900px){
+.core-shoot-category-toggle{display:grid;grid-template-columns:16px 200px 300px 165px 135px 165px;column-gap:16px;align-items:center;width:100%;max-width:1090px;}
+@media (max-width:1050px){
   .core-shoot-category-header,
-  .core-shoot-category-toggle{grid-template-columns:16px minmax(110px,1.3fr) minmax(130px,1.15fr) minmax(110px,1.1fr) minmax(90px,0.9fr) minmax(110px,1.1fr);column-gap:10px;max-width:100%;}
+  .core-shoot-category-toggle{grid-template-columns:16px minmax(110px,1.1fr) minmax(220px,1.7fr) minmax(110px,1.1fr) minmax(90px,0.9fr) minmax(110px,1.1fr);column-gap:10px;max-width:100%;}
 }
 /* Only the header keeps a divider (scoped to the same max-width:960px
    box as the columns, so it never runs into the unused right-hand
@@ -499,17 +499,36 @@ main{padding:20px 24px;}
 .core-shoot-stat-count{font-weight:700;color:var(--text);}
 .core-shoot-count-red{color:var(--red);}
 .core-shoot-stat-selected{color:var(--green);font-weight:700;}
-.core-category-trend{display:inline-block;padding:3px 9px;border-radius:var(--r-pill);font-weight:700;font-size:12.5px;letter-spacing:0.1px;font-variant-numeric:tabular-nums;cursor:default;}
-.core-category-trend.core-trend-up{background:var(--green-light);color:var(--green);}
-.core-category-trend.core-trend-down{background:var(--red-light);color:var(--red);}
-.core-category-trend.core-trend-flat{background:var(--surface2);color:var(--text-muted);}
+
+/* Sales Cadence widget: an "LY MTD -> This MTD" box (ported from demand-v2's
+   own Sales Cadence page, same light-green/red boxed-number look) plus a
+   miniature trailing-months strip standing in for that page's full 12-month
+   grid. Both live in the same grid column as the old single trend pill did,
+   just wider (see .core-shoot-category-header/-toggle's 3rd track). */
+.core-cadence-col{display:flex;align-items:center;gap:10px;}
+.core-cadence-empty{color:var(--text-muted);}
+.core-cadence-box{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:4px 12px;border-radius:var(--r);min-width:56px;cursor:default;flex-shrink:0;}
+.core-cadence-box.core-trend-up{background:var(--green-light);}
+.core-cadence-box.core-trend-down{background:var(--red-light);}
+.core-cadence-box.core-trend-flat{background:var(--surface2);}
+.core-cadence-box-value{font-size:15px;font-weight:800;font-variant-numeric:tabular-nums;color:var(--text);}
+.core-cadence-box-pct{font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;}
+.core-cadence-box.core-trend-up .core-cadence-box-pct{color:var(--green);}
+.core-cadence-box.core-trend-down .core-cadence-box-pct{color:var(--red);}
+.core-cadence-box.core-trend-flat .core-cadence-box-pct{color:var(--text-muted);}
+.core-cadence-months{display:flex;gap:9px;}
+.core-cadence-month{display:flex;flex-direction:column;align-items:center;cursor:default;}
+.core-cadence-month-value{font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums;}
+.core-cadence-month-value.core-trend-up{color:var(--green);}
+.core-cadence-month-value.core-trend-down{color:var(--red);}
+.core-cadence-month-value.core-trend-flat{color:var(--text-muted);}
+.core-cadence-month-label{font-size:9.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.2px;}
 .core-shoot-category-body{display:flex;flex-direction:column;gap:7px;padding:2px 6px 16px 32px;}
 
 .core-shoot-review-row{display:grid;grid-template-columns:2fr 4fr auto;gap:16px;align-items:center;background:white;border:1px solid var(--border);border-radius:var(--r);padding:11px 14px;}
 .core-shoot-review-col-product{display:flex;align-items:center;gap:8px;min-width:0;}
 .core-shoot-review-name{font-weight:700;font-size:13.5px;}
 .core-shoot-review-col-reasons{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text-secondary);overflow:hidden;}
-.core-shoot-review-col-reasons .core-category-trend{flex-shrink:0;}
 .core-shoot-review-reasons-text{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .core-shoot-review-soh{flex-shrink:0;white-space:nowrap;}
 .core-shoot-review-sep{flex-shrink:0;color:var(--text-muted);}
