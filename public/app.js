@@ -12,7 +12,7 @@ const TIER_LABELS = { core_proven: 'Core/Proven', new_drop: 'New Drop' };
 const CLASSIFICATION_LABELS = { tested_proven: 'Tested/Proven', new_experimental: 'New/Experimental' };
 
 let state = {
-  styles: [], categories: [], board: null, dashboard: null, drops: [], jobs: [], provenWinners: [],
+  styles: [], categories: [], board: null, dashboard: null, drops: [], provenWinners: [],
   coreProducts: [], planningSettings: null, coreView: 'priority', coreAllProductsOpen: false,
   coreExpandedCategories: new Set(), coreExpandedProducts: new Set(),
   coreShootExpandedCategories: new Set(),
@@ -23,10 +23,10 @@ let state = {
   // load (not persisted to localStorage): this is a recurring weekly
   // ritual, not a session to resume, so a stale mid-flow step from a prior
   // visit would only confuse. The one place it's overridden is entering
-  // the drop/product drill-in (see renderPlanningRoute), so "Back to
-  // Planning" always returns to the Drops step, not Core.
+  // the drop/product/promotion drill-in (see renderPlanningRoute), so "Back
+  // to Planning" always returns to the Drops step, not Core.
   planningStep: 'core',
-  promotions: [], promotionExpandedIds: new Set(),
+  promotions: [], currentPromotionId: null, currentPromotion: null,
   weeklyShootPlanConfirmation: null,
   salesCadence: null,
 };
@@ -159,7 +159,7 @@ async function loadAll() {
     renderPlanningSettingsForm();
     renderContentCreators();
     renderHighStockProducts();
-    renderPromotions();
+    renderPromotionsRow();
     renderPlanningShootSummary();
   } catch (e) {
     toast(e.message, true);
@@ -394,11 +394,12 @@ function renderPlanningShootSummary() {
     `${state.shootPlan.length} product${state.shootPlan.length === 1 ? '' : 's'} selected · ${totalSamples} sample${totalSamples === 1 ? '' : 's'} required`;
 }
 
-// ── Planning sub-navigation (list / drop / product) ──
-// Hash-routed so a drop or product is a genuinely separate view (not an
-// inline expand), with working back/forward. Scheme:
+// ── Planning sub-navigation (list / drop / product / promotion) ──
+// Hash-routed so a drop, product, or promotion is a genuinely separate view
+// (not an inline expand), with working back/forward. Scheme:
 //   #planning/drop/<id>
 //   #planning/drop/<id>/product/<productCode>
+//   #planning/promotion/<id>
 function parsePlanningHash() {
   const parts = window.location.hash.replace(/^#planning\/?/, '').split('/').filter(Boolean);
   if (parts[0] === 'drop' && parts[1]) {
@@ -406,6 +407,9 @@ function parsePlanningHash() {
       return { view: 'product', dropId: Number(parts[1]), productCode: decodeURIComponent(parts[3]) };
     }
     return { view: 'drop', dropId: Number(parts[1]) };
+  }
+  if (parts[0] === 'promotion' && parts[1]) {
+    return { view: 'promotion', promotionId: Number(parts[1]) };
   }
   return { view: 'list' };
 }
@@ -419,6 +423,7 @@ function renderPlanningRoute() {
   document.getElementById('planning-list-view').style.display = route.view === 'list' ? 'block' : 'none';
   document.getElementById('planning-drop-view').style.display = route.view === 'drop' ? 'block' : 'none';
   document.getElementById('planning-product-view').style.display = route.view === 'product' ? 'block' : 'none';
+  document.getElementById('planning-promotion-view').style.display = route.view === 'promotion' ? 'block' : 'none';
 
   if (route.view === 'drop' || route.view === 'product') {
     // So "Back to Planning" always lands on the Drops step, not Core --
@@ -426,6 +431,8 @@ function renderPlanningRoute() {
     // reload on a #planning/drop/<id> hash (state.planningStep resets to
     // 'core' on every fresh load otherwise).
     setPlanningStep('drops');
+  } else if (route.view === 'promotion') {
+    setPlanningStep('promotions');
   }
 
   if (route.view === 'drop') {
@@ -433,6 +440,8 @@ function renderPlanningRoute() {
   } else if (route.view === 'product') {
     document.getElementById('product-view-back').onclick = () => { window.location.hash = `#planning/drop/${route.dropId}`; };
     loadProductView(route.dropId, route.productCode);
+  } else if (route.view === 'promotion') {
+    loadPromotionView(route.promotionId);
   }
 }
 window.addEventListener('hashchange', renderPlanningRoute);
@@ -2068,109 +2077,378 @@ async function removeShootPlanItem(id) {
 }
 
 // ── Planning: Step 4 -- Promotions ────────────────────
-// "Are upcoming promotions covered?" -- same exception-based philosophy as
-// Drops: an on-track promotion shows just a status line, nothing to open.
-// Deliberately minimal (no ApparelMagic/SOH integration, unlike Core/High
-// Stock/Drops) -- a manual name/date/checklist, since a promotion doesn't
-// have an inventory-driven creative target the way a product does.
-function togglePromotionExpanded(id) {
-  if (state.promotionExpandedIds.has(id)) state.promotionExpandedIds.delete(id);
-  else state.promotionExpandedIds.add(id);
-  renderPromotions();
-}
-
-function promotionItemRowHtml(promotionId, item) {
-  return `
-    <div class="promotion-item-row">
-      <label class="checkbox-label">
-        <input type="checkbox" ${item.is_ready ? 'checked' : ''} onchange="togglePromotionItemReady(${promotionId}, ${item.id}, this.checked)">
-        ${escapeHtml(item.description)}
-      </label>
-      <button type="button" class="btn btn-ghost btn-sm" onclick="removePromotionItem(${promotionId}, ${item.id})">Remove</button>
-    </div>`;
-}
-
+// "Are upcoming promotions creatively covered, and what is still missing?"
+// -- deliberately built to feel like Upcoming Drops rather than a separate
+// UI: same card grid/status pill on the landing list, same coverage-card/
+// progress-bar treatment for the detail page's requirements, same
+// exception-based "On Track needs nothing, Needs Attention names the gap"
+// philosophy. The one structural difference is what stands in for a Drop's
+// Products: a Promotion isn't one product (it may cover several, a bundle,
+// a GWP, or nothing SKU-specific at all -- see promotion_stages in
+// schema.sql), so its requirement unit is a fully custom-per-promotion
+// Campaign Stage instead.
 function promotionCardHtml(p) {
-  const isOpen = state.promotionExpandedIds.has(p.id);
   const onTrack = p.status === 'on_track';
+  const dateRange = p.end_date ? `${formatDate(p.start_date)} – ${formatDate(p.end_date)}` : formatDate(p.start_date);
   return `
-    <div class="drop-card ${onTrack ? 'on-track' : 'needs-attention'}">
+    <div class="drop-card" data-promotion-id="${p.id}">
       <div class="drop-card-header">
         <div class="drop-card-name">${escapeHtml(p.name)}</div>
       </div>
-      <div class="drop-card-date">${formatDate(p.start_date)}</div>
-      ${onTrack
-        ? '<div class="drop-card-status on-track">✓ On Track</div>'
-        : `<div class="drop-card-status needs-attention">⚠ Needs Attention${p.item_count ? ` — ${p.ready_count}/${p.item_count} ready` : ' — nothing organised yet'}</div>
-           <button type="button" class="drop-card-review-link-btn" onclick="togglePromotionExpanded(${p.id})">${isOpen ? 'Hide' : 'Organise'} →</button>`}
-      ${isOpen ? `
-        <div class="promotion-item-list">
-          ${p.items.map((item) => promotionItemRowHtml(p.id, item)).join('')}
-        </div>
-        <div class="promotion-add-item-row">
-          <input type="text" id="promotion-new-item-${p.id}" placeholder="e.g. Hero banner">
-          <button type="button" class="btn btn-ghost btn-sm" onclick="addPromotionItem(${p.id})">+ Add Item</button>
-        </div>` : ''}
+      <div class="drop-card-date">${dateRange} · ${p.days_until_launch >= 0 ? p.days_until_launch + ' days to launch' : 'Launched'}</div>
+      ${onTrack ? '<div class="drop-card-status on-track">✓ On Track</div>' : ''}
+      <div class="drop-card-counts">
+        <span class="green">🟢 ${p.summary.green}</span>
+        <span class="amber">🟠 ${p.summary.amber}</span>
+        <span class="red">🔴 ${p.summary.red}</span>
+      </div>
+      <div class="drop-card-pct">${p.summary.totalCovered} / ${p.summary.totalTarget} requirements covered${p.summary.overallPct !== null ? ' — ' + p.summary.overallPct + '%' : ''}</div>
+      ${p.summary.overallPct !== null ? `<div class="coverage-progress-track"><div class="coverage-progress-fill ${onTrack ? 'green' : (p.summary.overallPct >= 50 ? 'amber' : 'red')}" style="width:${Math.min(100, p.summary.overallPct)}%;"></div></div>` : ''}
+      ${p.most_urgent[0] ? `<div class="drop-card-urgent">Most urgent: ${escapeHtml(p.most_urgent[0].name)} (${p.most_urgent[0].covered}/${p.most_urgent[0].required_count})</div>` : ''}
     </div>`;
 }
 
-function renderPromotions() {
+function wirePromotionCardRow(row) {
+  row.querySelectorAll('.drop-card').forEach((card) => {
+    card.addEventListener('click', () => { window.location.hash = `#planning/promotion/${card.dataset.promotionId}`; });
+  });
+}
+
+function renderPromotionsRow() {
   const list = document.getElementById('promotions-list');
   if (!list) return; // guards a load race before index.html's panel exists
-  const todayStr = new Date().toISOString().slice(0, 10);
-  const upcoming = state.promotions.filter((p) => formatDate(p.start_date) >= todayStr);
+  const upcoming = state.promotions.filter((p) => p.days_until_launch >= 0);
   list.innerHTML = upcoming.length
     ? upcoming.map(promotionCardHtml).join('')
-    : '<div class="attention-empty">No upcoming promotions yet — add one below.</div>';
+    : '<div class="attention-empty">No upcoming promotions yet — add one to start planning creative coverage.</div>';
+  wirePromotionCardRow(list);
 
   document.getElementById('promotions-step-footer-count').textContent = `${upcoming.length} upcoming promotion${upcoming.length === 1 ? '' : 's'}`;
 }
 
-async function addPromotion() {
-  const nameEl = document.getElementById('new-promotion-name');
-  const dateEl = document.getElementById('new-promotion-date');
+document.getElementById('new-promotion-btn').addEventListener('click', () => openPromotionModal(null));
+
+function openPromotionModal(promotion) {
+  document.getElementById('promotion-modal-title').textContent = promotion ? 'Edit Promotion' : 'New Promotion';
+  document.getElementById('promotion-id').value = promotion ? promotion.id : '';
+  document.getElementById('promotion-name').value = (promotion && promotion.name) || '';
+  document.getElementById('promotion-start-date').value = promotion ? promotion.start_date.slice(0, 10) : '';
+  document.getElementById('promotion-end-date').value = promotion && promotion.end_date ? promotion.end_date.slice(0, 10) : '';
+  document.getElementById('promotion-notes').value = (promotion && promotion.notes) || '';
+  document.getElementById('promotion-save-btn').textContent = promotion ? 'Save' : 'Add';
+  document.getElementById('promotion-delete-btn').style.display = promotion ? 'inline-block' : 'none';
+  openModal('promotion-modal');
+}
+
+async function savePromotion() {
+  const id = document.getElementById('promotion-id').value;
+  const name = document.getElementById('promotion-name').value;
+  const start_date = document.getElementById('promotion-start-date').value;
+  const end_date = document.getElementById('promotion-end-date').value || null;
+  const notes = document.getElementById('promotion-notes').value || null;
+  if (!name.trim()) return toast('Promotion name is required', true);
+  if (!start_date) return toast('Start date is required', true);
+
+  try {
+    if (id) {
+      await api(`/promotions/${id}`, { method: 'PUT', body: JSON.stringify({ name, start_date, end_date, notes }) });
+      closeModal('promotion-modal');
+      toast('Promotion saved');
+      loadAll();
+    } else {
+      const created = await api('/promotions', { method: 'POST', body: JSON.stringify({ name, start_date, end_date, notes }) });
+      closeModal('promotion-modal');
+      toast('Promotion added');
+      await loadAll();
+      // Straight into the new promotion's detail page -- that's where
+      // Campaign Stages get added, and there's nothing else to do on the
+      // landing card yet.
+      window.location.hash = `#planning/promotion/${created.id}`;
+    }
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function deletePromotion() {
+  const id = document.getElementById('promotion-id').value;
+  if (!id) return;
+  if (!(await confirmDialog('Delete this promotion? Its Campaign Stages go with it -- any Shoot Plan items already linked to them stay in the Shoot Plan, just unlinked.'))) return;
+  try {
+    await api(`/promotions/${id}`, { method: 'DELETE' });
+    closeModal('promotion-modal');
+    toast('Promotion deleted');
+    goToPlanningList();
+    loadAll();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// ── Promotion detail page: Campaign Stages ───────────
+async function loadPromotionView(id) {
+  state.currentPromotionId = id;
+  try {
+    state.currentPromotion = await api(`/promotions/${id}`);
+    renderPromotionView();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function renderPromotionView() {
+  const p = state.currentPromotion;
+  if (!p) return;
+  document.getElementById('promotion-view-title').textContent = p.name;
+  document.getElementById('promotion-view-edit-btn').onclick = () => openPromotionModal(p);
+  const dateRange = p.end_date ? `${formatDate(p.start_date)} – ${formatDate(p.end_date)}` : formatDate(p.start_date);
+  document.getElementById('promotion-view-summary').innerHTML = `
+    <div><strong>${dateRange}</strong><br>Dates</div>
+    <div><strong>${p.days_until_launch >= 0 ? p.days_until_launch : 0}</strong><br>Days to launch</div>
+    <div><strong>${p.summary.stageCount}</strong><br>Campaign Stages</div>
+    <div><strong>${p.summary.totalCovered} / ${p.summary.totalTarget}</strong><br>Requirements${p.summary.overallPct !== null ? ' — ' + p.summary.overallPct + '%' : ''}</div>
+  `;
+  renderPromotionStageGrid();
+}
+
+// Re-fetches just this promotion (not a full loadAll()) so stage add/
+// rename/reorder/delete feel immediate -- the landing card grid (which
+// does need refreshing, since its own coverage summary just changed too)
+// is patched separately by whichever caller needs it.
+async function refreshCurrentPromotion() {
+  if (!state.currentPromotionId) return;
+  try {
+    const promotion = await api(`/promotions/${state.currentPromotionId}`);
+    state.currentPromotion = promotion;
+    const idx = state.promotions.findIndex((p) => p.id === promotion.id);
+    if (idx !== -1) state.promotions[idx] = promotion;
+    renderPromotionView();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function promotionStageGapLabel(s) {
+  if (s.status === 'green') return '🟢 COVERAGE COMPLETE';
+  const icon = s.status === 'amber' ? '🟠' : '🔴';
+  return `${icon} ${s.remaining} more required`;
+}
+
+function promotionStageItemRowHtml(item) {
+  return `
+    <div class="promotion-stage-item-row">
+      <span class="promotion-stage-item-name">${escapeHtml(item.product_name)}</span>
+      <span class="admin-note">${escapeHtml(item.creator)} · ${escapeHtml(item.asset_status_label || '—')}</span>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="removeShootPlanItem(${item.id})">Remove</button>
+    </div>`;
+}
+
+// Each stage card doubles as both the coverage display (required/covered/
+// remaining/status, same visual language as a Drop product's coverage
+// card) and its own editor (rename/reorder/delete/required-count) -- no
+// separate edit mode, so customising a promotion's structure never needs
+// more than one click.
+function promotionStageCardHtml(stage, index, total) {
+  const pct = stage.required_count > 0 ? Math.min(100, Math.round((stage.covered / stage.required_count) * 100)) : 100;
+  const items = stage.items || [];
+  return `
+    <div class="coverage-card promotion-stage-card" data-stage-id="${stage.id}" draggable="true">
+      <div class="coverage-card-body">
+        <div class="promotion-stage-head">
+          <span class="pw-drag-handle" title="Drag to reorder">⠿</span>
+          <input type="text" class="promotion-stage-name-input" value="${escapeHtml(stage.name)}" onchange="renamePromotionStage(${stage.id}, this.value)">
+          <button type="button" class="btn btn-ghost btn-sm" ${index === 0 ? 'disabled' : ''} onclick="movePromotionStage(${stage.id}, -1)" title="Move up">&uarr;</button>
+          <button type="button" class="btn btn-ghost btn-sm" ${index === total - 1 ? 'disabled' : ''} onclick="movePromotionStage(${stage.id}, 1)" title="Move down">&darr;</button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="deletePromotionStage(${stage.id})" title="Delete stage">&times;</button>
+        </div>
+        <div class="coverage-card-ratio">${stage.covered} / ${stage.required_count} covered</div>
+        <div class="coverage-progress-track"><div class="coverage-progress-fill ${stage.status}" style="width:${pct}%;"></div></div>
+        <div class="coverage-card-gap ${stage.status}">${promotionStageGapLabel(stage)}</div>
+        <label class="promotion-stage-required-row">Required
+          <input type="number" min="0" class="promotion-stage-count-input" value="${stage.required_count}" onchange="savePromotionStageCount(${stage.id}, this.value)">
+        </label>
+        ${items.length ? `<div class="promotion-stage-item-list">${items.map(promotionStageItemRowHtml).join('')}</div>` : ''}
+        <button type="button" class="btn btn-primary btn-sm coverage-card-shoot-btn" onclick="shootThisWeekForPromotionStage(${stage.id})">+ Shoot This Week</button>
+      </div>
+    </div>`;
+}
+
+function renderPromotionStageGrid() {
+  const grid = document.getElementById('promotion-stage-grid');
+  const stages = (state.currentPromotion && state.currentPromotion.stages) || [];
+  grid.innerHTML = stages.length
+    ? stages.map((s, i) => promotionStageCardHtml(s, i, stages.length)).join('')
+    : '<div class="attention-empty">No Campaign Stages yet — add one below (e.g. Hype / Tease, Launch Ads, Mid-Sale / Offer, Last Chance). Different promotions can use completely different stages.</div>';
+  wirePromotionStageDragEvents();
+}
+
+let promotionStageDragId = null;
+
+function wirePromotionStageDragEvents() {
+  document.querySelectorAll('#promotion-stage-grid .promotion-stage-card').forEach((card) => {
+    card.addEventListener('dragstart', () => {
+      promotionStageDragId = Number(card.dataset.stageId);
+      card.classList.add('dragging');
+    });
+    card.addEventListener('dragend', () => {
+      card.classList.remove('dragging');
+      document.querySelectorAll('#promotion-stage-grid .promotion-stage-card').forEach((c) => c.classList.remove('drag-over'));
+    });
+    card.addEventListener('dragover', (e) => { e.preventDefault(); card.classList.add('drag-over'); });
+    card.addEventListener('dragleave', () => card.classList.remove('drag-over'));
+    card.addEventListener('drop', (e) => {
+      e.preventDefault();
+      card.classList.remove('drag-over');
+      const targetId = Number(card.dataset.stageId);
+      if (promotionStageDragId == null || promotionStageDragId === targetId) return;
+      const ids = state.currentPromotion.stages.map((s) => s.id);
+      const fromIdx = ids.indexOf(promotionStageDragId);
+      const toIdx = ids.indexOf(targetId);
+      if (fromIdx === -1 || toIdx === -1) return;
+      ids.splice(fromIdx, 1);
+      ids.splice(toIdx, 0, promotionStageDragId);
+      submitPromotionStageReorder(ids);
+    });
+  });
+}
+
+function movePromotionStage(id, delta) {
+  const ids = state.currentPromotion.stages.map((s) => s.id);
+  const idx = ids.indexOf(id);
+  const swapWith = idx + delta;
+  if (idx === -1 || swapWith < 0 || swapWith >= ids.length) return;
+  [ids[idx], ids[swapWith]] = [ids[swapWith], ids[idx]];
+  submitPromotionStageReorder(ids);
+}
+
+async function submitPromotionStageReorder(orderedIds) {
+  try {
+    await api('/promotions/stages/reorder', { method: 'PUT', body: JSON.stringify({ ordered_ids: orderedIds }) });
+    await refreshCurrentPromotion();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function addPromotionStage() {
+  const nameEl = document.getElementById('new-stage-name');
+  const countEl = document.getElementById('new-stage-count');
   const name = nameEl.value.trim();
-  const startDate = dateEl.value;
-  if (!name) return toast('Promotion name is required', true);
-  if (!startDate) return toast('Start date is required', true);
+  if (!name) return toast('Stage name is required', true);
   try {
-    await api('/promotions', { method: 'POST', body: JSON.stringify({ name, start_date: startDate }) });
+    await api(`/promotions/${state.currentPromotionId}/stages`, {
+      method: 'POST',
+      body: JSON.stringify({ name, required_count: Number(countEl.value) || 0 }),
+    });
     nameEl.value = '';
-    dateEl.value = '';
-    toast('Promotion added');
-    loadAll();
+    countEl.value = '1';
+    toast('Stage added');
+    await refreshCurrentPromotion();
+    renderPromotionsRow();
   } catch (e) {
     toast(e.message, true);
   }
 }
 
-async function addPromotionItem(promotionId) {
-  const input = document.getElementById(`promotion-new-item-${promotionId}`);
-  const description = input.value.trim();
-  if (!description) return toast('Item description is required', true);
+async function renamePromotionStage(id, name) {
+  if (!name || !name.trim()) return toast('Stage name is required', true);
   try {
-    await api(`/promotions/${promotionId}/items`, { method: 'POST', body: JSON.stringify({ description }) });
-    state.promotionExpandedIds.add(promotionId);
-    loadAll();
+    await api(`/promotions/stages/${id}`, { method: 'PUT', body: JSON.stringify({ name: name.trim() }) });
+    await refreshCurrentPromotion();
   } catch (e) {
     toast(e.message, true);
   }
 }
 
-async function togglePromotionItemReady(promotionId, itemId, isReady) {
+async function savePromotionStageCount(id, value) {
+  const count = Number(value);
+  if (!Number.isFinite(count) || count < 0) return toast('Required count must be 0 or more', true);
   try {
-    await api(`/promotions/items/${itemId}`, { method: 'PUT', body: JSON.stringify({ is_ready: isReady }) });
-    state.promotionExpandedIds.add(promotionId);
-    loadAll();
+    await api(`/promotions/stages/${id}`, { method: 'PUT', body: JSON.stringify({ required_count: count }) });
+    await refreshCurrentPromotion();
+    renderPromotionsRow();
   } catch (e) {
     toast(e.message, true);
   }
 }
 
-async function removePromotionItem(promotionId, itemId) {
+async function deletePromotionStage(id) {
+  if (!(await confirmDialog('Delete this Campaign Stage? Any Shoot Plan items already linked to it stay in the Shoot Plan, just unlinked.'))) return;
   try {
-    await api(`/promotions/items/${itemId}`, { method: 'DELETE' });
-    state.promotionExpandedIds.add(promotionId);
+    await api(`/promotions/stages/${id}`, { method: 'DELETE' });
+    toast('Stage deleted');
+    await refreshCurrentPromotion();
+    renderPromotionsRow();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// Covering a Campaign Stage requirement means picking a product to shoot
+// (same as Core/High Stock/Drops), but a promotion has no single known
+// product to launch the modal from -- so this picks any tracked style
+// directly rather than a pre-resolved colours/sizes list, and feeds the
+// same Concept Development pipeline via POST /shoot-plan.
+let promotionShootContext = null;
+
+function shootThisWeekForPromotionStage(stageId) {
+  const stage = ((state.currentPromotion && state.currentPromotion.stages) || []).find((s) => s.id === stageId);
+  if (!stage) return;
+  promotionShootContext = { stageId };
+  document.getElementById('promotion-shoot-modal-title').textContent = `Cover Requirement — ${stage.name}`;
+  populatePromotionShootStyleSelect();
+  populatePromotionShootCreatorSelect();
+  document.getElementById('promotion-shoot-stock-status').value = 'needs_to_be_brought_in';
+  document.getElementById('promotion-shoot-size').value = '';
+  document.getElementById('promotion-shoot-note').value = '';
+  updatePromotionShootSizeVisibility();
+  openModal('promotion-shoot-modal');
+}
+
+function populatePromotionShootStyleSelect() {
+  const sel = document.getElementById('promotion-shoot-style');
+  sel.innerHTML = state.styles.map((s) => `<option value="${s.id}">${escapeHtml(s.style_code)} — ${escapeHtml(s.name)}</option>`).join('');
+}
+
+function populatePromotionShootCreatorSelect() {
+  const sel = document.getElementById('promotion-shoot-creator');
+  sel.innerHTML = state.contentCreators.map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join('');
+  const defaultEntry = state.contentCreators.find((c) => c.is_default) || state.contentCreators[0];
+  sel.value = defaultEntry ? defaultEntry.name : DEFAULT_CREATOR;
+}
+
+function updatePromotionShootSizeVisibility() {
+  const bringingFromWarehouse = document.getElementById('promotion-shoot-stock-status').value === 'needs_to_be_brought_in';
+  document.getElementById('promotion-shoot-size-row').style.display = bringingFromWarehouse ? '' : 'none';
+}
+
+async function savePromotionShootItem() {
+  if (!promotionShootContext) return;
+  const styleId = Number(document.getElementById('promotion-shoot-style').value);
+  const style = state.styles.find((s) => s.id === styleId);
+  if (!style) return toast('Select a product / style', true);
+  const stockStatus = document.getElementById('promotion-shoot-stock-status').value;
+  const size = document.getElementById('promotion-shoot-size').value.trim();
+  const creator = document.getElementById('promotion-shoot-creator').value.trim();
+  if (!creator) return toast('Content creator is required', true);
+  const note = document.getElementById('promotion-shoot-note').value.trim();
+
+  try {
+    await api('/shoot-plan', {
+      method: 'POST',
+      body: JSON.stringify({
+        product_code: style.style_code,
+        product_name: style.name,
+        colourways: [{ style_id: style.id, size: size || null, colour_label: null }],
+        stock_status: stockStatus,
+        creator,
+        quick_note: note,
+        source: 'promotion',
+        promotion_stage_id: promotionShootContext.stageId,
+      }),
+    });
+    closeModal('promotion-shoot-modal');
+    toast('Sent to Concept Development');
     loadAll();
   } catch (e) {
     toast(e.message, true);
