@@ -505,6 +505,9 @@ main{padding:20px 24px;}
    miniature trailing-months strip standing in for that page's full 12-month
    grid. Both live in the same grid column as the old single trend pill did,
    just wider (see .core-shoot-category-header/-toggle's 3rd track). */
+.core-cadence-header{display:flex;flex-direction:column;line-height:1.35;}
+.core-cadence-header-top{color:var(--text);font-weight:800;}
+.core-cadence-header-bottom{font-weight:600;}
 .core-cadence-col{display:flex;align-items:center;gap:10px;}
 .core-cadence-empty{color:var(--text-muted);}
 .core-cadence-box{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:4px 12px;border-radius:var(--r);min-width:56px;cursor:default;flex-shrink:0;}
