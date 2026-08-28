@@ -464,7 +464,7 @@ main{padding:20px 24px;}
    behind "View All Core Products" instead of being the default. */
 .core-shoot-planning-title{font-size:14px;font-weight:700;margin-bottom:2px;}
 .core-shoot-planning-subtitle{font-size:12px;color:var(--text-muted);margin-bottom:10px;}
-.core-shoot-planning-list{display:flex;flex-direction:column;gap:6px;margin-bottom:4px;}
+.core-shoot-planning-list{display:flex;flex-direction:column;margin-bottom:4px;}
 
 /* Grid, not flex-with-margin-left-auto: fixed column tracks keep every
    category row (and the header above them) aligned to the same
@@ -482,14 +482,16 @@ main{padding:20px 24px;}
   .core-shoot-category-header,
   .core-shoot-category-toggle{grid-template-columns:16px minmax(110px,1fr) minmax(260px,2.6fr) minmax(70px,0.6fr) minmax(100px,1fr) minmax(90px,0.8fr) minmax(100px,1fr);column-gap:10px;max-width:100%;}
 }
-/* Only the header keeps a divider (scoped to the same max-width:960px
-   box as the columns, so it never runs into the unused right-hand
-   whitespace) -- rows below it are separated by the list's own gap
-   instead of a full-width line per row, per the "use whitespace, not
-   noise" cleanup. */
-.core-shoot-category-header{padding:0 6px 6px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);border-bottom:1px solid var(--border);margin-bottom:2px;}
-.core-shoot-category-toggle{background:none;border:none;padding:12px 6px;font-family:inherit;color:var(--text);cursor:pointer;text-align:left;}
-.core-shoot-category-toggle:hover{background:var(--surface2);border-radius:var(--r);}
+/* Each row gets its own divider line (not just the header) and more
+   breathing room -- with the widened Sales Cadence column, rows read as
+   one dense block without a clear line between categories. The list's
+   own gap is dropped in favour of these per-row borders so spacing reads
+   as one consistent rhythm rather than a gap AND a line stacking up; the
+   last row's border is dropped since the section already ends there. */
+.core-shoot-category-header{padding:0 8px 10px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);border-bottom:1px solid var(--border);margin-bottom:4px;}
+.core-shoot-category-toggle{background:none;border:none;border-bottom:1px solid var(--border);padding:18px 8px;font-family:inherit;color:var(--text);cursor:pointer;text-align:left;}
+.core-shoot-category-toggle:hover{background:var(--surface2);}
+.core-shoot-category-group:last-child > .core-shoot-category-toggle{border-bottom:none;}
 .core-shoot-category-toggle.open .accordion-arrow{transform:rotate(90deg);}
 .core-shoot-category-namecol{display:flex;align-items:baseline;gap:8px;min-width:0;}
 .core-shoot-category-name{font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
