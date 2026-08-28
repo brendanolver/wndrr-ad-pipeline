@@ -380,6 +380,17 @@
         <input type="text" id="cc-new-name" placeholder="e.g. Jess">
         <button class="btn btn-primary btn-sm" id="cc-add-btn">+ Add Creator</button>
       </div>
+
+      <div class="planning-section-header">
+        <h2>Meta Product Mapping</h2>
+        <span class="admin-note">Meta's ad names (Product + Product Type) don't always match ApparelMagic product names exactly. Map each combination once to a stable internal product family — every future ad with that same Product + Product Type is attributed automatically. Batch No. is metadata only and is never part of the mapping.</span>
+      </div>
+      <div class="mpm-check-row">
+        <input type="text" id="mpm-check-input" placeholder="Paste a Meta ad name, e.g. HALO SWEAT SET + SWEATS">
+        <button type="button" class="btn btn-ghost btn-sm" id="mpm-check-btn">Check Mapping</button>
+      </div>
+      <div id="mpm-check-result"></div>
+      <div id="mpm-list" class="mpm-list"></div>
     </section>
   </main>
 </div>

@@ -494,3 +494,34 @@ BEGIN
     VALUES (promo.id, 'General', GREATEST(promo.item_count, 1), 0);
   END LOOP;
 END $$;
+
+-- ---------------------------------------------------------------------------
+-- Meta Product Mapping: Meta's ad-naming convention concatenates Product
+-- and Product Type (e.g. "HALO SWEAT SET + SWEATS"), but that text doesn't
+-- always match the ApparelMagic/internal product name exactly (that example
+-- is really "Halo Hood Sweat") -- so attribution can't rely on string
+-- matching. This table is the persisted lookup: (meta_product,
+-- meta_product_type) -> a stable internal product_code (the same 8-char
+-- family key apparelmagic.js's deriveProductCode already derives from a
+-- style_code, and that Core/Drops/High Stocks/Coverage all group by) --
+-- never a product NAME, since a name can be edited later without the
+-- mapping breaking. product_code/product_name are nullable together: a row
+-- with product_code IS NULL means the combination has been seen but not
+-- yet resolved ("Unmapped"); there is no default/fallback guess. Batch No.
+-- (also part of the naming convention) is deliberately not modeled here at
+-- all -- it's parsed and passed along as metadata only, never part of the
+-- lookup key, since one batch can span multiple products or an entire drop.
+CREATE TABLE IF NOT EXISTS meta_product_mappings (
+  id SERIAL PRIMARY KEY,
+  meta_product VARCHAR(255) NOT NULL,
+  meta_product_type VARCHAR(255) NOT NULL,
+  product_code VARCHAR(64),
+  product_name VARCHAR(255),
+  mapped_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+-- Case-insensitive: Meta ad names aren't guaranteed consistent casing
+-- between ads for what's meant to be the same Product + Product Type.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_meta_product_mappings_key
+  ON meta_product_mappings (UPPER(meta_product), UPPER(meta_product_type));

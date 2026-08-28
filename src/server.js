@@ -26,6 +26,7 @@ const highStockProductRoutes = require('./routes/highStockProducts');
 const promotionRoutes = require('./routes/promotions');
 const weeklyShootPlanConfirmationRoutes = require('./routes/weeklyShootPlanConfirmation');
 const salesCadenceRoutes = require('./routes/salesCadence');
+const metaProductMappingRoutes = require('./routes/metaProductMappings');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -52,6 +53,7 @@ app.use('/api/high-stock-products', requireAuth, highStockProductRoutes);
 app.use('/api/promotions', requireAuth, promotionRoutes);
 app.use('/api/weekly-shoot-plan-confirmation', requireAuth, weeklyShootPlanConfirmationRoutes);
 app.use('/api/sales-cadence', requireAuth, salesCadenceRoutes);
+app.use('/api/meta-product-mappings', requireAuth, metaProductMappingRoutes);
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
