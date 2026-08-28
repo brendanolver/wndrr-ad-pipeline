@@ -29,6 +29,7 @@ let state = {
   promotions: [], currentPromotionId: null, currentPromotion: null,
   weeklyShootPlanConfirmation: null,
   salesCadence: null,
+  metaProductMappings: [], metaProductFamilies: [],
 };
 let dashboardWeekOffset = 0;
 
@@ -113,7 +114,7 @@ document.querySelectorAll('.tab-btn').forEach((btn) => {
 // ── Load & render ────────────────────────────────────
 async function loadAll() {
   try {
-    const [board, styles, categories, dashboard, dropsRes, provenWinners, coreRes, planningSettings, shootPlan, contentCreators, highStockRes, promotions, weeklyConfirmation, salesCadence] = await Promise.all([
+    const [board, styles, categories, dashboard, dropsRes, provenWinners, coreRes, planningSettings, shootPlan, contentCreators, highStockRes, promotions, weeklyConfirmation, salesCadence, metaProductMappings, metaProductFamilies] = await Promise.all([
       api('/board'),
       api('/styles'),
       api('/categories'),
@@ -128,6 +129,8 @@ async function loadAll() {
       api('/promotions'),
       api('/weekly-shoot-plan-confirmation'),
       api('/sales-cadence'),
+      api('/meta-product-mappings'),
+      api('/meta-product-mappings/product-families'),
     ]);
     state.board = board;
     state.styles = styles;
@@ -146,6 +149,8 @@ async function loadAll() {
     state.promotions = promotions;
     state.weeklyShootPlanConfirmation = weeklyConfirmation;
     state.salesCadence = salesCadence;
+    state.metaProductMappings = metaProductMappings;
+    state.metaProductFamilies = metaProductFamilies;
     renderBoard();
     renderMissingAd();
     renderStylesTable();
@@ -158,6 +163,7 @@ async function loadAll() {
     renderCoreProducts();
     renderPlanningSettingsForm();
     renderContentCreators();
+    renderMetaProductMappings();
     renderHighStockProducts();
     renderPromotionsRow();
     renderPlanningShootSummary();
@@ -2877,6 +2883,123 @@ document.getElementById('cc-add-btn').addEventListener('click', addContentCreato
 document.getElementById('cc-new-name').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') addContentCreator();
 });
+
+// ── Settings: Meta Product Mapping ───────────────────
+// Meta's ad names (Product + Product Type) don't always match the
+// ApparelMagic/internal product name -- see schema.sql's comment on
+// meta_product_mappings for the full rationale. This is the admin side of
+// that lookup: review what's already mapped, resolve anything still
+// Unmapped by picking its internal product family, and a "Check Mapping"
+// tool to try a raw ad name (or an already-split Product + Product Type)
+// against it directly -- which also records a brand-new combination as
+// Unmapped so it shows up in the list below rather than only existing
+// transiently in the check result.
+function mpmStatusBadge(m) {
+  return m.product_code
+    ? `<span class="badge badge-tested_proven">Mapped &rarr; ${escapeHtml(m.product_name)}</span>`
+    : '<span class="badge badge-unmapped">Unmapped</span>';
+}
+
+function metaProductMappingRowHtml(m) {
+  const familyOptions = state.metaProductFamilies
+    .map((f) => `<option value="${escapeHtml(f.product_code)}">${escapeHtml(f.product_name)}</option>`)
+    .join('');
+  return `
+    <div class="mpm-row">
+      <div class="mpm-row-main">
+        <span class="mpm-combo">${escapeHtml(m.meta_product)} <span class="mpm-combo-sep">+</span> ${escapeHtml(m.meta_product_type)}</span>
+        ${mpmStatusBadge(m)}
+        <button type="button" class="btn btn-ghost btn-sm" onclick="deleteMetaProductMapping(${m.id})">Remove</button>
+      </div>
+      ${!m.product_code ? `
+        <div class="mpm-resolve-row">
+          <select id="mpm-resolve-${m.id}">
+            <option value="">— select internal product family —</option>
+            ${familyOptions}
+          </select>
+          <button type="button" class="btn btn-primary btn-sm" onclick="resolveMetaProductMapping(${m.id})">Map</button>
+        </div>` : ''}
+    </div>`;
+}
+
+function renderMetaProductMappings() {
+  const list = document.getElementById('mpm-list');
+  list.innerHTML = state.metaProductMappings.length
+    ? state.metaProductMappings.map(metaProductMappingRowHtml).join('')
+    : '<div class="attention-empty">No Meta Product Mappings yet — use "Check Mapping" above to look up your first ad name.</div>';
+}
+
+async function refreshMetaProductMappings() {
+  state.metaProductMappings = await api('/meta-product-mappings');
+  renderMetaProductMappings();
+}
+
+function renderMpmCheckResult(mapping, batchNo) {
+  const el = document.getElementById('mpm-check-result');
+  if (!mapping) { el.innerHTML = ''; return; }
+  const batchLine = batchNo ? `<span class="admin-note">Batch No. ${escapeHtml(batchNo)} (metadata only — not used for attribution)</span>` : '';
+  const statusLine = mapping.product_code
+    ? mpmStatusBadge(mapping)
+    : '<span class="badge badge-unmapped">Unmapped — resolve it in the list below</span>';
+  el.innerHTML = `
+    <div class="mpm-check-result-card">
+      <span class="mpm-combo">${escapeHtml(mapping.meta_product)} <span class="mpm-combo-sep">+</span> ${escapeHtml(mapping.meta_product_type)}</span>
+      ${statusLine}
+      ${batchLine}
+    </div>`;
+}
+
+async function checkMetaProductMapping() {
+  const input = document.getElementById('mpm-check-input');
+  const adName = input.value.trim();
+  if (!adName) return toast('Enter a Meta ad name to check', true);
+  try {
+    const { mapping, batch_no } = await api('/meta-product-mappings/check', {
+      method: 'POST',
+      body: JSON.stringify({ ad_name: adName }),
+    });
+    renderMpmCheckResult(mapping, batch_no);
+    await refreshMetaProductMappings();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function resolveMetaProductMapping(id) {
+  const sel = document.getElementById(`mpm-resolve-${id}`);
+  const productCode = sel.value;
+  if (!productCode) return toast('Select which internal product family this maps to', true);
+  const family = state.metaProductFamilies.find((f) => f.product_code === productCode);
+  try {
+    await api(`/meta-product-mappings/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ product_code: productCode, product_name: family ? family.product_name : productCode }),
+    });
+    toast('Mapping saved');
+    renderMpmCheckResult(null);
+    await refreshMetaProductMappings();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function deleteMetaProductMapping(id) {
+  if (!(await confirmDialog('Remove this mapping? A future ad with this exact Product + Product Type will show as Unmapped again.'))) return;
+  try {
+    await api(`/meta-product-mappings/${id}`, { method: 'DELETE' });
+    toast('Mapping removed');
+    renderMpmCheckResult(null);
+    await refreshMetaProductMappings();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+document.getElementById('mpm-check-btn').addEventListener('click', checkMetaProductMapping);
+document.getElementById('mpm-check-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') checkMetaProductMapping();
+});
+
 document.querySelectorAll('.core-view-btn').forEach((btn) => {
   btn.addEventListener('click', () => setCoreView(btn.dataset.view));
 });
