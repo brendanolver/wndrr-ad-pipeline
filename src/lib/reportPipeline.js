@@ -322,9 +322,14 @@ async function buildCategorySalesCadence() {
   // Trailing 7 days (today and the 6 before it) -- the "how much have we
   // sold lately" figure Core's new column shows, same window ApparelMagic's
   // own qty7 velocity uses elsewhere in this app, just summed per category
-  // instead of per style.
+  // instead of per style. The PRIOR 7 days (the 7 immediately before that)
+  // is this figure's own week-over-week comparison -- the trend arrow next
+  // to it -- kept separate from the monthly/MTD YoY comparisons above since
+  // "up or down vs last week" is a different, faster-moving question.
   const last7dStart = new Date(today); last7dStart.setDate(last7dStart.getDate() - 6);
   const last7dEnd = today;
+  const prev7dStart = new Date(today); prev7dStart.setDate(prev7dStart.getDate() - 13);
+  const prev7dEnd = new Date(today); prev7dEnd.setDate(prev7dEnd.getDate() - 7);
 
   function inWindow(day, start, end) {
     const t = new Date(day).setHours(0, 0, 0, 0);
@@ -352,15 +357,16 @@ async function buildCategorySalesCadence() {
     });
   }
 
-  const totals = new Map(); // category -> { thisPeriod, lastYear, last7d, months: [{units, lyUnits}, ...] }
+  const totals = new Map(); // category -> { thisPeriod, lastYear, last7d, prev7d, months: [{units, lyUnits}, ...] }
   for (const r of rows) {
     if (!totals.has(r.category)) {
-      totals.set(r.category, { thisPeriod: 0, lastYear: 0, last7d: 0, months: monthDefs.map(() => ({ units: 0, lyUnits: 0 })) });
+      totals.set(r.category, { thisPeriod: 0, lastYear: 0, last7d: 0, prev7d: 0, months: monthDefs.map(() => ({ units: 0, lyUnits: 0 })) });
     }
     const entry = totals.get(r.category);
     if (inWindow(r.day, thisStart, thisEnd)) entry.thisPeriod += r.qty;
     if (inWindow(r.day, lastYearStart, lastYearEnd)) entry.lastYear += r.qty;
     if (inWindow(r.day, last7dStart, last7dEnd)) entry.last7d += r.qty;
+    if (inWindow(r.day, prev7dStart, prev7dEnd)) entry.prev7d += r.qty;
     monthDefs.forEach((m, idx) => {
       if (inWindow(r.day, m.start, m.end)) entry.months[idx].units += r.qty;
       if (inWindow(r.day, m.lyStart, m.lyEnd)) entry.months[idx].lyUnits += r.qty;
@@ -369,12 +375,13 @@ async function buildCategorySalesCadence() {
 
   const categories = [...totals.entries()]
     .filter(([category]) => category) // drop rows with no Product type set
-    .map(([category, { thisPeriod, lastYear, last7d, months }]) => ({
+    .map(([category, { thisPeriod, lastYear, last7d, prev7d, months }]) => ({
       category,
       this_period_units: Math.round(thisPeriod),
       last_year_units: Math.round(lastYear),
       pct_change: lastYear > 0 ? Math.round(((thisPeriod - lastYear) / lastYear) * 100) : (thisPeriod > 0 ? null : 0),
       last_7d_units: Math.round(last7d),
+      last_7d_pct_change: prev7d > 0 ? Math.round(((last7d - prev7d) / prev7d) * 100) : (last7d > 0 ? null : 0),
       months: months.map((m, idx) => {
         const units = Math.round(m.units);
         const lyUnits = Math.round(m.lyUnits);

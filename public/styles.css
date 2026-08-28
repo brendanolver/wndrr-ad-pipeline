@@ -477,10 +477,10 @@ main{padding:20px 24px;}
    narrower window instead of overflowing it. The header and the row
    toggles share this template so their columns always line up. */
 .core-shoot-category-header,
-.core-shoot-category-toggle{display:grid;grid-template-columns:16px 180px 420px 90px 150px 120px 150px;column-gap:16px;align-items:center;width:100%;max-width:1250px;}
+.core-shoot-category-toggle{display:grid;grid-template-columns:16px 180px 130px 420px 150px 120px 150px;column-gap:16px;align-items:center;width:100%;max-width:1300px;}
 @media (max-width:1200px){
   .core-shoot-category-header,
-  .core-shoot-category-toggle{grid-template-columns:16px minmax(110px,1fr) minmax(260px,2.6fr) minmax(70px,0.6fr) minmax(100px,1fr) minmax(90px,0.8fr) minmax(100px,1fr);column-gap:10px;max-width:100%;}
+  .core-shoot-category-toggle{grid-template-columns:16px minmax(110px,1fr) minmax(110px,0.9fr) minmax(260px,2.6fr) minmax(100px,1fr) minmax(90px,0.8fr) minmax(100px,1fr);column-gap:10px;max-width:100%;}
 }
 /* Each row gets its own divider line (not just the header) and more
    breathing room -- with the widened Sales Cadence column, rows read as
@@ -535,10 +535,16 @@ main{padding:20px 24px;}
 .core-cadence-month-value.core-trend-flat{color:var(--text-muted);}
 .core-cadence-month-label{font-size:9.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.2px;white-space:nowrap;margin-top:2px;}
 
-/* Last 7D Sales -- a plain rolling total, its own column (not part of the
-   cadence widget) since it's not compared/coloured like everything else. */
+/* Last 7D Sales -- a rolling total plus its own week-over-week trend (the
+   prior 7 days, kept separate from the cadence widget's YoY comparisons
+   since "up or down vs last week" is a faster-moving, different question).
+   Front-loaded as the first data column since it's the fastest "how are we
+   doing right now" read. */
+.core-shoot-7d-cell{display:flex;flex-direction:column;gap:3px;}
+.core-shoot-7d-row{display:flex;align-items:baseline;gap:6px;}
 .core-shoot-7d-value{font-weight:700;font-size:13px;color:var(--text);font-variant-numeric:tabular-nums;}
 .core-shoot-7d-label{font-size:11px;color:var(--text-muted);}
+.core-shoot-7d-trend{font-size:11px;font-weight:700;white-space:nowrap;}
 .core-shoot-category-body{display:flex;flex-direction:column;gap:7px;padding:2px 6px 16px 32px;}
 
 .core-shoot-review-row{display:grid;grid-template-columns:2fr 4fr auto;gap:16px;align-items:center;background:white;border:1px solid var(--border);border-radius:var(--r);padding:11px 14px;}
