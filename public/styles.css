@@ -422,6 +422,7 @@ main{padding:20px 24px;}
 .pw-slot-status{font-size:15px;}
 .pw-slot-status.fulfilled{color:var(--green);}
 .pw-slot-status.unfulfilled{color:var(--text-muted);}
+.pw-slot-done-checkbox{width:17px;height:17px;accent-color:var(--green);cursor:pointer;flex-shrink:0;}
 .pw-slot-link-select{font-size:12px;padding:5px 7px;}
 
 .settings-field-row{display:flex;align-items:center;gap:10px;margin-bottom:18px;}

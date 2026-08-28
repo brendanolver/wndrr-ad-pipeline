@@ -598,6 +598,21 @@ function renderDropsRow() {
   document.getElementById('drops-step-footer-count').textContent = `${upcoming.length} upcoming drop${upcoming.length === 1 ? '' : 's'}`;
 }
 
+// Refreshes just the Upcoming/Past Drops cards' summary numbers -- used
+// after a Required Concepts tickbox change inside a Product view, so the
+// drop-level progress bar/"X more required" line is already current by the
+// time someone navigates back, without a full loadAll() resetting the rest
+// of the page's state.
+async function refreshDropsRow() {
+  try {
+    const dropsRes = await api('/drops');
+    state.drops = dropsRes.drops;
+    renderDropsRow();
+  } catch (e) {
+    // Non-critical -- the drops row will pick up the change on next full load.
+  }
+}
+
 function togglePlanningSection(key) {
   const body = document.getElementById(`section-body-${key}`);
   const btn = document.querySelector(`.accordion-toggle[data-section="${key}"]`);
@@ -919,8 +934,10 @@ function renderRequiredConcepts(data) {
     const sourceBadge = s.source === 'proven'
       ? '<span class="badge badge-tested_proven">Proven</span>'
       : '<span class="badge badge-new_experimental">New/Test</span>';
+    // Fulfilled rows get an actual tickbox (not just a static ✓) -- checking
+    // it marks the concept done, unchecking reverts it. See toggleConceptDone.
     const statusIcon = fulfilled
-      ? '<span class="pw-slot-status fulfilled">✓</span>'
+      ? `<input type="checkbox" class="pw-slot-done-checkbox" data-asset-id="${s.asset_id}" ${s.asset_status === 'uploaded_live' ? 'checked' : ''} title="Mark this concept done">`
       : '<span class="pw-slot-status unfulfilled">○</span>';
     const fulfilledLine = fulfilled
       ? `<span class="job-status-pill">${assetStatusLabel(s.asset_status)}</span>`
@@ -960,6 +977,30 @@ function renderRequiredConcepts(data) {
       linkExistingAsset(Number(sel.dataset.slotId), Number(sel.value));
     });
   });
+
+  list.querySelectorAll('.pw-slot-done-checkbox').forEach((cb) => {
+    cb.addEventListener('change', () => toggleConceptDone(Number(cb.dataset.assetId), cb.checked));
+  });
+}
+
+// Fast "mark done" shortcut straight to the Board's final Kanban status --
+// reuses the same status field/endpoint the Board's drag-and-drop uses, so
+// Board and Planning always agree, and current_coverage (this product's
+// progress bar, plus the Drop card back in Upcoming/Past Drops) picks it up
+// automatically since it now only counts 'uploaded_live' assets, not just an
+// asset row existing. Unticking reverts to 'not_started' -- same as dragging
+// a Board card backwards; nothing is lost since status_history is append-only.
+async function toggleConceptDone(assetId, done) {
+  try {
+    await api(`/creative-assets/${assetId}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: done ? 'uploaded_live' : 'not_started' }),
+    });
+    await loadProductView(state.currentDropId, state.currentProduct.product_code);
+    await refreshDropsRow();
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 function assetStatusLabel(status) {

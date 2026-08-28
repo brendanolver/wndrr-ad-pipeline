@@ -2,11 +2,15 @@ const { computeCreativeTarget } = require('./creativeTarget');
 const apparelmagic = require('./apparelmagic');
 const { deriveProductCode } = apparelmagic;
 
-// "Current Creative Coverage" = count of Creative Assets (Phase 1's "one row
-// per ad concept per style" entity) linked to the style, any status. This is
-// deliberately the only creative entity we count -- Planning's own Creative
-// Jobs are a plan to close the gap, not the gap closed, so they never
-// inflate coverage (see schema.sql's comment on creative_jobs). No
+// "Current Creative Coverage" = a count of Creative Assets (Phase 1's "one
+// row per ad concept per style" entity) linked to the style -- the caller
+// decides which ones count by what it passes as assetCounts (see
+// planningData.js: Drops counts only status 'uploaded_live', i.e. actually
+// completed/live work, not merely an asset row existing; High Stock's own
+// informational figure still counts any status). Either way this is
+// deliberately the only creative entity ever counted -- Planning's own
+// Creative Jobs are a plan to close the gap, not the gap closed, so they
+// never inflate coverage (see schema.sql's comment on creative_jobs). No
 // duplicate-export inflation risk either, since a Creative Asset already
 // represents one concept, not one technical export.
 function coverageStatus(coverage, target) {

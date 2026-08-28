@@ -1,7 +1,7 @@
 const express = require('express');
 const { pool } = require('../db');
 const { buildCoverage } = require('../lib/coverage');
-const { fetchAmData, fetchMetaAdsData, getRules, getAssetCounts } = require('../lib/planningData');
+const { fetchAmData, fetchMetaAdsData, getRules, getCompletedAssetCounts } = require('../lib/planningData');
 const { isAdExcludedCategory } = require('../lib/apparelmagic');
 
 const router = express.Router();
@@ -52,7 +52,7 @@ router.get('/', async (req, res, next) => {
       stylesByDrop.get(style.drop_id).push(style);
     }
 
-    const assetCounts = await getAssetCounts(stylesResult.rows.map((s) => s.id));
+    const assetCounts = await getCompletedAssetCounts(stylesResult.rows.map((s) => s.id));
 
     const drops = dropsResult.rows.map((drop) => {
       const styleRows = excludeAdExcludedStyles(stylesByDrop.get(drop.id) || [], am.amDetails);
@@ -222,7 +222,7 @@ router.get('/:id', async (req, res, next) => {
       fetchAmData(),
       fetchMetaAdsData(),
     ]);
-    const assetCounts = await getAssetCounts(stylesResult.rows.map((s) => s.id));
+    const assetCounts = await getCompletedAssetCounts(stylesResult.rows.map((s) => s.id));
     const styleRows = excludeAdExcludedStyles(stylesResult.rows, am.amDetails);
     const coverage = sortByUrgency(
       buildCoverage(styleRows, { assetCounts, amStock: am.amStock, amOnOrder: am.amOnOrder, amDetails: am.amDetails, amSizeRanges: am.amSizeRanges, rules, liveMetaCounts: metaAdsData.metaLiveCounts })

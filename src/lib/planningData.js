@@ -52,4 +52,25 @@ async function getAssetCounts(styleIds) {
   return new Map(result.rows.map((r) => [r.style_id, r.count]));
 }
 
-module.exports = { fetchAmData, fetchMetaAdsData, getRules, getAssetCounts };
+// Drops' own "current_coverage" (the progress bar on Upcoming/Past Drops
+// cards and a Product view) counts only actually-completed creative --
+// status 'uploaded_live', the same status the Board's kanban drag-and-drop
+// uses for its final column -- not just a placeholder asset row existing.
+// A Required Concept slot's asset is auto-created the moment the slot is
+// generated (see dropProductPlans.js), so counting "any status" made
+// coverage look complete the instant slots existed, before any real work
+// had happened; the Required Concepts tickbox is what actually moves an
+// asset into this count now. Kept separate from getAssetCounts above
+// (still "any status") since High Stock's own informational Creative
+// Assets figure isn't part of this ask and shouldn't silently change.
+async function getCompletedAssetCounts(styleIds) {
+  if (!styleIds.length) return new Map();
+  const result = await pool.query(
+    `SELECT style_id, COUNT(*)::int AS count FROM creative_assets
+     WHERE style_id = ANY($1::int[]) AND status = 'uploaded_live' GROUP BY style_id`,
+    [styleIds]
+  );
+  return new Map(result.rows.map((r) => [r.style_id, r.count]));
+}
+
+module.exports = { fetchAmData, fetchMetaAdsData, getRules, getAssetCounts, getCompletedAssetCounts };
