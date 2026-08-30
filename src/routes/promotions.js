@@ -1,45 +1,116 @@
 const express = require('express');
 const { pool } = require('../db');
-const { coverageStatus } = require('../lib/coverage');
 const { STATUS_LABELS } = require('../lib/statuses');
 
 const router = express.Router();
 
-// Mirrors drops.js's rewriteRanks/summarize/sortByUrgency -- Promotions
-// reuses Upcoming Drops' own shape (a numeric target vs current coverage
-// per requirement, rolled up into a green/amber/red summary and a "most
-// urgent" shortlist) so the two pages read the same way, just with Campaign
-// Stages standing in for Products.
-function summarizeStage(stage, covered) {
+// "Ready" means approved and genuinely usable, not merely committed to the
+// workflow -- qc is included alongside uploaded_live because a promotion is
+// planned ahead of its launch, so nothing can be literally live yet for
+// most of the time it matters. See summarizeStage below for why this is
+// kept separate from "Planned" rather than folded into one coverage count
+// (the bug this whole redesign replaces: counting any linked item as
+// "covered" regardless of status).
+const READY_STATUSES = new Set(['qc', 'uploaded_live']);
+const URGENCY_RANK = { at_risk: 2, needs_attention: 1, on_track: 0 };
+const URGENCY_DUE_SOON_DAYS = 7;
+const URGENCY_DUE_APPROACHING_DAYS = 21;
+
+// Simple and transparent by design (per the spec): a stage with nothing
+// still required is always On Track. Otherwise the closer its due date,
+// the more a remaining gap matters -- a stage with no due date set can't be
+// judged by closeness at all, so it defaults to Needs Attention rather than
+// silently reading as fine.
+function stageUrgency(stillRequired, daysUntilDue) {
+  if (stillRequired <= 0) return 'on_track';
+  if (daysUntilDue == null) return 'needs_attention';
+  if (daysUntilDue <= URGENCY_DUE_SOON_DAYS) return 'at_risk';
+  if (daysUntilDue <= URGENCY_DUE_APPROACHING_DAYS) return 'needs_attention';
+  return 'on_track';
+}
+
+// counts: { ready, planned } -- planned is EVERY shoot_plan_item linked to
+// this stage regardless of status ("committed into the workflow"), ready is
+// the ones through qc/uploaded_live. still_required (not "planned") is what
+// drives urgency and the headline gap badge -- per the spec, planned
+// creative is never treated as fully covering the requirement.
+function summarizeStage(stage, { ready = 0, planned = 0 } = {}) {
+  const target = stage.required_count;
+  const stillRequired = Math.max(0, target - ready);
+  const coveragePct = target > 0 ? Math.min(100, Math.round((ready / target) * 100)) : 100;
+  const daysUntilDue = stage.due_date ? Math.ceil((new Date(stage.due_date) - new Date()) / 86400000) : null;
+  const urgency = stageUrgency(stillRequired, daysUntilDue);
+
   return {
     ...stage,
-    covered,
-    remaining: Math.max(0, stage.required_count - covered),
-    status: coverageStatus(covered, stage.required_count),
+    target,
+    ready,
+    planned,
+    still_required: stillRequired,
+    coverage_pct: coveragePct,
+    days_until_due: daysUntilDue,
+    urgency,
   };
 }
 
 function summarizePromotion(promotion, stages) {
-  const green = stages.filter((s) => s.status === 'green').length;
-  const amber = stages.filter((s) => s.status === 'amber').length;
-  const red = stages.filter((s) => s.status === 'red').length;
-  const totalCovered = stages.reduce((sum, s) => sum + s.covered, 0);
-  const totalTarget = stages.reduce((sum, s) => sum + s.required_count, 0);
-  const overallPct = totalTarget > 0 ? Math.round((totalCovered / totalTarget) * 100) : null;
-  const mostUrgent = [...stages].filter((s) => s.remaining > 0).sort((a, b) => b.remaining - a.remaining).slice(0, 3);
+  const totalRequired = stages.reduce((sum, s) => sum + s.target, 0);
+  const totalReady = stages.reduce((sum, s) => sum + s.ready, 0);
+  // The overview's "Planned" bucket is deliberately the NOT-yet-ready
+  // portion of each stage's committed work (not each stage's own raw
+  // "planned" count, which includes its ready items too) -- so Ready +
+  // Planned + Missing always adds back up to Total Required for the
+  // progress-bar breakdown, matching the spec's own worked example.
+  const totalPlanned = stages.reduce((sum, s) => sum + Math.max(0, s.planned - s.ready), 0);
+  const totalMissing = Math.max(0, totalRequired - totalReady - totalPlanned);
+  const overallPct = totalRequired > 0 ? Math.round((totalReady / totalRequired) * 100) : null;
   const daysUntilLaunch = Math.ceil((new Date(promotion.start_date) - new Date()) / 86400000);
-  // Same "reads as Needs Attention until proven otherwise" rule as Drops:
-  // zero stages (nothing organised yet) or any stage still short is Needs
-  // Attention; only every stage fully covered is On Track.
-  const onTrack = stages.length > 0 && stages.every((s) => s.status === 'green');
+
+  const onTrackCount = stages.filter((s) => s.urgency === 'on_track').length;
+  const needsAttentionCount = stages.filter((s) => s.urgency === 'needs_attention').length;
+  const atRiskCount = stages.filter((s) => s.urgency === 'at_risk').length;
+
+  // A promotion's own status is the worst urgency among its still-short
+  // stages -- one stage close to its deadline with a real gap matters more
+  // than an okay-looking overall %. Zero stages reads as Needs Attention
+  // (nothing organised yet), same convention this page has always used.
+  const gapStages = stages.filter((s) => s.still_required > 0);
+  let status = 'on_track';
+  if (!stages.length) status = 'needs_attention';
+  else if (gapStages.length) {
+    status = gapStages.reduce((worst, s) => (URGENCY_RANK[s.urgency] > URGENCY_RANK[worst] ? s.urgency : worst), 'on_track');
+  }
+
+  // "Next priority" / "Most urgent stage": worst urgency first, then
+  // whichever due date is soonest, then the largest remaining gap --
+  // stages with no due date sort last among equally-urgent ones since
+  // there's no deadline pressure to point at.
+  const mostUrgentStage = [...gapStages].sort((a, b) => {
+    const rankDiff = URGENCY_RANK[b.urgency] - URGENCY_RANK[a.urgency];
+    if (rankDiff !== 0) return rankDiff;
+    if (a.days_until_due == null && b.days_until_due == null) return b.still_required - a.still_required;
+    if (a.days_until_due == null) return 1;
+    if (b.days_until_due == null) return -1;
+    return a.days_until_due - b.days_until_due;
+  })[0] || null;
 
   return {
     ...promotion,
     days_until_launch: daysUntilLaunch,
     stages,
-    summary: { stageCount: stages.length, green, amber, red, totalCovered, totalTarget, overallPct },
-    most_urgent: mostUrgent,
-    status: onTrack ? 'on_track' : 'needs_attention',
+    summary: {
+      stage_count: stages.length,
+      total_required: totalRequired,
+      total_ready: totalReady,
+      total_planned: totalPlanned,
+      total_missing: totalMissing,
+      overall_pct: overallPct,
+      on_track_count: onTrackCount,
+      needs_attention_count: needsAttentionCount,
+      at_risk_count: atRiskCount,
+    },
+    most_urgent_stage: mostUrgentStage,
+    status,
   };
 }
 
@@ -52,17 +123,24 @@ async function fetchStagesWithCoverage(promotionIds) {
   const stageIds = stagesResult.rows.map((s) => s.id);
   const coveredResult = stageIds.length
     ? await pool.query(
-        `SELECT promotion_stage_id, COUNT(*)::int AS count FROM shoot_plan_items
-         WHERE promotion_stage_id = ANY($1::int[]) GROUP BY promotion_stage_id`,
+        `SELECT spi.promotion_stage_id, ca.status FROM shoot_plan_items spi
+         LEFT JOIN creative_assets ca ON ca.id = spi.asset_id
+         WHERE spi.promotion_stage_id = ANY($1::int[])`,
         [stageIds]
       )
     : { rows: [] };
-  const coveredByStage = new Map(coveredResult.rows.map((r) => [r.promotion_stage_id, r.count]));
+  const countsByStage = new Map();
+  for (const row of coveredResult.rows) {
+    const counts = countsByStage.get(row.promotion_stage_id) || { ready: 0, planned: 0 };
+    counts.planned += 1;
+    if (READY_STATUSES.has(row.status)) counts.ready += 1;
+    countsByStage.set(row.promotion_stage_id, counts);
+  }
 
   const stagesByPromotion = new Map();
   for (const stage of stagesResult.rows) {
     if (!stagesByPromotion.has(stage.promotion_id)) stagesByPromotion.set(stage.promotion_id, []);
-    stagesByPromotion.get(stage.promotion_id).push(summarizeStage(stage, coveredByStage.get(stage.id) || 0));
+    stagesByPromotion.get(stage.promotion_id).push(summarizeStage(stage, countsByStage.get(stage.id)));
   }
   return stagesByPromotion;
 }
@@ -168,7 +246,7 @@ router.delete('/:id', async (req, res, next) => {
 
 router.post('/:id/stages', async (req, res, next) => {
   try {
-    const { name, required_count } = req.body || {};
+    const { name, required_count, due_date } = req.body || {};
     if (!name || !name.trim()) return res.status(400).json({ error: 'name is required' });
     const count = required_count === undefined ? 1 : Number(required_count);
     if (!Number.isFinite(count) || count < 0) return res.status(400).json({ error: 'required_count must be a non-negative number' });
@@ -181,10 +259,10 @@ router.post('/:id/stages', async (req, res, next) => {
       [req.params.id]
     );
     const result = await pool.query(
-      `INSERT INTO promotion_stages (promotion_id, name, required_count, sort_order) VALUES ($1, $2, $3, $4) RETURNING *`,
-      [req.params.id, name.trim(), count, maxOrder.rows[0].max_order + 1]
+      `INSERT INTO promotion_stages (promotion_id, name, required_count, sort_order, due_date) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [req.params.id, name.trim(), count, maxOrder.rows[0].max_order + 1, due_date || null]
     );
-    res.status(201).json(summarizeStage(result.rows[0], 0));
+    res.status(201).json(summarizeStage(result.rows[0]));
   } catch (err) {
     next(err);
   }
@@ -216,7 +294,7 @@ router.put('/stages/reorder', async (req, res, next) => {
 
 router.put('/stages/:stageId', async (req, res, next) => {
   try {
-    const { name, required_count } = req.body || {};
+    const { name, required_count, due_date } = req.body || {};
     const existing = await pool.query('SELECT * FROM promotion_stages WHERE id = $1', [req.params.stageId]);
     if (!existing.rows.length) return res.status(404).json({ error: 'Stage not found' });
     const current = existing.rows[0];
@@ -228,16 +306,26 @@ router.put('/stages/:stageId', async (req, res, next) => {
       if (!Number.isFinite(count) || count < 0) return res.status(400).json({ error: 'required_count must be a non-negative number' });
       nextCount = count;
     }
+    // Explicit-clear supported, same as PUT /drops/:id's end_date: sending
+    // due_date: null (or '') removes it, omitting the key leaves it as-is.
+    const nextDueDate = due_date !== undefined ? (due_date || null) : current.due_date;
 
     const result = await pool.query(
-      `UPDATE promotion_stages SET name = $1, required_count = $2, updated_at = now() WHERE id = $3 RETURNING *`,
-      [nextName, nextCount, req.params.stageId]
+      `UPDATE promotion_stages SET name = $1, required_count = $2, due_date = $3, updated_at = now() WHERE id = $4 RETURNING *`,
+      [nextName, nextCount, nextDueDate, req.params.stageId]
     );
     const coveredResult = await pool.query(
-      'SELECT COUNT(*)::int AS count FROM shoot_plan_items WHERE promotion_stage_id = $1',
+      `SELECT ca.status FROM shoot_plan_items spi
+       LEFT JOIN creative_assets ca ON ca.id = spi.asset_id
+       WHERE spi.promotion_stage_id = $1`,
       [req.params.stageId]
     );
-    res.json(summarizeStage(result.rows[0], coveredResult.rows[0].count));
+    const counts = { ready: 0, planned: 0 };
+    for (const row of coveredResult.rows) {
+      counts.planned += 1;
+      if (READY_STATUSES.has(row.status)) counts.ready += 1;
+    }
+    res.json(summarizeStage(result.rows[0], counts));
   } catch (err) {
     next(err);
   }

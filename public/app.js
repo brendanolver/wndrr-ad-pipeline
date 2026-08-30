@@ -2250,24 +2250,27 @@ async function removeShootPlanItem(id) {
 // a GWP, or nothing SKU-specific at all -- see promotion_stages in
 // schema.sql), so its requirement unit is a fully custom-per-promotion
 // Campaign Stage instead.
+// Ready/Planned/Missing urgency -> the same green/amber/red tokens used
+// everywhere else in this app (coverage-progress-fill, coverage-card-gap,
+// drop-card-status), so Promotions reads as the same visual language as
+// Drops/Core/High Stock rather than inventing its own palette.
+function promotionUrgencyColor(u) { return u === 'at_risk' ? 'red' : u === 'needs_attention' ? 'amber' : 'green'; }
+function promotionUrgencyLabel(u) { return u === 'at_risk' ? 'At Risk' : u === 'needs_attention' ? 'Needs Attention' : 'On Track'; }
+
 function promotionCardHtml(p) {
-  const onTrack = p.status === 'on_track';
+  const color = promotionUrgencyColor(p.status);
   const dateRange = p.end_date ? `${formatDate(p.start_date)} – ${formatDate(p.end_date)}` : formatDate(p.start_date);
+  const pct = p.summary.overall_pct;
   return `
     <div class="drop-card" data-promotion-id="${p.id}">
       <div class="drop-card-header">
         <div class="drop-card-name">${escapeHtml(p.name)}</div>
+        <div class="drop-card-status ${color === 'green' ? 'on-track' : color === 'amber' ? 'needs-attention' : 'at-risk'}">${promotionUrgencyLabel(p.status)}</div>
       </div>
       <div class="drop-card-date">${dateRange} · ${p.days_until_launch >= 0 ? p.days_until_launch + ' days to launch' : 'Launched'}</div>
-      ${onTrack ? '<div class="drop-card-status on-track">✓ On Track</div>' : ''}
-      <div class="drop-card-counts">
-        <span class="green">🟢 ${p.summary.green}</span>
-        <span class="amber">🟠 ${p.summary.amber}</span>
-        <span class="red">🔴 ${p.summary.red}</span>
-      </div>
-      <div class="drop-card-pct">${p.summary.totalCovered} / ${p.summary.totalTarget} requirements covered${p.summary.overallPct !== null ? ' — ' + p.summary.overallPct + '%' : ''}</div>
-      ${p.summary.overallPct !== null ? `<div class="coverage-progress-track"><div class="coverage-progress-fill ${onTrack ? 'green' : (p.summary.overallPct >= 50 ? 'amber' : 'red')}" style="width:${Math.min(100, p.summary.overallPct)}%;"></div></div>` : ''}
-      ${p.most_urgent[0] ? `<div class="drop-card-urgent">Most urgent: ${escapeHtml(p.most_urgent[0].name)} (${p.most_urgent[0].covered}/${p.most_urgent[0].required_count})</div>` : ''}
+      <div class="drop-card-pct">${p.summary.total_ready} / ${p.summary.total_required} Ready${pct !== null ? ' — ' + pct + '%' : ''}</div>
+      ${pct !== null ? `<div class="coverage-progress-track"><div class="coverage-progress-fill ${color}" style="width:${Math.min(100, pct)}%;"></div></div>` : ''}
+      ${p.most_urgent_stage ? `<div class="drop-card-urgent">Next priority: ${escapeHtml(p.most_urgent_stage.name)} — ${p.most_urgent_stage.still_required} missing</div>` : ''}
     </div>`;
 }
 
@@ -2359,18 +2362,45 @@ async function loadPromotionView(id) {
   }
 }
 
+// The prominent progress card at the top of a promotion's detail page --
+// same visual language as the Core weekly card (big %, thick progress bar,
+// pill breakdown) so Promotions reads as one of "the other WNDRR internal
+// dashboards" rather than a bespoke layout. Ready/Planned/Missing pills sum
+// to Total Required by construction (see summarizePromotion's total_planned
+// comment in promotions.js).
+function promotionOverviewHtml(p) {
+  const color = promotionUrgencyColor(p.status);
+  const dateRange = p.end_date ? `${formatDate(p.start_date)} – ${formatDate(p.end_date)}` : formatDate(p.start_date);
+  const s = p.summary;
+  const pct = s.overall_pct;
+  return `
+    <div class="promo-overview-card">
+      <div class="promo-overview-top">
+        <div>
+          <div class="promo-overview-label">PROMOTION OVERVIEW</div>
+          <div class="promo-overview-dates">${dateRange}</div>
+        </div>
+        <div class="drop-card-status ${color === 'green' ? 'on-track' : color === 'amber' ? 'needs-attention' : 'at-risk'}">${promotionUrgencyLabel(p.status)}</div>
+      </div>
+      <div class="promo-overview-pct-row">
+        <div class="promo-overview-pct">${pct !== null ? pct + '%' : '—'}</div>
+        <div class="promo-overview-pct-sub">${s.total_ready} / ${s.total_required} Ready · ${p.days_until_launch >= 0 ? p.days_until_launch + ' days to launch' : 'Launched'}</div>
+      </div>
+      <div class="promo-overview-progress-track"><div class="promo-overview-progress-fill ${color}" style="width:${pct !== null ? Math.min(100, pct) : 0}%;"></div></div>
+      <div class="promo-overview-pills">
+        <span class="promo-pill promo-pill-ready">${s.total_ready} Ready</span>
+        <span class="promo-pill promo-pill-planned">${s.total_planned} Planned</span>
+        <span class="promo-pill promo-pill-missing">${s.total_missing} Missing</span>
+      </div>
+    </div>`;
+}
+
 function renderPromotionView() {
   const p = state.currentPromotion;
   if (!p) return;
   document.getElementById('promotion-view-title').textContent = p.name;
   document.getElementById('promotion-view-edit-btn').onclick = () => openPromotionModal(p);
-  const dateRange = p.end_date ? `${formatDate(p.start_date)} – ${formatDate(p.end_date)}` : formatDate(p.start_date);
-  document.getElementById('promotion-view-summary').innerHTML = `
-    <div><strong>${dateRange}</strong><br>Dates</div>
-    <div><strong>${p.days_until_launch >= 0 ? p.days_until_launch : 0}</strong><br>Days to launch</div>
-    <div><strong>${p.summary.stageCount}</strong><br>Campaign Stages</div>
-    <div><strong>${p.summary.totalCovered} / ${p.summary.totalTarget}</strong><br>Requirements${p.summary.overallPct !== null ? ' — ' + p.summary.overallPct + '%' : ''}</div>
-  `;
+  document.getElementById('promotion-view-summary').innerHTML = promotionOverviewHtml(p);
   renderPromotionStageGrid();
 }
 
@@ -2392,9 +2422,9 @@ async function refreshCurrentPromotion() {
 }
 
 function promotionStageGapLabel(s) {
-  if (s.status === 'green') return '🟢 COVERAGE COMPLETE';
-  const icon = s.status === 'amber' ? '🟠' : '🔴';
-  return `${icon} ${s.remaining} more required`;
+  if (s.still_required <= 0) return '🟢 COVERAGE COMPLETE';
+  const icon = s.urgency === 'at_risk' ? '🔴' : s.urgency === 'needs_attention' ? '🟠' : '🟢';
+  return `${icon} ${s.still_required} still required`;
 }
 
 function promotionStageItemRowHtml(item) {
@@ -2406,14 +2436,15 @@ function promotionStageItemRowHtml(item) {
     </div>`;
 }
 
-// Each stage card doubles as both the coverage display (required/covered/
-// remaining/status, same visual language as a Drop product's coverage
-// card) and its own editor (rename/reorder/delete/required-count) -- no
-// separate edit mode, so customising a promotion's structure never needs
-// more than one click.
+// Each stage card doubles as both the coverage display (target/planned/
+// ready/still-required/urgency, same visual language as a Drop product's
+// coverage card) and its own editor (rename/reorder/delete/required-count/
+// due-date) -- no separate edit mode, so customising a promotion's
+// structure never needs more than one click.
 function promotionStageCardHtml(stage, index, total) {
-  const pct = stage.required_count > 0 ? Math.min(100, Math.round((stage.covered / stage.required_count) * 100)) : 100;
+  const color = promotionUrgencyColor(stage.urgency);
   const items = stage.items || [];
+  const dueLabel = stage.due_date ? `Due ${formatDate(stage.due_date)}` : 'No due date set';
   return `
     <div class="coverage-card promotion-stage-card" data-stage-id="${stage.id}" draggable="true">
       <div class="coverage-card-body">
@@ -2424,11 +2455,20 @@ function promotionStageCardHtml(stage, index, total) {
           <button type="button" class="btn btn-ghost btn-sm" ${index === total - 1 ? 'disabled' : ''} onclick="movePromotionStage(${stage.id}, 1)" title="Move down">&darr;</button>
           <button type="button" class="btn btn-ghost btn-sm" onclick="deletePromotionStage(${stage.id})" title="Delete stage">&times;</button>
         </div>
-        <div class="coverage-card-ratio">${stage.covered} / ${stage.required_count} covered</div>
-        <div class="coverage-progress-track"><div class="coverage-progress-fill ${stage.status}" style="width:${pct}%;"></div></div>
-        <div class="coverage-card-gap ${stage.status}">${promotionStageGapLabel(stage)}</div>
-        <label class="promotion-stage-required-row">Required
-          <input type="number" min="0" class="promotion-stage-count-input" value="${stage.required_count}" onchange="savePromotionStageCount(${stage.id}, this.value)">
+        <div class="promotion-stage-urgency-badge ${color}">${promotionUrgencyLabel(stage.urgency)}</div>
+        <div class="promotion-stage-due-row">
+          <span>${dueLabel}</span>
+          <input type="date" class="promotion-stage-due-input" value="${stage.due_date ? stage.due_date.slice(0, 10) : ''}" onchange="savePromotionStageDueDate(${stage.id}, this.value)">
+        </div>
+        <div class="coverage-card-ratio">${stage.ready} / ${stage.target} Ready</div>
+        <div class="coverage-progress-track"><div class="coverage-progress-fill ${color}" style="width:${stage.coverage_pct}%;"></div></div>
+        <div class="promotion-stage-stats-row">
+          <span>Planned: ${stage.planned}</span>
+          <span>Ready: ${stage.ready}</span>
+        </div>
+        <div class="coverage-card-gap ${color}">${promotionStageGapLabel(stage)}</div>
+        <label class="promotion-stage-required-row">Target
+          <input type="number" min="0" class="promotion-stage-count-input" value="${stage.target}" onchange="savePromotionStageCount(${stage.id}, this.value)">
         </label>
         ${items.length ? `<div class="promotion-stage-item-list">${items.map(promotionStageItemRowHtml).join('')}</div>` : ''}
         <button type="button" class="btn btn-primary btn-sm coverage-card-shoot-btn" onclick="shootThisWeekForPromotionStage(${stage.id})">+ Shoot This Week</button>
@@ -2496,15 +2536,17 @@ async function submitPromotionStageReorder(orderedIds) {
 async function addPromotionStage() {
   const nameEl = document.getElementById('new-stage-name');
   const countEl = document.getElementById('new-stage-count');
+  const dueEl = document.getElementById('new-stage-due-date');
   const name = nameEl.value.trim();
   if (!name) return toast('Stage name is required', true);
   try {
     await api(`/promotions/${state.currentPromotionId}/stages`, {
       method: 'POST',
-      body: JSON.stringify({ name, required_count: Number(countEl.value) || 0 }),
+      body: JSON.stringify({ name, required_count: Number(countEl.value) || 0, due_date: dueEl.value || null }),
     });
     nameEl.value = '';
     countEl.value = '1';
+    dueEl.value = '';
     toast('Stage added');
     await refreshCurrentPromotion();
     renderPromotionsRow();
@@ -2528,6 +2570,16 @@ async function savePromotionStageCount(id, value) {
   if (!Number.isFinite(count) || count < 0) return toast('Required count must be 0 or more', true);
   try {
     await api(`/promotions/stages/${id}`, { method: 'PUT', body: JSON.stringify({ required_count: count }) });
+    await refreshCurrentPromotion();
+    renderPromotionsRow();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function savePromotionStageDueDate(id, value) {
+  try {
+    await api(`/promotions/stages/${id}`, { method: 'PUT', body: JSON.stringify({ due_date: value || null }) });
     await refreshCurrentPromotion();
     renderPromotionsRow();
   } catch (e) {

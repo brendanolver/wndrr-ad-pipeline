@@ -245,12 +245,13 @@ main{padding:20px 24px;}
 .core-shoot-selected-badge{display:inline-block;padding:5px 12px;border-radius:var(--r-pill);background:var(--green-light);color:var(--green);font-size:12.5px;font-weight:700;white-space:nowrap;}
 
 /* Step 4 -- Promotions: reuses .drop-card's card shell for the landing
-   list (same green/amber/red counts, progress bar, "Most urgent" line as
-   Upcoming Drops -- see promotionCardHtml) and .coverage-card for each
-   Campaign Stage on the detail page (same required/covered/progress-bar/
-   status treatment as a Drop product's coverage card -- see
-   promotionStageCardHtml), so Promotions reads as the same page family
-   rather than a separate UI. */
+   list (progress bar, "Next priority" line, on-track/needs-attention/
+   at-risk status badge -- see promotionCardHtml) and .coverage-card for
+   each Campaign Stage on the detail page (target/planned/ready/still-
+   required/urgency treatment -- see promotionStageCardHtml), so Promotions
+   reads as the same page family rather than a separate UI. The detail
+   page's own prominent overview card (promo-overview-* below) mirrors the
+   Core weekly card's visual language. */
 .drops-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;margin-bottom:8px;}
 
 .planning-accordion{margin:24px 0 12px;border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;background:var(--surface);}
@@ -278,9 +279,10 @@ main{padding:20px 24px;}
 .drop-card-counts span.red{color:var(--red);}
 .drop-card-pct{font-size:13px;color:var(--text-secondary);font-weight:600;}
 .drop-card-urgent{font-size:11.5px;color:var(--text-muted);margin-top:9px;border-top:1px solid var(--border);padding-top:9px;}
-.drop-card-status{display:inline-block;padding:3px 9px;border-radius:var(--r-pill);font-size:12px;font-weight:700;}
+.drop-card-status{display:inline-block;padding:3px 9px;border-radius:var(--r-pill);font-size:12px;font-weight:700;white-space:nowrap;}
 .drop-card-status.on-track{background:var(--green-light);color:var(--green);}
-.drop-card-status.needs-attention{background:var(--red-light);color:var(--red);margin-bottom:6px;}
+.drop-card-status.needs-attention{background:var(--amber-light);color:var(--amber);}
+.drop-card-status.at-risk{background:var(--red-light);color:var(--red);}
 .drop-card-review-link-btn{font-size:12px;font-weight:600;color:var(--teal-dark);background:none;border:none;padding:0;cursor:pointer;font-family:inherit;display:block;}
 
 /* ── DROP MODAL: date quickpicks + auto-populated style checklist ── */
@@ -340,6 +342,35 @@ main{padding:20px 24px;}
 .promotion-stage-item-list{display:flex;flex-direction:column;gap:6px;margin-bottom:9px;padding-top:9px;border-top:1px solid var(--border);}
 .promotion-stage-item-row{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;}
 .promotion-stage-item-name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.promotion-stage-urgency-badge{display:inline-block;padding:2px 8px;border-radius:var(--r-pill);font-size:11px;font-weight:700;margin-bottom:8px;}
+.promotion-stage-urgency-badge.green{background:var(--green-light);color:var(--green);}
+.promotion-stage-urgency-badge.amber{background:var(--amber-light);color:var(--amber);}
+.promotion-stage-urgency-badge.red{background:var(--red-light);color:var(--red);}
+.promotion-stage-due-row{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11.5px;color:var(--text-muted);margin-bottom:9px;}
+.promotion-stage-due-input{font-size:11.5px;padding:3px 5px;width:130px;}
+.promotion-stage-stats-row{display:flex;gap:14px;font-size:12px;color:var(--text-secondary);margin:5px 0;}
+
+/* Promotion detail page overview -- same visual language as the Core
+   weekly card (icon-free variant: big %, thick progress bar, pill
+   breakdown) so a promotion's own page reads as "one of the other WNDRR
+   internal dashboards" per the redesign spec, not a bespoke layout. */
+.promo-overview-card{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--teal);border-radius:var(--r-lg);padding:16px 18px;margin-bottom:16px;box-shadow:var(--shadow-xs);}
+.promo-overview-top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;}
+.promo-overview-label{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);}
+.promo-overview-dates{font-size:14px;font-weight:700;margin-top:1px;color:var(--text);}
+.promo-overview-pct-row{display:flex;align-items:baseline;gap:10px;margin-top:12px;}
+.promo-overview-pct{font-size:30px;font-weight:800;line-height:1;color:var(--teal-dark);}
+.promo-overview-pct-sub{font-size:12px;color:var(--text-muted);font-weight:600;}
+.promo-overview-progress-track{background:var(--surface2);border-radius:var(--r-pill);height:9px;margin:12px 0;overflow:hidden;}
+.promo-overview-progress-fill{height:100%;border-radius:var(--r-pill);transition:width 0.3s;}
+.promo-overview-progress-fill.green{background:var(--green);}
+.promo-overview-progress-fill.amber{background:var(--amber);}
+.promo-overview-progress-fill.red{background:var(--red);}
+.promo-overview-pills{display:flex;gap:8px;flex-wrap:wrap;}
+.promo-pill{padding:4px 10px;border-radius:var(--r-pill);font-size:11px;font-weight:700;}
+.promo-pill-ready{background:var(--green-light);color:var(--green);}
+.promo-pill-planned{background:var(--amber-light);color:var(--amber);}
+.promo-pill-missing{background:var(--red-light);color:var(--red);}
 
 .back-link{background:none;border:none;color:var(--teal-dark);font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;padding:0;margin-bottom:14px;display:inline-block;}
 .back-link:hover{text-decoration:underline;}

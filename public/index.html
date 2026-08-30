@@ -293,16 +293,17 @@
             <button type="button" class="btn btn-ghost btn-sm" id="promotion-view-edit-btn">Edit</button>
           </div>
         </div>
-        <div id="promotion-view-summary" class="drop-view-summary"></div>
+        <div id="promotion-view-summary"></div>
 
         <div class="planning-section-header">
           <h2>Campaign Stages</h2>
-          <span class="admin-note">Add, rename, reorder, delete, and set how many creatives each stage needs</span>
+          <span class="admin-note">Add, rename, reorder, delete, and set how many creatives + which due date each stage needs</span>
         </div>
         <div id="promotion-stage-grid" class="coverage-grid"></div>
         <div class="stock-request-form">
           <input type="text" id="new-stage-name" placeholder="e.g. Hype / Tease">
           <input type="number" id="new-stage-count" min="0" value="1" title="Creatives required" style="width:80px;">
+          <input type="date" id="new-stage-due-date" title="Stage go-live / due date (optional)">
           <button type="button" class="btn btn-ghost btn-sm" onclick="addPromotionStage()">+ Add Stage</button>
         </div>
       </div>
