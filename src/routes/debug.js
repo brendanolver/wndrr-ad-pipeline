@@ -29,6 +29,9 @@ router.get('/pipeline/status', async (req, res, next) => {
 // whether AM carries the style at all (and its SOH), whether the Report
 // Pipeline resolved a tier for it, and what High Stock's own gates computed.
 // Search by product-name substring since style codes aren't always at hand.
+// Must match HIGH_STOCK_MIN_DAYS_SINCE_LAUNCH in highStockProducts.js.
+const HIGH_STOCK_MIN_DAYS_SINCE_LAUNCH = 14;
+
 router.get('/high-stock/lookup', async (req, res, next) => {
   try {
     const query = (req.query.name || '').trim().toLowerCase();
@@ -65,6 +68,7 @@ router.get('/high-stock/lookup', async (req, res, next) => {
       const qty7 = salesByStyle.get(styleCode)?.qty7 ?? 0;
       const sellThrough7Pct = (qty7 + soh) > 0 ? Math.round((qty7 / (qty7 + soh)) * 100) : 0;
       const local = localByCode.get(styleCode) || null;
+      const daysSinceLaunch = details.launchDate ? Math.floor((Date.now() - details.launchDate.getTime()) / 86400000) : null;
       return {
         style_code: styleCode,
         product_name: details.productName,
@@ -74,6 +78,11 @@ router.get('/high-stock/lookup', async (req, res, next) => {
         is_wndrr_style_code: apparelmagic.isWndrrStyleCode(styleCode),
         qty7,
         sell_through_7d_pct: sellThrough7Pct,
+        launch_date: details.launchDateRaw || null,
+        days_since_launch: daysSinceLaunch,
+        recent_launch_exclusion: daysSinceLaunch != null && daysSinceLaunch < HIGH_STOCK_MIN_DAYS_SINCE_LAUNCH
+          ? `launched ${daysSinceLaunch} day${daysSinceLaunch === 1 ? '' : 's'} ago -- excluded as a recent drop (< ${HIGH_STOCK_MIN_DAYS_SINCE_LAUNCH} days)`
+          : null,
         tier_lookup: tierEntry ? { tier: tierEntry.tier, index_score: tierEntry.indexScore } : 'not found in Report Pipeline tier map',
         local_exclusion: local
           ? (local.tier === 'core_proven' ? 'already tracked locally as core_proven'
