@@ -195,6 +195,7 @@ router.get('/:id', async (req, res, next) => {
       if (!itemsByStage.has(row.promotion_stage_id)) itemsByStage.set(row.promotion_stage_id, []);
       itemsByStage.get(row.promotion_stage_id).push({
         id: row.id,
+        asset_id: row.asset_id,
         product_code: row.product_code,
         product_name: row.product_name,
         creator: row.creator,

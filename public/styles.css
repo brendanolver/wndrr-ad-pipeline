@@ -326,12 +326,12 @@ main{padding:20px 24px;}
 .coverage-card-shoot-btn{width:100%;margin-top:2px;}
 
 /* Promotion Campaign Stage cards -- built on .coverage-card (same required/
-   covered/progress-bar/status pill as a Drop product), but each card is
-   its own inline editor (rename/reorder/delete/required-count) rather than
-   a click-to-navigate row, so the pointer cursor + hover border .coverage-
-   card gets by default are turned back off here. */
-.promotion-stage-card{cursor:default;}
-.promotion-stage-card:hover{border-color:var(--border);}
+   covered/progress-bar/status pill as a Drop product) and DOUBLES as a
+   click-to-navigate row into that stage's own planning page (see
+   loadPromotionStageView), same teal hover border every other .coverage-
+   card uses -- while still being its own inline editor for rename/reorder/
+   delete/required-count/due-date, so those controls need their own cursor
+   overrides to read as editable rather than part of the click target. */
 .promotion-stage-card.dragging{opacity:0.4;}
 .promotion-stage-card.drag-over{border-color:var(--teal);box-shadow:0 0 0 2px var(--teal-light);}
 .promotion-stage-head{display:flex;align-items:center;gap:6px;margin-bottom:9px;}
