@@ -525,3 +525,10 @@ CREATE TABLE IF NOT EXISTS meta_product_mappings (
 -- between ads for what's meant to be the same Product + Product Type.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_meta_product_mappings_key
   ON meta_product_mappings (UPPER(meta_product), UPPER(meta_product_type));
+
+-- ---------------------------------------------------------------------------
+-- Promotions V2: a stage's own go-live/due date drives its urgency (On
+-- Track / Needs Attention / At Risk in promotions.js) -- the closer the
+-- date, the more a remaining gap matters. Optional: plenty of stages
+-- (sitewide sale messaging, ongoing GWP) have no single hard deadline.
+ALTER TABLE promotion_stages ADD COLUMN IF NOT EXISTS due_date DATE;
