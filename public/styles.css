@@ -493,25 +493,23 @@ main{padding:20px 24px;}
    opportunity), one line each -- 2-3 reasons, one action, no metric
    columns. The full Priority/By Category views are unchanged, just tucked
    behind "View All Core Products" instead of being the default. */
-.core-shoot-planning-title{font-size:14px;font-weight:700;margin-bottom:2px;}
-.core-shoot-planning-subtitle{font-size:12px;color:var(--text-muted);margin-bottom:10px;}
+.core-shoot-planning-title{font-size:15.5px;font-weight:700;margin-bottom:2px;}
+.core-shoot-planning-subtitle{font-size:13px;color:var(--text-muted);margin-bottom:10px;}
 .core-shoot-planning-list{display:flex;flex-direction:column;margin-bottom:4px;}
 
-/* Grid, not flex-with-margin-left-auto: fixed column tracks keep every
-   category row (and the header above them) aligned to the same
-   positions, and since the tracks are sized to their content (fixed px,
-   not `fr`), the row's own width stops well short of 100% -- the
-   leftover space trails after the last column instead of opening up
-   between the category name and its data. The max-width caps how far
-   this can stretch on a wide desktop; the 900px breakpoint switches to
-   proportional (`fr`) tracks so the row can still shrink to fit a
-   narrower window instead of overflowing it. The header and the row
-   toggles share this template so their columns always line up. */
+/* Grid, not flex-with-margin-left-auto: proportional (`fr`) column tracks
+   keep every category row (and the header above them) aligned to the same
+   positions while still stretching to fill the full width of `main` (no
+   max-width cap) -- the Sales Cadence column, the widest content, gets the
+   largest share of any extra space on a wide desktop. The 1150px
+   breakpoint tightens the minimums and gap for a narrower window instead
+   of overflowing it. The header and the row toggles share this template so
+   their columns always line up. */
 .core-shoot-category-header,
-.core-shoot-category-toggle{display:grid;grid-template-columns:16px 180px 130px 360px 150px 120px 150px;column-gap:16px;align-items:center;width:100%;max-width:1240px;}
+.core-shoot-category-toggle{display:grid;grid-template-columns:16px minmax(170px,1.1fr) minmax(130px,0.85fr) minmax(340px,2.6fr) minmax(150px,0.9fr) minmax(120px,0.75fr) minmax(140px,0.9fr);column-gap:22px;align-items:center;width:100%;}
 @media (max-width:1150px){
   .core-shoot-category-header,
-  .core-shoot-category-toggle{grid-template-columns:16px minmax(110px,1fr) minmax(110px,0.9fr) minmax(220px,2.2fr) minmax(100px,1fr) minmax(90px,0.8fr) minmax(100px,1fr);column-gap:10px;max-width:100%;}
+  .core-shoot-category-toggle{grid-template-columns:16px minmax(110px,1fr) minmax(110px,0.9fr) minmax(220px,2.2fr) minmax(100px,1fr) minmax(90px,0.8fr) minmax(100px,1fr);column-gap:10px;}
 }
 /* Each row gets its own divider line (not just the header) and more
    breathing room -- with the widened Sales Cadence column, rows read as
@@ -519,15 +517,15 @@ main{padding:20px 24px;}
    own gap is dropped in favour of these per-row borders so spacing reads
    as one consistent rhythm rather than a gap AND a line stacking up; the
    last row's border is dropped since the section already ends there. */
-.core-shoot-category-header{padding:0 8px 10px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);border-bottom:1px solid var(--border);margin-bottom:4px;}
-.core-shoot-category-toggle{background:none;border:none;border-bottom:1px solid var(--border);padding:18px 8px;font-family:inherit;color:var(--text);cursor:pointer;text-align:left;}
+.core-shoot-category-header{padding:0 8px 12px;font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);border-bottom:1px solid var(--border);margin-bottom:4px;}
+.core-shoot-category-toggle{background:none;border:none;border-bottom:1px solid var(--border);padding:20px 8px;font-family:inherit;color:var(--text);cursor:pointer;text-align:left;}
 .core-shoot-category-toggle:hover{background:var(--surface2);}
 .core-shoot-category-group:last-child > .core-shoot-category-toggle{border-bottom:none;}
 .core-shoot-category-toggle.open .accordion-arrow{transform:rotate(90deg);}
 .core-shoot-category-namecol{display:flex;align-items:baseline;gap:8px;min-width:0;}
-.core-shoot-category-name{font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.core-shoot-category-count{font-size:12px;color:var(--text-muted);font-weight:600;white-space:nowrap;}
-.core-shoot-stat-col{display:flex;align-items:center;font-size:12px;color:var(--text-secondary);min-width:0;}
+.core-shoot-category-name{font-size:16px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.core-shoot-category-count{font-size:13px;color:var(--text-muted);font-weight:600;white-space:nowrap;}
+.core-shoot-stat-col{display:flex;align-items:center;font-size:13px;color:var(--text-secondary);min-width:0;}
 .core-shoot-stat{white-space:nowrap;}
 .core-shoot-stat-count{font-weight:700;color:var(--text);}
 .core-shoot-count-red{color:var(--red);}
@@ -544,23 +542,23 @@ main{padding:20px 24px;}
 .core-cadence-header-bottom{font-weight:600;}
 .core-cadence-col{display:flex;align-items:center;gap:10px;min-width:0;}
 .core-cadence-empty{color:var(--text-muted);}
-.core-cadence-box{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:4px 12px;border-radius:var(--r);min-width:56px;cursor:default;flex-shrink:0;}
+.core-cadence-box{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:5px 14px;border-radius:var(--r);min-width:62px;cursor:default;flex-shrink:0;}
 .core-cadence-box.core-trend-up{background:var(--green-light);}
 .core-cadence-box.core-trend-down{background:var(--red-light);}
 .core-cadence-box.core-trend-flat{background:var(--surface2);}
-.core-cadence-box-value{font-size:15px;font-weight:800;font-variant-numeric:tabular-nums;color:var(--text);}
-.core-cadence-box-pct{font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;}
+.core-cadence-box-value{font-size:17px;font-weight:800;font-variant-numeric:tabular-nums;color:var(--text);}
+.core-cadence-box-pct{font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;}
 .core-cadence-box.core-trend-up .core-cadence-box-pct{color:var(--green);}
 .core-cadence-box.core-trend-down .core-cadence-box-pct{color:var(--red);}
 .core-cadence-box.core-trend-flat .core-cadence-box-pct{color:var(--text-muted);}
-.core-cadence-months{display:flex;gap:10px;overflow-x:auto;min-width:0;padding:2px 2px 4px;scrollbar-width:thin;cursor:grab;}
+.core-cadence-months{display:flex;gap:12px;overflow-x:auto;min-width:0;padding:2px 2px 4px;scrollbar-width:thin;cursor:grab;}
 .core-cadence-months.dragging{cursor:grabbing;}
-.core-cadence-month{display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:inherit;flex-shrink:0;min-width:88px;border:1px solid var(--border);border-radius:var(--r);padding:6px 10px;background:white;user-select:none;}
-.core-cadence-month-value{font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;}
+.core-cadence-month{display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:inherit;flex-shrink:0;min-width:96px;border:1px solid var(--border);border-radius:var(--r);padding:7px 12px;background:white;user-select:none;}
+.core-cadence-month-value{font-size:14.5px;font-weight:700;font-variant-numeric:tabular-nums;}
 .core-cadence-month-value.core-trend-up{color:var(--green);}
 .core-cadence-month-value.core-trend-down{color:var(--red);}
 .core-cadence-month-value.core-trend-flat{color:var(--text-muted);}
-.core-cadence-month-label{font-size:9.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.2px;white-space:nowrap;margin-top:2px;}
+.core-cadence-month-label{font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.2px;white-space:nowrap;margin-top:2px;}
 
 /* Last 7D Sales -- a rolling total plus its own week-over-week trend (the
    prior 7 days, kept separate from the cadence widget's YoY comparisons
@@ -569,9 +567,9 @@ main{padding:20px 24px;}
    doing right now" read. */
 .core-shoot-7d-cell{display:flex;flex-direction:column;gap:3px;}
 .core-shoot-7d-row{display:flex;align-items:baseline;gap:6px;}
-.core-shoot-7d-value{font-weight:700;font-size:13px;color:var(--text);font-variant-numeric:tabular-nums;}
-.core-shoot-7d-label{font-size:11px;color:var(--text-muted);}
-.core-shoot-7d-trend{font-size:11px;font-weight:700;white-space:nowrap;}
+.core-shoot-7d-value{font-weight:700;font-size:15px;color:var(--text);font-variant-numeric:tabular-nums;}
+.core-shoot-7d-label{font-size:12px;color:var(--text-muted);}
+.core-shoot-7d-trend{font-size:12px;font-weight:700;white-space:nowrap;}
 .core-shoot-category-body{display:flex;flex-direction:column;gap:7px;padding:2px 6px 16px 32px;}
 
 .core-shoot-review-row{display:grid;grid-template-columns:2fr 4fr auto;gap:16px;align-items:center;background:white;border:1px solid var(--border);border-radius:var(--r);padding:11px 14px;}
