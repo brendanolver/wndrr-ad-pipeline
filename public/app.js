@@ -400,12 +400,13 @@ function renderPlanningShootSummary() {
     `${state.shootPlan.length} product${state.shootPlan.length === 1 ? '' : 's'} selected · ${totalSamples} sample${totalSamples === 1 ? '' : 's'} required`;
 }
 
-// ── Planning sub-navigation (list / drop / product / promotion) ──
-// Hash-routed so a drop, product, or promotion is a genuinely separate view
-// (not an inline expand), with working back/forward. Scheme:
+// ── Planning sub-navigation (list / drop / product / promotion / stage) ──
+// Hash-routed so a drop, product, promotion, or stage is a genuinely
+// separate view (not an inline expand), with working back/forward. Scheme:
 //   #planning/drop/<id>
 //   #planning/drop/<id>/product/<productCode>
 //   #planning/promotion/<id>
+//   #planning/promotion/<id>/stage/<stageId>
 function parsePlanningHash() {
   const parts = window.location.hash.replace(/^#planning\/?/, '').split('/').filter(Boolean);
   if (parts[0] === 'drop' && parts[1]) {
@@ -415,6 +416,9 @@ function parsePlanningHash() {
     return { view: 'drop', dropId: Number(parts[1]) };
   }
   if (parts[0] === 'promotion' && parts[1]) {
+    if (parts[2] === 'stage' && parts[3]) {
+      return { view: 'promotion-stage', promotionId: Number(parts[1]), stageId: Number(parts[3]) };
+    }
     return { view: 'promotion', promotionId: Number(parts[1]) };
   }
   return { view: 'list' };
@@ -430,6 +434,7 @@ function renderPlanningRoute() {
   document.getElementById('planning-drop-view').style.display = route.view === 'drop' ? 'block' : 'none';
   document.getElementById('planning-product-view').style.display = route.view === 'product' ? 'block' : 'none';
   document.getElementById('planning-promotion-view').style.display = route.view === 'promotion' ? 'block' : 'none';
+  document.getElementById('planning-promotion-stage-view').style.display = route.view === 'promotion-stage' ? 'block' : 'none';
 
   if (route.view === 'drop' || route.view === 'product') {
     // So "Back to Planning" always lands on the Drops step, not Core --
@@ -437,7 +442,7 @@ function renderPlanningRoute() {
     // reload on a #planning/drop/<id> hash (state.planningStep resets to
     // 'core' on every fresh load otherwise).
     setPlanningStep('drops');
-  } else if (route.view === 'promotion') {
+  } else if (route.view === 'promotion' || route.view === 'promotion-stage') {
     setPlanningStep('promotions');
   }
 
@@ -448,6 +453,9 @@ function renderPlanningRoute() {
     loadProductView(route.dropId, route.productCode);
   } else if (route.view === 'promotion') {
     loadPromotionView(route.promotionId);
+  } else if (route.view === 'promotion-stage') {
+    document.getElementById('promotion-stage-view-back').onclick = () => { window.location.hash = `#planning/promotion/${route.promotionId}`; };
+    loadPromotionStageView(route.promotionId, route.stageId);
   }
 }
 window.addEventListener('hashchange', renderPlanningRoute);
@@ -2481,7 +2489,7 @@ function renderPromotionStageGrid() {
   const stages = (state.currentPromotion && state.currentPromotion.stages) || [];
   grid.innerHTML = stages.length
     ? stages.map((s, i) => promotionStageCardHtml(s, i, stages.length)).join('')
-    : '<div class="attention-empty">No Campaign Stages yet — add one below (e.g. Hype / Tease, Launch Ads, Mid-Sale / Offer, Last Chance). Different promotions can use completely different stages.</div>';
+    : '<div class="attention-empty">No Campaign Stages yet — click "+ Add Stage" above (e.g. Hype / Tease, Launch Ads, Mid-Sale / Offer, Last Chance). Different promotions can use completely different stages.</div>';
   wirePromotionStageDragEvents();
 }
 
@@ -2489,6 +2497,14 @@ let promotionStageDragId = null;
 
 function wirePromotionStageDragEvents() {
   document.querySelectorAll('#promotion-stage-grid .promotion-stage-card').forEach((card) => {
+    // The card is its own inline editor (rename/reorder/delete/required-
+    // count/due-date all live directly on it), so a click only navigates
+    // to the stage's own planning page when it didn't land on one of those
+    // controls -- every one of them is an <input> or <button>.
+    card.addEventListener('click', (e) => {
+      if (e.target.closest('input, button')) return;
+      window.location.hash = `#planning/promotion/${state.currentPromotionId}/stage/${card.dataset.stageId}`;
+    });
     card.addEventListener('dragstart', () => {
       promotionStageDragId = Number(card.dataset.stageId);
       card.classList.add('dragging');
@@ -2533,6 +2549,14 @@ async function submitPromotionStageReorder(orderedIds) {
   }
 }
 
+function openNewStageModal() {
+  document.getElementById('new-stage-name').value = '';
+  document.getElementById('new-stage-count').value = '1';
+  document.getElementById('new-stage-due-date').value = '';
+  openModal('promotion-stage-modal');
+}
+document.getElementById('new-stage-btn').addEventListener('click', openNewStageModal);
+
 async function addPromotionStage() {
   const nameEl = document.getElementById('new-stage-name');
   const countEl = document.getElementById('new-stage-count');
@@ -2544,9 +2568,7 @@ async function addPromotionStage() {
       method: 'POST',
       body: JSON.stringify({ name, required_count: Number(countEl.value) || 0, due_date: dueEl.value || null }),
     });
-    nameEl.value = '';
-    countEl.value = '1';
-    dueEl.value = '';
+    closeModal('promotion-stage-modal');
     toast('Stage added');
     await refreshCurrentPromotion();
     renderPromotionsRow();
@@ -2594,6 +2616,84 @@ async function deletePromotionStage(id) {
     toast('Stage deleted');
     await refreshCurrentPromotion();
     renderPromotionsRow();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// ── Campaign Stage detail page ("what we have") ──────────────────────
+// The card on the promotion page is its own compact editor; this is the
+// planning page you land on by clicking it -- same Target/Ready/Planned/
+// Still-Required numbers at a glance, plus every creative shot against
+// this stage rendered as the same clickable job-card the Product Detail
+// page uses, so a click opens the exact same asset editor already used
+// everywhere else (no separate stage-scoped editing UI).
+async function loadPromotionStageView(promotionId, stageId) {
+  state.currentPromotionId = promotionId;
+  state.currentPromotionStageId = stageId;
+  try {
+    const promotion = await api(`/promotions/${promotionId}`);
+    state.currentPromotion = promotion;
+    const idx = state.promotions.findIndex((p) => p.id === promotion.id);
+    if (idx !== -1) state.promotions[idx] = promotion;
+    await renderPromotionStageDetailView();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function renderPromotionStageDetailView() {
+  const promotion = state.currentPromotion;
+  const stage = promotion && promotion.stages.find((s) => s.id === state.currentPromotionStageId);
+  if (!stage) return;
+
+  document.getElementById('promotion-stage-view-title').textContent = stage.name;
+  const color = promotionUrgencyColor(stage.urgency);
+  const urgencyEl = document.getElementById('promotion-stage-view-urgency');
+  urgencyEl.textContent = promotionUrgencyLabel(stage.urgency);
+  urgencyEl.className = `drop-card-status ${color === 'green' ? 'on-track' : color === 'amber' ? 'needs-attention' : 'at-risk'}`;
+
+  const dueLabel = stage.due_date ? formatDate(stage.due_date) : 'Not set';
+  document.getElementById('promotion-stage-view-summary').innerHTML = `
+    <div><strong>${stage.target}</strong><br>Target</div>
+    <div><strong>${stage.ready}</strong><br>Ready</div>
+    <div><strong>${stage.planned}</strong><br>Planned</div>
+    <div><strong>${stage.still_required}</strong><br>Still Required</div>
+    <div><strong>${dueLabel}</strong><br>Due date</div>
+  `;
+  document.getElementById('promotion-stage-view-shoot-btn').onclick = () => shootThisWeekForPromotionStage(stage.id);
+
+  const items = stage.items || [];
+  const grid = document.getElementById('promotion-stage-view-items');
+  if (!items.length) {
+    grid.innerHTML = '<div class="attention-empty">Nothing shot for this stage yet — click "+ Shoot This Week" to send the first requirement into Concept Development.</div>';
+    return;
+  }
+
+  try {
+    const assetIds = items.map((i) => i.asset_id).filter(Boolean);
+    const assets = assetIds.length ? await api(`/creative-assets?ids=${assetIds.join(',')}`) : [];
+    const assetsById = new Map(assets.map((a) => [a.id, a]));
+    grid.innerHTML = items.map((item) => {
+      const asset = assetsById.get(item.asset_id);
+      if (!asset) return '';
+      const [bg, fg] = ASSET_STATUS_COLORS[asset.status] || ASSET_STATUS_COLORS.not_started;
+      return `
+      <div class="job-card" data-asset-id="${asset.id}">
+        <div class="job-card-concept">${escapeHtml(asset.concept_name)}</div>
+        <div class="job-card-products">${escapeHtml(asset.style_code)} · ${asset.format}</div>
+        <div class="job-status-row">
+          <span class="job-status-pill" style="background:${bg};color:${fg};">${STATUS_LABELS[asset.status]}</span>
+          <span class="badge badge-${asset.concept_classification}">${CLASSIFICATION_LABELS[asset.concept_classification]}</span>
+        </div>
+      </div>`;
+    }).join('');
+    grid.querySelectorAll('.job-card').forEach((card) => {
+      card.addEventListener('click', () => {
+        const asset = assetsById.get(Number(card.dataset.assetId));
+        if (asset) openAssetModal(asset);
+      });
+    });
   } catch (e) {
     toast(e.message, true);
   }
@@ -2664,6 +2764,10 @@ async function savePromotionShootItem() {
     });
     closeModal('promotion-shoot-modal');
     toast('Sent to Concept Development');
+    await refreshCurrentPromotion();
+    if (document.getElementById('planning-promotion-stage-view').style.display !== 'none') {
+      renderPromotionStageDetailView();
+    }
     loadAll();
   } catch (e) {
     toast(e.message, true);

@@ -16,14 +16,20 @@ const SELECT_QUERY = `
 
 router.get('/', async (req, res, next) => {
   try {
-    const { style_id, style_ids, status } = req.query;
+    const { style_id, style_ids, status, ids } = req.query;
     const clauses = [];
     const params = [];
 
-    if (style_ids) {
-      const ids = String(style_ids).split(',').map((s) => Number(s.trim())).filter(Number.isFinite);
-      if (ids.length) {
-        params.push(ids);
+    if (ids) {
+      const assetIds = String(ids).split(',').map((s) => Number(s.trim())).filter(Number.isFinite);
+      if (assetIds.length) {
+        params.push(assetIds);
+        clauses.push(`ca.id = ANY($${params.length}::int[])`);
+      }
+    } else if (style_ids) {
+      const styleIds = String(style_ids).split(',').map((s) => Number(s.trim())).filter(Number.isFinite);
+      if (styleIds.length) {
+        params.push(styleIds);
         clauses.push(`ca.style_id = ANY($${params.length}::int[])`);
       }
     } else if (style_id) {

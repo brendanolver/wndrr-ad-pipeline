@@ -296,16 +296,30 @@
         <div id="promotion-view-summary"></div>
 
         <div class="planning-section-header">
-          <h2>Campaign Stages</h2>
-          <span class="admin-note">Add, rename, reorder, delete, and set how many creatives + which due date each stage needs</span>
+          <div>
+            <h2>Campaign Stages</h2>
+            <span class="admin-note">Click a stage to see what's ready, planned, and still needed</span>
+          </div>
+          <button type="button" class="btn btn-ghost btn-sm" id="new-stage-btn">+ Add Stage</button>
         </div>
         <div id="promotion-stage-grid" class="coverage-grid"></div>
-        <div class="stock-request-form">
-          <input type="text" id="new-stage-name" placeholder="e.g. Hype / Tease">
-          <input type="number" id="new-stage-count" min="0" value="1" title="Creatives required" style="width:80px;">
-          <input type="date" id="new-stage-due-date" title="Stage go-live / due date (optional)">
-          <button type="button" class="btn btn-ghost btn-sm" onclick="addPromotionStage()">+ Add Stage</button>
+      </div>
+
+      <div id="planning-promotion-stage-view" style="display:none;">
+        <button class="back-link" id="promotion-stage-view-back">&larr; Back to Promotion</button>
+        <div class="planning-section-header">
+          <div class="drop-view-title-row">
+            <h2 id="promotion-stage-view-title">Stage</h2>
+          </div>
+          <span id="promotion-stage-view-urgency" class="drop-card-status"></span>
         </div>
+        <div id="promotion-stage-view-summary" class="drop-view-summary"></div>
+        <button class="btn btn-primary" id="promotion-stage-view-shoot-btn">+ Shoot This Week</button>
+
+        <div class="planning-section-header">
+          <h2>What We Have</h2>
+        </div>
+        <div id="promotion-stage-view-items" class="jobs-grid"></div>
       </div>
 
     </section>
@@ -587,6 +601,35 @@
       <button class="btn btn-danger" id="promotion-delete-btn" style="display:none;" onclick="deletePromotion()">Delete</button>
       <button class="btn btn-ghost" onclick="closeModal('promotion-modal')">Cancel</button>
       <button class="btn btn-primary" id="promotion-save-btn" onclick="savePromotion()">Add</button>
+    </div>
+  </div>
+</div>
+
+<!-- New Campaign Stage -- editing an existing stage (rename/reorder/
+     required count/due date/delete) stays inline on its own coverage
+     card; this modal is only ever for adding a new one. -->
+<div id="promotion-stage-modal" class="modal-backdrop">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>New Campaign Stage</h3>
+      <button class="modal-close" onclick="closeModal('promotion-stage-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <label>Stage name
+        <input type="text" id="new-stage-name" placeholder="e.g. Hype / Tease">
+      </label>
+      <div class="field-row">
+        <label>Creative target
+          <input type="number" id="new-stage-count" min="0" value="1">
+        </label>
+        <label>Due date <span class="hint">(optional)</span>
+          <input type="date" id="new-stage-due-date">
+        </label>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('promotion-stage-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="addPromotionStage()">Add Stage</button>
     </div>
   </div>
 </div>
