@@ -13,6 +13,11 @@ const router = express.Router();
 // tunable as a hidden ranking/display input, not a scoring model.
 const HIGH_STOCK_TIERS = new Set(['platinum', 'rocket']);
 const HIGH_STOCK_MAX_SELL_THROUGH_7D_PCT = 5; // strict < -- "under 5%"
+// A style this fresh out of the gate reads as a new drop still finding its
+// stride, not a High Stock problem yet -- excluding it keeps the list from
+// filling up with newly-launched product that just hasn't had time to sell
+// through, rather than genuine overstock.
+const HIGH_STOCK_MIN_DAYS_SINCE_LAUNCH = 14;
 const HIGH_STOCK_STALE_DAYS = 21;
 const HIGH_STOCK_TREND_DEADZONE_PCT = 10; // matches Core's own ±10% steady-state threshold
 const HIGH_STOCK_MIN_RELIABLE_HIST_VEL = 1; // vel365 below this (units/week) isn't enough sales history for a trustworthy % comparison
@@ -96,6 +101,12 @@ router.get('/', async (req, res, next) => {
     for (const [styleCode, details] of am.amDetails.entries()) {
       if (details.isCore || apparelmagic.isAdExcludedCategory(details)) continue;
       if (!apparelmagic.isWndrrStyleCode(styleCode)) continue;
+      // No launch date on record -> can't tell it's a recent drop, so it's
+      // not excluded on this basis alone.
+      if (details.launchDate) {
+        const daysSinceLaunch = Math.floor((Date.now() - details.launchDate.getTime()) / 86400000);
+        if (daysSinceLaunch < HIGH_STOCK_MIN_DAYS_SINCE_LAUNCH) continue;
+      }
 
       const soh = am.amStock.get(styleCode) ?? 0;
       if (soh <= minSoh) continue;
