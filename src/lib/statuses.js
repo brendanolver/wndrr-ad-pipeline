@@ -41,6 +41,18 @@ const CONCEPT_CLASSIFICATIONS = ['tested_proven', 'new_experimental'];
 const TIERS = ['core_proven', 'new_drop'];
 const FORMATS = ['video', 'static'];
 
+// Concept Development's own simple review status -- separate from STATUSES
+// above (the full production pipeline). This just tracks how ready a
+// concept is for the Tuesday review meeting.
+const CONCEPT_DEV_STATUSES = ['not_started', 'in_development', 'ready_for_review', 'changes_required', 'approved'];
+const CONCEPT_DEV_STATUS_LABELS = {
+  not_started: 'Not Started',
+  in_development: 'In Development',
+  ready_for_review: 'Ready for Review',
+  changes_required: 'Changes Required',
+  approved: 'Approved',
+};
+
 module.exports = {
   STATUSES,
   STATUS_LABELS,
@@ -48,4 +60,6 @@ module.exports = {
   CONCEPT_CLASSIFICATIONS,
   TIERS,
   FORMATS,
+  CONCEPT_DEV_STATUSES,
+  CONCEPT_DEV_STATUS_LABELS,
 };

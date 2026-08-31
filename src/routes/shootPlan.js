@@ -137,6 +137,12 @@ router.post('/', async (req, res, next) => {
     );
     const item = itemResult.rows[0];
 
+    // Links the seed concept back to this handoff item -- Concept
+    // Development scopes a Core/High Stock/Promotion product's concepts to
+    // exactly this shoot_plan_item, not every historical asset ever made
+    // for the style.
+    await client.query('UPDATE creative_assets SET shoot_plan_item_id = $1 WHERE id = $2', [item.id, asset.id]);
+
     for (const c of colourways) {
       await client.query(
         `INSERT INTO shoot_plan_item_styles (shoot_plan_item_id, style_id, size, colour_label) VALUES ($1, $2, $3, $4)`,

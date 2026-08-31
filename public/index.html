@@ -33,6 +33,7 @@
     <nav class="tabs">
       <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
       <button class="tab-btn" data-tab="planning">Planning</button>
+      <button class="tab-btn" data-tab="concept-dev">Concept Dev</button>
       <button class="tab-btn" data-tab="board">Board</button>
       <button class="tab-btn" data-tab="admin">Styles &amp; Categories</button>
       <button class="tab-btn" data-tab="settings">Settings</button>
@@ -358,6 +359,21 @@
         <div id="promotion-stage-view-items" class="jobs-grid"></div>
       </div>
 
+    </section>
+
+    <section id="tab-concept-dev" class="tab-panel">
+      <div class="planning-header">
+        <div class="planning-week-nav">
+          <button type="button" class="week-nav-btn" id="cd-week-prev" onclick="changeConceptDevWeek(-1)" aria-label="Previous week">&lsaquo;</button>
+          <button type="button" class="planning-week-label-btn" id="cd-week-label" onclick="toggleConceptDevWeekPicker()"></button>
+          <button type="button" class="week-nav-btn" id="cd-week-next" onclick="changeConceptDevWeek(1)" aria-label="Next week">&rsaquo;</button>
+          <span class="planning-week-status" id="cd-week-status"></span>
+          <button type="button" class="btn btn-ghost btn-sm" id="cd-this-week-btn" onclick="goToCurrentConceptDevWeek()" style="display:none;">This Week</button>
+          <div class="planning-week-picker" id="cd-week-picker" style="display:none;"></div>
+        </div>
+      </div>
+
+      <div id="concept-dev-list"></div>
     </section>
 
     <section id="tab-board" class="tab-panel">
@@ -777,6 +793,81 @@
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('shoot-plan-modal')">Cancel</button>
       <button class="btn btn-primary" onclick="saveShootPlanItem()">Add to Shoot Plan</button>
+    </div>
+  </div>
+</div>
+
+<!-- Concept Development: every rich creative-development field for one
+     concept (a creative_assets row). concept_name is locked to a read-only
+     label for a Drop's Proven Winner concept -- see openConceptDevModal --
+     so the creator preps execution rather than inventing the concept again. -->
+<div id="concept-dev-modal" class="modal-backdrop">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="cd-modal-title">Concept</h3>
+      <button class="modal-close" onclick="closeModal('concept-dev-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <label>Concept Name
+        <input type="text" id="cd-modal-name">
+        <div class="hint cd-modal-locked-name" id="cd-modal-name-locked" style="display:none;"></div>
+      </label>
+      <label>Concept Development Status
+        <select id="cd-modal-status"></select>
+      </label>
+      <label>Angle / Idea
+        <textarea id="cd-modal-angle" rows="2"></textarea>
+      </label>
+      <label>Hook
+        <textarea id="cd-modal-hook" rows="2"></textarea>
+      </label>
+      <label>Execution
+        <textarea id="cd-modal-execution" rows="2"></textarea>
+      </label>
+      <label>Script / Talking Points <span class="hint">(optional)</span>
+        <textarea id="cd-modal-script" rows="3"></textarea>
+      </label>
+      <label>Reference Links
+        <div class="cd-reference-input-row">
+          <input type="text" id="cd-modal-link-input" placeholder="https://...">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="addConceptDevReferenceLink()">Add</button>
+        </div>
+        <div id="cd-modal-links-list" class="cd-reference-link-list"></div>
+      </label>
+      <label>Reference Note <span class="hint">(what we like about it)</span>
+        <textarea id="cd-modal-reference-note" rows="2"></textarea>
+      </label>
+      <label>Talent / Model Requirement
+        <input type="text" id="cd-modal-talent" placeholder="e.g. In-house model, UGC creator, none">
+      </label>
+      <label>Location
+        <input type="text" id="cd-modal-location" placeholder="e.g. Studio, warehouse, external">
+      </label>
+      <label>Props / Special Requirements
+        <textarea id="cd-modal-props" rows="2"></textarea>
+      </label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('concept-dev-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveConceptDevModal()">Save</button>
+    </div>
+  </div>
+</div>
+
+<div id="cd-add-concept-modal" class="modal-backdrop">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Add Concept</h3>
+      <button class="modal-close" onclick="closeModal('cd-add-concept-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <label>Concept Name
+        <input type="text" id="cd-add-concept-name" placeholder="e.g. Unboxing hook">
+      </label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('cd-add-concept-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveAddConcept()">Add Concept</button>
     </div>
   </div>
 </div>

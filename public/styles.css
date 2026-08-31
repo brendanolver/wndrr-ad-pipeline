@@ -758,6 +758,31 @@ main{padding:20px 24px;}
 .shoot-plan-idea{font-size:12px;color:var(--text-muted);font-style:italic;}
 .shoot-plan-row-actions{display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;}
 
+/* Concept Development: one bordered card per product (reuses the Shoot
+   Plan step's own row typography inside .cd-product-header -- see
+   conceptDevProductCardHtml), holding a compact concept list + Add Concept. */
+.cd-product-card{background:white;border:1px solid var(--border);border-radius:var(--r-lg);padding:14px 16px;margin-bottom:12px;}
+.cd-product-header{display:flex;align-items:flex-start;gap:10px;}
+.cd-status-summary{font-size:12px;color:var(--text-secondary);font-weight:600;margin:10px 0 8px;padding-top:10px;border-top:1px solid var(--border);}
+.cd-concepts-list{display:flex;flex-direction:column;gap:6px;margin-bottom:10px;}
+.cd-concept-row{display:flex;align-items:center;gap:8px;background:var(--surface2);border-radius:var(--r);padding:8px 10px;cursor:pointer;}
+.cd-concept-row:hover{background:var(--border);}
+.cd-concept-name{flex:1;min-width:0;font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.cd-locked-tag{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.2px;color:var(--purple);background:var(--purple-light);border-radius:var(--r-pill);padding:2px 7px;flex-shrink:0;}
+.cd-concept-status-pill{font-size:10.5px;font-weight:700;border-radius:var(--r-pill);padding:2px 9px;white-space:nowrap;flex-shrink:0;}
+.cd-status-not-started{background:var(--surface2);color:var(--text-muted);border:1px solid var(--border);}
+.cd-status-in-development{background:var(--blue-light);color:var(--blue);}
+.cd-status-ready-for-review{background:var(--amber-light);color:var(--amber);}
+.cd-status-changes-required{background:var(--red-light);color:var(--red);}
+.cd-status-approved{background:var(--green-light);color:var(--green);}
+
+.cd-reference-input-row{display:flex;gap:8px;}
+.cd-reference-input-row input{flex:1;}
+.cd-reference-link-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
+.cd-reference-chip{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;color:var(--text-secondary);background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-pill);padding:3px 6px 3px 10px;max-width:260px;}
+.cd-reference-chip button{background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:13px;line-height:1;padding:0 2px;}
+.cd-reference-chip button:hover{color:var(--red);}
+
 .shoot-plan-edit-size-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--border);font-size:13px;font-weight:600;}
 .shoot-plan-edit-size-row:last-child{border-bottom:none;}
 .shoot-plan-edit-size-input{width:100px;}

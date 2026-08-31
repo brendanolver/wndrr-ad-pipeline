@@ -41,6 +41,10 @@ let state = {
   // tabs are viewed independently. 0 = current week, -1 = last week, etc.
   planningWeekOffset: 0,
   weeklyPlanningProgress: { core_reviewed: false, high_stock_reviewed: false, drops_reviewed: false, promotions_reviewed: false },
+  // Concept Development's own week nav -- deliberately separate from
+  // planningWeekOffset, same reasoning as dashboardWeekOffset above: viewed
+  // independently, so navigating one page's week must never move another's.
+  conceptDev: { weekOffset: 0, data: null },
 };
 let dashboardWeekOffset = 0;
 
@@ -162,11 +166,19 @@ function planningWeekNumber() {
   return isoWeekNumber(mondayOfWeek(state.planningWeekOffset));
 }
 
+function conceptDevWeekStart() {
+  return isoDateStr(mondayOfWeek(state.conceptDev.weekOffset));
+}
+
+function conceptDevWeekNumber() {
+  return isoWeekNumber(mondayOfWeek(state.conceptDev.weekOffset));
+}
+
 // ── Load & render ────────────────────────────────────
 async function loadAll() {
   try {
     const weekStart = planningWeekStart();
-    const [board, styles, categories, dashboard, dropsRes, provenWinners, coreRes, planningSettings, shootPlan, contentCreators, highStockRes, promotions, weeklyConfirmation, weeklyPlanningProgress, salesCadence, metaProductMappings, metaProductFamilies] = await Promise.all([
+    const [board, styles, categories, dashboard, dropsRes, provenWinners, coreRes, planningSettings, shootPlan, contentCreators, highStockRes, promotions, weeklyConfirmation, weeklyPlanningProgress, salesCadence, metaProductMappings, metaProductFamilies, conceptDev] = await Promise.all([
       api('/board'),
       api('/styles'),
       api('/categories'),
@@ -184,6 +196,7 @@ async function loadAll() {
       api('/sales-cadence'),
       api('/meta-product-mappings'),
       api('/meta-product-mappings/product-families'),
+      api(`/concept-development?week_start=${conceptDevWeekStart()}`),
     ]);
     state.board = board;
     state.styles = styles;
@@ -205,6 +218,7 @@ async function loadAll() {
     state.salesCadence = salesCadence;
     state.metaProductMappings = metaProductMappings;
     state.metaProductFamilies = metaProductFamilies;
+    state.conceptDev.data = conceptDev;
     renderBoard();
     renderMissingAd();
     renderStylesTable();
@@ -221,6 +235,8 @@ async function loadAll() {
     renderHighStockProducts();
     renderPromotionsRow();
     renderPlanningShootSummary();
+    renderConceptDevWeekHeader();
+    renderConceptDevList();
   } catch (e) {
     toast(e.message, true);
   }
@@ -3288,6 +3304,328 @@ function downloadApparelMagicCsv() {
   a.download = `apparel-magic-shoot-plan-${today}.csv`;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+// ── Concept Development ──────────────────────────────
+// The content creator's workspace for turning a CONFIRMED weekly Shoot Plan
+// into concepts ready for the Tuesday review meeting. Product/colourways/
+// owner/source/pathway/initial idea all come straight from the Planning
+// handoff (state.conceptDev.data, from GET /concept-development) -- nothing
+// here lets the creator re-enter any of that, only develop/track concepts.
+// Week nav mirrors Planning's own (same mondayOfWeek/isoWeekNumber/
+// formatWeekRange helpers, same picker markup) via its own weekOffset, kept
+// independent for the same reason dashboardWeekOffset is independent of
+// planningWeekOffset.
+const CONCEPT_DEV_STATUSES = ['not_started', 'in_development', 'ready_for_review', 'changes_required', 'approved'];
+const CONCEPT_DEV_STATUS_LABELS = {
+  not_started: 'Not Started',
+  in_development: 'In Development',
+  ready_for_review: 'Ready for Review',
+  changes_required: 'Changes Required',
+  approved: 'Approved',
+};
+const CONCEPT_DEV_STATUS_CLASS = {
+  not_started: 'cd-status-not-started',
+  in_development: 'cd-status-in-development',
+  ready_for_review: 'cd-status-ready-for-review',
+  changes_required: 'cd-status-changes-required',
+  approved: 'cd-status-approved',
+};
+
+async function loadConceptDevWeek() {
+  try {
+    state.conceptDev.data = await api(`/concept-development?week_start=${conceptDevWeekStart()}`);
+    renderConceptDevWeekHeader();
+    renderConceptDevList();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function changeConceptDevWeek(delta) {
+  state.conceptDev.weekOffset += delta;
+  onConceptDevWeekChanged();
+}
+
+function goToCurrentConceptDevWeek() {
+  state.conceptDev.weekOffset = 0;
+  onConceptDevWeekChanged();
+}
+
+function jumpToConceptDevWeek(offset) {
+  state.conceptDev.weekOffset = offset;
+  onConceptDevWeekChanged();
+}
+
+function onConceptDevWeekChanged() {
+  closeConceptDevWeekPicker();
+  loadConceptDevWeek();
+}
+
+function toggleConceptDevWeekPicker() {
+  const el = document.getElementById('cd-week-picker');
+  const opening = el.style.display === 'none';
+  if (opening) renderConceptDevWeekPicker();
+  el.style.display = opening ? '' : 'none';
+}
+
+function closeConceptDevWeekPicker() {
+  document.getElementById('cd-week-picker').style.display = 'none';
+}
+
+function renderConceptDevWeekPicker() {
+  const rows = [];
+  for (let offset = 8; offset >= -12; offset--) {
+    const monday = mondayOfWeek(offset);
+    rows.push({ offset, number: isoWeekNumber(monday), range: formatWeekRange(monday) });
+  }
+  document.getElementById('cd-week-picker').innerHTML = rows.map((r) => `
+    <button type="button" class="planning-week-picker-row ${r.offset === state.conceptDev.weekOffset ? 'active' : ''}" onclick="jumpToConceptDevWeek(${r.offset})">
+      <span>Week ${r.number}${r.offset === 0 ? ' · Current' : ''}</span>
+      <span class="admin-note">${r.range}</span>
+    </button>`).join('');
+}
+
+document.addEventListener('click', (e) => {
+  const picker = document.getElementById('cd-week-picker');
+  if (!picker || picker.style.display === 'none') return;
+  if (e.target.closest('#cd-week-picker') || e.target.id === 'cd-week-label') return;
+  picker.style.display = 'none';
+});
+
+function renderConceptDevWeekHeader() {
+  document.getElementById('cd-week-label').textContent = `Week ${conceptDevWeekNumber()}`;
+  document.getElementById('cd-this-week-btn').style.display = state.conceptDev.weekOffset === 0 ? 'none' : '';
+  const confirmed = Boolean(state.conceptDev.data && state.conceptDev.data.confirmed);
+  const statusEl = document.getElementById('cd-week-status');
+  statusEl.textContent = confirmed ? '✓ Confirmed' : 'Not Confirmed Yet';
+  statusEl.className = `planning-week-status ${confirmed ? 'planning-week-status-confirmed' : ''}`;
+}
+
+function conceptDevStatusSummary(concepts) {
+  if (!concepts.length) return '';
+  const counts = new Map();
+  concepts.forEach((c) => counts.set(c.concept_dev_status, (counts.get(c.concept_dev_status) || 0) + 1));
+  return Array.from(counts.entries())
+    .map(([status, count]) => `${count} ${CONCEPT_DEV_STATUS_LABELS[status] || status}`)
+    .join(' · ');
+}
+
+function conceptDevConceptRowHtml(concept) {
+  return `
+    <div class="cd-concept-row" onclick="openConceptDevModal(${concept.id})">
+      <span class="cd-concept-name">${escapeHtml(concept.concept_name)}</span>
+      ${concept.name_locked ? '<span class="cd-locked-tag">Proven</span>' : ''}
+      <span class="cd-concept-status-pill ${CONCEPT_DEV_STATUS_CLASS[concept.concept_dev_status] || ''}">${CONCEPT_DEV_STATUS_LABELS[concept.concept_dev_status] || concept.concept_dev_status}</span>
+    </div>`;
+}
+
+// Reuses the Shoot Plan step's own product-row typography classes
+// (.shoot-plan-product-main/-top/-name/-owner/-pathway-chip/-style-chips,
+// .high-stock-thumb) for visual consistency -- just wrapped in this page's
+// own bordered .cd-product-card instead of .shoot-plan-product-row's card
+// chrome, since a Concept Dev card also holds a concept list + button.
+function conceptDevProductCardHtml(product) {
+  const thumb = product.image_url
+    ? `<img class="high-stock-thumb" src="${product.image_url}" alt="">`
+    : '<span class="high-stock-thumb high-stock-noimg">🖼</span>';
+  const chips = product.colourways
+    .map((c) => `<span class="shoot-plan-style-chip">${escapeHtml(c.colour_label || c.style_code)}${c.size ? ` · ${escapeHtml(c.size)}` : ''}</span>`)
+    .join('');
+  const pathway = escapeHtml(shootPlanRequirementLabel(product));
+  const summary = conceptDevStatusSummary(product.concepts);
+  return `
+    <div class="cd-product-card">
+      <div class="cd-product-header">
+        ${thumb}
+        <div class="shoot-plan-product-main">
+          <div class="shoot-plan-product-top">
+            <span class="shoot-plan-product-name">${escapeHtml(product.product_name)}</span>
+          </div>
+          <div class="shoot-plan-product-meta">
+            <span class="shoot-plan-owner">Owner: ${escapeHtml(product.creator)}</span>
+            <span class="shoot-plan-pathway-chip">${pathway}</span>
+          </div>
+          <div class="shoot-plan-style-chips">${chips}</div>
+          ${product.initial_idea ? `<div class="shoot-plan-idea">💡 ${escapeHtml(product.initial_idea)}</div>` : ''}
+        </div>
+      </div>
+      ${summary ? `<div class="cd-status-summary">${summary}</div>` : ''}
+      <div class="cd-concepts-list">
+        ${product.concepts.length ? product.concepts.map(conceptDevConceptRowHtml).join('') : '<div class="attention-empty">No concepts yet — use + Add Concept.</div>'}
+      </div>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="openAddConceptModal(${product.shoot_plan_item_id})">+ Add Concept</button>
+    </div>`;
+}
+
+function renderConceptDevList() {
+  const list = document.getElementById('concept-dev-list');
+  const data = state.conceptDev.data;
+  if (!data || !data.confirmed) {
+    list.innerHTML = `<div class="attention-empty">Shoot Plan for Week ${conceptDevWeekNumber()} hasn't been confirmed yet — nothing to prepare. <button type="button" class="link-btn" onclick="switchTab('planning')">Go to Planning &rarr;</button></div>`;
+    return;
+  }
+  if (!data.products.length) {
+    list.innerHTML = '<div class="attention-empty">Nothing was in this week\'s Shoot Plan.</div>';
+    return;
+  }
+  list.innerHTML = data.products.map(conceptDevProductCardHtml).join('');
+}
+
+function findConceptDevConcept(conceptId) {
+  for (const p of (state.conceptDev.data && state.conceptDev.data.products) || []) {
+    const c = p.concepts.find((c) => c.id === conceptId);
+    if (c) return { concept: c, product: p };
+  }
+  return null;
+}
+
+let conceptDevModalConceptId = null;
+let conceptDevModalLinks = [];
+
+function renderConceptDevModalLinks() {
+  document.getElementById('cd-modal-links-list').innerHTML = conceptDevModalLinks.length
+    ? conceptDevModalLinks.map((link, i) => `
+        <span class="cd-reference-chip">${escapeHtml(link)} <button type="button" onclick="removeConceptDevReferenceLink(${i})">&times;</button></span>`).join('')
+    : '<span class="hint">No reference links yet.</span>';
+}
+
+function addConceptDevReferenceLink() {
+  const input = document.getElementById('cd-modal-link-input');
+  const value = input.value.trim();
+  if (!value) return;
+  conceptDevModalLinks.push(value);
+  input.value = '';
+  renderConceptDevModalLinks();
+}
+
+function removeConceptDevReferenceLink(index) {
+  conceptDevModalLinks.splice(index, 1);
+  renderConceptDevModalLinks();
+}
+
+// concept_name is locked to a read-only label for a Drop's Proven Winner
+// concept (name_locked) -- the creator preps execution for the assigned
+// concept rather than inventing the name again, per the brief.
+function openConceptDevModal(conceptId) {
+  const found = findConceptDevConcept(conceptId);
+  if (!found) return;
+  const { concept } = found;
+  conceptDevModalConceptId = conceptId;
+  conceptDevModalLinks = [...(concept.reference_links || [])];
+
+  document.getElementById('cd-modal-title').textContent = concept.concept_name;
+
+  const nameInput = document.getElementById('cd-modal-name');
+  const nameLocked = document.getElementById('cd-modal-name-locked');
+  if (concept.name_locked) {
+    nameInput.style.display = 'none';
+    nameLocked.style.display = '';
+    nameLocked.textContent = `${concept.concept_name} — Proven Winner name, locked`;
+  } else {
+    nameInput.style.display = '';
+    nameLocked.style.display = 'none';
+    nameInput.value = concept.concept_name;
+  }
+
+  const statusSelect = document.getElementById('cd-modal-status');
+  statusSelect.innerHTML = CONCEPT_DEV_STATUSES
+    .map((s) => `<option value="${s}" ${s === concept.concept_dev_status ? 'selected' : ''}>${CONCEPT_DEV_STATUS_LABELS[s]}</option>`)
+    .join('');
+
+  document.getElementById('cd-modal-angle').value = concept.angle || '';
+  document.getElementById('cd-modal-hook').value = concept.hook || '';
+  document.getElementById('cd-modal-execution').value = concept.execution || '';
+  document.getElementById('cd-modal-script').value = concept.script_notes || '';
+  document.getElementById('cd-modal-reference-note').value = concept.reference_note || '';
+  document.getElementById('cd-modal-talent').value = concept.talent_requirement || '';
+  document.getElementById('cd-modal-location').value = concept.location || '';
+  document.getElementById('cd-modal-props').value = concept.props_notes || '';
+  document.getElementById('cd-modal-link-input').value = '';
+  renderConceptDevModalLinks();
+
+  openModal('concept-dev-modal');
+}
+
+async function saveConceptDevModal() {
+  if (!conceptDevModalConceptId) return;
+  const found = findConceptDevConcept(conceptDevModalConceptId);
+  const nameLocked = found && found.concept.name_locked;
+
+  const body = {
+    concept_dev_status: document.getElementById('cd-modal-status').value,
+    angle: document.getElementById('cd-modal-angle').value.trim(),
+    hook: document.getElementById('cd-modal-hook').value.trim(),
+    execution: document.getElementById('cd-modal-execution').value.trim(),
+    script_notes: document.getElementById('cd-modal-script').value.trim(),
+    reference_links: conceptDevModalLinks,
+    reference_note: document.getElementById('cd-modal-reference-note').value.trim(),
+    talent_requirement: document.getElementById('cd-modal-talent').value.trim(),
+    location: document.getElementById('cd-modal-location').value.trim(),
+    props_notes: document.getElementById('cd-modal-props').value.trim(),
+  };
+  if (!nameLocked) {
+    const name = document.getElementById('cd-modal-name').value.trim();
+    if (!name) { toast('Concept name is required', true); return; }
+    body.concept_name = name;
+  }
+
+  try {
+    await api(`/concept-development/concepts/${conceptDevModalConceptId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    });
+    closeModal('concept-dev-modal');
+    toast('Concept saved');
+    loadConceptDevWeek();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// A Drop product's "+ Add Concept" reuses the existing
+// POST /drop-product-plans/:id/slots (adds a 'new' Required Concept slot,
+// same as Planning's own product page) -- everything else posts a plain
+// ad-hoc concept scoped to the shoot_plan_item.
+let conceptDevAddProduct = null;
+
+function openAddConceptModal(shootPlanItemId) {
+  const data = state.conceptDev.data;
+  const product = data && data.products.find((p) => p.shoot_plan_item_id === shootPlanItemId);
+  if (!product) return;
+  conceptDevAddProduct = product;
+  document.getElementById('cd-add-concept-name').value = '';
+  openModal('cd-add-concept-modal');
+}
+
+async function saveAddConcept() {
+  const product = conceptDevAddProduct;
+  if (!product) return;
+  const name = document.getElementById('cd-add-concept-name').value.trim();
+  if (!name) { toast('Concept name is required', true); return; }
+
+  try {
+    if (product.source === 'drop') {
+      if (!product.drop_plan_id) {
+        toast('This product\'s Required Concept plan is still being generated — try again in a moment.', true);
+        return;
+      }
+      await api(`/drop-product-plans/${product.drop_plan_id}/slots`, {
+        method: 'POST',
+        body: JSON.stringify({ concept_name: name }),
+      });
+    } else {
+      await api('/concept-development/concepts', {
+        method: 'POST',
+        body: JSON.stringify({ shoot_plan_item_id: product.shoot_plan_item_id, concept_name: name }),
+      });
+    }
+    closeModal('cd-add-concept-modal');
+    toast('Concept added');
+    loadConceptDevWeek();
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 // ── Settings: Weekly New Concept Target ──────────────
