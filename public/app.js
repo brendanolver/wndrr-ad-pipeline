@@ -1859,6 +1859,22 @@ function shootActionHtml(productCode, onclickFn, selectedCodes) {
   return `<button type="button" class="btn btn-primary btn-sm" onclick="${onclickFn}('${productCode}')">+ Shoot</button>`;
 }
 
+// Mini column labels for the product rows below -- the category header
+// above (index.html's .core-shoot-category-header) uses a different, wider
+// grid than .core-shoot-review-row, so its labels don't line up with these
+// rows once a category is expanded. Repeats just the two stat labels so the
+// 7D/cadence numbers on each product row are still legible on their own.
+function coreProblemProductsHeaderHtml() {
+  return `
+    <div class="core-shoot-review-header">
+      <span></span>
+      <span>7D Sales</span>
+      <span>LY MTD vs This MTD</span>
+      <span></span>
+      <span></span>
+    </div>`;
+}
+
 function coreProblemProductRowHtml(p, selectedCodes) {
   const badge = p.flag === 'needs_attention' ? '🔴' : p.flag === 'opportunity' ? '🟠' : '';
   const reasons = (p.reason_chips || []).join(' · ');
@@ -2085,7 +2101,7 @@ function coreShootCategoryRowHtml(cat, selectedCodes) {
       </button>
       ${isOpen ? `<div class="core-shoot-category-body">
         ${cat.problemProducts.length
-          ? cat.problemProducts.map((p) => coreProblemProductRowHtml(p, selectedCodes)).join('')
+          ? coreProblemProductsHeaderHtml() + cat.problemProducts.map((p) => coreProblemProductRowHtml(p, selectedCodes)).join('')
           : '<div class="attention-empty">No problem products in this category right now.</div>'}
       </div>` : ''}
     </div>`;
