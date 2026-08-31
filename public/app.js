@@ -1859,29 +1859,43 @@ function shootActionHtml(productCode, onclickFn, selectedCodes) {
   return `<button type="button" class="btn btn-primary btn-sm" onclick="${onclickFn}('${productCode}')">+ Shoot</button>`;
 }
 
-// Mini column labels for the product rows below -- the category header
+// Full column header for the product rows below -- the category header
 // above (index.html's .core-shoot-category-header) uses a different, wider
 // grid than .core-shoot-review-row, so its labels don't line up with these
-// rows once a category is expanded. Repeats just the two stat labels so the
-// 7D/cadence numbers on each product row are still legible on their own.
+// rows once a category is expanded. .core-product-row overrides just the
+// shared .core-shoot-review-row/-header grid template (see styles.css) --
+// that class is also used by High Stock's row with a different column
+// count, so the base rule itself is left alone.
 function coreProblemProductsHeaderHtml() {
   return `
-    <div class="core-shoot-review-header">
+    <div class="core-shoot-review-header core-product-row">
       <span></span>
+      <span>SOH</span>
+      <span>On Order</span>
       <span>7D Sales</span>
       <span>LY MTD vs This MTD</span>
-      <span></span>
-      <span></span>
+      <span>Creative Attention</span>
+      <span>This Week</span>
     </div>`;
+}
+
+// This row now has its own SOH/On Order columns, so drop the "+N Incoming"
+// chip buildAttention (coreProducts.js) still includes in the shared
+// reason_chips list -- that list is also read by the Priority table, which
+// keeps showing it; this filter only affects this row's own text.
+function coreAttentionReasonsWithoutOnOrder(p) {
+  return (p.reason_chips || []).filter((c) => !/ Incoming$/.test(c)).join(' · ');
 }
 
 function coreProblemProductRowHtml(p, selectedCodes) {
   const badge = p.flag === 'needs_attention' ? '🔴' : p.flag === 'opportunity' ? '🟠' : '';
-  const reasons = (p.reason_chips || []).join(' · ');
+  const reasons = coreAttentionReasonsWithoutOnOrder(p);
   const trend = coreProductTrendInfo(p);
   return `
-    <div class="core-shoot-review-row">
+    <div class="core-shoot-review-row core-product-row">
       <div class="core-shoot-review-col-product">${badge ? badge + ' ' : ''}<span class="core-shoot-review-name">${escapeHtml(p.product_name)}</span></div>
+      <div class="core-shoot-review-col-soh">${p.soh != null ? p.soh : '—'}</div>
+      <div class="core-shoot-review-col-onorder">${p.on_order != null ? p.on_order : '—'}</div>
       <div class="core-shoot-review-col-7d">${core7dCellHtml(trend)}</div>
       <div class="core-shoot-review-col-cadence">${coreCadenceBoxHtml(trend)}</div>
       <div class="core-shoot-review-col-reasons"><span class="core-shoot-review-reasons-text">${escapeHtml(reasons)}</span></div>
