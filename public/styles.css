@@ -52,13 +52,30 @@ body{font-family:'Inter',sans-serif;font-size:13px;background:var(--bg);color:va
 .pw-error{display:none;color:var(--red);font-size:11px;margin-top:10px;}
 .pw-error.show{display:block;}
 
-/* ── TOPBAR ── */
-.topbar{display:flex;align-items:center;gap:24px;padding:12px 24px;background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:10;}
-.tabs{display:flex;gap:4px;flex:1;}
-.tab-btn{background:none;border:none;padding:8px 14px;border-radius:var(--r);font-family:inherit;font-size:13px;font-weight:500;color:var(--text-secondary);cursor:pointer;}
-.tab-btn:hover{background:var(--surface2);}
-.tab-btn.active{background:var(--teal-light);color:var(--teal-dark);font-weight:600;}
-.topbar-actions{display:flex;gap:8px;}
+/* ── SIDEBAR ── */
+/* #app itself is the flex container (display:flex set inline by showApp()
+   in app.js) -- .sidebar and <main> are its two children. Modal backdrops
+   further down the DOM are also #app children, but position:fixed takes
+   them out of flow entirely, so being flex items never affects them. */
+.sidebar{width:220px;flex-shrink:0;background:var(--black);display:flex;flex-direction:column;padding:20px 14px;position:sticky;top:0;align-self:flex-start;height:100vh;overflow-y:auto;}
+.sidebar-header{margin-bottom:18px;}
+.sidebar .wndrr-logo{padding:0 10px;}
+.sidebar .logo-text{color:white;}
+.sidebar .logo-text span{color:rgba(255,255,255,0.5);}
+/* .btn-primary is black -- same as the sidebar background -- so this needs
+   its own colour to actually be visible here. Two classes (.btn.sidebar-
+   quick-action) outweighs .btn-primary's one, so this wins regardless of
+   source order. */
+.btn.sidebar-quick-action{width:100%;margin-bottom:18px;background:var(--teal);color:white;}
+.btn.sidebar-quick-action:hover{background:var(--teal-dark);}
+.sidebar-nav{display:flex;flex-direction:column;gap:2px;flex:1;}
+.sidebar-nav .tab-btn{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:none;border:none;padding:9px 10px;border-radius:var(--r);font-family:inherit;font-size:13px;font-weight:500;color:rgba(255,255,255,0.65);cursor:pointer;}
+.sidebar-nav .tab-btn:hover{background:rgba(255,255,255,0.07);color:white;}
+.sidebar-nav .tab-btn.active{background:var(--teal);color:white;font-weight:600;}
+.sidebar-nav-icon{font-size:14px;width:16px;text-align:center;flex-shrink:0;}
+.sidebar-footer{margin-top:auto;padding-top:14px;border-top:1px solid rgba(255,255,255,0.12);}
+.sidebar-signout{width:100%;text-align:left;background:none;border:none;padding:8px 10px;font-family:inherit;font-size:12.5px;font-weight:500;color:rgba(255,255,255,0.5);cursor:pointer;}
+.sidebar-signout:hover{color:white;}
 
 .btn{border:none;border-radius:var(--r);padding:9px 14px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;}
 .btn-primary{background:var(--black);color:white;}
@@ -68,7 +85,7 @@ body{font-family:'Inter',sans-serif;font-size:13px;background:var(--bg);color:va
 .btn-danger{background:var(--red-light);color:var(--red);margin-right:auto;}
 .btn-sm{padding:6px 10px;font-size:11px;}
 
-main{padding:20px 24px;}
+main{flex:1;min-width:0;padding:20px 24px;}
 .tab-panel{display:none;}
 .tab-panel.active{display:block;}
 
