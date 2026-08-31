@@ -210,33 +210,30 @@
             <span class="admin-note">Monday handoff — what we're committed to shooting this week</span>
           </div>
 
-          <div class="shoot-plan-stat-bar">
-            <div class="shoot-plan-stat">
-              <span class="shoot-plan-stat-num" id="shoot-plan-stat-selected">0</span>
-              <span class="shoot-plan-stat-label">Products Selected</span>
+          <div class="shoot-plan-summary-bar">
+            <div class="shoot-plan-summary-stats">
+              <span><strong id="shoot-plan-stat-selected">0</strong> Products Selected</span>
+              <span class="shoot-plan-summary-sep">·</span>
+              <span><strong id="shoot-plan-stat-samples">0</strong> Samples Required</span>
+              <span class="shoot-plan-summary-sep">·</span>
+              <span><strong id="shoot-plan-stat-sent">0</strong> Sent to Content</span>
             </div>
-            <div class="shoot-plan-stat">
-              <span class="shoot-plan-stat-num" id="shoot-plan-stat-samples">0</span>
-              <span class="shoot-plan-stat-label">Samples Required</span>
-            </div>
-            <div class="shoot-plan-stat">
-              <span class="shoot-plan-stat-num" id="shoot-plan-stat-sent">0</span>
-              <span class="shoot-plan-stat-label">Products Sent to Content</span>
-            </div>
+            <button type="button" class="shoot-plan-csv-link" id="shoot-plan-csv-btn" onclick="downloadApparelMagicCsv()">
+              <span id="shoot-plan-samples-required-count">0 samples required</span> · Download Apparel Magic CSV &darr;
+            </button>
           </div>
 
           <div id="shoot-plan-grouped"></div>
 
-          <div class="shoot-plan-handoff-row">
-            <div class="shoot-plan-handoff-card">
-              <h3>CONTENT HANDOFF</h3>
-              <div id="shoot-plan-confirm-banner" class="shoot-plan-confirm-banner" style="display:none;"></div>
-              <button type="button" class="btn btn-primary" id="shoot-plan-confirm-btn" onclick="confirmWeeklyShootPlan()">Send to Concept Development</button>
+          <div class="shoot-plan-primary-handoff">
+            <div id="shoot-plan-confirm-cta">
+              <button type="button" class="btn btn-primary shoot-plan-cta-btn" id="shoot-plan-confirm-btn" onclick="confirmWeeklyShootPlan()">Confirm &amp; Send Shoot Plan &rarr;</button>
+              <div class="admin-note" id="shoot-plan-confirm-subtext">0 products will be added to the content workflow.</div>
             </div>
-            <div class="shoot-plan-handoff-card">
-              <h3>WAREHOUSE STOCK</h3>
-              <span class="admin-note" id="shoot-plan-samples-required-count">0 samples required</span>
-              <button type="button" class="btn btn-ghost" id="shoot-plan-csv-btn" onclick="downloadApparelMagicCsv()">Download Apparel Magic CSV</button>
+            <div id="shoot-plan-confirmed-state" class="shoot-plan-confirmed-state" style="display:none;">
+              <div class="shoot-plan-confirmed-title">&#10003; <span id="shoot-plan-confirmed-week-label"></span> Shoot Plan Confirmed</div>
+              <div class="admin-note" id="shoot-plan-confirmed-timestamp"></div>
+              <button type="button" class="btn btn-ghost btn-sm" onclick="editShootPlan()">Edit Plan</button>
             </div>
           </div>
         </div>
