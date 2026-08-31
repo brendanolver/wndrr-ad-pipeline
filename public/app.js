@@ -2303,7 +2303,7 @@ function highStockDetailHtml(p, selectedCodes) {
           <div class="high-stock-detail-col-title">Sales</div>
           <div class="high-stock-detail-metric"><span class="high-stock-detail-metric-label">7D Sell-Through</span><span class="high-stock-detail-metric-value">${p.sell_through_7d_pct}%</span></div>
           <div class="high-stock-detail-row"><span>7D Units Sold</span><span>${p.vel7}</span></div>
-          <div class="high-stock-detail-row"><span>30D</span><span>${p.units_sold_30d} units / ${p.sell_through_pct}%</span></div>
+          <div class="high-stock-detail-row"><span>30D Sell-Through</span><span>${p.units_sold_30d} units / ${p.sell_through_pct}%</span></div>
         </div>
         <div class="high-stock-detail-col">
           <div class="high-stock-detail-col-title">Creative</div>
@@ -2326,8 +2326,10 @@ function highStockDetailHtml(p, selectedCodes) {
       <div class="high-stock-detail-planned">
         <div class="high-stock-detail-col-title">Planned</div>
         <div class="high-stock-detail-planned-value">
-          ${planned ? `${escapeHtml(plannedClassification)} &middot; ${escapeHtml(planned.status_label)}` : 'Not yet planned'}
-          ${isSelected ? '<span class="high-stock-detail-planned-selected">&middot; &#10003; Shooting This Week</span>' : ''}
+          ${planned
+            ? `<span class="high-stock-planned-name">${escapeHtml(plannedClassification)}</span><span class="high-stock-planned-status">${escapeHtml(planned.status_label)}</span>`
+            : '<span class="high-stock-planned-name">Not yet planned</span>'}
+          ${isSelected ? '<span class="high-stock-detail-planned-selected">&#10003; Shooting This Week</span>' : ''}
         </div>
       </div>` : ''}
     </div>`;
