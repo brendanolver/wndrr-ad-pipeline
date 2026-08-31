@@ -628,11 +628,11 @@ main{padding:20px 24px;}
    Monday glance; expanding tells the story top to bottom: a one-line
    recommendation (stock problem), a compact 3-column Inventory | Sales |
    Creative grid with one bolded primary metric per column (sales problem /
-   creative gap), then a "Planned" line if a concept is already in flight
-   (shoot decision). Analytical/supporting figures (Index Score, historical
-   & 30D weekly avg, detailed Sales Trend, the raw recommendation reasons)
-   sit in a collapsed "More data" <details> so they don't compete with the
-   primary metrics. */
+   creative gap), then a single "Planned" line if a concept is already in
+   flight (shoot decision). Analytical/supporting figures (Index Score,
+   historical & 30D weekly avg, detailed Sales Trend, the raw recommendation
+   reasons) sit in a collapsed "More data" <details> so they don't compete
+   with the primary metrics. */
 .high-stock-tier-badge{display:inline-block;padding:2px 8px;border-radius:var(--r-pill);font-weight:700;font-size:11.5px;background:var(--surface2);white-space:nowrap;}
 .high-stock-clickable-row{cursor:pointer;}
 .high-stock-clickable-row:hover{background:var(--surface2);}
@@ -644,15 +644,9 @@ main{padding:20px 24px;}
 .high-stock-detail-metric{display:flex;flex-direction:column;gap:2px;padding-bottom:8px;margin-bottom:6px;border-bottom:1px solid var(--border);}
 .high-stock-detail-metric-label{font-size:10.5px;color:var(--text-muted);font-weight:600;}
 .high-stock-detail-metric-value{font-size:17px;font-weight:800;color:var(--text);font-variant-numeric:tabular-nums;}
-.high-stock-detail-subtitle{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.2px;color:var(--text-muted);margin:10px 0 4px;}
 .high-stock-detail-row{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;color:var(--text-secondary);padding:3px 0;}
 .high-stock-detail-row span:first-child{color:var(--text-muted);}
 .high-stock-detail-row span:last-child{font-weight:600;color:var(--text);white-space:nowrap;}
-.high-stock-detail-assets{margin-top:12px;}
-.high-stock-asset-row{display:flex;align-items:center;gap:6px;font-size:12px;padding:3px 0;}
-.high-stock-asset-icon{flex-shrink:0;}
-.high-stock-asset-name{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text-secondary);}
-.high-stock-asset-status{flex-shrink:0;font-size:11px;color:var(--text-muted);white-space:nowrap;}
 .high-stock-more-data{margin-top:12px;}
 .high-stock-more-data summary{cursor:pointer;color:var(--text-muted);font-weight:700;font-size:10.5px;text-transform:uppercase;letter-spacing:0.3px;list-style:none;}
 .high-stock-more-data summary::-webkit-details-marker{display:none;}
