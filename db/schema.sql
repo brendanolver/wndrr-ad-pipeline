@@ -596,12 +596,13 @@ CREATE INDEX IF NOT EXISTS idx_creative_assets_shoot_plan_item_id ON creative_as
 -- from the main production `status` (not_started..uploaded_live), which the
 -- Kanban board and every "days since last live" check elsewhere already
 -- depends on. This is just "how far along is this concept for Tuesday
--- review", not where it sits in the full production pipeline. A freshly
--- created concept starts life already being worked on, not sitting idle --
--- see ALTER COLUMN ... SET DEFAULT below.
+-- review", not where it sits in the full production pipeline. Stays Not
+-- Started until the creator actually saves work on it in the Individual
+-- Concept workspace -- Save Draft/Ready for Review are the only things
+-- that ever move it off Not Started (see conceptDevelopment.js PATCH
+-- /concepts/:id and app.js's saveConceptDevModal).
 ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS concept_dev_status VARCHAR(20) NOT NULL DEFAULT 'not_started'
   CHECK (concept_dev_status IN ('not_started', 'in_development', 'ready_for_review', 'changes_required', 'approved'));
-ALTER TABLE creative_assets ALTER COLUMN concept_dev_status SET DEFAULT 'in_development';
 
 -- The actual creative-development fields a concept is built from.
 ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS angle TEXT;
@@ -626,3 +627,14 @@ UPDATE creative_assets
 ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS talent_requirement TEXT;
 ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS location TEXT;
 ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS props_notes TEXT;
+
+-- One-time backfill for concepts stuck at 'in_development' purely because
+-- an earlier version of concept_dev_status's column default put new rows
+-- there instead of 'not_started' (see the ALTER COLUMN comment above) --
+-- with none of the actual creative-development fields ever filled in,
+-- these were never really "being worked on", so reset them to match.
+UPDATE creative_assets SET concept_dev_status = 'not_started'
+ WHERE concept_dev_status = 'in_development'
+   AND angle IS NULL AND hook IS NULL AND execution IS NULL AND script_notes IS NULL
+   AND reference_items = '[]'::jsonb
+   AND talent_requirement IS NULL AND location IS NULL AND props_notes IS NULL;
