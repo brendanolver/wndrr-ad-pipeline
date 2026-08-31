@@ -638,3 +638,17 @@ UPDATE creative_assets SET concept_dev_status = 'not_started'
    AND angle IS NULL AND hook IS NULL AND execution IS NULL AND script_notes IS NULL
    AND reference_items = '[]'::jsonb
    AND talent_requirement IS NULL AND location IS NULL AND props_notes IS NULL;
+
+-- A Concept is a distinct idea, not one ad -- "1 Concept -> 3 Hook
+-- Variations -> 3 (future) Creative Assets", never 3 concepts. Rather than
+-- invent a new top-level entity, hook_variations holds every opening this
+-- concept is trying (the first entry is the Primary Hook, any further ones
+-- are Alternative Hooks) directly on the same creative_assets row --
+-- exactly the reference_items pattern above, and exactly why counting
+-- product.concepts.length elsewhere in the app is unaffected by how many
+-- hooks a concept has. Superseded by this column: `hook` (a single-hook-
+-- per-concept field) -- the app no longer reads/writes it, backfilled once
+-- below into this concept's Primary Hook.
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS hook_variations JSONB NOT NULL DEFAULT '[]'::jsonb;
+UPDATE creative_assets SET hook_variations = jsonb_build_array(jsonb_build_object('text', hook))
+ WHERE hook_variations = '[]'::jsonb AND hook IS NOT NULL AND trim(hook) <> '';

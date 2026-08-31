@@ -3679,7 +3679,7 @@ function conceptDevWorkspaceHeaderHtml(product) {
 // already been added (the two fields that most determine "is this actually
 // ready to shoot", so they're worth surfacing without opening the concept).
 function conceptDevConceptCardHtml(concept) {
-  const hasHook = Boolean(concept.hook && concept.hook.trim());
+  const hasHook = Array.isArray(concept.hook_variations) && concept.hook_variations.some((h) => h.text && h.text.trim());
   const hasReference = Array.isArray(concept.reference_items) && concept.reference_items.length > 0;
   return `
     <div class="cd-concept-card" onclick="openConceptDevModal(${concept.id})">
@@ -3767,6 +3767,36 @@ function findConceptDevConcept(conceptId) {
 let conceptDevModalConceptId = null;
 let conceptDevModalProduct = null;
 let conceptDevModalReferences = [];
+let conceptDevModalHooks = [];
+
+// A concept's hook variations -- the first entry is always the Primary
+// Hook (never removable, unlike a reference or an alternative hook: a
+// concept always has exactly one primary opening slot, even if it's still
+// blank), any further entries are Alternative Hooks. There's deliberately
+// no minimum enforced here or at save time -- one strong hook is a
+// complete concept, per the brief; this only ever adds a slot when the
+// creator asks for one.
+function renderConceptDevModalHooks() {
+  document.getElementById('cd-modal-hooks-list').innerHTML = conceptDevModalHooks.map((h, i) => `
+    <div class="cd-hook-item">
+      <label>${i === 0 ? 'Primary Hook' : `Alternative Hook ${i + 1}`}
+        <textarea rows="2" oninput="conceptDevModalHooks[${i}].text=this.value" placeholder="${i === 0 ? 'e.g. 5 tees. $200. Here\'s what you actually get.' : 'A different opening for the same concept'}">${escapeHtml(h.text)}</textarea>
+      </label>
+      ${i > 0 ? `<button type="button" class="link-btn cd-hook-remove" onclick="removeConceptDevHook(${i})">Remove</button>` : ''}
+    </div>`).join('');
+}
+
+function addConceptDevHook() {
+  conceptDevModalHooks.push({ text: '' });
+  renderConceptDevModalHooks();
+  const textareas = document.querySelectorAll('#cd-modal-hooks-list textarea');
+  if (textareas.length) textareas[textareas.length - 1].focus();
+}
+
+function removeConceptDevHook(index) {
+  conceptDevModalHooks.splice(index, 1);
+  renderConceptDevModalHooks();
+}
 
 function renderConceptDevModalReferences() {
   document.getElementById('cd-modal-references-list').innerHTML = conceptDevModalReferences.length
@@ -3832,7 +3862,6 @@ function conceptDevModalContextHtml(product) {
 // header badge.
 function fillConceptDevModalFields(concept) {
   document.getElementById('cd-modal-angle').value = concept ? (concept.angle || '') : '';
-  document.getElementById('cd-modal-hook').value = concept ? (concept.hook || '') : '';
   document.getElementById('cd-modal-execution').value = concept ? (concept.execution || '') : '';
   document.getElementById('cd-modal-script').value = concept ? (concept.script_notes || '') : '';
   document.getElementById('cd-modal-talent').value = concept ? (concept.talent_requirement || '') : '';
@@ -3842,6 +3871,15 @@ function fillConceptDevModalFields(concept) {
     ? (concept.reference_items || []).map((r) => ({ url: r.url || '', note: r.note || '' }))
     : [];
   renderConceptDevModalReferences();
+
+  // Always at least a Primary Hook slot -- even blank, it's the one
+  // opening every concept has room for; Alternative Hooks only appear if
+  // the concept actually has them.
+  const existingHooks = concept && Array.isArray(concept.hook_variations) ? concept.hook_variations : [];
+  conceptDevModalHooks = existingHooks.length
+    ? existingHooks.map((h) => ({ text: h.text || '' }))
+    : [{ text: '' }];
+  renderConceptDevModalHooks();
 
   const status = concept ? concept.concept_dev_status : 'not_started';
   const badge = document.getElementById('cd-modal-status-badge');
@@ -3957,9 +3995,11 @@ async function saveConceptDevModal(targetStatus) {
   const body = {
     concept_dev_status: targetStatus,
     angle,
-    hook: document.getElementById('cd-modal-hook').value.trim(),
     execution,
     script_notes: document.getElementById('cd-modal-script').value.trim(),
+    hook_variations: conceptDevModalHooks
+      .map((h) => ({ text: h.text.trim() }))
+      .filter((h) => h.text),
     reference_items: conceptDevModalReferences
       .map((r) => ({ url: r.url.trim(), note: r.note.trim() }))
       .filter((r) => r.url),

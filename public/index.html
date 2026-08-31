@@ -828,27 +828,34 @@
             <div class="hint cd-modal-locked-name" id="cd-modal-name-locked" style="display:none;"></div>
           </label>
           <label>Angle / Idea
-            <textarea id="cd-modal-angle" rows="2"></textarea>
+            <textarea id="cd-modal-angle" rows="2" placeholder="Why would someone actually care about this?"></textarea>
           </label>
         </div>
       </div>
 
       <div class="cd-modal-section">
         <div class="cd-modal-section-title">The Execution</div>
-        <div class="cd-modal-field-row">
-          <label>Hook
-            <textarea id="cd-modal-hook" rows="2"></textarea>
-          </label>
-          <label>Execution / Shot Plan
-            <textarea id="cd-modal-execution" rows="2"></textarea>
-          </label>
-        </div>
+        <label>Execution / Shot Plan
+          <textarea id="cd-modal-execution" rows="2"></textarea>
+        </label>
         <div id="cd-modal-script-toggle-wrap">
           <button type="button" class="link-btn" onclick="toggleConceptDevScript()">+ Add Script / Talking Points <span class="hint">(optional)</span></button>
         </div>
         <label id="cd-modal-script-field" style="display:none;">Script / Talking Points
           <textarea id="cd-modal-script" rows="3"></textarea>
         </label>
+      </div>
+
+      <!-- Hook Variations belong to THIS concept -- "1 Concept -> 3 Hook
+           Variations", never 3 concepts (see hook_variations column
+           comment in schema.sql). Primary Hook is always visible (not
+           progressive -- every concept needs at least the option of one),
+           Alternative Hooks are opt-in and freely removable; there's no
+           minimum count enforced anywhere in this section. -->
+      <div class="cd-modal-section">
+        <div class="cd-modal-section-title">Hook / Opening</div>
+        <div id="cd-modal-hooks-list"></div>
+        <button type="button" class="link-btn" onclick="addConceptDevHook()">+ Add Alternative Hook</button>
       </div>
 
       <div class="cd-modal-section cd-modal-section-references">
