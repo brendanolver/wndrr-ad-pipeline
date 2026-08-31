@@ -833,12 +833,41 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .shoot-plan-idea{font-size:12px;color:var(--text-muted);font-style:italic;}
 .shoot-plan-row-actions{display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;}
 
-/* Concept Development: one bordered card per product (reuses the Shoot
-   Plan step's own row typography inside .cd-product-header -- see
-   conceptDevProductCardHtml), holding a compact concept list + Add Concept. */
-.cd-product-card{background:white;border:1px solid var(--border);border-radius:var(--r-lg);padding:14px 16px;margin-bottom:12px;}
-.cd-product-header{display:flex;align-items:flex-start;gap:10px;}
-.cd-status-summary{font-size:12px;color:var(--text-secondary);font-weight:600;margin:10px 0 8px;padding-top:10px;border-top:1px solid var(--border);}
+/* Concept Development landing page -- progressive disclosure, level 1:
+   "what products need attention?" A compact 3-column card grid, one card
+   per product, no concept-level detail (that lives one level down, in the
+   Product Workspace below). */
+.cd-week-summary-line{font-size:12px;color:var(--text-secondary);margin:2px 0 10px;}
+.cd-filters{display:flex;gap:6px;margin-bottom:14px;}
+.cd-filter-btn{background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-pill);padding:5px 12px;font-family:inherit;font-size:11.5px;font-weight:600;color:var(--text-secondary);cursor:pointer;}
+.cd-filter-btn:hover{background:var(--border);}
+.cd-filter-btn.active{background:var(--teal);border-color:var(--teal);color:white;}
+.cd-product-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
+@media (max-width:1100px){.cd-product-grid{grid-template-columns:repeat(2,1fr);}}
+@media (max-width:700px){.cd-product-grid{grid-template-columns:1fr;}}
+.cd-card{background:white;border:1px solid var(--border);border-radius:var(--r-lg);padding:14px;cursor:pointer;display:flex;flex-direction:column;gap:8px;}
+.cd-card:hover{border-color:var(--teal);box-shadow:var(--shadow-xs);}
+.cd-card-top{display:flex;align-items:center;gap:10px;}
+.cd-card-name{font-weight:700;font-size:13.5px;min-width:0;}
+.cd-card-badges{display:flex;flex-wrap:wrap;gap:5px;}
+.cd-badge{display:inline-block;background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-pill);padding:2px 8px;font-size:10.5px;font-weight:700;color:var(--text-secondary);white-space:nowrap;}
+.cd-badge-pathway{background:var(--purple-light);border-color:transparent;color:var(--purple);}
+.cd-card-count{font-size:12.5px;font-weight:700;color:var(--text);}
+.cd-card-status-row{display:flex;flex-wrap:wrap;gap:6px;}
+.cd-card-meta{font-size:11.5px;color:var(--text-muted);}
+.cd-card-action{font-size:12px;font-weight:700;color:var(--teal-dark);margin-top:2px;}
+
+/* Product Workspace -- level 2: "what concepts need preparing for this
+   product?" A read-only header (everything inherited from Planning) plus
+   a compact list of concept cards; the full development form only opens
+   once a concept is clicked (level 3, the existing .cd-modal-workspace). */
+.cd-back-link{display:inline-block;margin-bottom:12px;font-size:12.5px;}
+.cd-workspace-header{display:flex;align-items:flex-start;gap:10px;background:white;border:1px solid var(--border);border-radius:var(--r-lg);padding:14px 16px;margin-bottom:14px;}
+.cd-workspace-header-info{display:flex;flex-direction:column;gap:5px;min-width:0;}
+.cd-workspace-header-name{font-weight:700;font-size:15px;}
+.cd-workspace-header-meta{display:flex;flex-wrap:wrap;gap:5px;font-size:12px;color:var(--text-secondary);}
+.cd-new-concept-btn{margin-bottom:12px;}
+.cd-add-concept-subtle{display:inline-block;margin-top:10px;font-size:12px;color:var(--text-muted);}
 .cd-concepts-list{display:flex;flex-direction:column;gap:6px;margin-bottom:10px;}
 .cd-concept-row{display:flex;align-items:center;gap:8px;background:var(--surface2);border-radius:var(--r);padding:8px 10px;cursor:pointer;}
 .cd-concept-row:hover{background:var(--border);}
@@ -850,6 +879,7 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .cd-status-ready-for-review{background:var(--amber-light);color:var(--amber);}
 .cd-status-changes-required{background:var(--red-light);color:var(--red);}
 .cd-status-approved{background:var(--green-light);color:var(--green);}
+.cd-concept-open{font-size:11.5px;font-weight:700;color:var(--teal-dark);flex-shrink:0;}
 
 /* Concept Development workspace modal -- wide and section-divided (not the
    generic 420px .modal) since it holds every field a creator needs to
