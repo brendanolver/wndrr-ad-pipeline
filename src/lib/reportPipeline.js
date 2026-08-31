@@ -12,7 +12,7 @@
 const http = require('http');
 const https = require('https');
 const { getCached, cacheStatus } = require('./amCache');
-const { isWndrrStyleCode } = require('./apparelmagic');
+const { isWndrrStyleCode, deriveProductCode } = require('./apparelmagic');
 
 const PIPELINE_BASE_URL = process.env.PIPELINE_BASE_URL;
 const PIPELINE_TOKEN = process.env.PIPELINE_TOKEN;
@@ -416,6 +416,64 @@ async function getCategorySalesCadence() {
   return buildCategorySalesCadence();
 }
 
+// Product-level "this month to date vs the same days last year" + last-7-
+// days -- the exact same MTD/YoY windows buildCategorySalesCadence uses
+// above, just grouped by product_code (the same 8-char family key
+// apparelmagic.js's deriveProductCode derives from a style_code) instead of
+// Shopify's own Product type. No trailing-months strip here -- Core's
+// per-product rows only need the MTD box + the 7D figure, not the full
+// category-page monthly grid. Reuses the same cached getSalesRows() the
+// tier computation and category cadence both already share, so this adds
+// no extra download/parse of its own.
+async function buildProductSalesCadenceUncached() {
+  const rows = await getSalesRows();
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const thisStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  const thisEnd = today;
+  const lastYearStart = new Date(today.getFullYear() - 1, today.getMonth(), 1);
+  const lastYearEnd = clampToMonth(today.getFullYear() - 1, today.getMonth(), today.getDate());
+  const last7dStart = new Date(today); last7dStart.setDate(last7dStart.getDate() - 6);
+  const last7dEnd = today;
+  const prev7dStart = new Date(today); prev7dStart.setDate(prev7dStart.getDate() - 13);
+  const prev7dEnd = new Date(today); prev7dEnd.setDate(prev7dEnd.getDate() - 7);
+
+  function inWindow(day, start, end) {
+    const t = new Date(day).setHours(0, 0, 0, 0);
+    return t >= start.getTime() && t <= end.getTime();
+  }
+
+  const totals = new Map(); // product_code -> { thisPeriod, lastYear, last7d, prev7d }
+  for (const r of rows) {
+    const styleCode = styleCodeFromSku(r.sku);
+    if (!styleCode) continue;
+    const productCode = deriveProductCode(styleCode);
+    if (!totals.has(productCode)) totals.set(productCode, { thisPeriod: 0, lastYear: 0, last7d: 0, prev7d: 0 });
+    const entry = totals.get(productCode);
+    if (inWindow(r.day, thisStart, thisEnd)) entry.thisPeriod += r.qty;
+    if (inWindow(r.day, lastYearStart, lastYearEnd)) entry.lastYear += r.qty;
+    if (inWindow(r.day, last7dStart, last7dEnd)) entry.last7d += r.qty;
+    if (inWindow(r.day, prev7dStart, prev7dEnd)) entry.prev7d += r.qty;
+  }
+
+  const products = new Map();
+  for (const [productCode, { thisPeriod, lastYear, last7d, prev7d }] of totals.entries()) {
+    products.set(productCode, {
+      this_period_units: Math.round(thisPeriod),
+      last_year_units: Math.round(lastYear),
+      pct_change: lastYear > 0 ? Math.round(((thisPeriod - lastYear) / lastYear) * 100) : (thisPeriod > 0 ? null : 0),
+      last_7d_units: Math.round(last7d),
+      last_7d_pct_change: prev7d > 0 ? Math.round(((last7d - prev7d) / prev7d) * 100) : (last7d > 0 ? null : 0),
+    });
+  }
+  return products; // Map<product_code, { this_period_units, last_year_units, pct_change, last_7d_units, last_7d_pct_change }>
+}
+
+async function getProductSalesCadence() {
+  return buildProductSalesCadenceUncached();
+}
+
 function warmPipelineCache() {
   if (!configured()) return;
   getStyleTiers().catch((err) => {
@@ -427,4 +485,4 @@ function getPipelineCacheStatus() {
   return { styleTiers: cacheStatus('pipelineStyleTiers') };
 }
 
-module.exports = { configured, getStyleTiers, getCategorySalesCadence, warmPipelineCache, getPipelineCacheStatus };
+module.exports = { configured, getStyleTiers, getCategorySalesCadence, getProductSalesCadence, warmPipelineCache, getPipelineCacheStatus };
