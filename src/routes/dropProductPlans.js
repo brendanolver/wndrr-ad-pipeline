@@ -89,16 +89,18 @@ router.get('/', async (req, res, next) => {
 // pipeline, so there's no separate "create" step. It starts against the
 // product's first colourway; the team can change that (and add target
 // date/owner) via Edit.
-router.post('/', async (req, res, next) => {
+//
+// Extracted so Concept Development (conceptDevelopment.js) can call this
+// exact same logic server-side -- a Drop product's "already assigned"
+// concepts must exist by the time Concept Dev is opened, even if nobody
+// has visited that product's page in Planning yet.
+async function generateOrTopUpPlan(dropId, productCode) {
   const client = await pool.connect();
   try {
-    const { drop_id, product_code } = req.body || {};
-    if (!drop_id || !product_code) return res.status(400).json({ error: 'drop_id and product_code are required' });
-
-    const { found, target, styles } = await computeProductTarget(drop_id, product_code);
-    if (!found) return res.status(404).json({ error: 'Product not found in this drop' });
+    const { found, target, styles } = await computeProductTarget(dropId, productCode);
+    if (!found) return { notFound: true };
     if (target == null) {
-      return res.json({ plan: null, slots: [], target: null, shortfall: null, reason: 'stock_unavailable' });
+      return { plan: null, slots: [], target: null, shortfall: null, reason: 'stock_unavailable' };
     }
 
     await client.query('BEGIN');
@@ -108,7 +110,7 @@ router.post('/', async (req, res, next) => {
        ON CONFLICT (drop_id, product_code)
        DO UPDATE SET last_known_target = EXCLUDED.last_known_target, updated_at = now()
        RETURNING id`,
-      [drop_id, product_code, target]
+      [dropId, productCode, target]
     );
     const planId = upserted.rows[0].id;
 
@@ -151,12 +153,25 @@ router.post('/', async (req, res, next) => {
     await client.query('COMMIT');
 
     const { plan, slots } = await fetchPlanWithSlots(planId);
-    res.status(201).json({ plan, slots, target, shortfall: Math.max(0, target - slots.length) });
+    return { plan, slots, target, shortfall: Math.max(0, target - slots.length) };
   } catch (err) {
     await client.query('ROLLBACK');
-    next(err);
+    throw err;
   } finally {
     client.release();
+  }
+}
+
+router.post('/', async (req, res, next) => {
+  try {
+    const { drop_id, product_code } = req.body || {};
+    if (!drop_id || !product_code) return res.status(400).json({ error: 'drop_id and product_code are required' });
+
+    const result = await generateOrTopUpPlan(drop_id, product_code);
+    if (result.notFound) return res.status(404).json({ error: 'Product not found in this drop' });
+    res.status(201).json(result);
+  } catch (err) {
+    next(err);
   }
 });
 
@@ -307,4 +322,4 @@ router.delete('/:id/slots/:slotId/fulfill', async (req, res, next) => {
   }
 });
 
-module.exports = router;
+module.exports = { router, generateOrTopUpPlan };

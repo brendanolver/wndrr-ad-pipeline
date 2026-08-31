@@ -574,3 +574,42 @@ CREATE TABLE IF NOT EXISTS weekly_planning_progress (
   promotions_reviewed BOOLEAN NOT NULL DEFAULT false,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- ---------------------------------------------------------------------------
+-- Concept Development: the stage right after Monday Planning confirms a
+-- week's Shoot Plan. Concepts are still creative_assets rows (this table is
+-- already "one row per ad concept per style") rather than a new parallel
+-- entity, so the Kanban board/status history/every existing consumer keep
+-- working unchanged, and later Shooting/Editing stages can build on the
+-- same rows. All additive/nullable except where noted.
+-- ---------------------------------------------------------------------------
+
+-- Scopes a Core/High Stock/Promotion concept to the exact shoot_plan_items
+-- handoff it belongs to, so Concept Dev shows only this week's concepts for
+-- a product, not every historical asset ever made for the style. Stays NULL
+-- for Drop-sourced concepts, which are scoped via drop_product_plan_slots
+-- instead (those already have their own assigned-concept structure).
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS shoot_plan_item_id INTEGER REFERENCES shoot_plan_items(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_creative_assets_shoot_plan_item_id ON creative_assets(shoot_plan_item_id);
+
+-- Concept Development's own simple review status -- deliberately separate
+-- from the main production `status` (not_started..uploaded_live), which the
+-- Kanban board and every "days since last live" check elsewhere already
+-- depends on. This is just "how far along is this concept for Tuesday
+-- review", not where it sits in the full production pipeline.
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS concept_dev_status VARCHAR(20) NOT NULL DEFAULT 'not_started'
+  CHECK (concept_dev_status IN ('not_started', 'in_development', 'ready_for_review', 'changes_required', 'approved'));
+
+-- The actual creative-development fields a concept is built from.
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS angle TEXT;
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS hook TEXT;
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS execution TEXT;
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS script_notes TEXT;
+-- Reference uploads (image/video/screenshot) are out of scope for V1 -- no
+-- object storage exists yet and Railway's own disk is ephemeral, so links
+-- are the only supported reference mechanism for now.
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS reference_links TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS reference_note TEXT;
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS talent_requirement TEXT;
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS location TEXT;
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS props_notes TEXT;
