@@ -35,6 +35,12 @@ router.put('/', async (req, res, next) => {
       }
       updates.high_stock_min_soh = v;
     }
+    for (const field of ['default_shoot_top_size', 'default_shoot_bottom_alpha_size', 'default_shoot_bottom_waist_size']) {
+      if (body[field] === undefined) continue;
+      const v = String(body[field] || '').trim();
+      if (!v) return res.status(400).json({ error: `${field} is required` });
+      updates[field] = v;
+    }
 
     const keys = Object.keys(updates);
     if (!keys.length) {
