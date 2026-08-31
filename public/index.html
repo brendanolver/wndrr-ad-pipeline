@@ -207,30 +207,49 @@
         <div class="planning-step-panel" data-step="shoot-plan" id="planning-step-shoot-plan">
           <div class="shoot-plan-step-header">
             <h2>THIS WEEK'S SHOOT PLAN</h2>
-            <span id="shoot-plan-step-count">0 Products Selected</span>
+            <span class="admin-note">Monday handoff — what we're committed to shooting this week</span>
           </div>
+
+          <div class="shoot-plan-stat-bar">
+            <div class="shoot-plan-stat">
+              <span class="shoot-plan-stat-num" id="shoot-plan-stat-selected">0</span>
+              <span class="shoot-plan-stat-label">Products Selected</span>
+            </div>
+            <div class="shoot-plan-stat">
+              <span class="shoot-plan-stat-num" id="shoot-plan-stat-samples">0</span>
+              <span class="shoot-plan-stat-label">Samples Required</span>
+            </div>
+            <div class="shoot-plan-stat">
+              <span class="shoot-plan-stat-num" id="shoot-plan-stat-sent">0</span>
+              <span class="shoot-plan-stat-label">Products Sent to Content</span>
+            </div>
+          </div>
+
           <div id="shoot-plan-grouped"></div>
 
-          <div class="planning-section-header">
-            <h2>Bring From Warehouse</h2>
-          </div>
-          <div id="shoot-plan-warehouse-list" class="shoot-plan-warehouse-list"></div>
-
-          <div class="shoot-plan-confirm-row">
-            <div id="shoot-plan-confirm-banner" class="shoot-plan-confirm-banner" style="display:none;"></div>
-            <button type="button" class="btn btn-primary" id="shoot-plan-confirm-btn" onclick="confirmWeeklyShootPlan()">Confirm Weekly Shoot Plan</button>
+          <div class="shoot-plan-handoff-row">
+            <div class="shoot-plan-handoff-card">
+              <h3>CONTENT HANDOFF</h3>
+              <div id="shoot-plan-confirm-banner" class="shoot-plan-confirm-banner" style="display:none;"></div>
+              <button type="button" class="btn btn-primary" id="shoot-plan-confirm-btn" onclick="confirmWeeklyShootPlan()">Send to Concept Development</button>
+            </div>
+            <div class="shoot-plan-handoff-card">
+              <h3>WAREHOUSE STOCK</h3>
+              <span class="admin-note" id="shoot-plan-samples-required-count">0 samples required</span>
+              <button type="button" class="btn btn-ghost" id="shoot-plan-csv-btn" onclick="downloadApparelMagicCsv()">Download Apparel Magic CSV</button>
+            </div>
           </div>
         </div>
 
         <!-- Persistent across every Planning step (not just the "Shoot Plan"
              tab) -- a product added at any stage (Core, High Stock, Upcoming
              Drops, Promotions) shows up here immediately, so you don't have
-             to switch tabs to see what's already selected for the week. -->
+             to switch tabs to see whether anything's selected yet. The full
+             row list lives once, on the Shoot Plan step itself. -->
         <div class="planning-section-header">
           <h2>This Week's Shoot Plan</h2>
           <span class="admin-note" id="planning-shoot-plan-summary-count"></span>
         </div>
-        <div id="planning-shoot-plan-summary-list" class="core-shoot-planning-list"></div>
       </div>
 
       <div id="planning-drop-view" style="display:none;">
