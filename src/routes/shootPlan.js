@@ -11,7 +11,7 @@ const SOURCES = ['core', 'high_stock', 'drop', 'promotion'];
 router.get('/', async (req, res, next) => {
   try {
     const itemsResult = await pool.query(
-      `SELECT spi.*, ca.status AS asset_status, p.id AS promotion_id, p.name AS promotion_name
+      `SELECT spi.*, ca.status AS asset_status, p.id AS promotion_id, p.name AS promotion_name, ps.name AS promotion_stage_name
        FROM shoot_plan_items spi
        LEFT JOIN creative_assets ca ON ca.id = spi.asset_id
        LEFT JOIN promotion_stages ps ON ps.id = spi.promotion_stage_id
@@ -52,6 +52,7 @@ router.get('/', async (req, res, next) => {
       promotion_stage_id: i.promotion_stage_id,
       promotion_id: i.promotion_id,
       promotion_name: i.promotion_name,
+      promotion_stage_name: i.promotion_stage_name,
       styles: stylesByItem.get(i.id) || [],
     })));
   } catch (err) {

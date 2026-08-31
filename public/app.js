@@ -394,10 +394,13 @@ document.querySelectorAll('.planning-step-btn').forEach((btn) => {
   btn.addEventListener('click', () => setPlanningStep(btn.dataset.step));
 });
 
+// Same "samples required" definition as the Shoot Plan step's own stat --
+// only "Bring from Warehouse" colourway+size rows count, so this header
+// line never disagrees with the number the step itself shows.
 function renderPlanningShootSummary() {
-  const totalSamples = state.shootPlan.reduce((sum, i) => sum + i.styles.length, 0);
+  const samplesRequired = shootPlanWarehouseRows().length;
   document.getElementById('planning-shoot-summary').textContent =
-    `${state.shootPlan.length} product${state.shootPlan.length === 1 ? '' : 's'} selected · ${totalSamples} sample${totalSamples === 1 ? '' : 's'} required`;
+    `${state.shootPlan.length} product${state.shootPlan.length === 1 ? '' : 's'} selected · ${samplesRequired} sample${samplesRequired === 1 ? '' : 's'} required`;
 }
 
 // ── Planning sub-navigation (list / drop / product / promotion / stage) ──
@@ -2784,31 +2787,55 @@ async function savePromotionShootItem() {
 }
 
 // ── Planning: Step 5 -- This Week's Shoot Plan ───────
-// The Monday meeting's output: everything selected across Core/High
-// Stock/Upcoming Drops/Promotions, grouped by where it came from, plus the
-// warehouse pull list every "Bring from Warehouse" selection produces.
+// The Monday handoff, not another planning dashboard: a top stat bar
+// (Selected / Samples Required / Sent to Content), one row per product
+// grouped by where it came from, and two handoff actions at the bottom
+// (confirm to Content, download the warehouse pull list for Apparel Magic).
 // 'other' catches any pre-migration item whose source is NULL, so it never
 // silently vanishes from the total.
 const SHOOT_PLAN_SOURCE_LABELS = { core: 'CORE', high_stock: 'HIGH STOCK', drop: 'UPCOMING DROPS', promotion: 'PROMOTIONS', other: 'OTHER' };
 const SHOOT_PLAN_SOURCE_ORDER = ['core', 'high_stock', 'drop', 'promotion', 'other'];
 
+// The creative pathway a product's source implies -- fixed copy for
+// Core/Drops per the brief, "Cover Requirement" reused verbatim from the
+// Promotions shoot modal since that's the only existing precedent string.
+function shootPlanRequirementLabel(item) {
+  switch (item.source) {
+    case 'core': return 'Develop New Concepts';
+    case 'drop': return 'Proven Concepts Already Assigned';
+    case 'high_stock': return 'Creative Refresh (High Stock)';
+    case 'promotion': return item.promotion_stage_name ? `Cover Requirement — ${item.promotion_stage_name}` : 'Cover Requirement';
+    default: return '—';
+  }
+}
+
 function shootPlanProductRowHtml(item) {
   const thumb = item.image_url
     ? `<img class="high-stock-thumb" src="${item.image_url}" alt="">`
     : '<span class="high-stock-thumb high-stock-noimg">🖼</span>';
-  const stockLabel = item.stock_status === 'in_office' ? 'In Office' : 'Bring from Warehouse';
+  const ready = item.stock_status === 'in_office';
+  const chips = item.styles
+    .map((s) => `<span class="shoot-plan-style-chip">${escapeHtml(s.colour_label || s.style_code)}${s.size ? ` · ${escapeHtml(s.size)}` : ''}</span>`)
+    .join('');
   return `
     <div class="shoot-plan-product-row">
       ${thumb}
-      <span class="shoot-plan-product-name">${escapeHtml(item.product_name)}</span>
-      <span class="shoot-plan-product-meta">${stockLabel} · ${escapeHtml(item.asset_status_label || '—')}</span>
+      <div class="shoot-plan-product-main">
+        <div class="shoot-plan-product-top">
+          <span class="shoot-plan-product-name">${escapeHtml(item.product_name)}</span>
+          <span class="shoot-plan-stock-badge ${ready ? 'shoot-plan-stock-ready' : 'shoot-plan-stock-warehouse'}">${ready ? 'Ready' : 'Bring from Warehouse'}</span>
+        </div>
+        <div class="shoot-plan-product-meta">
+          <span>Owner: ${escapeHtml(item.creator)}</span>
+          <span>${escapeHtml(shootPlanRequirementLabel(item))}</span>
+        </div>
+        <div class="shoot-plan-style-chips">${chips}</div>
+        ${item.quick_note ? `<div class="shoot-plan-idea">💡 ${escapeHtml(item.quick_note)}</div>` : ''}
+      </div>
       <button type="button" class="btn btn-ghost btn-sm" onclick="removeShootPlanItem(${item.id})">Remove</button>
     </div>`;
 }
 
-// Shared by the dedicated "Shoot Plan" step and the persistent summary
-// below every Planning step -- both are just this same state.shootPlan
-// list, grouped by where each product was added from.
 function shootPlanGroupedHtml(emptyMessage) {
   if (!state.shootPlan.length) {
     return `<div class="attention-empty">${emptyMessage}</div>`;
@@ -2829,38 +2856,38 @@ function shootPlanGroupedHtml(emptyMessage) {
     .join('');
 }
 
-// Persistent across every Planning step (not just the "Shoot Plan" tab) --
-// a product added at any stage (Core, High Stock, Upcoming Drops,
-// Promotions) shows up here immediately, so you don't have to switch tabs
-// to see what's already selected for the week.
+// Only a count -- the full row list lives once, on the Shoot Plan step
+// itself. This just tells you at a glance, from any other step, whether
+// anything's selected yet for the week.
 function renderPlanningShootPlanSummary() {
   const count = state.shootPlan.length;
   document.getElementById('planning-shoot-plan-summary-count').textContent =
-    `${count} product${count === 1 ? '' : 's'} selected`;
-  document.getElementById('planning-shoot-plan-summary-list').innerHTML =
-    shootPlanGroupedHtml('Nothing selected yet this week — use + Shoot This Week on a Core, High Stock, Upcoming Drop, or Promotion product to add one.');
+    count ? `${count} product${count === 1 ? '' : 's'} selected this week` : 'Nothing selected yet this week';
+}
+
+// Colourway+size rows across every "Bring from Warehouse" selection --
+// the raw material for both the Samples Required stat and the AM CSV.
+function shootPlanWarehouseRows() {
+  return state.shootPlan
+    .filter((i) => i.stock_status === 'needs_to_be_brought_in')
+    .flatMap((i) => i.styles.map((s) => ({ product_name: i.product_name, style_code: s.style_code, colour: s.colour_label, size: s.size })));
 }
 
 function renderShootPlanStep() {
-  document.getElementById('shoot-plan-step-count').textContent = `${state.shootPlan.length} Product${state.shootPlan.length === 1 ? '' : 's'} Selected`;
+  const total = state.shootPlan.length;
+  const samplesRequired = shootPlanWarehouseRows().length;
+  const sentToContent = state.weeklyShootPlanConfirmation ? total : 0;
+
+  document.getElementById('shoot-plan-stat-selected').textContent = total;
+  document.getElementById('shoot-plan-stat-samples').textContent = samplesRequired;
+  document.getElementById('shoot-plan-stat-sent').textContent = sentToContent;
 
   document.getElementById('shoot-plan-grouped').innerHTML =
     shootPlanGroupedHtml('Nothing planned yet this week — use + Shoot This Week on a Core, High Stock, Upcoming Drop, or Promotion product to add one.');
 
-  // Only "Bring from Warehouse" items contribute -- "In Office" samples
-  // never need a pull-list entry, per the brief.
-  const warehouseRows = state.shootPlan
-    .filter((i) => i.stock_status === 'needs_to_be_brought_in')
-    .flatMap((i) => i.styles.map((s) => ({ product: i.product_name, colour: s.colour_label, size: s.size })));
-  const warehouseList = document.getElementById('shoot-plan-warehouse-list');
-  warehouseList.innerHTML = warehouseRows.length
-    ? warehouseRows.map((r) => `
-        <div class="shoot-plan-warehouse-row">
-          <span>${escapeHtml(r.product)}</span>
-          <span>${escapeHtml(r.colour || '—')}</span>
-          <span>${escapeHtml(r.size || '—')}</span>
-        </div>`).join('')
-    : '<div class="attention-empty">Nothing to bring from the warehouse this week.</div>';
+  document.getElementById('shoot-plan-samples-required-count').textContent =
+    `${samplesRequired} sample${samplesRequired === 1 ? '' : 's'} required`;
+  document.getElementById('shoot-plan-csv-btn').disabled = !samplesRequired;
 
   renderWeeklyShootPlanConfirmation();
 }
@@ -2870,7 +2897,7 @@ function renderWeeklyShootPlanConfirmation() {
   const btn = document.getElementById('shoot-plan-confirm-btn');
   if (state.weeklyShootPlanConfirmation) {
     banner.style.display = '';
-    banner.textContent = `✓ Weekly Shoot Plan Confirmed — ${formatDate(state.weeklyShootPlanConfirmation.confirmed_at)}`;
+    banner.textContent = `✓ Sent to Concept Development — ${formatDate(state.weeklyShootPlanConfirmation.confirmed_at)}`;
     btn.style.display = 'none';
   } else {
     banner.style.display = 'none';
@@ -2882,11 +2909,38 @@ function renderWeeklyShootPlanConfirmation() {
 async function confirmWeeklyShootPlan() {
   try {
     state.weeklyShootPlanConfirmation = await api('/weekly-shoot-plan-confirmation', { method: 'POST' });
-    renderWeeklyShootPlanConfirmation();
-    toast('Weekly Shoot Plan confirmed');
+    renderShootPlanStep();
+    toast('Sent to Concept Development');
   } catch (e) {
     toast(e.message, true);
   }
+}
+
+// Mirrors the Mystery Box Builder's "Apparel Magic order export" CSV
+// exactly (customer_po, customer_name, sku_alt, qty, date_due, date,
+// unit_price, date_start), quoted fields with doubled internal quotes.
+// sku_alt is the colourway's style_code, not a true per-size AM SKU --
+// this app has no live per-size SKU resolution (apparelmagic.js only ever
+// extracts style_number/sku_id, never a size-level SKU string), so
+// Warehouse still needs to match the size against this style_code by hand.
+function downloadApparelMagicCsv() {
+  const rows = shootPlanWarehouseRows();
+  if (!rows.length) return;
+
+  const today = new Date().toISOString().slice(0, 10);
+  const po = `CONTENT SHOOT ${today}`;
+  const headers = ['customer_po', 'customer_name', 'sku_alt', 'qty', 'date_due', 'date', 'unit_price', 'date_start'];
+  const csvRows = rows.map((r) => [po, 'STOCK ADJUST', r.style_code, '1', today, today, '0.00', today]);
+  const csv = [headers, ...csvRows]
+    .map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','))
+    .join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `apparel-magic-shoot-plan-${today}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 // ── Settings: Weekly New Concept Target ──────────────
