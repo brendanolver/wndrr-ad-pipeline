@@ -3045,53 +3045,40 @@ function shootPlanRequirementLabel(item) {
 // Size only matters (and so is only editable) for colourways being pulled
 // from the warehouse -- an "in office" sample doesn't have a pull-list
 // size to get wrong. Past weeks stay read-only, same as Remove.
-function shootPlanStyleChipHtml(item, s) {
-  const label = s.colour_label || s.style_code;
-  const editable = item.stock_status === 'needs_to_be_brought_in' && state.planningWeekOffset >= 0;
-  if (!editable) {
-    return `<span class="shoot-plan-style-chip">${escapeHtml(label)}${s.size ? ` · ${escapeHtml(s.size)}` : ''}</span>`;
-  }
-  return `<span class="shoot-plan-style-chip shoot-plan-style-chip-editable" data-item-id="${item.id}" data-style-id="${s.style_id}" data-size="${escapeHtml(s.size || '')}" data-label="${escapeHtml(label)}" onclick="editShootPlanStyleSize(this)" title="Edit size">${escapeHtml(label)}${s.size ? ` · ${escapeHtml(s.size)}` : ' · Add size'} <span class="shoot-plan-size-edit-icon">&#9998;</span></span>`;
+// Opens a small modal listing every colourway on this product with an
+// editable size field, rather than an inline per-chip edit -- one clear
+// "Edit Sizes" action on the card, same footing as "Remove".
+let shootPlanEditSizesItemId = null;
+
+function openShootPlanEditSizesModal(itemId) {
+  const item = state.shootPlan.find((i) => i.id === itemId);
+  if (!item) return;
+  shootPlanEditSizesItemId = itemId;
+  document.getElementById('shoot-plan-edit-sizes-title').textContent = `Edit Sizes — ${item.product_name}`;
+  document.getElementById('shoot-plan-edit-sizes-list').innerHTML = item.styles.map((s) => `
+    <div class="shoot-plan-edit-size-row">
+      <span>${escapeHtml(s.colour_label || s.style_code)}</span>
+      <input type="text" class="shoot-plan-edit-size-input" data-style-id="${s.style_id}" value="${escapeHtml(s.size || '')}" placeholder="Size">
+    </div>`).join('');
+  openModal('shoot-plan-edit-sizes-modal');
 }
 
-function editShootPlanStyleSize(chipEl) {
-  if (!chipEl || chipEl.querySelector('input')) return;
-  const { itemId, styleId, size, label } = chipEl.dataset;
-  chipEl.innerHTML = `${escapeHtml(label)} · <input type="text" class="shoot-plan-size-input" value="${escapeHtml(size)}" placeholder="Size">`;
-  const input = chipEl.querySelector('input');
-  input.focus();
-  input.select();
-
-  // Guards against both a keydown-triggered commit/cancel AND the blur
-  // that follows it (moving focus off the input, or the re-render itself)
-  // from firing this twice.
-  let settled = false;
-  const commit = () => {
-    if (settled) return;
-    settled = true;
-    saveShootPlanStyleSize(itemId, styleId, input.value.trim());
-  };
-  const cancel = () => {
-    if (settled) return;
-    settled = true;
-    renderShootPlanStep();
-    renderPlanningShootPlanSummary();
-  };
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); commit(); }
-    if (e.key === 'Escape') { e.preventDefault(); cancel(); }
-  });
-  input.addEventListener('blur', commit);
-}
-
-async function saveShootPlanStyleSize(itemId, styleId, size) {
+async function saveShootPlanEditSizes() {
+  const itemId = shootPlanEditSizesItemId;
+  if (!itemId) return;
+  const inputs = document.querySelectorAll('#shoot-plan-edit-sizes-list .shoot-plan-edit-size-input');
   try {
-    await api(`/shoot-plan/${itemId}/styles/${styleId}`, { method: 'PATCH', body: JSON.stringify({ size }) });
-    await loadAll();
+    await Promise.all(Array.from(inputs).map((input) =>
+      api(`/shoot-plan/${itemId}/styles/${input.dataset.styleId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ size: input.value.trim() }),
+      })
+    ));
+    closeModal('shoot-plan-edit-sizes-modal');
+    toast('Sizes updated');
+    loadAll();
   } catch (e) {
     toast(e.message, true);
-    renderShootPlanStep();
-    renderPlanningShootPlanSummary();
   }
 }
 
@@ -3100,10 +3087,17 @@ function shootPlanProductRowHtml(item) {
     ? `<img class="high-stock-thumb" src="${item.image_url}" alt="">`
     : '<span class="high-stock-thumb high-stock-noimg">🖼</span>';
   const ready = item.stock_status === 'in_office';
-  const chips = item.styles.map((s) => shootPlanStyleChipHtml(item, s)).join('');
+  const chips = item.styles
+    .map((s) => `<span class="shoot-plan-style-chip">${escapeHtml(s.colour_label || s.style_code)}${s.size ? ` · ${escapeHtml(s.size)}` : ''}</span>`)
+    .join('');
   // Past weeks are a read-only historical record -- no editing what
-  // already happened.
-  const removeBtn = state.planningWeekOffset < 0
+  // already happened. Sizes only matter for colourways being pulled from
+  // the warehouse -- an "in office" sample has nothing to correct.
+  const readOnly = state.planningWeekOffset < 0;
+  const editSizesBtn = !ready && !readOnly
+    ? `<button type="button" class="btn btn-ghost btn-sm" onclick="openShootPlanEditSizesModal(${item.id})">Edit Sizes</button>`
+    : '';
+  const removeBtn = readOnly
     ? ''
     : `<button type="button" class="btn btn-ghost btn-sm" onclick="removeShootPlanItem(${item.id})">Remove</button>`;
   return `
@@ -3121,7 +3115,7 @@ function shootPlanProductRowHtml(item) {
         <div class="shoot-plan-style-chips">${chips}</div>
         ${item.quick_note ? `<div class="shoot-plan-idea">💡 ${escapeHtml(item.quick_note)}</div>` : ''}
       </div>
-      ${removeBtn}
+      <div class="shoot-plan-row-actions">${editSizesBtn}${removeBtn}</div>
     </div>`;
 }
 
