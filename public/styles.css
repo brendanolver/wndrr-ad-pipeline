@@ -781,12 +781,27 @@ main{padding:20px 24px;}
 .cd-status-changes-required{background:var(--red-light);color:var(--red);}
 .cd-status-approved{background:var(--green-light);color:var(--green);}
 
-.cd-reference-input-row{display:flex;gap:8px;}
-.cd-reference-input-row input{flex:1;}
-.cd-reference-link-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
-.cd-reference-chip{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;color:var(--text-secondary);background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-pill);padding:3px 6px 3px 10px;max-width:260px;}
-.cd-reference-chip button{background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:13px;line-height:1;padding:0 2px;}
-.cd-reference-chip button:hover{color:var(--red);}
+/* Concept Development workspace modal -- wide and section-divided (not the
+   generic 420px .modal) since it holds every field a creator needs to
+   prep a concept for Tuesday review: context banner, then Concept
+   Details/References/Production Requirements/Status stacked as clearly
+   labelled sections instead of one long unbroken field list. */
+.cd-modal-workspace{width:760px;max-width:92vw;}
+@media (max-width:840px){.cd-modal-workspace{width:94vw;}}
+.cd-modal-context{display:flex;gap:12px;background:var(--surface2);border-radius:var(--r);padding:12px;}
+.cd-modal-context-info{display:flex;flex-direction:column;gap:6px;min-width:0;}
+.cd-modal-context-product{font-weight:700;font-size:14px;}
+.cd-modal-context-meta{display:flex;gap:6px;flex-wrap:wrap;font-size:12px;color:var(--text-secondary);}
+.cd-modal-section{border-top:1px solid var(--border);padding-top:12px;display:flex;flex-direction:column;gap:12px;}
+.cd-modal-section-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);}
+.cd-modal-field-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+@media (max-width:600px){.cd-modal-field-row{grid-template-columns:1fr;}}
+.cd-reference-item-list{display:flex;flex-direction:column;gap:10px;}
+.cd-reference-item{border:1px solid var(--border);border-radius:var(--r);padding:8px;display:flex;flex-direction:column;gap:6px;}
+.cd-reference-item-row{display:flex;gap:8px;align-items:center;}
+.cd-reference-item-row input{flex:1;}
+.cd-reference-remove{background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:16px;line-height:1;padding:2px 6px;flex-shrink:0;}
+.cd-reference-remove:hover{color:var(--red);}
 
 .shoot-plan-edit-size-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--border);font-size:13px;font-weight:600;}
 .shoot-plan-edit-size-row:last-child{border-bottom:none;}

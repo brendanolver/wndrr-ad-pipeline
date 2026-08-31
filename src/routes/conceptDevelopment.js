@@ -186,8 +186,7 @@ router.patch('/concepts/:id', async (req, res, next) => {
       hook,
       execution,
       script_notes,
-      reference_links,
-      reference_note,
+      reference_items,
       talent_requirement,
       location,
       props_notes,
@@ -196,8 +195,11 @@ router.patch('/concepts/:id', async (req, res, next) => {
     if (concept_dev_status !== undefined && !CONCEPT_DEV_STATUSES.includes(concept_dev_status)) {
       return res.status(400).json({ error: `concept_dev_status must be one of: ${CONCEPT_DEV_STATUSES.join(', ')}` });
     }
-    if (reference_links !== undefined && !Array.isArray(reference_links)) {
-      return res.status(400).json({ error: 'reference_links must be an array' });
+    if (reference_items !== undefined) {
+      const valid = Array.isArray(reference_items) && reference_items.every(
+        (r) => r && typeof r === 'object' && typeof r.url === 'string'
+      );
+      if (!valid) return res.status(400).json({ error: 'reference_items must be an array of { url, note }' });
     }
 
     const result = await pool.query(
@@ -208,13 +210,12 @@ router.patch('/concepts/:id', async (req, res, next) => {
          hook = COALESCE($4, hook),
          execution = COALESCE($5, execution),
          script_notes = COALESCE($6, script_notes),
-         reference_links = COALESCE($7, reference_links),
-         reference_note = COALESCE($8, reference_note),
-         talent_requirement = COALESCE($9, talent_requirement),
-         location = COALESCE($10, location),
-         props_notes = COALESCE($11, props_notes),
+         reference_items = COALESCE($7, reference_items),
+         talent_requirement = COALESCE($8, talent_requirement),
+         location = COALESCE($9, location),
+         props_notes = COALESCE($10, props_notes),
          updated_at = now()
-       WHERE id = $12 RETURNING *`,
+       WHERE id = $11 RETURNING *`,
       [
         concept_name && concept_name.trim() ? concept_name.trim() : null,
         concept_dev_status || null,
@@ -222,8 +223,7 @@ router.patch('/concepts/:id', async (req, res, next) => {
         hook !== undefined ? hook : null,
         execution !== undefined ? execution : null,
         script_notes !== undefined ? script_notes : null,
-        reference_links !== undefined ? reference_links : null,
-        reference_note !== undefined ? reference_note : null,
+        reference_items !== undefined ? JSON.stringify(reference_items) : null,
         talent_requirement !== undefined ? talent_requirement : null,
         location !== undefined ? location : null,
         props_notes !== undefined ? props_notes : null,
