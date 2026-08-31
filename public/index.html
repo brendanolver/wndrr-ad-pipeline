@@ -125,20 +125,6 @@
           </div>
         </div>
 
-        <!-- Small progress/navigation aid, not a dashboard card: answers
-             "have we finished planning this week?" at a glance. The first
-             four items are manually ticked (never auto-set by visiting a
-             tab); the 5th mirrors the Shoot Plan confirmation state and
-             isn't independently clickable. -->
-        <div class="monday-checklist" id="monday-checklist">
-          <span class="monday-checklist-label">Monday Planning</span>
-          <button type="button" class="monday-checklist-item" id="monday-checklist-core" onclick="toggleWeeklyProgress('core_reviewed')"></button>
-          <button type="button" class="monday-checklist-item" id="monday-checklist-high-stock" onclick="toggleWeeklyProgress('high_stock_reviewed')"></button>
-          <button type="button" class="monday-checklist-item" id="monday-checklist-drops" onclick="toggleWeeklyProgress('drops_reviewed')"></button>
-          <button type="button" class="monday-checklist-item" id="monday-checklist-promotions" onclick="toggleWeeklyProgress('promotions_reviewed')"></button>
-          <span class="monday-checklist-item monday-checklist-item-derived" id="monday-checklist-shootplan"></span>
-        </div>
-
         <!-- Monday's guided workflow: one step visible at a time, freely
              clickable forward/backward -- mutually exclusive, unlike the
              independent Past Drops accordion further down. -->
@@ -178,7 +164,10 @@
 
           <div class="planning-step-footer">
             <span id="core-step-footer-count">0 Core products selected</span>
-            <button type="button" class="btn btn-primary planning-step-continue-btn" onclick="setPlanningStep('high-stocks')">Continue to High Stocks &rarr;</button>
+            <div class="planning-step-footer-actions">
+              <button type="button" class="planning-review-btn" id="core-review-btn" onclick="toggleWeeklyProgress('core_reviewed')">&#10003; Mark as Reviewed</button>
+              <button type="button" class="btn btn-primary planning-step-continue-btn" onclick="setPlanningStep('high-stocks')">Continue to High Stocks &rarr;</button>
+            </div>
           </div>
         </div>
 
@@ -188,7 +177,10 @@
 
           <div class="planning-step-footer">
             <span id="high-stock-step-footer-count">0 High Stock products selected</span>
-            <button type="button" class="btn btn-primary planning-step-continue-btn" onclick="setPlanningStep('drops')">Continue to Upcoming Drops &rarr;</button>
+            <div class="planning-step-footer-actions">
+              <button type="button" class="planning-review-btn" id="high-stocks-review-btn" onclick="toggleWeeklyProgress('high_stock_reviewed')">&#10003; Mark as Reviewed</button>
+              <button type="button" class="btn btn-primary planning-step-continue-btn" onclick="setPlanningStep('drops')">Continue to Upcoming Drops &rarr;</button>
+            </div>
           </div>
         </div>
 
@@ -206,7 +198,10 @@
 
           <div class="planning-step-footer">
             <span id="drops-step-footer-count">0 upcoming drops</span>
-            <button type="button" class="btn btn-primary planning-step-continue-btn" onclick="setPlanningStep('promotions')">Continue to Promotions &rarr;</button>
+            <div class="planning-step-footer-actions">
+              <button type="button" class="planning-review-btn" id="drops-review-btn" onclick="toggleWeeklyProgress('drops_reviewed')">&#10003; Mark as Reviewed</button>
+              <button type="button" class="btn btn-primary planning-step-continue-btn" onclick="setPlanningStep('promotions')">Continue to Promotions &rarr;</button>
+            </div>
           </div>
         </div>
 
@@ -219,7 +214,10 @@
 
           <div class="planning-step-footer">
             <span id="promotions-step-footer-count">0 upcoming promotions</span>
-            <button type="button" class="btn btn-primary planning-step-continue-btn" onclick="setPlanningStep('shoot-plan')">Continue to Shoot Plan &rarr;</button>
+            <div class="planning-step-footer-actions">
+              <button type="button" class="planning-review-btn" id="promotions-review-btn" onclick="toggleWeeklyProgress('promotions_reviewed')">&#10003; Mark as Reviewed</button>
+              <button type="button" class="btn btn-primary planning-step-continue-btn" onclick="setPlanningStep('shoot-plan')">Continue to Shoot Plan &rarr;</button>
+            </div>
           </div>
         </div>
 
