@@ -2234,6 +2234,30 @@ function toggleHighStockProduct(styleCode) {
   renderHighStockProducts();
 }
 
+// Column header above the collapsed rows -- gives the SOH/7D Sell-Through/
+// Last Creative/Tier figures context, same reasoning as Core's own row
+// header. .high-stock-row overrides just the shared .core-shoot-review-row/
+// -header grid template (see styles.css), same modifier-class pattern
+// Core's .core-product-row already uses, so neither touches the other.
+function highStockHeaderHtml() {
+  return `
+    <div class="core-shoot-review-header high-stock-row">
+      <span></span>
+      <span>SOH</span>
+      <span>7D Sell-Through</span>
+      <span>Last Creative</span>
+      <span>Tier</span>
+      <span>This Week</span>
+    </div>`;
+}
+
+// Shared by the collapsed row and the expanded detail's Creative column so
+// there's exactly one definition of "how stale is this colourway's live
+// creative" -- 'Never' when nothing has ever gone live for it.
+function highStockLastCreativeText(p) {
+  return p.days_since_last_creative != null ? `${p.days_since_last_creative}d ago` : 'Never';
+}
+
 // One-line recommendation up top ("Stock problem"), a compact 3-column
 // Inventory | Sales | Creative breakdown ("Sales problem" / "Creative gap"),
 // then a single "Planned" line at the bottom if a concept is already in
@@ -2245,9 +2269,8 @@ function toggleHighStockProduct(styleCode) {
 // Trend (and the raw recommendation_reasons the backend still returns)
 // live in the collapsed "More data" <details> so they don't compete with
 // the 3 primary metrics. Weeks Cover is deliberately never shown, per the brief.
-function highStockDetailHtml(p) {
+function highStockDetailHtml(p, selectedCodes) {
   const reasons = (p.recommendation_reasons || []).join(' · ');
-  const lastLiveText = p.days_since_last_creative != null ? `${p.days_since_last_creative}d ago` : 'Never';
   const lastNewConceptText = p.days_since_last_new_concept != null ? `${p.days_since_last_new_concept}d ago` : 'Never';
   const trend = p.sales_trend || { display: '—', cls: 'core-trend-flat' };
   const assets = p.creative_assets || [];
@@ -2264,6 +2287,7 @@ function highStockDetailHtml(p) {
   // plan for this colourway.
   const planned = assets.find((a) => a.status !== 'uploaded_live');
   const plannedClassification = planned && planned.concept_classification === 'tested_proven' ? 'Proven Winner' : 'New Concept';
+  const isSelected = selectedCodes.has(p.product_code);
 
   return `
     <div class="high-stock-detail">
@@ -2277,14 +2301,13 @@ function highStockDetailHtml(p) {
         </div>
         <div class="high-stock-detail-col">
           <div class="high-stock-detail-col-title">Sales</div>
-          <div class="high-stock-detail-row"><span>7D Units Sold</span><span>${p.vel7}</span></div>
           <div class="high-stock-detail-metric"><span class="high-stock-detail-metric-label">7D Sell-Through</span><span class="high-stock-detail-metric-value">${p.sell_through_7d_pct}%</span></div>
-          <div class="high-stock-detail-row"><span>30D Units Sold</span><span>${p.units_sold_30d}</span></div>
-          <div class="high-stock-detail-row"><span>30D Sell-Through</span><span>${p.sell_through_pct}%</span></div>
+          <div class="high-stock-detail-row"><span>7D Units Sold</span><span>${p.vel7}</span></div>
+          <div class="high-stock-detail-row"><span>30D</span><span>${p.units_sold_30d} units / ${p.sell_through_pct}%</span></div>
         </div>
         <div class="high-stock-detail-col">
           <div class="high-stock-detail-col-title">Creative</div>
-          <div class="high-stock-detail-metric"><span class="high-stock-detail-metric-label">Last Creative</span><span class="high-stock-detail-metric-value">${lastLiveText}</span></div>
+          <div class="high-stock-detail-metric"><span class="high-stock-detail-metric-label">Last Creative</span><span class="high-stock-detail-metric-value">${highStockLastCreativeText(p)}</span></div>
           <div class="high-stock-detail-row"><span>Last New Concept</span><span>${lastNewConceptText}</span></div>
           <div class="high-stock-detail-row"><span>Creative Assets</span><span>${p.current_coverage}</span></div>
         </div>
@@ -2299,7 +2322,14 @@ function highStockDetailHtml(p) {
         ${reasons ? `<div class="high-stock-detail-row"><span>Why it's recommended</span><span>${escapeHtml(reasons)}</span></div>` : ''}
       </details>
 
-      ${planned ? `<div class="high-stock-detail-planned">Planned: ${escapeHtml(plannedClassification)} &middot; ${escapeHtml(planned.status_label)}</div>` : ''}
+      ${planned || isSelected ? `
+      <div class="high-stock-detail-planned">
+        <div class="high-stock-detail-col-title">Planned</div>
+        <div class="high-stock-detail-planned-value">
+          ${planned ? `${escapeHtml(plannedClassification)} &middot; ${escapeHtml(planned.status_label)}` : 'Not yet planned'}
+          ${isSelected ? '<span class="high-stock-detail-planned-selected">&middot; &#10003; Shooting This Week</span>' : ''}
+        </div>
+      </div>` : ''}
     </div>`;
 }
 
@@ -2319,25 +2349,20 @@ function highStockProductRowHtml(p, selectedCodes) {
   const isOpen = state.highStockExpandedProducts.has(p.style_code);
   const displayName = `${p.product_name}${p.colour_label ? ` — ${p.colour_label}` : ''}`;
   return `
-    <div class="high-stock-row-wrap">
-      <div class="core-shoot-review-row high-stock-clickable-row" onclick="toggleHighStockProduct('${p.style_code}')">
+    <div class="high-stock-row-wrap${isOpen ? ' open' : ''}">
+      <div class="core-shoot-review-row high-stock-row high-stock-clickable-row" onclick="toggleHighStockProduct('${p.style_code}')">
         <div class="core-shoot-review-col-product">
           <span class="accordion-arrow ${isOpen ? 'open' : ''}">&#9656;</span>
           ${thumb}
           <span class="core-shoot-review-name">${escapeHtml(displayName)}</span>
         </div>
-        <div class="core-shoot-review-col-reasons">
-          <span class="high-stock-tier-badge">${p.tier_emoji} ${escapeHtml(p.tier_label)}</span>
-          <span class="core-shoot-review-sep">·</span>
-          <span class="core-shoot-review-soh">${p.soh} SOH</span>
-          <span class="core-shoot-review-sep">·</span>
-          <span class="core-shoot-review-soh">${p.sell_through_7d_pct}% 7D Sell-Through</span>
-          <span class="core-shoot-review-sep">·</span>
-          <span class="core-shoot-review-reasons-text">${escapeHtml(p.creative_status_label || '')}</span>
-        </div>
+        <div class="high-stock-row-value">${p.soh}</div>
+        <div class="high-stock-row-value">${p.sell_through_7d_pct}%</div>
+        <div class="high-stock-row-value">${escapeHtml(highStockLastCreativeText(p))}</div>
+        <div class="high-stock-row-col-tier"><span class="high-stock-tier-badge">${p.tier_emoji} ${escapeHtml(p.tier_label)}</span></div>
         <div class="core-shoot-review-col-action" onclick="event.stopPropagation()">${highStockActionHtml(p, selectedCodes)}</div>
       </div>
-      ${isOpen ? highStockDetailHtml(p) : ''}
+      ${isOpen ? highStockDetailHtml(p, selectedCodes) : ''}
     </div>`;
 }
 
@@ -2354,7 +2379,7 @@ function renderHighStockProducts() {
 
   const list = document.getElementById('high-stock-list');
   list.innerHTML = state.highStockProducts.length
-    ? state.highStockProducts.map((p) => highStockProductRowHtml(p, selectedCodes)).join('')
+    ? highStockHeaderHtml() + state.highStockProducts.map((p) => highStockProductRowHtml(p, selectedCodes)).join('')
     : '<div class="attention-empty">No Platinum/Rocket products currently meet the High Stock threshold.</div>';
 
   renderHighStockStepFooter();
