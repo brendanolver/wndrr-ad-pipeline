@@ -3439,7 +3439,6 @@ function downloadApparelMagicCsv() {
 // formatWeekRange helpers, same picker markup) via its own weekOffset, kept
 // independent for the same reason dashboardWeekOffset is independent of
 // planningWeekOffset.
-const CONCEPT_DEV_STATUSES = ['not_started', 'in_development', 'ready_for_review', 'changes_required', 'approved'];
 const CONCEPT_DEV_STATUS_LABELS = {
   not_started: 'Not Started',
   in_development: 'In Development',
@@ -3593,8 +3592,8 @@ function conceptDevProductCardHtml(product) {
       </div>
       <div class="cd-card-count">${count} Concept${count === 1 ? '' : 's'}</div>
       <div class="cd-card-status-row">
-        <span class="cd-concept-status-pill cd-status-not-started">${notStarted} Not Started</span>
-        <span class="cd-concept-status-pill cd-status-ready-for-review">${readyForReview} Ready for Review</span>
+        <span class="cd-concept-status-pill cd-pill-neutral">${notStarted} Not Started</span>
+        <span class="cd-concept-status-pill ${readyForReview > 0 ? 'cd-status-ready-for-review' : 'cd-pill-neutral'}">${readyForReview} Ready for Review</span>
       </div>
       <div class="cd-card-meta">${product.colourways.length} Colourway${product.colourways.length === 1 ? '' : 's'} &middot; Owner: ${escapeHtml(product.creator || '—')}</div>
       <div class="cd-card-action">${actionLabel} &rarr;</div>
@@ -3675,20 +3674,32 @@ function conceptDevWorkspaceHeaderHtml(product) {
     </div>`;
 }
 
-function conceptDevConceptRowHtml(concept) {
+// Compact card, not a thin row -- shows just enough to decide what to open
+// next: name/locked-tag/status, plus whether a Hook and a Reference have
+// already been added (the two fields that most determine "is this actually
+// ready to shoot", so they're worth surfacing without opening the concept).
+function conceptDevConceptCardHtml(concept) {
+  const hasHook = Boolean(concept.hook && concept.hook.trim());
+  const hasReference = Array.isArray(concept.reference_items) && concept.reference_items.length > 0;
   return `
-    <div class="cd-concept-row" onclick="openConceptDevModal(${concept.id})">
-      <span class="cd-concept-name">${escapeHtml(concept.concept_name)}</span>
-      ${concept.name_locked ? '<span class="cd-locked-tag">Proven</span>' : ''}
+    <div class="cd-concept-card" onclick="openConceptDevModal(${concept.id})">
+      <div class="cd-concept-card-top">
+        <span class="cd-concept-card-name">${escapeHtml(concept.concept_name)}</span>
+        ${concept.name_locked ? '<span class="cd-locked-tag">Proven</span>' : ''}
+      </div>
       <span class="cd-concept-status-pill ${CONCEPT_DEV_STATUS_CLASS[concept.concept_dev_status] || ''}">${CONCEPT_DEV_STATUS_LABELS[concept.concept_dev_status] || concept.concept_dev_status}</span>
-      <span class="cd-concept-open">Open Concept &rarr;</span>
+      <div class="cd-concept-card-flags">
+        <span class="${hasHook ? 'cd-concept-flag-on' : 'cd-concept-flag-off'}">${hasHook ? '✓' : '—'} Hook</span>
+        <span class="${hasReference ? 'cd-concept-flag-on' : 'cd-concept-flag-off'}">${hasReference ? '✓' : '—'} Reference</span>
+      </div>
+      <div class="cd-concept-card-action">Open Concept &rarr;</div>
     </div>`;
 }
 
 // "What concepts do I need to prepare for this product?" -- concept cards
-// stay compact (name/locked-tag/status only); the full Concept Details/
-// References/Production Requirements/Status form only appears once one is
-// opened (openConceptDevModal). A Drop's concepts are already-decided
+// stay compact (name/locked-tag/status/hook+reference flags only); the full
+// Concept Details/References/Shoot Requirements form only appears once one
+// is opened (openConceptDevModal). A Drop's concepts are already-decided
 // Proven Winners, so "+ New Concept" is deliberately NOT the prominent
 // action there -- the creator's job is opening each one and preparing its
 // execution, not inventing another. Core/High Stock/Promotion have no such
@@ -3699,8 +3710,8 @@ function renderConceptDevProductWorkspace(product) {
     <button type="button" class="link-btn cd-back-link" onclick="closeConceptDevProduct()">&larr; Back to Products</button>
     ${conceptDevWorkspaceHeaderHtml(product)}
     ${!isProvenAssigned ? `<button type="button" class="btn btn-primary btn-sm cd-new-concept-btn" onclick="openAddConceptModal(${product.shoot_plan_item_id})">+ New Concept</button>` : ''}
-    <div class="cd-concepts-list">
-      ${product.concepts.length ? product.concepts.map(conceptDevConceptRowHtml).join('') : '<div class="attention-empty">No concepts yet.</div>'}
+    <div class="cd-concept-grid">
+      ${product.concepts.length ? product.concepts.map(conceptDevConceptCardHtml).join('') : '<div class="attention-empty">No concepts yet.</div>'}
     </div>
     ${isProvenAssigned ? `<button type="button" class="link-btn cd-add-concept-subtle" onclick="openAddConceptModal(${product.shoot_plan_item_id})">+ Add another concept</button>` : ''}
   `;
@@ -3762,12 +3773,12 @@ function renderConceptDevModalReferences() {
     ? conceptDevModalReferences.map((r, i) => `
         <div class="cd-reference-item">
           <div class="cd-reference-item-row">
-            <input type="text" value="${escapeHtml(r.url)}" oninput="conceptDevModalReferences[${i}].url=this.value" placeholder="https://...">
+            <input type="text" value="${escapeHtml(r.url)}" oninput="conceptDevModalReferences[${i}].url=this.value" placeholder="Reference link">
             <button type="button" class="cd-reference-remove" onclick="removeConceptDevReference(${i})" aria-label="Remove reference">&times;</button>
           </div>
-          <textarea rows="2" oninput="conceptDevModalReferences[${i}].note=this.value" placeholder="What specifically we like/want to take from this...">${escapeHtml(r.note)}</textarea>
+          <textarea rows="2" oninput="conceptDevModalReferences[${i}].note=this.value" placeholder="What do we like about it?">${escapeHtml(r.note)}</textarea>
         </div>`).join('')
-    : '<span class="hint">No references yet — use + Add Another Reference.</span>';
+    : '<span class="hint">No references yet.</span>';
 }
 
 function addConceptDevReference() {
@@ -3809,10 +3820,11 @@ function conceptDevModalContextHtml(product) {
     </div>`;
 }
 
-// Shared by both the create ("+ Add Concept") and edit (click a concept row)
-// paths -- concept is null in create mode, so every field just starts blank
-// and the status defaults to In Development (a new concept is being worked
-// on the moment it exists, not sitting idle).
+// Shared by both the create ("+ Add Concept") and edit (click a concept
+// card) paths -- concept is null in create mode, so every field just starts
+// blank. Status is no longer an editable field here (see saveConceptDevModal)
+// -- this just shows where the concept currently sits, read-only, in the
+// header badge.
 function fillConceptDevModalFields(concept) {
   document.getElementById('cd-modal-angle').value = concept ? (concept.angle || '') : '';
   document.getElementById('cd-modal-hook').value = concept ? (concept.hook || '') : '';
@@ -3826,10 +3838,10 @@ function fillConceptDevModalFields(concept) {
     : [];
   renderConceptDevModalReferences();
 
-  const defaultStatus = concept ? concept.concept_dev_status : 'in_development';
-  document.getElementById('cd-modal-status').innerHTML = CONCEPT_DEV_STATUSES
-    .map((s) => `<option value="${s}" ${s === defaultStatus ? 'selected' : ''}>${CONCEPT_DEV_STATUS_LABELS[s]}</option>`)
-    .join('');
+  const status = concept ? concept.concept_dev_status : 'not_started';
+  const badge = document.getElementById('cd-modal-status-badge');
+  badge.className = `cd-concept-status-pill ${CONCEPT_DEV_STATUS_CLASS[status] || ''}`;
+  badge.textContent = CONCEPT_DEV_STATUS_LABELS[status] || status;
 }
 
 // concept_name is locked to a read-only label for a Drop's Proven Winner
@@ -3863,8 +3875,9 @@ function openConceptDevModal(conceptId) {
 
 // "+ Add Concept" opens this exact same workspace instead of a bare
 // name-only prompt -- the creator can fill in everything (references,
-// execution, talent/location/props, status) before the concept even exists
-// server-side. Save creates it, then immediately PATCHes the rest in.
+// execution, talent/location/props) before the concept even exists
+// server-side. Save Draft/Ready for Review creates it, then immediately
+// PATCHes the rest in.
 function openAddConceptModal(shootPlanItemId) {
   const data = state.conceptDev.data;
   const product = data && data.products.find((p) => p.shoot_plan_item_id === shootPlanItemId);
@@ -3884,13 +3897,18 @@ function openAddConceptModal(shootPlanItemId) {
   openModal('concept-dev-modal');
 }
 
-async function saveConceptDevModal() {
+// Status is no longer a field the creator sets directly -- it's driven by
+// which footer action they click. targetStatus is 'in_development' (Save
+// Draft) or 'ready_for_review' (Ready for Review); a concept that's never
+// been saved stays Not Started (see schema.sql's concept_dev_status
+// default) until one of these two actions actually moves it.
+async function saveConceptDevModal(targetStatus) {
   const product = conceptDevModalProduct;
   if (!product) return;
   const name = document.getElementById('cd-modal-name').value.trim();
 
   const body = {
-    concept_dev_status: document.getElementById('cd-modal-status').value,
+    concept_dev_status: targetStatus,
     angle: document.getElementById('cd-modal-angle').value.trim(),
     hook: document.getElementById('cd-modal-hook').value.trim(),
     execution: document.getElementById('cd-modal-execution').value.trim(),
@@ -3902,6 +3920,7 @@ async function saveConceptDevModal() {
     location: document.getElementById('cd-modal-location').value.trim(),
     props_notes: document.getElementById('cd-modal-props').value.trim(),
   };
+  const savedToast = targetStatus === 'ready_for_review' ? 'Marked Ready for Review' : 'Draft saved';
 
   try {
     if (conceptDevModalConceptId) {
@@ -3916,7 +3935,7 @@ async function saveConceptDevModal() {
         body: JSON.stringify(body),
       });
       closeModal('concept-dev-modal');
-      toast('Concept saved');
+      toast(savedToast);
     } else {
       if (!name) { toast('Concept name is required', true); return; }
 
@@ -3946,7 +3965,7 @@ async function saveConceptDevModal() {
         body: JSON.stringify(body),
       });
       closeModal('concept-dev-modal');
-      toast('Concept added');
+      toast(savedToast);
     }
     loadConceptDevWeek();
   } catch (e) {
