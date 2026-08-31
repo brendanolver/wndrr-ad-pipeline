@@ -36,6 +36,11 @@ let state = {
   shootPlanEditMode: false,
   salesCadence: null,
   metaProductMappings: [], metaProductFamilies: [],
+  // Planning's own week nav -- deliberately separate from dashboardWeekOffset
+  // (the Weekly Creative Dashboard's own, unrelated week nav) since the two
+  // tabs are viewed independently. 0 = current week, -1 = last week, etc.
+  planningWeekOffset: 0,
+  weeklyPlanningProgress: { core_reviewed: false, high_stock_reviewed: false, drops_reviewed: false, promotions_reviewed: false },
 };
 let dashboardWeekOffset = 0;
 
@@ -117,10 +122,51 @@ document.querySelectorAll('.tab-btn').forEach((btn) => {
   btn.addEventListener('click', () => switchTab(btn.dataset.tab));
 });
 
+// ── Week math (Monday-start ISO weeks, mirrors src/lib/week.js) ──────
+// Client-side port so Planning's week nav doesn't need a round trip just
+// to know which Monday it's looking at or what to call it.
+function isoWeekNumber(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
+}
+
+function mondayOfWeek(offsetWeeks, base = new Date()) {
+  const today = new Date(base);
+  today.setHours(0, 0, 0, 0);
+  const day = today.getDay(); // 0 = Sun .. 6 = Sat
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+  const monday = new Date(today);
+  monday.setDate(today.getDate() + diffToMonday + offsetWeeks * 7);
+  return monday;
+}
+
+function isoDateStr(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function formatWeekRange(monday) {
+  const end = new Date(monday);
+  end.setDate(monday.getDate() + 6);
+  const fmt = (d) => d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
+  return `${fmt(monday)} – ${fmt(end)}, ${end.getFullYear()}`;
+}
+
+function planningWeekStart() {
+  return isoDateStr(mondayOfWeek(state.planningWeekOffset));
+}
+
+function planningWeekNumber() {
+  return isoWeekNumber(mondayOfWeek(state.planningWeekOffset));
+}
+
 // ── Load & render ────────────────────────────────────
 async function loadAll() {
   try {
-    const [board, styles, categories, dashboard, dropsRes, provenWinners, coreRes, planningSettings, shootPlan, contentCreators, highStockRes, promotions, weeklyConfirmation, salesCadence, metaProductMappings, metaProductFamilies] = await Promise.all([
+    const weekStart = planningWeekStart();
+    const [board, styles, categories, dashboard, dropsRes, provenWinners, coreRes, planningSettings, shootPlan, contentCreators, highStockRes, promotions, weeklyConfirmation, weeklyPlanningProgress, salesCadence, metaProductMappings, metaProductFamilies] = await Promise.all([
       api('/board'),
       api('/styles'),
       api('/categories'),
@@ -129,11 +175,12 @@ async function loadAll() {
       api('/proven-winners'),
       api('/core-products'),
       api('/planning-settings'),
-      api('/shoot-plan'),
+      api(`/shoot-plan?week_start=${weekStart}`),
       api('/content-creators'),
       api('/high-stock-products'),
       api('/promotions'),
-      api('/weekly-shoot-plan-confirmation'),
+      api(`/weekly-shoot-plan-confirmation?week_start=${weekStart}`),
+      api(`/weekly-planning-progress?week_start=${weekStart}`),
       api('/sales-cadence'),
       api('/meta-product-mappings'),
       api('/meta-product-mappings/product-families'),
@@ -154,6 +201,7 @@ async function loadAll() {
     state.highStockProducts = highStockRes.products;
     state.promotions = promotions;
     state.weeklyShootPlanConfirmation = weeklyConfirmation;
+    state.weeklyPlanningProgress = weeklyPlanningProgress;
     state.salesCadence = salesCadence;
     state.metaProductMappings = metaProductMappings;
     state.metaProductFamilies = metaProductFamilies;
@@ -172,6 +220,30 @@ async function loadAll() {
     renderMetaProductMappings();
     renderHighStockProducts();
     renderPromotionsRow();
+    renderPlanningShootSummary();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// Refetches just the week-scoped Planning data (Shoot Plan items, weekly
+// confirmation, Monday checklist progress) instead of a full loadAll() --
+// Core/High Stock/Upcoming Drops/Promotions are always live/current-data
+// views regardless of which week is being browsed, so there's nothing
+// week-specific in them to refetch.
+async function loadPlanningWeek() {
+  try {
+    const weekStart = planningWeekStart();
+    const [shootPlan, weeklyConfirmation, weeklyPlanningProgress] = await Promise.all([
+      api(`/shoot-plan?week_start=${weekStart}`),
+      api(`/weekly-shoot-plan-confirmation?week_start=${weekStart}`),
+      api(`/weekly-planning-progress?week_start=${weekStart}`),
+    ]);
+    state.shootPlan = shootPlan;
+    state.weeklyShootPlanConfirmation = weeklyConfirmation;
+    state.weeklyPlanningProgress = weeklyPlanningProgress;
+    state.shootPlanEditMode = false;
+    renderPlanning();
     renderPlanningShootSummary();
   } catch (e) {
     toast(e.message, true);
@@ -376,7 +448,9 @@ function formatDate(value) {
 }
 
 function renderPlanning() {
-  renderPlanningSummary();
+  renderPlanningWeekHeader();
+  renderMondayChecklist();
+  renderPlanningStepNav();
   renderDropsRow();
   loadDropSuggestions();
   renderPlanningRoute();
@@ -541,8 +615,152 @@ function onDropDateChange() {
 }
 document.getElementById('drop-launch-date').addEventListener('change', onDropDateChange);
 
-function renderPlanningSummary() {
-  document.getElementById('planning-week-title').textContent = state.dashboard ? `Planning — Week ${state.dashboard.week.number}` : 'Planning';
+// ── Planning: week navigation ─────────────────────────
+// Four statuses only -- Upcoming for any future week, then Planning in
+// Progress / Shoot Plan Confirmed / Completed depending on whether this
+// specific week's confirmation exists and whether it's the current week.
+function planningWeekStatus() {
+  if (state.planningWeekOffset > 0) return { label: 'Upcoming', cls: 'upcoming' };
+  const confirmed = Boolean(state.weeklyShootPlanConfirmation);
+  if (!confirmed) return { label: 'Planning in Progress', cls: 'in-progress' };
+  return state.planningWeekOffset === 0
+    ? { label: '✓ Shoot Plan Confirmed', cls: 'confirmed' }
+    : { label: '✓ Completed', cls: 'completed' };
+}
+
+function renderPlanningWeekHeader() {
+  document.getElementById('planning-week-label').textContent = `Week ${planningWeekNumber()}`;
+  document.getElementById('planning-this-week-btn').style.display = state.planningWeekOffset === 0 ? 'none' : '';
+  const status = planningWeekStatus();
+  const statusEl = document.getElementById('planning-week-status');
+  statusEl.textContent = status.label;
+  statusEl.className = `planning-week-status planning-week-status-${status.cls}`;
+}
+
+function changePlanningWeek(delta) {
+  state.planningWeekOffset += delta;
+  onPlanningWeekChanged();
+}
+
+function goToCurrentPlanningWeek() {
+  state.planningWeekOffset = 0;
+  onPlanningWeekChanged();
+}
+
+function jumpToPlanningWeek(offset) {
+  state.planningWeekOffset = offset;
+  onPlanningWeekChanged();
+}
+
+function onPlanningWeekChanged() {
+  closePlanningWeekPicker();
+  // Past weeks only have the Shoot Plan step (a historical record) to show
+  // -- Core/High Stock/Upcoming Drops/Promotions are always live/current-
+  // data views, so land straight on Shoot Plan rather than a step whose
+  // tab is about to become disabled.
+  if (state.planningWeekOffset < 0) setPlanningStep('shoot-plan');
+  loadPlanningWeek();
+}
+
+function togglePlanningWeekPicker() {
+  const el = document.getElementById('planning-week-picker');
+  const opening = el.style.display === 'none';
+  if (opening) renderPlanningWeekPicker();
+  el.style.display = opening ? '' : 'none';
+}
+
+function closePlanningWeekPicker() {
+  document.getElementById('planning-week-picker').style.display = 'none';
+}
+
+// Jump list: 8 weeks ahead through 12 weeks back, newest first -- "further
+// backwards/forwards" without an unbounded (and mostly useless) list.
+function renderPlanningWeekPicker() {
+  const rows = [];
+  for (let offset = 8; offset >= -12; offset--) {
+    const monday = mondayOfWeek(offset);
+    rows.push({ offset, number: isoWeekNumber(monday), range: formatWeekRange(monday) });
+  }
+  document.getElementById('planning-week-picker').innerHTML = rows.map((r) => `
+    <button type="button" class="planning-week-picker-row ${r.offset === state.planningWeekOffset ? 'active' : ''}" onclick="jumpToPlanningWeek(${r.offset})">
+      <span>Week ${r.number}${r.offset === 0 ? ' · Current' : ''}</span>
+      <span class="admin-note">${r.range}</span>
+    </button>`).join('');
+}
+
+document.addEventListener('click', (e) => {
+  const picker = document.getElementById('planning-week-picker');
+  if (!picker || picker.style.display === 'none') return;
+  if (e.target.closest('#planning-week-picker') || e.target.id === 'planning-week-label') return;
+  picker.style.display = 'none';
+});
+
+// ── Planning: Monday Planning Checklist ───────────────
+// A small progress/navigation aid ("have we finished planning this week?"),
+// not a dashboard card. First four items are manually ticked -- never set
+// just because a tab was visited. The 5th mirrors the Shoot Plan
+// confirmation and isn't independently clickable.
+const MONDAY_CHECKLIST_ITEMS = [
+  { field: 'core_reviewed', label: 'Core reviewed', elId: 'monday-checklist-core' },
+  { field: 'high_stock_reviewed', label: 'High Stocks reviewed', elId: 'monday-checklist-high-stock' },
+  { field: 'drops_reviewed', label: 'Upcoming Drops reviewed', elId: 'monday-checklist-drops' },
+  { field: 'promotions_reviewed', label: 'Promotions reviewed', elId: 'monday-checklist-promotions' },
+];
+
+function renderMondayChecklist() {
+  const readOnly = state.planningWeekOffset < 0;
+  const progress = state.weeklyPlanningProgress || {};
+  MONDAY_CHECKLIST_ITEMS.forEach((item) => {
+    const el = document.getElementById(item.elId);
+    const done = Boolean(progress[item.field]);
+    el.textContent = `${done ? '✓' : '○'} ${item.label}`;
+    el.classList.toggle('done', done);
+    el.disabled = readOnly;
+  });
+  const confirmed = Boolean(state.weeklyShootPlanConfirmation);
+  const shootPlanEl = document.getElementById('monday-checklist-shootplan');
+  shootPlanEl.textContent = `${confirmed ? '✓' : '○'} Shoot Plan confirmed`;
+  shootPlanEl.classList.toggle('done', confirmed);
+}
+
+async function toggleWeeklyProgress(field) {
+  if (state.planningWeekOffset < 0) return; // past weeks are read-only
+  const current = Boolean(state.weeklyPlanningProgress && state.weeklyPlanningProgress[field]);
+  try {
+    const updated = await api('/weekly-planning-progress', {
+      method: 'PUT',
+      body: JSON.stringify({ week_start: planningWeekStart(), field, value: !current }),
+    });
+    state.weeklyPlanningProgress = updated;
+    renderMondayChecklist();
+    renderPlanningStepNav();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// Reflects checklist completion on the step tabs themselves (a small tick,
+// not a redesign) and disables the four recommendation tabs for past weeks
+// -- they're always live/current-data views, so there's nothing truthful
+// to show "as it was" for a past week on them; Shoot Plan (the actual
+// historical record) stays open.
+const PLANNING_STEP_REVIEW_FIELD = { core: 'core_reviewed', 'high-stocks': 'high_stock_reviewed', drops: 'drops_reviewed', promotions: 'promotions_reviewed' };
+const PLANNING_STEP_LABELS = { core: '1 Core', 'high-stocks': '2 High Stocks', drops: '3 Upcoming Drops', promotions: '4 Promotions', 'shoot-plan': '5 Shoot Plan' };
+
+function renderPlanningStepNav() {
+  const readOnlyPast = state.planningWeekOffset < 0;
+  const progress = state.weeklyPlanningProgress || {};
+  document.querySelectorAll('.planning-step-btn').forEach((btn) => {
+    const step = btn.dataset.step;
+    const field = PLANNING_STEP_REVIEW_FIELD[step];
+    const reviewed = Boolean(field && progress[field]);
+    btn.innerHTML = reviewed
+      ? `<span class="planning-step-tick">&#10003;</span> ${PLANNING_STEP_LABELS[step]}`
+      : PLANNING_STEP_LABELS[step];
+    const disabled = readOnlyPast && step !== 'shoot-plan';
+    btn.disabled = disabled;
+    btn.classList.toggle('planning-step-btn-disabled', disabled);
+  });
 }
 
 // Compact, exception-based card for Step 3 (Upcoming Drops): "are we on
@@ -2246,6 +2464,7 @@ async function saveShootPlanItem() {
     quick_note: document.getElementById('shoot-plan-initial-idea').value.trim() || null,
     source: shootPlanModalContext.source || null,
     image_url: headerImage?.image_url || null,
+    week_start: planningWeekStart(),
   };
   try {
     await api('/shoot-plan', { method: 'POST', body: JSON.stringify(payload) });
@@ -2258,6 +2477,7 @@ async function saveShootPlanItem() {
 }
 
 async function removeShootPlanItem(id) {
+  if (state.planningWeekOffset < 0) return; // past weeks are read-only
   if (!(await confirmDialog("Remove this product from this week's shoot plan? The creator's in-progress concept work is not affected."))) return;
   try {
     await api(`/shoot-plan/${id}`, { method: 'DELETE' });
@@ -2781,6 +3001,7 @@ async function savePromotionShootItem() {
         quick_note: note,
         source: 'promotion',
         promotion_stage_id: promotionShootContext.stageId,
+        week_start: planningWeekStart(),
       }),
     });
     closeModal('promotion-shoot-modal');
@@ -2829,6 +3050,11 @@ function shootPlanProductRowHtml(item) {
   const chips = item.styles
     .map((s) => `<span class="shoot-plan-style-chip">${escapeHtml(s.colour_label || s.style_code)}${s.size ? ` · ${escapeHtml(s.size)}` : ''}</span>`)
     .join('');
+  // Past weeks are a read-only historical record -- no editing what
+  // already happened.
+  const removeBtn = state.planningWeekOffset < 0
+    ? ''
+    : `<button type="button" class="btn btn-ghost btn-sm" onclick="removeShootPlanItem(${item.id})">Remove</button>`;
   return `
     <div class="shoot-plan-product-row">
       ${thumb}
@@ -2844,7 +3070,7 @@ function shootPlanProductRowHtml(item) {
         <div class="shoot-plan-style-chips">${chips}</div>
         ${item.quick_note ? `<div class="shoot-plan-idea">💡 ${escapeHtml(item.quick_note)}</div>` : ''}
       </div>
-      <button type="button" class="btn btn-ghost btn-sm" onclick="removeShootPlanItem(${item.id})">Remove</button>
+      ${removeBtn}
     </div>`;
 }
 
@@ -2921,18 +3147,21 @@ function renderWeeklyShootPlanConfirmation() {
   const cta = document.getElementById('shoot-plan-confirm-cta');
   const confirmed = document.getElementById('shoot-plan-confirmed-state');
   const btn = document.getElementById('shoot-plan-confirm-btn');
+  const editBtn = document.getElementById('shoot-plan-edit-plan-btn');
+  const readOnly = state.planningWeekOffset < 0;
 
   if (state.weeklyShootPlanConfirmation && !state.shootPlanEditMode) {
     cta.style.display = 'none';
     confirmed.style.display = '';
-    const weekNumber = state.dashboard ? state.dashboard.week.number : null;
-    document.getElementById('shoot-plan-confirmed-week-label').textContent = weekNumber ? `Week ${weekNumber}` : 'This Week’s';
+    document.getElementById('shoot-plan-confirmed-week-label').textContent = `Week ${planningWeekNumber()}`;
     document.getElementById('shoot-plan-confirmed-timestamp').textContent =
       `Confirmed ${formatDateTime(state.weeklyShootPlanConfirmation.confirmed_at)}`;
+    // No editing a past week's already-confirmed plan.
+    editBtn.style.display = readOnly ? 'none' : '';
   } else {
     cta.style.display = '';
     confirmed.style.display = 'none';
-    btn.disabled = !state.shootPlan.length;
+    btn.disabled = !state.shootPlan.length || readOnly;
   }
 }
 
@@ -2948,9 +3177,15 @@ function editShootPlan() {
 
 async function confirmWeeklyShootPlan() {
   try {
-    state.weeklyShootPlanConfirmation = await api('/weekly-shoot-plan-confirmation', { method: 'POST' });
+    state.weeklyShootPlanConfirmation = await api('/weekly-shoot-plan-confirmation', {
+      method: 'POST',
+      body: JSON.stringify({ week_start: planningWeekStart() }),
+    });
     state.shootPlanEditMode = false;
     renderShootPlanStep();
+    // The checklist's 5th item ("Shoot Plan confirmed") is derived from
+    // this same confirmation, so it needs its own repaint here.
+    renderMondayChecklist();
     toast('Shoot plan sent to Concept Development');
   } catch (e) {
     toast(e.message, true);
