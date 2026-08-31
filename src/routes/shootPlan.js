@@ -143,6 +143,28 @@ router.post('/', async (req, res, next) => {
   }
 });
 
+// Lets a colourway's pull-list size be corrected in place (e.g. after a
+// quick "+ Shoot This Week" add with the wrong size) without removing and
+// re-adding the whole product.
+router.patch('/:itemId/styles/:styleId', async (req, res, next) => {
+  try {
+    const itemId = Number(req.params.itemId);
+    const styleId = Number(req.params.styleId);
+    if (!Number.isFinite(itemId) || !Number.isFinite(styleId)) {
+      return res.status(400).json({ error: 'Invalid item or style id' });
+    }
+    const size = req.body && typeof req.body.size === 'string' && req.body.size.trim() ? req.body.size.trim() : null;
+    const result = await pool.query(
+      `UPDATE shoot_plan_item_styles SET size = $1 WHERE shoot_plan_item_id = $2 AND style_id = $3 RETURNING *`,
+      [size, itemId, styleId]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Shoot plan colourway not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.delete('/:id', async (req, res, next) => {
   try {
     const result = await pool.query('DELETE FROM shoot_plan_items WHERE id = $1 RETURNING id', [req.params.id]);

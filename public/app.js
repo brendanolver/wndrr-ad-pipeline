@@ -3042,14 +3042,65 @@ function shootPlanRequirementLabel(item) {
   }
 }
 
+// Size only matters (and so is only editable) for colourways being pulled
+// from the warehouse -- an "in office" sample doesn't have a pull-list
+// size to get wrong. Past weeks stay read-only, same as Remove.
+function shootPlanStyleChipHtml(item, s) {
+  const label = s.colour_label || s.style_code;
+  const editable = item.stock_status === 'needs_to_be_brought_in' && state.planningWeekOffset >= 0;
+  if (!editable) {
+    return `<span class="shoot-plan-style-chip">${escapeHtml(label)}${s.size ? ` · ${escapeHtml(s.size)}` : ''}</span>`;
+  }
+  return `<span class="shoot-plan-style-chip shoot-plan-style-chip-editable" data-item-id="${item.id}" data-style-id="${s.style_id}" data-size="${escapeHtml(s.size || '')}" data-label="${escapeHtml(label)}" onclick="editShootPlanStyleSize(this)" title="Edit size">${escapeHtml(label)}${s.size ? ` · ${escapeHtml(s.size)}` : ' · Add size'} <span class="shoot-plan-size-edit-icon">&#9998;</span></span>`;
+}
+
+function editShootPlanStyleSize(chipEl) {
+  if (!chipEl || chipEl.querySelector('input')) return;
+  const { itemId, styleId, size, label } = chipEl.dataset;
+  chipEl.innerHTML = `${escapeHtml(label)} · <input type="text" class="shoot-plan-size-input" value="${escapeHtml(size)}" placeholder="Size">`;
+  const input = chipEl.querySelector('input');
+  input.focus();
+  input.select();
+
+  // Guards against both a keydown-triggered commit/cancel AND the blur
+  // that follows it (moving focus off the input, or the re-render itself)
+  // from firing this twice.
+  let settled = false;
+  const commit = () => {
+    if (settled) return;
+    settled = true;
+    saveShootPlanStyleSize(itemId, styleId, input.value.trim());
+  };
+  const cancel = () => {
+    if (settled) return;
+    settled = true;
+    renderShootPlanStep();
+    renderPlanningShootPlanSummary();
+  };
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); commit(); }
+    if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+  });
+  input.addEventListener('blur', commit);
+}
+
+async function saveShootPlanStyleSize(itemId, styleId, size) {
+  try {
+    await api(`/shoot-plan/${itemId}/styles/${styleId}`, { method: 'PATCH', body: JSON.stringify({ size }) });
+    await loadAll();
+  } catch (e) {
+    toast(e.message, true);
+    renderShootPlanStep();
+    renderPlanningShootPlanSummary();
+  }
+}
+
 function shootPlanProductRowHtml(item) {
   const thumb = item.image_url
     ? `<img class="high-stock-thumb" src="${item.image_url}" alt="">`
     : '<span class="high-stock-thumb high-stock-noimg">🖼</span>';
   const ready = item.stock_status === 'in_office';
-  const chips = item.styles
-    .map((s) => `<span class="shoot-plan-style-chip">${escapeHtml(s.colour_label || s.style_code)}${s.size ? ` · ${escapeHtml(s.size)}` : ''}</span>`)
-    .join('');
+  const chips = item.styles.map((s) => shootPlanStyleChipHtml(item, s)).join('');
   // Past weeks are a read-only historical record -- no editing what
   // already happened.
   const removeBtn = state.planningWeekOffset < 0
