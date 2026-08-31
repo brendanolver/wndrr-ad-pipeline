@@ -613,13 +613,20 @@ main{padding:20px 24px;}
 .core-shoot-7d-trend{font-size:12px;font-weight:700;white-space:nowrap;}
 .core-shoot-category-body{display:flex;flex-direction:column;gap:7px;padding:2px 6px 16px 32px;}
 
-/* Columns 2/3 are fixed px (not auto) so the header and each row -- two
-   separate grids -- always agree on where those columns sit; auto would let
-   each size independently off its own content and drift out of alignment. */
+/* Fixed px (not auto) so the header and each row -- two/three separate
+   grids -- always agree on where columns sit; auto would let each size
+   independently off its own content and drift out of alignment.
+   .core-shoot-review-row is also High Stock's row (3 columns, unrelated
+   layout) -- .core-product-row overrides the template only for Core's own
+   7-column row/header below, via higher selector specificity, so High
+   Stock's own column count is never touched. */
 .core-shoot-review-header{display:grid;grid-template-columns:1.6fr 110px 160px 2.4fr 100px;gap:14px;padding:0 14px 4px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);}
 .core-shoot-review-row{display:grid;grid-template-columns:1.6fr 110px 160px 2.4fr 100px;gap:14px;align-items:center;background:white;border:1px solid var(--border);border-radius:var(--r);padding:11px 14px;}
+.core-shoot-review-header.core-product-row,
+.core-shoot-review-row.core-product-row{grid-template-columns:1.3fr 60px 85px 110px 160px 2fr 100px;gap:22px;}
 .core-shoot-review-col-product{display:flex;align-items:center;gap:8px;min-width:0;}
 .core-shoot-review-col-7d,.core-shoot-review-col-cadence{display:flex;align-items:center;min-width:0;}
+.core-shoot-review-col-soh,.core-shoot-review-col-onorder{font-weight:700;font-size:14px;color:var(--text);font-variant-numeric:tabular-nums;}
 .core-shoot-review-name{font-weight:700;font-size:13.5px;}
 .core-shoot-review-col-reasons{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text-secondary);overflow:hidden;}
 .core-shoot-review-reasons-text{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
