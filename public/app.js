@@ -2134,7 +2134,10 @@ function openShootPlanModal(preset) {
       ${c.image_url ? `<img class="shoot-plan-colour-thumb" src="${c.image_url}" alt="">` : '<span class="shoot-plan-colour-thumb shoot-plan-noimg">🖼</span>'}
       <label class="checkbox-label shoot-plan-colour-check">
         <input type="checkbox" class="shoot-plan-colour-required" value="${c.style_id}" checked>
-        ${escapeHtml(c.colour_label || c.style_code)}
+        <span class="shoot-plan-colour-names">
+          <span class="shoot-plan-colour-name">${escapeHtml(c.colour_label || c.style_code)}</span>
+          ${c.colour_label ? `<span class="shoot-plan-colour-code">${escapeHtml(c.style_code)}</span>` : ''}
+        </span>
       </label>
       ${sizeControl}
     </div>`;
@@ -2166,9 +2169,42 @@ function populateShootPlanCreatorSelect() {
 // Sizes only matter when something has to be picked and brought in -- if
 // it's already in the office, hide the size controls entirely (colourway
 // checkboxes stay, since which colours are being shot is still recorded).
+// "Bring from Warehouse" is effectively the stock pick list itself, so
+// Apply Size to All only makes sense (and only shows) alongside the size
+// controls it fills in.
 function updateShootPlanSampleStatusVisibility() {
   const bringingFromWarehouse = document.getElementById('shoot-plan-stock-status').value === 'needs_to_be_brought_in';
   document.getElementById('shoot-plan-colours').classList.toggle('hide-sizes', !bringingFromWarehouse);
+  document.getElementById('shoot-plan-apply-size-btn').style.display = bringingFromWarehouse ? '' : 'none';
+}
+
+// Select All / Clear All -- a many-colourway product otherwise means
+// clicking every single checkbox just to shoot the whole family.
+function selectAllShootPlanColours(checked) {
+  document.querySelectorAll('#shoot-plan-colours .shoot-plan-colour-required').forEach((el) => { el.checked = checked; });
+}
+
+// Copies the first checked colourway's chosen size to every other checked
+// colourway -- only when that exact size is one of ITS own options (a
+// <select> only ever offers that colourway's real size range, so a size
+// that isn't present there is silently skipped rather than forced).
+function applySizeToAllShootPlanColours() {
+  const rows = [...document.querySelectorAll('#shoot-plan-colours .shoot-plan-colour-row')]
+    .filter((row) => row.querySelector('.shoot-plan-colour-required').checked);
+  if (!rows.length) return;
+  const sourceSize = rows[0].querySelector('.shoot-plan-colour-size').value;
+  if (!sourceSize) return toast('Pick a size on the first colourway to apply it to the rest', true);
+  let applied = 0;
+  for (const row of rows.slice(1)) {
+    const sizeEl = row.querySelector('.shoot-plan-colour-size');
+    if (sizeEl.tagName === 'SELECT') {
+      const hasOption = [...sizeEl.options].some((o) => o.value === sourceSize);
+      if (!hasOption) continue;
+    }
+    sizeEl.value = sourceSize;
+    applied += 1;
+  }
+  toast(applied ? `Applied ${sourceSize} to ${applied} more colourway${applied === 1 ? '' : 's'}` : 'No other colourway offers that size');
 }
 
 // Re-applies (or clears, per defaultSizeForColourway's Mark-only rule)
@@ -2229,7 +2265,7 @@ async function saveShootPlanItem() {
   try {
     await api('/shoot-plan', { method: 'POST', body: JSON.stringify(payload) });
     closeModal('shoot-plan-modal');
-    toast('Sent to Concept Development');
+    toast('Added to Shoot Plan');
     loadAll();
   } catch (e) {
     toast(e.message, true);

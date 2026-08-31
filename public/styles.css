@@ -140,12 +140,23 @@ main{padding:20px 24px;}
 .shoot-plan-product-image img{width:100%;height:100%;object-fit:contain;}
 .shoot-plan-noimg{font-size:20px;opacity:0.4;}
 .shoot-plan-category-tag{font-size:10.5px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px;margin-top:2px;}
+/* Colourway name prominent, style code secondary -- a Monday planner reads
+   "Black" or "Baby Blue" at a glance, not W26DE016BLK. */
+.shoot-plan-colour-names{display:flex;flex-direction:column;line-height:1.3;min-width:0;}
+.shoot-plan-colour-name{font-size:13px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.shoot-plan-colour-code{font-size:10.5px;color:var(--text-muted);}
 .shoot-plan-colour-row{display:grid;grid-template-columns:32px 1fr 90px;gap:8px;align-items:center;}
 .shoot-plan-colour-thumb{width:32px;height:32px;border-radius:var(--r);object-fit:contain;background:var(--surface2);}
 .shoot-plan-colour-check{margin:0 !important;}
 .shoot-plan-colour-size{width:100%;font-size:12.5px !important;padding:6px 8px !important;}
 .shoot-plan-colours-list.hide-sizes .shoot-plan-colour-row{grid-template-columns:32px 1fr;}
 .shoot-plan-colours-list.hide-sizes .shoot-plan-colour-size{display:none;}
+/* Select All/Clear All + Apply Size to All -- a compact toolbar right above
+   the (scrollable) colourway list so a many-colourway product never needs
+   repeat clicking. Apply Size to All only makes sense once sizes are
+   visible at all (see .hide-sizes above), so it's toggled alongside it. */
+.shoot-plan-colours-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;flex-wrap:wrap;}
+.shoot-plan-colours-toolbar-group{display:flex;gap:6px;}
 .modal-footer{display:flex;justify-content:flex-end;gap:8px;padding:14px 18px;border-top:1px solid var(--border);}
 .confirm-modal{width:360px;}
 .confirm-modal .modal-body{align-items:center;text-align:center;padding:28px 22px 8px;}

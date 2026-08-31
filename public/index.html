@@ -698,25 +698,32 @@
           <div id="shoot-plan-product-category" class="shoot-plan-category-tag"></div>
         </div>
       </div>
-      <label>Sample Status
+      <label>Stock for Shoot
         <select id="shoot-plan-stock-status" onchange="updateShootPlanSampleStatusVisibility()">
           <option value="needs_to_be_brought_in">Bring from Warehouse</option>
           <option value="in_office">In Office</option>
         </select>
       </label>
       <label>Colourways &amp; sizes needed
+        <div class="shoot-plan-colours-toolbar">
+          <div class="shoot-plan-colours-toolbar-group">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="selectAllShootPlanColours(true)">Select All</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="selectAllShootPlanColours(false)">Clear All</button>
+          </div>
+          <button type="button" class="btn btn-ghost btn-sm" id="shoot-plan-apply-size-btn" onclick="applySizeToAllShootPlanColours()" title="Copies the first colourway's size to every other selected colourway">Apply Size to All</button>
+        </div>
         <div id="shoot-plan-colours" class="shoot-plan-colours-list"></div>
       </label>
       <label>Content Creator / Owner
         <select id="shoot-plan-creator" onchange="applyShootPlanSizeDefaults()"></select>
       </label>
-      <label>Quick Note <span class="hint">(optional — not a creative brief)</span>
+      <label>Quick Idea <span class="hint">(optional — not a creative brief)</span>
         <textarea id="shoot-plan-initial-idea" rows="2" placeholder="e.g. Show all colours together"></textarea>
       </label>
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('shoot-plan-modal')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveShootPlanItem()">Send to Concept Development</button>
+      <button class="btn btn-primary" onclick="saveShootPlanItem()">Add to Shoot Plan</button>
     </div>
   </div>
 </div>
