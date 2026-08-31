@@ -532,3 +532,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_meta_product_mappings_key
 -- date, the more a remaining gap matters. Optional: plenty of stages
 -- (sitewide sale messaging, ongoing GWP) have no single hard deadline.
 ALTER TABLE promotion_stages ADD COLUMN IF NOT EXISTS due_date DATE;
+
+-- ---------------------------------------------------------------------------
+-- Default Shoot Sizes (Settings -> Default Shoot Sizes): pre-fills each
+-- selected colourway's size when the "Shoot This Week" modal opens, keyed
+-- by garment type (top vs bottom) and, for bottoms, alpha vs waist sizing
+-- (see classifyGarmentType/defaultSizeForColourway in app.js). One shared
+-- default rather than one per Content Creator -- replaces that per-creator
+-- sizing's role for this specific purpose; the content_creators size
+-- columns are unused by this modal going forward but kept in place, same
+-- as every other retired-in-place column in this file.
+ALTER TABLE planning_settings ADD COLUMN IF NOT EXISTS default_shoot_top_size VARCHAR(20) NOT NULL DEFAULT 'S';
+ALTER TABLE planning_settings ADD COLUMN IF NOT EXISTS default_shoot_bottom_alpha_size VARCHAR(20) NOT NULL DEFAULT 'S';
+ALTER TABLE planning_settings ADD COLUMN IF NOT EXISTS default_shoot_bottom_waist_size VARCHAR(20) NOT NULL DEFAULT '30';

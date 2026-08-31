@@ -382,6 +382,26 @@
       </div>
 
       <div class="planning-section-header">
+        <h2>Default Shoot Sizes</h2>
+        <span class="admin-note">Pre-fills each colourway's size when Shoot This Week opens, by garment type -- always just a starting point, any colourway's size can still be changed by hand.</span>
+      </div>
+      <div class="settings-field-row">
+        <label for="default-shoot-top-size-input">Tops</label>
+        <input type="text" id="default-shoot-top-size-input">
+        <button class="btn btn-primary btn-sm" id="default-shoot-top-size-save-btn">Save</button>
+      </div>
+      <div class="settings-field-row">
+        <label for="default-shoot-bottom-alpha-size-input">Bottoms (Alpha sizing, e.g. S/M/L)</label>
+        <input type="text" id="default-shoot-bottom-alpha-size-input">
+        <button class="btn btn-primary btn-sm" id="default-shoot-bottom-alpha-size-save-btn">Save</button>
+      </div>
+      <div class="settings-field-row">
+        <label for="default-shoot-bottom-waist-size-input">Bottoms (Waist sizing, e.g. 28/30/32)</label>
+        <input type="text" id="default-shoot-bottom-waist-size-input">
+        <button class="btn btn-primary btn-sm" id="default-shoot-bottom-waist-size-save-btn">Save</button>
+      </div>
+
+      <div class="planning-section-header">
         <h2>Proven Winners</h2>
         <span class="admin-note">Ranked concept playbook. Highest-ranked active entries auto-fill a new product's Required Concepts up to its SOH-driven creative target.</span>
       </div>
@@ -390,7 +410,7 @@
 
       <div class="planning-section-header">
         <h2>Content Creators</h2>
-        <span class="admin-note">Who can be assigned as Content Creator in Shoot This Week. The default pre-selects there, and each creator's Top / Bottom (Alpha) / Bottom (Waist) sizes auto-fill a colourway's size field when a matching size is available.</span>
+        <span class="admin-note">Who can be assigned as Content Creator in Shoot This Week -- the default pre-selects there. (Colourway size defaults now live in Default Shoot Sizes above, shared across every creator rather than set per creator.)</span>
       </div>
       <div id="cc-list" class="cc-list"></div>
       <div class="cc-add-row">
@@ -706,16 +726,13 @@
       </label>
       <label>Colourways &amp; sizes needed
         <div class="shoot-plan-colours-toolbar">
-          <div class="shoot-plan-colours-toolbar-group">
-            <button type="button" class="btn btn-ghost btn-sm" onclick="selectAllShootPlanColours(true)">Select All</button>
-            <button type="button" class="btn btn-ghost btn-sm" onclick="selectAllShootPlanColours(false)">Clear All</button>
-          </div>
-          <button type="button" class="btn btn-ghost btn-sm" id="shoot-plan-apply-size-btn" onclick="applySizeToAllShootPlanColours()" title="Copies the first colourway's size to every other selected colourway">Apply Size to All</button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="selectAllShootPlanColours(true)">Select All</button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="selectAllShootPlanColours(false)">Clear All</button>
         </div>
         <div id="shoot-plan-colours" class="shoot-plan-colours-list"></div>
       </label>
       <label>Content Creator / Owner
-        <select id="shoot-plan-creator" onchange="applyShootPlanSizeDefaults()"></select>
+        <select id="shoot-plan-creator"></select>
       </label>
       <label>Quick Idea <span class="hint">(optional — not a creative brief)</span>
         <textarea id="shoot-plan-initial-idea" rows="2" placeholder="e.g. Show all colours together"></textarea>

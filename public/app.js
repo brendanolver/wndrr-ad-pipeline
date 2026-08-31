@@ -2071,18 +2071,20 @@ function classifyGarmentType(category) {
   return null;
 }
 
-// Returns '' (no default) whenever the selected creator isn't in
-// state.contentCreators, has no size configured for this garment shape in
-// Settings, or this colourway has no resolved size list at all -- the
-// literal "if changed to a creator with no sizes set, do not assume
-// another creator's sizing" rule. Sizes are Settings-managed per creator
-// (content_creators.default_top_size / default_bottom_alpha_size /
-// default_bottom_waist_size) rather than hardcoded.
-function defaultSizeForColourway(creator, garmentType, sizingSystem, sizes) {
-  const creatorRow = state.contentCreators.find((c) => c.name === creator);
-  if (!creatorRow || !sizes || !sizes.length || !garmentType) return '';
-  const key = garmentType === 'top' ? 'default_top_size' : (sizingSystem === 'waist' ? 'default_bottom_waist_size' : 'default_bottom_alpha_size');
-  const label = creatorRow[key];
+// One shared default per garment shape (Settings -> Default Shoot Sizes),
+// not per Content Creator -- returns '' only when this colourway has no
+// resolved size list at all or its category doesn't classify as a garment
+// shape. When Settings' configured label isn't literally one of this
+// colourway's own size options, falls back to the first size rather than
+// leaving the field blank -- still a genuine default, just not an exact
+// label match (e.g. Settings says "S" but this range only offers "Small").
+function defaultSizeForColourway(garmentType, sizingSystem, sizes) {
+  if (!sizes || !sizes.length || !garmentType) return '';
+  const settings = state.planningSettings;
+  if (!settings) return '';
+  const label = garmentType === 'top'
+    ? settings.default_shoot_top_size
+    : (sizingSystem === 'waist' ? settings.default_shoot_bottom_waist_size : settings.default_shoot_bottom_alpha_size);
   if (!label) return '';
   const match = sizes.find((s) => s.toLowerCase() === String(label).toLowerCase());
   return match || sizes[0];
@@ -2169,13 +2171,9 @@ function populateShootPlanCreatorSelect() {
 // Sizes only matter when something has to be picked and brought in -- if
 // it's already in the office, hide the size controls entirely (colourway
 // checkboxes stay, since which colours are being shot is still recorded).
-// "Bring from Warehouse" is effectively the stock pick list itself, so
-// Apply Size to All only makes sense (and only shows) alongside the size
-// controls it fills in.
 function updateShootPlanSampleStatusVisibility() {
   const bringingFromWarehouse = document.getElementById('shoot-plan-stock-status').value === 'needs_to_be_brought_in';
   document.getElementById('shoot-plan-colours').classList.toggle('hide-sizes', !bringingFromWarehouse);
-  document.getElementById('shoot-plan-apply-size-btn').style.display = bringingFromWarehouse ? '' : 'none';
 }
 
 // Select All / Clear All -- a many-colourway product otherwise means
@@ -2184,35 +2182,13 @@ function selectAllShootPlanColours(checked) {
   document.querySelectorAll('#shoot-plan-colours .shoot-plan-colour-required').forEach((el) => { el.checked = checked; });
 }
 
-// Copies the first checked colourway's chosen size to every other checked
-// colourway -- only when that exact size is one of ITS own options (a
-// <select> only ever offers that colourway's real size range, so a size
-// that isn't present there is silently skipped rather than forced).
-function applySizeToAllShootPlanColours() {
-  const rows = [...document.querySelectorAll('#shoot-plan-colours .shoot-plan-colour-row')]
-    .filter((row) => row.querySelector('.shoot-plan-colour-required').checked);
-  if (!rows.length) return;
-  const sourceSize = rows[0].querySelector('.shoot-plan-colour-size').value;
-  if (!sourceSize) return toast('Pick a size on the first colourway to apply it to the rest', true);
-  let applied = 0;
-  for (const row of rows.slice(1)) {
-    const sizeEl = row.querySelector('.shoot-plan-colour-size');
-    if (sizeEl.tagName === 'SELECT') {
-      const hasOption = [...sizeEl.options].some((o) => o.value === sourceSize);
-      if (!hasOption) continue;
-    }
-    sizeEl.value = sourceSize;
-    applied += 1;
-  }
-  toast(applied ? `Applied ${sourceSize} to ${applied} more colourway${applied === 1 ? '' : 's'}` : 'No other colourway offers that size');
-}
-
-// Re-applies (or clears, per defaultSizeForColourway's Mark-only rule)
-// every still-required colourway's size default -- called on open and again
-// whenever the creator field changes.
+// Pre-fills every still-required colourway's size from Settings -> Default
+// Shoot Sizes -- called once when the modal opens. Purely a starting point:
+// each <select> stays a normal control the user can change by hand, and
+// nothing re-runs this afterward (Select All/Clear All only toggle which
+// colourways are required, they never touch an already-set size).
 function applyShootPlanSizeDefaults() {
   if (!shootPlanModalContext) return;
-  const creator = document.getElementById('shoot-plan-creator').value.trim();
   const garmentType = classifyGarmentType(shootPlanModalContext.category);
   document.querySelectorAll('#shoot-plan-colours .shoot-plan-colour-size').forEach((el) => {
     const styleId = Number(el.dataset.styleId);
@@ -2220,10 +2196,7 @@ function applyShootPlanSizeDefaults() {
     if (!checkbox || !checkbox.checked) return;
     const colour = shootPlanModalContext.colours.find((c) => c.style_id === styleId);
     if (!colour) return;
-    // Always overwrite (including back to blank) rather than only setting a
-    // truthy default -- a creator change with no configured defaults must
-    // actively clear a previous creator's size, not leave it looking chosen.
-    el.value = defaultSizeForColourway(creator, garmentType, colour.sizing_system, colour.sizes);
+    el.value = defaultSizeForColourway(garmentType, colour.sizing_system, colour.sizes);
   });
 }
 
@@ -2921,6 +2894,9 @@ function renderPlanningSettingsForm() {
   if (!state.planningSettings) return;
   document.getElementById('weekly-target-input').value = state.planningSettings.weekly_new_concept_target;
   document.getElementById('high-stock-min-soh-input').value = state.planningSettings.high_stock_min_soh;
+  document.getElementById('default-shoot-top-size-input').value = state.planningSettings.default_shoot_top_size;
+  document.getElementById('default-shoot-bottom-alpha-size-input').value = state.planningSettings.default_shoot_bottom_alpha_size;
+  document.getElementById('default-shoot-bottom-waist-size-input').value = state.planningSettings.default_shoot_bottom_waist_size;
 }
 
 async function saveWeeklyTarget() {
@@ -2947,6 +2923,30 @@ async function saveHighStockMinSoh() {
     const res = await api('/high-stock-products');
     state.highStockProducts = res.products;
     renderHighStockProducts();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// ── Settings: Default Shoot Sizes ────────────────────
+// One shared default per garment shape (not per Content Creator) --
+// pre-fills a colourway's size when Shoot This Week opens. Three
+// independent fields, each with its own Save button, same convention as
+// every other Settings field on this form.
+const DEFAULT_SHOOT_SIZE_FIELDS = {
+  top: { field: 'default_shoot_top_size', inputId: 'default-shoot-top-size-input', label: 'Tops' },
+  bottom_alpha: { field: 'default_shoot_bottom_alpha_size', inputId: 'default-shoot-bottom-alpha-size-input', label: 'Bottoms (Alpha)' },
+  bottom_waist: { field: 'default_shoot_bottom_waist_size', inputId: 'default-shoot-bottom-waist-size-input', label: 'Bottoms (Waist)' },
+};
+
+async function saveDefaultShootSize(key) {
+  const { field, inputId, label } = DEFAULT_SHOOT_SIZE_FIELDS[key];
+  const value = document.getElementById(inputId).value.trim();
+  if (!value) return toast(`${label} default size is required`, true);
+  try {
+    const updated = await api('/planning-settings', { method: 'PUT', body: JSON.stringify({ [field]: value }) });
+    state.planningSettings = updated;
+    toast(`${label} default size saved`);
   } catch (e) {
     toast(e.message, true);
   }
@@ -3105,6 +3105,9 @@ async function deletePw() {
 document.getElementById('pw-add-btn').addEventListener('click', () => openPwModal(null));
 document.getElementById('weekly-target-save-btn').addEventListener('click', saveWeeklyTarget);
 document.getElementById('high-stock-min-soh-save-btn').addEventListener('click', saveHighStockMinSoh);
+document.getElementById('default-shoot-top-size-save-btn').addEventListener('click', () => saveDefaultShootSize('top'));
+document.getElementById('default-shoot-bottom-alpha-size-save-btn').addEventListener('click', () => saveDefaultShootSize('bottom_alpha'));
+document.getElementById('default-shoot-bottom-waist-size-save-btn').addEventListener('click', () => saveDefaultShootSize('bottom_waist'));
 
 // ── Settings: Content Creators ───────────────────────
 // Fixed scales rather than free text -- keeps entries consistent and
