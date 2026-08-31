@@ -2067,7 +2067,7 @@ const DEFAULT_CREATOR = 'Mark';
 function classifyGarmentType(category) {
   const c = (category || '').toUpperCase();
   if (/JEAN|PANT|SHORT|TROUSER|SKIRT/.test(c)) return 'bottom';
-  if (/TEE|SHIRT|HOODIE|JUMPER|JACKET/.test(c)) return 'top';
+  if (/TEE|SHIRT|HOODIE|JUMPER|JACKET|SWEAT|OUTERWEAR/.test(c)) return 'top';
   return null;
 }
 
