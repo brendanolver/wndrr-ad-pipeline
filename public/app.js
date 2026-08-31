@@ -449,7 +449,6 @@ function formatDate(value) {
 
 function renderPlanning() {
   renderPlanningWeekHeader();
-  renderMondayChecklist();
   renderPlanningStepNav();
   renderDropsRow();
   loadDropSuggestions();
@@ -624,7 +623,7 @@ function planningWeekStatus() {
   const confirmed = Boolean(state.weeklyShootPlanConfirmation);
   if (!confirmed) return { label: 'Planning in Progress', cls: 'in-progress' };
   return state.planningWeekOffset === 0
-    ? { label: '✓ Shoot Plan Confirmed', cls: 'confirmed' }
+    ? { label: '✓ Week Confirmed', cls: 'confirmed' }
     : { label: '✓ Completed', cls: 'completed' };
 }
 
@@ -695,34 +694,12 @@ document.addEventListener('click', (e) => {
   picker.style.display = 'none';
 });
 
-// ── Planning: Monday Planning Checklist ───────────────
-// A small progress/navigation aid ("have we finished planning this week?"),
-// not a dashboard card. First four items are manually ticked -- never set
-// just because a tab was visited. The 5th mirrors the Shoot Plan
-// confirmation and isn't independently clickable.
-const MONDAY_CHECKLIST_ITEMS = [
-  { field: 'core_reviewed', label: 'Core reviewed', elId: 'monday-checklist-core' },
-  { field: 'high_stock_reviewed', label: 'High Stocks reviewed', elId: 'monday-checklist-high-stock' },
-  { field: 'drops_reviewed', label: 'Upcoming Drops reviewed', elId: 'monday-checklist-drops' },
-  { field: 'promotions_reviewed', label: 'Promotions reviewed', elId: 'monday-checklist-promotions' },
-];
-
-function renderMondayChecklist() {
-  const readOnly = state.planningWeekOffset < 0;
-  const progress = state.weeklyPlanningProgress || {};
-  MONDAY_CHECKLIST_ITEMS.forEach((item) => {
-    const el = document.getElementById(item.elId);
-    const done = Boolean(progress[item.field]);
-    el.textContent = `${done ? '✓' : '○'} ${item.label}`;
-    el.classList.toggle('done', done);
-    el.disabled = readOnly;
-  });
-  const confirmed = Boolean(state.weeklyShootPlanConfirmation);
-  const shootPlanEl = document.getElementById('monday-checklist-shootplan');
-  shootPlanEl.textContent = `${confirmed ? '✓' : '○'} Shoot Plan confirmed`;
-  shootPlanEl.classList.toggle('done', confirmed);
-}
-
+// ── Planning: step nav doubles as the Monday meeting checklist ───────
+// The 5 nav tabs themselves answer "where are we / what's reviewed / what's
+// left" -- no separate checklist row. First four sections are manually
+// marked reviewed via the "Mark as Reviewed" button beside each step's
+// Continue button (never auto-set just by opening the tab); Shoot Plan
+// ticks itself once Confirm & Send Shoot Plan completes.
 async function toggleWeeklyProgress(field) {
   if (state.planningWeekOffset < 0) return; // past weeks are read-only
   const current = Boolean(state.weeklyPlanningProgress && state.weeklyPlanningProgress[field]);
@@ -732,20 +709,21 @@ async function toggleWeeklyProgress(field) {
       body: JSON.stringify({ week_start: planningWeekStart(), field, value: !current }),
     });
     state.weeklyPlanningProgress = updated;
-    renderMondayChecklist();
     renderPlanningStepNav();
   } catch (e) {
     toast(e.message, true);
   }
 }
 
-// Reflects checklist completion on the step tabs themselves (a small tick,
-// not a redesign) and disables the four recommendation tabs for past weeks
-// -- they're always live/current-data views, so there's nothing truthful
-// to show "as it was" for a past week on them; Shoot Plan (the actual
-// historical record) stays open.
+// Reflects review/confirmation state on the step tabs (a small tick, not a
+// redesign) and disables the four recommendation tabs for past weeks --
+// they're always live/current-data views, so there's nothing truthful to
+// show "as it was" for a past week on them; Shoot Plan (the actual
+// historical record) stays open. Also repaints each step's own "Mark as
+// Reviewed" button so both surfaces always agree.
 const PLANNING_STEP_REVIEW_FIELD = { core: 'core_reviewed', 'high-stocks': 'high_stock_reviewed', drops: 'drops_reviewed', promotions: 'promotions_reviewed' };
 const PLANNING_STEP_LABELS = { core: '1 Core', 'high-stocks': '2 High Stocks', drops: '3 Upcoming Drops', promotions: '4 Promotions', 'shoot-plan': '5 Shoot Plan' };
+const PLANNING_REVIEW_BTN_IDS = { core: 'core-review-btn', 'high-stocks': 'high-stocks-review-btn', drops: 'drops-review-btn', promotions: 'promotions-review-btn' };
 
 function renderPlanningStepNav() {
   const readOnlyPast = state.planningWeekOffset < 0;
@@ -753,13 +731,22 @@ function renderPlanningStepNav() {
   document.querySelectorAll('.planning-step-btn').forEach((btn) => {
     const step = btn.dataset.step;
     const field = PLANNING_STEP_REVIEW_FIELD[step];
-    const reviewed = Boolean(field && progress[field]);
+    const reviewed = step === 'shoot-plan' ? Boolean(state.weeklyShootPlanConfirmation) : Boolean(field && progress[field]);
     btn.innerHTML = reviewed
       ? `<span class="planning-step-tick">&#10003;</span> ${PLANNING_STEP_LABELS[step]}`
       : PLANNING_STEP_LABELS[step];
     const disabled = readOnlyPast && step !== 'shoot-plan';
     btn.disabled = disabled;
     btn.classList.toggle('planning-step-btn-disabled', disabled);
+  });
+
+  Object.entries(PLANNING_REVIEW_BTN_IDS).forEach(([step, elId]) => {
+    const btn = document.getElementById(elId);
+    if (!btn) return;
+    const reviewed = Boolean(progress[PLANNING_STEP_REVIEW_FIELD[step]]);
+    btn.textContent = reviewed ? '✓ Reviewed' : '✓ Mark as Reviewed';
+    btn.classList.toggle('planning-review-btn-done', reviewed);
+    btn.disabled = readOnlyPast;
   });
 }
 
@@ -3245,9 +3232,10 @@ async function confirmWeeklyShootPlan() {
     });
     state.shootPlanEditMode = false;
     renderShootPlanStep();
-    // The checklist's 5th item ("Shoot Plan confirmed") is derived from
-    // this same confirmation, so it needs its own repaint here.
-    renderMondayChecklist();
+    // The "5 Shoot Plan" nav tick and the week-header badge both derive
+    // from this same confirmation, so they need their own repaint here.
+    renderPlanningStepNav();
+    renderPlanningWeekHeader();
     toast('Shoot plan sent to Concept Development');
   } catch (e) {
     toast(e.message, true);

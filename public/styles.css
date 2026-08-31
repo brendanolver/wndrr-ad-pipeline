@@ -240,8 +240,11 @@ main{padding:20px 24px;}
 .planning-week-label-btn{background:none;border:none;font-family:inherit;font-size:22px;font-weight:700;color:var(--text);cursor:pointer;padding:0 2px;}
 .planning-week-label-btn:hover{color:var(--teal-dark);}
 .planning-week-status{font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);}
-.planning-week-status-confirmed,.planning-week-status-completed{color:var(--green);}
+.planning-week-status-completed{color:var(--green);}
 .planning-week-status-upcoming{color:var(--blue);}
+/* Subtle pill instead of plain caps text -- this sits directly beside the
+   week label, so it reads as a small badge ("done"), not a headline. */
+.planning-week-status-confirmed{display:inline-block;background:var(--green-light);color:var(--green);border-radius:var(--r-pill);padding:3px 10px;text-transform:none;letter-spacing:normal;font-size:11.5px;}
 .planning-week-picker{position:absolute;top:100%;left:0;margin-top:6px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--shadow);padding:6px;z-index:20;max-height:320px;overflow-y:auto;min-width:220px;}
 .planning-week-picker-row{display:flex;justify-content:space-between;align-items:center;gap:12px;width:100%;background:none;border:none;border-radius:var(--r);padding:7px 10px;font-family:inherit;font-size:12.5px;font-weight:600;color:var(--text);cursor:pointer;text-align:left;}
 .planning-week-picker-row:hover{background:var(--surface2);}
@@ -254,17 +257,6 @@ main{padding:20px 24px;}
 .planning-shoot-plan-summary-right{display:flex;align-items:center;gap:10px;}
 .link-btn{background:none;border:none;color:var(--teal-dark);cursor:pointer;font-family:inherit;font-size:12px;font-weight:600;padding:0;}
 .link-btn:hover{text-decoration:underline;}
-
-/* Monday Planning Checklist: a small progress/navigation aid, not a
-   dashboard card -- one compact row of toggle pills sitting between the
-   week nav and the step tabs. */
-.monday-checklist{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:12px;}
-.monday-checklist-label{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-muted);margin-right:2px;}
-.monday-checklist-item{background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-pill);padding:4px 10px;font-family:inherit;font-size:11.5px;font-weight:600;color:var(--text-secondary);cursor:pointer;}
-.monday-checklist-item:hover:not(:disabled){border-color:var(--teal);}
-.monday-checklist-item:disabled{cursor:default;}
-.monday-checklist-item.done{background:var(--green-light);border-color:transparent;color:var(--green);}
-.monday-checklist-item-derived{cursor:default;}
 
 /* Monday's guided workflow: a compact step nav (pill-switch, same visual
    language as .core-view-btn) + one mutually-exclusive panel at a time --
@@ -282,7 +274,15 @@ main{padding:20px 24px;}
 .planning-step-panel.active{display:block;}
 .planning-step-footer{display:flex;justify-content:space-between;align-items:center;margin-top:16px;padding-top:14px;border-top:1px solid var(--border);}
 .planning-step-footer span{font-size:13px;color:var(--text-secondary);font-weight:600;}
+.planning-step-footer-actions{display:flex;align-items:center;gap:10px;}
 .planning-step-continue-btn{padding:13px 24px;font-size:14.5px;font-weight:700;border-radius:var(--r-pill);}
+/* Compact companion to the Continue button -- marks this step reviewed on
+   the nav tabs above (see .planning-step-tick) without adding a whole
+   separate checklist row. */
+.planning-review-btn{background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-pill);padding:9px 16px;font-family:inherit;font-size:12.5px;font-weight:600;color:var(--text-secondary);cursor:pointer;white-space:nowrap;}
+.planning-review-btn:hover:not(:disabled){border-color:var(--teal);}
+.planning-review-btn:disabled{cursor:not-allowed;opacity:0.55;}
+.planning-review-btn.planning-review-btn-done{background:var(--green-light);border-color:transparent;color:var(--green);}
 .core-shoot-selected-badge{display:inline-block;padding:5px 12px;border-radius:var(--r-pill);background:var(--green-light);color:var(--green);font-size:12.5px;font-weight:700;white-space:nowrap;}
 
 /* Step 4 -- Promotions: reuses .drop-card's card shell for the landing
