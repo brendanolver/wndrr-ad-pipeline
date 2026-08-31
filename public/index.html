@@ -259,18 +259,19 @@
 
         <!-- Persistent across Core/High Stock/Upcoming Drops/Promotions only
              -- a product added at any of those stages shows up here
-             immediately, so you don't have to switch tabs to see whether
-             anything's selected yet. Hidden on the Shoot Plan step itself
-             (see setPlanningStep), since that step already IS this summary,
-             in full. Deliberately just a count + link, not the full row
-             list (that lives once, on Shoot Plan) -- the link is what
-             keeps it from reading as a dead end. -->
-        <div class="planning-section-header" id="planning-shoot-plan-summary-block">
-          <h2>This Week's Shoot Plan</h2>
-          <div class="planning-shoot-plan-summary-right">
-            <span class="admin-note" id="planning-shoot-plan-summary-count"></span>
-            <button type="button" class="link-btn" id="planning-shoot-plan-summary-link" onclick="setPlanningStep('shoot-plan')" style="display:none;">View Shoot Plan &rarr;</button>
+             immediately, so you don't have to switch tabs to see what's
+             selected. Hidden on the Shoot Plan step itself (see
+             setPlanningStep), since that step already IS this, in full
+             (stat bar, Confirm & Send CTA, CSV export). -->
+        <div id="planning-shoot-plan-summary-block">
+          <div class="planning-section-header">
+            <h2>This Week's Shoot Plan</h2>
+            <div class="planning-shoot-plan-summary-right">
+              <span class="admin-note" id="planning-shoot-plan-summary-count"></span>
+              <button type="button" class="link-btn" id="planning-shoot-plan-summary-link" onclick="setPlanningStep('shoot-plan')" style="display:none;">Go to Shoot Plan &rarr;</button>
+            </div>
           </div>
+          <div id="planning-shoot-plan-summary-list"></div>
         </div>
       </div>
 

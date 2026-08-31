@@ -3094,14 +3094,17 @@ function shootPlanGroupedHtml(emptyMessage) {
     .join('');
 }
 
-// Only a count -- the full row list lives once, on the Shoot Plan step
-// itself. A "View Shoot Plan" link keeps this from reading as a dead end
-// once there's actually something to see (nothing to link to when empty).
+// Same grouped row list Shoot Plan itself uses -- so while working through
+// Core/High Stock/Upcoming Drops/Promotions, you can see exactly what's
+// been selected so far without switching tabs. "Go to Shoot Plan" still
+// jumps to the full step for the stat bar, Confirm & Send, and CSV export.
 function renderPlanningShootPlanSummary() {
   const count = state.shootPlan.length;
   document.getElementById('planning-shoot-plan-summary-count').textContent =
     count ? `${count} product${count === 1 ? '' : 's'} selected this week` : 'Nothing selected yet this week';
   document.getElementById('planning-shoot-plan-summary-link').style.display = count ? '' : 'none';
+  document.getElementById('planning-shoot-plan-summary-list').innerHTML =
+    shootPlanGroupedHtml('Nothing selected yet this week — use + Shoot This Week on a Core, High Stock, Upcoming Drop, or Promotion product to add one.');
 }
 
 // Colourway+size rows across every "Bring from Warehouse" selection --
