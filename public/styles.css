@@ -896,23 +896,41 @@ main{flex:1;min-width:0;padding:20px 24px;}
 
 /* Individual Concept workspace -- wide (55-65% of viewport on desktop, not
    the generic 420px .modal) and section-divided, since it holds every
-   field a creator needs to prep a concept for Tuesday review: context
-   banner, then The Idea/The Execution/References/Shoot Requirements
-   stacked as clearly labelled sections instead of one long unbroken field
-   list. Status is shown read-only in the header (cd-modal-status-badge),
-   not edited here -- see the Save Draft/Ready for Review footer actions. */
-.cd-modal-workspace{width:60vw;min-width:640px;max-width:1080px;}
+   field a creator needs to prep a concept for Tuesday review: a compact
+   one/two-line context banner, then The Idea/The Execution/References/
+   Shoot Requirements stacked as clearly labelled sections instead of one
+   long unbroken field list. Status is shown read-only in the header
+   (cd-modal-status-badge), not edited here -- see the Save Draft/Ready
+   for Review footer actions. display:flex + its own overflow (overriding
+   .modal's overflow-y:auto) pins the header/validation/footer in place
+   and makes .modal-body the only scrolling region, so the footer actions
+   stay visible ("sticky") while a long concept scrolls. */
+.cd-modal-workspace{width:60vw;min-width:640px;max-width:1080px;display:flex;flex-direction:column;overflow:hidden;}
 @media (max-width:900px){.cd-modal-workspace{width:94vw;min-width:0;}}
+.cd-modal-workspace .modal-body{flex:1;min-height:0;overflow-y:auto;}
+.cd-modal-workspace .modal-footer{flex-shrink:0;}
 .cd-modal-header-title{display:flex;align-items:center;gap:9px;min-width:0;}
 .cd-modal-header-title h3{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.cd-modal-context{display:flex;gap:12px;background:var(--surface2);border-radius:var(--r);padding:12px;}
-.cd-modal-context-info{display:flex;flex-direction:column;gap:6px;min-width:0;}
-.cd-modal-context-product{font-weight:700;font-size:14px;}
-.cd-modal-context-meta{display:flex;gap:6px;flex-wrap:wrap;font-size:12px;color:var(--text-secondary);}
+
+/* Compact context banner -- one line normally, a second only when there's
+   an initial idea from Planning to show; deliberately not a large grey
+   card, so the creative-development fields below start higher on screen. */
+.cd-modal-context-compact{display:flex;align-items:center;gap:8px;padding:6px 2px 10px;}
+.cd-modal-context-thumb{width:22px;height:22px;border-radius:4px;object-fit:cover;flex-shrink:0;}
+.cd-modal-context-noimg{display:inline-flex;align-items:center;justify-content:center;background:var(--surface2);font-size:12px;}
+.cd-modal-context-lines{display:flex;flex-direction:column;gap:2px;min-width:0;}
+.cd-modal-context-line{font-size:12.5px;color:var(--text-secondary);}
+.cd-modal-context-idea{font-size:12px;color:var(--text-muted);font-style:italic;}
+
 .cd-modal-section{border-top:1px solid var(--border);padding-top:12px;display:flex;flex-direction:column;gap:12px;}
 .cd-modal-section-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);}
 .cd-modal-field-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
 @media (max-width:600px){.cd-modal-field-row{grid-template-columns:1fr;}}
+.cd-modal-idea-row{display:grid;grid-template-columns:35% 1fr;gap:12px;}
+@media (max-width:600px){.cd-modal-idea-row{grid-template-columns:1fr;}}
+
+.cd-modal-validation{padding:8px 18px;font-size:12px;font-weight:600;color:var(--red);background:var(--red-light);border-top:1px solid var(--border);}
+.cd-field-invalid{border-color:var(--red) !important;}
 
 /* References gets its own light card frame (rather than just another
    divided section) so it reads as the clear, simple place to drop links --

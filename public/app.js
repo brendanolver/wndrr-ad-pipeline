@@ -3778,7 +3778,7 @@ function renderConceptDevModalReferences() {
           </div>
           <textarea rows="2" oninput="conceptDevModalReferences[${i}].note=this.value" placeholder="What do we like about it?">${escapeHtml(r.note)}</textarea>
         </div>`).join('')
-    : '<span class="hint">No references yet.</span>';
+    : '<span class="hint">Add inspiration or examples for this concept.</span>';
 }
 
 function addConceptDevReference() {
@@ -3794,29 +3794,34 @@ function removeConceptDevReference(index) {
 }
 
 // Read-only Planning-handoff context shown at the top of the workspace --
-// product/week/owner/source/colourways -- so the creator (especially on a
-// Drop's already-assigned Proven Winner concept) always has what they need
-// to prep execution without leaving the modal or re-entering anything.
+// product/source/pathway/owner/colourways -- so the creator (especially on
+// a Drop's already-assigned Proven Winner concept) always has what they
+// need to prep execution without leaving the modal or re-entering
+// anything. Deliberately compact (one line, two if there's an initial
+// idea from Planning) -- the creative-development fields are the point of
+// this workspace, not the context banner, so it shouldn't compete for
+// vertical space with them.
 function conceptDevModalContextHtml(product) {
   const thumb = product.image_url
-    ? `<img class="high-stock-thumb" src="${product.image_url}" alt="">`
-    : '<span class="high-stock-thumb high-stock-noimg">🖼</span>';
-  const chips = product.colourways
-    .map((c) => `<span class="shoot-plan-style-chip">${escapeHtml(c.colour_label || c.style_code)}${c.size ? ` · ${escapeHtml(c.size)}` : ''}</span>`)
-    .join('');
+    ? `<img class="cd-modal-context-thumb" src="${product.image_url}" alt="">`
+    : '<span class="cd-modal-context-thumb cd-modal-context-noimg">🖼</span>';
+  const sourceLabel = CONCEPT_DEV_SOURCE_LABELS[product.source] || product.source || '—';
+  const pathwayLabel = CONCEPT_DEV_PATHWAY_LABELS[product.source] || shootPlanRequirementLabel(product);
+  const skuInfo = product.colourways
+    .map((c) => `${c.style_code || c.colour_label}${c.size ? `-${c.size}` : ''}`)
+    .join(', ');
+  const line = [
+    `<strong>${escapeHtml(product.product_name)}</strong>`,
+    escapeHtml(sourceLabel),
+    escapeHtml(pathwayLabel),
+    `Owner: ${escapeHtml(product.creator || '—')}`,
+    escapeHtml(skuInfo),
+  ].filter(Boolean).join(' &middot; ');
   return `
     ${thumb}
-    <div class="cd-modal-context-info">
-      <div class="cd-modal-context-product">${escapeHtml(product.product_name)}</div>
-      <div class="cd-modal-context-meta">
-        <span>Week ${conceptDevWeekNumber()}</span>
-        <span>·</span>
-        <span>Owner: ${escapeHtml(product.creator || '—')}</span>
-        <span>·</span>
-        <span>${escapeHtml(SHOOT_PLAN_SOURCE_LABELS[product.source] || product.source || '—')}</span>
-      </div>
-      <div class="shoot-plan-style-chips">${chips}</div>
-      <span class="shoot-plan-pathway-chip">${escapeHtml(shootPlanRequirementLabel(product))}</span>
+    <div class="cd-modal-context-lines">
+      <div class="cd-modal-context-line">${line}</div>
+      ${product.initial_idea ? `<div class="cd-modal-context-idea">💡 ${escapeHtml(product.initial_idea)}</div>` : ''}
     </div>`;
 }
 
@@ -3842,6 +3847,46 @@ function fillConceptDevModalFields(concept) {
   const badge = document.getElementById('cd-modal-status-badge');
   badge.className = `cd-concept-status-pill ${CONCEPT_DEV_STATUS_CLASS[status] || ''}`;
   badge.textContent = CONCEPT_DEV_STATUS_LABELS[status] || status;
+
+  // Progressive disclosure: Script and Shoot Requirements stay collapsed
+  // behind a toggle for the common case (a simple concept doesn't need
+  // either), but open automatically if the concept already has content
+  // there -- a creator revisiting it should never have to go hunting for
+  // information that's already been entered.
+  setConceptDevScriptExpanded(Boolean(concept && concept.script_notes));
+  setConceptDevShootRequirementsExpanded(Boolean(
+    concept && (concept.talent_requirement || concept.location || concept.props_notes)
+  ));
+
+  hideConceptDevValidation();
+}
+
+function setConceptDevScriptExpanded(expanded) {
+  document.getElementById('cd-modal-script-toggle-wrap').style.display = expanded ? 'none' : '';
+  document.getElementById('cd-modal-script-field').style.display = expanded ? '' : 'none';
+}
+
+function toggleConceptDevScript() {
+  setConceptDevScriptExpanded(true);
+  document.getElementById('cd-modal-script').focus();
+}
+
+function setConceptDevShootRequirementsExpanded(expanded) {
+  document.getElementById('cd-modal-shoot-req-toggle-wrap').style.display = expanded ? 'none' : '';
+  document.getElementById('cd-modal-shoot-req-fields').style.display = expanded ? '' : 'none';
+}
+
+function toggleConceptDevShootRequirements() {
+  setConceptDevShootRequirementsExpanded(true);
+  document.getElementById('cd-modal-talent').focus();
+}
+
+function hideConceptDevValidation() {
+  const el = document.getElementById('cd-modal-validation');
+  el.style.display = 'none';
+  el.textContent = '';
+  document.getElementById('cd-modal-angle').classList.remove('cd-field-invalid');
+  document.getElementById('cd-modal-execution').classList.remove('cd-field-invalid');
 }
 
 // concept_name is locked to a read-only label for a Drop's Proven Winner
@@ -3906,12 +3951,14 @@ async function saveConceptDevModal(targetStatus) {
   const product = conceptDevModalProduct;
   if (!product) return;
   const name = document.getElementById('cd-modal-name').value.trim();
+  const angle = document.getElementById('cd-modal-angle').value.trim();
+  const execution = document.getElementById('cd-modal-execution').value.trim();
 
   const body = {
     concept_dev_status: targetStatus,
-    angle: document.getElementById('cd-modal-angle').value.trim(),
+    angle,
     hook: document.getElementById('cd-modal-hook').value.trim(),
-    execution: document.getElementById('cd-modal-execution').value.trim(),
+    execution,
     script_notes: document.getElementById('cd-modal-script').value.trim(),
     reference_items: conceptDevModalReferences
       .map((r) => ({ url: r.url.trim(), note: r.note.trim() }))
@@ -3921,6 +3968,26 @@ async function saveConceptDevModal(targetStatus) {
     props_notes: document.getElementById('cd-modal-props').value.trim(),
   };
   const savedToast = targetStatus === 'ready_for_review' ? 'Marked Ready for Review' : 'Draft saved';
+
+  // Ready for Review is the only action with real required fields --
+  // Save Draft stays deliberately permissive (just a name) so a creator
+  // can jot down an idea and come back later. Missing fields get a clear
+  // inline message rather than a generic toast, per the brief.
+  if (targetStatus === 'ready_for_review') {
+    const missing = [];
+    if (!angle) missing.push('Angle / Idea');
+    if (!execution) missing.push('Execution / Shot Plan');
+    if (missing.length) {
+      const el = document.getElementById('cd-modal-validation');
+      el.textContent = `Before marking Ready for Review, add: ${missing.join(', ')}.`;
+      el.style.display = '';
+      document.getElementById('cd-modal-angle').classList.toggle('cd-field-invalid', !angle);
+      document.getElementById('cd-modal-execution').classList.toggle('cd-field-invalid', !execution);
+      el.scrollIntoView({ block: 'nearest' });
+      return;
+    }
+  }
+  hideConceptDevValidation();
 
   try {
     if (conceptDevModalConceptId) {

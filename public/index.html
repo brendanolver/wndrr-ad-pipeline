@@ -818,17 +818,19 @@
       <button class="modal-close" onclick="closeModal('concept-dev-modal')">&times;</button>
     </div>
     <div class="modal-body">
-      <div class="cd-modal-context" id="cd-modal-context"></div>
+      <div class="cd-modal-context-compact" id="cd-modal-context"></div>
 
       <div class="cd-modal-section">
         <div class="cd-modal-section-title">The Idea</div>
-        <label>Concept Name
-          <input type="text" id="cd-modal-name">
-          <div class="hint cd-modal-locked-name" id="cd-modal-name-locked" style="display:none;"></div>
-        </label>
-        <label>Angle / Idea
-          <textarea id="cd-modal-angle" rows="2"></textarea>
-        </label>
+        <div class="cd-modal-idea-row">
+          <label>Concept Name
+            <input type="text" id="cd-modal-name">
+            <div class="hint cd-modal-locked-name" id="cd-modal-name-locked" style="display:none;"></div>
+          </label>
+          <label>Angle / Idea
+            <textarea id="cd-modal-angle" rows="2"></textarea>
+          </label>
+        </div>
       </div>
 
       <div class="cd-modal-section">
@@ -837,11 +839,14 @@
           <label>Hook
             <textarea id="cd-modal-hook" rows="2"></textarea>
           </label>
-          <label>Execution
+          <label>Execution / Shot Plan
             <textarea id="cd-modal-execution" rows="2"></textarea>
           </label>
         </div>
-        <label>Script / Talking Points <span class="hint">(optional)</span>
+        <div id="cd-modal-script-toggle-wrap">
+          <button type="button" class="link-btn" onclick="toggleConceptDevScript()">+ Add Script / Talking Points <span class="hint">(optional)</span></button>
+        </div>
+        <label id="cd-modal-script-field" style="display:none;">Script / Talking Points
           <textarea id="cd-modal-script" rows="3"></textarea>
         </label>
       </div>
@@ -854,19 +859,25 @@
 
       <div class="cd-modal-section">
         <div class="cd-modal-section-title">Shoot Requirements</div>
-        <div class="cd-modal-field-row">
-          <label>Talent / Model
-            <input type="text" id="cd-modal-talent" placeholder="e.g. In-house model, UGC creator, none">
-          </label>
-          <label>Location
-            <input type="text" id="cd-modal-location" placeholder="e.g. Studio, warehouse, external">
+        <div id="cd-modal-shoot-req-toggle-wrap">
+          <button type="button" class="link-btn" onclick="toggleConceptDevShootRequirements()">+ Add Requirements</button>
+        </div>
+        <div id="cd-modal-shoot-req-fields" style="display:none;">
+          <div class="cd-modal-field-row">
+            <label>Talent / Model
+              <input type="text" id="cd-modal-talent" placeholder="e.g. In-house model, UGC creator, none">
+            </label>
+            <label>Location
+              <input type="text" id="cd-modal-location" placeholder="e.g. Studio, warehouse, external">
+            </label>
+          </div>
+          <label>Props / Special Requirements
+            <textarea id="cd-modal-props" rows="2"></textarea>
           </label>
         </div>
-        <label>Props / Special Requirements
-          <textarea id="cd-modal-props" rows="2"></textarea>
-        </label>
       </div>
     </div>
+    <div class="cd-modal-validation" id="cd-modal-validation" style="display:none;"></div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('concept-dev-modal')">Cancel</button>
       <button class="btn btn-ghost" onclick="saveConceptDevModal('in_development')">Save Draft</button>
