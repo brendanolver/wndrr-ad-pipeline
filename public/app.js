@@ -389,6 +389,9 @@ function setPlanningStep(key) {
   state.planningStep = key;
   document.querySelectorAll('.planning-step-btn').forEach((btn) => btn.classList.toggle('active', btn.dataset.step === key));
   document.querySelectorAll('.planning-step-panel').forEach((panel) => panel.classList.toggle('active', panel.dataset.step === key));
+  // The persistent "This Week's Shoot Plan" summary is redundant on the
+  // Shoot Plan step itself -- that step already is this summary, in full.
+  document.getElementById('planning-shoot-plan-summary-block').style.display = key === 'shoot-plan' ? 'none' : '';
 }
 document.querySelectorAll('.planning-step-btn').forEach((btn) => {
   btn.addEventListener('click', () => setPlanningStep(btn.dataset.step));

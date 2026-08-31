@@ -241,12 +241,13 @@
           </div>
         </div>
 
-        <!-- Persistent across every Planning step (not just the "Shoot Plan"
-             tab) -- a product added at any stage (Core, High Stock, Upcoming
-             Drops, Promotions) shows up here immediately, so you don't have
-             to switch tabs to see whether anything's selected yet. The full
-             row list lives once, on the Shoot Plan step itself. -->
-        <div class="planning-section-header">
+        <!-- Persistent across Core/High Stock/Upcoming Drops/Promotions only
+             -- a product added at any of those stages shows up here
+             immediately, so you don't have to switch tabs to see whether
+             anything's selected yet. Hidden on the Shoot Plan step itself
+             (see setPlanningStep), since that step already IS this summary,
+             in full. -->
+        <div class="planning-section-header" id="planning-shoot-plan-summary-block">
           <h2>This Week's Shoot Plan</h2>
           <span class="admin-note" id="planning-shoot-plan-summary-count"></span>
         </div>
