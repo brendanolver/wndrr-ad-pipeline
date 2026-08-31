@@ -3095,12 +3095,13 @@ function shootPlanGroupedHtml(emptyMessage) {
 }
 
 // Only a count -- the full row list lives once, on the Shoot Plan step
-// itself. This just tells you at a glance, from any other step, whether
-// anything's selected yet for the week.
+// itself. A "View Shoot Plan" link keeps this from reading as a dead end
+// once there's actually something to see (nothing to link to when empty).
 function renderPlanningShootPlanSummary() {
   const count = state.shootPlan.length;
   document.getElementById('planning-shoot-plan-summary-count').textContent =
     count ? `${count} product${count === 1 ? '' : 's'} selected this week` : 'Nothing selected yet this week';
+  document.getElementById('planning-shoot-plan-summary-link').style.display = count ? '' : 'none';
 }
 
 // Colourway+size rows across every "Bring from Warehouse" selection --
