@@ -618,17 +618,29 @@ main{padding:20px 24px;}
    independently off its own content and drift out of alignment.
    .core-shoot-review-row is also High Stock's row (3 columns, unrelated
    layout) -- .core-product-row overrides the template only for Core's own
-   7-column row/header below, via higher selector specificity, so High
-   Stock's own column count is never touched. */
+   6-column row/header below, via higher selector specificity, so High
+   Stock's own column count/padding/reasons layout is never touched. */
 .core-shoot-review-header{display:grid;grid-template-columns:1.6fr 110px 160px 2.4fr 100px;gap:14px;padding:0 14px 4px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);}
 .core-shoot-review-row{display:grid;grid-template-columns:1.6fr 110px 160px 2.4fr 100px;gap:14px;align-items:center;background:white;border:1px solid var(--border);border-radius:var(--r);padding:11px 14px;}
 .core-shoot-review-header.core-product-row,
-.core-shoot-review-row.core-product-row{grid-template-columns:1.3fr 60px 85px 110px 160px 2fr 100px;gap:22px;}
+.core-shoot-review-row.core-product-row{grid-template-columns:1.3fr 130px 110px 160px 2.2fr 100px;gap:20px;}
+.core-shoot-review-row.core-product-row{padding:9px 14px;}
+/* Selected rows get only a hint of tint plus a left accent -- the ✓
+   Shooting pill in the action column is still the primary signal, this
+   just makes an already-planned row easy to spot while scanning. */
+.core-shoot-review-row.core-product-row.core-row-selected{background:#f4faf6;border-color:#d3ecdf;}
 .core-shoot-review-col-product{display:flex;align-items:center;gap:8px;min-width:0;}
 .core-shoot-review-col-7d,.core-shoot-review-col-cadence{display:flex;align-items:center;min-width:0;}
-.core-shoot-review-col-soh,.core-shoot-review-col-onorder{font-weight:700;font-size:14px;color:var(--text);font-variant-numeric:tabular-nums;}
+.core-shoot-review-col-inventory{display:flex;flex-direction:column;gap:2px;min-width:0;}
+.core-inv-row{display:flex;align-items:baseline;gap:5px;}
+.core-inv-value{font-weight:700;font-size:13.5px;color:var(--text);font-variant-numeric:tabular-nums;}
+.core-inv-label{font-size:10.5px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.2px;}
+/* Amber, not red -- red stays reserved for the needs-attention dot on the
+   product name; this is a quieter supporting signal, not a second alarm. */
+.core-inv-flag{margin-top:1px;display:inline-block;width:fit-content;font-size:10px;font-weight:700;color:var(--amber);background:var(--amber-light);border-radius:var(--r-pill);padding:1px 7px;}
 .core-shoot-review-name{font-weight:700;font-size:13.5px;}
 .core-shoot-review-col-reasons{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text-secondary);overflow:hidden;}
+.core-product-row .core-shoot-review-col-reasons{flex-wrap:wrap;gap:6px;}
 .core-shoot-review-reasons-text{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .core-shoot-review-soh{flex-shrink:0;white-space:nowrap;}
 .core-shoot-review-sep{flex-shrink:0;color:var(--text-muted);}

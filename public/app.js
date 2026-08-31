@@ -1870,35 +1870,57 @@ function coreProblemProductsHeaderHtml() {
   return `
     <div class="core-shoot-review-header core-product-row">
       <span></span>
-      <span>SOH</span>
-      <span>On Order</span>
+      <span>Inventory</span>
       <span>7D Sales</span>
-      <span>LY MTD vs This MTD</span>
+      <span>MTD vs LY</span>
       <span>Creative Attention</span>
       <span>This Week</span>
     </div>`;
 }
 
-// This row now has its own SOH/On Order columns, so drop the "+N Incoming"
-// chip buildAttention (coreProducts.js) still includes in the shared
-// reason_chips list -- that list is also read by the Priority table, which
-// keeps showing it; this filter only affects this row's own text.
-function coreAttentionReasonsWithoutOnOrder(p) {
-  return (p.reason_chips || []).filter((c) => !/ Incoming$/.test(c)).join(' · ');
+// buildAttention (coreProducts.js) still includes a "+N Incoming" chip in
+// the shared reason_chips list when On Order is large relative to
+// velocity -- the Priority table keeps showing that chip as-is, but this
+// row now has its own Inventory column, so on-order pressure surfaces
+// there instead (as the quieter "High Incoming" label) rather than
+// duplicating the number in both places.
+function coreHasHighIncoming(p) {
+  return (p.reason_chips || []).some((c) => / Incoming$/.test(c));
+}
+
+// "Never tested" / "31.9 wks cover" (buildAttention's own chip strings,
+// written for the Priority table's running sentence) read as sentence
+// fragments; title-cased into standalone chips they scan as labels instead
+// -- e.g. "Never Tested", "31.9 Wks Cover". Numbers/symbols are untouched
+// since \b\w only matches the first letter of each word.
+function coreTitleCaseChip(text) {
+  return text.replace(/\b\w/g, (ch) => ch.toUpperCase());
+}
+
+function coreInventoryCellHtml(p) {
+  const highIncoming = coreHasHighIncoming(p);
+  return `
+    <div class="core-inv-row"><span class="core-inv-value">${p.soh != null ? p.soh : '—'}</span><span class="core-inv-label">SOH</span></div>
+    <div class="core-inv-row"><span class="core-inv-value">${p.on_order != null ? p.on_order : '—'}</span><span class="core-inv-label">On Order</span></div>
+    ${highIncoming ? '<span class="core-inv-flag">High Incoming</span>' : ''}`;
+}
+
+function coreAttentionChipsHtml(p) {
+  const chips = (p.reason_chips || []).filter((c) => !/ Incoming$/.test(c));
+  return chips.map((c) => `<span class="core-reason-chip">${escapeHtml(coreTitleCaseChip(c))}</span>`).join('');
 }
 
 function coreProblemProductRowHtml(p, selectedCodes) {
   const badge = p.flag === 'needs_attention' ? '🔴' : p.flag === 'opportunity' ? '🟠' : '';
-  const reasons = coreAttentionReasonsWithoutOnOrder(p);
+  const isSelected = selectedCodes.has(p.product_code);
   const trend = coreProductTrendInfo(p);
   return `
-    <div class="core-shoot-review-row core-product-row">
+    <div class="core-shoot-review-row core-product-row${isSelected ? ' core-row-selected' : ''}">
       <div class="core-shoot-review-col-product">${badge ? badge + ' ' : ''}<span class="core-shoot-review-name">${escapeHtml(p.product_name)}</span></div>
-      <div class="core-shoot-review-col-soh">${p.soh != null ? p.soh : '—'}</div>
-      <div class="core-shoot-review-col-onorder">${p.on_order != null ? p.on_order : '—'}</div>
+      <div class="core-shoot-review-col-inventory">${coreInventoryCellHtml(p)}</div>
       <div class="core-shoot-review-col-7d">${core7dCellHtml(trend)}</div>
       <div class="core-shoot-review-col-cadence">${coreCadenceBoxHtml(trend)}</div>
-      <div class="core-shoot-review-col-reasons"><span class="core-shoot-review-reasons-text">${escapeHtml(reasons)}</span></div>
+      <div class="core-shoot-review-col-reasons">${coreAttentionChipsHtml(p)}</div>
       <div class="core-shoot-review-col-action">${shootActionHtml(p.product_code, 'shootThisWeekForCore', selectedCodes)}</div>
     </div>`;
 }
