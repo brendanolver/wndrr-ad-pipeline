@@ -826,6 +826,25 @@
   </div>
 </div>
 
+<!-- One "Edit Sizes" action per Shoot Plan product card -- lists every
+     selected colourway with an editable size field, rather than editing
+     a size inline on its chip. -->
+<div id="shoot-plan-edit-sizes-modal" class="modal-backdrop">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="shoot-plan-edit-sizes-title">Edit Sizes</h3>
+      <button class="modal-close" onclick="closeModal('shoot-plan-edit-sizes-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div id="shoot-plan-edit-sizes-list"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('shoot-plan-edit-sizes-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveShootPlanEditSizes()">Save</button>
+    </div>
+  </div>
+</div>
+
 <!-- Reusable in-app confirmation, replacing the browser's native confirm()
      for destructive actions -- see confirmDialog() in app.js. Rendered
      last so it always paints on top of any other open modal (e.g.
