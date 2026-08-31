@@ -1893,7 +1893,7 @@ function renderCoreProducts() {
 
 // ── Planning: High Stocks ─────────────────────────────
 // Platinum/Rocket-tier (per the "demand planning v2" cohort-based sales
-// index), non-Core, over the SOH threshold with under 5% sell-through in
+// index), non-Core, over the SOH threshold with under 10% sell-through in
 // the last 7 days -- a flat eligibility gate, not a ranked heuristic, so
 // every matching colourway shows (no Top-5 cap), sorted SOH descending by
 // the backend. One row per colourway (style_code), matching the reference
