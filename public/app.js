@@ -2137,10 +2137,14 @@ function highStockAssetRowHtml(a) {
     </div>`;
 }
 
-// Compact 3-column Inventory | Sales | Creative breakdown, plus the
-// auto-generated "why recommended" summary -- entirely reads fields the
-// backend already returns (recommendation_reasons included), no ranking
-// logic lives here. Weeks Cover is deliberately never shown, per the brief.
+// One-line recommendation up top ("Stock problem"), a compact 3-column
+// Inventory | Sales | Creative breakdown ("Sales problem" / "Creative gap"),
+// then a "Planned" line at the bottom if a concept is already in flight
+// ("Shoot decision"). Nothing here is dropped from the old layout -- Index
+// Score / historical weekly avg / 30D weekly avg / detailed Sales Trend
+// (and the raw recommendation_reasons the backend still returns) just move
+// into the collapsed "More data" <details> so they don't compete with the
+// 3 primary metrics. Weeks Cover is deliberately never shown, per the brief.
 function highStockDetailHtml(p) {
   const reasons = (p.recommendation_reasons || []).join(' · ');
   const lastLiveText = p.days_since_last_creative != null ? `${p.days_since_last_creative}d ago` : 'Never';
@@ -2148,36 +2152,59 @@ function highStockDetailHtml(p) {
   const trend = p.sales_trend || { display: '—', cls: 'core-trend-flat' };
   const assets = p.creative_assets || [];
 
+  // Platinum is the top merchandising tier, so it reads as the higher-
+  // urgency call; every other qualifying tier (Rocket, today) is still a
+  // real recommendation, just not the loudest one.
+  const priority = p.tier === 'platinum' ? 'High priority' : 'Priority';
+  const creativePhrase = p.creative_status_label === 'Recent Creative' ? 'recent creative in place' : 'no recent creative';
+  const recommendation = `${p.soh} units on hand, only ${p.sell_through_7d_pct}% 7D sell-through, with ${creativePhrase}.`;
+
+  // "Planned" means a concept already exists and isn't live yet -- assets
+  // arrive sorted newest-first, so the first non-live one is the current
+  // plan for this colourway.
+  const planned = assets.find((a) => a.status !== 'uploaded_live');
+  const plannedClassification = planned && planned.concept_classification === 'tested_proven' ? 'Proven Winner' : 'New Concept';
+
   return `
     <div class="high-stock-detail">
-      ${reasons ? `<div class="high-stock-detail-why"><strong>Why it's recommended:</strong> ${escapeHtml(reasons)}</div>` : ''}
+      <div class="high-stock-detail-recommendation"><span class="high-stock-detail-priority">${escapeHtml(priority)}:</span> ${escapeHtml(recommendation)}</div>
       <div class="high-stock-detail-grid">
         <div class="high-stock-detail-col">
           <div class="high-stock-detail-col-title">Inventory</div>
-          <div class="high-stock-detail-row"><span>Tier</span><span>${p.tier_emoji} ${escapeHtml(p.tier_label)}</span></div>
-          <div class="high-stock-detail-row"><span>Index Score</span><span>${p.index_score}</span></div>
-          <div class="high-stock-detail-row"><span>SOH</span><span>${p.soh}</span></div>
+          <div class="high-stock-detail-metric"><span class="high-stock-detail-metric-label">SOH</span><span class="high-stock-detail-metric-value">${p.soh}</span></div>
           <div class="high-stock-detail-row"><span>On Order</span><span>${p.on_order != null ? p.on_order : '—'}</span></div>
+          <div class="high-stock-detail-row"><span>Tier</span><span>${p.tier_emoji} ${escapeHtml(p.tier_label)}</span></div>
         </div>
         <div class="high-stock-detail-col">
           <div class="high-stock-detail-col-title">Sales</div>
-          <div class="high-stock-detail-row"><span>Last 7D units sold</span><span>${p.vel7}</span></div>
-          <div class="high-stock-detail-row"><span>7D Sell-Through</span><span>${p.sell_through_7d_pct}%</span></div>
-          <div class="high-stock-detail-row"><span>Last 30D units sold</span><span>${p.units_sold_30d}</span></div>
+          <div class="high-stock-detail-row"><span>7D Units Sold</span><span>${p.vel7}</span></div>
+          <div class="high-stock-detail-metric"><span class="high-stock-detail-metric-label">7D Sell-Through</span><span class="high-stock-detail-metric-value">${p.sell_through_7d_pct}%</span></div>
+          <div class="high-stock-detail-row"><span>30D Units Sold</span><span>${p.units_sold_30d}</span></div>
           <div class="high-stock-detail-row"><span>30D Sell-Through</span><span>${p.sell_through_pct}%</span></div>
-          <div class="high-stock-detail-row"><span>Historical weekly avg</span><span>${p.vel365}/wk</span></div>
-          <div class="high-stock-detail-row"><span>30D weekly avg</span><span>${p.vel30}/wk</span></div>
-          <div class="high-stock-detail-row"><span>Sales Trend</span><span class="${trend.cls}">${escapeHtml(trend.display)}</span></div>
         </div>
         <div class="high-stock-detail-col">
           <div class="high-stock-detail-col-title">Creative</div>
-          <div class="high-stock-detail-row"><span>Creative Assets</span><span>${p.current_coverage}</span></div>
-          <div class="high-stock-detail-row"><span>Last Creative</span><span>${lastLiveText}</span></div>
+          <div class="high-stock-detail-metric"><span class="high-stock-detail-metric-label">Last Creative</span><span class="high-stock-detail-metric-value">${lastLiveText}</span></div>
           <div class="high-stock-detail-row"><span>Last New Concept</span><span>${lastNewConceptText}</span></div>
-          <div class="high-stock-detail-subtitle">Existing creative</div>
-          ${assets.length ? assets.map(highStockAssetRowHtml).join('') : '<div class="attention-empty">No creative assets yet.</div>'}
+          <div class="high-stock-detail-row"><span>Creative Assets</span><span>${p.current_coverage}</span></div>
         </div>
       </div>
+
+      <div class="high-stock-detail-assets">
+        <div class="high-stock-detail-subtitle">Existing creative</div>
+        ${assets.length ? assets.map(highStockAssetRowHtml).join('') : '<div class="attention-empty">No creative assets yet.</div>'}
+      </div>
+
+      <details class="high-stock-more-data">
+        <summary>More data</summary>
+        <div class="high-stock-detail-row"><span>Index Score</span><span>${p.index_score}</span></div>
+        <div class="high-stock-detail-row"><span>Historical weekly avg</span><span>${p.vel365}/wk</span></div>
+        <div class="high-stock-detail-row"><span>30D weekly avg</span><span>${p.vel30}/wk</span></div>
+        <div class="high-stock-detail-row"><span>Sales Trend</span><span class="${trend.cls}">${escapeHtml(trend.display)}</span></div>
+        ${reasons ? `<div class="high-stock-detail-row"><span>Why it's recommended</span><span>${escapeHtml(reasons)}</span></div>` : ''}
+      </details>
+
+      ${planned ? `<div class="high-stock-detail-planned">Planned: ${escapeHtml(plannedClassification)} &middot; ${escapeHtml(planned.status_label)}</div>` : ''}
     </div>`;
 }
 
