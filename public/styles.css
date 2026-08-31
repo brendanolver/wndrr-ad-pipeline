@@ -251,6 +251,9 @@ main{padding:20px 24px;}
 
 .planning-section-header{display:flex;justify-content:space-between;align-items:center;margin:24px 0 12px;}
 .planning-section-header h2{font-size:16px;}
+.planning-shoot-plan-summary-right{display:flex;align-items:center;gap:10px;}
+.link-btn{background:none;border:none;color:var(--teal-dark);cursor:pointer;font-family:inherit;font-size:12px;font-weight:600;padding:0;}
+.link-btn:hover{text-decoration:underline;}
 
 /* Monday Planning Checklist: a small progress/navigation aid, not a
    dashboard card -- one compact row of toggle pills sitting between the
