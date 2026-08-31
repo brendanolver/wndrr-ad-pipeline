@@ -641,43 +641,63 @@ main{padding:20px 24px;}
 .core-shoot-review-name{font-weight:700;font-size:13.5px;}
 .core-shoot-review-col-reasons{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text-secondary);overflow:hidden;}
 .core-product-row .core-shoot-review-col-reasons{flex-wrap:wrap;gap:6px;}
-.core-shoot-review-reasons-text{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.core-shoot-review-soh{flex-shrink:0;white-space:nowrap;}
-.core-shoot-review-sep{flex-shrink:0;color:var(--text-muted);}
 
 .high-stock-thumb{width:34px;height:34px;border-radius:var(--r);object-fit:contain;background:var(--surface2);flex-shrink:0;}
 .high-stock-noimg{display:flex;align-items:center;justify-content:center;font-size:15px;opacity:0.4;}
 
-/* High Stock expandable detail -- collapsed row stays the fixed 4-field
-   Monday glance; expanding tells the story top to bottom: a one-line
+/* High Stock: collapsed row + expanded detail read as ONE bordered card
+   (.high-stock-row-wrap) -- the row itself sits borderless inside it (see
+   .high-stock-row below), with a divider only appearing once expanded, so
+   "More data" and "Planned" visually belong to the product above them
+   instead of floating on the page background.
+   Expanding tells the story top to bottom: the yellow Priority
    recommendation (stock problem), a compact 3-column Inventory | Sales |
-   Creative grid with one bolded primary metric per column (sales problem /
-   creative gap), then a single "Planned" line if a concept is already in
-   flight (shoot decision). Analytical/supporting figures (Index Score,
-   historical & 30D weekly avg, detailed Sales Trend, the raw recommendation
-   reasons) sit in a collapsed "More data" <details> so they don't compete
-   with the primary metrics. */
+   Creative grid with one bolded primary metric per column -- SOH, 7D
+   Sell-Through, Last Creative, the same three figures the Priority
+   sentence itself cites (sales problem / creative gap), then a compact
+   Planned footer if a concept is already in flight and/or the product is
+   already in this week's Shoot Plan (shoot decision). Analytical/
+   supporting figures (Index Score, historical & 30D weekly avg, detailed
+   Sales Trend, the raw recommendation reasons) sit in a collapsed "More
+   data" <details> so they don't compete with the primary metrics. */
+.high-stock-row-wrap{background:white;border:1px solid var(--border);border-radius:var(--r);margin-bottom:8px;overflow:hidden;}
+.high-stock-row-wrap.open .core-shoot-review-row.high-stock-row{border-bottom:1px solid var(--border);}
+/* .high-stock-row overrides just the shared .core-shoot-review-row/-header
+   grid template/chrome -- same modifier-class pattern as Core's own
+   .core-product-row, so neither touches the other's column count. */
+/* This Week's own column is wider than Core's (150px vs 100px) -- High
+   Stock deliberately uses the fuller "✓ Shooting This Week" wording (see
+   highStockActionHtml), which needs more room than Core's shorter
+   "✓ Shooting"; .high-stock-row-wrap clips overflow for its rounded
+   corners, so this has to actually fit rather than spill over. */
+.core-shoot-review-header.high-stock-row,
+.core-shoot-review-row.high-stock-row{grid-template-columns:1.3fr 60px 130px 110px 130px 150px;gap:18px;}
+.core-shoot-review-row.high-stock-row{background:none;border:none;border-radius:0;padding:10px 14px;}
+.high-stock-row-value{font-size:13.5px;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums;}
+.high-stock-row-col-tier{display:flex;align-items:center;min-width:0;}
 .high-stock-tier-badge{display:inline-block;padding:2px 8px;border-radius:var(--r-pill);font-weight:700;font-size:11.5px;background:var(--surface2);white-space:nowrap;}
 .high-stock-clickable-row{cursor:pointer;}
 .high-stock-clickable-row:hover{background:var(--surface2);}
-.high-stock-detail{padding:12px 14px 16px 44px;}
-.high-stock-detail-recommendation{background:var(--amber-light);border-radius:var(--r);padding:9px 12px;font-size:12.5px;color:var(--text);margin-bottom:12px;}
+.high-stock-detail{padding:9px 14px 12px 44px;}
+.high-stock-detail-recommendation{background:var(--amber-light);border-radius:var(--r);padding:7px 11px;font-size:12px;line-height:1.4;color:var(--text);margin-bottom:10px;}
 .high-stock-detail-priority{font-weight:800;color:var(--amber);}
-.high-stock-detail-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;background:var(--surface2);border-radius:var(--r);padding:14px 16px;}
-.high-stock-detail-col-title{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);margin-bottom:8px;}
-.high-stock-detail-metric{display:flex;flex-direction:column;gap:2px;padding-bottom:8px;margin-bottom:6px;border-bottom:1px solid var(--border);}
-.high-stock-detail-metric-label{font-size:10.5px;color:var(--text-muted);font-weight:600;}
-.high-stock-detail-metric-value{font-size:17px;font-weight:800;color:var(--text);font-variant-numeric:tabular-nums;}
-.high-stock-detail-row{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;color:var(--text-secondary);padding:3px 0;}
+.high-stock-detail-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;background:var(--surface2);border-radius:var(--r);padding:10px 14px;}
+.high-stock-detail-col-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);margin-bottom:5px;}
+.high-stock-detail-metric{display:flex;flex-direction:column;gap:1px;padding-bottom:4px;margin-bottom:3px;border-bottom:1px solid var(--border);}
+.high-stock-detail-metric-label{font-size:10px;color:var(--text-muted);font-weight:600;}
+.high-stock-detail-metric-value{font-size:15px;font-weight:800;color:var(--text);font-variant-numeric:tabular-nums;}
+.high-stock-detail-row{display:flex;justify-content:space-between;gap:8px;font-size:11.5px;color:var(--text-secondary);padding:1.5px 0;}
 .high-stock-detail-row span:first-child{color:var(--text-muted);}
 .high-stock-detail-row span:last-child{font-weight:600;color:var(--text);white-space:nowrap;}
-.high-stock-more-data{margin-top:12px;}
+.high-stock-more-data{margin-top:10px;}
 .high-stock-more-data summary{cursor:pointer;color:var(--text-muted);font-weight:700;font-size:10.5px;text-transform:uppercase;letter-spacing:0.3px;list-style:none;}
 .high-stock-more-data summary::-webkit-details-marker{display:none;}
 .high-stock-more-data summary::before{content:'▸ ';}
 .high-stock-more-data[open] summary::before{content:'▾ ';}
 .high-stock-more-data .high-stock-detail-row{padding:4px 0;}
-.high-stock-detail-planned{margin-top:12px;padding-top:10px;border-top:1px solid var(--border);font-size:12.5px;font-weight:600;color:var(--text-secondary);}
+.high-stock-detail-planned{margin-top:10px;padding-top:8px;border-top:1px solid var(--border);}
+.high-stock-detail-planned-value{font-size:12px;font-weight:600;color:var(--text-secondary);}
+.high-stock-detail-planned-selected{color:var(--green);font-weight:700;margin-left:4px;}
 
 @media (max-width:900px){.high-stock-detail-grid{grid-template-columns:1fr;}}
 
