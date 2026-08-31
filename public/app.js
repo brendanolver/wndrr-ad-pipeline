@@ -92,7 +92,7 @@ function showPasswordScreen() {
 
 function showApp() {
   document.getElementById('password-screen').style.display = 'none';
-  document.getElementById('app').style.display = 'block';
+  document.getElementById('app').style.display = 'flex';
   loadAll();
 }
 
