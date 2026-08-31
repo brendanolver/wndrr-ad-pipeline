@@ -1862,9 +1862,12 @@ function shootActionHtml(productCode, onclickFn, selectedCodes) {
 function coreProblemProductRowHtml(p, selectedCodes) {
   const badge = p.flag === 'needs_attention' ? '🔴' : p.flag === 'opportunity' ? '🟠' : '';
   const reasons = (p.reason_chips || []).join(' · ');
+  const trend = coreProductTrendInfo(p);
   return `
     <div class="core-shoot-review-row">
       <div class="core-shoot-review-col-product">${badge ? badge + ' ' : ''}<span class="core-shoot-review-name">${escapeHtml(p.product_name)}</span></div>
+      <div class="core-shoot-review-col-7d">${core7dCellHtml(trend)}</div>
+      <div class="core-shoot-review-col-cadence">${coreCadenceBoxHtml(trend)}</div>
       <div class="core-shoot-review-col-reasons"><span class="core-shoot-review-reasons-text">${escapeHtml(reasons)}</span></div>
       <div class="core-shoot-review-col-action">${shootActionHtml(p.product_code, 'shootThisWeekForCore', selectedCodes)}</div>
     </div>`;
@@ -1950,6 +1953,43 @@ function coreCadenceCellHtml(trend) {
           <span class="core-cadence-month-value core-trend-${m.cls}">${m.value}</span>
           <span class="core-cadence-month-label">${escapeHtml(m.label)}</span>
         </div>`).join('')}
+    </div>`;
+}
+
+// Same LY-MTD-vs-This-MTD/last-7D shape coreCategoryTrendInfo returns, read
+// from a product's own p.cadence (coreProducts.js, keyed by product_code
+// instead of category) -- lets core7dCellHtml/coreCadenceBoxHtml below run
+// unmodified against either level. No .months here: the per-product row is
+// a compact single line, not the category header's wider strip.
+function coreProductTrendInfo(p) {
+  const c = p.cadence;
+  if (!c || !c.has_data) {
+    return { hasData: false, title: 'No Sales Cadence data for this product' };
+  }
+  const title = `LY MTD: ${c.last_year_units} · This MTD: ${c.this_period_units}`;
+  const pctLabel = c.pct_change == null ? 'New' : `${c.pct_change > 0 ? '+' : ''}${c.pct_change}%`;
+  return {
+    hasData: true,
+    title,
+    boxValue: c.last_year_units,
+    boxPctLabel: pctLabel,
+    boxCls: pctClass(c.pct_change),
+    last7dUnits: c.last_7d_units,
+    last7dPctChange: c.last_7d_pct_change,
+  };
+}
+
+// Just the MTD box portion of coreCadenceCellHtml, with no months strip --
+// a per-product row is one compact line, not the category header's wider
+// glance area.
+function coreCadenceBoxHtml(trend) {
+  if (!trend.hasData) {
+    return `<span class="core-cadence-empty" title="${escapeHtml(trend.title)}">—</span>`;
+  }
+  return `
+    <div class="core-cadence-box core-trend-${trend.boxCls}" title="${escapeHtml(trend.title)}">
+      <span class="core-cadence-box-value">${trend.boxValue}</span>
+      <span class="core-cadence-box-pct">${trend.boxPctLabel}</span>
     </div>`;
 }
 

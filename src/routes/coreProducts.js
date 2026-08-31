@@ -2,6 +2,7 @@ const express = require('express');
 const { pool } = require('../db');
 const apparelmagic = require('../lib/apparelmagic');
 const { fetchAmData } = require('../lib/planningData');
+const reportPipeline = require('../lib/reportPipeline');
 
 const router = express.Router();
 
@@ -158,7 +159,7 @@ router.get('/', async (req, res, next) => {
     // otherwise skip for this request (velocity/weeks-cover just come back
     // null) rather than blocking the whole Planning page load on it.
     const salesReady = apparelmagic.getAmCacheStatus().sales.hasData;
-    const [salesByStyle, freshnessRows] = await Promise.all([
+    const [salesByStyle, freshnessRows, productCadence] = await Promise.all([
       am.amConfigured && salesReady ? apparelmagic.getSalesByStyle() : Promise.resolve(new Map()),
       styleIds.length
         ? pool.query(
@@ -172,6 +173,13 @@ router.get('/', async (req, res, next) => {
             [styleIds]
           )
         : Promise.resolve({ rows: [] }),
+      // Product-level "Last 7D Sales" / "LY MTD vs This MTD" -- same Report
+      // Pipeline source Core's category-level Sales Cadence header already
+      // uses, just grouped by product_code instead of category. Degrades to
+      // an empty Map (every product's cadence.hasData: false) when the
+      // Report Pipeline isn't configured, same pattern as every other
+      // reportPipeline consumer.
+      reportPipeline.configured() ? reportPipeline.getProductSalesCadence() : Promise.resolve(new Map()),
     ]);
     const lastLiveByStyleId = new Map(freshnessRows.rows.map((r) => [r.style_id, r.last_live_at]));
 
@@ -230,6 +238,11 @@ router.get('/', async (req, res, next) => {
         ? Math.floor((Date.now() - new Date(lastLiveAt).getTime()) / 86400000)
         : null;
 
+      const cadenceRow = productCadence.get(productCode);
+      const cadence = cadenceRow
+        ? { has_data: true, ...cadenceRow }
+        : { has_data: false, this_period_units: null, last_year_units: null, pct_change: null, last_7d_units: null, last_7d_pct_change: null };
+
       return {
         product_code: productCode,
         product_name: firstDetails?.productName || first.name,
@@ -243,6 +256,7 @@ router.get('/', async (req, res, next) => {
         vel365: +vel365.toFixed(1),
         weeks_cover: weeksCover,
         days_since_last_new_concept: daysSinceLastNewConcept,
+        cadence,
         sohKnown,
       };
     });
