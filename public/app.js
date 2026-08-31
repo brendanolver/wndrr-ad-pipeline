@@ -44,7 +44,11 @@ let state = {
   // Concept Development's own week nav -- deliberately separate from
   // planningWeekOffset, same reasoning as dashboardWeekOffset above: viewed
   // independently, so navigating one page's week must never move another's.
-  conceptDev: { weekOffset: 0, data: null },
+  // view/currentItemId drive the landing-page <-> product-workspace
+  // navigation (see renderConceptDevList); filter is the landing page's
+  // own client-side status filter, applied over the same week's data with
+  // no extra API call.
+  conceptDev: { weekOffset: 0, data: null, view: 'list', currentItemId: null, filter: 'all' },
 };
 let dashboardWeekOffset = 0;
 
@@ -3478,6 +3482,8 @@ function jumpToConceptDevWeek(offset) {
 
 function onConceptDevWeekChanged() {
   closeConceptDevWeekPicker();
+  state.conceptDev.view = 'list';
+  state.conceptDev.currentItemId = null;
   loadConceptDevWeek();
 }
 
@@ -3521,13 +3527,152 @@ function renderConceptDevWeekHeader() {
   statusEl.className = `planning-week-status ${confirmed ? 'planning-week-status-confirmed' : ''}`;
 }
 
-function conceptDevStatusSummary(concepts) {
-  if (!concepts.length) return '';
-  const counts = new Map();
-  concepts.forEach((c) => counts.set(c.concept_dev_status, (counts.get(c.concept_dev_status) || 0) + 1));
-  return Array.from(counts.entries())
-    .map(([status, count]) => `${count} ${CONCEPT_DEV_STATUS_LABELS[status] || status}`)
-    .join(' · ');
+// Compact wording for the landing-page card -- deliberately shorter than
+// shootPlanRequirementLabel() (which the Product Workspace header below
+// still uses in full): the card already shows the source badge, so
+// repeating "(High Stock)"/"Already" in the pathway badge next to it would
+// just be the same fact twice on a tile meant to be scanned in a glance.
+const CONCEPT_DEV_SOURCE_LABELS = { core: 'Core', high_stock: 'High Stock', drop: 'Upcoming Drop', promotion: 'Promotion' };
+const CONCEPT_DEV_PATHWAY_LABELS = { core: 'Develop New Concepts', high_stock: 'Creative Refresh', drop: 'Proven Concepts Assigned', promotion: 'Cover Requirement' };
+
+// Not Started / Ready for Review are always shown, even at 0 -- a fixed,
+// predictable pair (what still needs starting vs. what's ready to check
+// off) rather than a variable-length list of every non-zero status, so
+// every card reads the same shape at a glance.
+function conceptDevStatusCounts(concepts) {
+  return {
+    notStarted: concepts.filter((c) => c.concept_dev_status === 'not_started').length,
+    readyForReview: concepts.filter((c) => c.concept_dev_status === 'ready_for_review').length,
+  };
+}
+
+// Buckets a product into the landing page's own filter groups. A product
+// still needs development the moment ANY of its concepts aren't ready
+// (including changes_required -- that's more work, not a review state);
+// it only counts as fully approved once EVERY concept is. A product with
+// no concepts yet (shouldn't normally happen, given the seed-asset
+// guarantee) defensively falls into needs_development too.
+function conceptDevProductBucket(product) {
+  const statuses = product.concepts.map((c) => c.concept_dev_status);
+  if (!statuses.length) return 'needs_development';
+  if (statuses.some((s) => s === 'not_started' || s === 'in_development' || s === 'changes_required')) return 'needs_development';
+  if (statuses.some((s) => s === 'ready_for_review')) return 'ready_for_review';
+  return 'approved';
+}
+
+function conceptDevFilteredProducts(data) {
+  if (state.conceptDev.filter === 'all') return data.products;
+  return data.products.filter((p) => conceptDevProductBucket(p) === state.conceptDev.filter);
+}
+
+// "What products do I need to prepare for Tuesday?" -- one compact card
+// per product, no concept-level detail (that's the Product Workspace's
+// job). Reuses .high-stock-thumb for the image, same as everywhere else a
+// product thumbnail appears in Planning.
+function conceptDevProductCardHtml(product) {
+  const thumb = product.image_url
+    ? `<img class="high-stock-thumb" src="${product.image_url}" alt="">`
+    : '<span class="high-stock-thumb high-stock-noimg">🖼</span>';
+  const sourceLabel = CONCEPT_DEV_SOURCE_LABELS[product.source] || product.source || '—';
+  const pathwayLabel = CONCEPT_DEV_PATHWAY_LABELS[product.source] || shootPlanRequirementLabel(product);
+  const count = product.concepts.length;
+  const { notStarted, readyForReview } = conceptDevStatusCounts(product.concepts);
+  // A Drop's concepts are already-assigned Proven Winners -- the creator is
+  // opening what exists, not developing something new, so the action reads
+  // differently even though the click target is identical.
+  const actionLabel = product.source === 'drop' ? 'Open Concepts' : 'Develop Concepts';
+  return `
+    <div class="cd-card" onclick="openConceptDevProduct(${product.shoot_plan_item_id})">
+      <div class="cd-card-top">
+        ${thumb}
+        <div class="cd-card-name">${escapeHtml(product.product_name)}</div>
+      </div>
+      <div class="cd-card-badges">
+        <span class="cd-badge">${escapeHtml(sourceLabel)}</span>
+        <span class="cd-badge cd-badge-pathway">${escapeHtml(pathwayLabel)}</span>
+      </div>
+      <div class="cd-card-count">${count} Concept${count === 1 ? '' : 's'}</div>
+      <div class="cd-card-status-row">
+        <span class="cd-concept-status-pill cd-status-not-started">${notStarted} Not Started</span>
+        <span class="cd-concept-status-pill cd-status-ready-for-review">${readyForReview} Ready for Review</span>
+      </div>
+      <div class="cd-card-meta">${product.colourways.length} Colourway${product.colourways.length === 1 ? '' : 's'} &middot; Owner: ${escapeHtml(product.creator || '—')}</div>
+      <div class="cd-card-action">${actionLabel} &rarr;</div>
+    </div>`;
+}
+
+// Understated by design ("do not make this header oversized or dashboard-
+// heavy") -- one small line of plain counts, not a coloured summary card.
+function conceptDevWeekSummaryLineHtml(data) {
+  const totalConcepts = data.products.reduce((sum, p) => sum + p.concepts.length, 0);
+  const readyForReview = data.products.reduce(
+    (sum, p) => sum + p.concepts.filter((c) => c.concept_dev_status === 'ready_for_review').length, 0
+  );
+  return `<div class="cd-week-summary-line">${data.products.length} Product${data.products.length === 1 ? '' : 's'} &middot; ${totalConcepts} Concept${totalConcepts === 1 ? '' : 's'} &middot; ${readyForReview} Ready for Review</div>`;
+}
+
+const CONCEPT_DEV_FILTERS = [
+  { key: 'all', label: 'All' },
+  { key: 'needs_development', label: 'Needs Development' },
+  { key: 'ready_for_review', label: 'Ready for Review' },
+  { key: 'approved', label: 'Approved' },
+];
+
+function conceptDevFiltersHtml() {
+  return `
+    <div class="cd-filters">
+      ${CONCEPT_DEV_FILTERS.map((f) => `
+        <button type="button" class="cd-filter-btn ${state.conceptDev.filter === f.key ? 'active' : ''}" onclick="setConceptDevFilter('${f.key}')">${escapeHtml(f.label)}</button>`).join('')}
+    </div>`;
+}
+
+function setConceptDevFilter(filter) {
+  state.conceptDev.filter = filter;
+  renderConceptDevList();
+}
+
+function openConceptDevProduct(itemId) {
+  state.conceptDev.view = 'product';
+  state.conceptDev.currentItemId = itemId;
+  renderConceptDevList();
+}
+
+function closeConceptDevProduct() {
+  state.conceptDev.view = 'list';
+  state.conceptDev.currentItemId = null;
+  renderConceptDevList();
+}
+
+// The Product Workspace's own header -- everything inherited from Planning
+// (image/name/source/full pathway text/owner/colourways+sizes/concept
+// count), read-only, so the creator never re-enters what's already there.
+function conceptDevWorkspaceHeaderHtml(product) {
+  const thumb = product.image_url
+    ? `<img class="high-stock-thumb" src="${product.image_url}" alt="">`
+    : '<span class="high-stock-thumb high-stock-noimg">🖼</span>';
+  const sourceLabel = CONCEPT_DEV_SOURCE_LABELS[product.source] || product.source || '—';
+  const chips = product.colourways
+    .map((c) => `<span class="shoot-plan-style-chip">${escapeHtml(c.colour_label || c.style_code)}${c.size ? ` · ${escapeHtml(c.size)}` : ''}</span>`)
+    .join('');
+  const count = product.concepts.length;
+  return `
+    <div class="cd-workspace-header">
+      ${thumb}
+      <div class="cd-workspace-header-info">
+        <div class="cd-workspace-header-name">${escapeHtml(product.product_name)}</div>
+        <div class="cd-workspace-header-meta">
+          <span>${escapeHtml(sourceLabel)}</span>
+          <span>&middot;</span>
+          <span>${escapeHtml(shootPlanRequirementLabel(product))}</span>
+          <span>&middot;</span>
+          <span>Owner: ${escapeHtml(product.creator || '—')}</span>
+          <span>&middot;</span>
+          <span>${count} Concept${count === 1 ? '' : 's'}</span>
+        </div>
+        <div class="shoot-plan-style-chips">${chips}</div>
+        ${product.initial_idea ? `<div class="shoot-plan-idea">💡 ${escapeHtml(product.initial_idea)}</div>` : ''}
+      </div>
+    </div>`;
 }
 
 function conceptDevConceptRowHtml(concept) {
@@ -3536,59 +3681,68 @@ function conceptDevConceptRowHtml(concept) {
       <span class="cd-concept-name">${escapeHtml(concept.concept_name)}</span>
       ${concept.name_locked ? '<span class="cd-locked-tag">Proven</span>' : ''}
       <span class="cd-concept-status-pill ${CONCEPT_DEV_STATUS_CLASS[concept.concept_dev_status] || ''}">${CONCEPT_DEV_STATUS_LABELS[concept.concept_dev_status] || concept.concept_dev_status}</span>
+      <span class="cd-concept-open">Open Concept &rarr;</span>
     </div>`;
 }
 
-// Reuses the Shoot Plan step's own product-row typography classes
-// (.shoot-plan-product-main/-top/-name/-owner/-pathway-chip/-style-chips,
-// .high-stock-thumb) for visual consistency -- just wrapped in this page's
-// own bordered .cd-product-card instead of .shoot-plan-product-row's card
-// chrome, since a Concept Dev card also holds a concept list + button.
-function conceptDevProductCardHtml(product) {
-  const thumb = product.image_url
-    ? `<img class="high-stock-thumb" src="${product.image_url}" alt="">`
-    : '<span class="high-stock-thumb high-stock-noimg">🖼</span>';
-  const chips = product.colourways
-    .map((c) => `<span class="shoot-plan-style-chip">${escapeHtml(c.colour_label || c.style_code)}${c.size ? ` · ${escapeHtml(c.size)}` : ''}</span>`)
-    .join('');
-  const pathway = escapeHtml(shootPlanRequirementLabel(product));
-  const summary = conceptDevStatusSummary(product.concepts);
+// "What concepts do I need to prepare for this product?" -- concept cards
+// stay compact (name/locked-tag/status only); the full Concept Details/
+// References/Production Requirements/Status form only appears once one is
+// opened (openConceptDevModal). A Drop's concepts are already-decided
+// Proven Winners, so "+ New Concept" is deliberately NOT the prominent
+// action there -- the creator's job is opening each one and preparing its
+// execution, not inventing another. Core/High Stock/Promotion have no such
+// pre-assigned concepts, so "+ New Concept" is the primary action instead.
+function renderConceptDevProductWorkspace(product) {
+  const isProvenAssigned = product.source === 'drop';
   return `
-    <div class="cd-product-card">
-      <div class="cd-product-header">
-        ${thumb}
-        <div class="shoot-plan-product-main">
-          <div class="shoot-plan-product-top">
-            <span class="shoot-plan-product-name">${escapeHtml(product.product_name)}</span>
-          </div>
-          <div class="shoot-plan-product-meta">
-            <span class="shoot-plan-owner">Owner: ${escapeHtml(product.creator)}</span>
-            <span class="shoot-plan-pathway-chip">${pathway}</span>
-          </div>
-          <div class="shoot-plan-style-chips">${chips}</div>
-          ${product.initial_idea ? `<div class="shoot-plan-idea">💡 ${escapeHtml(product.initial_idea)}</div>` : ''}
-        </div>
-      </div>
-      ${summary ? `<div class="cd-status-summary">${summary}</div>` : ''}
-      <div class="cd-concepts-list">
-        ${product.concepts.length ? product.concepts.map(conceptDevConceptRowHtml).join('') : '<div class="attention-empty">No concepts yet — use + Add Concept.</div>'}
-      </div>
-      <button type="button" class="btn btn-ghost btn-sm" onclick="openAddConceptModal(${product.shoot_plan_item_id})">+ Add Concept</button>
-    </div>`;
+    <button type="button" class="link-btn cd-back-link" onclick="closeConceptDevProduct()">&larr; Back to Products</button>
+    ${conceptDevWorkspaceHeaderHtml(product)}
+    ${!isProvenAssigned ? `<button type="button" class="btn btn-primary btn-sm cd-new-concept-btn" onclick="openAddConceptModal(${product.shoot_plan_item_id})">+ New Concept</button>` : ''}
+    <div class="cd-concepts-list">
+      ${product.concepts.length ? product.concepts.map(conceptDevConceptRowHtml).join('') : '<div class="attention-empty">No concepts yet.</div>'}
+    </div>
+    ${isProvenAssigned ? `<button type="button" class="link-btn cd-add-concept-subtle" onclick="openAddConceptModal(${product.shoot_plan_item_id})">+ Add another concept</button>` : ''}
+  `;
 }
 
+// Dispatches between the two "pages" this tab now has -- the landing grid
+// ("what products?") and a single product's workspace ("what concepts?") --
+// both rendered into the same #concept-dev-list target, driven by
+// state.conceptDev.view/currentItemId (see openConceptDevProduct/
+// closeConceptDevProduct). Falls back to the landing grid if the current
+// product no longer exists in a freshly (re)loaded week -- e.g. the week
+// was changed while a product workspace was open.
 function renderConceptDevList() {
   const list = document.getElementById('concept-dev-list');
   const data = state.conceptDev.data;
   if (!data || !data.confirmed) {
+    state.conceptDev.view = 'list';
     list.innerHTML = `<div class="attention-empty">Shoot Plan for Week ${conceptDevWeekNumber()} hasn't been confirmed yet — nothing to prepare. <button type="button" class="link-btn" onclick="switchTab('planning')">Go to Planning &rarr;</button></div>`;
     return;
   }
   if (!data.products.length) {
+    state.conceptDev.view = 'list';
     list.innerHTML = '<div class="attention-empty">Nothing was in this week\'s Shoot Plan.</div>';
     return;
   }
-  list.innerHTML = data.products.map(conceptDevProductCardHtml).join('');
+
+  if (state.conceptDev.view === 'product') {
+    const product = data.products.find((p) => p.shoot_plan_item_id === state.conceptDev.currentItemId);
+    if (product) {
+      list.innerHTML = renderConceptDevProductWorkspace(product);
+      return;
+    }
+    state.conceptDev.view = 'list';
+  }
+
+  const filtered = conceptDevFilteredProducts(data);
+  list.innerHTML = `
+    ${conceptDevWeekSummaryLineHtml(data)}
+    ${conceptDevFiltersHtml()}
+    <div class="cd-product-grid">
+      ${filtered.length ? filtered.map(conceptDevProductCardHtml).join('') : '<div class="attention-empty">No products match this filter.</div>'}
+    </div>`;
 }
 
 function findConceptDevConcept(conceptId) {
