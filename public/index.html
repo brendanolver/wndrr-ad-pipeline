@@ -228,13 +228,7 @@
           </div>
 
           <div class="shoot-plan-summary-bar">
-            <div class="shoot-plan-summary-stats">
-              <span><strong id="shoot-plan-stat-selected">0</strong> Products Selected</span>
-              <span class="shoot-plan-summary-sep">·</span>
-              <span><strong id="shoot-plan-stat-samples">0</strong> Samples Required</span>
-              <span class="shoot-plan-summary-sep">·</span>
-              <span><strong id="shoot-plan-stat-sent">0</strong> Sent to Content</span>
-            </div>
+            <div class="shoot-plan-summary-stats" id="shoot-plan-summary-stats"></div>
             <button type="button" class="shoot-plan-csv-link" id="shoot-plan-csv-btn" onclick="downloadApparelMagicCsv()">
               <span id="shoot-plan-samples-required-count">0 samples required</span> · Download Apparel Magic CSV &darr;
             </button>
@@ -247,9 +241,11 @@
               <button type="button" class="btn btn-primary shoot-plan-cta-btn" id="shoot-plan-confirm-btn" onclick="confirmWeeklyShootPlan()">Confirm &amp; Send Shoot Plan &rarr;</button>
               <div class="admin-note" id="shoot-plan-confirm-subtext">0 products will be added to the content workflow.</div>
             </div>
-            <div id="shoot-plan-confirmed-state" class="shoot-plan-confirmed-state" style="display:none;">
-              <div class="shoot-plan-confirmed-title">&#10003; <span id="shoot-plan-confirmed-week-label"></span> Shoot Plan Confirmed</div>
-              <div class="admin-note" id="shoot-plan-confirmed-timestamp"></div>
+            <!-- Compact, one-row completed state -- a small green tick +
+                 timestamp, not another coloured panel competing with the
+                 products list above. -->
+            <div id="shoot-plan-confirmed-state" class="shoot-plan-confirmed-row" style="display:none;">
+              <span class="shoot-plan-confirmed-status"><span class="shoot-plan-confirmed-tick">&#10003;</span> Shoot Plan Confirmed &middot; <span id="shoot-plan-confirmed-timestamp"></span></span>
               <button type="button" class="btn btn-ghost btn-sm" id="shoot-plan-edit-plan-btn" onclick="editShootPlan()">Edit Plan</button>
             </div>
           </div>
