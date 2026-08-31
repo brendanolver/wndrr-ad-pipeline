@@ -3163,11 +3163,13 @@ function shootPlanWarehouseRows() {
 function renderShootPlanStep() {
   const total = state.shootPlan.length;
   const samplesRequired = shootPlanWarehouseRows().length;
-  const sentToContent = state.weeklyShootPlanConfirmation ? total : 0;
-
-  document.getElementById('shoot-plan-stat-selected').textContent = total;
-  document.getElementById('shoot-plan-stat-samples').textContent = samplesRequired;
-  document.getElementById('shoot-plan-stat-sent').textContent = sentToContent;
+  // Once confirmed, the products/samples counts stay the headline -- "Sent
+  // to Content" collapses to a plain checkmark rather than a duplicate
+  // count, so this bar stays a glance-length summary, not another stat row.
+  const confirmedActive = Boolean(state.weeklyShootPlanConfirmation) && !state.shootPlanEditMode;
+  document.getElementById('shoot-plan-summary-stats').innerHTML = confirmedActive
+    ? `<span><strong>${total}</strong> Product${total === 1 ? '' : 's'}</span><span class="shoot-plan-summary-sep">&middot;</span><span><strong>${samplesRequired}</strong> Sample${samplesRequired === 1 ? '' : 's'}</span><span class="shoot-plan-summary-sep">&middot;</span><span class="shoot-plan-summary-sent">&#10003; Sent to Content</span>`
+    : `<span><strong>${total}</strong> Product${total === 1 ? '' : 's'} Selected</span><span class="shoot-plan-summary-sep">&middot;</span><span><strong>${samplesRequired}</strong> Sample${samplesRequired === 1 ? '' : 's'} Required</span><span class="shoot-plan-summary-sep">&middot;</span><span><strong>0</strong> Sent to Content</span>`;
 
   document.getElementById('shoot-plan-grouped').innerHTML =
     shootPlanGroupedHtml('Nothing planned yet this week — use + Shoot This Week on a Core, High Stock, Upcoming Drop, or Promotion product to add one.');
@@ -3202,9 +3204,8 @@ function renderWeeklyShootPlanConfirmation() {
   if (state.weeklyShootPlanConfirmation && !state.shootPlanEditMode) {
     cta.style.display = 'none';
     confirmed.style.display = '';
-    document.getElementById('shoot-plan-confirmed-week-label').textContent = `Week ${planningWeekNumber()}`;
     document.getElementById('shoot-plan-confirmed-timestamp').textContent =
-      `Confirmed ${formatDateTime(state.weeklyShootPlanConfirmation.confirmed_at)}`;
+      formatDateTime(state.weeklyShootPlanConfirmation.confirmed_at);
     // No editing a past week's already-confirmed plan.
     editBtn.style.display = readOnly ? 'none' : '';
   } else {
@@ -3221,7 +3222,10 @@ function renderWeeklyShootPlanConfirmation() {
 // against the backend and simply returns to the confirmed view.
 function editShootPlan() {
   state.shootPlanEditMode = true;
-  renderWeeklyShootPlanConfirmation();
+  // The top summary's "Sent to Content" checkmark also depends on edit
+  // mode now, so this needs the full step repaint, not just the
+  // confirmation row.
+  renderShootPlanStep();
 }
 
 async function confirmWeeklyShootPlan() {
