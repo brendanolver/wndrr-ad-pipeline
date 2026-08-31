@@ -2126,25 +2126,17 @@ function toggleHighStockProduct(styleCode) {
   renderHighStockProducts();
 }
 
-function highStockAssetRowHtml(a) {
-  const icon = a.format === 'video' ? '🎥' : '🖼';
-  const classificationLabel = a.concept_classification === 'tested_proven' ? 'Proven Winner' : 'New/Test';
-  return `
-    <div class="high-stock-asset-row">
-      <span class="high-stock-asset-icon" title="${escapeHtml(classificationLabel)}">${icon}</span>
-      <span class="high-stock-asset-name">${escapeHtml(a.concept_name)}</span>
-      <span class="high-stock-asset-status">${escapeHtml(a.status_label)}</span>
-    </div>`;
-}
-
 // One-line recommendation up top ("Stock problem"), a compact 3-column
 // Inventory | Sales | Creative breakdown ("Sales problem" / "Creative gap"),
-// then a "Planned" line at the bottom if a concept is already in flight
-// ("Shoot decision"). Nothing here is dropped from the old layout -- Index
-// Score / historical weekly avg / 30D weekly avg / detailed Sales Trend
-// (and the raw recommendation_reasons the backend still returns) just move
-// into the collapsed "More data" <details> so they don't compete with the
-// 3 primary metrics. Weeks Cover is deliberately never shown, per the brief.
+// then a single "Planned" line at the bottom if a concept is already in
+// flight ("Shoot decision"). The per-asset "Existing creative" list used to
+// sit above this and largely repeated the same information (the in-flight
+// concept's name/status) -- collapsed into the one Planned line instead, so
+// there's exactly one place answering "is something already planned?".
+// Index Score / historical weekly avg / 30D weekly avg / detailed Sales
+// Trend (and the raw recommendation_reasons the backend still returns)
+// live in the collapsed "More data" <details> so they don't compete with
+// the 3 primary metrics. Weeks Cover is deliberately never shown, per the brief.
 function highStockDetailHtml(p) {
   const reasons = (p.recommendation_reasons || []).join(' · ');
   const lastLiveText = p.days_since_last_creative != null ? `${p.days_since_last_creative}d ago` : 'Never';
@@ -2190,11 +2182,6 @@ function highStockDetailHtml(p) {
         </div>
       </div>
 
-      <div class="high-stock-detail-assets">
-        <div class="high-stock-detail-subtitle">Existing creative</div>
-        ${assets.length ? assets.map(highStockAssetRowHtml).join('') : '<div class="attention-empty">No creative assets yet.</div>'}
-      </div>
-
       <details class="high-stock-more-data">
         <summary>More data</summary>
         <div class="high-stock-detail-row"><span>Index Score</span><span>${p.index_score}</span></div>
@@ -2208,8 +2195,12 @@ function highStockDetailHtml(p) {
     </div>`;
 }
 
+// Deliberately its own copy rather than the shared shootActionHtml() Core
+// also uses -- High Stock's fuller "✓ Shooting This Week" wording makes it
+// unambiguous this specific recommendation has already been actioned,
+// without changing Core's own "✓ Shooting" badge.
 function highStockActionHtml(p, selectedCodes) {
-  if (selectedCodes.has(p.product_code)) return '<span class="core-shoot-selected-badge">✓ Shooting</span>';
+  if (selectedCodes.has(p.product_code)) return '<span class="core-shoot-selected-badge">✓ Shooting This Week</span>';
   return `<button type="button" class="btn btn-primary btn-sm" onclick="shootThisWeekForHighStock('${p.style_code}')">+ Shoot</button>`;
 }
 
