@@ -12,7 +12,7 @@ const router = express.Router();
 // the flat SOH/sell-through gates the brief asked for, and keeps every other
 // tunable as a hidden ranking/display input, not a scoring model.
 const HIGH_STOCK_TIERS = new Set(['platinum', 'rocket']);
-const HIGH_STOCK_MAX_SELL_THROUGH_7D_PCT = 5; // strict < -- "under 5%"
+const HIGH_STOCK_MAX_SELL_THROUGH_7D_PCT = 10; // strict < -- "under 10%"
 // A style this fresh out of the gate reads as a new drop still finding its
 // stride, not a High Stock problem yet -- excluding it keeps the list from
 // filling up with newly-launched product that just hasn't had time to sell
