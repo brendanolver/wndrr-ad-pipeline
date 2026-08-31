@@ -596,9 +596,12 @@ CREATE INDEX IF NOT EXISTS idx_creative_assets_shoot_plan_item_id ON creative_as
 -- from the main production `status` (not_started..uploaded_live), which the
 -- Kanban board and every "days since last live" check elsewhere already
 -- depends on. This is just "how far along is this concept for Tuesday
--- review", not where it sits in the full production pipeline.
+-- review", not where it sits in the full production pipeline. A freshly
+-- created concept starts life already being worked on, not sitting idle --
+-- see ALTER COLUMN ... SET DEFAULT below.
 ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS concept_dev_status VARCHAR(20) NOT NULL DEFAULT 'not_started'
   CHECK (concept_dev_status IN ('not_started', 'in_development', 'ready_for_review', 'changes_required', 'approved'));
+ALTER TABLE creative_assets ALTER COLUMN concept_dev_status SET DEFAULT 'in_development';
 
 -- The actual creative-development fields a concept is built from.
 ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS angle TEXT;
@@ -610,6 +613,16 @@ ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS script_notes TEXT;
 -- are the only supported reference mechanism for now.
 ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS reference_links TEXT[] NOT NULL DEFAULT '{}';
 ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS reference_note TEXT;
+-- Superseded by reference_items below (each reference link needs its own
+-- "what we like about it" note, not one shared note for the whole list) --
+-- the app no longer reads/writes these two, backfilled once below.
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS reference_items JSONB NOT NULL DEFAULT '[]'::jsonb;
+UPDATE creative_assets
+   SET reference_items = (
+     SELECT COALESCE(jsonb_agg(jsonb_build_object('url', link, 'note', creative_assets.reference_note)), '[]'::jsonb)
+     FROM unnest(creative_assets.reference_links) AS link
+   )
+ WHERE reference_items = '[]'::jsonb AND cardinality(reference_links) > 0;
 ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS talent_requirement TEXT;
 ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS location TEXT;
 ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS props_notes TEXT;

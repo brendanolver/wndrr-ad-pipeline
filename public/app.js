@@ -3537,27 +3537,82 @@ function findConceptDevConcept(conceptId) {
 }
 
 let conceptDevModalConceptId = null;
-let conceptDevModalLinks = [];
+let conceptDevModalProduct = null;
+let conceptDevModalReferences = [];
 
-function renderConceptDevModalLinks() {
-  document.getElementById('cd-modal-links-list').innerHTML = conceptDevModalLinks.length
-    ? conceptDevModalLinks.map((link, i) => `
-        <span class="cd-reference-chip">${escapeHtml(link)} <button type="button" onclick="removeConceptDevReferenceLink(${i})">&times;</button></span>`).join('')
-    : '<span class="hint">No reference links yet.</span>';
+function renderConceptDevModalReferences() {
+  document.getElementById('cd-modal-references-list').innerHTML = conceptDevModalReferences.length
+    ? conceptDevModalReferences.map((r, i) => `
+        <div class="cd-reference-item">
+          <div class="cd-reference-item-row">
+            <input type="text" value="${escapeHtml(r.url)}" oninput="conceptDevModalReferences[${i}].url=this.value" placeholder="https://...">
+            <button type="button" class="cd-reference-remove" onclick="removeConceptDevReference(${i})" aria-label="Remove reference">&times;</button>
+          </div>
+          <textarea rows="2" oninput="conceptDevModalReferences[${i}].note=this.value" placeholder="What specifically we like/want to take from this...">${escapeHtml(r.note)}</textarea>
+        </div>`).join('')
+    : '<span class="hint">No references yet — use + Add Another Reference.</span>';
 }
 
-function addConceptDevReferenceLink() {
-  const input = document.getElementById('cd-modal-link-input');
-  const value = input.value.trim();
-  if (!value) return;
-  conceptDevModalLinks.push(value);
-  input.value = '';
-  renderConceptDevModalLinks();
+function addConceptDevReference() {
+  conceptDevModalReferences.push({ url: '', note: '' });
+  renderConceptDevModalReferences();
+  const inputs = document.querySelectorAll('#cd-modal-references-list .cd-reference-item-row input');
+  if (inputs.length) inputs[inputs.length - 1].focus();
 }
 
-function removeConceptDevReferenceLink(index) {
-  conceptDevModalLinks.splice(index, 1);
-  renderConceptDevModalLinks();
+function removeConceptDevReference(index) {
+  conceptDevModalReferences.splice(index, 1);
+  renderConceptDevModalReferences();
+}
+
+// Read-only Planning-handoff context shown at the top of the workspace --
+// product/week/owner/source/colourways -- so the creator (especially on a
+// Drop's already-assigned Proven Winner concept) always has what they need
+// to prep execution without leaving the modal or re-entering anything.
+function conceptDevModalContextHtml(product) {
+  const thumb = product.image_url
+    ? `<img class="high-stock-thumb" src="${product.image_url}" alt="">`
+    : '<span class="high-stock-thumb high-stock-noimg">🖼</span>';
+  const chips = product.colourways
+    .map((c) => `<span class="shoot-plan-style-chip">${escapeHtml(c.colour_label || c.style_code)}${c.size ? ` · ${escapeHtml(c.size)}` : ''}</span>`)
+    .join('');
+  return `
+    ${thumb}
+    <div class="cd-modal-context-info">
+      <div class="cd-modal-context-product">${escapeHtml(product.product_name)}</div>
+      <div class="cd-modal-context-meta">
+        <span>Week ${conceptDevWeekNumber()}</span>
+        <span>·</span>
+        <span>Owner: ${escapeHtml(product.creator || '—')}</span>
+        <span>·</span>
+        <span>${escapeHtml(SHOOT_PLAN_SOURCE_LABELS[product.source] || product.source || '—')}</span>
+      </div>
+      <div class="shoot-plan-style-chips">${chips}</div>
+      <span class="shoot-plan-pathway-chip">${escapeHtml(shootPlanRequirementLabel(product))}</span>
+    </div>`;
+}
+
+// Shared by both the create ("+ Add Concept") and edit (click a concept row)
+// paths -- concept is null in create mode, so every field just starts blank
+// and the status defaults to In Development (a new concept is being worked
+// on the moment it exists, not sitting idle).
+function fillConceptDevModalFields(concept) {
+  document.getElementById('cd-modal-angle').value = concept ? (concept.angle || '') : '';
+  document.getElementById('cd-modal-hook').value = concept ? (concept.hook || '') : '';
+  document.getElementById('cd-modal-execution').value = concept ? (concept.execution || '') : '';
+  document.getElementById('cd-modal-script').value = concept ? (concept.script_notes || '') : '';
+  document.getElementById('cd-modal-talent').value = concept ? (concept.talent_requirement || '') : '';
+  document.getElementById('cd-modal-location').value = concept ? (concept.location || '') : '';
+  document.getElementById('cd-modal-props').value = concept ? (concept.props_notes || '') : '';
+  conceptDevModalReferences = concept
+    ? (concept.reference_items || []).map((r) => ({ url: r.url || '', note: r.note || '' }))
+    : [];
+  renderConceptDevModalReferences();
+
+  const defaultStatus = concept ? concept.concept_dev_status : 'in_development';
+  document.getElementById('cd-modal-status').innerHTML = CONCEPT_DEV_STATUSES
+    .map((s) => `<option value="${s}" ${s === defaultStatus ? 'selected' : ''}>${CONCEPT_DEV_STATUS_LABELS[s]}</option>`)
+    .join('');
 }
 
 // concept_name is locked to a read-only label for a Drop's Proven Winner
@@ -3566,10 +3621,11 @@ function removeConceptDevReferenceLink(index) {
 function openConceptDevModal(conceptId) {
   const found = findConceptDevConcept(conceptId);
   if (!found) return;
-  const { concept } = found;
+  const { concept, product } = found;
   conceptDevModalConceptId = conceptId;
-  conceptDevModalLinks = [...(concept.reference_links || [])];
+  conceptDevModalProduct = product;
 
+  document.getElementById('cd-modal-context').innerHTML = conceptDevModalContextHtml(product);
   document.getElementById('cd-modal-title').textContent = concept.concept_name;
 
   const nameInput = document.getElementById('cd-modal-name');
@@ -3584,29 +3640,37 @@ function openConceptDevModal(conceptId) {
     nameInput.value = concept.concept_name;
   }
 
-  const statusSelect = document.getElementById('cd-modal-status');
-  statusSelect.innerHTML = CONCEPT_DEV_STATUSES
-    .map((s) => `<option value="${s}" ${s === concept.concept_dev_status ? 'selected' : ''}>${CONCEPT_DEV_STATUS_LABELS[s]}</option>`)
-    .join('');
+  fillConceptDevModalFields(concept);
+  openModal('concept-dev-modal');
+}
 
-  document.getElementById('cd-modal-angle').value = concept.angle || '';
-  document.getElementById('cd-modal-hook').value = concept.hook || '';
-  document.getElementById('cd-modal-execution').value = concept.execution || '';
-  document.getElementById('cd-modal-script').value = concept.script_notes || '';
-  document.getElementById('cd-modal-reference-note').value = concept.reference_note || '';
-  document.getElementById('cd-modal-talent').value = concept.talent_requirement || '';
-  document.getElementById('cd-modal-location').value = concept.location || '';
-  document.getElementById('cd-modal-props').value = concept.props_notes || '';
-  document.getElementById('cd-modal-link-input').value = '';
-  renderConceptDevModalLinks();
+// "+ Add Concept" opens this exact same workspace instead of a bare
+// name-only prompt -- the creator can fill in everything (references,
+// execution, talent/location/props, status) before the concept even exists
+// server-side. Save creates it, then immediately PATCHes the rest in.
+function openAddConceptModal(shootPlanItemId) {
+  const data = state.conceptDev.data;
+  const product = data && data.products.find((p) => p.shoot_plan_item_id === shootPlanItemId);
+  if (!product) return;
+  conceptDevModalConceptId = null;
+  conceptDevModalProduct = product;
 
+  document.getElementById('cd-modal-context').innerHTML = conceptDevModalContextHtml(product);
+  document.getElementById('cd-modal-title').textContent = 'New Concept';
+
+  const nameInput = document.getElementById('cd-modal-name');
+  nameInput.style.display = '';
+  nameInput.value = '';
+  document.getElementById('cd-modal-name-locked').style.display = 'none';
+
+  fillConceptDevModalFields(null);
   openModal('concept-dev-modal');
 }
 
 async function saveConceptDevModal() {
-  if (!conceptDevModalConceptId) return;
-  const found = findConceptDevConcept(conceptDevModalConceptId);
-  const nameLocked = found && found.concept.name_locked;
+  const product = conceptDevModalProduct;
+  if (!product) return;
+  const name = document.getElementById('cd-modal-name').value.trim();
 
   const body = {
     concept_dev_status: document.getElementById('cd-modal-status').value,
@@ -3614,70 +3678,59 @@ async function saveConceptDevModal() {
     hook: document.getElementById('cd-modal-hook').value.trim(),
     execution: document.getElementById('cd-modal-execution').value.trim(),
     script_notes: document.getElementById('cd-modal-script').value.trim(),
-    reference_links: conceptDevModalLinks,
-    reference_note: document.getElementById('cd-modal-reference-note').value.trim(),
+    reference_items: conceptDevModalReferences
+      .map((r) => ({ url: r.url.trim(), note: r.note.trim() }))
+      .filter((r) => r.url),
     talent_requirement: document.getElementById('cd-modal-talent').value.trim(),
     location: document.getElementById('cd-modal-location').value.trim(),
     props_notes: document.getElementById('cd-modal-props').value.trim(),
   };
-  if (!nameLocked) {
-    const name = document.getElementById('cd-modal-name').value.trim();
-    if (!name) { toast('Concept name is required', true); return; }
-    body.concept_name = name;
-  }
 
   try {
-    await api(`/concept-development/concepts/${conceptDevModalConceptId}`, {
-      method: 'PATCH',
-      body: JSON.stringify(body),
-    });
-    closeModal('concept-dev-modal');
-    toast('Concept saved');
-    loadConceptDevWeek();
-  } catch (e) {
-    toast(e.message, true);
-  }
-}
-
-// A Drop product's "+ Add Concept" reuses the existing
-// POST /drop-product-plans/:id/slots (adds a 'new' Required Concept slot,
-// same as Planning's own product page) -- everything else posts a plain
-// ad-hoc concept scoped to the shoot_plan_item.
-let conceptDevAddProduct = null;
-
-function openAddConceptModal(shootPlanItemId) {
-  const data = state.conceptDev.data;
-  const product = data && data.products.find((p) => p.shoot_plan_item_id === shootPlanItemId);
-  if (!product) return;
-  conceptDevAddProduct = product;
-  document.getElementById('cd-add-concept-name').value = '';
-  openModal('cd-add-concept-modal');
-}
-
-async function saveAddConcept() {
-  const product = conceptDevAddProduct;
-  if (!product) return;
-  const name = document.getElementById('cd-add-concept-name').value.trim();
-  if (!name) { toast('Concept name is required', true); return; }
-
-  try {
-    if (product.source === 'drop') {
-      if (!product.drop_plan_id) {
-        toast('This product\'s Required Concept plan is still being generated — try again in a moment.', true);
-        return;
+    if (conceptDevModalConceptId) {
+      const found = findConceptDevConcept(conceptDevModalConceptId);
+      const nameLocked = found && found.concept.name_locked;
+      if (!nameLocked) {
+        if (!name) { toast('Concept name is required', true); return; }
+        body.concept_name = name;
       }
-      await api(`/drop-product-plans/${product.drop_plan_id}/slots`, {
-        method: 'POST',
-        body: JSON.stringify({ concept_name: name }),
+      await api(`/concept-development/concepts/${conceptDevModalConceptId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
       });
+      closeModal('concept-dev-modal');
+      toast('Concept saved');
     } else {
-      await api('/concept-development/concepts', {
-        method: 'POST',
-        body: JSON.stringify({ shoot_plan_item_id: product.shoot_plan_item_id, concept_name: name }),
+      if (!name) { toast('Concept name is required', true); return; }
+
+      // Create the bare concept first (name only, matching both existing
+      // creation endpoints), then PATCH the rest of the workspace into it --
+      // no backend change needed for "create with everything filled in".
+      let assetId;
+      if (product.source === 'drop') {
+        if (!product.drop_plan_id) {
+          toast('This product\'s Required Concept plan is still being generated — try again in a moment.', true);
+          return;
+        }
+        const data = await api(`/drop-product-plans/${product.drop_plan_id}/slots`, {
+          method: 'POST',
+          body: JSON.stringify({ concept_name: name }),
+        });
+        assetId = data.slots[data.slots.length - 1].asset_id;
+      } else {
+        const asset = await api('/concept-development/concepts', {
+          method: 'POST',
+          body: JSON.stringify({ shoot_plan_item_id: product.shoot_plan_item_id, concept_name: name }),
+        });
+        assetId = asset.id;
+      }
+      await api(`/concept-development/concepts/${assetId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
       });
+      closeModal('concept-dev-modal');
+      toast('Concept added');
     }
-    closeModal('cd-add-concept-modal');
-    toast('Concept added');
     loadConceptDevWeek();
   } catch (e) {
     toast(e.message, true);

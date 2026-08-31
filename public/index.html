@@ -797,77 +797,78 @@
   </div>
 </div>
 
-<!-- Concept Development: every rich creative-development field for one
-     concept (a creative_assets row). concept_name is locked to a read-only
-     label for a Drop's Proven Winner concept -- see openConceptDevModal --
-     so the creator preps execution rather than inventing the concept again. -->
+<!-- Concept Development workspace: every rich creative-development field for
+     one concept (a creative_assets row), used both to create a brand new
+     concept ("+ Add Concept") and to develop an existing one -- see
+     openConceptDevModal/openAddConceptModal. concept_name is locked to a
+     read-only label for a Drop's Proven Winner concept, so the creator
+     preps execution for that assigned concept rather than inventing a new
+     one. The context banner at top (product/week/owner/source/colourways)
+     is read-only, straight from Planning's handoff -- nothing here lets the
+     creator re-enter it. -->
 <div id="concept-dev-modal" class="modal-backdrop">
-  <div class="modal">
+  <div class="modal cd-modal-workspace">
     <div class="modal-header">
       <h3 id="cd-modal-title">Concept</h3>
       <button class="modal-close" onclick="closeModal('concept-dev-modal')">&times;</button>
     </div>
     <div class="modal-body">
-      <label>Concept Name
-        <input type="text" id="cd-modal-name">
-        <div class="hint cd-modal-locked-name" id="cd-modal-name-locked" style="display:none;"></div>
-      </label>
-      <label>Concept Development Status
-        <select id="cd-modal-status"></select>
-      </label>
-      <label>Angle / Idea
-        <textarea id="cd-modal-angle" rows="2"></textarea>
-      </label>
-      <label>Hook
-        <textarea id="cd-modal-hook" rows="2"></textarea>
-      </label>
-      <label>Execution
-        <textarea id="cd-modal-execution" rows="2"></textarea>
-      </label>
-      <label>Script / Talking Points <span class="hint">(optional)</span>
-        <textarea id="cd-modal-script" rows="3"></textarea>
-      </label>
-      <label>Reference Links
-        <div class="cd-reference-input-row">
-          <input type="text" id="cd-modal-link-input" placeholder="https://...">
-          <button type="button" class="btn btn-ghost btn-sm" onclick="addConceptDevReferenceLink()">Add</button>
+      <div class="cd-modal-context" id="cd-modal-context"></div>
+
+      <div class="cd-modal-section">
+        <div class="cd-modal-section-title">Concept Details</div>
+        <label>Concept Name
+          <input type="text" id="cd-modal-name">
+          <div class="hint cd-modal-locked-name" id="cd-modal-name-locked" style="display:none;"></div>
+        </label>
+        <div class="cd-modal-field-row">
+          <label>Angle / Idea
+            <textarea id="cd-modal-angle" rows="2"></textarea>
+          </label>
+          <label>Hook
+            <textarea id="cd-modal-hook" rows="2"></textarea>
+          </label>
         </div>
-        <div id="cd-modal-links-list" class="cd-reference-link-list"></div>
-      </label>
-      <label>Reference Note <span class="hint">(what we like about it)</span>
-        <textarea id="cd-modal-reference-note" rows="2"></textarea>
-      </label>
-      <label>Talent / Model Requirement
-        <input type="text" id="cd-modal-talent" placeholder="e.g. In-house model, UGC creator, none">
-      </label>
-      <label>Location
-        <input type="text" id="cd-modal-location" placeholder="e.g. Studio, warehouse, external">
-      </label>
-      <label>Props / Special Requirements
-        <textarea id="cd-modal-props" rows="2"></textarea>
-      </label>
+        <label>Execution
+          <textarea id="cd-modal-execution" rows="2"></textarea>
+        </label>
+        <label>Script / Talking Points <span class="hint">(optional)</span>
+          <textarea id="cd-modal-script" rows="3"></textarea>
+        </label>
+      </div>
+
+      <div class="cd-modal-section">
+        <div class="cd-modal-section-title">References</div>
+        <div class="hint">Link to inspiration (Instagram, TikTok, Google Drive, etc) and note what specifically we like about each one. File uploads aren't supported yet -- use a link instead.</div>
+        <div id="cd-modal-references-list" class="cd-reference-item-list"></div>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="addConceptDevReference()">+ Add Another Reference</button>
+      </div>
+
+      <div class="cd-modal-section">
+        <div class="cd-modal-section-title">Production Requirements</div>
+        <div class="cd-modal-field-row">
+          <label>Talent / Model
+            <input type="text" id="cd-modal-talent" placeholder="e.g. In-house model, UGC creator, none">
+          </label>
+          <label>Location
+            <input type="text" id="cd-modal-location" placeholder="e.g. Studio, warehouse, external">
+          </label>
+        </div>
+        <label>Props / Special Requirements
+          <textarea id="cd-modal-props" rows="2"></textarea>
+        </label>
+      </div>
+
+      <div class="cd-modal-section">
+        <div class="cd-modal-section-title">Status</div>
+        <label>Concept Development Status
+          <select id="cd-modal-status"></select>
+        </label>
+      </div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('concept-dev-modal')">Cancel</button>
       <button class="btn btn-primary" onclick="saveConceptDevModal()">Save</button>
-    </div>
-  </div>
-</div>
-
-<div id="cd-add-concept-modal" class="modal-backdrop">
-  <div class="modal">
-    <div class="modal-header">
-      <h3>Add Concept</h3>
-      <button class="modal-close" onclick="closeModal('cd-add-concept-modal')">&times;</button>
-    </div>
-    <div class="modal-body">
-      <label>Concept Name
-        <input type="text" id="cd-add-concept-name" placeholder="e.g. Unboxing hook">
-      </label>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('cd-add-concept-modal')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveAddConcept()">Add Concept</button>
     </div>
   </div>
 </div>
