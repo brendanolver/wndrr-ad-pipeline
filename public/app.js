@@ -3050,6 +3050,19 @@ function shootPlanRequirementLabel(item) {
 // "Edit Sizes" action on the card, same footing as "Remove".
 let shootPlanEditSizesItemId = null;
 
+// Same select-when-known/text-when-not fallback the "Shoot This Week"
+// modal itself uses -- a real dropdown of valid sizes when AM resolves a
+// size range for the style, otherwise free text.
+function shootPlanEditSizeControlHtml(s) {
+  if (s.sizes && s.sizes.length) {
+    const options = s.sizes
+      .map((sz) => `<option value="${escapeHtml(sz)}" ${sz === s.size ? 'selected' : ''}>${escapeHtml(sz)}</option>`)
+      .join('');
+    return `<select class="shoot-plan-edit-size-input" data-style-id="${s.style_id}">${options}</select>`;
+  }
+  return `<input type="text" class="shoot-plan-edit-size-input" data-style-id="${s.style_id}" value="${escapeHtml(s.size || '')}" placeholder="Size">`;
+}
+
 function openShootPlanEditSizesModal(itemId) {
   const item = state.shootPlan.find((i) => i.id === itemId);
   if (!item) return;
@@ -3058,7 +3071,7 @@ function openShootPlanEditSizesModal(itemId) {
   document.getElementById('shoot-plan-edit-sizes-list').innerHTML = item.styles.map((s) => `
     <div class="shoot-plan-edit-size-row">
       <span>${escapeHtml(s.colour_label || s.style_code)}</span>
-      <input type="text" class="shoot-plan-edit-size-input" data-style-id="${s.style_id}" value="${escapeHtml(s.size || '')}" placeholder="Size">
+      ${shootPlanEditSizeControlHtml(s)}
     </div>`).join('');
   openModal('shoot-plan-edit-sizes-modal');
 }

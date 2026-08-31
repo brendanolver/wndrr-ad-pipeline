@@ -2,6 +2,8 @@ const express = require('express');
 const { pool } = require('../db');
 const { insertCreativeAsset } = require('../lib/assets');
 const { STATUS_LABELS } = require('../lib/statuses');
+const apparelmagic = require('../lib/apparelmagic');
+const { fetchAmData } = require('../lib/planningData');
 
 const router = express.Router();
 
@@ -37,10 +39,24 @@ router.get('/', async (req, res, next) => {
           [items.map((i) => i.id)]
         )
       : { rows: [] };
+    // Same size-range lookup the "Shoot This Week" modal itself uses --
+    // lets Edit Sizes offer the real dropdown of valid sizes for a style
+    // instead of a free-text field. resolveStyleSizing is null-safe, so
+    // this degrades to an empty list (free-text fallback) when AM isn't
+    // configured or a style isn't resolvable, same as everywhere else.
+    const am = await fetchAmData();
     const stylesByItem = new Map();
     for (const row of stylesResult.rows) {
       if (!stylesByItem.has(row.shoot_plan_item_id)) stylesByItem.set(row.shoot_plan_item_id, []);
-      stylesByItem.get(row.shoot_plan_item_id).push({ style_id: row.style_id, style_code: row.style_code, size: row.size, colour_label: row.colour_label });
+      const sizing = apparelmagic.resolveStyleSizing(am.amDetails, am.amSizeRanges, row.style_code);
+      stylesByItem.get(row.shoot_plan_item_id).push({
+        style_id: row.style_id,
+        style_code: row.style_code,
+        size: row.size,
+        colour_label: row.colour_label,
+        sizes: sizing.sizes,
+        sizing_system: sizing.system,
+      });
     }
 
     res.json(items.map((i) => ({
