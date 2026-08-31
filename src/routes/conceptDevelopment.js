@@ -176,16 +176,20 @@ router.post('/concepts', async (req, res, next) => {
 // handoff or a Drop's Required Concept slot -- both are plain
 // creative_assets rows. concept_name is accepted here too, but the
 // frontend never renders it editable when name_locked (a real Proven
-// Winner name) is true.
+// Winner name) is true. hook_variations replaces the old single `hook`
+// field -- a concept's opening(s), not a separate concept per opening; see
+// schema.sql's comment on the column. Same whole-array-replace pattern as
+// reference_items, not a diffed patch, so the frontend can freely
+// add/remove/reorder hooks client-side before saving.
 router.patch('/concepts/:id', async (req, res, next) => {
   try {
     const {
       concept_name,
       concept_dev_status,
       angle,
-      hook,
       execution,
       script_notes,
+      hook_variations,
       reference_items,
       talent_requirement,
       location,
@@ -201,15 +205,21 @@ router.patch('/concepts/:id', async (req, res, next) => {
       );
       if (!valid) return res.status(400).json({ error: 'reference_items must be an array of { url, note }' });
     }
+    if (hook_variations !== undefined) {
+      const valid = Array.isArray(hook_variations) && hook_variations.every(
+        (h) => h && typeof h === 'object' && typeof h.text === 'string'
+      );
+      if (!valid) return res.status(400).json({ error: 'hook_variations must be an array of { text }' });
+    }
 
     const result = await pool.query(
       `UPDATE creative_assets SET
          concept_name = COALESCE($1, concept_name),
          concept_dev_status = COALESCE($2, concept_dev_status),
          angle = COALESCE($3, angle),
-         hook = COALESCE($4, hook),
-         execution = COALESCE($5, execution),
-         script_notes = COALESCE($6, script_notes),
+         execution = COALESCE($4, execution),
+         script_notes = COALESCE($5, script_notes),
+         hook_variations = COALESCE($6, hook_variations),
          reference_items = COALESCE($7, reference_items),
          talent_requirement = COALESCE($8, talent_requirement),
          location = COALESCE($9, location),
@@ -220,9 +230,9 @@ router.patch('/concepts/:id', async (req, res, next) => {
         concept_name && concept_name.trim() ? concept_name.trim() : null,
         concept_dev_status || null,
         angle !== undefined ? angle : null,
-        hook !== undefined ? hook : null,
         execution !== undefined ? execution : null,
         script_notes !== undefined ? script_notes : null,
+        hook_variations !== undefined ? JSON.stringify(hook_variations) : null,
         reference_items !== undefined ? JSON.stringify(reference_items) : null,
         talent_requirement !== undefined ? talent_requirement : null,
         location !== undefined ? location : null,
