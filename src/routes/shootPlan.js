@@ -7,17 +7,24 @@ const router = express.Router();
 
 const STOCK_STATUSES = ['in_office', 'needs_to_be_brought_in'];
 const SOURCES = ['core', 'high_stock', 'drop', 'promotion'];
+const WEEK_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 router.get('/', async (req, res, next) => {
   try {
+    const weekStart = req.query.week_start;
+    if (weekStart !== undefined && !WEEK_RE.test(weekStart)) {
+      return res.status(400).json({ error: 'week_start must be YYYY-MM-DD' });
+    }
+
     const itemsResult = await pool.query(
       `SELECT spi.*, ca.status AS asset_status, p.id AS promotion_id, p.name AS promotion_name, ps.name AS promotion_stage_name
        FROM shoot_plan_items spi
        LEFT JOIN creative_assets ca ON ca.id = spi.asset_id
        LEFT JOIN promotion_stages ps ON ps.id = spi.promotion_stage_id
        LEFT JOIN promotions p ON p.id = ps.promotion_id
-       WHERE spi.created_at >= date_trunc('week', now())
-       ORDER BY spi.created_at ASC`
+       WHERE spi.week_start = COALESCE($1::date, date_trunc('week', now())::date)
+       ORDER BY spi.created_at ASC`,
+      [weekStart || null]
     );
     const items = itemsResult.rows;
 
@@ -44,6 +51,7 @@ router.get('/', async (req, res, next) => {
       creator: i.creator,
       quick_note: i.initial_idea,
       created_at: i.created_at,
+      week_start: i.week_start,
       asset_id: i.asset_id,
       asset_status: i.asset_status,
       asset_status_label: i.asset_status ? (STATUS_LABELS[i.asset_status] || i.asset_status) : null,
@@ -61,7 +69,7 @@ router.get('/', async (req, res, next) => {
 });
 
 router.post('/', async (req, res, next) => {
-  const { product_code, product_name, colourways, stock_status, creator, quick_note, source, image_url, promotion_stage_id } = req.body || {};
+  const { product_code, product_name, colourways, stock_status, creator, quick_note, source, image_url, promotion_stage_id, week_start } = req.body || {};
 
   if (!product_code || !product_name) {
     return res.status(400).json({ error: 'product_code and product_name are required' });
@@ -77,6 +85,9 @@ router.post('/', async (req, res, next) => {
   }
   if (source !== undefined && source !== null && !SOURCES.includes(source)) {
     return res.status(400).json({ error: `source must be one of ${SOURCES.join(', ')}` });
+  }
+  if (week_start !== undefined && week_start !== null && !WEEK_RE.test(week_start)) {
+    return res.status(400).json({ error: 'week_start must be YYYY-MM-DD' });
   }
 
   const client = await pool.connect();
@@ -104,9 +115,9 @@ router.post('/', async (req, res, next) => {
     });
 
     const itemResult = await client.query(
-      `INSERT INTO shoot_plan_items (product_code, product_name, stock_status, creator, initial_idea, asset_id, source, image_url, promotion_stage_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-      [product_code, product_name, stock_status, trimmedCreator, trimmedNote, asset.id, source || null, image_url || null, promotion_stage_id || null]
+      `INSERT INTO shoot_plan_items (product_code, product_name, stock_status, creator, initial_idea, asset_id, source, image_url, promotion_stage_id, week_start)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10::date, date_trunc('week', now())::date)) RETURNING *`,
+      [product_code, product_name, stock_status, trimmedCreator, trimmedNote, asset.id, source || null, image_url || null, promotion_stage_id || null, week_start || null]
     );
     const item = itemResult.rows[0];
 

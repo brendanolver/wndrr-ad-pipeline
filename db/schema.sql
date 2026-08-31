@@ -545,3 +545,32 @@ ALTER TABLE promotion_stages ADD COLUMN IF NOT EXISTS due_date DATE;
 ALTER TABLE planning_settings ADD COLUMN IF NOT EXISTS default_shoot_top_size VARCHAR(20) NOT NULL DEFAULT 'S';
 ALTER TABLE planning_settings ADD COLUMN IF NOT EXISTS default_shoot_bottom_alpha_size VARCHAR(20) NOT NULL DEFAULT 'S';
 ALTER TABLE planning_settings ADD COLUMN IF NOT EXISTS default_shoot_bottom_waist_size VARCHAR(20) NOT NULL DEFAULT '30';
+
+-- ---------------------------------------------------------------------------
+-- Weekly Planning: Shoot Plan items now belong to the week they were
+-- planned FOR, not just whichever calendar week they happened to be
+-- inserted in. That's what makes week navigation possible -- viewing last
+-- week shows what was actually planned then, and advance-planning a future
+-- week stores items against that future Monday instead of today's. Backfill
+-- existing rows from their created_at, matching the same Monday-start week
+-- every other date_trunc('week', ...) call in this app already uses.
+ALTER TABLE shoot_plan_items ADD COLUMN IF NOT EXISTS week_start DATE;
+UPDATE shoot_plan_items SET week_start = (date_trunc('week', created_at))::date WHERE week_start IS NULL;
+ALTER TABLE shoot_plan_items ALTER COLUMN week_start SET DEFAULT (date_trunc('week', now()))::date;
+ALTER TABLE shoot_plan_items ALTER COLUMN week_start SET NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_shoot_plan_items_week_start ON shoot_plan_items(week_start);
+
+-- Monday Planning Checklist: per-week, manually-ticked review state for the
+-- four recommendation steps (Core/High Stocks/Upcoming Drops/Promotions).
+-- Deliberately NOT auto-set by visiting a tab -- the team asked for an
+-- explicit tick, not a "was it opened" flag. The checklist's 5th item,
+-- "Shoot Plan confirmed", is derived from weekly_shoot_plan_confirmations
+-- rather than duplicated here, so there's one source of truth for it.
+CREATE TABLE IF NOT EXISTS weekly_planning_progress (
+  week_start DATE PRIMARY KEY,
+  core_reviewed BOOLEAN NOT NULL DEFAULT false,
+  high_stock_reviewed BOOLEAN NOT NULL DEFAULT false,
+  drops_reviewed BOOLEAN NOT NULL DEFAULT false,
+  promotions_reviewed BOOLEAN NOT NULL DEFAULT false,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

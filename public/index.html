@@ -112,12 +112,31 @@
 
       <div id="planning-list-view">
         <div class="planning-header">
-          <div>
-            <div class="planning-title" id="planning-week-title">Planning</div>
+          <div class="planning-week-nav">
+            <button type="button" class="week-nav-btn" id="planning-week-prev" onclick="changePlanningWeek(-1)" aria-label="Previous week">&lsaquo;</button>
+            <button type="button" class="planning-week-label-btn" id="planning-week-label" onclick="togglePlanningWeekPicker()"></button>
+            <button type="button" class="week-nav-btn" id="planning-week-next" onclick="changePlanningWeek(1)" aria-label="Next week">&rsaquo;</button>
+            <span class="planning-week-status" id="planning-week-status"></span>
+            <button type="button" class="btn btn-ghost btn-sm" id="planning-this-week-btn" onclick="goToCurrentPlanningWeek()" style="display:none;">This Week</button>
+            <div class="planning-week-picker" id="planning-week-picker" style="display:none;"></div>
           </div>
           <div class="planning-actions">
             <button class="btn btn-ghost btn-sm" id="new-drop-btn">+ New Drop</button>
           </div>
+        </div>
+
+        <!-- Small progress/navigation aid, not a dashboard card: answers
+             "have we finished planning this week?" at a glance. The first
+             four items are manually ticked (never auto-set by visiting a
+             tab); the 5th mirrors the Shoot Plan confirmation state and
+             isn't independently clickable. -->
+        <div class="monday-checklist" id="monday-checklist">
+          <span class="monday-checklist-label">Monday Planning</span>
+          <button type="button" class="monday-checklist-item" id="monday-checklist-core" onclick="toggleWeeklyProgress('core_reviewed')"></button>
+          <button type="button" class="monday-checklist-item" id="monday-checklist-high-stock" onclick="toggleWeeklyProgress('high_stock_reviewed')"></button>
+          <button type="button" class="monday-checklist-item" id="monday-checklist-drops" onclick="toggleWeeklyProgress('drops_reviewed')"></button>
+          <button type="button" class="monday-checklist-item" id="monday-checklist-promotions" onclick="toggleWeeklyProgress('promotions_reviewed')"></button>
+          <span class="monday-checklist-item monday-checklist-item-derived" id="monday-checklist-shootplan"></span>
         </div>
 
         <!-- Monday's guided workflow: one step visible at a time, freely
@@ -233,7 +252,7 @@
             <div id="shoot-plan-confirmed-state" class="shoot-plan-confirmed-state" style="display:none;">
               <div class="shoot-plan-confirmed-title">&#10003; <span id="shoot-plan-confirmed-week-label"></span> Shoot Plan Confirmed</div>
               <div class="admin-note" id="shoot-plan-confirmed-timestamp"></div>
-              <button type="button" class="btn btn-ghost btn-sm" onclick="editShootPlan()">Edit Plan</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="shoot-plan-edit-plan-btn" onclick="editShootPlan()">Edit Plan</button>
             </div>
           </div>
         </div>

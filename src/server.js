@@ -26,6 +26,7 @@ const contentCreatorRoutes = require('./routes/contentCreators');
 const highStockProductRoutes = require('./routes/highStockProducts');
 const promotionRoutes = require('./routes/promotions');
 const weeklyShootPlanConfirmationRoutes = require('./routes/weeklyShootPlanConfirmation');
+const weeklyPlanningProgressRoutes = require('./routes/weeklyPlanningProgress');
 const salesCadenceRoutes = require('./routes/salesCadence');
 const metaProductMappingRoutes = require('./routes/metaProductMappings');
 
@@ -53,6 +54,7 @@ app.use('/api/content-creators', requireAuth, contentCreatorRoutes);
 app.use('/api/high-stock-products', requireAuth, highStockProductRoutes);
 app.use('/api/promotions', requireAuth, promotionRoutes);
 app.use('/api/weekly-shoot-plan-confirmation', requireAuth, weeklyShootPlanConfirmationRoutes);
+app.use('/api/weekly-planning-progress', requireAuth, weeklyPlanningProgressRoutes);
 app.use('/api/sales-cadence', requireAuth, salesCadenceRoutes);
 app.use('/api/meta-product-mappings', requireAuth, metaProductMappingRoutes);
 
