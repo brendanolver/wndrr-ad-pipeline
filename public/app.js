@@ -3257,10 +3257,9 @@ async function confirmWeeklyShootPlan() {
 // Mirrors the Mystery Box Builder's "Apparel Magic order export" CSV
 // exactly (customer_po, customer_name, sku_alt, qty, date_due, date,
 // unit_price, date_start), quoted fields with doubled internal quotes.
-// sku_alt is the colourway's style_code, not a true per-size AM SKU --
-// this app has no live per-size SKU resolution (apparelmagic.js only ever
-// extracts style_number/sku_id, never a size-level SKU string), so
-// Warehouse still needs to match the size against this style_code by hand.
+// sku_alt is the colourway's style_code with the size code appended
+// (e.g. "W26BA004DBEXXS"), same as the Mystery Box export, so Warehouse
+// can pull the exact size without matching it against style_code by hand.
 function downloadApparelMagicCsv() {
   const rows = shootPlanWarehouseRows();
   if (!rows.length) return;
@@ -3268,7 +3267,7 @@ function downloadApparelMagicCsv() {
   const today = new Date().toISOString().slice(0, 10);
   const po = `CONTENT SHOOT ${today}`;
   const headers = ['customer_po', 'customer_name', 'sku_alt', 'qty', 'date_due', 'date', 'unit_price', 'date_start'];
-  const csvRows = rows.map((r) => [po, 'WNDRR Promo', r.style_code, '1', today, today, '0.00', today]);
+  const csvRows = rows.map((r) => [po, 'WNDRR Promo', `${r.style_code}${r.size || ''}`, '1', today, today, '0.00', today]);
   const csv = [headers, ...csvRows]
     .map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','))
     .join('\n');
