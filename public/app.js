@@ -3268,7 +3268,7 @@ function downloadApparelMagicCsv() {
   const today = new Date().toISOString().slice(0, 10);
   const po = `CONTENT SHOOT ${today}`;
   const headers = ['customer_po', 'customer_name', 'sku_alt', 'qty', 'date_due', 'date', 'unit_price', 'date_start'];
-  const csvRows = rows.map((r) => [po, 'STOCK ADJUST', r.style_code, '1', today, today, '0.00', today]);
+  const csvRows = rows.map((r) => [po, 'WNDRR Promo', r.style_code, '1', today, today, '0.00', today]);
   const csv = [headers, ...csvRows]
     .map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','))
     .join('\n');
