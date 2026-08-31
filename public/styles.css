@@ -682,10 +682,18 @@ main{padding:20px 24px;}
 .high-stock-detail-recommendation{background:var(--amber-light);border-radius:var(--r);padding:7px 11px;font-size:12px;line-height:1.4;color:var(--text);margin-bottom:10px;}
 .high-stock-detail-priority{font-weight:800;color:var(--amber);}
 .high-stock-detail-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;background:var(--surface2);border-radius:var(--r);padding:10px 14px;}
+/* Subtle divider between columns, not a third card/border treatment --
+   only the 2nd/3rd columns get it (adjacent-sibling selector), so Inventory
+   never gets a stray line on its own left edge. */
+.high-stock-detail-col + .high-stock-detail-col{border-left:1px solid var(--border);padding-left:12px;}
 .high-stock-detail-col-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);margin-bottom:5px;}
 .high-stock-detail-metric{display:flex;flex-direction:column;gap:1px;padding-bottom:4px;margin-bottom:3px;border-bottom:1px solid var(--border);}
 .high-stock-detail-metric-label{font-size:10px;color:var(--text-muted);font-weight:600;}
-.high-stock-detail-metric-value{font-size:15px;font-weight:800;color:var(--text);font-variant-numeric:tabular-nums;}
+/* The one figure each column is actually recommending on (SOH / 7D
+   Sell-Through / Last Creative) -- ~13% larger than before so the eye
+   lands on it first, left to right, ahead of the smaller supporting rows
+   underneath. */
+.high-stock-detail-metric-value{font-size:17px;font-weight:800;color:var(--text);font-variant-numeric:tabular-nums;}
 .high-stock-detail-row{display:flex;justify-content:space-between;gap:8px;font-size:11.5px;color:var(--text-secondary);padding:1.5px 0;}
 .high-stock-detail-row span:first-child{color:var(--text-muted);}
 .high-stock-detail-row span:last-child{font-weight:600;color:var(--text);white-space:nowrap;}
@@ -696,8 +704,14 @@ main{padding:20px 24px;}
 .high-stock-more-data[open] summary::before{content:'▾ ';}
 .high-stock-more-data .high-stock-detail-row{padding:4px 0;}
 .high-stock-detail-planned{margin-top:10px;padding-top:8px;border-top:1px solid var(--border);}
-.high-stock-detail-planned-value{font-size:12px;font-weight:600;color:var(--text-secondary);}
-.high-stock-detail-planned-selected{color:var(--green);font-weight:700;margin-left:4px;}
+.high-stock-detail-planned-value{display:flex;align-items:center;flex-wrap:wrap;gap:7px;font-size:12px;font-weight:600;color:var(--text-secondary);}
+.high-stock-planned-name{color:var(--text);}
+/* Deliberately un-colored by status (unlike Core's cd-status-* pills) --
+   this reads whatever status text a concept is currently at (Awaiting
+   Concept Development, In Development, Approved, ...) without needing a
+   color mapped to every value in advance. */
+.high-stock-planned-status{display:inline-block;padding:2px 8px;border-radius:var(--r-pill);background:var(--surface2);border:1px solid var(--border);color:var(--text-secondary);font-size:11px;font-weight:700;white-space:nowrap;}
+.high-stock-detail-planned-selected{color:var(--green);font-weight:700;}
 
 @media (max-width:900px){.high-stock-detail-grid{grid-template-columns:1fr;}}
 
