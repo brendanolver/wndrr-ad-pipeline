@@ -28,6 +28,12 @@ let state = {
   planningStep: 'core',
   promotions: [], currentPromotionId: null, currentPromotion: null,
   weeklyShootPlanConfirmation: null,
+  // Set by "Edit Plan" on the confirmed handoff card -- lets the team keep
+  // adjusting a shoot plan after it's been sent, without a backend
+  // "unconfirm" (the weekly confirmation record itself is untouched and
+  // stays idempotent; this only decides whether the CTA or the confirmed
+  // card is showing).
+  shootPlanEditMode: false,
   salesCadence: null,
   metaProductMappings: [], metaProductFamilies: [],
 };
@@ -2790,10 +2796,13 @@ async function savePromotionShootItem() {
 }
 
 // ── Planning: Step 5 -- This Week's Shoot Plan ───────
-// The Monday handoff, not another planning dashboard: a top stat bar
-// (Selected / Samples Required / Sent to Content), one row per product
-// grouped by where it came from, and two handoff actions at the bottom
-// (confirm to Content, download the warehouse pull list for Apparel Magic).
+// The Monday handoff, not another planning dashboard: a compact top summary
+// (Selected / Samples Required / Sent to Content, plus the Apparel Magic
+// CSV as a small secondary utility), one row per product grouped by where
+// it came from, and one clear primary action -- Confirm & Send Shoot Plan
+// -- which is the actual Content handoff. The CSV is operational (getting
+// warehouse stock pulled), not the handoff itself, so it never competes
+// with that button for attention.
 // 'other' catches any pre-migration item whose source is NULL, so it never
 // silently vanishes from the total.
 const SHOOT_PLAN_SOURCE_LABELS = { core: 'CORE', high_stock: 'HIGH STOCK', drop: 'UPCOMING DROPS', promotion: 'PROMOTIONS', other: 'OTHER' };
@@ -2829,8 +2838,8 @@ function shootPlanProductRowHtml(item) {
           <span class="shoot-plan-stock-badge ${ready ? 'shoot-plan-stock-ready' : 'shoot-plan-stock-warehouse'}">${ready ? 'Ready' : 'Bring from Warehouse'}</span>
         </div>
         <div class="shoot-plan-product-meta">
-          <span>Owner: ${escapeHtml(item.creator)}</span>
-          <span>${escapeHtml(shootPlanRequirementLabel(item))}</span>
+          <span class="shoot-plan-owner">Owner: ${escapeHtml(item.creator)}</span>
+          <span class="shoot-plan-pathway-chip">${escapeHtml(shootPlanRequirementLabel(item))}</span>
         </div>
         <div class="shoot-plan-style-chips">${chips}</div>
         ${item.quick_note ? `<div class="shoot-plan-idea">💡 ${escapeHtml(item.quick_note)}</div>` : ''}
@@ -2892,28 +2901,57 @@ function renderShootPlanStep() {
     `${samplesRequired} sample${samplesRequired === 1 ? '' : 's'} required`;
   document.getElementById('shoot-plan-csv-btn').disabled = !samplesRequired;
 
+  document.getElementById('shoot-plan-confirm-subtext').textContent =
+    `${total} product${total === 1 ? '' : 's'} will be added to the content workflow.`;
+
   renderWeeklyShootPlanConfirmation();
 }
 
+// Formats a confirmation timestamp with both date and time, since "sent
+// Monday morning" vs "sent Monday evening" is exactly the kind of thing
+// this handoff moment should make unambiguous.
+function formatDateTime(value) {
+  if (!value) return '';
+  return new Date(value).toLocaleString(undefined, {
+    weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit',
+  });
+}
+
 function renderWeeklyShootPlanConfirmation() {
-  const banner = document.getElementById('shoot-plan-confirm-banner');
+  const cta = document.getElementById('shoot-plan-confirm-cta');
+  const confirmed = document.getElementById('shoot-plan-confirmed-state');
   const btn = document.getElementById('shoot-plan-confirm-btn');
-  if (state.weeklyShootPlanConfirmation) {
-    banner.style.display = '';
-    banner.textContent = `✓ Sent to Concept Development — ${formatDate(state.weeklyShootPlanConfirmation.confirmed_at)}`;
-    btn.style.display = 'none';
+
+  if (state.weeklyShootPlanConfirmation && !state.shootPlanEditMode) {
+    cta.style.display = 'none';
+    confirmed.style.display = '';
+    const weekNumber = state.dashboard ? state.dashboard.week.number : null;
+    document.getElementById('shoot-plan-confirmed-week-label').textContent = weekNumber ? `Week ${weekNumber}` : 'This Week’s';
+    document.getElementById('shoot-plan-confirmed-timestamp').textContent =
+      `Confirmed ${formatDateTime(state.weeklyShootPlanConfirmation.confirmed_at)}`;
   } else {
-    banner.style.display = 'none';
-    btn.style.display = '';
+    cta.style.display = '';
+    confirmed.style.display = 'none';
     btn.disabled = !state.shootPlan.length;
   }
+}
+
+// "Edit Plan" doesn't undo the weekly confirmation record (it's idempotent
+// by design -- re-confirming just returns the existing row) -- it only
+// re-reveals the CTA so the team can keep adjusting the plan without the
+// confirmed card sitting in the way. Confirming again from here is a no-op
+// against the backend and simply returns to the confirmed view.
+function editShootPlan() {
+  state.shootPlanEditMode = true;
+  renderWeeklyShootPlanConfirmation();
 }
 
 async function confirmWeeklyShootPlan() {
   try {
     state.weeklyShootPlanConfirmation = await api('/weekly-shoot-plan-confirmation', { method: 'POST' });
+    state.shootPlanEditMode = false;
     renderShootPlanStep();
-    toast('Sent to Concept Development');
+    toast('Shoot plan sent to Concept Development');
   } catch (e) {
     toast(e.message, true);
   }

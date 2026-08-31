@@ -682,17 +682,21 @@ main{padding:20px 24px;}
 .core-colours-inner-table td{padding:5px 7px;border-bottom:1px solid var(--border);}
 
 /* Planning Step 5 -- This Week's Shoot Plan: a Monday handoff, not a
-   dashboard. Top stat bar, one row per product grouped by source, and two
-   bottom handoff cards (Content, Warehouse). */
+   dashboard. Compact top summary (+ the Apparel Magic CSV as a small
+   secondary utility alongside it), one row per product grouped by source,
+   and a single prominent primary action -- Confirm & Send Shoot Plan --
+   which IS the Content handoff. */
 .shoot-plan-step-header{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px;}
 .shoot-plan-step-header h2{font-size:16px;}
 .shoot-plan-step-header span{font-size:13px;color:var(--text-secondary);font-weight:600;}
 
-.shoot-plan-stat-bar{display:flex;gap:0;background:var(--surface2);border-radius:var(--r-lg);padding:16px 0;margin-bottom:18px;}
-.shoot-plan-stat{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;border-right:1px solid var(--border);}
-.shoot-plan-stat:last-child{border-right:none;}
-.shoot-plan-stat-num{font-size:26px;font-weight:800;}
-.shoot-plan-stat-label{font-size:10.5px;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-muted);font-weight:700;}
+.shoot-plan-summary-bar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;background:var(--surface2);border-radius:var(--r);padding:10px 14px;margin-bottom:16px;font-size:12.5px;}
+.shoot-plan-summary-stats{display:flex;align-items:center;gap:8px;color:var(--text-secondary);}
+.shoot-plan-summary-stats strong{font-size:13.5px;font-weight:800;color:var(--text);}
+.shoot-plan-summary-sep{color:var(--text-muted);}
+.shoot-plan-csv-link{background:none;border:none;padding:0;font-family:inherit;font-size:12px;font-weight:600;color:var(--teal-dark);cursor:pointer;}
+.shoot-plan-csv-link:hover{text-decoration:underline;}
+.shoot-plan-csv-link:disabled{color:var(--text-muted);cursor:not-allowed;text-decoration:none;}
 
 .shoot-plan-source-group{margin-bottom:16px;}
 .shoot-plan-source-label{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);margin-bottom:6px;}
@@ -703,16 +707,20 @@ main{padding:20px 24px;}
 .shoot-plan-stock-badge{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;padding:3px 9px;border-radius:var(--r-pill);white-space:nowrap;}
 .shoot-plan-stock-ready{background:var(--green-light);color:var(--green);}
 .shoot-plan-stock-warehouse{background:var(--amber-light);color:var(--amber);}
-.shoot-plan-product-meta{display:flex;gap:12px;font-size:12px;color:var(--text-secondary);}
+.shoot-plan-product-meta{display:flex;align-items:center;gap:8px;font-size:12px;}
+.shoot-plan-owner{color:var(--text-secondary);}
+.shoot-plan-pathway-chip{font-size:10.5px;font-weight:700;color:var(--purple);background:var(--purple-light);border-radius:var(--r-pill);padding:2px 9px;white-space:nowrap;}
 .shoot-plan-style-chips{display:flex;flex-wrap:wrap;gap:5px;}
 .shoot-plan-style-chip{font-size:11px;font-weight:600;color:var(--text-secondary);background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-pill);padding:2px 8px;}
 .shoot-plan-idea{font-size:12px;color:var(--text-muted);font-style:italic;}
 
-.shoot-plan-handoff-row{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:20px;padding-top:16px;border-top:1px solid var(--border);}
-.shoot-plan-handoff-card{background:var(--surface2);border-radius:var(--r-lg);padding:16px;display:flex;flex-direction:column;align-items:flex-start;gap:8px;}
-.shoot-plan-handoff-card h3{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-muted);}
-.shoot-plan-confirm-banner{display:inline-block;padding:8px 14px;border-radius:var(--r);background:var(--green-light);color:var(--green);font-weight:700;font-size:13.5px;}
-.shoot-plan-handoff-card .btn:disabled{opacity:0.5;cursor:not-allowed;}
+.shoot-plan-primary-handoff{margin-top:20px;padding-top:18px;border-top:1px solid var(--border);}
+#shoot-plan-confirm-cta{display:flex;flex-direction:column;align-items:flex-start;gap:8px;}
+.shoot-plan-cta-btn{background:var(--black-dark);color:white;font-size:15px;font-weight:700;padding:15px 26px;border-radius:var(--r-lg);}
+.shoot-plan-cta-btn:hover{background:var(--black);}
+.shoot-plan-cta-btn:disabled{opacity:0.4;cursor:not-allowed;}
+.shoot-plan-confirmed-state{display:flex;flex-direction:column;align-items:flex-start;gap:6px;background:var(--green-light);border-radius:var(--r-lg);padding:16px 18px;}
+.shoot-plan-confirmed-title{font-size:15px;font-weight:800;color:var(--green);}
 
 @media (max-width: 1100px){
   .board{grid-template-columns:1fr;}
