@@ -285,18 +285,20 @@ async function computeCoreProducts() {
   products.sort((a, b) => ATTENTION_ORDER[a.flag] - ATTENTION_ORDER[b.flag]);
 
   // "Planned" means actually greenlit for production, not just drafted --
-  // a concept only counts once Tuesday Review has approved it for shooting
-  // (concept_dev_status = 'approved'), counted against the week it was
-  // APPROVED (reviewed_at), not the week it was first created. A concept
-  // can sit in Concept Development for a while before its Tuesday slot, so
-  // created_at would under/over-count relative to which week's target it
-  // actually lands against.
+  // a concept only counts once it has gone through Concept Development and
+  // Tuesday Review has approved it for shooting (concept_dev_status =
+  // 'approved'), counted against the week it was APPROVED (reviewed_at),
+  // not the week it was first created. A concept can sit in Concept
+  // Development for a while before its Tuesday slot, so created_at would
+  // under/over-count relative to which week's target it actually lands
+  // against. Deliberately NOT scoped to Core-tier styles -- this tracks
+  // genuinely new creative testing volume across the whole pipeline (Core,
+  // High Stock, and Drop New/Test concepts alike), not Core specifically.
   const weeklyCountResult = await pool.query(
-    `SELECT COUNT(*)::int AS count FROM creative_assets ca
-     JOIN styles s ON s.id = ca.style_id
-     WHERE ca.concept_classification = 'new_experimental' AND s.tier = 'core_proven'
-       AND ca.concept_dev_status = 'approved'
-       AND ca.reviewed_at >= date_trunc('week', now())`
+    `SELECT COUNT(*)::int AS count FROM creative_assets
+     WHERE concept_classification = 'new_experimental'
+       AND concept_dev_status = 'approved'
+       AND reviewed_at >= date_trunc('week', now())`
   );
   const weeklyPlanned = weeklyCountResult.rows[0].count;
   const weeklyTarget = settings.weekly_new_concept_target;
