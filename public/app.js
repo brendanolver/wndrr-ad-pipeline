@@ -74,7 +74,7 @@ let state = {
   // from a Concept's own References section (openReferenceLibraryPicker)
   // instead of from a Creative Toolkit/Tools card -- same list, but cards
   // offer "Use This Reference" instead of the ••• edit/delete menu.
-  referenceLibrary: [], referenceLibraryLoaded: false, referenceLibraryFilter: 'all', referenceLibraryPickerMode: false,
+  referenceLibrary: [], referenceLibraryLoaded: false, referenceLibraryFilter: 'all', referencePickerFilter: 'all',
   // Settings' reusable Customer Avatar library -- who Concept Development's
   // "The Audience" section picks a Primary Customer Avatar from. See
   // schema.sql's comment on customer_avatars/customer_avatar_id.
@@ -167,6 +167,7 @@ function switchTab(name) {
   // needs a fresh fetch on every visit so a concept approved a moment ago
   // reliably shows up without a full page reload.
   if (name === 'shooting') refreshCurrentShootingView();
+  if (name === 'reference-library') loadReferenceLibraryPage();
 }
 
 // [data-tab] guard: the sidebar also holds non-tab .tab-btn entries (styled
@@ -5792,14 +5793,19 @@ function viewProvenWinnersFromToolkit() {
 }
 
 // ── Reference Library ─────────────────────────────────
-// A single shared reference_library table, reached from three places: the
-// global Creative Toolkit, the context-aware Creative Tools modal (both via
-// openReferenceLibraryFromToolkit), and a Concept's own References section
-// as a picker (openReferenceLibraryPicker) -- same modal, same data, never
-// a second copy. There's no login system to draw an "Added by" name from,
-// so identity is a one-time localStorage prompt (reference-identity-modal)
-// reusing the existing content_creators list; every Add Reference after
-// that is fully automatic, per the brief.
+// A single shared reference_library table with two different surfaces:
+//  - A real page (#tab-reference-library), reached from the sidebar and
+//    from both Creative Toolkit surfaces (openReferenceLibraryFromToolkit)
+//    -- browsing, search, and full CRUD via the ••• menu.
+//  - A small picker MODAL (#reference-picker-modal, openReferenceLibraryPicker),
+//    opened only from inside a Concept's own References section to attach
+//    an existing reference -- same underlying state.referenceLibrary data,
+//    never a second copy, but its own simpler card set (Use This Reference
+//    only, no edit/delete).
+// There's no login system to draw an "Added by" name from, so identity is a
+// one-time localStorage prompt (reference-identity-modal) reusing the
+// existing content_creators list; every Add Reference after that is fully
+// automatic, per the brief.
 let referenceAddEditId = null;
 let referenceAddType = 'bau';
 
@@ -5853,28 +5859,28 @@ function referenceLibraryStyleOptionsHtml() {
   return '<option value="">— none —</option>' + state.styles.map((s) => `<option value="${s.id}">${escapeHtml(s.style_code)} — ${escapeHtml(s.name)}</option>`).join('');
 }
 
-async function openReferenceLibraryModal() {
-  await ensureReferenceLibraryLoaded();
-  document.getElementById('ref-lib-search').value = '';
-  setReferenceLibraryFilter('all');
-  document.getElementById('reference-library-modal-title').textContent = state.referenceLibraryPickerMode ? '📚 Choose from Reference Library' : '📚 Reference Library';
-  document.getElementById('ref-lib-helper').textContent = state.referenceLibraryPickerMode
-    ? 'Pick a saved reference to attach to this concept.'
-    : "A shared bank of ads, UGC and ideas the team likes — browse for inspiration or add something you've spotted.";
-  document.getElementById('ref-lib-add-btn').style.display = state.referenceLibraryPickerMode ? 'none' : '';
-  openModal('reference-library-modal');
+// Shared by the page and the picker modal -- everything downstream (card
+// markup, container ids) differs by surface, but "which references match
+// the current type filter + search text" doesn't.
+function referenceLibraryFilteredList(filterValue, searchValue) {
+  const search = searchValue.trim().toLowerCase();
+  return state.referenceLibrary.filter((r) => {
+    if (filterValue !== 'all' && r.idea_type !== filterValue) return false;
+    if (!search) return true;
+    const haystack = [r.comment, r.style_name, r.style_code, r.category_name].filter(Boolean).join(' ').toLowerCase();
+    return haystack.includes(search);
+  });
 }
 
-async function openReferenceLibraryFromToolkit() {
+async function loadReferenceLibraryPage() {
+  await ensureReferenceLibraryLoaded();
+  renderReferenceLibraryList();
+}
+
+function openReferenceLibraryFromToolkit() {
   closeModal('creative-toolkit-modal');
   closeModal('creative-tools-modal');
-  state.referenceLibraryPickerMode = false;
-  await openReferenceLibraryModal();
-}
-
-async function openReferenceLibraryPicker() {
-  state.referenceLibraryPickerMode = true;
-  await openReferenceLibraryModal();
+  switchTab('reference-library');
 }
 
 function setReferenceLibraryFilter(filter) {
@@ -5889,16 +5895,6 @@ function referenceLibraryCardHtml(item) {
   const typeLabel = item.idea_type === 'sale' ? 'SALE' : 'BAU';
   const product = item.style_code ? `${item.style_code} — ${item.style_name}` : (item.category_name || null);
   const added = `Added by ${escapeHtml(item.added_by)} · ${formatReferenceLibraryDate(item.created_at)}`;
-  const actions = state.referenceLibraryPickerMode
-    ? `<button type="button" class="btn btn-primary btn-sm" onclick="pickReferenceLibraryItem(${item.id})">Use This Reference</button>`
-    : `<a class="btn btn-ghost btn-sm" href="${escapeHtml(item.link)}" target="_blank" rel="noopener">Open Reference &#8599;</a>
-       <div class="ref-card-menu">
-         <button type="button" class="ref-card-menu-btn" onclick="toggleReferenceCardMenu(${item.id}, event)" aria-label="More actions">&bull;&bull;&bull;</button>
-         <div class="ref-card-menu-dropdown" id="ref-card-menu-${item.id}">
-           <button type="button" class="ref-card-menu-item" onclick="closeAllReferenceCardMenus();openReferenceEditModal(${item.id})">Edit</button>
-           <button type="button" class="ref-card-menu-item ref-card-menu-item-danger" onclick="closeAllReferenceCardMenus();confirmDeleteReferenceLibraryItem(${item.id})">Delete</button>
-         </div>
-       </div>`;
   return `
     <div class="ref-card">
       <div class="ref-card-top">
@@ -5907,18 +5903,22 @@ function referenceLibraryCardHtml(item) {
       </div>
       <div class="ref-card-comment">${escapeHtml(item.comment)}</div>
       <div class="ref-card-meta">${added}</div>
-      <div class="ref-card-actions">${actions}</div>
+      <div class="ref-card-actions">
+        <a class="btn btn-ghost btn-sm" href="${escapeHtml(item.link)}" target="_blank" rel="noopener">Open Reference &#8599;</a>
+        <div class="ref-card-menu">
+          <button type="button" class="ref-card-menu-btn" onclick="toggleReferenceCardMenu(${item.id}, event)" aria-label="More actions">&bull;&bull;&bull;</button>
+          <div class="ref-card-menu-dropdown" id="ref-card-menu-${item.id}">
+            <button type="button" class="ref-card-menu-item" onclick="closeAllReferenceCardMenus();openReferenceEditModal(${item.id})">Edit</button>
+            <button type="button" class="ref-card-menu-item ref-card-menu-item-danger" onclick="closeAllReferenceCardMenus();confirmDeleteReferenceLibraryItem(${item.id})">Delete</button>
+          </div>
+        </div>
+      </div>
     </div>`;
 }
 
 function renderReferenceLibraryList() {
-  const search = document.getElementById('ref-lib-search').value.trim().toLowerCase();
-  const filtered = state.referenceLibrary.filter((r) => {
-    if (state.referenceLibraryFilter !== 'all' && r.idea_type !== state.referenceLibraryFilter) return false;
-    if (!search) return true;
-    const haystack = [r.comment, r.style_name, r.style_code, r.category_name].filter(Boolean).join(' ').toLowerCase();
-    return haystack.includes(search);
-  });
+  const search = document.getElementById('ref-lib-search').value;
+  const filtered = referenceLibraryFilteredList(state.referenceLibraryFilter, search);
   document.getElementById('ref-lib-list').innerHTML = filtered.map(referenceLibraryCardHtml).join('');
   document.getElementById('ref-lib-empty').style.display = filtered.length ? 'none' : '';
   document.getElementById('ref-lib-empty').textContent = state.referenceLibrary.length
@@ -5942,13 +5942,57 @@ document.addEventListener('click', (e) => {
   if (!e.target.closest('.ref-card-menu')) closeAllReferenceCardMenus();
 });
 
+// ── Reference Library picker (attach to a Concept) ────
+async function openReferenceLibraryPicker() {
+  await ensureReferenceLibraryLoaded();
+  document.getElementById('ref-picker-search').value = '';
+  setReferencePickerFilter('all');
+  openModal('reference-picker-modal');
+}
+
+function setReferencePickerFilter(filter) {
+  state.referencePickerFilter = filter;
+  document.getElementById('ref-picker-tab-all').classList.toggle('active', filter === 'all');
+  document.getElementById('ref-picker-tab-bau').classList.toggle('active', filter === 'bau');
+  document.getElementById('ref-picker-tab-sale').classList.toggle('active', filter === 'sale');
+  renderReferencePickerList();
+}
+
+function referencePickerCardHtml(item) {
+  const typeLabel = item.idea_type === 'sale' ? 'SALE' : 'BAU';
+  const product = item.style_code ? `${item.style_code} — ${item.style_name}` : (item.category_name || null);
+  const added = `Added by ${escapeHtml(item.added_by)} · ${formatReferenceLibraryDate(item.created_at)}`;
+  return `
+    <div class="ref-card">
+      <div class="ref-card-top">
+        <span class="ref-card-type ref-card-type-${item.idea_type}">${typeLabel}</span>
+        ${product ? `<span class="ref-card-product">${escapeHtml(product)}</span>` : ''}
+      </div>
+      <div class="ref-card-comment">${escapeHtml(item.comment)}</div>
+      <div class="ref-card-meta">${added}</div>
+      <div class="ref-card-actions">
+        <button type="button" class="btn btn-primary btn-sm" onclick="pickReferenceLibraryItem(${item.id})">Use This Reference</button>
+      </div>
+    </div>`;
+}
+
+function renderReferencePickerList() {
+  const search = document.getElementById('ref-picker-search').value;
+  const filtered = referenceLibraryFilteredList(state.referencePickerFilter, search);
+  document.getElementById('ref-picker-list').innerHTML = filtered.map(referencePickerCardHtml).join('');
+  document.getElementById('ref-picker-empty').style.display = filtered.length ? 'none' : '';
+  document.getElementById('ref-picker-empty').textContent = state.referenceLibrary.length
+    ? 'No references match your filters.'
+    : 'No references yet — be the first to add one.';
+}
+
 function pickReferenceLibraryItem(id) {
   const item = state.referenceLibrary.find((r) => r.id === id);
   if (!item) return;
   conceptDevModalReferences.push({ url: item.link, note: '', library_reference_id: item.id });
   renderConceptDevModalReferences();
   setConceptDevReferencesExpanded(true);
-  closeModal('reference-library-modal');
+  closeModal('reference-picker-modal');
   toast('Reference added');
 }
 
