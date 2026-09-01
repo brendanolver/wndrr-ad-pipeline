@@ -264,6 +264,7 @@ async function loadAll() {
     state.creativeResources = creativeResources;
     state.customerAvatars = customerAvatars;
     state.tuesdayReview.data = tuesdayReview;
+    state.tuesdayReview.filter = tuesdayReviewDefaultFilter();
     renderBoard();
     renderMissingAd();
     renderStylesTable();
@@ -4415,6 +4416,7 @@ function tuesdayReviewWeekNumber() {
 async function loadTuesdayReviewWeek() {
   try {
     state.tuesdayReview.data = await api(`/concept-development?week_start=${tuesdayReviewWeekStart()}`);
+    state.tuesdayReview.filter = tuesdayReviewDefaultFilter();
     renderTuesdayReviewWeekHeader();
     renderTuesdayReviewList();
   } catch (e) {
@@ -4490,6 +4492,7 @@ function tuesdayReviewAllConcepts() {
 function tuesdayReviewCounts() {
   const statuses = tuesdayReviewAllConcepts().map((x) => x.concept.concept_dev_status);
   return {
+    all: statuses.length,
     readyForReview: statuses.filter((s) => s === 'ready_for_review').length,
     approved: statuses.filter((s) => s === 'approved').length,
     changesRequired: statuses.filter((s) => s === 'changes_required').length,
@@ -4497,33 +4500,30 @@ function tuesdayReviewCounts() {
   };
 }
 
-// Compact chip row -- no giant success panel for the "done" state either,
-// per the brief, just the same chip language with a checkmark swapped in.
-function renderTuesdayReviewSummary() {
-  const c = tuesdayReviewCounts();
-  const el = document.getElementById('tr-summary');
-  const decided = c.approved + c.changesRequired + c.killed;
-  if (c.readyForReview === 0 && decided === 0) {
-    el.innerHTML = '<span class="tr-summary-empty">No concepts submitted for Tuesday Review yet.</span>';
-    return;
-  }
-  if (c.readyForReview === 0) {
-    el.innerHTML = `<span class="tr-summary-complete">&check; Tuesday Review Complete</span><span class="tr-summary-chip">${c.approved} Approved &middot; ${c.changesRequired} Changes Required &middot; ${c.killed} Killed</span>`;
-    return;
-  }
-  el.innerHTML = `<span class="tr-summary-chip">${c.readyForReview} Ready for Review &middot; ${c.approved} Approved &middot; ${c.changesRequired} Changes Required &middot; ${c.killed} Killed</span>`;
+// While the meeting is still working through the queue, landing on Ready
+// is the point (that's the whole agenda); once it's empty, staying on
+// Ready would land the team on a confusing "nothing here" empty state
+// right after they just finished deciding on everything -- so the default
+// falls back to All, which still shows what was just decided.
+function tuesdayReviewDefaultFilter() {
+  return tuesdayReviewCounts().readyForReview > 0 ? 'ready_for_review' : 'all';
 }
 
+// Status filters, not CTAs -- a quiet tab bar with the count baked into
+// each label (counts double as the at-a-glance summary this used to need
+// a separate chip row for) rather than teal-filled pill buttons.
 const TUESDAY_REVIEW_FILTERS = [
-  { value: 'ready_for_review', label: 'Ready for Review' },
-  { value: 'approved', label: 'Approved' },
-  { value: 'changes_required', label: 'Changes Required' },
-  { value: 'killed', label: 'Killed' },
+  { value: 'all', label: 'All', countKey: 'all' },
+  { value: 'ready_for_review', label: 'Ready', countKey: 'readyForReview' },
+  { value: 'approved', label: 'Approved', countKey: 'approved' },
+  { value: 'changes_required', label: 'Changes Required', countKey: 'changesRequired' },
+  { value: 'killed', label: 'Killed', countKey: 'killed' },
 ];
 
 function renderTuesdayReviewFilters() {
+  const c = tuesdayReviewCounts();
   document.getElementById('tr-filters').innerHTML = TUESDAY_REVIEW_FILTERS.map((f) => `
-    <button type="button" class="cd-filter-btn ${state.tuesdayReview.filter === f.value ? 'active' : ''}" onclick="setTuesdayReviewFilter('${f.value}')">${f.label}</button>`).join('');
+    <button type="button" class="tr-filter-tab ${state.tuesdayReview.filter === f.value ? 'active' : ''}" onclick="setTuesdayReviewFilter('${f.value}')">${f.label} <span class="tr-filter-tab-count">${c[f.countKey]}</span></button>`).join('');
 }
 
 function setTuesdayReviewFilter(filter) {
@@ -4590,7 +4590,6 @@ function tuesdayReviewConceptCardHtml(concept) {
 }
 
 function renderTuesdayReviewList() {
-  renderTuesdayReviewSummary();
   renderTuesdayReviewFilters();
   const list = document.getElementById('tr-list');
   const data = state.tuesdayReview.data;
@@ -4598,12 +4597,17 @@ function renderTuesdayReviewList() {
     list.innerHTML = `<div class="attention-empty">Shoot Plan for Week ${tuesdayReviewWeekNumber()} hasn't been confirmed yet — nothing to review.</div>`;
     return;
   }
+  const filter = state.tuesdayReview.filter;
   const groups = (data.products || [])
-    .map((product) => ({ product, concepts: product.concepts.filter((c) => c.concept_dev_status === state.tuesdayReview.filter) }))
+    .map((product) => ({ product, concepts: product.concepts.filter((c) => filter === 'all' || c.concept_dev_status === filter) }))
     .filter((g) => g.concepts.length > 0);
 
   if (!groups.length) {
-    const filterLabel = (TUESDAY_REVIEW_FILTERS.find((f) => f.value === state.tuesdayReview.filter) || {}).label || state.tuesdayReview.filter;
+    if (filter === 'all') {
+      list.innerHTML = '<div class="attention-empty">No concepts submitted for Tuesday Review yet.</div>';
+      return;
+    }
+    const filterLabel = (TUESDAY_REVIEW_FILTERS.find((f) => f.value === filter) || {}).label || filter;
     list.innerHTML = `<div class="attention-empty">No concepts are currently ${filterLabel}.</div>`;
     return;
   }
@@ -4627,7 +4631,7 @@ function buildTuesdayReviewQueue() {
   const queue = [];
   for (const product of (data && data.products) || []) {
     for (const concept of product.concepts) {
-      if (concept.concept_dev_status === state.tuesdayReview.filter) queue.push({ concept, product });
+      if (state.tuesdayReview.filter === 'all' || concept.concept_dev_status === state.tuesdayReview.filter) queue.push({ concept, product });
     }
   }
   return queue;
