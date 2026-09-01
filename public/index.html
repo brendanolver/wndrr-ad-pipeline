@@ -888,12 +888,14 @@
       <div class="cd-modal-section">
         <div class="cd-modal-section-title">The Idea</div>
         <div class="cd-modal-idea-row">
-          <label>Concept Name
+          <label>Concept Name<span class="cd-req-mark">*</span>
             <input type="text" id="cd-modal-name" oninput="updateReviewPromptGate()">
             <div class="hint cd-modal-locked-name" id="cd-modal-name-locked" style="display:none;"></div>
+            <div class="cd-field-error" id="cd-modal-name-error"></div>
           </label>
-          <label>Angle / Idea
+          <label>Angle / Idea<span class="cd-req-mark">*</span>
             <textarea id="cd-modal-angle" rows="2" placeholder="Why would someone actually care about this?" oninput="updateReviewPromptGate()"></textarea>
+            <div class="cd-field-error" id="cd-modal-angle-error"></div>
           </label>
         </div>
       </div>
@@ -912,16 +914,19 @@
       <div class="cd-modal-section" id="cd-modal-audience-section">
         <div class="cd-modal-section-title">The Audience</div>
         <div class="cd-modal-idea-row">
-          <label>Customer Avatar
+          <label>Customer Avatar<span class="cd-req-mark">*</span>
             <select id="cd-modal-avatar-select" onchange="onConceptDevAvatarChange()"></select>
+            <div class="cd-field-error" id="cd-modal-avatar-select-error"></div>
           </label>
-          <label>Why will they care?
-            <textarea id="cd-modal-avatar-why-care" rows="2" placeholder="What makes this product or concept relevant to this person?"></textarea>
+          <label>Why should they care?<span class="cd-req-mark">*</span>
+            <textarea id="cd-modal-avatar-why-care" rows="2" placeholder="What makes this product or concept relevant to this person?" oninput="updateReviewPromptGate()"></textarea>
+            <div class="cd-field-error" id="cd-modal-avatar-why-care-error"></div>
           </label>
         </div>
         <div id="cd-modal-avatar-custom-wrap" style="display:none;">
           <label>Who are you targeting?
-            <textarea id="cd-modal-avatar-custom-desc" rows="2" placeholder="Describe the specific person, mindset or customer behaviour you're targeting."></textarea>
+            <textarea id="cd-modal-avatar-custom-desc" rows="2" placeholder="Describe the specific person, mindset or customer behaviour you're targeting." oninput="updateReviewPromptGate()"></textarea>
+            <div class="cd-field-error" id="cd-modal-avatar-custom-desc-error"></div>
           </label>
           <button type="button" class="link-btn" onclick="openSaveAvatarFromConceptModal()">Save as new Customer Avatar</button>
         </div>
@@ -929,8 +934,9 @@
 
       <div class="cd-modal-section">
         <div class="cd-modal-section-title">The Execution</div>
-        <label>Execution / Shot Plan
+        <label>Execution / Shot Plan<span class="cd-req-mark">*</span>
           <textarea id="cd-modal-execution" rows="2" oninput="updateReviewPromptGate()"></textarea>
+          <div class="cd-field-error" id="cd-modal-execution-error"></div>
         </label>
         <div id="cd-modal-script-toggle-wrap">
           <button type="button" class="link-btn" onclick="toggleConceptDevScript()">+ Add Script / Talking Points <span class="hint">(optional)</span></button>
@@ -950,7 +956,11 @@
            Alternative Hooks are opt-in and freely removable; there's no
            minimum count enforced anywhere in this section. -->
       <div class="cd-modal-section">
-        <div class="cd-modal-section-title">Hook / Opening</div>
+        <div class="cd-modal-section-title-row">
+          <div class="cd-modal-section-title">Hook / Opening</div>
+          <span class="cd-badge-recommended">Recommended</span>
+        </div>
+        <div class="hint cd-modal-section-helper">How does this creative earn attention in the first few seconds? This can be spoken, text-based or visual.</div>
         <div id="cd-modal-hooks-list"></div>
         <button type="button" class="link-btn" onclick="addConceptDevHook()">+ Add Alternative Hook</button>
       </div>
@@ -986,28 +996,52 @@
            before Tuesday review -- never a required workflow step, never
            auto-validates the concept. Only shown once there's an actual
            saved concept to review (id-less new/unsaved concepts have
-           nothing in the database yet to build a review prompt from);
-           Copy Review Prompt itself stays disabled until there's enough
-           substance to critique (Concept Name + Angle/Idea + Execution/
-           Shot Plan). The prompt itself pulls in everything else already
-           captured for this concept (hooks, script, references, shoot
-           requirements) plus the same Planning context the other Creative
-           Tools prompts use, omitting anything blank -- see
-           buildReviewPrompt in creativeToolkitContext.js. -->
+           nothing in the database yet to build a review prompt from); both
+           actions stay disabled (with an explanatory helper line swapped in,
+           see updateReviewPromptGate) until the same five core fields Ready
+           for Review itself requires are complete -- there's nothing
+           meaningful to critique before then. The prompt itself pulls in
+           everything else already captured for this concept (hooks, script,
+           references, shoot requirements) plus the same Planning context
+           the other Creative Tools prompts use, omitting anything blank --
+           see buildReviewPrompt in creativeToolkitContext.js. -->
       <div class="cd-ai-review" id="cd-ai-review-section" style="display:none;">
         <div class="cd-ai-review-title">AI CREATIVE REVIEW</div>
-        <div class="cd-ai-review-helper">Want a second opinion before sending this to Tuesday review?</div>
+        <div class="cd-ai-review-helper" id="cd-ai-review-helper">Want a second opinion before sending this to Tuesday review?</div>
         <div class="cd-ai-review-actions">
           <button type="button" class="btn btn-ghost btn-sm" id="cd-review-copy-btn" onclick="copyReviewPrompt()" disabled>Copy Review Prompt</button>
-          <button type="button" class="btn btn-ghost btn-sm" onclick="openChatGpt()">Open ChatGPT &#8599;</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="cd-review-chatgpt-btn" onclick="openChatGpt()" disabled>Open ChatGPT &#8599;</button>
         </div>
       </div>
+
+      <div class="cd-modal-required-note">* Required for Tuesday Review</div>
     </div>
-    <div class="cd-modal-validation" id="cd-modal-validation" style="display:none;"></div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('concept-dev-modal')">Cancel</button>
       <button class="btn btn-ghost" onclick="saveConceptDevModal('in_development')">Save Draft</button>
       <button class="btn btn-primary" onclick="saveConceptDevModal('ready_for_review')">Ready for Review &rarr;</button>
+    </div>
+  </div>
+</div>
+
+<!-- Hook / Opening nudge: a thinking prompt, not a validation error -- shown
+     once, only when all five core required fields are already complete and
+     Primary Hook / Opening is still blank, so it never blocks a concept
+     that genuinely has no room for one. Deliberately not the red/warning
+     #confirm-modal used for destructive actions elsewhere -- see
+     showConceptDevHookNudge in app.js. Must stay AFTER #concept-dev-modal
+     in the DOM so it paints on top (same z-index-stacking convention as
+     #ca-modal and #creative-tools-modal below). -->
+<div id="cd-hook-nudge-modal" class="modal-backdrop">
+  <div class="modal cd-hook-nudge">
+    <div class="modal-body">
+      <div class="cd-hook-nudge-icon">💡</div>
+      <div class="cd-hook-nudge-title">No Hook / Opening added</div>
+      <div class="cd-hook-nudge-message">Have you considered how this creative earns attention in the first few seconds?</div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-ghost" id="cd-hook-nudge-continue-btn">Continue Without</button>
+      <button type="button" class="btn btn-primary" id="cd-hook-nudge-add-btn">Add Opening</button>
     </div>
   </div>
 </div>

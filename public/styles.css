@@ -181,6 +181,16 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .confirm-modal .modal-footer{justify-content:center;}
 .confirm-modal .btn-danger{margin-right:0;}
 
+/* Hook / Opening nudge -- same centered layout as .confirm-modal, but
+   deliberately its own classes rather than reusing it: no warning icon,
+   no danger button, since this is a thinking prompt, not an error. */
+.cd-hook-nudge{width:360px;}
+.cd-hook-nudge .modal-body{align-items:center;text-align:center;padding:28px 22px 8px;}
+.cd-hook-nudge-icon{font-size:28px;line-height:1;}
+.cd-hook-nudge-title{font-size:14px;font-weight:700;color:var(--text);margin-top:4px;}
+.cd-hook-nudge-message{font-size:13px;color:var(--text-secondary);line-height:1.5;margin-top:2px;}
+.cd-hook-nudge .modal-footer{justify-content:center;}
+
 /* ── TOAST ── */
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--text);color:white;padding:10px 18px;border-radius:var(--r);font-size:12px;opacity:0;pointer-events:none;transition:all 0.2s;z-index:200;}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
@@ -930,6 +940,8 @@ main{flex:1;min-width:0;padding:20px 24px;}
 
 .cd-modal-section{border-top:1px solid var(--border);padding-top:12px;display:flex;flex-direction:column;gap:12px;}
 .cd-modal-section-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);}
+.cd-modal-section-title-row{display:flex;align-items:center;gap:8px;}
+.cd-modal-section-helper{font-size:12px;}
 .cd-modal-field-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
 @media (max-width:600px){.cd-modal-field-row{grid-template-columns:1fr;}}
 .cd-modal-idea-row{display:grid;grid-template-columns:35% 1fr;gap:12px;}
@@ -941,7 +953,18 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .cd-modal-collapsible{display:flex;flex-direction:column;gap:8px;}
 .cd-modal-collapsible>.link-btn{align-self:flex-start;}
 
-.cd-modal-validation{padding:8px 18px;font-size:12px;font-weight:600;color:var(--red);background:var(--red-light);border-top:1px solid var(--border);}
+/* Required-field indicators: a subtle grey asterisk on the label (never
+   red by default), a small "Recommended" badge for Hook/Opening (positive
+   framing, not a warning), and a quiet legend at the bottom of the form --
+   per the brief, this must never read as an aggressive validation UI. */
+.cd-req-mark{color:var(--text-muted);font-weight:400;margin-left:1px;}
+.cd-badge-recommended{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.2px;color:var(--teal-dark);background:var(--teal-light);border-radius:var(--r-pill);padding:2px 7px;flex-shrink:0;}
+.cd-modal-required-note{padding-top:10px;border-top:1px solid var(--border);font-size:11px;color:var(--text-muted);}
+
+/* Per-field inline validation -- concise text directly beneath the field
+   it belongs to, never a combined "please complete all fields" banner. */
+.cd-field-error{display:none;font-size:11.5px;font-weight:600;color:var(--red);}
+.cd-field-error.show{display:block;}
 .cd-field-invalid{border-color:var(--red) !important;}
 
 /* References gets its own light card frame (rather than just another
