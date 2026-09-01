@@ -3661,11 +3661,24 @@ const CONCEPT_DEV_FILTERS = [
   { key: 'approved', label: 'Approved' },
 ];
 
-function conceptDevFiltersHtml() {
+// Same quiet tab-bar language as Tuesday Review's status filters -- these
+// are product-bucket navigation, not primary actions, so no teal fill.
+function conceptDevFilterCounts(data) {
+  const buckets = data.products.map((p) => conceptDevProductBucket(p));
+  return {
+    all: buckets.length,
+    needs_development: buckets.filter((b) => b === 'needs_development').length,
+    ready_for_review: buckets.filter((b) => b === 'ready_for_review').length,
+    approved: buckets.filter((b) => b === 'approved').length,
+  };
+}
+
+function conceptDevFiltersHtml(data) {
+  const counts = conceptDevFilterCounts(data);
   return `
-    <div class="cd-filters">
+    <div class="filter-tabs">
       ${CONCEPT_DEV_FILTERS.map((f) => `
-        <button type="button" class="cd-filter-btn ${state.conceptDev.filter === f.key ? 'active' : ''}" onclick="setConceptDevFilter('${f.key}')">${escapeHtml(f.label)}</button>`).join('')}
+        <button type="button" class="filter-tab ${state.conceptDev.filter === f.key ? 'active' : ''}" onclick="setConceptDevFilter('${f.key}')">${escapeHtml(f.label)} <span class="filter-tab-count">${counts[f.key]}</span></button>`).join('')}
     </div>`;
 }
 
@@ -3802,7 +3815,7 @@ function renderConceptDevList() {
   const filtered = conceptDevFilteredProducts(data);
   list.innerHTML = `
     ${conceptDevWeekSummaryLineHtml(data)}
-    ${conceptDevFiltersHtml()}
+    ${conceptDevFiltersHtml(data)}
     <div class="cd-product-grid">
       ${filtered.length ? filtered.map(conceptDevProductCardHtml).join('') : '<div class="attention-empty">No products match this filter.</div>'}
     </div>`;
@@ -4523,7 +4536,7 @@ const TUESDAY_REVIEW_FILTERS = [
 function renderTuesdayReviewFilters() {
   const c = tuesdayReviewCounts();
   document.getElementById('tr-filters').innerHTML = TUESDAY_REVIEW_FILTERS.map((f) => `
-    <button type="button" class="tr-filter-tab ${state.tuesdayReview.filter === f.value ? 'active' : ''}" onclick="setTuesdayReviewFilter('${f.value}')">${f.label} <span class="tr-filter-tab-count">${c[f.countKey]}</span></button>`).join('');
+    <button type="button" class="filter-tab ${state.tuesdayReview.filter === f.value ? 'active' : ''}" onclick="setTuesdayReviewFilter('${f.value}')">${f.label} <span class="filter-tab-count">${c[f.countKey]}</span></button>`).join('');
 }
 
 function setTuesdayReviewFilter(filter) {
