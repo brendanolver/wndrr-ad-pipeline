@@ -1351,7 +1351,13 @@ main{flex:1;min-width:0;padding:20px 24px;}
    visual consistency with Concept Development's own modal. Audience is a
    <details> disclosure -- present but never open by default, since the
    strategy's already approved by this stage (see the brief). */
-.shoot-brief-modal{width:640px;max-width:94vw;}
+/* Sticky footer -- same flex-column treatment as .cd-modal-workspace: the
+   outer modal clips (max-height:88vh from .modal, overflow hidden here) so
+   .modal-body is the only thing that scrolls, and the footer's Close/Mark
+   as Shot buttons stay put at the bottom regardless of brief length. */
+.shoot-brief-modal{width:640px;max-width:94vw;display:flex;flex-direction:column;overflow:hidden;}
+.shoot-brief-modal .modal-body{flex:1;min-height:0;overflow-y:auto;}
+.shoot-brief-modal .modal-footer{flex-shrink:0;}
 .shoot-brief-context{display:flex;align-items:flex-start;gap:10px;background:var(--surface2);border-radius:var(--r);padding:10px 12px;margin-bottom:14px;}
 .shoot-brief-text{font-size:13px;color:var(--text);white-space:pre-wrap;line-height:1.5;}
 .shoot-brief-hook + .shoot-brief-hook{margin-top:10px;padding-top:10px;border-top:1px solid var(--border);}
