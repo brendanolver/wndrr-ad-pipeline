@@ -873,8 +873,10 @@
       <button class="modal-close" onclick="closeModal('concept-dev-modal')">&times;</button>
     </div>
     <div class="modal-body">
-      <div class="cd-modal-context-compact" id="cd-modal-context"></div>
-      <button type="button" class="link-btn cd-need-inspiration" onclick="openCreativeToolsFromConceptModal()">🛠 Creative Tools</button>
+      <div class="cd-modal-context-row">
+        <div class="cd-modal-context-compact" id="cd-modal-context"></div>
+        <button type="button" class="link-btn cd-modal-tools-trigger" onclick="openCreativeToolsFromConceptModal()">🛠 Creative Tools &#9662;</button>
+      </div>
 
       <div class="cd-modal-section">
         <div class="cd-modal-section-title">The Idea</div>
@@ -1004,12 +1006,16 @@
      concept Concept Development is currently open on
      (state.creativeToolkit.shootPlanItemId/conceptId, set by
      openCreativeTools*). Kept as its own modal, separate from the global
-     Creative Toolkit above, because everything shown here (the ChatGPT
-     prompts, jumping to this concept's own Hook/Reference sections) only
-     means something for a specific product/concept -- exactly one of the
-     two views below is shown, chosen by whether a specific Concept (not
-     just a product) is currently open, and an AI prompt card is only ever
-     shown once the id it needs is actually available. -->
+     Creative Toolkit above, because the ChatGPT prompt here only means
+     something for a specific product/concept -- exactly one of the two
+     views below is shown, chosen by whether a specific Concept (not just
+     a product) is currently open, and an AI prompt card is only ever
+     shown once the id it needs is actually available. The Ad Library/
+     Proven Winners cards are duplicated per level (not just shown once)
+     because their copy differs by level -- "research competitors before
+     you start" at product level vs. "here's a reference while you're
+     mid-concept" at concept level -- both resolve the same configured
+     Meta Ad Library resource, never a second URL/config. -->
 <div id="creative-tools-modal" class="modal-backdrop">
   <div class="modal ct-modal">
     <div class="modal-header">
@@ -1046,27 +1052,27 @@
 
       <div id="ctx-concept-level" style="display:none;">
         <div class="ct-card" id="ctx-improve-card">
-          <div class="ct-card-name">Improve This Concept with ChatGPT</div>
-          <div class="ct-card-helper">Pressure-test the idea and develop stronger executions or hooks.</div>
+          <div class="ct-card-name">Develop This Concept with ChatGPT</div>
+          <div class="ct-card-helper">Use the product, planning context and your work so far to help develop the idea.</div>
           <div class="ct-card-actions">
             <button type="button" class="btn btn-primary btn-sm" onclick="copyToolkitPrompt('improve')">Copy Prompt</button>
             <button type="button" class="btn btn-ghost btn-sm" onclick="openChatGpt()">Open ChatGPT &#8599;</button>
           </div>
         </div>
 
-        <div class="ct-card">
-          <div class="ct-card-name">Develop Hook Variations</div>
-          <div class="ct-card-helper">Jump to this concept's Hook / Opening section and add an alternative.</div>
+        <div class="ct-card" id="ctx-concept-adlibrary-card">
+          <div class="ct-card-name">Research Competitor Ads</div>
+          <div class="ct-card-helper">Explore current creative from other brands for references and inspiration.</div>
           <div class="ct-card-actions">
-            <button type="button" class="btn btn-ghost btn-sm" onclick="jumpToConceptDevHooks()">Add Hook &rarr;</button>
+            <a class="btn btn-ghost btn-sm" id="ctx-concept-adlibrary-link" href="#" target="_blank" rel="noopener">Open Meta Ad Library &#8599;</a>
           </div>
         </div>
 
         <div class="ct-card">
-          <div class="ct-card-name">Add Reference</div>
-          <div class="ct-card-helper">Jump to References and add a link.</div>
+          <div class="ct-card-name">Browse Proven Winners</div>
+          <div class="ct-card-helper">Review WNDRR creative concepts that have already performed.</div>
           <div class="ct-card-actions">
-            <button type="button" class="btn btn-ghost btn-sm" onclick="jumpToConceptDevReferences()">Add Reference &rarr;</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="viewProvenWinnersFromToolkit()">View Winners &rarr;</button>
           </div>
         </div>
       </div>
