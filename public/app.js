@@ -5317,6 +5317,34 @@ function shootingCardHtml(item) {
 // owner-filtered item lists here, rather than the server's unfiltered
 // data.summary -- so switching the Owner filter updates the Planned/Shot/
 // Remaining counts too, not just which cards are visible.
+// Day header: date label plus, only once the day actually has something
+// scheduled, a compact "X/Y Shot" count (the count is the primary signal,
+// per the brief -- the thin bar underneath is purely a secondary visual) and
+// a "✓" once every Concept for that day is Shot. An empty day shows just
+// the date, never a "0/0" -- see the brief: "keeps empty days visually
+// clean". Unscheduled Concepts never reach this function at all, since it
+// only ever receives a single weekday's already-bucketed items.
+function shootingDayHeaderHtml(day, items) {
+  const label = `<span class="shoot-day-date">${shootingDayHeaderLabel(day)}</span>`;
+  if (!items.length) return `<div class="shoot-day-header-top">${label}</div>`;
+  const shotCount = items.filter((i) => i.status === 'shot').length;
+  const total = items.length;
+  const complete = shotCount === total;
+  const pct = Math.round((shotCount / total) * 100);
+  return `
+    <div class="shoot-day-header-top">
+      ${label}
+      <span class="shoot-day-progress-count${complete ? ' shoot-day-progress-complete' : ''}">${complete ? '&check; ' : ''}${shotCount}/${total} Shot</span>
+    </div>
+    <div class="shoot-day-progress-bar"><div class="shoot-day-progress-fill${complete ? ' shoot-day-progress-fill-complete' : ''}" style="width:${pct}%"></div></div>`;
+}
+
+// Planned/Shot/Remaining/Complete% here are computed purely from the
+// Mon-Fri day buckets (never Unscheduled -- see the brief: "have not been
+// allocated to a day"), and only from whatever the Owner filter currently
+// lets through, so switching owners updates every number here and every
+// day header's own X/Y Shot in one re-render -- no separate fetch, no page
+// reload (see markShootingShot -> refreshCurrentShootingView).
 function renderShootingWeekView() {
   const data = state.shooting.data;
   if (!data) return;
@@ -5331,11 +5359,17 @@ function renderShootingWeekView() {
     planned += items.length;
     shot += items.filter((i) => i.status === 'shot').length;
   });
+  const completionPct = planned > 0 ? Math.round((shot / planned) * 100) : null;
 
   document.getElementById('shoot-week-summary').innerHTML = `
     <span class="shoot-summary-stat"><strong>${planned}</strong> Planned</span>
     <span class="shoot-summary-stat"><strong>${shot}</strong> Shot</span>
-    <span class="shoot-summary-stat"><strong>${planned - shot}</strong> Remaining</span>`;
+    <span class="shoot-summary-stat"><strong>${planned - shot}</strong> Remaining</span>
+    ${completionPct !== null ? `<span class="shoot-summary-stat"><strong>${completionPct}%</strong> Complete</span>` : ''}`;
+
+  const weekProgressBar = document.getElementById('shoot-week-progress-bar');
+  weekProgressBar.style.display = completionPct !== null ? '' : 'none';
+  if (completionPct !== null) document.getElementById('shoot-week-progress-fill').style.width = `${completionPct}%`;
 
   const unscheduledEl = document.getElementById('shoot-unscheduled');
   unscheduledEl.classList.toggle('shoot-unscheduled-compact', unscheduled.length === 0);
@@ -5348,7 +5382,7 @@ function renderShootingWeekView() {
     const items = dayItems[day];
     return `
       <div class="shoot-day-column" ondragover="onShootColumnDragOver(event)" ondrop="onShootColumnDrop(event, '${day}')">
-        <div class="shoot-day-header">${shootingDayHeaderLabel(day)}</div>
+        <div class="shoot-day-header">${shootingDayHeaderHtml(day, items)}</div>
         <div class="shoot-day-cards">
           ${items.length ? items.map((item) => shootingCardHtml(item)).join('') : '<div class="shoot-day-empty">—</div>'}
         </div>
