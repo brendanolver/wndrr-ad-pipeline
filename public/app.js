@@ -145,6 +145,18 @@ document.querySelectorAll('.tab-btn').forEach((btn) => {
   btn.addEventListener('click', () => switchTab(btn.dataset.tab));
 });
 
+// Settings sub-nav: the same switch-a-panel pattern as the top-level tabs
+// above, just nested one level -- Settings had grown to 8 sections on one
+// long scroll, so they're grouped into 4 themed panels instead.
+function switchSettingsPanel(name) {
+  document.querySelectorAll('.settings-subnav-btn').forEach((b) => b.classList.toggle('active', b.dataset.settingsPanel === name));
+  document.querySelectorAll('.settings-panel').forEach((p) => p.classList.toggle('active', p.id === `settings-panel-${name}`));
+}
+
+document.querySelectorAll('.settings-subnav-btn').forEach((btn) => {
+  btn.addEventListener('click', () => switchSettingsPanel(btn.dataset.settingsPanel));
+});
+
 // ── Week math (Monday-start ISO weeks, mirrors src/lib/week.js) ──────
 // Client-side port so Planning's week nav doesn't need a round trip just
 // to know which Monday it's looking at or what to call it.

@@ -281,6 +281,19 @@ main{flex:1;min-width:0;padding:20px 24px;}
 
 .planning-section-header{display:flex;justify-content:space-between;align-items:center;margin:24px 0 12px;}
 .planning-section-header h2{font-size:16px;}
+
+/* Settings sub-nav: same pill-chip language as .cd-filter-btn, just its
+   own classes since it's switching .settings-panel visibility rather than
+   filtering a list. First section header inside a panel sits right below
+   the nav, so it gets a smaller top margin than the 24px sections lower
+   down get from each other. */
+.settings-subnav{display:flex;gap:6px;margin-bottom:8px;}
+.settings-subnav-btn{background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-pill);padding:6px 14px;font-family:inherit;font-size:12.5px;font-weight:600;color:var(--text-secondary);cursor:pointer;}
+.settings-subnav-btn:hover{background:var(--border);}
+.settings-subnav-btn.active{background:var(--teal);border-color:var(--teal);color:white;}
+.settings-panel{display:none;}
+.settings-panel.active{display:block;}
+.settings-panel .planning-section-header:first-child{margin-top:8px;}
 .planning-shoot-plan-summary-right{display:flex;align-items:center;gap:10px;}
 .link-btn{background:none;border:none;color:var(--teal-dark);cursor:pointer;font-family:inherit;font-size:12px;font-weight:600;padding:0;}
 .link-btn:hover{text-decoration:underline;}

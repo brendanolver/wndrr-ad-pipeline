@@ -418,87 +418,109 @@
     </section>
 
     <section id="tab-settings" class="tab-panel">
-      <div class="planning-section-header">
-        <h2>Core Creative Testing</h2>
-        <span class="admin-note">How many genuinely new concepts the team aims to test on Core products each week.</span>
-      </div>
-      <div class="settings-field-row">
-        <label for="weekly-target-input">Weekly New Concept Target</label>
-        <input type="number" id="weekly-target-input" min="0" step="1">
-        <button class="btn btn-primary btn-sm" id="weekly-target-save-btn">Save</button>
-      </div>
-
-      <div class="planning-section-header">
-        <h2>High Stocks</h2>
-        <span class="admin-note">Platinum/Rocket-tier, non-Core products over the SOH threshold with under 10% sell-through in the last 7 days.</span>
-      </div>
-      <div class="settings-field-row">
-        <label for="high-stock-min-soh-input">High Stock Minimum SOH</label>
-        <input type="number" id="high-stock-min-soh-input" min="0" step="1">
-        <button class="btn btn-primary btn-sm" id="high-stock-min-soh-save-btn">Save</button>
+      <!-- Settings sub-navigation: the 8 config sections below used to be
+           one long scroll -- grouped into 4 themed panels (mirroring the
+           top-level tab-btn/tab-panel pattern, just nested) so each visit
+           only shows what's relevant to the task at hand. Panel ids are
+           the single source of truth switchSettingsPanel() reads/writes;
+           adding a new settings section just needs a home in one of these
+           four, not a fifth sub-tab, unless it's genuinely a new theme. -->
+      <div class="settings-subnav">
+        <button type="button" class="settings-subnav-btn active" data-settings-panel="planning">Planning</button>
+        <button type="button" class="settings-subnav-btn" data-settings-panel="shoot-prep">Shoot Prep</button>
+        <button type="button" class="settings-subnav-btn" data-settings-panel="creative-playbook">Creative Playbook</button>
+        <button type="button" class="settings-subnav-btn" data-settings-panel="meta-mapping">Meta Mapping</button>
       </div>
 
-      <div class="planning-section-header">
-        <h2>Default Shoot Sizes</h2>
-        <span class="admin-note">Pre-fills each colourway's size when Shoot This Week opens, by garment type -- always just a starting point, any colourway's size can still be changed by hand.</span>
-      </div>
-      <div class="settings-field-row">
-        <label for="default-shoot-top-size-input">Tops</label>
-        <input type="text" id="default-shoot-top-size-input">
-        <button class="btn btn-primary btn-sm" id="default-shoot-top-size-save-btn">Save</button>
-      </div>
-      <div class="settings-field-row">
-        <label for="default-shoot-bottom-alpha-size-input">Bottoms (Alpha sizing, e.g. S/M/L)</label>
-        <input type="text" id="default-shoot-bottom-alpha-size-input">
-        <button class="btn btn-primary btn-sm" id="default-shoot-bottom-alpha-size-save-btn">Save</button>
-      </div>
-      <div class="settings-field-row">
-        <label for="default-shoot-bottom-waist-size-input">Bottoms (Waist sizing, e.g. 28/30/32)</label>
-        <input type="text" id="default-shoot-bottom-waist-size-input">
-        <button class="btn btn-primary btn-sm" id="default-shoot-bottom-waist-size-save-btn">Save</button>
+      <div class="settings-panel active" id="settings-panel-planning">
+        <div class="planning-section-header">
+          <h2>Core Creative Testing</h2>
+          <span class="admin-note">How many genuinely new concepts the team aims to test on Core products each week.</span>
+        </div>
+        <div class="settings-field-row">
+          <label for="weekly-target-input">Weekly New Concept Target</label>
+          <input type="number" id="weekly-target-input" min="0" step="1">
+          <button class="btn btn-primary btn-sm" id="weekly-target-save-btn">Save</button>
+        </div>
+
+        <div class="planning-section-header">
+          <h2>High Stocks</h2>
+          <span class="admin-note">Platinum/Rocket-tier, non-Core products over the SOH threshold with under 10% sell-through in the last 7 days.</span>
+        </div>
+        <div class="settings-field-row">
+          <label for="high-stock-min-soh-input">High Stock Minimum SOH</label>
+          <input type="number" id="high-stock-min-soh-input" min="0" step="1">
+          <button class="btn btn-primary btn-sm" id="high-stock-min-soh-save-btn">Save</button>
+        </div>
       </div>
 
-      <div class="planning-section-header">
-        <h2>Proven Winners</h2>
-        <span class="admin-note">Ranked concept playbook. Highest-ranked active entries auto-fill a new product's Required Concepts up to its SOH-driven creative target.</span>
-      </div>
-      <div id="pw-list" class="pw-list"></div>
-      <button class="btn btn-primary btn-sm" id="pw-add-btn">+ Add Proven Winner</button>
+      <div class="settings-panel" id="settings-panel-shoot-prep">
+        <div class="planning-section-header">
+          <h2>Default Shoot Sizes</h2>
+          <span class="admin-note">Pre-fills each colourway's size when Shoot This Week opens, by garment type -- always just a starting point, any colourway's size can still be changed by hand.</span>
+        </div>
+        <div class="settings-field-row">
+          <label for="default-shoot-top-size-input">Tops</label>
+          <input type="text" id="default-shoot-top-size-input">
+          <button class="btn btn-primary btn-sm" id="default-shoot-top-size-save-btn">Save</button>
+        </div>
+        <div class="settings-field-row">
+          <label for="default-shoot-bottom-alpha-size-input">Bottoms (Alpha sizing, e.g. S/M/L)</label>
+          <input type="text" id="default-shoot-bottom-alpha-size-input">
+          <button class="btn btn-primary btn-sm" id="default-shoot-bottom-alpha-size-save-btn">Save</button>
+        </div>
+        <div class="settings-field-row">
+          <label for="default-shoot-bottom-waist-size-input">Bottoms (Waist sizing, e.g. 28/30/32)</label>
+          <input type="text" id="default-shoot-bottom-waist-size-input">
+          <button class="btn btn-primary btn-sm" id="default-shoot-bottom-waist-size-save-btn">Save</button>
+        </div>
 
-      <div class="planning-section-header">
-        <h2>Creative Resources</h2>
-        <span class="admin-note">Research/inspiration links shown in the Concept Development 💡 Creative Toolkit -- add, rename, reorder, disable or delete as needed.</span>
-      </div>
-      <div id="cr-list" class="pw-list"></div>
-      <button class="btn btn-primary btn-sm" id="cr-add-btn">+ Add Creative Resource</button>
-
-      <div class="planning-section-header">
-        <h2>Customer Avatars</h2>
-        <span class="admin-note">Who Concept Development's "The Audience" section picks from -- add, rename, reorder, disable or delete as needed. Keep each one to mindset/behaviour, not a demographic profile: how they think, what they want, why they might buy, why they might not, and what creative tends to land.</span>
-      </div>
-      <div id="ca-list" class="pw-list"></div>
-      <button class="btn btn-primary btn-sm" id="ca-add-btn">+ Add Customer Avatar</button>
-
-      <div class="planning-section-header">
-        <h2>Content Creators</h2>
-        <span class="admin-note">Who can be assigned as Content Creator in Shoot This Week -- the default pre-selects there. (Colourway size defaults now live in Default Shoot Sizes above, shared across every creator rather than set per creator.)</span>
-      </div>
-      <div id="cc-list" class="cc-list"></div>
-      <div class="cc-add-row">
-        <input type="text" id="cc-new-name" placeholder="e.g. Jess">
-        <button class="btn btn-primary btn-sm" id="cc-add-btn">+ Add Creator</button>
+        <div class="planning-section-header">
+          <h2>Content Creators</h2>
+          <span class="admin-note">Who can be assigned as Content Creator in Shoot This Week -- the default pre-selects there. (Colourway size defaults now live in Default Shoot Sizes above, shared across every creator rather than set per creator.)</span>
+        </div>
+        <div id="cc-list" class="cc-list"></div>
+        <div class="cc-add-row">
+          <input type="text" id="cc-new-name" placeholder="e.g. Jess">
+          <button class="btn btn-primary btn-sm" id="cc-add-btn">+ Add Creator</button>
+        </div>
       </div>
 
-      <div class="planning-section-header">
-        <h2>Meta Product Mapping</h2>
-        <span class="admin-note">Meta's ad names (Product + Product Type) don't always match ApparelMagic product names exactly. Map each combination once to a stable internal product family — every future ad with that same Product + Product Type is attributed automatically. Batch No. is metadata only and is never part of the mapping.</span>
+      <div class="settings-panel" id="settings-panel-creative-playbook">
+        <div class="planning-section-header">
+          <h2>Proven Winners</h2>
+          <span class="admin-note">Ranked concept playbook. Highest-ranked active entries auto-fill a new product's Required Concepts up to its SOH-driven creative target.</span>
+        </div>
+        <div id="pw-list" class="pw-list"></div>
+        <button class="btn btn-primary btn-sm" id="pw-add-btn">+ Add Proven Winner</button>
+
+        <div class="planning-section-header">
+          <h2>Creative Resources</h2>
+          <span class="admin-note">Research/inspiration links shown in the Concept Development 💡 Creative Toolkit -- add, rename, reorder, disable or delete as needed.</span>
+        </div>
+        <div id="cr-list" class="pw-list"></div>
+        <button class="btn btn-primary btn-sm" id="cr-add-btn">+ Add Creative Resource</button>
+
+        <div class="planning-section-header">
+          <h2>Customer Avatars</h2>
+          <span class="admin-note">Who Concept Development's "The Audience" section picks from -- add, rename, reorder, disable or delete as needed. Keep each one to mindset/behaviour, not a demographic profile: how they think, what they want, why they might buy, why they might not, and what creative tends to land.</span>
+        </div>
+        <div id="ca-list" class="pw-list"></div>
+        <button class="btn btn-primary btn-sm" id="ca-add-btn">+ Add Customer Avatar</button>
       </div>
-      <div class="mpm-check-row">
-        <input type="text" id="mpm-check-input" placeholder="Paste a Meta ad name, e.g. HALO SWEAT SET + SWEATS">
-        <button type="button" class="btn btn-ghost btn-sm" id="mpm-check-btn">Check Mapping</button>
+
+      <div class="settings-panel" id="settings-panel-meta-mapping">
+        <div class="planning-section-header">
+          <h2>Meta Product Mapping</h2>
+          <span class="admin-note">Meta's ad names (Product + Product Type) don't always match ApparelMagic product names exactly. Map each combination once to a stable internal product family — every future ad with that same Product + Product Type is attributed automatically. Batch No. is metadata only and is never part of the mapping.</span>
+        </div>
+        <div class="mpm-check-row">
+          <input type="text" id="mpm-check-input" placeholder="Paste a Meta ad name, e.g. HALO SWEAT SET + SWEATS">
+          <button type="button" class="btn btn-ghost btn-sm" id="mpm-check-btn">Check Mapping</button>
+        </div>
+        <div id="mpm-check-result"></div>
+        <div id="mpm-list" class="mpm-list"></div>
       </div>
-      <div id="mpm-check-result"></div>
-      <div id="mpm-list" class="mpm-list"></div>
     </section>
   </main>
 </div>
