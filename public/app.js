@@ -49,6 +49,14 @@ let state = {
   // own client-side status filter, applied over the same week's data with
   // no extra API call.
   conceptDev: { weekOffset: 0, data: null, view: 'list', currentItemId: null, filter: 'all' },
+  // Tuesday Review's own week nav -- independent from conceptDev's, same
+  // reasoning as above. data is the exact same GET /concept-development
+  // payload Concept Dev uses (products -> concepts); filter is the landing
+  // page's status filter (defaults to ready_for_review, the actual meeting
+  // queue). queue/queueIndex track the flat, filter-scoped concept list the
+  // review modal's Previous/Next and auto-advance walk through -- see
+  // buildTuesdayReviewQueue in app.js.
+  tuesdayReview: { weekOffset: 0, data: null, filter: 'ready_for_review', queue: [], queueIndex: -1 },
   // Settings' configurable link-out resources (Meta Ad Library etc, seeded
   // by default) -- see the Creative Toolkit section below. The ChatGPT
   // Develop/Improve and Proven Winners cards are NOT in this list; they
@@ -209,7 +217,7 @@ function conceptDevWeekNumber() {
 async function loadAll() {
   try {
     const weekStart = planningWeekStart();
-    const [board, styles, categories, dashboard, dropsRes, provenWinners, coreRes, planningSettings, shootPlan, contentCreators, highStockRes, promotions, weeklyConfirmation, weeklyPlanningProgress, salesCadence, metaProductMappings, metaProductFamilies, conceptDev, creativeResources, customerAvatars] = await Promise.all([
+    const [board, styles, categories, dashboard, dropsRes, provenWinners, coreRes, planningSettings, shootPlan, contentCreators, highStockRes, promotions, weeklyConfirmation, weeklyPlanningProgress, salesCadence, metaProductMappings, metaProductFamilies, conceptDev, creativeResources, customerAvatars, tuesdayReview] = await Promise.all([
       api('/board'),
       api('/styles'),
       api('/categories'),
@@ -230,6 +238,7 @@ async function loadAll() {
       api(`/concept-development?week_start=${conceptDevWeekStart()}`),
       api('/creative-resources'),
       api('/customer-avatars'),
+      api(`/concept-development?week_start=${tuesdayReviewWeekStart()}`),
     ]);
     state.board = board;
     state.styles = styles;
@@ -254,6 +263,7 @@ async function loadAll() {
     state.conceptDev.data = conceptDev;
     state.creativeResources = creativeResources;
     state.customerAvatars = customerAvatars;
+    state.tuesdayReview.data = tuesdayReview;
     renderBoard();
     renderMissingAd();
     renderStylesTable();
@@ -274,6 +284,8 @@ async function loadAll() {
     renderPlanningShootSummary();
     renderConceptDevWeekHeader();
     renderConceptDevList();
+    renderTuesdayReviewWeekHeader();
+    renderTuesdayReviewList();
   } catch (e) {
     toast(e.message, true);
   }
@@ -3478,6 +3490,7 @@ const CONCEPT_DEV_STATUS_LABELS = {
   ready_for_review: 'Ready for Review',
   changes_required: 'Changes Required',
   approved: 'Approved',
+  killed: 'Killed',
 };
 const CONCEPT_DEV_STATUS_CLASS = {
   not_started: 'cd-status-not-started',
@@ -3485,6 +3498,7 @@ const CONCEPT_DEV_STATUS_CLASS = {
   ready_for_review: 'cd-status-ready-for-review',
   changes_required: 'cd-status-changes-required',
   approved: 'cd-status-approved',
+  killed: 'cd-status-killed',
 };
 
 async function loadConceptDevWeek() {
@@ -4012,6 +4026,14 @@ function fillConceptDevModalFields(concept) {
   badge.className = `cd-concept-status-pill ${CONCEPT_DEV_STATUS_CLASS[status] || ''}`;
   badge.textContent = CONCEPT_DEV_STATUS_LABELS[status] || status;
 
+  const feedbackBanner = document.getElementById('cd-changes-required-banner');
+  if (status === 'changes_required' && concept && concept.review_feedback) {
+    feedbackBanner.style.display = '';
+    document.getElementById('cd-changes-required-text').textContent = concept.review_feedback;
+  } else {
+    feedbackBanner.style.display = 'none';
+  }
+
   // Progressive disclosure: Script and Shoot Requirements stay collapsed
   // behind a toggle for the common case (a simple concept doesn't need
   // either), but open automatically if the concept already has content
@@ -4109,8 +4131,38 @@ function openConceptDevModal(conceptId) {
   // (deleteConceptSlot), which drops the whole slot correctly.
   document.getElementById('cd-modal-delete-btn').style.display = product.source === 'drop' ? 'none' : '';
 
+  updateConceptDevFooterButtons(concept.concept_dev_status);
   fillConceptDevModalFields(concept);
   openModal('concept-dev-modal');
+}
+
+// Which footer action(s) make sense depends on how far along the concept
+// already is: not yet submitted -> Save Draft + Ready for Review; sent back
+// with feedback -> Save Draft (stays Changes Required) + Resubmit for
+// Review; already submitted/decided (Ready for Review, Approved, or
+// Killed) -> a single Save Changes that edits the concept in place without
+// moving concept_dev_status at all (see the targetStatus===null branch of
+// saveConceptDevModal) -- this is the fix for the "still shows Ready for
+// Review after it's already submitted" bug.
+function updateConceptDevFooterButtons(status) {
+  const draftBtn = document.getElementById('cd-modal-save-draft-btn');
+  const changesBtn = document.getElementById('cd-modal-save-changes-btn');
+  const submitBtn = document.getElementById('cd-modal-submit-btn');
+  if (status === 'ready_for_review' || status === 'approved' || status === 'killed') {
+    draftBtn.style.display = 'none';
+    changesBtn.style.display = '';
+    submitBtn.style.display = 'none';
+  } else if (status === 'changes_required') {
+    draftBtn.style.display = '';
+    changesBtn.style.display = 'none';
+    submitBtn.style.display = '';
+    submitBtn.textContent = 'Resubmit for Review →';
+  } else {
+    draftBtn.style.display = '';
+    changesBtn.style.display = 'none';
+    submitBtn.style.display = '';
+    submitBtn.textContent = 'Ready for Review →';
+  }
 }
 
 // "+ Add Concept" opens this exact same workspace instead of a bare
@@ -4132,6 +4184,8 @@ function openAddConceptModal(shootPlanItemId) {
   nameInput.style.display = '';
   nameInput.value = '';
   document.getElementById('cd-modal-name-locked').style.display = 'none';
+
+  updateConceptDevFooterButtons(null);
 
   // Nothing to delete yet -- this concept doesn't exist server-side until
   // Save Draft/Ready for Review creates it.
@@ -4233,7 +4287,6 @@ async function saveConceptDevModal(targetStatus) {
   const hasAvatar = Boolean(customerAvatarId) || Boolean(customAvatarDescription);
 
   const body = {
-    concept_dev_status: targetStatus,
     angle,
     execution,
     customer_avatar_id: customerAvatarId,
@@ -4250,7 +4303,14 @@ async function saveConceptDevModal(targetStatus) {
     location: document.getElementById('cd-modal-location').value.trim(),
     props_notes: document.getElementById('cd-modal-props').value.trim(),
   };
-  const savedToast = targetStatus === 'ready_for_review' ? 'Marked Ready for Review' : 'Draft saved';
+  // targetStatus is null for "Save Changes" on an already-submitted concept
+  // (ready_for_review/approved/killed) -- omitting the key entirely (rather
+  // than sending null, which the backend's CONCEPT_DEV_STATUSES check would
+  // reject) leaves concept_dev_status untouched via the PATCH route's
+  // COALESCE, so a minor edit never silently bounces the concept back to
+  // Draft/In Development.
+  if (targetStatus) body.concept_dev_status = targetStatus;
+  const savedToast = targetStatus === 'ready_for_review' ? 'Marked Ready for Review' : (targetStatus ? 'Draft saved' : 'Changes saved');
 
   hideConceptDevValidation();
 
@@ -4339,6 +4399,493 @@ async function saveConceptDevModal(targetStatus) {
   } catch (e) {
     toast(e.message, true);
   }
+}
+
+// ── Tuesday Creative Review ────────────────────────────
+// The human quality gate right after Concept Development -- reads the exact
+// same GET /concept-development payload Concept Dev already fetches (a
+// concept is "in Tuesday Review" purely by virtue of concept_dev_status
+// being ready_for_review/approved/changes_required/killed, no separate
+// backend surface needed). Deliberately read-only and its own tr-* visual
+// language throughout -- this is a decision room, not another editable
+// form. Week nav mirrors Concept Dev's own (independent weekOffset, same
+// reasoning as conceptDev vs planningWeekOffset).
+function tuesdayReviewWeekStart() {
+  return isoDateStr(mondayOfWeek(state.tuesdayReview.weekOffset));
+}
+function tuesdayReviewWeekNumber() {
+  return isoWeekNumber(mondayOfWeek(state.tuesdayReview.weekOffset));
+}
+
+async function loadTuesdayReviewWeek() {
+  try {
+    state.tuesdayReview.data = await api(`/concept-development?week_start=${tuesdayReviewWeekStart()}`);
+    renderTuesdayReviewWeekHeader();
+    renderTuesdayReviewList();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function changeTuesdayReviewWeek(delta) {
+  state.tuesdayReview.weekOffset += delta;
+  onTuesdayReviewWeekChanged();
+}
+
+function goToCurrentTuesdayReviewWeek() {
+  state.tuesdayReview.weekOffset = 0;
+  onTuesdayReviewWeekChanged();
+}
+
+function jumpToTuesdayReviewWeek(offset) {
+  state.tuesdayReview.weekOffset = offset;
+  onTuesdayReviewWeekChanged();
+}
+
+function onTuesdayReviewWeekChanged() {
+  closeTuesdayReviewWeekPicker();
+  loadTuesdayReviewWeek();
+}
+
+function toggleTuesdayReviewWeekPicker() {
+  const el = document.getElementById('tr-week-picker');
+  const opening = el.style.display === 'none';
+  if (opening) renderTuesdayReviewWeekPicker();
+  el.style.display = opening ? '' : 'none';
+}
+
+function closeTuesdayReviewWeekPicker() {
+  document.getElementById('tr-week-picker').style.display = 'none';
+}
+
+function renderTuesdayReviewWeekPicker() {
+  const rows = [];
+  for (let offset = 8; offset >= -12; offset--) {
+    const monday = mondayOfWeek(offset);
+    rows.push({ offset, number: isoWeekNumber(monday), range: formatWeekRange(monday) });
+  }
+  document.getElementById('tr-week-picker').innerHTML = rows.map((r) => `
+    <button type="button" class="planning-week-picker-row ${r.offset === state.tuesdayReview.weekOffset ? 'active' : ''}" onclick="jumpToTuesdayReviewWeek(${r.offset})">
+      <span>Week ${r.number}${r.offset === 0 ? ' · Current' : ''}</span>
+      <span class="admin-note">${r.range}</span>
+    </button>`).join('');
+}
+
+document.addEventListener('click', (e) => {
+  const picker = document.getElementById('tr-week-picker');
+  if (!picker || picker.style.display === 'none') return;
+  if (e.target.closest('#tr-week-picker') || e.target.id === 'tr-week-label') return;
+  picker.style.display = 'none';
+});
+
+function renderTuesdayReviewWeekHeader() {
+  document.getElementById('tr-week-label').textContent = `Week ${tuesdayReviewWeekNumber()}`;
+  document.getElementById('tr-this-week-btn').style.display = state.tuesdayReview.weekOffset === 0 ? 'none' : '';
+}
+
+function tuesdayReviewAllConcepts() {
+  const products = (state.tuesdayReview.data && state.tuesdayReview.data.products) || [];
+  const out = [];
+  for (const product of products) {
+    for (const concept of product.concepts) out.push({ concept, product });
+  }
+  return out;
+}
+
+function tuesdayReviewCounts() {
+  const statuses = tuesdayReviewAllConcepts().map((x) => x.concept.concept_dev_status);
+  return {
+    readyForReview: statuses.filter((s) => s === 'ready_for_review').length,
+    approved: statuses.filter((s) => s === 'approved').length,
+    changesRequired: statuses.filter((s) => s === 'changes_required').length,
+    killed: statuses.filter((s) => s === 'killed').length,
+  };
+}
+
+// Compact chip row -- no giant success panel for the "done" state either,
+// per the brief, just the same chip language with a checkmark swapped in.
+function renderTuesdayReviewSummary() {
+  const c = tuesdayReviewCounts();
+  const el = document.getElementById('tr-summary');
+  const decided = c.approved + c.changesRequired + c.killed;
+  if (c.readyForReview === 0 && decided === 0) {
+    el.innerHTML = '<span class="tr-summary-empty">No concepts submitted for Tuesday Review yet.</span>';
+    return;
+  }
+  if (c.readyForReview === 0) {
+    el.innerHTML = `<span class="tr-summary-complete">&check; Tuesday Review Complete</span><span class="tr-summary-chip">${c.approved} Approved &middot; ${c.changesRequired} Changes Required &middot; ${c.killed} Killed</span>`;
+    return;
+  }
+  el.innerHTML = `<span class="tr-summary-chip">${c.readyForReview} Ready for Review &middot; ${c.approved} Approved &middot; ${c.changesRequired} Changes Required &middot; ${c.killed} Killed</span>`;
+}
+
+const TUESDAY_REVIEW_FILTERS = [
+  { value: 'ready_for_review', label: 'Ready for Review' },
+  { value: 'approved', label: 'Approved' },
+  { value: 'changes_required', label: 'Changes Required' },
+  { value: 'killed', label: 'Killed' },
+];
+
+function renderTuesdayReviewFilters() {
+  document.getElementById('tr-filters').innerHTML = TUESDAY_REVIEW_FILTERS.map((f) => `
+    <button type="button" class="cd-filter-btn ${state.tuesdayReview.filter === f.value ? 'active' : ''}" onclick="setTuesdayReviewFilter('${f.value}')">${f.label}</button>`).join('');
+}
+
+function setTuesdayReviewFilter(filter) {
+  state.tuesdayReview.filter = filter;
+  renderTuesdayReviewList();
+}
+
+function tuesdayReviewProductMetaText(product) {
+  const sourceLabel = CONCEPT_DEV_SOURCE_LABELS[product.source] || product.source;
+  const pathwayLabel = CONCEPT_DEV_PATHWAY_LABELS[product.source] || '';
+  return [sourceLabel, pathwayLabel, product.creator ? `Owner: ${product.creator}` : null].filter(Boolean).join(' · ');
+}
+
+function truncateText(text, maxLen) {
+  if (!text) return '';
+  const trimmed = text.trim();
+  return trimmed.length > maxLen ? `${trimmed.slice(0, maxLen).trim()}…` : trimmed;
+}
+
+function tuesdayReviewAvatarLabel(concept) {
+  if (concept.customer_avatar_id) {
+    const avatar = state.customerAvatars.find((a) => a.id === concept.customer_avatar_id);
+    return avatar ? avatar.name : null;
+  }
+  if (concept.custom_avatar_description) return truncateText(concept.custom_avatar_description, 60);
+  return null;
+}
+
+// Agenda-card, not a brief -- name/avatar/idea preview/opening/status only,
+// per the brief. Full detail only appears once "Review Concept" is clicked.
+function tuesdayReviewConceptCardHtml(concept) {
+  const avatarLabel = tuesdayReviewAvatarLabel(concept);
+  const primaryHookText = ((concept.hook_variations && concept.hook_variations[0] && concept.hook_variations[0].text) || '').trim();
+  return `
+    <div class="tr-concept-card" onclick="openTuesdayReviewConcept(${concept.id})">
+      <div class="tr-concept-card-name">${escapeHtml(concept.concept_name)}</div>
+      ${avatarLabel ? `<div class="tr-concept-card-avatar">${escapeHtml(avatarLabel)}</div>` : ''}
+      ${concept.angle && concept.angle.trim() ? `<div class="tr-concept-card-field"><span class="tr-concept-card-label">Idea</span>${escapeHtml(truncateText(concept.angle, 140))}</div>` : ''}
+      ${primaryHookText ? `<div class="tr-concept-card-field"><span class="tr-concept-card-label">Opening</span>&ldquo;${escapeHtml(truncateText(primaryHookText, 100))}&rdquo;</div>` : ''}
+      <div class="tr-concept-card-footer">
+        <span class="cd-concept-status-pill ${CONCEPT_DEV_STATUS_CLASS[concept.concept_dev_status] || ''}">${CONCEPT_DEV_STATUS_LABELS[concept.concept_dev_status] || concept.concept_dev_status}</span>
+        <span class="tr-concept-card-cta">Review Concept &rarr;</span>
+      </div>
+    </div>`;
+}
+
+function renderTuesdayReviewList() {
+  renderTuesdayReviewSummary();
+  renderTuesdayReviewFilters();
+  const list = document.getElementById('tr-list');
+  const data = state.tuesdayReview.data;
+  if (!data || !data.confirmed) {
+    list.innerHTML = `<div class="attention-empty">Shoot Plan for Week ${tuesdayReviewWeekNumber()} hasn't been confirmed yet — nothing to review.</div>`;
+    return;
+  }
+  const groups = (data.products || [])
+    .map((product) => ({ product, concepts: product.concepts.filter((c) => c.concept_dev_status === state.tuesdayReview.filter) }))
+    .filter((g) => g.concepts.length > 0);
+
+  if (!groups.length) {
+    const filterLabel = (TUESDAY_REVIEW_FILTERS.find((f) => f.value === state.tuesdayReview.filter) || {}).label || state.tuesdayReview.filter;
+    list.innerHTML = `<div class="attention-empty">No concepts are currently ${filterLabel}.</div>`;
+    return;
+  }
+
+  list.innerHTML = groups.map((g) => `
+    <div class="tr-product-group">
+      <div class="tr-product-header">
+        <div class="tr-product-name">${escapeHtml(g.product.product_name)}</div>
+        <div class="tr-product-meta">${escapeHtml(tuesdayReviewProductMetaText(g.product))}</div>
+      </div>
+      <div class="tr-concept-list">${g.concepts.map((c) => tuesdayReviewConceptCardHtml(c)).join('')}</div>
+    </div>`).join('');
+}
+
+// The review queue Previous/Next walks -- scoped to the currently active
+// filter (per the brief: "represent the relevant review queue for that
+// week/filter"), rebuilt fresh each time a concept is opened so it always
+// reflects the latest data.
+function buildTuesdayReviewQueue() {
+  const data = state.tuesdayReview.data;
+  const queue = [];
+  for (const product of (data && data.products) || []) {
+    for (const concept of product.concepts) {
+      if (concept.concept_dev_status === state.tuesdayReview.filter) queue.push({ concept, product });
+    }
+  }
+  return queue;
+}
+
+function openTuesdayReviewConcept(conceptId) {
+  state.tuesdayReview.queue = buildTuesdayReviewQueue();
+  const index = state.tuesdayReview.queue.findIndex((x) => x.concept.id === conceptId);
+  if (index === -1) return;
+  state.tuesdayReview.queueIndex = index;
+  renderTuesdayReviewConcept();
+  openModal('tuesday-review-modal');
+}
+
+function tuesdayReviewNav(delta) {
+  const nextIndex = state.tuesdayReview.queueIndex + delta;
+  if (nextIndex < 0 || nextIndex >= state.tuesdayReview.queue.length) return;
+  state.tuesdayReview.queueIndex = nextIndex;
+  renderTuesdayReviewConcept();
+}
+
+function closeTuesdayReviewModal() {
+  closeModal('tuesday-review-modal');
+  renderTuesdayReviewList();
+}
+
+function referenceLabelFromUrl(url) {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, '');
+    if (host.includes('instagram')) return 'Instagram Reference';
+    if (host.includes('tiktok')) return 'TikTok Reference';
+    if (host.includes('youtube') || host.includes('youtu.be')) return 'YouTube Reference';
+    if (host.includes('pinterest')) return 'Pinterest Reference';
+    return `${host} Reference`;
+  } catch {
+    return 'Reference';
+  }
+}
+
+function formatTuesdayReviewDate(iso) {
+  return new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
+}
+
+// Order deliberately follows the brief, NOT Concept Development's own order
+// -- Hook/Opening comes before Execution here, so the team judges attention
+// before production detail. Everything is plain text, no inputs.
+function renderTuesdayReviewConcept() {
+  const entry = state.tuesdayReview.queue[state.tuesdayReview.queueIndex];
+  if (!entry) return;
+  const { concept, product } = entry;
+
+  document.getElementById('tr-review-position').textContent = `${state.tuesdayReview.queueIndex + 1} of ${state.tuesdayReview.queue.length}`;
+  document.getElementById('tr-review-prev-btn').disabled = state.tuesdayReview.queueIndex === 0;
+  document.getElementById('tr-review-next-btn').disabled = state.tuesdayReview.queueIndex === state.tuesdayReview.queue.length - 1;
+
+  document.getElementById('tr-review-title').textContent = concept.concept_name;
+  const statusPill = document.getElementById('tr-review-status-pill');
+  statusPill.className = `cd-concept-status-pill ${CONCEPT_DEV_STATUS_CLASS[concept.concept_dev_status] || ''}`;
+  statusPill.textContent = CONCEPT_DEV_STATUS_LABELS[concept.concept_dev_status] || concept.concept_dev_status;
+
+  document.getElementById('tr-review-product-context').textContent = [product.product_name, tuesdayReviewProductMetaText(product)].filter(Boolean).join(' · ');
+
+  document.getElementById('tr-review-angle').textContent = concept.angle && concept.angle.trim() ? concept.angle.trim() : 'No Angle / Idea provided';
+
+  const avatarNameBtn = document.getElementById('tr-review-avatar-name');
+  const avatarDetail = document.getElementById('tr-review-avatar-detail');
+  avatarDetail.style.display = 'none';
+  avatarDetail.innerHTML = '';
+  if (concept.customer_avatar_id) {
+    const avatar = state.customerAvatars.find((a) => a.id === concept.customer_avatar_id);
+    avatarNameBtn.textContent = avatar ? `${avatar.name} ▾` : 'Customer Avatar';
+    avatarNameBtn.disabled = !avatar;
+    if (avatar) {
+      avatarDetail.innerHTML = [
+        avatar.who_they_are ? `<div><span class="tr-avatar-detail-label">Who they are</span>${escapeHtml(avatar.who_they_are)}</div>` : '',
+        avatar.what_they_care_about ? `<div><span class="tr-avatar-detail-label">What they care about</span>${escapeHtml(avatar.what_they_care_about)}</div>` : '',
+        avatar.what_stops_buying ? `<div><span class="tr-avatar-detail-label">What stops them buying</span>${escapeHtml(avatar.what_stops_buying)}</div>` : '',
+        avatar.what_resonates ? `<div><span class="tr-avatar-detail-label">What tends to resonate</span>${escapeHtml(avatar.what_resonates)}</div>` : '',
+      ].join('');
+    }
+  } else if (concept.custom_avatar_description) {
+    // A one-off audience has no separate saved profile to expand -- the
+    // description IS the name/label, so it shows directly rather than
+    // being hidden behind a (disabled, unreachable) toggle.
+    avatarNameBtn.textContent = concept.custom_avatar_description;
+    avatarNameBtn.disabled = true;
+  } else {
+    avatarNameBtn.textContent = 'No Customer Avatar selected';
+    avatarNameBtn.disabled = true;
+  }
+  document.getElementById('tr-review-why-care').textContent = concept.avatar_why_care && concept.avatar_why_care.trim() ? concept.avatar_why_care.trim() : '—';
+
+  const hooks = (Array.isArray(concept.hook_variations) ? concept.hook_variations : []).filter((h) => h && h.text && h.text.trim());
+  const hooksEl = document.getElementById('tr-review-hooks');
+  hooksEl.innerHTML = hooks.length
+    ? [
+        `<div class="tr-hook-item"><span class="tr-hook-label">Primary</span><div class="tr-hook-text">&ldquo;${escapeHtml(hooks[0].text.trim())}&rdquo;</div></div>`,
+        ...hooks.slice(1).map((h, i) => `<div class="tr-hook-item"><span class="tr-hook-label">Alt ${String(i + 1).padStart(2, '0')}</span><div class="tr-hook-text">&ldquo;${escapeHtml(h.text.trim())}&rdquo;</div></div>`),
+      ].join('')
+    : '<div class="tr-review-subtle">No specific Hook / Opening provided</div>';
+
+  document.getElementById('tr-review-execution').textContent = concept.execution && concept.execution.trim() ? concept.execution.trim() : 'No Execution / Shot Plan provided';
+  const scriptToggle = document.getElementById('tr-review-script-toggle');
+  const scriptEl = document.getElementById('tr-review-script');
+  scriptEl.style.display = 'none';
+  scriptEl.textContent = concept.script_notes || '';
+  scriptToggle.style.display = concept.script_notes && concept.script_notes.trim() ? '' : 'none';
+
+  const refs = (Array.isArray(concept.reference_items) ? concept.reference_items : []).filter((r) => r && r.url);
+  const refsSection = document.getElementById('tr-review-references-section');
+  if (!refs.length) {
+    refsSection.style.display = 'none';
+  } else {
+    refsSection.style.display = '';
+    document.getElementById('tr-review-references').innerHTML = refs.map((r) => `
+      <div class="tr-reference-item">
+        <a href="${escapeHtml(r.url)}" target="_blank" rel="noopener" class="tr-reference-link">${escapeHtml(referenceLabelFromUrl(r.url))} &#8599;</a>
+        ${r.note ? `<div class="tr-reference-note"><span class="tr-reference-note-label">What we like about it</span>${escapeHtml(r.note)}</div>` : ''}
+      </div>`).join('');
+  }
+
+  const shootReqSection = document.getElementById('tr-review-shoot-req-section');
+  const hasShootReq = concept.talent_requirement || concept.location || (concept.props_notes && concept.props_notes.trim());
+  if (!hasShootReq) {
+    shootReqSection.style.display = 'none';
+  } else {
+    shootReqSection.style.display = '';
+    const inlineParts = [
+      concept.talent_requirement ? `Talent: ${concept.talent_requirement}` : null,
+      concept.location ? `Location: ${concept.location}` : null,
+    ].filter(Boolean);
+    document.getElementById('tr-review-shoot-req-inline').textContent = inlineParts.length ? inlineParts.join(' · ') : '—';
+    const propsToggle = document.getElementById('tr-review-props-toggle');
+    const propsEl = document.getElementById('tr-review-props');
+    propsEl.style.display = 'none';
+    propsEl.textContent = concept.props_notes || '';
+    propsToggle.style.display = concept.props_notes && concept.props_notes.trim() ? '' : 'none';
+  }
+
+  updateTuesdayReviewDecisionBar(concept);
+}
+
+function toggleTuesdayReviewAvatarDetail() {
+  const el = document.getElementById('tr-review-avatar-detail');
+  el.style.display = el.style.display === 'none' ? '' : 'none';
+}
+function toggleTuesdayReviewScript() {
+  const el = document.getElementById('tr-review-script');
+  el.style.display = el.style.display === 'none' ? '' : 'none';
+}
+function toggleTuesdayReviewProps() {
+  const el = document.getElementById('tr-review-props');
+  el.style.display = el.style.display === 'none' ? '' : 'none';
+}
+
+// The three live decisions only ever apply to a concept still awaiting
+// Tuesday Review -- anything opened from another filter shows what was
+// already decided instead (feedback/kill reason/approved date), never a
+// re-decide affordance.
+function updateTuesdayReviewDecisionBar(concept) {
+  const bar = document.getElementById('tr-decision-bar');
+  const note = document.getElementById('tr-review-decided-note');
+  if (concept.concept_dev_status === 'ready_for_review') {
+    bar.style.display = '';
+    note.style.display = 'none';
+    note.textContent = '';
+    return;
+  }
+  bar.style.display = 'none';
+  note.style.display = '';
+  if (concept.concept_dev_status === 'approved') {
+    note.textContent = `Approved for Shooting${concept.reviewed_at ? ' on ' + formatTuesdayReviewDate(concept.reviewed_at) : ''}.`;
+  } else if (concept.concept_dev_status === 'changes_required') {
+    note.textContent = `Feedback from Tuesday Review: ${concept.review_feedback || '—'}`;
+  } else if (concept.concept_dev_status === 'killed') {
+    const parts = [concept.kill_reason, concept.kill_note].filter(Boolean);
+    note.textContent = `Killed${parts.length ? ' — ' + parts.join(': ') : ''}.`;
+  } else {
+    note.textContent = 'This concept has not been submitted for Tuesday Review yet.';
+  }
+}
+
+async function submitTuesdayReviewDecision(conceptId, decision, extra) {
+  try {
+    await api(`/concept-development/concepts/${conceptId}/review`, {
+      method: 'PATCH',
+      body: JSON.stringify({ decision, ...extra }),
+    });
+    await loadTuesdayReviewWeek();
+    tuesdayReviewAdvanceAfterDecision();
+    return true;
+  } catch (e) {
+    toast(e.message, true);
+    return false;
+  }
+}
+
+// After a decision, move straight to the next Concept still awaiting
+// Tuesday Review -- the queue actually being worked through live in the
+// meeting -- rather than making the team close, find and reopen the next
+// card by hand. Closes the modal and shows the completion state once none
+// remain.
+function tuesdayReviewAdvanceAfterDecision() {
+  const remaining = tuesdayReviewAllConcepts().filter((x) => x.concept.concept_dev_status === 'ready_for_review');
+  if (!remaining.length) {
+    closeModal('tuesday-review-modal');
+    renderTuesdayReviewList();
+    return;
+  }
+  state.tuesdayReview.queue = buildTuesdayReviewQueue();
+  state.tuesdayReview.queueIndex = 0;
+  renderTuesdayReviewConcept();
+  renderTuesdayReviewList();
+}
+
+async function approveTuesdayReviewConcept() {
+  const entry = state.tuesdayReview.queue[state.tuesdayReview.queueIndex];
+  if (!entry) return;
+  await submitTuesdayReviewDecision(entry.concept.id, 'approved');
+}
+
+function openTuesdayReviewChangesModal() {
+  document.getElementById('tr-changes-feedback').value = '';
+  document.getElementById('tr-changes-feedback').classList.remove('cd-field-invalid');
+  hideConceptDevFieldError('tr-changes-feedback-error');
+  openModal('tr-changes-modal');
+}
+
+async function submitTuesdayReviewChanges() {
+  const entry = state.tuesdayReview.queue[state.tuesdayReview.queueIndex];
+  if (!entry) return;
+  const feedback = document.getElementById('tr-changes-feedback').value.trim();
+  if (!feedback) {
+    showConceptDevFieldError('tr-changes-feedback', 'tr-changes-feedback-error', 'Explain what needs changing');
+    return;
+  }
+  const ok = await submitTuesdayReviewDecision(entry.concept.id, 'changes_required', { feedback });
+  if (ok) closeModal('tr-changes-modal');
+}
+
+const TUESDAY_REVIEW_KILL_REASONS = [
+  'Weak Angle', 'Too Similar to Existing Creative', 'Not Right for Product',
+  'Execution Too Difficult', 'No Longer Relevant', 'Other',
+];
+let tuesdayReviewKillReason = null;
+
+function renderTuesdayReviewKillReasonChips() {
+  document.getElementById('tr-kill-reason-chips').innerHTML = TUESDAY_REVIEW_KILL_REASONS.map((r) => `
+    <button type="button" class="cd-filter-btn ${tuesdayReviewKillReason === r ? 'active' : ''}" onclick="selectTuesdayReviewKillReason('${r.replace(/'/g, "\\'")}')">${r}</button>`).join('');
+}
+
+function selectTuesdayReviewKillReason(reason) {
+  tuesdayReviewKillReason = tuesdayReviewKillReason === reason ? null : reason;
+  renderTuesdayReviewKillReasonChips();
+}
+
+function openTuesdayReviewKillModal() {
+  tuesdayReviewKillReason = null;
+  document.getElementById('tr-kill-note').value = '';
+  renderTuesdayReviewKillReasonChips();
+  openModal('tr-kill-modal');
+}
+
+async function submitTuesdayReviewKill() {
+  const entry = state.tuesdayReview.queue[state.tuesdayReview.queueIndex];
+  if (!entry) return;
+  const kill_note = document.getElementById('tr-kill-note').value.trim();
+  const ok = await submitTuesdayReviewDecision(entry.concept.id, 'killed', {
+    kill_reason: tuesdayReviewKillReason || undefined,
+    kill_note: kill_note || undefined,
+  });
+  if (ok) closeModal('tr-kill-modal');
 }
 
 // ── Creative Toolkit / Creative Tools ─────────────────
