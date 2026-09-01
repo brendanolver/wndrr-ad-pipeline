@@ -5293,6 +5293,18 @@ async function markShootingShot(scheduleId) {
   }
 }
 
+// The reverse of markShootingShot -- for an accidental click, not a second
+// production status. Returns the Concept to Scheduled/draggable.
+async function unmarkShootingShot(scheduleId) {
+  try {
+    await api(`/shooting/${scheduleId}/unmark-shot`, { method: 'POST' });
+    toast('Unmarked as Shot');
+    refreshCurrentShootingView();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
 // Week grid card -- compact by design (per the brief: "Do NOT display the
 // entire Concept description..."). Shot cards stay visible and undraggable
 // (see the backend's status != 'shot' guard) so the calendar always shows
@@ -5306,7 +5318,7 @@ function shootingCardHtml(item) {
   const metaParts = [item.owner, item.location].filter(Boolean);
   const carriedBadge = item.carried_over ? `<span class="shoot-carried-badge">From W${isoWeekNumber(parseDateStr(item.original_week_start))}</span>` : '';
   const statusHtml = isShot
-    ? `<span class="shoot-status-pill shoot-status-pill-shot">&check; Shot</span>`
+    ? `<button type="button" class="shoot-status-pill shoot-status-pill-shot shoot-status-pill-toggle" onclick="event.stopPropagation(); unmarkShootingShot(${item.id})" title="Undo -- mark as not Shot">&check; Shot</button>`
     : `<button type="button" class="shoot-status-pill shoot-status-pill-toggle" onclick="event.stopPropagation(); markShootingShot(${item.id})" title="Mark as Shot">&#9675; Planned</button>`;
   const menuHtml = isShot ? '' : `
         <div class="shoot-card-menu" onclick="event.stopPropagation()">
