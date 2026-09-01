@@ -49,6 +49,16 @@ let state = {
   // own client-side status filter, applied over the same week's data with
   // no extra API call.
   conceptDev: { weekOffset: 0, data: null, view: 'list', currentItemId: null, filter: 'all' },
+  // Settings' configurable link-out resources (Meta Ad Library etc, seeded
+  // by default) -- see the Creative Toolkit section below. The ChatGPT
+  // Develop/Improve and Proven Winners cards are NOT in this list; they
+  // have real app logic (context-aware prompts, an internal view) a plain
+  // name/url resource can't represent, so they stay fixed toolkit cards.
+  creativeResources: [],
+  // Which product/concept the Creative Toolkit was opened from -- drives
+  // the context-aware ChatGPT prompts and whether "Improve This Concept"
+  // shows at all (only once a concept, not just a product, is in view).
+  creativeToolkit: { shootPlanItemId: null, conceptId: null },
 };
 let dashboardWeekOffset = 0;
 
@@ -182,7 +192,7 @@ function conceptDevWeekNumber() {
 async function loadAll() {
   try {
     const weekStart = planningWeekStart();
-    const [board, styles, categories, dashboard, dropsRes, provenWinners, coreRes, planningSettings, shootPlan, contentCreators, highStockRes, promotions, weeklyConfirmation, weeklyPlanningProgress, salesCadence, metaProductMappings, metaProductFamilies, conceptDev] = await Promise.all([
+    const [board, styles, categories, dashboard, dropsRes, provenWinners, coreRes, planningSettings, shootPlan, contentCreators, highStockRes, promotions, weeklyConfirmation, weeklyPlanningProgress, salesCadence, metaProductMappings, metaProductFamilies, conceptDev, creativeResources] = await Promise.all([
       api('/board'),
       api('/styles'),
       api('/categories'),
@@ -201,6 +211,7 @@ async function loadAll() {
       api('/meta-product-mappings'),
       api('/meta-product-mappings/product-families'),
       api(`/concept-development?week_start=${conceptDevWeekStart()}`),
+      api('/creative-resources'),
     ]);
     state.board = board;
     state.styles = styles;
@@ -223,6 +234,7 @@ async function loadAll() {
     state.metaProductMappings = metaProductMappings;
     state.metaProductFamilies = metaProductFamilies;
     state.conceptDev.data = conceptDev;
+    state.creativeResources = creativeResources;
     renderBoard();
     renderMissingAd();
     renderStylesTable();
@@ -232,6 +244,7 @@ async function loadAll() {
     renderDashboard();
     renderPlanning();
     renderProvenWinners();
+    renderCreativeResourcesSettings();
     renderCoreProducts();
     renderPlanningSettingsForm();
     renderContentCreators();
@@ -3709,6 +3722,7 @@ function renderConceptDevProductWorkspace(product) {
   return `
     <button type="button" class="link-btn cd-back-link" onclick="closeConceptDevProduct()">&larr; Back to Products</button>
     ${conceptDevWorkspaceHeaderHtml(product)}
+    <button type="button" class="link-btn cd-need-inspiration" onclick="openCreativeToolkit(${product.shoot_plan_item_id})">Need inspiration? 💡</button>
     ${!isProvenAssigned ? `<button type="button" class="btn btn-primary btn-sm cd-new-concept-btn" onclick="openAddConceptModal(${product.shoot_plan_item_id})">+ New Concept</button>` : ''}
     <div class="cd-concept-grid">
       ${product.concepts.length ? product.concepts.map(conceptDevConceptCardHtml).join('') : '<div class="attention-empty">No concepts yet.</div>'}
@@ -4080,6 +4094,223 @@ async function saveConceptDevModal(targetStatus) {
   }
 }
 
+// ── Creative Toolkit ──────────────────────────────────
+// Research/inspiration resources plus context-aware ChatGPT prompt
+// generation, reachable from the Concept Development landing page (💡
+// Creative Toolkit) and from inside a product/concept workspace (Need
+// inspiration?). Deliberately just a resource: it never writes anything
+// back into Concept Development itself -- Copy Prompt only puts text on
+// the clipboard, and the creator brings back whatever's actually worth
+// developing by hand. See creativeToolkitContext.js for how the prompts
+// themselves get built server-side from Planning's own data.
+async function ensureCreativeResourcesLoaded() {
+  if (state.creativeResources.length) return;
+  try {
+    state.creativeResources = await api('/creative-resources');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function renderCreativeToolkitModal() {
+  const list = document.getElementById('ct-resources-list');
+  const enabled = state.creativeResources.filter((r) => r.enabled);
+  list.innerHTML = enabled.length
+    ? enabled.map((r) => `
+        <div class="ct-card">
+          <div class="ct-card-name">${escapeHtml(r.name)}</div>
+          ${r.resource_type ? `<div class="ct-card-sub">${escapeHtml(r.resource_type)}</div>` : ''}
+          ${r.description ? `<div class="ct-card-helper">${escapeHtml(r.description)}</div>` : ''}
+          <div class="ct-card-actions">
+            <a class="btn btn-ghost btn-sm" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.cta_label)}</a>
+          </div>
+        </div>`).join('')
+    : '';
+  document.getElementById('ct-improve-card').style.display = state.creativeToolkit.conceptId ? '' : 'none';
+}
+
+// shootPlanItemId is required (every entry point knows which product it's
+// for); conceptId is only set when opened from inside a specific concept
+// (openCreativeToolkitFromConceptModal), which is what unlocks the
+// "Improve This Concept" card -- per the brief, that card only makes sense
+// once there's an existing concept to pressure-test.
+async function openCreativeToolkit(shootPlanItemId, conceptId = null) {
+  state.creativeToolkit = { shootPlanItemId, conceptId };
+  await ensureCreativeResourcesLoaded();
+  renderCreativeToolkitModal();
+  openModal('creative-toolkit-modal');
+}
+
+function openCreativeToolkitFromConceptModal() {
+  if (!conceptDevModalProduct) return;
+  openCreativeToolkit(conceptDevModalProduct.shoot_plan_item_id, conceptDevModalConceptId);
+}
+
+async function copyToolkitPrompt(type) {
+  const { shootPlanItemId, conceptId } = state.creativeToolkit;
+  if (!shootPlanItemId) return;
+  try {
+    const query = type === 'improve' && conceptId
+      ? `shoot_plan_item_id=${shootPlanItemId}&concept_id=${conceptId}`
+      : `shoot_plan_item_id=${shootPlanItemId}`;
+    const { prompt } = await api(`/creative-toolkit/prompt?${query}`);
+    await navigator.clipboard.writeText(prompt);
+    toast('Prompt copied — paste it into ChatGPT');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function openChatGpt() {
+  window.open('https://chat.openai.com/', '_blank', 'noopener');
+}
+
+function viewProvenWinnersFromToolkit() {
+  closeModal('creative-toolkit-modal');
+  switchTab('settings');
+  document.getElementById('pw-list').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ── Settings: Creative Resources ─────────────────────
+// Same rank/reorder/edit-modal pattern as Proven Winners just above --
+// see that section's comments for the reasoning, unchanged here.
+let crDragId = null;
+
+function renderCreativeResourcesSettings() {
+  const list = document.getElementById('cr-list');
+  if (!state.creativeResources.length) {
+    list.innerHTML = '<div class="attention-empty">No Creative Resources yet — add your first below.</div>';
+    return;
+  }
+  list.innerHTML = state.creativeResources.map((r, i) => `
+    <div class="pw-row" draggable="true" data-id="${r.id}">
+      <span class="pw-drag-handle" title="Drag to reorder">⠿</span>
+      <span class="pw-name ${r.enabled ? '' : 'inactive'}">${escapeHtml(r.name)}</span>
+      <span class="badge ${r.enabled ? 'badge-tested_proven' : 'badge-format'}">${r.enabled ? 'Enabled' : 'Disabled'}</span>
+      <button type="button" class="btn btn-ghost btn-sm" ${i === 0 ? 'disabled' : ''} onclick="moveCr(${r.id}, -1)" title="Move up">&uarr;</button>
+      <button type="button" class="btn btn-ghost btn-sm" ${i === state.creativeResources.length - 1 ? 'disabled' : ''} onclick="moveCr(${r.id}, 1)" title="Move down">&darr;</button>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="openCrModal(${r.id})">Edit</button>
+    </div>
+  `).join('');
+  wireCrDragEvents();
+}
+
+function wireCrDragEvents() {
+  document.querySelectorAll('#cr-list .pw-row').forEach((row) => {
+    row.addEventListener('dragstart', () => {
+      crDragId = Number(row.dataset.id);
+      row.classList.add('dragging');
+    });
+    row.addEventListener('dragend', () => {
+      row.classList.remove('dragging');
+      document.querySelectorAll('#cr-list .pw-row').forEach((r) => r.classList.remove('drag-over'));
+    });
+    row.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      row.classList.add('drag-over');
+    });
+    row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
+    row.addEventListener('drop', (e) => {
+      e.preventDefault();
+      row.classList.remove('drag-over');
+      const targetId = Number(row.dataset.id);
+      if (crDragId == null || crDragId === targetId) return;
+      const ids = state.creativeResources.map((r) => r.id);
+      const fromIdx = ids.indexOf(crDragId);
+      const toIdx = ids.indexOf(targetId);
+      if (fromIdx === -1 || toIdx === -1) return;
+      ids.splice(fromIdx, 1);
+      ids.splice(toIdx, 0, crDragId);
+      submitCrReorder(ids);
+    });
+  });
+}
+
+function moveCr(id, delta) {
+  const ids = state.creativeResources.map((r) => r.id);
+  const idx = ids.indexOf(id);
+  const swapWith = idx + delta;
+  if (idx === -1 || swapWith < 0 || swapWith >= ids.length) return;
+  [ids[idx], ids[swapWith]] = [ids[swapWith], ids[idx]];
+  submitCrReorder(ids);
+}
+
+async function submitCrReorder(orderedIds) {
+  try {
+    state.creativeResources = await api('/creative-resources/reorder', {
+      method: 'PUT',
+      body: JSON.stringify({ ordered_ids: orderedIds }),
+    });
+    renderCreativeResourcesSettings();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function openCrModal(id) {
+  const r = id ? state.creativeResources.find((x) => x.id === id) : null;
+  document.getElementById('cr-modal-title').textContent = r ? 'Edit Creative Resource' : 'New Creative Resource';
+  document.getElementById('cr-id').value = r ? r.id : '';
+  document.getElementById('cr-name').value = r ? r.name : '';
+  document.getElementById('cr-description').value = (r && r.description) || '';
+  document.getElementById('cr-url').value = r ? r.url : '';
+  document.getElementById('cr-type').value = (r && r.resource_type) || '';
+  document.getElementById('cr-cta-label').value = (r && r.cta_label) || 'Open ↗';
+  document.getElementById('cr-enabled-row').style.display = r ? 'flex' : 'none';
+  document.getElementById('cr-enabled').checked = r ? r.enabled : true;
+  document.getElementById('cr-delete-btn').style.display = r ? 'inline-block' : 'none';
+  openModal('cr-modal');
+}
+
+async function refreshCreativeResources() {
+  state.creativeResources = await api('/creative-resources');
+  renderCreativeResourcesSettings();
+}
+
+async function saveCr() {
+  const id = document.getElementById('cr-id').value;
+  const name = document.getElementById('cr-name').value;
+  const description = document.getElementById('cr-description').value || null;
+  const url = document.getElementById('cr-url').value;
+  const resource_type = document.getElementById('cr-type').value || null;
+  const cta_label = document.getElementById('cr-cta-label').value || null;
+  if (!name.trim()) return toast('Name is required', true);
+  if (!url.trim()) return toast('URL is required', true);
+
+  try {
+    if (id) {
+      await api(`/creative-resources/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ name, description, url, resource_type, cta_label, enabled: document.getElementById('cr-enabled').checked }),
+      });
+    } else {
+      await api('/creative-resources', {
+        method: 'POST',
+        body: JSON.stringify({ name, description, url, resource_type, cta_label }),
+      });
+    }
+    closeModal('cr-modal');
+    toast('Creative Resource saved');
+    refreshCreativeResources();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function deleteCr() {
+  const id = document.getElementById('cr-id').value;
+  if (!id) return;
+  if (!(await confirmDialog('Delete this Creative Resource?'))) return;
+  try {
+    await api(`/creative-resources/${id}`, { method: 'DELETE' });
+    closeModal('cr-modal');
+    toast('Creative Resource deleted');
+    refreshCreativeResources();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
 // ── Settings: Weekly New Concept Target ──────────────
 function renderPlanningSettingsForm() {
   if (!state.planningSettings) return;
@@ -4294,6 +4525,7 @@ async function deletePw() {
 }
 
 document.getElementById('pw-add-btn').addEventListener('click', () => openPwModal(null));
+document.getElementById('cr-add-btn').addEventListener('click', () => openCrModal(null));
 document.getElementById('weekly-target-save-btn').addEventListener('click', saveWeeklyTarget);
 document.getElementById('high-stock-min-soh-save-btn').addEventListener('click', saveHighStockMinSoh);
 document.getElementById('default-shoot-top-size-save-btn').addEventListener('click', () => saveDefaultShootSize('top'));

@@ -61,14 +61,18 @@ function salesTrendInfo(vel30, vel365) {
   return { display: `→ Sales ${Math.abs(pct)}%`, cls: 'core-trend-flat', reliable: true, pct };
 }
 
-router.get('/', async (req, res, next) => {
-  try {
-    const [am, settingsResult] = await Promise.all([
-      fetchAmData(),
-      pool.query('SELECT * FROM planning_settings WHERE id = 1'),
-    ]);
-    const settings = settingsResult.rows[0];
-    const minSoh = settings.high_stock_min_soh;
+// Extracted so the Creative Toolkit (creativeToolkitContext.js) can look up
+// one product's live SOH/sell-through/tier/freshness figures using the
+// exact same eligibility+computation logic the High Stock Planning step
+// itself uses, rather than a second, possibly-diverging copy. Returns the
+// same shape the route below responds with.
+async function computeHighStockProducts() {
+  const [am, settingsResult] = await Promise.all([
+    fetchAmData(),
+    pool.query('SELECT * FROM planning_settings WHERE id = 1'),
+  ]);
+  const settings = settingsResult.rows[0];
+  const minSoh = settings.high_stock_min_soh;
 
     const emptyResponse = () => ({
       products: [],
@@ -79,10 +83,10 @@ router.get('/', async (req, res, next) => {
     });
 
     if (!am.amConfigured || !am.amDetails || !am.amStock) {
-      return res.json(emptyResponse());
+      return emptyResponse();
     }
     if (!reportPipeline.configured()) {
-      return res.json(emptyResponse());
+      return emptyResponse();
     }
 
     const salesReady = apparelmagic.getAmCacheStatus().sales.hasData;
@@ -126,7 +130,7 @@ router.get('/', async (req, res, next) => {
       eligibleStyleCodes.push({ styleCode, soh, tierInfo, sellThrough7Pct: sellThrough7.pct });
     }
 
-    if (!eligibleStyleCodes.length) return res.json(emptyResponse());
+    if (!eligibleStyleCodes.length) return emptyResponse();
 
     // Check what's already locally tracked BEFORE inserting anything, so a
     // style excluded below never causes a wasted insert attempt.
@@ -160,7 +164,7 @@ router.get('/', async (req, res, next) => {
       return local.tier !== 'core_proven' && !(local.drop_id != null && upcomingDropIds.has(local.drop_id));
     });
 
-    if (!surviving.length) return res.json(emptyResponse());
+    if (!surviving.length) return emptyResponse();
 
     // Sync local styles rows ONLY for the surviving codes that don't
     // already have one -- idempotent, same pattern as syncCoreStylesFromAm.
@@ -304,16 +308,22 @@ router.get('/', async (req, res, next) => {
 
     products.sort((a, b) => b.soh - a.soh);
 
-    res.json({
+    return {
       products,
       min_soh: minSoh,
       apparelmagic: { configured: am.amConfigured, error: am.amError },
       sales_data: apparelmagic.getAmCacheStatus().sales,
       pipeline: { configured: reportPipeline.configured(), styleTiersStatus: reportPipeline.getPipelineCacheStatus().styleTiers },
-    });
+    };
+}
+
+router.get('/', async (req, res, next) => {
+  try {
+    const result = await computeHighStockProducts();
+    res.json(result);
   } catch (err) {
     next(err);
   }
 });
 
-module.exports = router;
+module.exports = { router, computeHighStockProducts };

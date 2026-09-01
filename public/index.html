@@ -373,6 +373,9 @@
           <button type="button" class="btn btn-ghost btn-sm" id="cd-this-week-btn" onclick="goToCurrentConceptDevWeek()" style="display:none;">This Week</button>
           <div class="planning-week-picker" id="cd-week-picker" style="display:none;"></div>
         </div>
+        <div class="planning-actions">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="openCreativeToolkit()">💡 Creative Toolkit</button>
+        </div>
       </div>
 
       <div id="concept-dev-list"></div>
@@ -461,6 +464,13 @@
       </div>
       <div id="pw-list" class="pw-list"></div>
       <button class="btn btn-primary btn-sm" id="pw-add-btn">+ Add Proven Winner</button>
+
+      <div class="planning-section-header">
+        <h2>Creative Resources</h2>
+        <span class="admin-note">Research/inspiration links shown in the Concept Development 💡 Creative Toolkit -- add, rename, reorder, disable or delete as needed.</span>
+      </div>
+      <div id="cr-list" class="pw-list"></div>
+      <button class="btn btn-primary btn-sm" id="cr-add-btn">+ Add Creative Resource</button>
 
       <div class="planning-section-header">
         <h2>Content Creators</h2>
@@ -754,6 +764,51 @@
   </div>
 </div>
 
+<!-- Creative Resources: the Creative Toolkit's configurable link-out
+     resources (Meta Ad Library, and whatever the team adds -- TikTok
+     Creative Center, Motion, Pinterest, Drive folders, competitor sites,
+     internal docs). The ChatGPT Develop/Improve and Proven Winners cards
+     shown in the same toolkit are NOT managed here -- they have real app
+     logic (context-aware prompts, an internal view) this plain name/url
+     shape can't represent. -->
+<div id="cr-modal" class="modal-backdrop">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="cr-modal-title">New Creative Resource</h3>
+      <button class="modal-close" onclick="closeModal('cr-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="cr-id">
+      <label>Name
+        <input type="text" id="cr-name" placeholder="e.g. TikTok Creative Center">
+      </label>
+      <label>Description <span class="hint">(optional)</span>
+        <input type="text" id="cr-description" placeholder="e.g. See what's trending right now.">
+      </label>
+      <label>URL
+        <input type="text" id="cr-url" placeholder="https://...">
+      </label>
+      <div class="field-row">
+        <label>Type <span class="hint">(short subtitle, optional)</span>
+          <input type="text" id="cr-type" placeholder="e.g. Inspiration">
+        </label>
+        <label>Button label
+          <input type="text" id="cr-cta-label" placeholder="Open ↗">
+        </label>
+      </div>
+      <label class="checkbox-label" id="cr-enabled-row" style="display:none;">
+        <input type="checkbox" id="cr-enabled">
+        Enabled (shown in the Creative Toolkit)
+      </label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-danger" id="cr-delete-btn" style="display:none;" onclick="deleteCr()">Delete</button>
+      <button class="btn btn-ghost" onclick="closeModal('cr-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveCr()">Save</button>
+    </div>
+  </div>
+</div>
+
 <!-- Monday Planning fast-path: decide a product needs shooting this week
      without the full Creative Job form (no talent/location/props/scripts
      yet -- that's handled later once a concept exists). -->
@@ -819,6 +874,7 @@
     </div>
     <div class="modal-body">
       <div class="cd-modal-context-compact" id="cd-modal-context"></div>
+      <button type="button" class="link-btn cd-need-inspiration" onclick="openCreativeToolkitFromConceptModal()">Need inspiration? 💡</button>
 
       <div class="cd-modal-section">
         <div class="cd-modal-section-title">The Idea</div>
@@ -889,6 +945,55 @@
       <button class="btn btn-ghost" onclick="closeModal('concept-dev-modal')">Cancel</button>
       <button class="btn btn-ghost" onclick="saveConceptDevModal('in_development')">Save Draft</button>
       <button class="btn btn-primary" onclick="saveConceptDevModal('ready_for_review')">Ready for Review &rarr;</button>
+    </div>
+  </div>
+</div>
+
+<!-- Creative Toolkit: research/inspiration resources plus context-aware
+     ChatGPT prompt generation for whichever product/concept it was opened
+     from (state.creativeToolkit.shootPlanItemId/conceptId, set by
+     openCreativeToolkit*). Deliberately lightweight -- an optional
+     resource, never a required workflow stage, and never writes anything
+     back into Concept Development itself; the creator always brings
+     worthwhile ideas back in by hand. -->
+<div id="creative-toolkit-modal" class="modal-backdrop">
+  <div class="modal ct-modal">
+    <div class="modal-header">
+      <h3>💡 Creative Toolkit</h3>
+      <button class="modal-close" onclick="closeModal('creative-toolkit-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div id="ct-resources-list" class="ct-card-list"></div>
+
+      <div class="ct-section-title">AI &amp; Creative Tools</div>
+
+      <div class="ct-card">
+        <div class="ct-card-name">ChatGPT &mdash; Develop Concepts</div>
+        <div class="ct-card-sub">Develop stronger creative directions</div>
+        <div class="ct-card-helper">Use the product and planning context to brainstorm considered creative concepts.</div>
+        <div class="ct-card-actions">
+          <button type="button" class="btn btn-primary btn-sm" onclick="copyToolkitPrompt('develop')">Copy Prompt</button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="openChatGpt()">Open ChatGPT &#8599;</button>
+        </div>
+      </div>
+
+      <div class="ct-card" id="ct-improve-card" style="display:none;">
+        <div class="ct-card-name">ChatGPT &mdash; Improve This Concept</div>
+        <div class="ct-card-helper">Pressure-test the idea and develop stronger executions or hooks.</div>
+        <div class="ct-card-actions">
+          <button type="button" class="btn btn-primary btn-sm" onclick="copyToolkitPrompt('improve')">Copy Prompt</button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="openChatGpt()">Open ChatGPT &#8599;</button>
+        </div>
+      </div>
+
+      <div class="ct-card">
+        <div class="ct-card-name">Proven Winners</div>
+        <div class="ct-card-sub">Review what's already working</div>
+        <div class="ct-card-helper">Browse WNDRR's proven creative concepts for inspiration.</div>
+        <div class="ct-card-actions">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="viewProvenWinnersFromToolkit()">View Winners &rarr;</button>
+        </div>
+      </div>
     </div>
   </div>
 </div>

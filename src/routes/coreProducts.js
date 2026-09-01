@@ -132,178 +132,188 @@ function buildAttention({ sohKnown, soh, onOrder, vel7, vel30, vel365, weeksCove
 
 const ATTENTION_ORDER = { needs_attention: 0, opportunity: 1, healthy: 2, product_review: 3 };
 
-router.get('/', async (req, res, next) => {
-  try {
-    const [am, settingsResult] = await Promise.all([
-      fetchAmData(),
-      pool.query('SELECT * FROM planning_settings WHERE id = 1'),
-    ]);
-    const settings = settingsResult.rows[0];
+// Extracted so the Creative Toolkit (creativeToolkitContext.js) can look up
+// one product's live SOH/sales/tier/freshness figures using the exact same
+// computation the Core Planning step itself uses, rather than a second,
+// possibly-diverging copy of this logic. Returns the same shape the route
+// below responds with.
+async function computeCoreProducts() {
+  const [am, settingsResult] = await Promise.all([
+    fetchAmData(),
+    pool.query('SELECT * FROM planning_settings WHERE id = 1'),
+  ]);
+  const settings = settingsResult.rows[0];
 
-    await syncCoreStylesFromAm(am.amDetails);
+  await syncCoreStylesFromAm(am.amDetails);
 
-    const stylesResult = await pool.query(`SELECT * FROM styles WHERE tier = 'core_proven' ORDER BY style_code ASC`);
-    // Live category check (not just at sync time) -- a style synced before
-    // this exclusion existed, or whose AM category changed since, is still
-    // excluded here.
-    const coreStyles = stylesResult.rows.filter((s) => {
-      const details = am.amDetails ? am.amDetails.get(s.style_code) : null;
-      return !apparelmagic.isAdExcludedCategory(details);
-    });
-    const styleIds = coreStyles.map((s) => s.id);
+  const stylesResult = await pool.query(`SELECT * FROM styles WHERE tier = 'core_proven' ORDER BY style_code ASC`);
+  // Live category check (not just at sync time) -- a style synced before
+  // this exclusion existed, or whose AM category changed since, is still
+  // excluded here.
+  const coreStyles = stylesResult.rows.filter((s) => {
+    const details = am.amDetails ? am.amDetails.get(s.style_code) : null;
+    return !apparelmagic.isAdExcludedCategory(details);
+  });
+  const styleIds = coreStyles.map((s) => s.id);
 
-    // getSalesByStyle()'s cache is stale-while-revalidate EXCEPT on a true
-    // cold start (no data at all yet), where it awaits the full ~730-request
-    // crawl -- warmAmCache() already fires that crawl in the background at
-    // boot, so only call it here once that first crawl has actually landed;
-    // otherwise skip for this request (velocity/weeks-cover just come back
-    // null) rather than blocking the whole Planning page load on it.
-    const salesReady = apparelmagic.getAmCacheStatus().sales.hasData;
-    const [salesByStyle, freshnessRows, productCadence] = await Promise.all([
-      am.amConfigured && salesReady ? apparelmagic.getSalesByStyle() : Promise.resolve(new Map()),
-      styleIds.length
-        ? pool.query(
-            `SELECT ca.style_id, MAX(sh.changed_at) AS last_live_at
-             FROM status_history sh
-             JOIN creative_assets ca ON ca.id = sh.creative_asset_id
-             WHERE sh.to_status = 'uploaded_live'
-               AND ca.concept_classification = 'new_experimental'
-               AND ca.style_id = ANY($1::int[])
-             GROUP BY ca.style_id`,
-            [styleIds]
-          )
-        : Promise.resolve({ rows: [] }),
-      // Product-level "Last 7D Sales" / "LY MTD vs This MTD" -- same Report
-      // Pipeline source Core's category-level Sales Cadence header already
-      // uses, just grouped by product_code instead of category. Degrades to
-      // an empty Map (every product's cadence.hasData: false) when the
-      // Report Pipeline isn't configured, same pattern as every other
-      // reportPipeline consumer.
-      reportPipeline.configured() ? reportPipeline.getProductSalesCadence() : Promise.resolve(new Map()),
-    ]);
-    const lastLiveByStyleId = new Map(freshnessRows.rows.map((r) => [r.style_id, r.last_live_at]));
+  // getSalesByStyle()'s cache is stale-while-revalidate EXCEPT on a true
+  // cold start (no data at all yet), where it awaits the full ~730-request
+  // crawl -- warmAmCache() already fires that crawl in the background at
+  // boot, so only call it here once that first crawl has actually landed;
+  // otherwise skip for this request (velocity/weeks-cover just come back
+  // null) rather than blocking the whole Planning page load on it.
+  const salesReady = apparelmagic.getAmCacheStatus().sales.hasData;
+  const [salesByStyle, freshnessRows, productCadence] = await Promise.all([
+    am.amConfigured && salesReady ? apparelmagic.getSalesByStyle() : Promise.resolve(new Map()),
+    styleIds.length
+      ? pool.query(
+          `SELECT ca.style_id, MAX(sh.changed_at) AS last_live_at
+           FROM status_history sh
+           JOIN creative_assets ca ON ca.id = sh.creative_asset_id
+           WHERE sh.to_status = 'uploaded_live'
+             AND ca.concept_classification = 'new_experimental'
+             AND ca.style_id = ANY($1::int[])
+           GROUP BY ca.style_id`,
+          [styleIds]
+        )
+      : Promise.resolve({ rows: [] }),
+    // Product-level "Last 7D Sales" / "LY MTD vs This MTD" -- same Report
+    // Pipeline source Core's category-level Sales Cadence header already
+    // uses, just grouped by product_code instead of category. Degrades to
+    // an empty Map (every product's cadence.hasData: false) when the
+    // Report Pipeline isn't configured, same pattern as every other
+    // reportPipeline consumer.
+    reportPipeline.configured() ? reportPipeline.getProductSalesCadence() : Promise.resolve(new Map()),
+  ]);
+  const lastLiveByStyleId = new Map(freshnessRows.rows.map((r) => [r.style_id, r.last_live_at]));
 
-    // Group colourways into their parent product family -- same
-    // deriveProductCode used by coverage.js, no new grouping logic.
-    const groups = new Map();
-    for (const style of coreStyles) {
-      const productCode = apparelmagic.deriveProductCode(style.style_code);
-      if (!groups.has(productCode)) groups.set(productCode, []);
-      groups.get(productCode).push(style);
+  // Group colourways into their parent product family -- same
+  // deriveProductCode used by coverage.js, no new grouping logic.
+  const groups = new Map();
+  for (const style of coreStyles) {
+    const productCode = apparelmagic.deriveProductCode(style.style_code);
+    if (!groups.has(productCode)) groups.set(productCode, []);
+    groups.get(productCode).push(style);
+  }
+
+  const rawProducts = [...groups.entries()].map(([productCode, members]) => {
+    let soh = 0;
+    let onOrder = 0;
+    let sohKnown = false;
+    let qty7 = 0;
+    let qty30 = 0;
+    let qty365 = 0;
+    let lastLiveAt = null;
+    const colours = [];
+
+    for (const style of members) {
+      const styleSoh = am.amStock ? am.amStock.get(style.style_code) ?? 0 : null;
+      if (styleSoh != null) { soh += styleSoh; sohKnown = true; }
+      const styleOnOrder = am.amOnOrder ? am.amOnOrder.get(style.style_code) ?? 0 : null;
+      if (styleOnOrder != null) onOrder += styleOnOrder;
+
+      const sales = salesByStyle.get(style.style_code);
+      if (sales) { qty7 += sales.qty7; qty30 += sales.qty30; qty365 += sales.qty365; }
+
+      const liveAt = lastLiveByStyleId.get(style.id);
+      if (liveAt && (!lastLiveAt || liveAt > lastLiveAt)) lastLiveAt = liveAt;
+
+      const details = am.amDetails ? am.amDetails.get(style.style_code) : null;
+      const sizing = apparelmagic.resolveStyleSizing(am.amDetails, am.amSizeRanges, style.style_code);
+      colours.push({
+        style_id: style.id,
+        style_code: style.style_code,
+        image_url: details?.imageUrl || null,
+        soh: styleSoh,
+        on_order: styleOnOrder,
+        colour_label: apparelmagic.resolveColourLabel(am.amDetails, style.style_code),
+        sizes: sizing.sizes,
+        sizing_system: sizing.system,
+      });
     }
 
-    const rawProducts = [...groups.entries()].map(([productCode, members]) => {
-      let soh = 0;
-      let onOrder = 0;
-      let sohKnown = false;
-      let qty7 = 0;
-      let qty30 = 0;
-      let qty365 = 0;
-      let lastLiveAt = null;
-      const colours = [];
+    const first = members[0];
+    const firstDetails = am.amDetails ? am.amDetails.get(first.style_code) : null;
+    const vel7 = qty7; // already a weekly figure (7 days)
+    const vel30 = qty30 / 30 * 7;
+    const vel365 = qty365 / 365 * 7;
+    const weeksCover = vel30 > 0 && sohKnown ? +(soh / vel30).toFixed(1) : null;
+    const daysSinceLastNewConcept = lastLiveAt
+      ? Math.floor((Date.now() - new Date(lastLiveAt).getTime()) / 86400000)
+      : null;
 
-      for (const style of members) {
-        const styleSoh = am.amStock ? am.amStock.get(style.style_code) ?? 0 : null;
-        if (styleSoh != null) { soh += styleSoh; sohKnown = true; }
-        const styleOnOrder = am.amOnOrder ? am.amOnOrder.get(style.style_code) ?? 0 : null;
-        if (styleOnOrder != null) onOrder += styleOnOrder;
+    const cadenceRow = productCadence.get(productCode);
+    const cadence = cadenceRow
+      ? { has_data: true, ...cadenceRow }
+      : { has_data: false, this_period_units: null, last_year_units: null, pct_change: null, last_7d_units: null, last_7d_pct_change: null };
 
-        const sales = salesByStyle.get(style.style_code);
-        if (sales) { qty7 += sales.qty7; qty30 += sales.qty30; qty365 += sales.qty365; }
+    return {
+      product_code: productCode,
+      product_name: firstDetails?.productName || first.name,
+      category: firstDetails?.category || 'UNCATEGORISED',
+      colours,
+      soh: sohKnown ? soh : null,
+      on_order: am.amOnOrder ? onOrder : null,
+      qty365,
+      vel7: +vel7.toFixed(1),
+      vel30: +vel30.toFixed(1),
+      vel365: +vel365.toFixed(1),
+      weeks_cover: weeksCover,
+      days_since_last_new_concept: daysSinceLastNewConcept,
+      cadence,
+      sohKnown,
+    };
+  });
 
-        const liveAt = lastLiveByStyleId.get(style.id);
-        if (liveAt && (!lastLiveAt || liveAt > lastLiveAt)) lastLiveAt = liveAt;
-
-        const details = am.amDetails ? am.amDetails.get(style.style_code) : null;
-        const sizing = apparelmagic.resolveStyleSizing(am.amDetails, am.amSizeRanges, style.style_code);
-        colours.push({
-          style_id: style.id,
-          style_code: style.style_code,
-          image_url: details?.imageUrl || null,
-          soh: styleSoh,
-          on_order: styleOnOrder,
-          colour_label: apparelmagic.resolveColourLabel(am.amDetails, style.style_code),
-          sizes: sizing.sizes,
-          sizing_system: sizing.system,
-        });
-      }
-
-      const first = members[0];
-      const firstDetails = am.amDetails ? am.amDetails.get(first.style_code) : null;
-      const vel7 = qty7; // already a weekly figure (7 days)
-      const vel30 = qty30 / 30 * 7;
-      const vel365 = qty365 / 365 * 7;
-      const weeksCover = vel30 > 0 && sohKnown ? +(soh / vel30).toFixed(1) : null;
-      const daysSinceLastNewConcept = lastLiveAt
-        ? Math.floor((Date.now() - new Date(lastLiveAt).getTime()) / 86400000)
-        : null;
-
-      const cadenceRow = productCadence.get(productCode);
-      const cadence = cadenceRow
-        ? { has_data: true, ...cadenceRow }
-        : { has_data: false, this_period_units: null, last_year_units: null, pct_change: null, last_7d_units: null, last_7d_pct_change: null };
-
-      return {
-        product_code: productCode,
-        product_name: firstDetails?.productName || first.name,
-        category: firstDetails?.category || 'UNCATEGORISED',
-        colours,
-        soh: sohKnown ? soh : null,
-        on_order: am.amOnOrder ? onOrder : null,
-        qty365,
-        vel7: +vel7.toFixed(1),
-        vel30: +vel30.toFixed(1),
-        vel365: +vel365.toFixed(1),
-        weeks_cover: weeksCover,
-        days_since_last_new_concept: daysSinceLastNewConcept,
-        cadence,
-        sohKnown,
-      };
+  const boundaries = computeTierBoundaries(rawProducts.map((p) => p.qty365));
+  const products = rawProducts.map((p) => {
+    const tier = tierForQty(p.qty365, boundaries);
+    const attention = buildAttention({
+      sohKnown: p.sohKnown,
+      soh: p.soh || 0,
+      onOrder: p.on_order || 0,
+      vel7: p.vel7,
+      vel30: p.vel30,
+      vel365: p.vel365,
+      weeksCover: p.weeks_cover,
+      daysSinceLastNewConcept: p.days_since_last_new_concept,
+      tier,
     });
+    const { sohKnown, ...rest } = p;
+    return { ...rest, tier, ...attention };
+  });
+  products.sort((a, b) => ATTENTION_ORDER[a.flag] - ATTENTION_ORDER[b.flag]);
 
-    const boundaries = computeTierBoundaries(rawProducts.map((p) => p.qty365));
-    const products = rawProducts.map((p) => {
-      const tier = tierForQty(p.qty365, boundaries);
-      const attention = buildAttention({
-        sohKnown: p.sohKnown,
-        soh: p.soh || 0,
-        onOrder: p.on_order || 0,
-        vel7: p.vel7,
-        vel30: p.vel30,
-        vel365: p.vel365,
-        weeksCover: p.weeks_cover,
-        daysSinceLastNewConcept: p.days_since_last_new_concept,
-        tier,
-      });
-      const { sohKnown, ...rest } = p;
-      return { ...rest, tier, ...attention };
-    });
-    products.sort((a, b) => ATTENTION_ORDER[a.flag] - ATTENTION_ORDER[b.flag]);
+  // Creative Jobs (which this used to count) is retired -- the still-active
+  // concept-production pipeline is creative_assets, so a "new concept
+  // planned this week" is now a new_experimental asset on a Core-tier
+  // style, created this week.
+  const weeklyCountResult = await pool.query(
+    `SELECT COUNT(*)::int AS count FROM creative_assets ca
+     JOIN styles s ON s.id = ca.style_id
+     WHERE ca.concept_classification = 'new_experimental' AND s.tier = 'core_proven'
+       AND ca.created_at >= date_trunc('week', now())`
+  );
+  const weeklyPlanned = weeklyCountResult.rows[0].count;
+  const weeklyTarget = settings.weekly_new_concept_target;
 
-    // Creative Jobs (which this used to count) is retired -- the still-active
-    // concept-production pipeline is creative_assets, so a "new concept
-    // planned this week" is now a new_experimental asset on a Core-tier
-    // style, created this week.
-    const weeklyCountResult = await pool.query(
-      `SELECT COUNT(*)::int AS count FROM creative_assets ca
-       JOIN styles s ON s.id = ca.style_id
-       WHERE ca.concept_classification = 'new_experimental' AND s.tier = 'core_proven'
-         AND ca.created_at >= date_trunc('week', now())`
-    );
-    const weeklyPlanned = weeklyCountResult.rows[0].count;
-    const weeklyTarget = settings.weekly_new_concept_target;
+  return {
+    products,
+    weekly_target: weeklyTarget,
+    weekly_planned: weeklyPlanned,
+    weekly_remaining: Math.max(0, weeklyTarget - weeklyPlanned),
+    apparelmagic: { configured: am.amConfigured, error: am.amError },
+    sales_data: apparelmagic.getAmCacheStatus().sales,
+  };
+}
 
-    res.json({
-      products,
-      weekly_target: weeklyTarget,
-      weekly_planned: weeklyPlanned,
-      weekly_remaining: Math.max(0, weeklyTarget - weeklyPlanned),
-      apparelmagic: { configured: am.amConfigured, error: am.amError },
-      sales_data: apparelmagic.getAmCacheStatus().sales,
-    });
+router.get('/', async (req, res, next) => {
+  try {
+    const result = await computeCoreProducts();
+    res.json(result);
   } catch (err) {
     next(err);
   }
 });
 
-module.exports = router;
+module.exports = { router, computeCoreProducts };
