@@ -1210,33 +1210,51 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .shoot-panel.active{display:block;}
 
 .shoot-owner-filter{background:white;border:1px solid var(--border);border-radius:var(--r);padding:6px 10px;font-family:inherit;font-size:12.5px;font-weight:600;color:var(--text-secondary);cursor:pointer;}
-.shoot-summary-line{font-size:12.5px;font-weight:600;color:var(--text-secondary);margin:2px 0 14px;}
+
+/* Planned/Shot/Remaining -- a compact summary line, not KPI cards (see the
+   brief: "the calendar is the main interface"). Each number is bolded up a
+   size from its label so the three counts are readable at a glance without
+   growing into their own boxes. */
+.shoot-summary-line{display:flex;align-items:baseline;gap:16px;margin:2px 0 14px;}
+.shoot-summary-stat{font-size:12.5px;font-weight:600;color:var(--text-secondary);}
+.shoot-summary-stat strong{font-size:14.5px;font-weight:800;color:var(--text);margin-right:4px;}
 .shoot-today-title{font-size:18px;font-weight:800;margin:0;}
 
 /* Unscheduled sits above the weekday grid as its own bordered strip -- a
    deliberately different container than the day columns below, so it never
-   looks like "day 0" of the week. */
+   looks like "day 0" of the week. Collapses to a single compact row when
+   empty (see the brief: "do not display a large empty container") -- the
+   .open drop target still spans the whole element either way, so a card can
+   always be dragged back to Unscheduled even while it's showing collapsed. */
 .shoot-unscheduled{background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-lg);padding:12px;margin-bottom:14px;}
+.shoot-unscheduled-compact{padding:8px 12px;}
+.shoot-unscheduled-compact .shoot-unscheduled-header{margin-bottom:0;}
 .shoot-unscheduled-header{font-size:11px;font-weight:800;letter-spacing:0.5px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;}
 .shoot-unscheduled-count{font-weight:600;text-transform:none;letter-spacing:0;color:var(--text-secondary);margin-left:4px;}
-.shoot-unscheduled-list{display:flex;flex-wrap:wrap;gap:10px;min-height:20px;}
+.shoot-unscheduled-list{display:flex;flex-wrap:wrap;gap:10px;min-height:20px;margin-top:8px;}
 .shoot-unscheduled-list .shoot-card{width:220px;}
 
-.shoot-week-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;}
+/* Weekday columns: a sensible minimum so an empty week never reads as a
+   half-empty page, but no fixed tall height -- CSS grid's default row
+   stretch makes every column match whichever day has the most cards, so a
+   busy week grows naturally without any column looking artificially short
+   or artificially padded out. */
+.shoot-week-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;align-items:stretch;}
 @media (max-width:1100px){.shoot-week-grid{grid-template-columns:repeat(2,1fr);}}
 @media (max-width:640px){.shoot-week-grid{grid-template-columns:1fr;}}
-.shoot-day-column{background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-lg);padding:10px;min-height:80px;}
-.shoot-day-header{font-size:11px;font-weight:800;letter-spacing:0.5px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;}
-.shoot-day-cards{display:flex;flex-direction:column;gap:8px;}
-.shoot-day-empty{font-size:12px;color:var(--text-muted);text-align:center;padding:10px 0;}
+.shoot-day-column{background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-lg);padding:8px;min-height:54px;}
+.shoot-day-header{font-size:10.5px;font-weight:800;letter-spacing:0.4px;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px;white-space:nowrap;}
+.shoot-day-cards{display:flex;flex-direction:column;gap:6px;}
+.shoot-day-empty{font-size:11.5px;color:var(--text-muted);text-align:center;padding:6px 0;}
 
 /* One Concept, not one Product -- compact by design (see the brief: "Do
    NOT display the entire Concept description..."). Shot cards stay fully
    visible (never removed, per the brief) but visually settled -- a green
-   left border and slightly muted body text, not greyed-out/disabled. */
-.shoot-card{background:white;border:1px solid var(--border);border-left:3px solid var(--border);border-radius:var(--r);padding:10px;display:flex;flex-direction:column;gap:6px;cursor:grab;}
+   left border, the day-column's own grey fill instead of white, and a
+   "✓ Shot" status label; never greyed-out/disabled or hard to read. */
+.shoot-card{background:white;border:1px solid var(--border);border-left:3px solid var(--border);border-radius:var(--r);padding:9px 10px;display:flex;flex-direction:column;gap:5px;cursor:grab;}
 .shoot-card:active{cursor:grabbing;}
-.shoot-card-shot{border-left-color:var(--green);cursor:default;}
+.shoot-card-shot{border-left-color:var(--green);cursor:default;background:var(--surface2);}
 .shoot-card-name{font-weight:700;font-size:12.5px;}
 .shoot-card-product{font-size:11.5px;color:var(--text-secondary);}
 .shoot-card-meta{font-size:11px;color:var(--text-muted);}
@@ -1244,8 +1262,22 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .shoot-card-status{font-size:10.5px;font-weight:700;color:var(--text-muted);}
 .shoot-card-status-shot{color:var(--green);}
 .shoot-carried-badge{font-size:10px;font-weight:700;color:var(--amber);background:var(--amber-light);border-radius:var(--r-pill);padding:1px 7px;}
+
+/* Card footer: "View Brief →" is the one primary, always-visible action;
+   moving days lives behind a quiet "•••" overflow menu instead of a
+   permanently-visible dropdown, so the two never compete for attention (see
+   the brief: "View Brief... the primary card action"). Drag-and-drop still
+   works exactly as before -- the menu is purely the non-drag alternative. */
 .shoot-card-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:2px;}
-.shoot-move-select{font-family:inherit;font-size:11px;font-weight:600;color:var(--text-secondary);background:var(--surface2);border:1px solid var(--border);border-radius:var(--r);padding:3px 6px;max-width:130px;}
+.shoot-card-menu{position:relative;}
+.shoot-card-menu-btn{background:none;border:none;font-family:inherit;font-size:13px;font-weight:700;letter-spacing:1px;color:var(--text-muted);cursor:pointer;padding:2px 7px;border-radius:var(--r);line-height:1.4;}
+.shoot-card-menu-btn:hover{background:var(--border);color:var(--text-secondary);}
+.shoot-card-menu-dropdown{display:none;position:absolute;right:0;bottom:calc(100% + 4px);background:white;border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--shadow);padding:4px;min-width:150px;z-index:20;}
+.shoot-card-menu-dropdown.open{display:flex;flex-direction:column;}
+.shoot-card-menu-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);padding:5px 8px 3px;}
+.shoot-card-menu-item{background:none;border:none;font-family:inherit;font-size:12px;font-weight:600;color:var(--text);text-align:left;padding:6px 8px;border-radius:var(--r);cursor:pointer;white-space:nowrap;}
+.shoot-card-menu-item:hover{background:var(--surface2);}
+.shoot-card-menu-item-carry{border-top:1px solid var(--border);margin-top:3px;padding-top:8px;color:var(--text-secondary);}
 
 /* Today's worklist -- a plain vertical list, not the week grid's columns,
    since there's only ever one day's worth of cards here. */

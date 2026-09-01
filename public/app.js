@@ -5050,6 +5050,18 @@ async function submitTuesdayReviewKill() {
 // as those two: navigating one page's week must never move another's).
 const SHOOT_DAY_KEYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'];
 const SHOOT_DAY_LABELS = { monday: 'Monday', tuesday: 'Tuesday', wednesday: 'Wednesday', thursday: 'Thursday', friday: 'Friday' };
+const SHOOT_DAY_SHORT_LABELS = { monday: 'MON', tuesday: 'TUE', wednesday: 'WED', thursday: 'THU', friday: 'FRI' };
+
+// "MON 31 AUG" -- computed from the week actually being browsed (not
+// "today"), so this stays correct when a manager navigates to a past or
+// future week rather than only ever labelling the current one.
+function shootingDayHeaderLabel(day) {
+  const monday = mondayOfWeek(state.shooting.weekOffset);
+  const d = new Date(monday);
+  d.setDate(monday.getDate() + SHOOT_DAY_KEYS.indexOf(day));
+  const month = d.toLocaleDateString('en-AU', { month: 'short' }).toUpperCase().slice(0, 3);
+  return `${SHOOT_DAY_SHORT_LABELS[day]} ${d.getDate()} ${month}`;
+}
 
 function shootingWeekStart() {
   return isoDateStr(mondayOfWeek(state.shooting.weekOffset));
@@ -5193,16 +5205,37 @@ function shootingHookPreview(item) {
 // brief: "drag-and-drop must NOT be the only way". Carry to next week is
 // listed for every card, not just ones sitting unfinished in a past week --
 // V1 keeps this a deliberate team decision rather than date-gating it.
-function shootingMoveOptionsHtml(item) {
-  const options = ['<option value="" selected disabled>Move to…</option>'];
-  for (const day of SHOOT_DAY_KEYS) {
-    if (day === item.scheduled_day) continue;
-    options.push(`<option value="${day}">${SHOOT_DAY_LABELS[day]}</option>`);
-  }
-  if (item.scheduled_day) options.push('<option value="unscheduled">Unscheduled</option>');
-  options.push('<option value="carry_next_week">Carry to next week &rarr;</option>');
-  return options.join('');
+// Rendered into the "•••" overflow menu (see shootingCardHtml) rather than
+// a permanently-visible dropdown, so the card footer stays quiet until
+// someone actually wants to move something.
+function shootingMoveMenuItemsHtml(item) {
+  const dayItems = SHOOT_DAY_KEYS
+    .filter((day) => day !== item.scheduled_day)
+    .map((day) => `<button type="button" class="shoot-card-menu-item" onclick="moveShootingCard(${item.id}, '${day}', '${item.scheduled_week_start}'); closeAllShootCardMenus();">${SHOOT_DAY_LABELS[day]}</button>`)
+    .join('');
+  const unscheduledItem = item.scheduled_day
+    ? `<button type="button" class="shoot-card-menu-item" onclick="moveShootingCard(${item.id}, 'unscheduled', '${item.scheduled_week_start}'); closeAllShootCardMenus();">Unscheduled</button>`
+    : '';
+  const carryItem = `<button type="button" class="shoot-card-menu-item shoot-card-menu-item-carry" onclick="moveShootingCard(${item.id}, 'carry_next_week', '${item.scheduled_week_start}'); closeAllShootCardMenus();">Carry to next week &rarr;</button>`;
+  return `<div class="shoot-card-menu-label">Move to</div>${dayItems}${unscheduledItem}${carryItem}`;
 }
+
+function toggleShootCardMenu(id) {
+  const dropdown = document.getElementById(`shoot-card-menu-${id}`);
+  if (!dropdown) return;
+  const isOpen = dropdown.classList.contains('open');
+  closeAllShootCardMenus();
+  if (!isOpen) dropdown.classList.add('open');
+}
+
+function closeAllShootCardMenus() {
+  document.querySelectorAll('.shoot-card-menu-dropdown.open').forEach((el) => el.classList.remove('open'));
+}
+
+document.addEventListener('click', (e) => {
+  if (e.target.closest('.shoot-card-menu')) return;
+  closeAllShootCardMenus();
+});
 
 async function moveShootingCard(scheduleId, value, currentWeekStart) {
   try {
@@ -5259,6 +5292,11 @@ function shootingCardHtml(item) {
   const isShot = item.status === 'shot';
   const metaParts = [item.owner, item.location].filter(Boolean);
   const carriedBadge = item.carried_over ? `<span class="shoot-carried-badge">From W${isoWeekNumber(parseDateStr(item.original_week_start))}</span>` : '';
+  const menuHtml = isShot ? '' : `
+        <div class="shoot-card-menu">
+          <button type="button" class="shoot-card-menu-btn" onclick="event.stopPropagation(); toggleShootCardMenu(${item.id})" aria-label="Move concept">&bull;&bull;&bull;</button>
+          <div class="shoot-card-menu-dropdown" id="shoot-card-menu-${item.id}">${shootingMoveMenuItemsHtml(item)}</div>
+        </div>`;
   return `
     <div class="shoot-card ${isShot ? 'shoot-card-shot' : ''}" ${isShot ? '' : 'draggable="true"'} ondragstart="onShootCardDragStart(event, ${item.id})">
       <div class="shoot-card-name">${escapeHtml(item.concept_name)}</div>
@@ -5270,29 +5308,47 @@ function shootingCardHtml(item) {
       </div>
       <div class="shoot-card-actions">
         <button type="button" class="link-btn" onclick="openShootingBrief(${item.id})">View Brief &rarr;</button>
-        ${isShot ? '' : `<select class="shoot-move-select" onchange="moveShootingCard(${item.id}, this.value, '${item.scheduled_week_start}'); this.selectedIndex=0;">${shootingMoveOptionsHtml(item)}</select>`}
+        ${menuHtml}
       </div>
     </div>`;
 }
 
+// Summary + Unscheduled + calendar are all derived from the SAME
+// owner-filtered item lists here, rather than the server's unfiltered
+// data.summary -- so switching the Owner filter updates the Planned/Shot/
+// Remaining counts too, not just which cards are visible.
 function renderShootingWeekView() {
   const data = state.shooting.data;
   if (!data) return;
-  const summary = data.summary || { planned: 0, shot: 0, remaining: 0 };
-  document.getElementById('shoot-week-summary').textContent = `${summary.planned} Planned · ${summary.shot} Shot · ${summary.remaining} Remaining`;
 
   const unscheduled = (data.unscheduled || []).filter(shootingOwnerMatches);
-  document.getElementById('shoot-unscheduled').innerHTML = `
-    <div class="shoot-unscheduled-header">Unscheduled <span class="shoot-unscheduled-count">${unscheduled.length} concept${unscheduled.length === 1 ? '' : 's'}</span></div>
-    <div class="shoot-unscheduled-list" ondragover="onShootColumnDragOver(event)" ondrop="onShootColumnDrop(event, null)">
-      ${unscheduled.length ? unscheduled.map((item) => shootingCardHtml(item)).join('') : '<div class="attention-empty">Nothing unscheduled.</div>'}
-    </div>`;
+  const dayItems = {};
+  let planned = 0;
+  let shot = 0;
+  SHOOT_DAY_KEYS.forEach((day) => {
+    const items = ((data.days && data.days[day]) || []).filter(shootingOwnerMatches);
+    dayItems[day] = items;
+    planned += items.length;
+    shot += items.filter((i) => i.status === 'shot').length;
+  });
+
+  document.getElementById('shoot-week-summary').innerHTML = `
+    <span class="shoot-summary-stat"><strong>${planned}</strong> Planned</span>
+    <span class="shoot-summary-stat"><strong>${shot}</strong> Shot</span>
+    <span class="shoot-summary-stat"><strong>${planned - shot}</strong> Remaining</span>`;
+
+  const unscheduledEl = document.getElementById('shoot-unscheduled');
+  unscheduledEl.classList.toggle('shoot-unscheduled-compact', unscheduled.length === 0);
+  unscheduledEl.innerHTML = unscheduled.length ? `
+    <div class="shoot-unscheduled-header">Unscheduled <span class="shoot-unscheduled-count">${unscheduled.length}</span></div>
+    <div class="shoot-unscheduled-list">${unscheduled.map((item) => shootingCardHtml(item)).join('')}</div>`
+    : `<div class="shoot-unscheduled-header">Unscheduled <span class="shoot-unscheduled-count">0</span></div>`;
 
   document.getElementById('shoot-week-grid').innerHTML = SHOOT_DAY_KEYS.map((day) => {
-    const items = ((data.days && data.days[day]) || []).filter(shootingOwnerMatches);
+    const items = dayItems[day];
     return `
       <div class="shoot-day-column" ondragover="onShootColumnDragOver(event)" ondrop="onShootColumnDrop(event, '${day}')">
-        <div class="shoot-day-header">${SHOOT_DAY_LABELS[day]}</div>
+        <div class="shoot-day-header">${shootingDayHeaderLabel(day)}</div>
         <div class="shoot-day-cards">
           ${items.length ? items.map((item) => shootingCardHtml(item)).join('') : '<div class="shoot-day-empty">—</div>'}
         </div>
