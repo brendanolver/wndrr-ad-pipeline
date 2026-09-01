@@ -169,7 +169,11 @@ function switchTab(name) {
   if (name === 'shooting') refreshCurrentShootingView();
 }
 
-document.querySelectorAll('.tab-btn').forEach((btn) => {
+// [data-tab] guard: the sidebar also holds non-tab .tab-btn entries (styled
+// the same, but opening a modal via their own onclick instead of switching
+// a panel -- see the Reference Library link in index.html), which must not
+// get wired into switchTab.
+document.querySelectorAll('.tab-btn[data-tab]').forEach((btn) => {
   btn.addEventListener('click', () => switchTab(btn.dataset.tab));
 });
 

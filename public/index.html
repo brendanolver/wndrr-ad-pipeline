@@ -41,6 +41,11 @@
       <button class="tab-btn" data-tab="shooting"><span class="sidebar-nav-icon">🎬</span>Shooting</button>
       <button class="tab-btn" data-tab="board"><span class="sidebar-nav-icon">▤</span>Board</button>
       <button class="tab-btn" data-tab="admin"><span class="sidebar-nav-icon">🏷</span>Styles &amp; Categories</button>
+      <!-- Not a real tab (no data-tab / tab-panel) -- opens the Reference
+           Library modal directly, same shared library as the Creative
+           Toolkit/Creative Tools entry points. See the [data-tab] guard on
+           the .tab-btn click wiring in app.js. -->
+      <button class="tab-btn" onclick="openReferenceLibraryFromToolkit()"><span class="sidebar-nav-icon">📚</span>Reference Library</button>
       <button class="tab-btn" data-tab="settings"><span class="sidebar-nav-icon">⚙</span>Settings</button>
     </nav>
     <div class="sidebar-footer">
