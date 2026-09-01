@@ -4557,6 +4557,25 @@ function tuesdayReviewAvatarLabel(concept) {
   return null;
 }
 
+// One-line "before you scroll" briefing for the review modal -- pulls
+// together the pieces of context otherwise scattered across the sections
+// below (Audience, Hook count, Reference count, Talent, Location) so the
+// team has quick orientation before reviewing the detail. Deliberately
+// skips anything already shown in the product context line right above it
+// (product/source/pathway/Owner), and omits any part with no data rather
+// than showing a placeholder.
+function tuesdayReviewSummaryLineText(concept) {
+  const hookCount = (Array.isArray(concept.hook_variations) ? concept.hook_variations : []).filter((h) => h && h.text && h.text.trim()).length;
+  const refCount = (Array.isArray(concept.reference_items) ? concept.reference_items : []).filter((r) => r && r.url).length;
+  return [
+    tuesdayReviewAvatarLabel(concept),
+    hookCount ? `${hookCount} Hook${hookCount === 1 ? '' : 's'}` : null,
+    refCount ? `${refCount} Reference${refCount === 1 ? '' : 's'}` : null,
+    concept.talent_requirement || null,
+    concept.location || null,
+  ].filter(Boolean).join(' · ');
+}
+
 // Agenda-card, not a brief -- name/avatar/idea preview/opening/status only,
 // per the brief. Full detail only appears once "Review Concept" is clicked.
 function tuesdayReviewConceptCardHtml(concept) {
@@ -4675,6 +4694,10 @@ function renderTuesdayReviewConcept() {
   statusPill.textContent = CONCEPT_DEV_STATUS_LABELS[concept.concept_dev_status] || concept.concept_dev_status;
 
   document.getElementById('tr-review-product-context').textContent = [product.product_name, tuesdayReviewProductMetaText(product)].filter(Boolean).join(' · ');
+  const summaryLineEl = document.getElementById('tr-review-summary-line');
+  const summaryLineText = tuesdayReviewSummaryLineText(concept);
+  summaryLineEl.textContent = summaryLineText;
+  summaryLineEl.style.display = summaryLineText ? '' : 'none';
 
   document.getElementById('tr-review-angle').textContent = concept.angle && concept.angle.trim() ? concept.angle.trim() : 'No Angle / Idea provided';
 
