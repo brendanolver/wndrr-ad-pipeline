@@ -37,6 +37,28 @@ const SUMMARY_SELECT = `
   LEFT JOIN shoot_plan_items spi ON spi.id = ca.shoot_plan_item_id
 `;
 
+// Approved concepts normally get their shoot_schedule row the instant Tuesday
+// Review approves them (see conceptDevelopment.js's PATCH /concepts/:id/review).
+// That only fires at the moment of the transition though, so anything
+// approved before that handoff existed -- or through any future path that
+// bypasses it -- would otherwise sit in Concept Dev forever with no way into
+// Shooting. Same self-healing-on-read pattern as Concept Development's
+// generateOrTopUpPlan: every read here first guarantees every approved
+// concept has a schedule row, so there's nothing to backfill or migrate by
+// hand -- the next load just fixes it.
+async function backfillApprovedConcepts() {
+  await pool.query(
+    `INSERT INTO shoot_schedule (creative_asset_id, status, original_week_start, scheduled_week_start)
+     SELECT ca.id, 'unscheduled',
+            COALESCE(spi.week_start, date_trunc('week', now())::date),
+            COALESCE(spi.week_start, date_trunc('week', now())::date)
+     FROM creative_assets ca
+     LEFT JOIN shoot_plan_items spi ON spi.id = ca.shoot_plan_item_id
+     WHERE ca.concept_dev_status = 'approved'
+     ON CONFLICT (creative_asset_id) DO NOTHING`
+  );
+}
+
 // Week View's entire payload in one call: the Unscheduled bucket plus each
 // weekday's cards, already bucketed server-side so the frontend just
 // renders what it's given. "Planned" in the header summary only counts
@@ -49,6 +71,7 @@ router.get('/', async (req, res, next) => {
     if (weekStart !== undefined && !WEEK_RE.test(weekStart)) {
       return res.status(400).json({ error: 'week_start must be YYYY-MM-DD' });
     }
+    await backfillApprovedConcepts();
     const resolvedWeekResult = await pool.query(`SELECT ${WEEK_START_SQL} AS week_start`, [weekStart || null]);
     const resolvedWeekStart = resolvedWeekResult.rows[0].week_start;
 
@@ -220,6 +243,7 @@ router.post('/:id/mark-shot', async (req, res, next) => {
 // incomplete even if the Concept is later shot somewhere else.
 router.get('/history', async (req, res, next) => {
   try {
+    await backfillApprovedConcepts();
     const result = await pool.query(
       `SELECT
          original_week_start AS week_start,
