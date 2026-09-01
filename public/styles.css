@@ -1236,8 +1236,14 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .shoot-unscheduled{background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-lg);padding:12px;margin-bottom:14px;}
 .shoot-unscheduled-compact{padding:8px 12px;}
 .shoot-unscheduled-compact .shoot-unscheduled-header{margin-bottom:0;}
+/* Once there's actually something sitting unscheduled, a quiet amber left
+   edge + a "Needs scheduling" hint make the section a little more
+   noticeable -- never a warning banner or a loud colour, just enough that
+   it doesn't read identically to "nothing to do here". */
+.shoot-unscheduled-active{border-left:3px solid var(--amber);}
 .shoot-unscheduled-header{font-size:11px;font-weight:800;letter-spacing:0.5px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;}
 .shoot-unscheduled-count{font-weight:600;text-transform:none;letter-spacing:0;color:var(--text-secondary);margin-left:4px;}
+.shoot-unscheduled-hint{font-weight:600;text-transform:none;letter-spacing:0;color:var(--amber);margin-left:8px;}
 .shoot-unscheduled-list{display:flex;flex-wrap:wrap;gap:10px;min-height:20px;margin-top:8px;}
 .shoot-unscheduled-list .shoot-card{width:220px;}
 
@@ -1250,9 +1256,16 @@ main{flex:1;min-width:0;padding:20px 24px;}
 @media (max-width:1100px){.shoot-week-grid{grid-template-columns:repeat(2,1fr);}}
 @media (max-width:640px){.shoot-week-grid{grid-template-columns:1fr;}}
 .shoot-day-column{background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-lg);padding:8px;min-height:54px;}
+/* Today: an extremely subtle border tint, never a filled/bright column --
+   the "Today" badge next to the date is the actual signal (see the brief:
+   "do not make the entire column brightly coloured"). Only ever set when
+   Week view is showing the real current week (see shootingIsCurrentDay). */
+.shoot-day-column-today{border-color:var(--teal);}
 .shoot-day-header{margin-bottom:6px;}
-.shoot-day-header-top{display:flex;align-items:baseline;justify-content:space-between;gap:8px;}
+.shoot-day-header-top{display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap;}
+.shoot-day-date-group{display:flex;align-items:baseline;gap:0;flex-wrap:wrap;}
 .shoot-day-date{font-size:10.5px;font-weight:800;letter-spacing:0.4px;text-transform:uppercase;color:var(--text-muted);white-space:nowrap;}
+.shoot-day-today-badge{font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:0.4px;color:var(--teal-dark);background:var(--teal-light);border-radius:var(--r-pill);padding:2px 6px;margin-left:5px;white-space:nowrap;}
 /* Per-day "X/Y Shot" -- the count is the primary signal (see the brief:
    "the user should primarily see 3/5 Shot rather than 60%"), the thin bar
    beneath is purely the secondary visual. Never rendered for an empty day
@@ -1281,6 +1294,13 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .shoot-card-status{font-size:10.5px;font-weight:700;color:var(--text-muted);}
 .shoot-card-status-shot{color:var(--green);}
 .shoot-carried-badge{font-size:10px;font-weight:700;color:var(--amber);background:var(--amber-light);border-radius:var(--r-pill);padding:1px 7px;}
+
+/* Week card status as a compact pill (not the plain text Today's list still
+   uses -- see shootingTodayItemHtml, deliberately untouched) so a stack of
+   cards in one day scans instantly by shape/colour, not just by reading
+   each one. Still just a small tinted badge, never a large coloured block. */
+.shoot-status-pill{display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:700;color:var(--text-secondary);background:var(--border);border-radius:var(--r-pill);padding:2px 8px;}
+.shoot-status-pill-shot{color:var(--green);background:var(--green-light);}
 
 /* Card footer: "View Brief →" is the one primary, always-visible action;
    moving days lives behind a quiet "•••" overflow menu instead of a
