@@ -681,3 +681,41 @@ ON CONFLICT (name) DO NOTHING;
 INSERT INTO creative_resources (name, description, url, resource_type, cta_label, sort_order)
 VALUES ('Ecommerce Equation', 'EE''s library of creative resources and trainings.', 'https://www.skool.com/ecommerce-equation/classroom/c0802fc9?md=a37c99fa293240f6b7944aed0d618130', 'Creative training', 'Open Classroom ↗', 1)
 ON CONFLICT (name) DO NOTHING;
+
+-- ---------------------------------------------------------------------------
+-- Customer Avatars: WNDRR's reusable library of "who are we actually making
+-- this for" profiles, selected per-concept in Concept Development so every
+-- concept has a specific person on the other side of it before production
+-- time gets spent. Deliberately kept to five short fields (mindset/behaviour,
+-- not a demographic questionnaire) -- name plus four strategic questions:
+-- who they are, what they want, what stops them buying, what resonates.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS customer_avatars (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(255) UNIQUE NOT NULL,
+  who_they_are TEXT,
+  what_they_care_about TEXT,
+  what_stops_buying TEXT,
+  what_resonates TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  enabled BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- One Primary Customer Avatar per concept, deliberately -- the brief wants
+-- "who is this ad primarily speaking to", not an unlimited multi-select
+-- that lets a concept dodge the question by targeting everyone. A plain
+-- nullable FK (rather than a join table) is the simplest shape that still
+-- leaves room for a future secondary_customer_avatar_id column without
+-- restructuring anything, if that's ever needed -- not built now because
+-- the brief explicitly doesn't want that complexity in the current UI.
+-- custom_avatar_description/avatar_why_care hold the "+ Other / New Avatar"
+-- one-off path: a concept-specific audience the creator described inline
+-- rather than picking (or saving) a library avatar for. Exactly one of
+-- customer_avatar_id / custom_avatar_description is populated at a time;
+-- avatar_why_care (the creator's own "why does THIS concept matter to
+-- them" answer) is never auto-filled from the avatar profile either way.
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS customer_avatar_id INTEGER REFERENCES customer_avatars(id) ON DELETE SET NULL;
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS custom_avatar_description TEXT;
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS avatar_why_care TEXT;

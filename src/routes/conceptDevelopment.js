@@ -194,6 +194,9 @@ router.patch('/concepts/:id', async (req, res, next) => {
       talent_requirement,
       location,
       props_notes,
+      customer_avatar_id,
+      custom_avatar_description,
+      avatar_why_care,
     } = req.body || {};
 
     if (concept_dev_status !== undefined && !CONCEPT_DEV_STATUSES.includes(concept_dev_status)) {
@@ -212,6 +215,16 @@ router.patch('/concepts/:id', async (req, res, next) => {
       if (!valid) return res.status(400).json({ error: 'hook_variations must be an array of { text }' });
     }
 
+    // customer_avatar_id is the one field here that must support explicit
+    // clear-to-NULL (switching from a saved avatar to "+ Other / New
+    // Avatar," or vice versa) -- a plain COALESCE can never do that, same
+    // reasoning as drops.js's PUT /:id name-clearing. The frontend always
+    // resends customer_avatar_id/custom_avatar_description together as a
+    // pair (exactly one populated), so no extra mutual-exclusivity
+    // enforcement is needed here.
+    const avatarIdProvided = Object.prototype.hasOwnProperty.call(req.body || {}, 'customer_avatar_id');
+    const nextAvatarId = avatarIdProvided ? (customer_avatar_id != null ? Number(customer_avatar_id) : null) : null;
+
     const result = await pool.query(
       `UPDATE creative_assets SET
          concept_name = COALESCE($1, concept_name),
@@ -224,8 +237,11 @@ router.patch('/concepts/:id', async (req, res, next) => {
          talent_requirement = COALESCE($8, talent_requirement),
          location = COALESCE($9, location),
          props_notes = COALESCE($10, props_notes),
+         customer_avatar_id = CASE WHEN $11 THEN $12 ELSE customer_avatar_id END,
+         custom_avatar_description = COALESCE($13, custom_avatar_description),
+         avatar_why_care = COALESCE($14, avatar_why_care),
          updated_at = now()
-       WHERE id = $11 RETURNING *`,
+       WHERE id = $15 RETURNING *`,
       [
         concept_name && concept_name.trim() ? concept_name.trim() : null,
         concept_dev_status || null,
@@ -237,12 +253,17 @@ router.patch('/concepts/:id', async (req, res, next) => {
         talent_requirement !== undefined ? talent_requirement : null,
         location !== undefined ? location : null,
         props_notes !== undefined ? props_notes : null,
+        avatarIdProvided,
+        nextAvatarId,
+        custom_avatar_description !== undefined ? custom_avatar_description : null,
+        avatar_why_care !== undefined ? avatar_why_care : null,
         req.params.id,
       ]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Concept not found' });
     res.json(result.rows[0]);
   } catch (err) {
+    if (err.code === '23503') return res.status(400).json({ error: 'That Customer Avatar no longer exists' });
     next(err);
   }
 });
