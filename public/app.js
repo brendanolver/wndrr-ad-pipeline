@@ -3582,15 +3582,15 @@ function renderConceptDevWeekHeader() {
 const CONCEPT_DEV_SOURCE_LABELS = { core: 'Core', high_stock: 'High Stock', drop: 'Upcoming Drop', promotion: 'Promotion' };
 const CONCEPT_DEV_PATHWAY_LABELS = { core: 'Develop New Concepts', high_stock: 'Creative Refresh', drop: 'Proven Concepts Assigned', promotion: 'Cover Requirement' };
 
-// Not Started / Ready for Review are always shown, even at 0 -- a fixed,
-// predictable pair (what still needs starting vs. what's ready to check
-// off) rather than a variable-length list of every non-zero status, so
-// every card reads the same shape at a glance.
-function conceptDevStatusCounts(concepts) {
-  return {
-    notStarted: concepts.filter((c) => c.concept_dev_status === 'not_started').length,
-    readyForReview: concepts.filter((c) => c.concept_dev_status === 'ready_for_review').length,
-  };
+// Only non-zero statuses are worth a pill -- a "0 Ready for Review" chip
+// on a product with nothing started yet is noise, not information. Order
+// is fixed (matches CONCEPT_DEV_STATUS_LABELS' rough workflow order) so
+// cards with the same mix of statuses always read the same left-to-right.
+const CONCEPT_DEV_STATUS_ORDER = ['not_started', 'in_development', 'changes_required', 'ready_for_review', 'approved', 'killed'];
+function conceptDevStatusBreakdown(concepts) {
+  return CONCEPT_DEV_STATUS_ORDER
+    .map((status) => ({ status, count: concepts.filter((c) => c.concept_dev_status === status).length }))
+    .filter((s) => s.count > 0);
 }
 
 // Buckets a product into the landing page's own filter groups. A product
@@ -3612,6 +3612,25 @@ function conceptDevFilteredProducts(data) {
   return data.products.filter((p) => conceptDevProductBucket(p) === state.conceptDev.filter);
 }
 
+// A Drop product's pathway badge shows its already-assigned Proven
+// coverage instead of the generic "Proven Concepts Assigned" phrase, so
+// the distinction from the New Concepts below it is explicit rather than
+// implied: Proven Coverage is existing creative that already exists,
+// Concept Development is for genuinely new ideas. Every other source keeps
+// its normal pathway label, untouched.
+function conceptDevPathwayBadgeLabel(product) {
+  if (product.source === 'drop') return `Proven Coverage: ${product.proven_coverage_count || 0}`;
+  return CONCEPT_DEV_PATHWAY_LABELS[product.source] || shootPlanRequirementLabel(product);
+}
+
+// State-aware CTA -- the same "Develop Concepts" label on every card told
+// the creator nothing about what they'd find behind it. This mirrors
+// conceptDevProductBucket's own three-way read of a product's concepts.
+function conceptDevProductCtaLabel(product) {
+  if (!product.concepts.length) return 'Develop First Concept';
+  return conceptDevProductBucket(product) === 'needs_development' ? 'Open Concepts' : 'View Concepts';
+}
+
 // "What products do I need to prepare for Tuesday?" -- one compact card
 // per product, no concept-level detail (that's the Product Workspace's
 // job). Reuses .high-stock-thumb for the image, same as everywhere else a
@@ -3621,9 +3640,8 @@ function conceptDevProductCardHtml(product) {
     ? `<img class="high-stock-thumb" src="${product.image_url}" alt="">`
     : '<span class="high-stock-thumb high-stock-noimg">🖼</span>';
   const sourceLabel = CONCEPT_DEV_SOURCE_LABELS[product.source] || product.source || '—';
-  const pathwayLabel = CONCEPT_DEV_PATHWAY_LABELS[product.source] || shootPlanRequirementLabel(product);
   const count = product.concepts.length;
-  const { notStarted, readyForReview } = conceptDevStatusCounts(product.concepts);
+  const breakdown = conceptDevStatusBreakdown(product.concepts);
   return `
     <div class="cd-card" onclick="openConceptDevProduct(${product.shoot_plan_item_id})">
       <div class="cd-card-top">
@@ -3632,15 +3650,12 @@ function conceptDevProductCardHtml(product) {
       </div>
       <div class="cd-card-badges">
         <span class="cd-badge">${escapeHtml(sourceLabel)}</span>
-        <span class="cd-badge cd-badge-pathway">${escapeHtml(pathwayLabel)}</span>
+        <span class="cd-badge cd-badge-pathway">${escapeHtml(conceptDevPathwayBadgeLabel(product))}</span>
       </div>
-      <div class="cd-card-count">${count} Concept${count === 1 ? '' : 's'}</div>
-      <div class="cd-card-status-row">
-        <span class="cd-concept-status-pill cd-pill-neutral">${notStarted} Not Started</span>
-        <span class="cd-concept-status-pill ${readyForReview > 0 ? 'cd-status-ready-for-review' : 'cd-pill-neutral'}">${readyForReview} Ready for Review</span>
-      </div>
+      <div class="cd-card-count">${count ? `${count} New Concept${count === 1 ? '' : 's'}` : 'No new concepts yet'}</div>
+      ${breakdown.length ? `<div class="cd-card-status-row">${breakdown.map((s) => `<span class="cd-concept-status-pill ${CONCEPT_DEV_STATUS_CLASS[s.status] || ''}">${s.count} ${CONCEPT_DEV_STATUS_LABELS[s.status] || s.status}</span>`).join('')}</div>` : ''}
       <div class="cd-card-meta">${product.colourways.length} Colourway${product.colourways.length === 1 ? '' : 's'} &middot; Owner: ${escapeHtml(product.creator || '—')}</div>
-      <div class="cd-card-action">Develop Concepts &rarr;</div>
+      <div class="cd-card-action">${conceptDevProductCtaLabel(product)} &rarr;</div>
     </div>`;
 }
 
@@ -3654,11 +3669,15 @@ function conceptDevWeekSummaryLineHtml(data) {
   return `<div class="cd-week-summary-line">${data.products.length} Product${data.products.length === 1 ? '' : 's'} &middot; ${totalConcepts} Concept${totalConcepts === 1 ? '' : 's'} &middot; ${readyForReview} Ready for Review</div>`;
 }
 
+// No "Approved" tab here -- Concept Development is the active workspace
+// for concepts still being developed or submitted; an approved concept has
+// already moved past this stage (Tuesday Review is where approval
+// happens), so it doesn't need its own primary filter. It's still counted
+// in "All" for context/history, and the status itself is unchanged.
 const CONCEPT_DEV_FILTERS = [
   { key: 'all', label: 'All' },
   { key: 'needs_development', label: 'Needs Development' },
   { key: 'ready_for_review', label: 'Ready for Review' },
-  { key: 'approved', label: 'Approved' },
 ];
 
 // Same quiet tab-bar language as Tuesday Review's status filters -- these
@@ -3719,16 +3738,28 @@ function conceptDevWorkspaceHeaderHtml(product) {
         <div class="cd-workspace-header-meta">
           <span>${escapeHtml(sourceLabel)}</span>
           <span>&middot;</span>
-          <span>${escapeHtml(shootPlanRequirementLabel(product))}</span>
+          <span>${escapeHtml(conceptDevPathwayBadgeLabel(product))}</span>
           <span>&middot;</span>
           <span>Owner: ${escapeHtml(product.creator || '—')}</span>
           <span>&middot;</span>
-          <span>${count} Concept${count === 1 ? '' : 's'}</span>
+          <span>${count} New Concept${count === 1 ? '' : 's'}</span>
         </div>
         <div class="shoot-plan-style-chips">${chips}</div>
         ${product.initial_idea ? `<div class="shoot-plan-idea">💡 ${escapeHtml(product.initial_idea)}</div>` : ''}
       </div>
     </div>`;
+}
+
+// State-aware so the card tells the creator what clicking it will actually
+// do: still-being-developed concepts get "Continue", Changes Required gets
+// "Update" (there's specific feedback waiting), anything already decided
+// (Ready for Review, Approved, Killed) is read-only from here on out, so
+// it's "View" -- deliberately never "Open" for Approved, which would imply
+// it's still active work rather than a finished, handed-off brief.
+function conceptDevConceptCtaLabel(status) {
+  if (status === 'changes_required') return 'Update Concept';
+  if (status === 'ready_for_review' || status === 'approved' || status === 'killed') return 'View Concept';
+  return 'Continue Concept';
 }
 
 // Compact card, not a thin row -- shows just enough to decide what to open
@@ -3756,7 +3787,7 @@ function conceptDevConceptCardHtml(concept, productSource) {
         <span class="${hasHook ? 'cd-concept-flag-on' : 'cd-concept-flag-off'}">${hasHook ? '✓' : '—'} Hook</span>
         <span class="${hasReference ? 'cd-concept-flag-on' : 'cd-concept-flag-off'}">${hasReference ? '✓' : '—'} Reference</span>
       </div>
-      <div class="cd-concept-card-action">Open Concept &rarr;</div>
+      <div class="cd-concept-card-action">${conceptDevConceptCtaLabel(concept.concept_dev_status)} &rarr;</div>
     </div>`;
 }
 
@@ -3769,13 +3800,23 @@ function conceptDevConceptCardHtml(concept, productSource) {
 // GET /concept-development) -- their existing Proven creative coverage
 // stays exactly where it's tracked (the drop's own Required Concepts
 // plan/Planning product page), it's just not duplicated into this list.
-// "+ New Concept" is the same primary action for every source now.
+// "+ New Concept" is the same primary action for every source now. The
+// toolbar row leads with a plain "New Concepts" heading so this workspace
+// reads unambiguously as the new-concepts view -- Creative Tools is
+// supporting/reference functionality, so it stays a quiet secondary link
+// even though it now sits alongside the primary button instead of on its
+// own line above it (where it was reading as if it were the section title).
 function renderConceptDevProductWorkspace(product) {
   return `
     <button type="button" class="link-btn cd-back-link" onclick="closeConceptDevProduct()">&larr; Back to Products</button>
     ${conceptDevWorkspaceHeaderHtml(product)}
-    <button type="button" class="link-btn cd-need-inspiration" onclick="openCreativeTools(${product.shoot_plan_item_id})">🛠 Creative Tools</button>
-    <button type="button" class="btn btn-primary btn-sm cd-new-concept-btn" onclick="openAddConceptModal(${product.shoot_plan_item_id})">+ New Concept</button>
+    <div class="cd-workspace-toolbar">
+      <div class="cd-workspace-toolbar-heading">New Concepts</div>
+      <div class="cd-workspace-toolbar-actions">
+        <button type="button" class="link-btn cd-need-inspiration" onclick="openCreativeTools(${product.shoot_plan_item_id})">Creative Tools &#9662;</button>
+        <button type="button" class="btn btn-primary btn-sm cd-new-concept-btn" onclick="openAddConceptModal(${product.shoot_plan_item_id})">+ New Concept</button>
+      </div>
+    </div>
     <div class="cd-concept-grid">
       ${product.concepts.length ? product.concepts.map((c) => conceptDevConceptCardHtml(c, product.source)).join('') : '<div class="attention-empty">No new concepts yet</div>'}
     </div>
@@ -3833,6 +3874,12 @@ let conceptDevModalConceptId = null;
 let conceptDevModalProduct = null;
 let conceptDevModalReferences = [];
 let conceptDevModalHooks = [];
+// Once a concept has been Approved in Tuesday Review, it's the final brief
+// moving into production -- the modal opens read-only by default so it
+// can't be edited by accident, with "Edit Approved Concept" (behind a
+// confirmation) as the deliberate, subtle way back into editing. Reset by
+// every fillConceptDevModalFields call, so it never leaks between concepts.
+let conceptDevModalReadOnly = false;
 
 // A concept's hook variations -- the first entry is always the Primary
 // Hook (never removable, unlike a reference or an alternative hook: a
@@ -3912,7 +3959,7 @@ function conceptDevModalContextHtml(product) {
     ? `<img class="cd-modal-context-thumb" src="${product.image_url}" alt="">`
     : '<span class="cd-modal-context-thumb cd-modal-context-noimg">🖼</span>';
   const sourceLabel = CONCEPT_DEV_SOURCE_LABELS[product.source] || product.source || '—';
-  const pathwayLabel = CONCEPT_DEV_PATHWAY_LABELS[product.source] || shootPlanRequirementLabel(product);
+  const pathwayLabel = conceptDevPathwayBadgeLabel(product);
   const skuInfo = product.colourways
     .map((c) => `${c.style_code || c.colour_label}${c.size ? `-${c.size}` : ''}`)
     .join(', ');
@@ -4043,6 +4090,11 @@ function fillConceptDevModalFields(concept) {
     feedbackBanner.style.display = 'none';
   }
 
+  // Approved concepts default to read-only -- see conceptDevModalReadOnly's
+  // own comment. A brand-new concept (concept === null) is never Approved,
+  // so this only ever engages when reopening an already-decided one.
+  setConceptDevModalReadOnly(status === 'approved');
+
   // Progressive disclosure: Script and Shoot Requirements stay collapsed
   // behind a toggle for the common case (a simple concept doesn't need
   // either), but open automatically if the concept already has content
@@ -4055,6 +4107,52 @@ function fillConceptDevModalFields(concept) {
 
   updateReviewPromptGate();
   hideConceptDevValidation();
+}
+
+// Toggles the modal between its normal editable state and the read-only
+// view an Approved concept opens into. Disables every real input (so
+// nothing can be typed into by accident, keyboard tab included) and hides
+// every action that mutates the concept -- Save Draft/Save Changes/Ready
+// for Review/Resubmit, Delete, and the hook/reference add-remove controls
+// (hidden via the .cd-readonly CSS, since those are re-rendered fresh on
+// every open and wouldn't otherwise pick up a one-off disabled flag).
+// Creative Tools stays available either way -- browsing references or
+// running the AI Creative Review doesn't edit the concept.
+function setConceptDevModalReadOnly(readOnly) {
+  conceptDevModalReadOnly = readOnly;
+  const modalEl = document.querySelector('#concept-dev-modal .modal');
+  modalEl.classList.toggle('cd-readonly', readOnly);
+  modalEl.querySelectorAll('.modal-body input, .modal-body textarea, .modal-body select').forEach((el) => {
+    el.disabled = readOnly;
+  });
+  document.getElementById('cd-approved-banner').style.display = readOnly ? '' : 'none';
+  if (readOnly) {
+    document.getElementById('cd-modal-save-draft-btn').style.display = 'none';
+    document.getElementById('cd-modal-save-changes-btn').style.display = 'none';
+    document.getElementById('cd-modal-submit-btn').style.display = 'none';
+    document.getElementById('cd-modal-delete-btn').style.display = 'none';
+  } else if (conceptDevModalConceptId) {
+    // Restore the footer/delete state that actually applies to this
+    // concept's status/source -- covers both a normal (never-locked) open
+    // and unlocking edit on a previously read-only Approved concept.
+    const found = findConceptDevConcept(conceptDevModalConceptId);
+    if (found) {
+      updateConceptDevFooterButtons(found.concept.concept_dev_status);
+      document.getElementById('cd-modal-delete-btn').style.display = found.product.source === 'drop' ? 'none' : '';
+    }
+  }
+}
+
+// The one deliberate way back into editing an Approved concept -- a plain
+// confirmation, not another status change (see the brief: approval logic
+// itself is untouched here, this only ever toggles the read-only view).
+async function confirmEditApprovedConcept() {
+  const confirmed = await confirmDialog(
+    'This concept has already been approved for shooting. Editing the concept may change the brief that was approved during Tuesday Review.',
+    { okLabel: 'Edit Anyway' }
+  );
+  if (!confirmed) return;
+  setConceptDevModalReadOnly(false);
 }
 
 function setConceptDevScriptExpanded(expanded) {

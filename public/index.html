@@ -941,6 +941,15 @@
         <div class="cd-changes-required-text" id="cd-changes-required-text"></div>
       </div>
 
+      <!-- Only shown when concept_dev_status is approved -- the concept has
+           passed Tuesday Review and is the brief moving into production, so
+           this opens read-only by default. See setConceptDevModalReadOnly
+           and confirmEditApprovedConcept in app.js. -->
+      <div class="cd-approved-banner" id="cd-approved-banner" style="display:none;">
+        <div class="cd-approved-banner-text">Approved — this concept passed Tuesday Review and is shown here read-only, as the brief moving into production.</div>
+        <button type="button" class="link-btn" onclick="confirmEditApprovedConcept()">Edit Approved Concept</button>
+      </div>
+
       <div class="cd-modal-section">
         <div class="cd-modal-section-title">The Idea</div>
         <div class="cd-modal-idea-row">
@@ -984,7 +993,7 @@
             <textarea id="cd-modal-avatar-custom-desc" rows="2" placeholder="Describe the specific person, mindset or customer behaviour you're targeting." oninput="updateReviewPromptGate()"></textarea>
             <div class="cd-field-error" id="cd-modal-avatar-custom-desc-error"></div>
           </label>
-          <button type="button" class="link-btn" onclick="openSaveAvatarFromConceptModal()">Save as new Customer Avatar</button>
+          <button type="button" class="link-btn" id="cd-modal-save-avatar-btn" onclick="openSaveAvatarFromConceptModal()">Save as new Customer Avatar</button>
         </div>
       </div>
 
@@ -1018,7 +1027,7 @@
         </div>
         <div class="hint cd-modal-section-helper">How does this creative earn attention in the first few seconds? This can be spoken, text-based or visual.</div>
         <div id="cd-modal-hooks-list"></div>
-        <button type="button" class="link-btn" onclick="addConceptDevHook()">+ Add Alternative Hook</button>
+        <button type="button" class="link-btn" id="cd-modal-add-hook-btn" onclick="addConceptDevHook()">+ Add Alternative Hook</button>
       </div>
 
       <!-- References defaults to the same compact collapsed state as Script
