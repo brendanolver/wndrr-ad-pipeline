@@ -5606,11 +5606,18 @@ function renderShootingBrief(brief) {
   document.getElementById('shoot-brief-audience').textContent = audienceParts.join(' — ') || 'No audience notes recorded.';
 
   document.getElementById('shoot-brief-mark-shot-btn').style.display = isShot ? 'none' : '';
+  document.getElementById('shoot-brief-unmark-shot-btn').style.display = isShot ? '' : 'none';
 }
 
 async function markShootingShotFromBrief() {
   if (!state.shooting.briefScheduleId) return;
   await markShootingShot(state.shooting.briefScheduleId);
+  closeModal('shoot-brief-modal');
+}
+
+async function unmarkShootingShotFromBrief() {
+  if (!state.shooting.briefScheduleId) return;
+  await unmarkShootingShot(state.shooting.briefScheduleId);
   closeModal('shoot-brief-modal');
 }
 
