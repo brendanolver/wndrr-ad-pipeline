@@ -969,8 +969,13 @@ main{flex:1;min-width:0;padding:20px 24px;}
 /* Required-field indicators: a subtle grey asterisk on the label (never
    red by default), a small "Recommended" badge for Hook/Opening (positive
    framing, not a warning), and a quiet legend at the bottom of the form --
-   per the brief, this must never read as an aggressive validation UI. */
-.cd-req-mark{color:var(--text-muted);font-weight:400;margin-left:1px;}
+   per the brief, this must never read as an aggressive validation UI.
+   .cd-field-label wraps the label text + asterisk together into a single
+   node -- .modal-body label is a column flex container, so without this
+   wrapper the asterisk (a separate child) becomes its own flex item and
+   drops onto its own line below the label text. */
+.cd-field-label{display:inline-flex;align-items:baseline;}
+.cd-req-mark{color:var(--text-muted);font-weight:400;margin-left:3px;}
 .cd-badge-recommended{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.2px;color:var(--teal-dark);background:var(--teal-light);border-radius:var(--r-pill);padding:2px 7px;flex-shrink:0;}
 .cd-modal-required-note{padding-top:10px;border-top:1px solid var(--border);font-size:11px;color:var(--text-muted);}
 
@@ -980,10 +985,11 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .cd-field-error.show{display:block;}
 .cd-field-invalid{border-color:var(--red) !important;}
 
-/* References gets its own light card frame (rather than just another
-   divided section) so it reads as the clear, simple place to drop links --
-   "prominent and simple", per the brief. */
-.cd-modal-section-references{border-top:none;background:var(--surface2);border-radius:var(--r-lg);padding:14px;}
+/* References: compact collapsed state by default (see
+   #cd-modal-references-toggle-wrap), same as Script/Shoot Requirements
+   below -- each added reference gets its own bordered white card, which
+   already reads as "the place links live" without an extra grey wrapper
+   around the whole section. */
 .cd-reference-item-list{display:flex;flex-direction:column;gap:10px;}
 .cd-reference-item{background:white;border:1px solid var(--border);border-radius:var(--r);padding:8px;display:flex;flex-direction:column;gap:6px;}
 .cd-reference-item-row{display:flex;gap:8px;align-items:center;}

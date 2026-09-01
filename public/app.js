@@ -3833,21 +3833,32 @@ function removeConceptDevHook(index) {
 }
 
 function renderConceptDevModalReferences() {
-  document.getElementById('cd-modal-references-list').innerHTML = conceptDevModalReferences.length
-    ? conceptDevModalReferences.map((r, i) => `
-        <div class="cd-reference-item">
-          <div class="cd-reference-item-row">
-            <input type="text" value="${escapeHtml(r.url)}" oninput="conceptDevModalReferences[${i}].url=this.value" placeholder="Reference link">
-            <button type="button" class="cd-reference-remove" onclick="removeConceptDevReference(${i})" aria-label="Remove reference">&times;</button>
-          </div>
-          <textarea rows="2" oninput="conceptDevModalReferences[${i}].note=this.value" placeholder="What do we like about it?">${escapeHtml(r.note)}</textarea>
-        </div>`).join('')
-    : '<span class="hint">Add inspiration or examples for this concept.</span>';
+  document.getElementById('cd-modal-references-list').innerHTML = conceptDevModalReferences.map((r, i) => `
+    <div class="cd-reference-item">
+      <div class="cd-reference-item-row">
+        <input type="text" value="${escapeHtml(r.url)}" oninput="conceptDevModalReferences[${i}].url=this.value" placeholder="Reference link">
+        <button type="button" class="cd-reference-remove" onclick="removeConceptDevReference(${i})" aria-label="Remove reference">&times;</button>
+      </div>
+      <textarea rows="2" oninput="conceptDevModalReferences[${i}].note=this.value" placeholder="What do we like about it?">${escapeHtml(r.note)}</textarea>
+    </div>`).join('');
+}
+
+// References defaults to the same compact collapsed state as Script/Shoot
+// Requirements -- an empty optional field shouldn't carry a big grey card's
+// worth of visual weight. Unlike those two it's a repeatable list, so both
+// the collapsed and expanded "+ Add Reference" triggers call the same
+// addConceptDevReference(), and removing the last reference collapses the
+// section back down rather than leaving an empty expanded list showing.
+function setConceptDevReferencesExpanded(expanded) {
+  document.getElementById('cd-modal-references-toggle-wrap').style.display = expanded ? 'none' : '';
+  document.getElementById('cd-modal-references-list').style.display = expanded ? '' : 'none';
+  document.getElementById('cd-modal-add-reference-btn').style.display = expanded ? '' : 'none';
 }
 
 function addConceptDevReference() {
   conceptDevModalReferences.push({ url: '', note: '' });
   renderConceptDevModalReferences();
+  setConceptDevReferencesExpanded(true);
   const inputs = document.querySelectorAll('#cd-modal-references-list .cd-reference-item-row input');
   if (inputs.length) inputs[inputs.length - 1].focus();
 }
@@ -3855,6 +3866,7 @@ function addConceptDevReference() {
 function removeConceptDevReference(index) {
   conceptDevModalReferences.splice(index, 1);
   renderConceptDevModalReferences();
+  if (!conceptDevModalReferences.length) setConceptDevReferencesExpanded(false);
 }
 
 // Read-only Planning-handoff context shown at the top of the workspace --
@@ -3961,6 +3973,7 @@ function fillConceptDevModalFields(concept) {
     ? (concept.reference_items || []).map((r) => ({ url: r.url || '', note: r.note || '' }))
     : [];
   renderConceptDevModalReferences();
+  setConceptDevReferencesExpanded(conceptDevModalReferences.length > 0);
 
   // The Audience: exactly one of customer_avatar_id / custom_avatar_description
   // is ever set (see schema.sql's comment) -- the select reflects whichever
