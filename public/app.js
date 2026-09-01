@@ -72,6 +72,14 @@ let state = {
   // "The Audience" section picks a Primary Customer Avatar from. See
   // schema.sql's comment on customer_avatars/customer_avatar_id.
   customerAvatars: [],
+  // Shooting's own week nav, independent of every other tab's for the same
+  // reason as conceptDev/tuesdayReview above. view is which of the three
+  // (Week/Today/History) is showing; data is Week's own GET /shooting
+  // response; todayData is a SEPARATE fetch of whatever week today's real
+  // calendar date falls in (never the same as the week being browsed in
+  // Week view); historyData is History's own GET /shooting/history.
+  // ownerFilter is shared across Week/Today (client-side only, no refetch).
+  shooting: { view: 'week', weekOffset: 0, data: null, todayData: null, historyData: null, ownerFilter: 'all', briefScheduleId: null, dragScheduleId: null },
 };
 let dashboardWeekOffset = 0;
 
@@ -147,6 +155,11 @@ function toast(message, isError = false) {
 function switchTab(name) {
   document.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
   document.querySelectorAll('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === `tab-${name}`));
+  // Shooting is the direct downstream consumer of an action just taken on
+  // Tuesday Review (Approve for Shooting) -- unlike every other tab, it
+  // needs a fresh fetch on every visit so a concept approved a moment ago
+  // reliably shows up without a full page reload.
+  if (name === 'shooting') refreshCurrentShootingView();
 }
 
 document.querySelectorAll('.tab-btn').forEach((btn) => {
@@ -217,7 +230,7 @@ function conceptDevWeekNumber() {
 async function loadAll() {
   try {
     const weekStart = planningWeekStart();
-    const [board, styles, categories, dashboard, dropsRes, provenWinners, coreRes, planningSettings, shootPlan, contentCreators, highStockRes, promotions, weeklyConfirmation, weeklyPlanningProgress, salesCadence, metaProductMappings, metaProductFamilies, conceptDev, creativeResources, customerAvatars, tuesdayReview] = await Promise.all([
+    const [board, styles, categories, dashboard, dropsRes, provenWinners, coreRes, planningSettings, shootPlan, contentCreators, highStockRes, promotions, weeklyConfirmation, weeklyPlanningProgress, salesCadence, metaProductMappings, metaProductFamilies, conceptDev, creativeResources, customerAvatars, tuesdayReview, shootingWeek] = await Promise.all([
       api('/board'),
       api('/styles'),
       api('/categories'),
@@ -239,6 +252,7 @@ async function loadAll() {
       api('/creative-resources'),
       api('/customer-avatars'),
       api(`/concept-development?week_start=${tuesdayReviewWeekStart()}`),
+      api(`/shooting?week_start=${shootingWeekStart()}`),
     ]);
     state.board = board;
     state.styles = styles;
@@ -265,6 +279,7 @@ async function loadAll() {
     state.customerAvatars = customerAvatars;
     state.tuesdayReview.data = tuesdayReview;
     state.tuesdayReview.filter = tuesdayReviewDefaultFilter();
+    state.shooting.data = shootingWeek;
     renderBoard();
     renderMissingAd();
     renderStylesTable();
@@ -287,6 +302,9 @@ async function loadAll() {
     renderConceptDevList();
     renderTuesdayReviewWeekHeader();
     renderTuesdayReviewList();
+    populateShootingOwnerFilters();
+    renderShootingWeekHeader();
+    renderShootingWeekView();
   } catch (e) {
     toast(e.message, true);
   }
@@ -4485,7 +4503,7 @@ async function saveConceptDevModal(targetStatus) {
         }
         const data = await api(`/drop-product-plans/${product.drop_plan_id}/slots`, {
           method: 'POST',
-          body: JSON.stringify({ concept_name: name }),
+          body: JSON.stringify({ concept_name: name, shoot_plan_item_id: product.shoot_plan_item_id }),
         });
         assetId = data.slots[data.slots.length - 1].asset_id;
       } else {
@@ -5019,6 +5037,461 @@ async function submitTuesdayReviewKill() {
     kill_note: kill_note || undefined,
   });
   if (ok) closeModal('tr-kill-modal');
+}
+
+// ── Shooting ───────────────────────────────────────────
+// A lightweight weekly calendar / task tracker, not another production
+// database (per the brief). Week is the primary planning view; Today is the
+// content creator's own worklist; History is the manager's week-by-week
+// rollup. All three read the SAME underlying shoot_schedule rows (via
+// GET /shooting and GET /shooting/history) -- nothing here ever creates a
+// second copy of a Concept, only where/when it gets shot. Week nav mirrors
+// Concept Dev/Tuesday Review's own (independent weekOffset, same reasoning
+// as those two: navigating one page's week must never move another's).
+const SHOOT_DAY_KEYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'];
+const SHOOT_DAY_LABELS = { monday: 'Monday', tuesday: 'Tuesday', wednesday: 'Wednesday', thursday: 'Thursday', friday: 'Friday' };
+
+function shootingWeekStart() {
+  return isoDateStr(mondayOfWeek(state.shooting.weekOffset));
+}
+function shootingWeekNumber() {
+  return isoWeekNumber(mondayOfWeek(state.shooting.weekOffset));
+}
+
+// Parses a plain YYYY-MM-DD string the same way every other date in this
+// app is built (local Y/M/D field arithmetic, never new Date(isoString) --
+// that parses as UTC and can land on the wrong local day). History renders
+// real past weeks rather than an offset from today, so this is the one
+// place the frontend actually needs to turn a returned date string back
+// into a Date for isoWeekNumber/formatWeekRange.
+function parseDateStr(s) {
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
+function nextWeekStartFrom(weekStartStr) {
+  const d = parseDateStr(weekStartStr);
+  d.setDate(d.getDate() + 7);
+  return isoDateStr(d);
+}
+
+async function loadShootingWeek() {
+  try {
+    state.shooting.data = await api(`/shooting?week_start=${shootingWeekStart()}`);
+    renderShootingWeekHeader();
+    renderShootingWeekView();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function changeShootingWeek(delta) {
+  state.shooting.weekOffset += delta;
+  onShootingWeekChanged();
+}
+
+function goToCurrentShootingWeek() {
+  state.shooting.weekOffset = 0;
+  onShootingWeekChanged();
+}
+
+function jumpToShootingWeek(offset) {
+  state.shooting.weekOffset = offset;
+  onShootingWeekChanged();
+}
+
+function onShootingWeekChanged() {
+  closeShootingWeekPicker();
+  loadShootingWeek();
+}
+
+function toggleShootingWeekPicker() {
+  const el = document.getElementById('shoot-week-picker');
+  const opening = el.style.display === 'none';
+  if (opening) renderShootingWeekPicker();
+  el.style.display = opening ? '' : 'none';
+}
+
+function closeShootingWeekPicker() {
+  document.getElementById('shoot-week-picker').style.display = 'none';
+}
+
+function renderShootingWeekPicker() {
+  const rows = [];
+  for (let offset = 8; offset >= -12; offset--) {
+    const monday = mondayOfWeek(offset);
+    rows.push({ offset, number: isoWeekNumber(monday), range: formatWeekRange(monday) });
+  }
+  document.getElementById('shoot-week-picker').innerHTML = rows.map((r) => `
+    <button type="button" class="planning-week-picker-row ${r.offset === state.shooting.weekOffset ? 'active' : ''}" onclick="jumpToShootingWeek(${r.offset})">
+      <span>Week ${r.number}${r.offset === 0 ? ' · Current' : ''}</span>
+      <span class="admin-note">${r.range}</span>
+    </button>`).join('');
+}
+
+document.addEventListener('click', (e) => {
+  const picker = document.getElementById('shoot-week-picker');
+  if (!picker || picker.style.display === 'none') return;
+  if (e.target.closest('#shoot-week-picker') || e.target.id === 'shoot-week-label') return;
+  picker.style.display = 'none';
+});
+
+function renderShootingWeekHeader() {
+  document.getElementById('shoot-week-label').textContent = `Week ${shootingWeekNumber()}`;
+  document.getElementById('shoot-this-week-btn').style.display = state.shooting.weekOffset === 0 ? 'none' : '';
+}
+
+// Week/Today/History switcher -- always refetches whatever view is now
+// active (see refreshCurrentShootingView), since Shooting is the direct
+// downstream consumer of an action just taken on Tuesday Review.
+function setShootingView(view) {
+  state.shooting.view = view;
+  document.querySelectorAll('#shoot-subnav .shoot-subnav-btn').forEach((b) => b.classList.toggle('active', b.dataset.shootView === view));
+  document.querySelectorAll('.shoot-panel').forEach((p) => p.classList.toggle('active', p.id === `shoot-view-${view}`));
+  refreshCurrentShootingView();
+}
+
+function refreshCurrentShootingView() {
+  if (state.shooting.view === 'week') loadShootingWeek();
+  else if (state.shooting.view === 'today') loadShootingToday();
+  else loadShootingHistory();
+}
+
+// Owner filter -- populated from content_creators (see the brief: "Do not
+// hard-code these names"), shared client-side across Week/Today, no
+// refetch needed on change since both views already have the full week's
+// data in hand.
+function populateShootingOwnerFilters() {
+  const optionsHtml = `<option value="all">All Owners</option>` +
+    state.contentCreators.map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join('');
+  ['shoot-week-owner-filter', 'shoot-today-owner-filter'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.innerHTML = optionsHtml;
+    el.value = state.shooting.ownerFilter;
+  });
+}
+
+function setShootingOwnerFilter(value) {
+  state.shooting.ownerFilter = value;
+  document.querySelectorAll('.shoot-owner-filter').forEach((el) => { el.value = value; });
+  if (state.shooting.view === 'week') renderShootingWeekView();
+  else if (state.shooting.view === 'today') renderShootingTodayView();
+}
+
+function shootingOwnerMatches(item) {
+  return state.shooting.ownerFilter === 'all' || item.owner === state.shooting.ownerFilter;
+}
+
+function shootingHookPreview(item) {
+  const hooks = Array.isArray(item.hook_variations) ? item.hook_variations : [];
+  const primary = ((hooks[0] && hooks[0].text) || '').trim();
+  return primary ? truncateText(primary, 90) : '';
+}
+
+// Every non-Shot card's accessible alternative to drag-and-drop -- see the
+// brief: "drag-and-drop must NOT be the only way". Carry to next week is
+// listed for every card, not just ones sitting unfinished in a past week --
+// V1 keeps this a deliberate team decision rather than date-gating it.
+function shootingMoveOptionsHtml(item) {
+  const options = ['<option value="" selected disabled>Move to…</option>'];
+  for (const day of SHOOT_DAY_KEYS) {
+    if (day === item.scheduled_day) continue;
+    options.push(`<option value="${day}">${SHOOT_DAY_LABELS[day]}</option>`);
+  }
+  if (item.scheduled_day) options.push('<option value="unscheduled">Unscheduled</option>');
+  options.push('<option value="carry_next_week">Carry to next week &rarr;</option>');
+  return options.join('');
+}
+
+async function moveShootingCard(scheduleId, value, currentWeekStart) {
+  try {
+    const body = value === 'unscheduled' ? { scheduled_day: null }
+      : value === 'carry_next_week' ? { scheduled_day: null, scheduled_week_start: nextWeekStartFrom(currentWeekStart) }
+      : { scheduled_day: value };
+    await api(`/shooting/${scheduleId}`, { method: 'PATCH', body: JSON.stringify(body) });
+    toast(value === 'carry_next_week' ? 'Carried to next week' : 'Moved');
+    refreshCurrentShootingView();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// Drag-and-drop is the OTHER way to move a card (same-week only -- there's
+// no "next week" drop target visible while browsing one week at a time, so
+// Carry Over stays a Move-to… option instead). dragScheduleId is a fallback
+// for browsers/situations where the dataTransfer payload doesn't survive
+// the drop (Safari has been inconsistent about this historically).
+function onShootCardDragStart(e, scheduleId) {
+  state.shooting.dragScheduleId = scheduleId;
+  e.dataTransfer.setData('text/plain', String(scheduleId));
+  e.dataTransfer.effectAllowed = 'move';
+}
+
+function onShootColumnDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+}
+
+function onShootColumnDrop(e, day) {
+  e.preventDefault();
+  const scheduleId = state.shooting.dragScheduleId || Number(e.dataTransfer.getData('text/plain'));
+  state.shooting.dragScheduleId = null;
+  if (!scheduleId) return;
+  moveShootingCard(scheduleId, day || 'unscheduled', null);
+}
+
+async function markShootingShot(scheduleId) {
+  try {
+    await api(`/shooting/${scheduleId}/mark-shot`, { method: 'POST' });
+    toast('Marked as Shot');
+    refreshCurrentShootingView();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// Week grid card -- compact by design (per the brief: "Do NOT display the
+// entire Concept description..."). Shot cards stay visible and undraggable
+// (see the backend's status != 'shot' guard) so the calendar always shows
+// what was actually produced, not just outstanding work.
+function shootingCardHtml(item) {
+  const isShot = item.status === 'shot';
+  const metaParts = [item.owner, item.location].filter(Boolean);
+  const carriedBadge = item.carried_over ? `<span class="shoot-carried-badge">From W${isoWeekNumber(parseDateStr(item.original_week_start))}</span>` : '';
+  return `
+    <div class="shoot-card ${isShot ? 'shoot-card-shot' : ''}" ${isShot ? '' : 'draggable="true"'} ondragstart="onShootCardDragStart(event, ${item.id})">
+      <div class="shoot-card-name">${escapeHtml(item.concept_name)}</div>
+      <div class="shoot-card-product">${escapeHtml(item.product_name || '—')}</div>
+      ${metaParts.length ? `<div class="shoot-card-meta">${escapeHtml(metaParts.join(' · '))}</div>` : ''}
+      <div class="shoot-card-footer">
+        <span class="shoot-card-status ${isShot ? 'shoot-card-status-shot' : ''}">${isShot ? '&check; Shot' : 'Planned'}</span>
+        ${carriedBadge}
+      </div>
+      <div class="shoot-card-actions">
+        <button type="button" class="link-btn" onclick="openShootingBrief(${item.id})">View Brief &rarr;</button>
+        ${isShot ? '' : `<select class="shoot-move-select" onchange="moveShootingCard(${item.id}, this.value, '${item.scheduled_week_start}'); this.selectedIndex=0;">${shootingMoveOptionsHtml(item)}</select>`}
+      </div>
+    </div>`;
+}
+
+function renderShootingWeekView() {
+  const data = state.shooting.data;
+  if (!data) return;
+  const summary = data.summary || { planned: 0, shot: 0, remaining: 0 };
+  document.getElementById('shoot-week-summary').textContent = `${summary.planned} Planned · ${summary.shot} Shot · ${summary.remaining} Remaining`;
+
+  const unscheduled = (data.unscheduled || []).filter(shootingOwnerMatches);
+  document.getElementById('shoot-unscheduled').innerHTML = `
+    <div class="shoot-unscheduled-header">Unscheduled <span class="shoot-unscheduled-count">${unscheduled.length} concept${unscheduled.length === 1 ? '' : 's'}</span></div>
+    <div class="shoot-unscheduled-list" ondragover="onShootColumnDragOver(event)" ondrop="onShootColumnDrop(event, null)">
+      ${unscheduled.length ? unscheduled.map((item) => shootingCardHtml(item)).join('') : '<div class="attention-empty">Nothing unscheduled.</div>'}
+    </div>`;
+
+  document.getElementById('shoot-week-grid').innerHTML = SHOOT_DAY_KEYS.map((day) => {
+    const items = ((data.days && data.days[day]) || []).filter(shootingOwnerMatches);
+    return `
+      <div class="shoot-day-column" ondragover="onShootColumnDragOver(event)" ondrop="onShootColumnDrop(event, '${day}')">
+        <div class="shoot-day-header">${SHOOT_DAY_LABELS[day]}</div>
+        <div class="shoot-day-cards">
+          ${items.length ? items.map((item) => shootingCardHtml(item)).join('') : '<div class="shoot-day-empty">—</div>'}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// Today always shows the REAL current weekday, independent of whatever
+// week Week view happens to be browsing -- see state.shooting.todayData.
+function shootingTodayInfo() {
+  const now = new Date();
+  const dayKeyByIndex = { 1: 'monday', 2: 'tuesday', 3: 'wednesday', 4: 'thursday', 5: 'friday' };
+  return { date: now, dayKey: dayKeyByIndex[now.getDay()] || null };
+}
+
+async function loadShootingToday() {
+  try {
+    state.shooting.todayData = await api(`/shooting?week_start=${isoDateStr(mondayOfWeek(0))}`);
+    renderShootingTodayView();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function shootingTodayItemHtml(item) {
+  const isShot = item.status === 'shot';
+  const hookPreview = shootingHookPreview(item);
+  const metaParts = [item.location].filter(Boolean);
+  return `
+    <div class="shoot-today-item ${isShot ? 'shoot-card-shot' : ''}">
+      <div class="shoot-today-item-main">
+        <div class="shoot-card-name">${escapeHtml(item.concept_name)}</div>
+        <div class="shoot-card-product">${escapeHtml(item.product_name || '—')}</div>
+        ${metaParts.length ? `<div class="shoot-card-meta">${escapeHtml(metaParts.join(' · '))}</div>` : ''}
+        ${hookPreview ? `<div class="shoot-today-hook">&ldquo;${escapeHtml(hookPreview)}&rdquo;</div>` : ''}
+      </div>
+      <div class="shoot-today-item-actions">
+        <span class="shoot-card-status ${isShot ? 'shoot-card-status-shot' : ''}">${isShot ? '&check; Shot' : 'Planned'}</span>
+        <button type="button" class="link-btn" onclick="openShootingBrief(${item.id})">View Shoot Brief &rarr;</button>
+        ${isShot ? '' : `<button type="button" class="btn btn-primary btn-sm" onclick="markShootingShot(${item.id})">&check; Mark as Shot</button>`}
+      </div>
+    </div>`;
+}
+
+function renderShootingTodayView() {
+  const { date, dayKey } = shootingTodayInfo();
+  const dayLabel = date.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' });
+  document.getElementById('shoot-today-title').textContent = `Today — ${dayLabel.toUpperCase()}`;
+
+  const list = document.getElementById('shoot-today-list');
+  if (!dayKey) {
+    document.getElementById('shoot-today-summary').textContent = '';
+    list.innerHTML = '<div class="attention-empty">No shoots are scheduled on weekends.</div>';
+    return;
+  }
+  const data = state.shooting.todayData;
+  if (!data) return;
+  const items = ((data.days && data.days[dayKey]) || []).filter(shootingOwnerMatches);
+  const shotCount = items.filter((i) => i.status === 'shot').length;
+  document.getElementById('shoot-today-summary').textContent = `${items.length} Planned · ${shotCount} Shot · ${items.length - shotCount} Remaining`;
+  list.innerHTML = items.length ? items.map((item) => shootingTodayItemHtml(item)).join('') : '<div class="attention-empty">Nothing scheduled for today.</div>';
+}
+
+async function loadShootingHistory() {
+  try {
+    state.shooting.historyData = await api('/shooting/history');
+    renderShootingHistoryView();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// Not Completed vs Carried Over: a week that still has unfinished work
+// sitting in place shows "Not Completed" (final disposition still pending);
+// once that work has actually been moved into a later week, it shows
+// "Carried Over" instead -- both can appear together if some of each kind
+// exist for the same week. See shooting.js's GET /history for the bucketing
+// logic itself (purely derived from current state, no separate flag).
+function shootingHistoryStatusLabel(w) {
+  const parts = [];
+  if (w.not_completed > 0 || w.carried_over === 0) parts.push(`${w.not_completed} Not Completed`);
+  if (w.carried_over > 0) parts.push(`${w.carried_over} Carried Over`);
+  return parts.join(' · ');
+}
+
+function renderShootingHistoryView() {
+  const weeks = (state.shooting.historyData && state.shooting.historyData.weeks) || [];
+  const list = document.getElementById('shoot-history-list');
+  if (!weeks.length) {
+    list.innerHTML = '<div class="attention-empty">No Shooting history yet.</div>';
+    return;
+  }
+  list.innerHTML = weeks.map((w) => {
+    const monday = parseDateStr(w.week_start);
+    const completionRate = w.planned > 0 ? Math.round((w.shot / w.planned) * 100) : 0;
+    return `
+      <div class="shoot-history-row">
+        <div class="shoot-history-row-main">
+          <div class="shoot-history-week-name">Week ${isoWeekNumber(monday)}</div>
+          <div class="shoot-history-range">${formatWeekRange(monday)}</div>
+          <div class="shoot-history-stats">${w.planned} Planned · ${w.shot} Shot · ${shootingHistoryStatusLabel(w)}</div>
+        </div>
+        <div class="shoot-history-row-side">
+          <div class="shoot-history-rate">${completionRate}% completed</div>
+          <button type="button" class="link-btn" onclick="jumpToShootingWeekFromHistory('${w.week_start}')">View Week &rarr;</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function jumpToShootingWeekFromHistory(weekStartStr) {
+  const targetMonday = parseDateStr(weekStartStr);
+  const diffWeeks = Math.round((targetMonday - mondayOfWeek(0)) / (7 * 86400000));
+  state.shooting.weekOffset = diffWeeks;
+  setShootingView('week');
+}
+
+// Read-only Shoot Brief -- reuses the approved Concept's own data (see
+// GET /shooting/:id/brief), never another editable form.
+async function openShootingBrief(scheduleId) {
+  try {
+    const brief = await api(`/shooting/${scheduleId}/brief`);
+    state.shooting.briefScheduleId = scheduleId;
+    renderShootingBrief(brief);
+    openModal('shoot-brief-modal');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function renderShootingBrief(brief) {
+  document.getElementById('shoot-brief-title').textContent = brief.concept_name;
+  const isShot = brief.status === 'shot';
+  const badge = document.getElementById('shoot-brief-status-badge');
+  badge.className = `cd-concept-status-pill ${isShot ? 'cd-status-approved' : 'cd-status-ready-for-review'}`;
+  badge.textContent = isShot ? 'Shot' : 'Planned';
+
+  const skuInfo = (brief.colourways || []).map((c) => `${c.colour_label || c.style_code}${c.size ? ` · ${c.size}` : ''}`).join(', ');
+  const contextLine = [
+    brief.product_name,
+    CONCEPT_DEV_SOURCE_LABELS[brief.source] || brief.source,
+    brief.owner ? `Owner: ${brief.owner}` : null,
+    skuInfo,
+  ].filter(Boolean).join(' &middot; ');
+  document.getElementById('shoot-brief-context').innerHTML = `
+    ${brief.image_url ? `<img class="cd-modal-context-thumb" src="${brief.image_url}" alt="">` : '<span class="cd-modal-context-thumb cd-modal-context-noimg">🖼</span>'}
+    <div class="cd-modal-context-lines"><div class="cd-modal-context-line">${contextLine}</div></div>`;
+
+  const hooks = Array.isArray(brief.hook_variations) ? brief.hook_variations.filter((h) => h.text && h.text.trim()) : [];
+  document.getElementById('shoot-brief-hooks').innerHTML = hooks.length
+    ? hooks.map((h, i) => `<div class="shoot-brief-hook"><span class="cd-field-label">${i === 0 ? 'Primary Hook' : `Alternative Hook ${i + 1}`}</span><div class="shoot-brief-text">${escapeHtml(h.text)}</div></div>`).join('')
+    : '<div class="shoot-brief-text hint">No hook recorded.</div>';
+
+  document.getElementById('shoot-brief-execution').textContent = brief.execution || '—';
+
+  const scriptSection = document.getElementById('shoot-brief-script-section');
+  if (brief.script_notes && brief.script_notes.trim()) {
+    scriptSection.style.display = '';
+    document.getElementById('shoot-brief-script').textContent = brief.script_notes;
+  } else {
+    scriptSection.style.display = 'none';
+  }
+
+  const refs = Array.isArray(brief.reference_items) ? brief.reference_items.filter((r) => r.url) : [];
+  const refSection = document.getElementById('shoot-brief-references-section');
+  if (refs.length) {
+    refSection.style.display = '';
+    document.getElementById('shoot-brief-references').innerHTML = refs.map((r) => `
+      <div class="cd-reference-item">
+        <a href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.url)}</a>
+        ${r.note ? `<div class="shoot-brief-text">${escapeHtml(r.note)}</div>` : ''}
+      </div>`).join('');
+  } else {
+    refSection.style.display = 'none';
+  }
+
+  document.getElementById('shoot-brief-talent').textContent = brief.talent_requirement || '—';
+  document.getElementById('shoot-brief-location').textContent = brief.location || '—';
+  const propsWrap = document.getElementById('shoot-brief-props-wrap');
+  if (brief.props_notes && brief.props_notes.trim()) {
+    propsWrap.style.display = '';
+    document.getElementById('shoot-brief-props').textContent = brief.props_notes;
+  } else {
+    propsWrap.style.display = 'none';
+  }
+
+  const audienceParts = [];
+  if (brief.avatar_name) audienceParts.push(brief.avatar_name);
+  else if (brief.custom_avatar_description) audienceParts.push(brief.custom_avatar_description);
+  if (brief.avatar_why_care) audienceParts.push(brief.avatar_why_care);
+  document.getElementById('shoot-brief-audience').textContent = audienceParts.join(' — ') || 'No audience notes recorded.';
+
+  document.getElementById('shoot-brief-mark-shot-btn').style.display = isShot ? 'none' : '';
+}
+
+async function markShootingShotFromBrief() {
+  if (!state.shooting.briefScheduleId) return;
+  await markShootingShot(state.shooting.briefScheduleId);
+  closeModal('shoot-brief-modal');
 }
 
 // ── Creative Toolkit / Creative Tools ─────────────────

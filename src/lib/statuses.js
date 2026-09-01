@@ -59,6 +59,24 @@ const CONCEPT_DEV_STATUS_LABELS = {
 // PATCH /concept-development/concepts/:id/review).
 const TUESDAY_REVIEW_DECISIONS = ['approved', 'changes_required', 'killed'];
 
+// Shooting's own deliberately simple status -- the calendar date already
+// communicates "when", so this only needs to say "has it happened yet".
+const SHOOT_STATUSES = ['unscheduled', 'scheduled', 'shot'];
+const SHOOT_STATUS_LABELS = {
+  unscheduled: 'Unscheduled',
+  scheduled: 'Planned',
+  shot: 'Shot',
+};
+// Monday-Friday only for V1 -- no weekend shoot days.
+const SHOOT_DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'];
+const SHOOT_DAY_LABELS = {
+  monday: 'Monday',
+  tuesday: 'Tuesday',
+  wednesday: 'Wednesday',
+  thursday: 'Thursday',
+  friday: 'Friday',
+};
+
 module.exports = {
   STATUSES,
   STATUS_LABELS,
@@ -69,4 +87,8 @@ module.exports = {
   CONCEPT_DEV_STATUSES,
   CONCEPT_DEV_STATUS_LABELS,
   TUESDAY_REVIEW_DECISIONS,
+  SHOOT_STATUSES,
+  SHOOT_STATUS_LABELS,
+  SHOOT_DAYS,
+  SHOOT_DAY_LABELS,
 };

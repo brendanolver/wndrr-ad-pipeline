@@ -38,6 +38,7 @@
       <button class="tab-btn" data-tab="planning"><span class="sidebar-nav-icon">🗓</span>Planning</button>
       <button class="tab-btn" data-tab="concept-dev"><span class="sidebar-nav-icon">💡</span>Concept Dev</button>
       <button class="tab-btn" data-tab="tuesday-review"><span class="sidebar-nav-icon">🗳</span>Tuesday Review</button>
+      <button class="tab-btn" data-tab="shooting"><span class="sidebar-nav-icon">🎬</span>Shooting</button>
       <button class="tab-btn" data-tab="board"><span class="sidebar-nav-icon">▤</span>Board</button>
       <button class="tab-btn" data-tab="admin"><span class="sidebar-nav-icon">🏷</span>Styles &amp; Categories</button>
       <button class="tab-btn" data-tab="settings"><span class="sidebar-nav-icon">⚙</span>Settings</button>
@@ -405,6 +406,116 @@
       <div class="filter-tabs" id="tr-filters"></div>
       <div id="tr-list"></div>
     </section>
+
+    <!-- Shooting: a lightweight weekly calendar / task tracker, not another
+         production database. Reads the SAME shoot_schedule row across all
+         three views (Week/Today/History) -- see state.shooting in app.js --
+         so nothing here ever duplicates a record, only how it's displayed.
+         Approved Concepts arrive automatically (see the handoff in
+         PATCH /concept-development/concepts/:id/review); the Concept itself
+         is never re-created here, only referenced. -->
+    <section id="tab-shooting" class="tab-panel">
+      <h1 class="tr-page-title">Shooting</h1>
+      <div class="shoot-subnav" id="shoot-subnav">
+        <button type="button" class="shoot-subnav-btn active" data-shoot-view="week" onclick="setShootingView('week')">Week</button>
+        <button type="button" class="shoot-subnav-btn" data-shoot-view="today" onclick="setShootingView('today')">Today</button>
+        <button type="button" class="shoot-subnav-btn" data-shoot-view="history" onclick="setShootingView('history')">History</button>
+      </div>
+
+      <!-- WEEK VIEW -->
+      <div class="shoot-panel active" id="shoot-view-week">
+        <div class="planning-header">
+          <div class="planning-week-nav">
+            <button type="button" class="week-nav-btn" id="shoot-week-prev" onclick="changeShootingWeek(-1)" aria-label="Previous week">&lsaquo;</button>
+            <button type="button" class="planning-week-label-btn" id="shoot-week-label" onclick="toggleShootingWeekPicker()"></button>
+            <button type="button" class="week-nav-btn" id="shoot-week-next" onclick="changeShootingWeek(1)" aria-label="Next week">&rsaquo;</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="shoot-this-week-btn" onclick="goToCurrentShootingWeek()" style="display:none;">This Week</button>
+            <div class="planning-week-picker" id="shoot-week-picker" style="display:none;"></div>
+          </div>
+          <select class="shoot-owner-filter" id="shoot-week-owner-filter" onchange="setShootingOwnerFilter(this.value)"></select>
+        </div>
+        <div class="shoot-summary-line" id="shoot-week-summary"></div>
+
+        <div class="shoot-unscheduled" id="shoot-unscheduled"></div>
+        <div class="shoot-week-grid" id="shoot-week-grid"></div>
+      </div>
+
+      <!-- TODAY VIEW -->
+      <div class="shoot-panel" id="shoot-view-today">
+        <div class="planning-header">
+          <h2 class="shoot-today-title" id="shoot-today-title"></h2>
+          <select class="shoot-owner-filter" id="shoot-today-owner-filter" onchange="setShootingOwnerFilter(this.value)"></select>
+        </div>
+        <div class="shoot-summary-line" id="shoot-today-summary"></div>
+        <div class="shoot-today-list" id="shoot-today-list"></div>
+      </div>
+
+      <!-- HISTORY VIEW -->
+      <div class="shoot-panel" id="shoot-view-history">
+        <h2 class="shoot-today-title">Creative Production History</h2>
+        <div class="shoot-history-list" id="shoot-history-list"></div>
+      </div>
+    </section>
+
+    <!-- Read-only Shoot Brief -- reuses the approved Concept's own data
+         (see GET /shooting/:id/brief), never another editable form. "What
+         exactly am I meant to capture", so Execution/Hook/Script/References/
+         Shoot Requirements are the point; Audience is present but
+         deliberately de-emphasized (the strategy was already approved). -->
+    <div id="shoot-brief-modal" class="modal-backdrop">
+      <div class="modal shoot-brief-modal">
+        <div class="modal-header">
+          <div class="cd-modal-header-title">
+            <h3 id="shoot-brief-title">Shoot Brief</h3>
+            <span id="shoot-brief-status-badge" class="cd-concept-status-pill"></span>
+          </div>
+          <button class="modal-close" onclick="closeModal('shoot-brief-modal')">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="shoot-brief-context" id="shoot-brief-context"></div>
+
+          <div class="cd-modal-section">
+            <div class="cd-modal-section-title">Hook / Opening</div>
+            <div id="shoot-brief-hooks"></div>
+          </div>
+          <div class="cd-modal-section">
+            <div class="cd-modal-section-title">Execution / Shot Plan</div>
+            <div class="shoot-brief-text" id="shoot-brief-execution"></div>
+          </div>
+          <div class="cd-modal-section" id="shoot-brief-script-section" style="display:none;">
+            <div class="cd-modal-section-title">Script / Talking Points</div>
+            <div class="shoot-brief-text" id="shoot-brief-script"></div>
+          </div>
+          <div class="cd-modal-section" id="shoot-brief-references-section" style="display:none;">
+            <div class="cd-modal-section-title">References</div>
+            <div id="shoot-brief-references"></div>
+          </div>
+          <div class="cd-modal-section">
+            <div class="cd-modal-section-title">Shoot Requirements</div>
+            <div class="shoot-brief-req-row">
+              <div><span class="cd-field-label">Talent</span><div class="shoot-brief-text" id="shoot-brief-talent"></div></div>
+              <div><span class="cd-field-label">Location</span><div class="shoot-brief-text" id="shoot-brief-location"></div></div>
+            </div>
+            <div id="shoot-brief-props-wrap" style="display:none;">
+              <span class="cd-field-label">Props / Special Requirements</span>
+              <div class="shoot-brief-text" id="shoot-brief-props"></div>
+            </div>
+          </div>
+
+          <!-- Audience: present so the creator can check who this is for if
+               useful, but kept visually secondary -- the strategy is already
+               approved by this stage. -->
+          <details class="shoot-brief-audience" id="shoot-brief-audience-wrap">
+            <summary>Customer Avatar / Audience context</summary>
+            <div class="shoot-brief-text" id="shoot-brief-audience"></div>
+          </details>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" onclick="closeModal('shoot-brief-modal')">Close</button>
+          <button class="btn btn-primary" id="shoot-brief-mark-shot-btn" onclick="markShootingShotFromBrief()">&check; Mark as Shot</button>
+        </div>
+      </div>
+    </div>
 
     <section id="tab-board" class="tab-panel">
       <div id="missing-ad-panel" class="missing-ad-panel" style="display:none;">

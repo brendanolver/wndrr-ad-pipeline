@@ -33,6 +33,7 @@ const metaProductMappingRoutes = require('./routes/metaProductMappings');
 const creativeResourceRoutes = require('./routes/creativeResources');
 const creativeToolkitRoutes = require('./routes/creativeToolkit');
 const customerAvatarRoutes = require('./routes/customerAvatars');
+const shootingRoutes = require('./routes/shooting');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -52,6 +53,7 @@ app.use('/api/debug', requireAuth, debugRoutes);
 app.use('/api/proven-winners', requireAuth, provenWinnerRoutes);
 app.use('/api/drop-product-plans', requireAuth, dropProductPlanRoutes);
 app.use('/api/concept-development', requireAuth, conceptDevelopmentRoutes);
+app.use('/api/shooting', requireAuth, shootingRoutes);
 app.use('/api/planning-settings', requireAuth, planningSettingsRoutes);
 app.use('/api/core-products', requireAuth, coreProductRoutes);
 app.use('/api/shoot-plan', requireAuth, shootPlanRoutes);
