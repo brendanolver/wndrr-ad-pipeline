@@ -21,15 +21,17 @@ const provenWinnerRoutes = require('./routes/provenWinners');
 const { router: dropProductPlanRoutes } = require('./routes/dropProductPlans');
 const conceptDevelopmentRoutes = require('./routes/conceptDevelopment');
 const planningSettingsRoutes = require('./routes/planningSettings');
-const coreProductRoutes = require('./routes/coreProducts');
+const { router: coreProductRoutes } = require('./routes/coreProducts');
 const shootPlanRoutes = require('./routes/shootPlan');
 const contentCreatorRoutes = require('./routes/contentCreators');
-const highStockProductRoutes = require('./routes/highStockProducts');
+const { router: highStockProductRoutes } = require('./routes/highStockProducts');
 const promotionRoutes = require('./routes/promotions');
 const weeklyShootPlanConfirmationRoutes = require('./routes/weeklyShootPlanConfirmation');
 const weeklyPlanningProgressRoutes = require('./routes/weeklyPlanningProgress');
 const salesCadenceRoutes = require('./routes/salesCadence');
 const metaProductMappingRoutes = require('./routes/metaProductMappings');
+const creativeResourceRoutes = require('./routes/creativeResources');
+const creativeToolkitRoutes = require('./routes/creativeToolkit');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -59,6 +61,8 @@ app.use('/api/weekly-shoot-plan-confirmation', requireAuth, weeklyShootPlanConfi
 app.use('/api/weekly-planning-progress', requireAuth, weeklyPlanningProgressRoutes);
 app.use('/api/sales-cadence', requireAuth, salesCadenceRoutes);
 app.use('/api/meta-product-mappings', requireAuth, metaProductMappingRoutes);
+app.use('/api/creative-resources', requireAuth, creativeResourceRoutes);
+app.use('/api/creative-toolkit', requireAuth, creativeToolkitRoutes);
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
 

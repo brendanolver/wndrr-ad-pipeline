@@ -45,4 +45,4 @@ function formatWeekLabel({ start, end }) {
   return `${fmt(start)} – ${fmt(end)}, ${end.getFullYear()}`;
 }
 
-module.exports = { getWeekRange, formatWeekLabel };
+module.exports = { getWeekRange, formatWeekLabel, isoWeekNumber };

@@ -652,3 +652,29 @@ UPDATE creative_assets SET concept_dev_status = 'not_started'
 ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS hook_variations JSONB NOT NULL DEFAULT '[]'::jsonb;
 UPDATE creative_assets SET hook_variations = jsonb_build_array(jsonb_build_object('text', hook))
  WHERE hook_variations = '[]'::jsonb AND hook IS NOT NULL AND trim(hook) <> '';
+
+-- ---------------------------------------------------------------------------
+-- Creative Toolkit: research/inspiration resources shown alongside Concept
+-- Development, configurable so the team can add their own (TikTok Creative
+-- Center, Motion, Pinterest, Drive folders, competitor sites, internal
+-- docs...) without a code change. Deliberately just a plain external link +
+-- helper copy -- the ChatGPT prompt generators and the Proven Winners link
+-- shown in the same toolkit have real app logic behind them (context-aware
+-- prompt building, an internal view) that this simple shape can't represent,
+-- so those stay fixed cards in the frontend rather than rows here.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS creative_resources (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(255) UNIQUE NOT NULL,
+  description TEXT,
+  url TEXT NOT NULL,
+  resource_type VARCHAR(100),
+  cta_label VARCHAR(100) NOT NULL DEFAULT 'Open ↗',
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  enabled BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO creative_resources (name, description, url, resource_type, cta_label, sort_order)
+VALUES ('Meta Ad Library', 'See what other brands are currently running.', 'https://www.facebook.com/ads/library/', 'Research competitors', 'Open Ad Library ↗', 0)
+ON CONFLICT (name) DO NOTHING;
