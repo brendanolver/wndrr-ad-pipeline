@@ -284,15 +284,19 @@ async function computeCoreProducts() {
   });
   products.sort((a, b) => ATTENTION_ORDER[a.flag] - ATTENTION_ORDER[b.flag]);
 
-  // Creative Jobs (which this used to count) is retired -- the still-active
-  // concept-production pipeline is creative_assets, so a "new concept
-  // planned this week" is now a new_experimental asset on a Core-tier
-  // style, created this week.
+  // "Planned" means actually greenlit for production, not just drafted --
+  // a concept only counts once Tuesday Review has approved it for shooting
+  // (concept_dev_status = 'approved'), counted against the week it was
+  // APPROVED (reviewed_at), not the week it was first created. A concept
+  // can sit in Concept Development for a while before its Tuesday slot, so
+  // created_at would under/over-count relative to which week's target it
+  // actually lands against.
   const weeklyCountResult = await pool.query(
     `SELECT COUNT(*)::int AS count FROM creative_assets ca
      JOIN styles s ON s.id = ca.style_id
      WHERE ca.concept_classification = 'new_experimental' AND s.tier = 'core_proven'
-       AND ca.created_at >= date_trunc('week', now())`
+       AND ca.concept_dev_status = 'approved'
+       AND ca.reviewed_at >= date_trunc('week', now())`
   );
   const weeklyPlanned = weeklyCountResult.rows[0].count;
   const weeklyTarget = settings.weekly_new_concept_target;
