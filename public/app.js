@@ -5063,6 +5063,15 @@ function shootingDayHeaderLabel(day) {
   return `${SHOOT_DAY_SHORT_LABELS[day]} ${d.getDate()} ${month}`;
 }
 
+// True only when the Week view is actually showing the real current week
+// (weekOffset 0) AND this is the real current weekday -- browsing to a past
+// or future week, or a weekend with no matching day key, never lights this
+// up. Reuses shootingTodayInfo's own real-world "now", the same source
+// Today's tab already trusts, so there's no second definition of "today".
+function shootingIsCurrentDay(day) {
+  return state.shooting.weekOffset === 0 && day === shootingTodayInfo().dayKey;
+}
+
 function shootingWeekStart() {
   return isoDateStr(mondayOfWeek(state.shooting.weekOffset));
 }
@@ -5303,7 +5312,7 @@ function shootingCardHtml(item) {
       <div class="shoot-card-product">${escapeHtml(item.product_name || '—')}</div>
       ${metaParts.length ? `<div class="shoot-card-meta">${escapeHtml(metaParts.join(' · '))}</div>` : ''}
       <div class="shoot-card-footer">
-        <span class="shoot-card-status ${isShot ? 'shoot-card-status-shot' : ''}">${isShot ? '&check; Shot' : 'Planned'}</span>
+        <span class="shoot-status-pill${isShot ? ' shoot-status-pill-shot' : ''}">${isShot ? '&check; Shot' : '&#9675; Planned'}</span>
         ${carriedBadge}
       </div>
       <div class="shoot-card-actions">
@@ -5324,8 +5333,8 @@ function shootingCardHtml(item) {
 // the date, never a "0/0" -- see the brief: "keeps empty days visually
 // clean". Unscheduled Concepts never reach this function at all, since it
 // only ever receives a single weekday's already-bucketed items.
-function shootingDayHeaderHtml(day, items) {
-  const label = `<span class="shoot-day-date">${shootingDayHeaderLabel(day)}</span>`;
+function shootingDayHeaderHtml(day, items, isToday) {
+  const label = `<span class="shoot-day-date-group"><span class="shoot-day-date">${shootingDayHeaderLabel(day)}</span>${isToday ? '<span class="shoot-day-today-badge">Today</span>' : ''}</span>`;
   if (!items.length) return `<div class="shoot-day-header-top">${label}</div>`;
   const shotCount = items.filter((i) => i.status === 'shot').length;
   const total = items.length;
@@ -5362,7 +5371,7 @@ function renderShootingWeekView() {
   const completionPct = planned > 0 ? Math.round((shot / planned) * 100) : null;
 
   document.getElementById('shoot-week-summary').innerHTML = `
-    <span class="shoot-summary-stat"><strong>${planned}</strong> Planned</span>
+    <span class="shoot-summary-stat"><strong>${planned}</strong> Scheduled</span>
     <span class="shoot-summary-stat"><strong>${shot}</strong> Shot</span>
     <span class="shoot-summary-stat"><strong>${planned - shot}</strong> Remaining</span>
     ${completionPct !== null ? `<span class="shoot-summary-stat"><strong>${completionPct}%</strong> Complete</span>` : ''}`;
@@ -5373,16 +5382,18 @@ function renderShootingWeekView() {
 
   const unscheduledEl = document.getElementById('shoot-unscheduled');
   unscheduledEl.classList.toggle('shoot-unscheduled-compact', unscheduled.length === 0);
+  unscheduledEl.classList.toggle('shoot-unscheduled-active', unscheduled.length > 0);
   unscheduledEl.innerHTML = unscheduled.length ? `
-    <div class="shoot-unscheduled-header">Unscheduled <span class="shoot-unscheduled-count">${unscheduled.length}</span></div>
+    <div class="shoot-unscheduled-header">Unscheduled <span class="shoot-unscheduled-count">${unscheduled.length}</span><span class="shoot-unscheduled-hint">Needs scheduling</span></div>
     <div class="shoot-unscheduled-list">${unscheduled.map((item) => shootingCardHtml(item)).join('')}</div>`
     : `<div class="shoot-unscheduled-header">Unscheduled <span class="shoot-unscheduled-count">0</span></div>`;
 
   document.getElementById('shoot-week-grid').innerHTML = SHOOT_DAY_KEYS.map((day) => {
     const items = dayItems[day];
+    const isToday = shootingIsCurrentDay(day);
     return `
-      <div class="shoot-day-column" ondragover="onShootColumnDragOver(event)" ondrop="onShootColumnDrop(event, '${day}')">
-        <div class="shoot-day-header">${shootingDayHeaderHtml(day, items)}</div>
+      <div class="shoot-day-column${isToday ? ' shoot-day-column-today' : ''}" ondragover="onShootColumnDragOver(event)" ondrop="onShootColumnDrop(event, '${day}')">
+        <div class="shoot-day-header">${shootingDayHeaderHtml(day, items, isToday)}</div>
         <div class="shoot-day-cards">
           ${items.length ? items.map((item) => shootingCardHtml(item)).join('') : '<div class="shoot-day-empty">—</div>'}
         </div>
