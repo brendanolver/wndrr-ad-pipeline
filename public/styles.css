@@ -935,6 +935,12 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .cd-modal-idea-row{display:grid;grid-template-columns:35% 1fr;gap:12px;}
 @media (max-width:600px){.cd-modal-idea-row{grid-template-columns:1fr;}}
 
+/* Wraps a progressive-disclosure field (Script/Talking Points, Shoot
+   Requirements) once expanded, so its own "- Hide" link sits directly
+   below it -- collapsing just re-hides the wrapper, values stay put. */
+.cd-modal-collapsible{display:flex;flex-direction:column;gap:8px;}
+.cd-modal-collapsible>.link-btn{align-self:flex-start;}
+
 .cd-modal-validation{padding:8px 18px;font-size:12px;font-weight:600;color:var(--red);background:var(--red-light);border-top:1px solid var(--border);}
 .cd-field-invalid{border-color:var(--red) !important;}
 
