@@ -3623,10 +3623,6 @@ function conceptDevProductCardHtml(product) {
   const pathwayLabel = CONCEPT_DEV_PATHWAY_LABELS[product.source] || shootPlanRequirementLabel(product);
   const count = product.concepts.length;
   const { notStarted, readyForReview } = conceptDevStatusCounts(product.concepts);
-  // A Drop's concepts are already-assigned Proven Winners -- the creator is
-  // opening what exists, not developing something new, so the action reads
-  // differently even though the click target is identical.
-  const actionLabel = product.source === 'drop' ? 'Open Concepts' : 'Develop Concepts';
   return `
     <div class="cd-card" onclick="openConceptDevProduct(${product.shoot_plan_item_id})">
       <div class="cd-card-top">
@@ -3643,7 +3639,7 @@ function conceptDevProductCardHtml(product) {
         <span class="cd-concept-status-pill ${readyForReview > 0 ? 'cd-status-ready-for-review' : 'cd-pill-neutral'}">${readyForReview} Ready for Review</span>
       </div>
       <div class="cd-card-meta">${product.colourways.length} Colourway${product.colourways.length === 1 ? '' : 's'} &middot; Owner: ${escapeHtml(product.creator || '—')}</div>
-      <div class="cd-card-action">${actionLabel} &rarr;</div>
+      <div class="cd-card-action">Develop Concepts &rarr;</div>
     </div>`;
 }
 
@@ -3750,25 +3746,25 @@ function conceptDevConceptCardHtml(concept, productSource) {
     </div>`;
 }
 
-// "What concepts do I need to prepare for this product?" -- concept cards
-// stay compact (name/locked-tag/status/hook+reference flags only); the full
-// Concept Details/References/Shoot Requirements form only appears once one
-// is opened (openConceptDevModal). A Drop's concepts are already-decided
-// Proven Winners, so "+ New Concept" is deliberately NOT the prominent
-// action there -- the creator's job is opening each one and preparing its
-// execution, not inventing another. Core/High Stock/Promotion have no such
-// pre-assigned concepts, so "+ New Concept" is the primary action instead.
+// "What NEW concepts do I need to develop for this product?" -- concept
+// cards stay compact (name/locked-tag/status/hook+reference flags only);
+// the full Concept Details/References/Shoot Requirements form only appears
+// once one is opened (openConceptDevModal). For an Upcoming Drop, this
+// workspace only ever holds concepts genuinely being developed here (the
+// backend already excludes assigned Proven Winner slots entirely -- see
+// GET /concept-development) -- their existing Proven creative coverage
+// stays exactly where it's tracked (the drop's own Required Concepts
+// plan/Planning product page), it's just not duplicated into this list.
+// "+ New Concept" is the same primary action for every source now.
 function renderConceptDevProductWorkspace(product) {
-  const isProvenAssigned = product.source === 'drop';
   return `
     <button type="button" class="link-btn cd-back-link" onclick="closeConceptDevProduct()">&larr; Back to Products</button>
     ${conceptDevWorkspaceHeaderHtml(product)}
     <button type="button" class="link-btn cd-need-inspiration" onclick="openCreativeTools(${product.shoot_plan_item_id})">🛠 Creative Tools</button>
-    ${!isProvenAssigned ? `<button type="button" class="btn btn-primary btn-sm cd-new-concept-btn" onclick="openAddConceptModal(${product.shoot_plan_item_id})">+ New Concept</button>` : ''}
+    <button type="button" class="btn btn-primary btn-sm cd-new-concept-btn" onclick="openAddConceptModal(${product.shoot_plan_item_id})">+ New Concept</button>
     <div class="cd-concept-grid">
-      ${product.concepts.length ? product.concepts.map((c) => conceptDevConceptCardHtml(c, product.source)).join('') : '<div class="attention-empty">No concepts yet.</div>'}
+      ${product.concepts.length ? product.concepts.map((c) => conceptDevConceptCardHtml(c, product.source)).join('') : '<div class="attention-empty">No new concepts yet</div>'}
     </div>
-    ${isProvenAssigned ? `<button type="button" class="link-btn cd-add-concept-subtle" onclick="openAddConceptModal(${product.shoot_plan_item_id})">+ Add another concept</button>` : ''}
   `;
 }
 
@@ -3891,13 +3887,12 @@ function removeConceptDevReference(index) {
 }
 
 // Read-only Planning-handoff context shown at the top of the workspace --
-// product/source/pathway/owner/colourways -- so the creator (especially on
-// a Drop's already-assigned Proven Winner concept) always has what they
-// need to prep execution without leaving the modal or re-entering
-// anything. Deliberately compact (one line, two if there's an initial
-// idea from Planning) -- the creative-development fields are the point of
-// this workspace, not the context banner, so it shouldn't compete for
-// vertical space with them.
+// product/source/pathway/owner/colourways -- so the creator always has
+// what they need to prep execution without leaving the modal or
+// re-entering anything. Deliberately compact (one line, two if there's an
+// initial idea from Planning) -- the creative-development fields are the
+// point of this workspace, not the context banner, so it shouldn't
+// compete for vertical space with them.
 function conceptDevModalContextHtml(product) {
   const thumb = product.image_url
     ? `<img class="cd-modal-context-thumb" src="${product.image_url}" alt="">`
