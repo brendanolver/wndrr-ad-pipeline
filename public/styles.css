@@ -981,15 +981,13 @@ main{flex:1;min-width:0;padding:20px 24px;}
   .hero-status-badge{margin-left:0;}
 }
 
-/* Creative Toolkit -- a resource, not a workflow stage, so it's kept
-   visually lightweight throughout: small cards, no giant AI panel, no
-   colour-alert boxes. cd-need-inspiration reuses the same plain .link-btn
-   look as the modal's other progressive-disclosure toggles, so it reads as
-   optional rather than another required action. */
+/* Creative Toolkit / Creative Tools -- a resource, not a workflow stage,
+   so both are kept visually lightweight throughout: small cards, no giant
+   AI panel, no colour-alert boxes. cd-need-inspiration reuses the same
+   plain .link-btn look as the modal's other progressive-disclosure
+   toggles, so it reads as optional rather than another required action. */
 .cd-need-inspiration{display:inline-block;margin:2px 0 4px;}
 .ct-modal{width:520px;max-width:92vw;}
-.ct-section-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);margin:16px 0 8px;padding-top:12px;border-top:1px solid var(--border);}
-.ct-card-list:first-child .ct-section-title{margin-top:0;}
 .ct-card{background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-lg);padding:12px;margin-bottom:8px;}
 .ct-card-name{font-weight:700;font-size:13.5px;}
 .ct-card-sub{font-size:11.5px;font-weight:600;color:var(--teal-dark);margin-top:1px;}
