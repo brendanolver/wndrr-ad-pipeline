@@ -935,9 +935,12 @@
         <div id="cd-modal-script-toggle-wrap">
           <button type="button" class="link-btn" onclick="toggleConceptDevScript()">+ Add Script / Talking Points <span class="hint">(optional)</span></button>
         </div>
-        <label id="cd-modal-script-field" style="display:none;">Script / Talking Points
-          <textarea id="cd-modal-script" rows="3"></textarea>
-        </label>
+        <div id="cd-modal-script-field" class="cd-modal-collapsible" style="display:none;">
+          <label>Script / Talking Points
+            <textarea id="cd-modal-script" rows="3"></textarea>
+          </label>
+          <button type="button" class="link-btn" onclick="setConceptDevScriptExpanded(false)">&minus; Hide</button>
+        </div>
       </div>
 
       <!-- Hook Variations belong to THIS concept -- "1 Concept -> 3 Hook
@@ -963,7 +966,7 @@
         <div id="cd-modal-shoot-req-toggle-wrap">
           <button type="button" class="link-btn" onclick="toggleConceptDevShootRequirements()">+ Add Requirements</button>
         </div>
-        <div id="cd-modal-shoot-req-fields" style="display:none;">
+        <div id="cd-modal-shoot-req-fields" class="cd-modal-collapsible" style="display:none;">
           <div class="cd-modal-field-row">
             <label>Talent / Model
               <input type="text" id="cd-modal-talent" placeholder="e.g. In-house model, UGC creator, none">
@@ -975,6 +978,7 @@
           <label>Props / Special Requirements
             <textarea id="cd-modal-props" rows="2"></textarea>
           </label>
+          <button type="button" class="link-btn" onclick="setConceptDevShootRequirementsExpanded(false)">&minus; Hide</button>
         </div>
       </div>
 
