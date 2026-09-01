@@ -55,9 +55,10 @@ let state = {
   // have real app logic (context-aware prompts, an internal view) a plain
   // name/url resource can't represent, so they stay fixed toolkit cards.
   creativeResources: [],
-  // Which product/concept the Creative Toolkit was opened from -- drives
-  // the context-aware ChatGPT prompts and whether "Improve This Concept"
-  // shows at all (only once a concept, not just a product, is in view).
+  // Which product/concept the context-aware Creative Tools modal was
+  // opened from -- drives the ChatGPT prompts and which of the two action
+  // sets (product-level vs. concept-level) is shown. Unused by the global
+  // Creative Toolkit drawer, which never needs a product/concept in view.
   creativeToolkit: { shootPlanItemId: null, conceptId: null },
 };
 let dashboardWeekOffset = 0;
@@ -3722,7 +3723,7 @@ function renderConceptDevProductWorkspace(product) {
   return `
     <button type="button" class="link-btn cd-back-link" onclick="closeConceptDevProduct()">&larr; Back to Products</button>
     ${conceptDevWorkspaceHeaderHtml(product)}
-    <button type="button" class="link-btn cd-need-inspiration" onclick="openCreativeToolkit(${product.shoot_plan_item_id})">Need inspiration? 💡</button>
+    <button type="button" class="link-btn cd-need-inspiration" onclick="openCreativeTools(${product.shoot_plan_item_id})">🛠 Creative Tools</button>
     ${!isProvenAssigned ? `<button type="button" class="btn btn-primary btn-sm cd-new-concept-btn" onclick="openAddConceptModal(${product.shoot_plan_item_id})">+ New Concept</button>` : ''}
     <div class="cd-concept-grid">
       ${product.concepts.length ? product.concepts.map(conceptDevConceptCardHtml).join('') : '<div class="attention-empty">No concepts yet.</div>'}
@@ -4094,15 +4095,20 @@ async function saveConceptDevModal(targetStatus) {
   }
 }
 
-// ── Creative Toolkit ──────────────────────────────────
-// Research/inspiration resources plus context-aware ChatGPT prompt
-// generation, reachable from the Concept Development landing page (💡
-// Creative Toolkit) and from inside a product/concept workspace (Need
-// inspiration?). Deliberately just a resource: it never writes anything
-// back into Concept Development itself -- Copy Prompt only puts text on
-// the clipboard, and the creator brings back whatever's actually worth
-// developing by hand. See creativeToolkitContext.js for how the prompts
-// themselves get built server-side from Planning's own data.
+// ── Creative Toolkit / Creative Tools ─────────────────
+// Two deliberately separate surfaces:
+//  - Creative Toolkit (creative-toolkit-modal, openCreativeToolkit()) is
+//    the GLOBAL resource drawer off the Concept Development landing
+//    header -- only ever configurable external links + Proven Winners,
+//    nothing that needs a product/concept in view.
+//  - Creative Tools (creative-tools-modal, openCreativeTools()) is
+//    CONTEXT-AWARE: opened from a product workspace or from inside a
+//    concept, it shows a different action set depending on which. Neither
+//    surface writes anything back into Concept Development itself --
+//    Copy Prompt only puts text on the clipboard, and the creator brings
+//    back whatever's actually worth developing by hand. See
+//    creativeToolkitContext.js for how the prompts themselves get built
+//    server-side from Planning's own data.
 async function ensureCreativeResourcesLoaded() {
   if (state.creativeResources.length) return;
   try {
@@ -4110,6 +4116,11 @@ async function ensureCreativeResourcesLoaded() {
   } catch (e) {
     toast(e.message, true);
   }
+}
+
+function findConfiguredResource(name) {
+  const target = name.trim().toLowerCase();
+  return state.creativeResources.find((r) => r.enabled && r.name.trim().toLowerCase() === target);
 }
 
 function renderCreativeToolkitModal() {
@@ -4126,24 +4137,50 @@ function renderCreativeToolkitModal() {
           </div>
         </div>`).join('')
     : '';
-  document.getElementById('ct-improve-card').style.display = state.creativeToolkit.conceptId ? '' : 'none';
 }
 
-// shootPlanItemId is required (every entry point knows which product it's
-// for); conceptId is only set when opened from inside a specific concept
-// (openCreativeToolkitFromConceptModal), which is what unlocks the
-// "Improve This Concept" card -- per the brief, that card only makes sense
-// once there's an existing concept to pressure-test.
-async function openCreativeToolkit(shootPlanItemId, conceptId = null) {
-  state.creativeToolkit = { shootPlanItemId, conceptId };
+async function openCreativeToolkit() {
   await ensureCreativeResourcesLoaded();
   renderCreativeToolkitModal();
   openModal('creative-toolkit-modal');
 }
 
-function openCreativeToolkitFromConceptModal() {
+// Exactly one of the two action sets is shown, chosen by whether a
+// specific Concept (not just a product) is currently open -- and an AI
+// prompt card is only ever shown once the id it actually needs is
+// available, rather than shown disabled.
+function renderCreativeToolsModal() {
+  const { shootPlanItemId, conceptId } = state.creativeToolkit;
+  const showConceptLevel = Boolean(conceptId);
+  document.getElementById('ctx-product-level').style.display = showConceptLevel ? 'none' : '';
+  document.getElementById('ctx-concept-level').style.display = showConceptLevel ? '' : 'none';
+  document.getElementById('ctx-develop-card').style.display = !showConceptLevel && shootPlanItemId ? '' : 'none';
+  document.getElementById('ctx-improve-card').style.display = showConceptLevel ? '' : 'none';
+
+  const adLibraryCard = document.getElementById('ctx-adlibrary-card');
+  const metaAdLibrary = findConfiguredResource('Meta Ad Library');
+  if (!showConceptLevel && metaAdLibrary) {
+    adLibraryCard.style.display = '';
+    document.getElementById('ctx-adlibrary-link').href = metaAdLibrary.url;
+  } else {
+    adLibraryCard.style.display = 'none';
+  }
+}
+
+// shootPlanItemId is required (every entry point knows which product it's
+// for); conceptId is only set when opened from inside a specific concept
+// (openCreativeToolsFromConceptModal), which switches the panel over to
+// the concept-level action set.
+async function openCreativeTools(shootPlanItemId, conceptId = null) {
+  state.creativeToolkit = { shootPlanItemId, conceptId };
+  await ensureCreativeResourcesLoaded();
+  renderCreativeToolsModal();
+  openModal('creative-tools-modal');
+}
+
+function openCreativeToolsFromConceptModal() {
   if (!conceptDevModalProduct) return;
-  openCreativeToolkit(conceptDevModalProduct.shoot_plan_item_id, conceptDevModalConceptId);
+  openCreativeTools(conceptDevModalProduct.shoot_plan_item_id, conceptDevModalConceptId);
 }
 
 async function copyToolkitPrompt(type) {
@@ -4165,8 +4202,25 @@ function openChatGpt() {
   window.open('https://chat.openai.com/', '_blank', 'noopener');
 }
 
+// Jump straight into this concept's own Hook/Reference sections, already
+// present further down the same concept-dev-modal -- addConceptDevHook/
+// addConceptDevReference add an empty row and focus it, so closing the
+// Creative Tools modal on top just reveals that ready-to-type input.
+function jumpToConceptDevHooks() {
+  closeModal('creative-tools-modal');
+  addConceptDevHook();
+  document.getElementById('cd-modal-hooks-list').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function jumpToConceptDevReferences() {
+  closeModal('creative-tools-modal');
+  addConceptDevReference();
+  document.getElementById('cd-modal-references-list').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
 function viewProvenWinnersFromToolkit() {
   closeModal('creative-toolkit-modal');
+  closeModal('creative-tools-modal');
   switchTab('settings');
   document.getElementById('pw-list').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }

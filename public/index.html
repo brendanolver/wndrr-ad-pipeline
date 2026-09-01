@@ -874,7 +874,7 @@
     </div>
     <div class="modal-body">
       <div class="cd-modal-context-compact" id="cd-modal-context"></div>
-      <button type="button" class="link-btn cd-need-inspiration" onclick="openCreativeToolkitFromConceptModal()">Need inspiration? 💡</button>
+      <button type="button" class="link-btn cd-need-inspiration" onclick="openCreativeToolsFromConceptModal()">🛠 Creative Tools</button>
 
       <div class="cd-modal-section">
         <div class="cd-modal-section-title">The Idea</div>
@@ -949,13 +949,15 @@
   </div>
 </div>
 
-<!-- Creative Toolkit: research/inspiration resources plus context-aware
-     ChatGPT prompt generation for whichever product/concept it was opened
-     from (state.creativeToolkit.shootPlanItemId/conceptId, set by
-     openCreativeToolkit*). Deliberately lightweight -- an optional
-     resource, never a required workflow stage, and never writes anything
-     back into Concept Development itself; the creator always brings
-     worthwhile ideas back in by hand. -->
+<!-- Creative Toolkit: the GLOBAL resource drawer, opened from Concept
+     Development's landing header (openCreativeToolkit(), no args --
+     nothing here needs a specific product/concept in view). Deliberately
+     scoped to only what works without product context: the team's
+     configurable external links (Settings -> Creative Resources, Meta Ad
+     Library seeded by default) and Proven Winners. Anything that needs
+     real product/concept data (the ChatGPT prompts, hook/reference
+     shortcuts) lives in the separate, context-aware Creative Tools modal
+     below instead -- see that comment for why the two are kept apart. -->
 <div id="creative-toolkit-modal" class="modal-backdrop">
   <div class="modal ct-modal">
     <div class="modal-header">
@@ -965,33 +967,86 @@
     <div class="modal-body">
       <div id="ct-resources-list" class="ct-card-list"></div>
 
-      <div class="ct-section-title">AI &amp; Creative Tools</div>
-
-      <div class="ct-card">
-        <div class="ct-card-name">ChatGPT &mdash; Develop Concepts</div>
-        <div class="ct-card-sub">Develop stronger creative directions</div>
-        <div class="ct-card-helper">Use the product and planning context to brainstorm considered creative concepts.</div>
-        <div class="ct-card-actions">
-          <button type="button" class="btn btn-primary btn-sm" onclick="copyToolkitPrompt('develop')">Copy Prompt</button>
-          <button type="button" class="btn btn-ghost btn-sm" onclick="openChatGpt()">Open ChatGPT &#8599;</button>
-        </div>
-      </div>
-
-      <div class="ct-card" id="ct-improve-card" style="display:none;">
-        <div class="ct-card-name">ChatGPT &mdash; Improve This Concept</div>
-        <div class="ct-card-helper">Pressure-test the idea and develop stronger executions or hooks.</div>
-        <div class="ct-card-actions">
-          <button type="button" class="btn btn-primary btn-sm" onclick="copyToolkitPrompt('improve')">Copy Prompt</button>
-          <button type="button" class="btn btn-ghost btn-sm" onclick="openChatGpt()">Open ChatGPT &#8599;</button>
-        </div>
-      </div>
-
       <div class="ct-card">
         <div class="ct-card-name">Proven Winners</div>
         <div class="ct-card-sub">Review what's already working</div>
         <div class="ct-card-helper">Browse WNDRR's proven creative concepts for inspiration.</div>
         <div class="ct-card-actions">
           <button type="button" class="btn btn-ghost btn-sm" onclick="viewProvenWinnersFromToolkit()">View Winners &rarr;</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Creative Tools: CONTEXT-AWARE quick actions for whichever product/
+     concept Concept Development is currently open on
+     (state.creativeToolkit.shootPlanItemId/conceptId, set by
+     openCreativeTools*). Kept as its own modal, separate from the global
+     Creative Toolkit above, because everything shown here (the ChatGPT
+     prompts, jumping to this concept's own Hook/Reference sections) only
+     means something for a specific product/concept -- exactly one of the
+     two views below is shown, chosen by whether a specific Concept (not
+     just a product) is currently open, and an AI prompt card is only ever
+     shown once the id it needs is actually available. -->
+<div id="creative-tools-modal" class="modal-backdrop">
+  <div class="modal ct-modal">
+    <div class="modal-header">
+      <h3>🛠 Creative Tools</h3>
+      <button class="modal-close" onclick="closeModal('creative-tools-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div id="ctx-product-level">
+        <div class="ct-card" id="ctx-develop-card">
+          <div class="ct-card-name">Develop Concepts with ChatGPT</div>
+          <div class="ct-card-helper">Use this product's Planning context to brainstorm considered creative concepts.</div>
+          <div class="ct-card-actions">
+            <button type="button" class="btn btn-primary btn-sm" onclick="copyToolkitPrompt('develop')">Copy Prompt</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="openChatGpt()">Open ChatGPT &#8599;</button>
+          </div>
+        </div>
+
+        <div class="ct-card" id="ctx-adlibrary-card">
+          <div class="ct-card-name">Open Meta Ad Library</div>
+          <div class="ct-card-helper">See what other brands are currently running.</div>
+          <div class="ct-card-actions">
+            <a class="btn btn-ghost btn-sm" id="ctx-adlibrary-link" href="#" target="_blank" rel="noopener">Open Ad Library &#8599;</a>
+          </div>
+        </div>
+
+        <div class="ct-card">
+          <div class="ct-card-name">View Proven Winners</div>
+          <div class="ct-card-helper">Browse WNDRR's proven creative concepts for inspiration.</div>
+          <div class="ct-card-actions">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="viewProvenWinnersFromToolkit()">View Winners &rarr;</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="ctx-concept-level" style="display:none;">
+        <div class="ct-card" id="ctx-improve-card">
+          <div class="ct-card-name">Improve This Concept with ChatGPT</div>
+          <div class="ct-card-helper">Pressure-test the idea and develop stronger executions or hooks.</div>
+          <div class="ct-card-actions">
+            <button type="button" class="btn btn-primary btn-sm" onclick="copyToolkitPrompt('improve')">Copy Prompt</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="openChatGpt()">Open ChatGPT &#8599;</button>
+          </div>
+        </div>
+
+        <div class="ct-card">
+          <div class="ct-card-name">Develop Hook Variations</div>
+          <div class="ct-card-helper">Jump to this concept's Hook / Opening section and add an alternative.</div>
+          <div class="ct-card-actions">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="jumpToConceptDevHooks()">Add Hook &rarr;</button>
+          </div>
+        </div>
+
+        <div class="ct-card">
+          <div class="ct-card-name">Add Reference</div>
+          <div class="ct-card-helper">Jump to References and add a link.</div>
+          <div class="ct-card-actions">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="jumpToConceptDevReferences()">Add Reference &rarr;</button>
+          </div>
         </div>
       </div>
     </div>
