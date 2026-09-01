@@ -910,12 +910,12 @@
       <div class="cd-modal-section">
         <div class="cd-modal-section-title">The Idea</div>
         <div class="cd-modal-idea-row">
-          <label>Concept Name<span class="cd-req-mark">*</span>
+          <label><span class="cd-field-label">Concept Name<span class="cd-req-mark">*</span></span>
             <input type="text" id="cd-modal-name" oninput="updateReviewPromptGate()">
             <div class="hint cd-modal-locked-name" id="cd-modal-name-locked" style="display:none;"></div>
             <div class="cd-field-error" id="cd-modal-name-error"></div>
           </label>
-          <label>Angle / Idea<span class="cd-req-mark">*</span>
+          <label><span class="cd-field-label">Angle / Idea<span class="cd-req-mark">*</span></span>
             <textarea id="cd-modal-angle" rows="2" placeholder="Why would someone actually care about this?" oninput="updateReviewPromptGate()"></textarea>
             <div class="cd-field-error" id="cd-modal-angle-error"></div>
           </label>
@@ -936,11 +936,11 @@
       <div class="cd-modal-section" id="cd-modal-audience-section">
         <div class="cd-modal-section-title">The Audience</div>
         <div class="cd-modal-idea-row">
-          <label>Customer Avatar<span class="cd-req-mark">*</span>
+          <label><span class="cd-field-label">Customer Avatar<span class="cd-req-mark">*</span></span>
             <select id="cd-modal-avatar-select" onchange="onConceptDevAvatarChange()"></select>
             <div class="cd-field-error" id="cd-modal-avatar-select-error"></div>
           </label>
-          <label>Why should they care?<span class="cd-req-mark">*</span>
+          <label><span class="cd-field-label">Why should they care?<span class="cd-req-mark">*</span></span>
             <textarea id="cd-modal-avatar-why-care" rows="2" placeholder="What makes this product or concept relevant to this person?" oninput="updateReviewPromptGate()"></textarea>
             <div class="cd-field-error" id="cd-modal-avatar-why-care-error"></div>
           </label>
@@ -956,7 +956,7 @@
 
       <div class="cd-modal-section">
         <div class="cd-modal-section-title">The Execution</div>
-        <label>Execution / Shot Plan<span class="cd-req-mark">*</span>
+        <label><span class="cd-field-label">Execution / Shot Plan<span class="cd-req-mark">*</span></span>
           <textarea id="cd-modal-execution" rows="2" oninput="updateReviewPromptGate()"></textarea>
           <div class="cd-field-error" id="cd-modal-execution-error"></div>
         </label>
@@ -987,10 +987,22 @@
         <button type="button" class="link-btn" onclick="addConceptDevHook()">+ Add Alternative Hook</button>
       </div>
 
-      <div class="cd-modal-section cd-modal-section-references">
+      <!-- References defaults to the same compact collapsed state as Script
+           and Shoot Requirements below -- an empty optional field shouldn't
+           carry the visual weight of a populated one. Unlike those two,
+           it's a repeatable list rather than a single toggle: the same
+           addConceptDevReference() is wired to both the collapsed and
+           expanded "+ Add Reference" triggers, and removing the last
+           reference collapses the section back down (see
+           setConceptDevReferencesExpanded in app.js). -->
+      <div class="cd-modal-section">
         <div class="cd-modal-section-title">References</div>
-        <div id="cd-modal-references-list" class="cd-reference-item-list"></div>
-        <button type="button" class="btn btn-sm cd-add-reference-btn" onclick="addConceptDevReference()">+ Add Reference</button>
+        <div id="cd-modal-references-toggle-wrap">
+          <button type="button" class="link-btn" onclick="addConceptDevReference()">+ Add Reference</button>
+          <div class="hint cd-modal-section-helper">Add inspiration or examples for this concept.</div>
+        </div>
+        <div id="cd-modal-references-list" class="cd-reference-item-list" style="display:none;"></div>
+        <button type="button" class="btn btn-sm cd-add-reference-btn" id="cd-modal-add-reference-btn" onclick="addConceptDevReference()" style="display:none;">+ Add Reference</button>
       </div>
 
       <div class="cd-modal-section">
