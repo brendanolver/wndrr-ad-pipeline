@@ -5296,27 +5296,34 @@ async function markShootingShot(scheduleId) {
 // Week grid card -- compact by design (per the brief: "Do NOT display the
 // entire Concept description..."). Shot cards stay visible and undraggable
 // (see the backend's status != 'shot' guard) so the calendar always shows
-// what was actually produced, not just outstanding work.
+// what was actually produced, not just outstanding work. The whole card
+// opens the Brief on click (draggable cards still drag as normal -- a plain
+// click and a drag are already distinct browser gestures); the status pill
+// and the "•••" menu each stop that click from bubbling so they act on
+// themselves instead of also opening the Brief underneath them.
 function shootingCardHtml(item) {
   const isShot = item.status === 'shot';
   const metaParts = [item.owner, item.location].filter(Boolean);
   const carriedBadge = item.carried_over ? `<span class="shoot-carried-badge">From W${isoWeekNumber(parseDateStr(item.original_week_start))}</span>` : '';
+  const statusHtml = isShot
+    ? `<span class="shoot-status-pill shoot-status-pill-shot">&check; Shot</span>`
+    : `<button type="button" class="shoot-status-pill shoot-status-pill-toggle" onclick="event.stopPropagation(); markShootingShot(${item.id})" title="Mark as Shot">&#9675; Planned</button>`;
   const menuHtml = isShot ? '' : `
-        <div class="shoot-card-menu">
-          <button type="button" class="shoot-card-menu-btn" onclick="event.stopPropagation(); toggleShootCardMenu(${item.id})" aria-label="Move concept">&bull;&bull;&bull;</button>
+        <div class="shoot-card-menu" onclick="event.stopPropagation()">
+          <button type="button" class="shoot-card-menu-btn" onclick="toggleShootCardMenu(${item.id})" aria-label="Move concept">&bull;&bull;&bull;</button>
           <div class="shoot-card-menu-dropdown" id="shoot-card-menu-${item.id}">${shootingMoveMenuItemsHtml(item)}</div>
         </div>`;
   return `
-    <div class="shoot-card ${isShot ? 'shoot-card-shot' : ''}" ${isShot ? '' : 'draggable="true"'} ondragstart="onShootCardDragStart(event, ${item.id})">
+    <div class="shoot-card ${isShot ? 'shoot-card-shot' : ''}" ${isShot ? '' : 'draggable="true"'} ondragstart="onShootCardDragStart(event, ${item.id})" onclick="openShootingBrief(${item.id})">
       <div class="shoot-card-name">${escapeHtml(item.concept_name)}</div>
       <div class="shoot-card-product">${escapeHtml(item.product_name || '—')}</div>
       ${metaParts.length ? `<div class="shoot-card-meta">${escapeHtml(metaParts.join(' · '))}</div>` : ''}
       <div class="shoot-card-footer">
-        <span class="shoot-status-pill${isShot ? ' shoot-status-pill-shot' : ''}">${isShot ? '&check; Shot' : '&#9675; Planned'}</span>
+        ${statusHtml}
         ${carriedBadge}
       </div>
       <div class="shoot-card-actions">
-        <button type="button" class="link-btn" onclick="openShootingBrief(${item.id})">View Brief &rarr;</button>
+        <button type="button" class="link-btn" onclick="event.stopPropagation(); openShootingBrief(${item.id})">View Brief &rarr;</button>
         ${menuHtml}
       </div>
     </div>`;

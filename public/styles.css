@@ -1286,7 +1286,10 @@ main{flex:1;min-width:0;padding:20px 24px;}
    "✓ Shot" status label; never greyed-out/disabled or hard to read. */
 .shoot-card{background:white;border:1px solid var(--border);border-left:3px solid var(--border);border-radius:var(--r);padding:9px 10px;display:flex;flex-direction:column;gap:5px;cursor:grab;}
 .shoot-card:active{cursor:grabbing;}
-.shoot-card-shot{border-left-color:var(--green);cursor:default;background:var(--surface2);}
+/* Shot cards aren't draggable any more (nothing left to move), but the
+   whole card still opens the Brief on click -- pointer, not the default
+   arrow, says so. */
+.shoot-card-shot{border-left-color:var(--green);cursor:pointer;background:var(--surface2);}
 .shoot-card-name{font-weight:700;font-size:12.5px;}
 .shoot-card-product{font-size:11.5px;color:var(--text-secondary);}
 .shoot-card-meta{font-size:11px;color:var(--text-muted);}
@@ -1301,6 +1304,13 @@ main{flex:1;min-width:0;padding:20px 24px;}
    each one. Still just a small tinted badge, never a large coloured block. */
 .shoot-status-pill{display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:700;color:var(--text-secondary);background:var(--border);border-radius:var(--r-pill);padding:2px 8px;}
 .shoot-status-pill-shot{color:var(--green);background:var(--green-light);}
+/* Planned pill doubles as a "mark as Shot" toggle -- the hollow circle
+   already reads as an unchecked box, so this is a small affordance change
+   (border/background reset off the <button>, a hover state) rather than a
+   whole new checkbox control. Stays a quiet grey pill; only turns green
+   once the card is actually marked Shot (see shootingCardHtml). */
+.shoot-status-pill-toggle{border:none;font-family:inherit;cursor:pointer;}
+.shoot-status-pill-toggle:hover{background:var(--teal-light);color:var(--teal-dark);}
 
 /* Card footer: "View Brief →" is the one primary, always-visible action;
    moving days lives behind a quiet "•••" overflow menu instead of a
