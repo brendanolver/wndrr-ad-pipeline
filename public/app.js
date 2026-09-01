@@ -4158,13 +4158,22 @@ function renderCreativeToolsModal() {
   document.getElementById('ctx-develop-card').style.display = !showConceptLevel && shootPlanItemId ? '' : 'none';
   document.getElementById('ctx-improve-card').style.display = showConceptLevel ? '' : 'none';
 
-  const adLibraryCard = document.getElementById('ctx-adlibrary-card');
   const metaAdLibrary = findConfiguredResource('Meta Ad Library');
+
+  const adLibraryCard = document.getElementById('ctx-adlibrary-card');
   if (!showConceptLevel && metaAdLibrary) {
     adLibraryCard.style.display = '';
     document.getElementById('ctx-adlibrary-link').href = metaAdLibrary.url;
   } else {
     adLibraryCard.style.display = 'none';
+  }
+
+  const conceptAdLibraryCard = document.getElementById('ctx-concept-adlibrary-card');
+  if (showConceptLevel && metaAdLibrary) {
+    conceptAdLibraryCard.style.display = '';
+    document.getElementById('ctx-concept-adlibrary-link').href = metaAdLibrary.url;
+  } else {
+    conceptAdLibraryCard.style.display = 'none';
   }
 }
 
@@ -4201,22 +4210,6 @@ async function copyToolkitPrompt(type) {
 
 function openChatGpt() {
   window.open('https://chat.openai.com/', '_blank', 'noopener');
-}
-
-// Jump straight into this concept's own Hook/Reference sections, already
-// present further down the same concept-dev-modal -- addConceptDevHook/
-// addConceptDevReference add an empty row and focus it, so closing the
-// Creative Tools modal on top just reveals that ready-to-type input.
-function jumpToConceptDevHooks() {
-  closeModal('creative-tools-modal');
-  addConceptDevHook();
-  document.getElementById('cd-modal-hooks-list').scrollIntoView({ behavior: 'smooth', block: 'center' });
-}
-
-function jumpToConceptDevReferences() {
-  closeModal('creative-tools-modal');
-  addConceptDevReference();
-  document.getElementById('cd-modal-references-list').scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 function viewProvenWinnersFromToolkit() {
