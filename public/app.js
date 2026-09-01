@@ -3801,8 +3801,8 @@ let conceptDevModalHooks = [];
 function renderConceptDevModalHooks() {
   document.getElementById('cd-modal-hooks-list').innerHTML = conceptDevModalHooks.map((h, i) => `
     <div class="cd-hook-item">
-      <label>${i === 0 ? 'Primary Hook' : `Alternative Hook ${i + 1}`}
-        <textarea rows="2" oninput="conceptDevModalHooks[${i}].text=this.value" placeholder="${i === 0 ? 'e.g. 5 tees. $200. Here\'s what you actually get.' : 'A different opening for the same concept'}">${escapeHtml(h.text)}</textarea>
+      <label>${i === 0 ? 'Primary Hook / Opening' : `Alternative Hook ${i + 1}`}
+        <textarea rows="2" oninput="conceptDevModalHooks[${i}].text=this.value" placeholder="${i === 0 ? 'Describe the opening — dialogue, on-screen text, visual moment, action, reveal, etc.' : 'A different opening for the same concept'}">${escapeHtml(h.text)}</textarea>
       </label>
       ${i > 0 ? `<button type="button" class="link-btn cd-hook-remove" onclick="removeConceptDevHook(${i})">Remove</button>` : ''}
     </div>`).join('');
@@ -3906,6 +3906,9 @@ function onConceptDevAvatarChange() {
     : 'What makes this product or concept relevant to this person?';
   select.classList.remove('cd-field-invalid');
   document.getElementById('cd-modal-avatar-custom-desc').classList.remove('cd-field-invalid');
+  hideConceptDevFieldError('cd-modal-avatar-select-error');
+  hideConceptDevFieldError('cd-modal-avatar-custom-desc-error');
+  updateReviewPromptGate();
 }
 
 // Called after "Save as new Customer Avatar" (see openSaveAvatarFromConceptModal
@@ -4011,16 +4014,33 @@ function toggleConceptDevShootRequirements() {
   document.getElementById('cd-modal-talent').focus();
 }
 
-function hideConceptDevValidation() {
-  const el = document.getElementById('cd-modal-validation');
-  el.style.display = 'none';
+// Required-field ids Ready for Review validates -- kept as one list so the
+// clear-all-errors path, the field-order walked to focus the first missing
+// one, and the individual error-message ids below all stay in sync.
+const CD_REQUIRED_FIELD_IDS = [
+  'cd-modal-name', 'cd-modal-angle', 'cd-modal-avatar-select',
+  'cd-modal-avatar-custom-desc', 'cd-modal-avatar-why-care', 'cd-modal-execution',
+];
+
+function hideConceptDevFieldError(errorId) {
+  const el = document.getElementById(errorId);
+  if (!el) return;
+  el.classList.remove('show');
   el.textContent = '';
-  document.getElementById('cd-modal-name').classList.remove('cd-field-invalid');
-  document.getElementById('cd-modal-angle').classList.remove('cd-field-invalid');
-  document.getElementById('cd-modal-execution').classList.remove('cd-field-invalid');
-  document.getElementById('cd-modal-avatar-select').classList.remove('cd-field-invalid');
-  document.getElementById('cd-modal-avatar-custom-desc').classList.remove('cd-field-invalid');
-  document.getElementById('cd-modal-avatar-why-care').classList.remove('cd-field-invalid');
+}
+
+function showConceptDevFieldError(fieldId, errorId, message) {
+  document.getElementById(fieldId).classList.add('cd-field-invalid');
+  const el = document.getElementById(errorId);
+  el.textContent = message;
+  el.classList.add('show');
+}
+
+function hideConceptDevValidation() {
+  for (const fieldId of CD_REQUIRED_FIELD_IDS) {
+    document.getElementById(fieldId).classList.remove('cd-field-invalid');
+    hideConceptDevFieldError(`${fieldId}-error`);
+  }
 }
 
 // concept_name is locked to a read-only label for a Drop's Proven Winner
@@ -4081,20 +4101,56 @@ function openAddConceptModal(shootPlanItemId) {
 // Draft) or 'ready_for_review' (Ready for Review); a concept that's never
 // been saved stays Not Started (see schema.sql's concept_dev_status
 // default) until one of these two actions actually moves it.
+// Opens the lightweight Hook / Opening nudge (see #cd-hook-nudge-modal) and
+// resolves true if the creator picked "Continue Without" (proceed to save
+// Ready for Review anyway) or false for "Add Opening" (cancel the save and
+// focus the Primary Hook field instead) -- mirrors confirmDialog's
+// promise-based pattern but deliberately its own modal, since this is a
+// thinking prompt, not a warning.
+function showConceptDevHookNudge() {
+  return new Promise((resolve) => {
+    const continueBtn = document.getElementById('cd-hook-nudge-continue-btn');
+    const addBtn = document.getElementById('cd-hook-nudge-add-btn');
+    const cleanup = (result) => {
+      continueBtn.removeEventListener('click', onContinue);
+      addBtn.removeEventListener('click', onAdd);
+      closeModal('cd-hook-nudge-modal');
+      resolve(result);
+    };
+    const onContinue = () => cleanup(true);
+    const onAdd = () => {
+      cleanup(false);
+      const textareas = document.querySelectorAll('#cd-modal-hooks-list textarea');
+      if (textareas.length) {
+        textareas[0].focus();
+        textareas[0].scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }
+    };
+    continueBtn.addEventListener('click', onContinue);
+    addBtn.addEventListener('click', onAdd);
+    openModal('cd-hook-nudge-modal');
+  });
+}
+
 async function saveConceptDevModal(targetStatus) {
   const product = conceptDevModalProduct;
   if (!product) return;
   const found = conceptDevModalConceptId ? findConceptDevConcept(conceptDevModalConceptId) : null;
   const nameLocked = Boolean(found && found.concept.name_locked);
-  const name = nameLocked ? found.concept.concept_name : document.getElementById('cd-modal-name').value.trim();
-  const angle = document.getElementById('cd-modal-angle').value.trim();
-  const execution = document.getElementById('cd-modal-execution').value.trim();
+  const nameInput = document.getElementById('cd-modal-name');
+  const name = nameLocked ? found.concept.concept_name : nameInput.value.trim();
+  const angleInput = document.getElementById('cd-modal-angle');
+  const angle = angleInput.value.trim();
+  const executionInput = document.getElementById('cd-modal-execution');
+  const execution = executionInput.value.trim();
 
   const avatarSelect = document.getElementById('cd-modal-avatar-select');
   const isOtherAvatar = avatarSelect.value === '__other__';
   const customerAvatarId = avatarSelect.value && !isOtherAvatar ? Number(avatarSelect.value) : null;
-  const customAvatarDescription = isOtherAvatar ? document.getElementById('cd-modal-avatar-custom-desc').value.trim() : '';
-  const avatarWhyCare = document.getElementById('cd-modal-avatar-why-care').value.trim();
+  const customDescInput = document.getElementById('cd-modal-avatar-custom-desc');
+  const customAvatarDescription = isOtherAvatar ? customDescInput.value.trim() : '';
+  const whyCareInput = document.getElementById('cd-modal-avatar-why-care');
+  const avatarWhyCare = whyCareInput.value.trim();
   const hasAvatar = Boolean(customerAvatarId) || Boolean(customAvatarDescription);
 
   const body = {
@@ -4117,35 +4173,45 @@ async function saveConceptDevModal(targetStatus) {
   };
   const savedToast = targetStatus === 'ready_for_review' ? 'Marked Ready for Review' : 'Draft saved';
 
+  hideConceptDevValidation();
+
   // Ready for Review is the only action with real required fields --
   // Save Draft stays deliberately permissive (just a name) so a creator
-  // can jot down an idea and come back later. Missing fields get a clear
-  // inline message rather than a generic toast, per the brief -- every
-  // concept needs a specific person on the other side of it (a Customer
-  // Avatar or a completed Other/New Avatar, plus why THIS concept matters
-  // to them) before it's ready, same bar as Angle/Execution.
+  // can jot down an idea and come back later. Each missing field gets its
+  // own concise message directly beneath it (never a combined "please
+  // complete all required fields" banner), and the first missing field is
+  // focused/scrolled to -- every concept needs a specific person on the
+  // other side of it (a Customer Avatar or a completed Other/New Avatar,
+  // plus why THIS concept matters to them) before it's ready, same bar as
+  // Angle/Execution.
   if (targetStatus === 'ready_for_review') {
     const missing = [];
-    if (!name) missing.push('Concept Name');
-    if (!angle) missing.push('Angle / Idea');
-    if (!hasAvatar) missing.push('Customer Avatar');
-    if (!avatarWhyCare) missing.push('Why will they care?');
-    if (!execution) missing.push('Execution / Shot Plan');
+    if (!nameLocked && !name) missing.push({ field: nameInput, errorId: 'cd-modal-name-error', message: 'Concept Name is required' });
+    if (!angle) missing.push({ field: angleInput, errorId: 'cd-modal-angle-error', message: 'Add an Angle / Idea' });
+    if (!hasAvatar) {
+      if (isOtherAvatar) missing.push({ field: customDescInput, errorId: 'cd-modal-avatar-custom-desc-error', message: 'Describe who you\'re targeting' });
+      else missing.push({ field: avatarSelect, errorId: 'cd-modal-avatar-select-error', message: 'Customer Avatar is required' });
+    }
+    if (!avatarWhyCare) missing.push({ field: whyCareInput, errorId: 'cd-modal-avatar-why-care-error', message: 'Explain why this audience should care' });
+    if (!execution) missing.push({ field: executionInput, errorId: 'cd-modal-execution-error', message: 'Add an Execution / Shot Plan' });
+
     if (missing.length) {
-      const el = document.getElementById('cd-modal-validation');
-      el.textContent = `Before marking Ready for Review, add: ${missing.join(', ')}.`;
-      el.style.display = '';
-      document.getElementById('cd-modal-name').classList.toggle('cd-field-invalid', !name);
-      document.getElementById('cd-modal-angle').classList.toggle('cd-field-invalid', !angle);
-      avatarSelect.classList.toggle('cd-field-invalid', !hasAvatar && !isOtherAvatar);
-      document.getElementById('cd-modal-avatar-custom-desc').classList.toggle('cd-field-invalid', !hasAvatar && isOtherAvatar);
-      document.getElementById('cd-modal-avatar-why-care').classList.toggle('cd-field-invalid', !avatarWhyCare);
-      document.getElementById('cd-modal-execution').classList.toggle('cd-field-invalid', !execution);
-      el.scrollIntoView({ block: 'nearest' });
+      for (const m of missing) showConceptDevFieldError(m.field.id, m.errorId, m.message);
+      missing[0].field.focus();
+      missing[0].field.scrollIntoView({ block: 'center', behavior: 'smooth' });
       return;
     }
+
+    // All five core fields are complete -- Hook / Opening is a creative
+    // thinking nudge, not a requirement (per the brief), so pause once to
+    // ask rather than silently letting a concept through with nobody
+    // having considered the opening at all.
+    const primaryHookText = ((conceptDevModalHooks[0] && conceptDevModalHooks[0].text) || '').trim();
+    if (!primaryHookText) {
+      const continueWithout = await showConceptDevHookNudge();
+      if (!continueWithout) return;
+    }
   }
-  hideConceptDevValidation();
 
   try {
     if (conceptDevModalConceptId) {
@@ -4341,7 +4407,23 @@ function updateReviewPromptGate() {
     : document.getElementById('cd-modal-name-locked').textContent;
   const angle = document.getElementById('cd-modal-angle').value;
   const execution = document.getElementById('cd-modal-execution').value;
-  document.getElementById('cd-review-copy-btn').disabled = !(name.trim() && angle.trim() && execution.trim());
+
+  const avatarSelect = document.getElementById('cd-modal-avatar-select');
+  const isOtherAvatar = avatarSelect.value === '__other__';
+  const hasAvatar = isOtherAvatar
+    ? Boolean(document.getElementById('cd-modal-avatar-custom-desc').value.trim())
+    : Boolean(avatarSelect.value);
+  const avatarWhyCare = document.getElementById('cd-modal-avatar-why-care').value;
+
+  // Same five-field minimum Ready for Review itself requires -- there's
+  // nothing meaningful to pressure-test before a concept has its strategic
+  // foundation: who it's for, why they'd care, and how it's executed.
+  const ready = Boolean(name.trim() && angle.trim() && execution.trim() && hasAvatar && avatarWhyCare.trim());
+  document.getElementById('cd-review-copy-btn').disabled = !ready;
+  document.getElementById('cd-review-chatgpt-btn').disabled = !ready;
+  document.getElementById('cd-ai-review-helper').textContent = ready
+    ? 'Want a second opinion before sending this to Tuesday review?'
+    : 'Complete the core concept fields to unlock AI Review.';
 }
 
 // Builds from the modal's current field values (not a re-fetch of the

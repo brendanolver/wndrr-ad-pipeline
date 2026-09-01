@@ -441,6 +441,26 @@ Ask:
 
 If there is a weak connection between the concept and the target customer, call that out clearly and explain how it could be strengthened.`;
 
+// AI Creative Review-specific -- per the brief, Hook / Opening is never
+// required to unlock the review, but where a Primary Hook (and any
+// Alternative Hooks) exist, EXISTING CONCEPT above already carries them
+// verbatim (see formatExistingConceptBlock), so this just tells the
+// reviewer how to judge them. Included unconditionally (not gated on a
+// hook actually being present) since the "no hook yet" guidance is itself
+// part of the instruction -- some formats lead with a strong visual frame
+// rather than written or spoken copy, and that's a legitimate choice, not
+// an automatic gap.
+const HOOK_OPENING_INSTRUCTIONS = `Also assess the Hook / Opening specifically:
+
+- Is the opening strong enough to earn attention in the first few seconds?
+- Does it connect to the selected Customer Avatar?
+- Does it naturally lead into the underlying concept, or feel disconnected from it?
+- Does it create a genuine reason to keep watching?
+- Is it overly clickbait, or does it feel true to the product?
+- If Alternative Hooks are provided, are they genuinely meaningful tests of a different opening, or just minor wording changes?
+
+If no Hook / Opening has been captured yet, note that as an opportunity where relevant -- but understand that some creative formats rely primarily on a strong visual opening rather than written or spoken copy.`;
+
 // A critical reviewer, not a second idea-generator -- per the brief, this
 // must be comfortable saying a concept isn't strong enough yet rather than
 // always validating it. Structure follows the brief's 8-step review order.
@@ -539,6 +559,8 @@ Assess:
 7. Whether the creative feels native to Meta/Instagram
 8. Whether this is genuinely worth spending production time and Meta budget on${targetCustomerBlock ? '\n9. Whether this concept genuinely connects with the target customer' : ''}
 ${targetCustomerBlock ? `\n${TARGET_CUSTOMER_INSTRUCTIONS}\n` : ''}
+${HOOK_OPENING_INSTRUCTIONS}
+
 Identify what is strong, what is weak/generic/unclear, and the 1–3 changes that would most improve it.
 
 If the underlying concept is weak, say so clearly rather than just polishing the execution.
