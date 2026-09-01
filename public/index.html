@@ -41,11 +41,7 @@
       <button class="tab-btn" data-tab="shooting"><span class="sidebar-nav-icon">🎬</span>Shooting</button>
       <button class="tab-btn" data-tab="board"><span class="sidebar-nav-icon">▤</span>Board</button>
       <button class="tab-btn" data-tab="admin"><span class="sidebar-nav-icon">🏷</span>Styles &amp; Categories</button>
-      <!-- Not a real tab (no data-tab / tab-panel) -- opens the Reference
-           Library modal directly, same shared library as the Creative
-           Toolkit/Creative Tools entry points. See the [data-tab] guard on
-           the .tab-btn click wiring in app.js. -->
-      <button class="tab-btn" onclick="openReferenceLibraryFromToolkit()"><span class="sidebar-nav-icon">📚</span>Reference Library</button>
+      <button class="tab-btn" data-tab="reference-library"><span class="sidebar-nav-icon">📚</span>Reference Library</button>
       <button class="tab-btn" data-tab="settings"><span class="sidebar-nav-icon">⚙</span>Settings</button>
     </nav>
     <div class="sidebar-footer">
@@ -570,6 +566,27 @@
           </table>
         </div>
       </div>
+    </section>
+
+    <!-- Reference Library: a shared, lightweight bank of external creative
+         references the whole team can add to and browse -- one table
+         (reference_library), reached from this sidebar tab and from both
+         Creative Toolkit surfaces via openReferenceLibraryFromToolkit()
+         (index.html above), never a second copy of the data. -->
+    <section id="tab-reference-library" class="tab-panel">
+      <h1 class="tr-page-title">📚 Reference Library</h1>
+      <div class="hint ref-lib-helper">A shared bank of ads, UGC and ideas the team likes — browse for inspiration or add something you've spotted.</div>
+      <div class="ref-lib-toolbar">
+        <div class="filter-tabs ref-lib-tabs">
+          <button type="button" class="filter-tab active" id="ref-lib-tab-all" onclick="setReferenceLibraryFilter('all')">All</button>
+          <button type="button" class="filter-tab" id="ref-lib-tab-bau" onclick="setReferenceLibraryFilter('bau')">BAU</button>
+          <button type="button" class="filter-tab" id="ref-lib-tab-sale" onclick="setReferenceLibraryFilter('sale')">Sale</button>
+        </div>
+        <input type="search" id="ref-lib-search" class="ref-lib-search" placeholder="Search references…" oninput="renderReferenceLibraryList()">
+      </div>
+      <button type="button" class="btn btn-primary btn-sm ref-lib-add-btn" onclick="openReferenceAddModal()">+ Add Reference</button>
+      <div id="ref-lib-list" class="ref-lib-grid"></div>
+      <div id="ref-lib-empty" class="ref-lib-empty" style="display:none;">No references yet — be the first to add one.</div>
     </section>
 
     <section id="tab-settings" class="tab-panel">
@@ -1559,34 +1576,32 @@
   </div>
 </div>
 
-<!-- Reference Library: a shared, lightweight bank of external creative
-     references the whole team can add to and browse -- one table
-     (reference_library), reached from both the global Creative Toolkit and
-     the context-aware Creative Tools modal above via
-     openReferenceLibraryFromToolkit(), never a second copy of the data.
-     Doubles as a picker (state.referenceLibraryPickerMode) when opened from
-     a Concept's own References section via
-     openReferenceLibraryPicker() -- same list, cards show "Use This
-     Reference" instead of the ••• menu, see renderReferenceLibraryList(). -->
-<div id="reference-library-modal" class="modal-backdrop">
+<!-- Reference Library picker: a small, focused modal used only to attach an
+     existing Library reference to a Concept's own References section (see
+     openReferenceLibraryPicker() / pickReferenceLibraryItem() in app.js).
+     Browsing the library itself lives on its own page (#tab-reference-library,
+     below, reached from the sidebar and from both Creative Toolkit
+     surfaces) -- this modal shares that same reference_library data via
+     state.referenceLibrary, never a second copy, but renders its own
+     smaller card set (Use This Reference only, no ••• menu). -->
+<div id="reference-picker-modal" class="modal-backdrop">
   <div class="modal ref-lib-modal">
     <div class="modal-header">
-      <h3 id="reference-library-modal-title">📚 Reference Library</h3>
-      <button class="modal-close" onclick="closeModal('reference-library-modal')">&times;</button>
+      <h3>📚 Choose from Reference Library</h3>
+      <button class="modal-close" onclick="closeModal('reference-picker-modal')">&times;</button>
     </div>
     <div class="modal-body">
-      <div class="hint ref-lib-helper" id="ref-lib-helper">A shared bank of ads, UGC and ideas the team likes — browse for inspiration or add something you've spotted.</div>
+      <div class="hint">Pick a saved reference to attach to this concept.</div>
       <div class="ref-lib-toolbar">
         <div class="filter-tabs ref-lib-tabs">
-          <button type="button" class="filter-tab active" id="ref-lib-tab-all" onclick="setReferenceLibraryFilter('all')">All</button>
-          <button type="button" class="filter-tab" id="ref-lib-tab-bau" onclick="setReferenceLibraryFilter('bau')">BAU</button>
-          <button type="button" class="filter-tab" id="ref-lib-tab-sale" onclick="setReferenceLibraryFilter('sale')">Sale</button>
+          <button type="button" class="filter-tab active" id="ref-picker-tab-all" onclick="setReferencePickerFilter('all')">All</button>
+          <button type="button" class="filter-tab" id="ref-picker-tab-bau" onclick="setReferencePickerFilter('bau')">BAU</button>
+          <button type="button" class="filter-tab" id="ref-picker-tab-sale" onclick="setReferencePickerFilter('sale')">Sale</button>
         </div>
-        <input type="search" id="ref-lib-search" class="ref-lib-search" placeholder="Search references…" oninput="renderReferenceLibraryList()">
+        <input type="search" id="ref-picker-search" class="ref-lib-search" placeholder="Search references…" oninput="renderReferencePickerList()">
       </div>
-      <button type="button" class="btn btn-primary btn-sm ref-lib-add-btn" id="ref-lib-add-btn" onclick="openReferenceAddModal()">+ Add Reference</button>
-      <div id="ref-lib-list" class="ref-lib-grid"></div>
-      <div id="ref-lib-empty" class="ref-lib-empty" style="display:none;">No references yet — be the first to add one.</div>
+      <div id="ref-picker-list" class="ref-lib-grid"></div>
+      <div id="ref-picker-empty" class="ref-lib-empty" style="display:none;">No references yet — be the first to add one.</div>
     </div>
   </div>
 </div>
