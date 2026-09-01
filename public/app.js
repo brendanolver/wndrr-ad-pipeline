@@ -60,6 +60,10 @@ let state = {
   // sets (product-level vs. concept-level) is shown. Unused by the global
   // Creative Toolkit drawer, which never needs a product/concept in view.
   creativeToolkit: { shootPlanItemId: null, conceptId: null },
+  // Settings' reusable Customer Avatar library -- who Concept Development's
+  // "The Audience" section picks a Primary Customer Avatar from. See
+  // schema.sql's comment on customer_avatars/customer_avatar_id.
+  customerAvatars: [],
 };
 let dashboardWeekOffset = 0;
 
@@ -193,7 +197,7 @@ function conceptDevWeekNumber() {
 async function loadAll() {
   try {
     const weekStart = planningWeekStart();
-    const [board, styles, categories, dashboard, dropsRes, provenWinners, coreRes, planningSettings, shootPlan, contentCreators, highStockRes, promotions, weeklyConfirmation, weeklyPlanningProgress, salesCadence, metaProductMappings, metaProductFamilies, conceptDev, creativeResources] = await Promise.all([
+    const [board, styles, categories, dashboard, dropsRes, provenWinners, coreRes, planningSettings, shootPlan, contentCreators, highStockRes, promotions, weeklyConfirmation, weeklyPlanningProgress, salesCadence, metaProductMappings, metaProductFamilies, conceptDev, creativeResources, customerAvatars] = await Promise.all([
       api('/board'),
       api('/styles'),
       api('/categories'),
@@ -213,6 +217,7 @@ async function loadAll() {
       api('/meta-product-mappings/product-families'),
       api(`/concept-development?week_start=${conceptDevWeekStart()}`),
       api('/creative-resources'),
+      api('/customer-avatars'),
     ]);
     state.board = board;
     state.styles = styles;
@@ -236,6 +241,7 @@ async function loadAll() {
     state.metaProductFamilies = metaProductFamilies;
     state.conceptDev.data = conceptDev;
     state.creativeResources = creativeResources;
+    state.customerAvatars = customerAvatars;
     renderBoard();
     renderMissingAd();
     renderStylesTable();
@@ -246,6 +252,7 @@ async function loadAll() {
     renderPlanning();
     renderProvenWinners();
     renderCreativeResourcesSettings();
+    renderCustomerAvatarsSettings();
     renderCoreProducts();
     renderPlanningSettingsForm();
     renderContentCreators();
@@ -3870,6 +3877,59 @@ function conceptDevModalContextHtml(product) {
     </div>`;
 }
 
+// The Audience's Customer Avatar dropdown -- rebuilt fresh every time the
+// concept modal opens (and after "Save as new Customer Avatar" adds one)
+// from state.customerAvatars, plus the fixed trailing "+ Other / New
+// Avatar" option. selectedAvatarId keeps a disabled-but-still-selected
+// avatar's option in the list (rather than having it silently vanish)
+// so an existing concept never loses track of what it's actually set to.
+function renderConceptDevAvatarOptions(selectedAvatarId) {
+  const select = document.getElementById('cd-modal-avatar-select');
+  const options = state.customerAvatars.filter((a) => a.enabled || a.id === selectedAvatarId);
+  select.innerHTML = [
+    '<option value="">Select an avatar…</option>',
+    ...options.map((a) => `<option value="${a.id}">${escapeHtml(a.name)}${a.enabled ? '' : ' (disabled)'}</option>`),
+    '<option value="__other__">+ Other / New Avatar</option>',
+  ].join('');
+}
+
+// Toggles "Who are you targeting?" and swaps the "Why will they care?"
+// placeholder between the two modes -- one shared field either way (see
+// the HTML comment on cd-modal-audience-section), never two parallel
+// "why care" fields to keep in sync.
+function onConceptDevAvatarChange() {
+  const select = document.getElementById('cd-modal-avatar-select');
+  const isOther = select.value === '__other__';
+  document.getElementById('cd-modal-avatar-custom-wrap').style.display = isOther ? '' : 'none';
+  document.getElementById('cd-modal-avatar-why-care').placeholder = isOther
+    ? 'Why should this person care about this product or creative idea?'
+    : 'What makes this product or concept relevant to this person?';
+  select.classList.remove('cd-field-invalid');
+  document.getElementById('cd-modal-avatar-custom-desc').classList.remove('cd-field-invalid');
+}
+
+// Called after "Save as new Customer Avatar" (see openSaveAvatarFromConceptModal
+// and saveCa's caModalReturnToConceptDev handling) creates the avatar --
+// switches the concept modal straight over from "+ Other / New Avatar" to
+// the newly-saved avatar, already selected.
+function selectConceptDevAvatar(avatarId) {
+  const select = document.getElementById('cd-modal-avatar-select');
+  if (!select) return;
+  renderConceptDevAvatarOptions(avatarId);
+  select.value = String(avatarId);
+  onConceptDevAvatarChange();
+}
+
+// The "+ Other / New Avatar" description is a one-off by default (per the
+// brief, never auto-added to the library) -- this is the opt-in path,
+// reusing the same Settings ca-modal rather than a third form surface.
+// Pre-fills "Who are they?" from what's already been typed as a starting
+// point; the creator still has to name it and fill in the rest themselves.
+function openSaveAvatarFromConceptModal() {
+  const description = document.getElementById('cd-modal-avatar-custom-desc').value.trim();
+  openCaModal(null, { who: description });
+}
+
 // Shared by both the create ("+ Add Concept") and edit (click a concept
 // card) paths -- concept is null in create mode, so every field just starts
 // blank. Status is no longer an editable field here (see saveConceptDevModal)
@@ -3886,6 +3946,22 @@ function fillConceptDevModalFields(concept) {
     ? (concept.reference_items || []).map((r) => ({ url: r.url || '', note: r.note || '' }))
     : [];
   renderConceptDevModalReferences();
+
+  // The Audience: exactly one of customer_avatar_id / custom_avatar_description
+  // is ever set (see schema.sql's comment) -- the select reflects whichever
+  // one this concept actually has, or blank for a brand-new concept.
+  renderConceptDevAvatarOptions(concept ? concept.customer_avatar_id : null);
+  const avatarSelect = document.getElementById('cd-modal-avatar-select');
+  if (concept && concept.customer_avatar_id) {
+    avatarSelect.value = String(concept.customer_avatar_id);
+  } else if (concept && concept.custom_avatar_description) {
+    avatarSelect.value = '__other__';
+  } else {
+    avatarSelect.value = '';
+  }
+  document.getElementById('cd-modal-avatar-why-care').value = concept ? (concept.avatar_why_care || '') : '';
+  document.getElementById('cd-modal-avatar-custom-desc').value = concept ? (concept.custom_avatar_description || '') : '';
+  onConceptDevAvatarChange();
 
   // Always at least a Primary Hook slot -- even blank, it's the one
   // opening every concept has room for; Alternative Hooks only appear if
@@ -3939,8 +4015,12 @@ function hideConceptDevValidation() {
   const el = document.getElementById('cd-modal-validation');
   el.style.display = 'none';
   el.textContent = '';
+  document.getElementById('cd-modal-name').classList.remove('cd-field-invalid');
   document.getElementById('cd-modal-angle').classList.remove('cd-field-invalid');
   document.getElementById('cd-modal-execution').classList.remove('cd-field-invalid');
+  document.getElementById('cd-modal-avatar-select').classList.remove('cd-field-invalid');
+  document.getElementById('cd-modal-avatar-custom-desc').classList.remove('cd-field-invalid');
+  document.getElementById('cd-modal-avatar-why-care').classList.remove('cd-field-invalid');
 }
 
 // concept_name is locked to a read-only label for a Drop's Proven Winner
@@ -4004,14 +4084,26 @@ function openAddConceptModal(shootPlanItemId) {
 async function saveConceptDevModal(targetStatus) {
   const product = conceptDevModalProduct;
   if (!product) return;
-  const name = document.getElementById('cd-modal-name').value.trim();
+  const found = conceptDevModalConceptId ? findConceptDevConcept(conceptDevModalConceptId) : null;
+  const nameLocked = Boolean(found && found.concept.name_locked);
+  const name = nameLocked ? found.concept.concept_name : document.getElementById('cd-modal-name').value.trim();
   const angle = document.getElementById('cd-modal-angle').value.trim();
   const execution = document.getElementById('cd-modal-execution').value.trim();
+
+  const avatarSelect = document.getElementById('cd-modal-avatar-select');
+  const isOtherAvatar = avatarSelect.value === '__other__';
+  const customerAvatarId = avatarSelect.value && !isOtherAvatar ? Number(avatarSelect.value) : null;
+  const customAvatarDescription = isOtherAvatar ? document.getElementById('cd-modal-avatar-custom-desc').value.trim() : '';
+  const avatarWhyCare = document.getElementById('cd-modal-avatar-why-care').value.trim();
+  const hasAvatar = Boolean(customerAvatarId) || Boolean(customAvatarDescription);
 
   const body = {
     concept_dev_status: targetStatus,
     angle,
     execution,
+    customer_avatar_id: customerAvatarId,
+    custom_avatar_description: customAvatarDescription,
+    avatar_why_care: avatarWhyCare,
     script_notes: document.getElementById('cd-modal-script').value.trim(),
     hook_variations: conceptDevModalHooks
       .map((h) => ({ text: h.text.trim() }))
@@ -4028,16 +4120,26 @@ async function saveConceptDevModal(targetStatus) {
   // Ready for Review is the only action with real required fields --
   // Save Draft stays deliberately permissive (just a name) so a creator
   // can jot down an idea and come back later. Missing fields get a clear
-  // inline message rather than a generic toast, per the brief.
+  // inline message rather than a generic toast, per the brief -- every
+  // concept needs a specific person on the other side of it (a Customer
+  // Avatar or a completed Other/New Avatar, plus why THIS concept matters
+  // to them) before it's ready, same bar as Angle/Execution.
   if (targetStatus === 'ready_for_review') {
     const missing = [];
+    if (!name) missing.push('Concept Name');
     if (!angle) missing.push('Angle / Idea');
+    if (!hasAvatar) missing.push('Customer Avatar');
+    if (!avatarWhyCare) missing.push('Why will they care?');
     if (!execution) missing.push('Execution / Shot Plan');
     if (missing.length) {
       const el = document.getElementById('cd-modal-validation');
       el.textContent = `Before marking Ready for Review, add: ${missing.join(', ')}.`;
       el.style.display = '';
+      document.getElementById('cd-modal-name').classList.toggle('cd-field-invalid', !name);
       document.getElementById('cd-modal-angle').classList.toggle('cd-field-invalid', !angle);
+      avatarSelect.classList.toggle('cd-field-invalid', !hasAvatar && !isOtherAvatar);
+      document.getElementById('cd-modal-avatar-custom-desc').classList.toggle('cd-field-invalid', !hasAvatar && isOtherAvatar);
+      document.getElementById('cd-modal-avatar-why-care').classList.toggle('cd-field-invalid', !avatarWhyCare);
       document.getElementById('cd-modal-execution').classList.toggle('cd-field-invalid', !execution);
       el.scrollIntoView({ block: 'nearest' });
       return;
@@ -4047,8 +4149,6 @@ async function saveConceptDevModal(targetStatus) {
 
   try {
     if (conceptDevModalConceptId) {
-      const found = findConceptDevConcept(conceptDevModalConceptId);
-      const nameLocked = found && found.concept.name_locked;
       if (!nameLocked) {
         if (!name) { toast('Concept name is required', true); return; }
         body.concept_name = name;
@@ -4253,10 +4353,15 @@ async function copyReviewPrompt() {
   const conceptName = nameInput.style.display !== 'none'
     ? nameInput.value.trim()
     : document.getElementById('cd-modal-name-locked').textContent;
+  const avatarSelect = document.getElementById('cd-modal-avatar-select');
+  const isOtherAvatar = avatarSelect.value === '__other__';
   const concept = {
     concept_name: conceptName,
     angle: document.getElementById('cd-modal-angle').value.trim(),
     execution: document.getElementById('cd-modal-execution').value.trim(),
+    customer_avatar_id: avatarSelect.value && !isOtherAvatar ? Number(avatarSelect.value) : null,
+    custom_avatar_description: isOtherAvatar ? document.getElementById('cd-modal-avatar-custom-desc').value.trim() : '',
+    avatar_why_care: document.getElementById('cd-modal-avatar-why-care').value.trim(),
     script_notes: document.getElementById('cd-modal-script').value.trim(),
     hook_variations: conceptDevModalHooks.map((h) => ({ text: h.text.trim() })).filter((h) => h.text),
     reference_items: conceptDevModalReferences.map((r) => ({ url: r.url.trim(), note: r.note.trim() })).filter((r) => r.url),
@@ -4411,6 +4516,159 @@ async function deleteCr() {
     closeModal('cr-modal');
     toast('Creative Resource deleted');
     refreshCreativeResources();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// ── Settings: Customer Avatars ────────────────────────
+// Same rank/reorder/edit-modal pattern as Creative Resources just above --
+// see that section's comments for the reasoning, unchanged here. The one
+// difference: this modal can also be opened mid-concept via "Save as new
+// Customer Avatar" (openSaveAvatarFromConceptModal), which is what
+// caModalReturnToConceptDev/prefill below are for.
+let caDragId = null;
+let caModalReturnToConceptDev = false;
+
+function renderCustomerAvatarsSettings() {
+  const list = document.getElementById('ca-list');
+  if (!state.customerAvatars.length) {
+    list.innerHTML = '<div class="attention-empty">No Customer Avatars yet — add your first below.</div>';
+    return;
+  }
+  list.innerHTML = state.customerAvatars.map((a, i) => `
+    <div class="pw-row" draggable="true" data-id="${a.id}">
+      <span class="pw-drag-handle" title="Drag to reorder">⠿</span>
+      <span class="pw-name ${a.enabled ? '' : 'inactive'}">${escapeHtml(a.name)}</span>
+      <span class="badge ${a.enabled ? 'badge-tested_proven' : 'badge-format'}">${a.enabled ? 'Enabled' : 'Disabled'}</span>
+      <button type="button" class="btn btn-ghost btn-sm" ${i === 0 ? 'disabled' : ''} onclick="moveCa(${a.id}, -1)" title="Move up">&uarr;</button>
+      <button type="button" class="btn btn-ghost btn-sm" ${i === state.customerAvatars.length - 1 ? 'disabled' : ''} onclick="moveCa(${a.id}, 1)" title="Move down">&darr;</button>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="openCaModal(${a.id})">Edit</button>
+    </div>
+  `).join('');
+  wireCaDragEvents();
+}
+
+function wireCaDragEvents() {
+  document.querySelectorAll('#ca-list .pw-row').forEach((row) => {
+    row.addEventListener('dragstart', () => {
+      caDragId = Number(row.dataset.id);
+      row.classList.add('dragging');
+    });
+    row.addEventListener('dragend', () => {
+      row.classList.remove('dragging');
+      document.querySelectorAll('#ca-list .pw-row').forEach((r) => r.classList.remove('drag-over'));
+    });
+    row.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      row.classList.add('drag-over');
+    });
+    row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
+    row.addEventListener('drop', (e) => {
+      e.preventDefault();
+      row.classList.remove('drag-over');
+      const targetId = Number(row.dataset.id);
+      if (caDragId == null || caDragId === targetId) return;
+      const ids = state.customerAvatars.map((a) => a.id);
+      const fromIdx = ids.indexOf(caDragId);
+      const toIdx = ids.indexOf(targetId);
+      if (fromIdx === -1 || toIdx === -1) return;
+      ids.splice(fromIdx, 1);
+      ids.splice(toIdx, 0, caDragId);
+      submitCaReorder(ids);
+    });
+  });
+}
+
+function moveCa(id, delta) {
+  const ids = state.customerAvatars.map((a) => a.id);
+  const idx = ids.indexOf(id);
+  const swapWith = idx + delta;
+  if (idx === -1 || swapWith < 0 || swapWith >= ids.length) return;
+  [ids[idx], ids[swapWith]] = [ids[swapWith], ids[idx]];
+  submitCaReorder(ids);
+}
+
+async function submitCaReorder(orderedIds) {
+  try {
+    state.customerAvatars = await api('/customer-avatars/reorder', {
+      method: 'PUT',
+      body: JSON.stringify({ ordered_ids: orderedIds }),
+    });
+    renderCustomerAvatarsSettings();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// prefill (only passed by openSaveAvatarFromConceptModal) pre-populates
+// "Who are they?" from the one-off description already typed in the
+// concept modal, and marks the modal so saveCa() selects the newly-saved
+// avatar back in the concept modal rather than just refreshing Settings.
+function openCaModal(id, prefill) {
+  const a = id ? state.customerAvatars.find((x) => x.id === id) : null;
+  caModalReturnToConceptDev = Boolean(prefill);
+  document.getElementById('ca-modal-title').textContent = a ? 'Edit Customer Avatar' : 'New Customer Avatar';
+  document.getElementById('ca-id').value = a ? a.id : '';
+  document.getElementById('ca-name').value = a ? a.name : '';
+  document.getElementById('ca-who').value = (a && a.who_they_are) || (prefill && prefill.who) || '';
+  document.getElementById('ca-cares').value = (a && a.what_they_care_about) || '';
+  document.getElementById('ca-stops').value = (a && a.what_stops_buying) || '';
+  document.getElementById('ca-resonates').value = (a && a.what_resonates) || '';
+  document.getElementById('ca-enabled-row').style.display = a ? 'flex' : 'none';
+  document.getElementById('ca-enabled').checked = a ? a.enabled : true;
+  document.getElementById('ca-delete-btn').style.display = a ? 'inline-block' : 'none';
+  openModal('ca-modal');
+}
+
+async function refreshCustomerAvatars() {
+  state.customerAvatars = await api('/customer-avatars');
+  renderCustomerAvatarsSettings();
+}
+
+async function saveCa() {
+  const id = document.getElementById('ca-id').value;
+  const name = document.getElementById('ca-name').value;
+  const who_they_are = document.getElementById('ca-who').value || null;
+  const what_they_care_about = document.getElementById('ca-cares').value || null;
+  const what_stops_buying = document.getElementById('ca-stops').value || null;
+  const what_resonates = document.getElementById('ca-resonates').value || null;
+  if (!name.trim()) return toast('Avatar Name is required', true);
+
+  try {
+    const saved = id
+      ? await api(`/customer-avatars/${id}`, {
+          method: 'PUT',
+          body: JSON.stringify({ name, who_they_are, what_they_care_about, what_stops_buying, what_resonates, enabled: document.getElementById('ca-enabled').checked }),
+        })
+      : await api('/customer-avatars', {
+          method: 'POST',
+          body: JSON.stringify({ name, who_they_are, what_they_care_about, what_stops_buying, what_resonates }),
+        });
+    closeModal('ca-modal');
+    await refreshCustomerAvatars();
+
+    if (caModalReturnToConceptDev) {
+      caModalReturnToConceptDev = false;
+      selectConceptDevAvatar(saved.id);
+      toast('Customer Avatar saved and selected');
+    } else {
+      toast('Customer Avatar saved');
+    }
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function deleteCa() {
+  const id = document.getElementById('ca-id').value;
+  if (!id) return;
+  if (!(await confirmDialog('Delete this Customer Avatar?'))) return;
+  try {
+    await api(`/customer-avatars/${id}`, { method: 'DELETE' });
+    closeModal('ca-modal');
+    toast('Customer Avatar deleted');
+    refreshCustomerAvatars();
   } catch (e) {
     toast(e.message, true);
   }
@@ -4631,6 +4889,7 @@ async function deletePw() {
 
 document.getElementById('pw-add-btn').addEventListener('click', () => openPwModal(null));
 document.getElementById('cr-add-btn').addEventListener('click', () => openCrModal(null));
+document.getElementById('ca-add-btn').addEventListener('click', () => openCaModal(null));
 document.getElementById('weekly-target-save-btn').addEventListener('click', saveWeeklyTarget);
 document.getElementById('high-stock-min-soh-save-btn').addEventListener('click', saveHighStockMinSoh);
 document.getElementById('default-shoot-top-size-save-btn').addEventListener('click', () => saveDefaultShootSize('top'));

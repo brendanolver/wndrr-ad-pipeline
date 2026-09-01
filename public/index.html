@@ -473,6 +473,13 @@
       <button class="btn btn-primary btn-sm" id="cr-add-btn">+ Add Creative Resource</button>
 
       <div class="planning-section-header">
+        <h2>Customer Avatars</h2>
+        <span class="admin-note">Who Concept Development's "The Audience" section picks from -- add, rename, reorder, disable or delete as needed. Keep each one to mindset/behaviour, not a demographic profile: how they think, what they want, why they might buy, why they might not, and what creative tends to land.</span>
+      </div>
+      <div id="ca-list" class="pw-list"></div>
+      <button class="btn btn-primary btn-sm" id="ca-add-btn">+ Add Customer Avatar</button>
+
+      <div class="planning-section-header">
         <h2>Content Creators</h2>
         <span class="admin-note">Who can be assigned as Content Creator in Shoot This Week -- the default pre-selects there. (Colourway size defaults now live in Default Shoot Sizes above, shared across every creator rather than set per creator.)</span>
       </div>
@@ -891,6 +898,35 @@
         </div>
       </div>
 
+      <!-- The Audience: forces "who exactly are we making this for, and why
+           should they care" before the idea gets executed. One Primary
+           Customer Avatar per concept, deliberately -- a plain dropdown
+           over the reusable Settings library, never an unlimited
+           multi-select (see schema.sql's comment on the customer_avatar_id
+           column). "Why will they care?" is never pre-filled from the
+           avatar profile; the creator has to connect THIS concept to that
+           person themselves. "+ Other / New Avatar" (the select's last
+           option) reveals a one-off description instead of picking a
+           library avatar -- never auto-saved to the library unless the
+           creator explicitly clicks "Save as new Customer Avatar". -->
+      <div class="cd-modal-section" id="cd-modal-audience-section">
+        <div class="cd-modal-section-title">The Audience</div>
+        <div class="cd-modal-idea-row">
+          <label>Customer Avatar
+            <select id="cd-modal-avatar-select" onchange="onConceptDevAvatarChange()"></select>
+          </label>
+          <label>Why will they care?
+            <textarea id="cd-modal-avatar-why-care" rows="2" placeholder="What makes this product or concept relevant to this person?"></textarea>
+          </label>
+        </div>
+        <div id="cd-modal-avatar-custom-wrap" style="display:none;">
+          <label>Who are you targeting?
+            <textarea id="cd-modal-avatar-custom-desc" rows="2" placeholder="Describe the specific person, mindset or customer behaviour you're targeting."></textarea>
+          </label>
+          <button type="button" class="link-btn" onclick="openSaveAvatarFromConceptModal()">Save as new Customer Avatar</button>
+        </div>
+      </div>
+
       <div class="cd-modal-section">
         <div class="cd-modal-section-title">The Execution</div>
         <label>Execution / Shot Plan
@@ -968,6 +1004,51 @@
       <button class="btn btn-ghost" onclick="closeModal('concept-dev-modal')">Cancel</button>
       <button class="btn btn-ghost" onclick="saveConceptDevModal('in_development')">Save Draft</button>
       <button class="btn btn-primary" onclick="saveConceptDevModal('ready_for_review')">Ready for Review &rarr;</button>
+    </div>
+  </div>
+</div>
+
+<!-- Customer Avatars: WNDRR's reusable "who are we making this for" library,
+     selected per-concept in Concept Development's THE AUDIENCE section.
+     Deliberately five short fields, not a demographic questionnaire -- see
+     schema.sql's comment on the customer_avatars table. Also opened
+     mid-concept via "Save as new Customer Avatar" (openCaModal with a
+     prefill) while #concept-dev-modal is still open underneath -- this block
+     must stay AFTER #concept-dev-modal in the DOM so it paints on top (both
+     share the same .modal-backdrop z-index; later-in-DOM wins the stack,
+     same convention #creative-tools-modal below relies on). -->
+<div id="ca-modal" class="modal-backdrop">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="ca-modal-title">New Customer Avatar</h3>
+      <button class="modal-close" onclick="closeModal('ca-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="ca-id">
+      <label>Avatar Name
+        <input type="text" id="ca-name" placeholder="e.g. Streetwear Regular">
+      </label>
+      <label>Who are they? <span class="hint">(mindset &amp; behaviour, not just demographics)</span>
+        <textarea id="ca-who" rows="2"></textarea>
+      </label>
+      <label>What do they care about? <span class="hint">(motivations, desires, purchase drivers)</span>
+        <textarea id="ca-cares" rows="2"></textarea>
+      </label>
+      <label>What stops them buying? <span class="hint">(objections, barriers, hesitations)</span>
+        <textarea id="ca-stops" rows="2"></textarea>
+      </label>
+      <label>What tends to resonate? <span class="hint">(creative triggers, proof, content types)</span>
+        <textarea id="ca-resonates" rows="2"></textarea>
+      </label>
+      <label class="checkbox-label" id="ca-enabled-row" style="display:none;">
+        <input type="checkbox" id="ca-enabled">
+        Enabled (selectable in Concept Development)
+      </label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-danger" id="ca-delete-btn" style="display:none;" onclick="deleteCa()">Delete</button>
+      <button class="btn btn-ghost" onclick="closeModal('ca-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveCa()">Save</button>
     </div>
   </div>
 </div>

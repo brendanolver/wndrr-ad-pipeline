@@ -399,14 +399,60 @@ function formatExistingConceptBlock(concept) {
   return lines.length ? `EXISTING CONCEPT\n\n${lines.join('\n')}` : null;
 }
 
+// The Customer Avatar system's own contribution to the prompt -- who this
+// concept is actually being made for, so ChatGPT evaluates the idea
+// against a specific person rather than as a generic ad. avatar is the
+// resolved customer_avatars row when an existing avatar was selected
+// (null when the concept used "+ Other / New Avatar" instead, in which
+// case concept.custom_avatar_description carries the one-off description).
+// avatar_why_care is the creator's own answer and is never auto-filled
+// from the avatar profile -- see schema.sql's comment on the column.
+function formatTargetCustomerBlock(concept, avatar) {
+  const blocks = [];
+  if (avatar) {
+    blocks.push(`Customer Avatar: ${avatar.name}`);
+    if (avatar.who_they_are) blocks.push(`Who they are:\n${avatar.who_they_are}`);
+    if (avatar.what_they_care_about) blocks.push(`What they care about:\n${avatar.what_they_care_about}`);
+    if (avatar.what_stops_buying) blocks.push(`What stops them buying:\n${avatar.what_stops_buying}`);
+    if (avatar.what_resonates) blocks.push(`What tends to resonate:\n${avatar.what_resonates}`);
+  } else if (concept.custom_avatar_description) {
+    blocks.push(`Who they are:\n${concept.custom_avatar_description}`);
+  }
+  if (concept.avatar_why_care) blocks.push(`Why this concept should matter to them:\n${concept.avatar_why_care}`);
+  return blocks.length ? `TARGET CUSTOMER\n\n${blocks.join('\n\n')}` : null;
+}
+
+// Verbatim per the brief -- appended to both concept-level prompts so
+// ChatGPT judges the idea against the specific person in TARGET CUSTOMER
+// rather than as a generic paid-social ad. Only meaningful once that
+// block is actually present, so callers only include it then.
+const TARGET_CUSTOMER_INSTRUCTIONS = `Pay particular attention to the TARGET CUSTOMER provided above.
+
+Do not evaluate this creative only as a generic paid-social advertisement.
+
+Ask:
+
+- Would this specific person actually care about this idea?
+- Does the angle connect to something they genuinely want, feel or struggle with?
+- Does the hook/opening speak to them?
+- Does the execution demonstrate something that matters to them?
+- Does the concept address a relevant desire, motivation, objection or behaviour?
+- Does the creative feel like it was made for this person, or could it have been made for anyone?
+
+If there is a weak connection between the concept and the target customer, call that out clearly and explain how it could be strengthened.`;
+
 // A critical reviewer, not a second idea-generator -- per the brief, this
 // must be comfortable saying a concept isn't strong enough yet rather than
 // always validating it. Structure follows the brief's 8-step review order.
-function buildImproveConceptPrompt(ctx, concept) {
+// avatar is the resolved customer_avatars row for this concept's selected
+// Customer Avatar (see formatTargetCustomerBlock), or null.
+function buildImproveConceptPrompt(ctx, concept, avatar) {
+  const targetCustomerBlock = formatTargetCustomerBlock(concept, avatar);
   const contextBlocks = [
     formatProductContextBlock(ctx),
     formatPlanningContextBlock(ctx),
     formatPlanningNotesBlock(ctx),
+    targetCustomerBlock,
     formatExistingConceptBlock(concept),
   ].filter(Boolean).join('\n\n');
 
@@ -432,7 +478,7 @@ Work through the concept in this order:
 6. Recommend specific improvements.
 7. Suggest alternative hooks only where they represent a genuinely worthwhile test -- these remain variations of the SAME concept, not new concepts.
 8. Clearly distinguish between a new concept and a variation of the existing concept.
-
+${targetCustomerBlock ? `\n${TARGET_CUSTOMER_INSTRUCTIONS}\n` : ''}
 Be honest, not encouraging for its own sake. You should be completely comfortable saying:
 
 "This concept isn't strong enough yet."
@@ -453,7 +499,10 @@ Specific, actionable changes -- not generic advice.
 
 HOOK ASSESSMENT
 Is the Primary Hook strong? Only suggest an alternative hook to test if there's a genuine, specific reason to -- it remains a variation of this same concept, not a new one.
-
+${targetCustomerBlock ? `
+AUDIENCE FIT
+Does this concept genuinely connect with the target customer, or could it have been made for anyone?
+` : ''}
 OVERALL VERDICT
 Is this concept, as it stands, worth producing and putting real Meta spend behind? If not, what needs to change first?`;
 }
@@ -464,12 +513,16 @@ Is this concept, as it stands, worth producing and putting real Meta spend behin
 // asks for a blunt, single verdict rather than a set of recommendations
 // to act on, so the instruction text and structure are deliberately
 // different (and reproduced verbatim per the brief) even though it draws
-// on the exact same context blocks.
-function buildReviewPrompt(ctx, concept) {
+// on the exact same context blocks. avatar is the resolved
+// customer_avatars row for this concept's selected Customer Avatar (see
+// formatTargetCustomerBlock), or null.
+function buildReviewPrompt(ctx, concept, avatar) {
+  const targetCustomerBlock = formatTargetCustomerBlock(concept, avatar);
   const contextBlocks = [
     formatProductContextBlock(ctx),
     formatPlanningContextBlock(ctx),
     formatPlanningNotesBlock(ctx),
+    targetCustomerBlock,
     formatExistingConceptBlock(concept),
   ].filter(Boolean).join('\n\n');
 
@@ -484,12 +537,12 @@ Assess:
 5. Whether alternative hooks are genuinely meaningful variations
 6. Anything missing from the shot plan
 7. Whether the creative feels native to Meta/Instagram
-8. Whether this is genuinely worth spending production time and Meta budget on
-
+8. Whether this is genuinely worth spending production time and Meta budget on${targetCustomerBlock ? '\n9. Whether this concept genuinely connects with the target customer' : ''}
+${targetCustomerBlock ? `\n${TARGET_CUSTOMER_INSTRUCTIONS}\n` : ''}
 Identify what is strong, what is weak/generic/unclear, and the 1–3 changes that would most improve it.
 
 If the underlying concept is weak, say so clearly rather than just polishing the execution.
-
+${targetCustomerBlock ? '\nA strong idea aimed at the wrong person is not ready either -- explicitly say whether the audience/idea fit is strong enough to proceed.\n' : ''}
 Finish with one verdict:
 
 READY FOR TUESDAY REVIEW
