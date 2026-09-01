@@ -3911,6 +3911,7 @@ function fillConceptDevModalFields(concept) {
     concept && (concept.talent_requirement || concept.location || concept.props_notes)
   ));
 
+  updateReviewPromptGate();
   hideConceptDevValidation();
 }
 
@@ -4223,6 +4224,63 @@ function viewProvenWinnersFromToolkit() {
   closeModal('creative-tools-modal');
   switchTab('settings');
   document.getElementById('pw-list').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ── AI Creative Review ────────────────────────────────
+// A small, optional quality-control pass at the bottom of an individual
+// concept's own workspace -- distinct from both the global Creative
+// Toolkit and the context-aware Creative Tools modal above (neither of
+// which is scoped to "is THIS specific, already-saved concept actually
+// ready for Tuesday?"). Only shown once the concept exists server-side
+// (a brand-new "+ Add Concept" has no id yet to build a review prompt
+// from); even then, Copy Review Prompt itself stays disabled until there
+// is enough substance to critique.
+function updateReviewPromptGate() {
+  const section = document.getElementById('cd-ai-review-section');
+  if (!section) return;
+  const hasConcept = Boolean(conceptDevModalConceptId);
+  section.style.display = hasConcept ? '' : 'none';
+  if (!hasConcept) return;
+
+  const nameInput = document.getElementById('cd-modal-name');
+  const name = nameInput.style.display !== 'none'
+    ? nameInput.value
+    : document.getElementById('cd-modal-name-locked').textContent;
+  const angle = document.getElementById('cd-modal-angle').value;
+  const execution = document.getElementById('cd-modal-execution').value;
+  document.getElementById('cd-review-copy-btn').disabled = !(name.trim() && angle.trim() && execution.trim());
+}
+
+// Builds from the modal's current field values (not a re-fetch of the
+// last-saved row) so the review always reflects exactly what's on screen,
+// including anything typed since the last Save Draft/Ready for Review.
+async function copyReviewPrompt() {
+  if (!conceptDevModalProduct || !conceptDevModalConceptId) return;
+  const nameInput = document.getElementById('cd-modal-name');
+  const conceptName = nameInput.style.display !== 'none'
+    ? nameInput.value.trim()
+    : document.getElementById('cd-modal-name-locked').textContent;
+  const concept = {
+    concept_name: conceptName,
+    angle: document.getElementById('cd-modal-angle').value.trim(),
+    execution: document.getElementById('cd-modal-execution').value.trim(),
+    script_notes: document.getElementById('cd-modal-script').value.trim(),
+    hook_variations: conceptDevModalHooks.map((h) => ({ text: h.text.trim() })).filter((h) => h.text),
+    reference_items: conceptDevModalReferences.map((r) => ({ url: r.url.trim(), note: r.note.trim() })).filter((r) => r.url),
+    talent_requirement: document.getElementById('cd-modal-talent').value.trim(),
+    location: document.getElementById('cd-modal-location').value.trim(),
+    props_notes: document.getElementById('cd-modal-props').value.trim(),
+  };
+  try {
+    const { prompt } = await api('/creative-toolkit/review-prompt', {
+      method: 'POST',
+      body: JSON.stringify({ shoot_plan_item_id: conceptDevModalProduct.shoot_plan_item_id, concept }),
+    });
+    await navigator.clipboard.writeText(prompt);
+    toast('Review prompt copied — paste it into ChatGPT');
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 // ── Settings: Creative Resources ─────────────────────

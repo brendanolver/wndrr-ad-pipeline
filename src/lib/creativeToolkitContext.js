@@ -458,4 +458,49 @@ OVERALL VERDICT
 Is this concept, as it stands, worth producing and putting real Meta spend behind? If not, what needs to change first?`;
 }
 
-module.exports = { buildContext, buildDevelopConceptsPrompt, buildImproveConceptPrompt };
+// AI Creative Review: a final, optional quality-control pass right before
+// Tuesday review -- distinct from "Improve This Concept" (a working
+// session for pressure-testing/developing an idea further). This one
+// asks for a blunt, single verdict rather than a set of recommendations
+// to act on, so the instruction text and structure are deliberately
+// different (and reproduced verbatim per the brief) even though it draws
+// on the exact same context blocks.
+function buildReviewPrompt(ctx, concept) {
+  const contextBlocks = [
+    formatProductContextBlock(ctx),
+    formatPlanningContextBlock(ctx),
+    formatPlanningNotesBlock(ctx),
+    formatExistingConceptBlock(concept),
+  ].filter(Boolean).join('\n\n');
+
+  return `Act as a senior paid-social creative strategist reviewing a WNDRR Meta ad concept before production. Do not automatically validate the idea. Critique it honestly and focus on improving quality, not producing more creative volume.
+
+Assess:
+
+1. Strength of the core idea
+2. Clarity of the angle
+3. Whether the execution actually delivers the idea
+4. Strength and relevance of the primary hook
+5. Whether alternative hooks are genuinely meaningful variations
+6. Anything missing from the shot plan
+7. Whether the creative feels native to Meta/Instagram
+8. Whether this is genuinely worth spending production time and Meta budget on
+
+Identify what is strong, what is weak/generic/unclear, and the 1–3 changes that would most improve it.
+
+If the underlying concept is weak, say so clearly rather than just polishing the execution.
+
+Finish with one verdict:
+
+READY FOR TUESDAY REVIEW
+NEEDS WORK
+RETHINK CONCEPT
+
+Here is the context already captured in our creative planning system:
+
+${contextBlocks}
+
+Use this information as context for your review. Do not simply repeat it back to me.`;
+}
+
+module.exports = { buildContext, buildDevelopConceptsPrompt, buildImproveConceptPrompt, buildReviewPrompt };

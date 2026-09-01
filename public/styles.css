@@ -994,3 +994,12 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .ct-card-helper{font-size:12px;color:var(--text-secondary);margin-top:5px;}
 .ct-card-actions{display:flex;gap:8px;margin-top:9px;}
 .ct-card-actions .btn{text-decoration:none;}
+
+/* AI Creative Review -- a quiet quality-control tool at the bottom of an
+   individual concept's workspace, not another stage of the workflow, so
+   it's deliberately quieter than every .cd-modal-section above it: no
+   card background, just a hairline rule and small muted type. */
+.cd-ai-review{margin-top:18px;padding-top:14px;border-top:1px solid var(--border);}
+.cd-ai-review-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-muted);}
+.cd-ai-review-helper{font-size:12.5px;color:var(--text-secondary);margin-top:3px;}
+.cd-ai-review-actions{display:flex;gap:8px;margin-top:8px;}
