@@ -1358,6 +1358,11 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .shoot-brief-modal{width:640px;max-width:94vw;display:flex;flex-direction:column;overflow:hidden;}
 .shoot-brief-modal .modal-body{flex:1;min-height:0;overflow-y:auto;}
 .shoot-brief-modal .modal-footer{flex-shrink:0;}
+/* .btn-danger normally pins itself to the left via margin-right:auto (its
+   Delete-button usage elsewhere) -- this button sits inline after Close
+   instead, so that's cancelled here rather than changing .btn-danger
+   itself and affecting every Delete button in the app. */
+#shoot-brief-unmark-shot-btn{margin-right:0;}
 .shoot-brief-context{display:flex;align-items:flex-start;gap:10px;background:var(--surface2);border-radius:var(--r);padding:10px 12px;margin-bottom:14px;}
 .shoot-brief-text{font-size:13px;color:var(--text);white-space:pre-wrap;line-height:1.5;}
 .shoot-brief-hook + .shoot-brief-hook{margin-top:10px;padding-top:10px;border-top:1px solid var(--border);}
