@@ -678,3 +678,6 @@ CREATE TABLE IF NOT EXISTS creative_resources (
 INSERT INTO creative_resources (name, description, url, resource_type, cta_label, sort_order)
 VALUES ('Meta Ad Library', 'See what other brands are currently running.', 'https://www.facebook.com/ads/library/', 'Research competitors', 'Open Ad Library ↗', 0)
 ON CONFLICT (name) DO NOTHING;
+INSERT INTO creative_resources (name, description, url, resource_type, cta_label, sort_order)
+VALUES ('Ecommerce Equation', 'EE''s library of creative resources and trainings.', 'https://www.skool.com/ecommerce-equation/classroom/c0802fc9?md=a37c99fa293240f6b7944aed0d618130', 'Creative training', 'Open Classroom ↗', 1)
+ON CONFLICT (name) DO NOTHING;
