@@ -3711,11 +3711,18 @@ function conceptDevWorkspaceHeaderHtml(product) {
 // next: name/locked-tag/status, plus whether a Hook and a Reference have
 // already been added (the two fields that most determine "is this actually
 // ready to shoot", so they're worth surfacing without opening the concept).
-function conceptDevConceptCardHtml(concept) {
+// The top-right X is a quick-delete shortcut for the same deletable-here
+// concepts the modal's own Delete button covers (see deleteConceptDevConcept)
+// -- hidden for a Drop's Required Concept slots, same reasoning as there.
+function conceptDevConceptCardHtml(concept, productSource) {
   const hasHook = Array.isArray(concept.hook_variations) && concept.hook_variations.some((h) => h.text && h.text.trim());
   const hasReference = Array.isArray(concept.reference_items) && concept.reference_items.length > 0;
+  const removeBtn = productSource !== 'drop'
+    ? `<button type="button" class="cd-concept-card-remove" onclick="event.stopPropagation(); deleteConceptDevConceptCard(${concept.id})" aria-label="Delete concept" title="Delete concept">&times;</button>`
+    : '';
   return `
     <div class="cd-concept-card" onclick="openConceptDevModal(${concept.id})">
+      ${removeBtn}
       <div class="cd-concept-card-top">
         <span class="cd-concept-card-name">${escapeHtml(concept.concept_name)}</span>
         ${concept.name_locked ? '<span class="cd-locked-tag">Proven</span>' : ''}
@@ -3745,7 +3752,7 @@ function renderConceptDevProductWorkspace(product) {
     <button type="button" class="link-btn cd-need-inspiration" onclick="openCreativeTools(${product.shoot_plan_item_id})">🛠 Creative Tools</button>
     ${!isProvenAssigned ? `<button type="button" class="btn btn-primary btn-sm cd-new-concept-btn" onclick="openAddConceptModal(${product.shoot_plan_item_id})">+ New Concept</button>` : ''}
     <div class="cd-concept-grid">
-      ${product.concepts.length ? product.concepts.map(conceptDevConceptCardHtml).join('') : '<div class="attention-empty">No concepts yet.</div>'}
+      ${product.concepts.length ? product.concepts.map((c) => conceptDevConceptCardHtml(c, product.source)).join('') : '<div class="attention-empty">No concepts yet.</div>'}
     </div>
     ${isProvenAssigned ? `<button type="button" class="link-btn cd-add-concept-subtle" onclick="openAddConceptModal(${product.shoot_plan_item_id})">+ Add another concept</button>` : ''}
   `;
@@ -4147,6 +4154,20 @@ async function deleteConceptDevConcept() {
   try {
     await api(`/creative-assets/${conceptDevModalConceptId}`, { method: 'DELETE' });
     closeModal('concept-dev-modal');
+    toast('Concept deleted');
+    loadConceptDevWeek();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// The concept card's own top-right X -- same deletable-here concepts as
+// deleteConceptDevConcept above (see conceptDevConceptCardHtml's
+// productSource gate), just reachable without opening the concept first.
+async function deleteConceptDevConceptCard(conceptId) {
+  if (!(await confirmDialog('Delete this concept? This cannot be undone.'))) return;
+  try {
+    await api(`/creative-assets/${conceptId}`, { method: 'DELETE' });
     toast('Concept deleted');
     loadConceptDevWeek();
   } catch (e) {

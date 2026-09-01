@@ -895,10 +895,12 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .cd-concept-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px;}
 @media (max-width:1000px){.cd-concept-grid{grid-template-columns:repeat(2,1fr);}}
 @media (max-width:600px){.cd-concept-grid{grid-template-columns:1fr;}}
-.cd-concept-card{background:white;border:1px solid var(--border);border-radius:var(--r-lg);padding:12px;cursor:pointer;display:flex;flex-direction:column;gap:7px;}
+.cd-concept-card{position:relative;background:white;border:1px solid var(--border);border-radius:var(--r-lg);padding:12px;cursor:pointer;display:flex;flex-direction:column;gap:7px;}
 .cd-concept-card:hover{border-color:var(--teal);box-shadow:var(--shadow-xs);}
-.cd-concept-card-top{display:flex;align-items:center;flex-wrap:wrap;gap:6px;}
+.cd-concept-card-top{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding-right:20px;}
 .cd-concept-card-name{flex:1;min-width:0;font-weight:700;font-size:13px;}
+.cd-concept-card-remove{position:absolute;top:8px;right:8px;width:20px;height:20px;display:flex;align-items:center;justify-content:center;background:none;border:none;border-radius:50%;color:var(--text-muted);font-size:16px;line-height:1;cursor:pointer;padding:0;}
+.cd-concept-card-remove:hover{background:var(--red-light);color:var(--red);}
 .cd-concept-card-flags{display:flex;gap:12px;font-size:11px;color:var(--text-muted);}
 .cd-concept-flag-on{color:var(--teal-dark);font-weight:600;}
 .cd-concept-flag-off{color:var(--text-muted);}
