@@ -233,6 +233,34 @@ router.post('/:id/mark-shot', async (req, res, next) => {
   }
 });
 
+// Undoes mark-shot -- for the "accidentally clicked it" case, not a second
+// production status. Clears shot_at/ready_for_editing back to their
+// pre-Shot state and returns the Concept to Scheduled (draggable/movable
+// again), rather than leaving it stuck as a permanent Shot record.
+router.post('/:id/unmark-shot', async (req, res, next) => {
+  try {
+    const result = await pool.query(
+      `UPDATE shoot_schedule SET
+         status = 'scheduled',
+         shot_at = NULL,
+         ready_for_editing = false,
+         updated_at = now()
+       WHERE id = $1 AND status = 'shot'
+       RETURNING *`,
+      [req.params.id]
+    );
+    if (!result.rows.length) {
+      const existsResult = await pool.query('SELECT id, status FROM shoot_schedule WHERE id = $1', [req.params.id]);
+      if (!existsResult.rows.length) return res.status(404).json({ error: 'Shoot schedule entry not found' });
+      return res.status(409).json({ error: `Only a Shot Concept can be unmarked (this one is ${existsResult.rows[0].status})` });
+    }
+    const row = result.rows[0];
+    res.json({ ...row, original_week_start: dateStr(row.original_week_start), scheduled_week_start: dateStr(row.scheduled_week_start) });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Manager History, one row per week that has ever had a Concept enter
 // Shooting. Bucketed purely from current state -- no separate "carried"
 // flag to keep in sync: a Concept counts as Carried Over the moment its
