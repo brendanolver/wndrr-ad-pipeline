@@ -78,10 +78,14 @@ router.get('/', async (req, res, next) => {
       conceptsByItem.get(row.shoot_plan_item_id).push({ ...row, name_locked: false });
     }
 
-    // Drop concepts: the product's already-assigned Required Concept slots.
-    // Auto-generate/top-up server-side (same logic Planning's own product
-    // page uses) so "already assigned" holds true even if nobody has
-    // visited that product's Planning page yet.
+    // Drop products: Concept Development is the workspace for developing
+    // NEW creative, not a display of the drop's already-assigned Proven
+    // Winner coverage -- those stay exactly where they are (the drop's own
+    // Required Concepts plan, still generated/topped-up here so "+ New
+    // Concept" always has a plan_id to post a 'new' slot against), they
+    // just don't get a Concept Development card, a count, or a status
+    // bucket. Only 'new' slots (source = 'new', never proven_winner_id) are
+    // genuinely new concepts being developed, so only those are returned.
     const dropItems = items.filter((i) => i.source === 'drop');
     const dropPlanIdByItem = new Map();
     for (const item of dropItems) {
@@ -92,17 +96,14 @@ router.get('/', async (req, res, next) => {
       if (result.notFound || !result.plan) { conceptsByItem.set(item.id, []); continue; }
       dropPlanIdByItem.set(item.id, result.plan.id);
       const slotAssetsResult = await pool.query(
-        `SELECT dpps.proven_winner_id, ca.*
+        `SELECT ca.*
          FROM drop_product_plan_slots dpps
          JOIN creative_assets ca ON ca.id = dpps.fulfilled_by_asset_id
-         WHERE dpps.plan_id = $1
+         WHERE dpps.plan_id = $1 AND dpps.source = 'new'
          ORDER BY dpps.slot_rank ASC`,
         [result.plan.id]
       );
-      conceptsByItem.set(item.id, slotAssetsResult.rows.map((row) => ({
-        ...row,
-        name_locked: row.proven_winner_id != null,
-      })));
+      conceptsByItem.set(item.id, slotAssetsResult.rows.map((row) => ({ ...row, name_locked: false })));
     }
 
     const products = items.map((i) => ({

@@ -890,7 +890,6 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .cd-workspace-header-name{font-weight:700;font-size:15px;}
 .cd-workspace-header-meta{display:flex;flex-wrap:wrap;gap:5px;font-size:12px;color:var(--text-secondary);}
 .cd-new-concept-btn{margin-bottom:12px;}
-.cd-add-concept-subtle{display:inline-block;margin-top:10px;font-size:12px;color:var(--text-muted);}
 
 .cd-concept-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px;}
 @media (max-width:1000px){.cd-concept-grid{grid-template-columns:repeat(2,1fr);}}
