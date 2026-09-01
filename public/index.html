@@ -475,22 +475,25 @@
         <div class="modal-body">
           <div class="shoot-brief-context" id="shoot-brief-context"></div>
 
+          <!-- What to Shoot is the hero: the one thing a creator standing on
+               set actually needs, so it comes before anything strategic (see
+               the brief: "the creator should not have to scroll through
+               strategic information before seeing what they actually need to
+               shoot"). shootingExecutionSteps() in app.js turns it into a
+               scannable numbered sequence purely by splitting the ORIGINAL
+               Execution text on sentence boundaries -- never rewritten,
+               never fabricated -- falling back to the plain paragraph
+               whenever that split isn't reliable. -->
+          <div class="shoot-brief-hero">
+            <div class="shoot-brief-hero-title">What to Shoot</div>
+            <div id="shoot-brief-execution"></div>
+          </div>
+
           <div class="cd-modal-section">
-            <div class="cd-modal-section-title">Hook / Opening</div>
+            <div class="cd-modal-section-title">Opening</div>
             <div id="shoot-brief-hooks"></div>
           </div>
-          <div class="cd-modal-section">
-            <div class="cd-modal-section-title">Execution / Shot Plan</div>
-            <div class="shoot-brief-text" id="shoot-brief-execution"></div>
-          </div>
-          <div class="cd-modal-section" id="shoot-brief-script-section" style="display:none;">
-            <div class="cd-modal-section-title">Script / Talking Points</div>
-            <div class="shoot-brief-text" id="shoot-brief-script"></div>
-          </div>
-          <div class="cd-modal-section" id="shoot-brief-references-section" style="display:none;">
-            <div class="cd-modal-section-title">References</div>
-            <div id="shoot-brief-references"></div>
-          </div>
+
           <div class="cd-modal-section">
             <div class="cd-modal-section-title">Shoot Requirements</div>
             <div class="shoot-brief-req-row">
@@ -503,10 +506,19 @@
             </div>
           </div>
 
-          <!-- Audience: present so the creator can check who this is for if
-               useful, but kept visually secondary -- the strategy is already
-               approved by this stage. -->
-          <details class="shoot-brief-audience" id="shoot-brief-audience-wrap">
+          <!-- Everything below here is supporting/strategic material, not
+               shot-day operational information -- collapsed by default and
+               entirely hidden (not just an empty accordion) when a Concept
+               has nothing recorded for it. -->
+          <details class="shoot-brief-collapsible" id="shoot-brief-script-section" style="display:none;">
+            <summary>Script / Talking Points</summary>
+            <div class="shoot-brief-text" id="shoot-brief-script"></div>
+          </details>
+          <details class="shoot-brief-collapsible" id="shoot-brief-references-section" style="display:none;">
+            <summary>References</summary>
+            <div id="shoot-brief-references"></div>
+          </details>
+          <details class="shoot-brief-collapsible" id="shoot-brief-audience-wrap" style="display:none;">
             <summary>Customer Avatar / Audience context</summary>
             <div class="shoot-brief-text" id="shoot-brief-audience"></div>
           </details>

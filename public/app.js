@@ -5543,6 +5543,20 @@ async function openShootingBrief(scheduleId) {
   }
 }
 
+// Purely mechanical: splits the ORIGINAL Execution text on sentence
+// boundaries so it can render as a scannable numbered sequence, without
+// rewriting, reordering, or inventing a single word of it -- see the
+// brief: "Do NOT alter or overwrite the original Execution / Shot Plan".
+// Returns null (render the plain paragraph instead) whenever that split
+// wouldn't actually read as a sensible step list -- a single sentence, or
+// text that's already short, gains nothing from being forced into "01 ...".
+function shootingExecutionSteps(text) {
+  if (!text || !text.trim()) return null;
+  const sentences = text.trim().split(/(?<=[.!?])\s+(?=[A-Z0-9])/).map((s) => s.trim()).filter(Boolean);
+  if (sentences.length < 2) return null;
+  return sentences;
+}
+
 function renderShootingBrief(brief) {
   document.getElementById('shoot-brief-title').textContent = brief.concept_name;
   const isShot = brief.status === 'shot';
@@ -5561,12 +5575,25 @@ function renderShootingBrief(brief) {
     ${brief.image_url ? `<img class="cd-modal-context-thumb" src="${brief.image_url}" alt="">` : '<span class="cd-modal-context-thumb cd-modal-context-noimg">🖼</span>'}
     <div class="cd-modal-context-lines"><div class="cd-modal-context-line">${contextLine}</div></div>`;
 
+  // Opening: the Primary hook is the one the creator actually needs to
+  // capture, so it gets the visual weight; everything after it is
+  // secondary-but-actionable "also get these if you can" coverage.
   const hooks = Array.isArray(brief.hook_variations) ? brief.hook_variations.filter((h) => h.text && h.text.trim()) : [];
-  document.getElementById('shoot-brief-hooks').innerHTML = hooks.length
-    ? hooks.map((h, i) => `<div class="shoot-brief-hook"><span class="cd-field-label">${i === 0 ? 'Primary Hook' : `Alternative Hook ${i + 1}`}</span><div class="shoot-brief-text">${escapeHtml(h.text)}</div></div>`).join('')
+  const [primaryHook, ...otherHooks] = hooks;
+  let hooksHtml = primaryHook
+    ? `<div class="shoot-brief-primary-hook"><span class="shoot-brief-primary-badge">Primary</span><div class="shoot-brief-primary-text">&ldquo;${escapeHtml(primaryHook.text)}&rdquo;</div></div>`
     : '<div class="shoot-brief-text hint">No hook recorded.</div>';
+  if (otherHooks.length) {
+    hooksHtml += `<div class="shoot-brief-other-hooks-label">Other Hooks to Capture</div>` +
+      otherHooks.map((h, i) => `<div class="shoot-brief-other-hook"><span class="shoot-brief-other-hook-num">${String(i + 1).padStart(2, '0')}</span><span>${escapeHtml(h.text)}</span></div>`).join('');
+  }
+  document.getElementById('shoot-brief-hooks').innerHTML = hooksHtml;
 
-  document.getElementById('shoot-brief-execution').textContent = brief.execution || '—';
+  const execEl = document.getElementById('shoot-brief-execution');
+  const steps = shootingExecutionSteps(brief.execution);
+  execEl.innerHTML = steps
+    ? `<ol class="shoot-brief-steps">${steps.map((s) => `<li>${escapeHtml(s)}</li>`).join('')}</ol>`
+    : `<div class="shoot-brief-text">${escapeHtml(brief.execution || '—')}</div>`;
 
   const scriptSection = document.getElementById('shoot-brief-script-section');
   if (brief.script_notes && brief.script_notes.trim()) {
@@ -5603,7 +5630,13 @@ function renderShootingBrief(brief) {
   if (brief.avatar_name) audienceParts.push(brief.avatar_name);
   else if (brief.custom_avatar_description) audienceParts.push(brief.custom_avatar_description);
   if (brief.avatar_why_care) audienceParts.push(brief.avatar_why_care);
-  document.getElementById('shoot-brief-audience').textContent = audienceParts.join(' — ') || 'No audience notes recorded.';
+  const audienceWrap = document.getElementById('shoot-brief-audience-wrap');
+  if (audienceParts.length) {
+    audienceWrap.style.display = '';
+    document.getElementById('shoot-brief-audience').textContent = audienceParts.join(' — ');
+  } else {
+    audienceWrap.style.display = 'none';
+  }
 
   document.getElementById('shoot-brief-mark-shot-btn').style.display = isShot ? 'none' : '';
   document.getElementById('shoot-brief-unmark-shot-btn').style.display = isShot ? '' : 'none';

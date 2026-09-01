@@ -1348,9 +1348,14 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .shoot-history-rate{font-weight:700;font-size:13px;margin-bottom:3px;}
 
 /* Shoot Brief: read-only, reuses cd-modal-section/cd-field-label for
-   visual consistency with Concept Development's own modal. Audience is a
-   <details> disclosure -- present but never open by default, since the
-   strategy's already approved by this stage (see the brief). */
+   visual consistency with Concept Development's own modal. Ordered for
+   shot-day execution rather than strategic review -- What to Shoot, then
+   Opening, then Shoot Requirements, are the only things visible without
+   opening a disclosure (see the brief: "the creator should not have to
+   scroll through strategic information before seeing what they actually
+   need to shoot"). Script/References/Audience are collapsed <details>
+   further down, each entirely hidden rather than an empty accordion when a
+   Concept has nothing recorded for it. */
 /* Sticky footer -- same flex-column treatment as .cd-modal-workspace: the
    outer modal clips (max-height:88vh from .modal, overflow hidden here) so
    .modal-body is the only thing that scrolls, and the footer's Close/Mark
@@ -1365,10 +1370,38 @@ main{flex:1;min-width:0;padding:20px 24px;}
 #shoot-brief-unmark-shot-btn{margin-right:0;}
 .shoot-brief-context{display:flex;align-items:flex-start;gap:10px;background:var(--surface2);border-radius:var(--r);padding:10px 12px;margin-bottom:14px;}
 .shoot-brief-text{font-size:13px;color:var(--text);white-space:pre-wrap;line-height:1.5;}
-.shoot-brief-hook + .shoot-brief-hook{margin-top:10px;padding-top:10px;border-top:1px solid var(--border);}
 .shoot-brief-req-row{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
-.shoot-brief-audience{margin-top:6px;padding-top:10px;border-top:1px solid var(--border);}
-.shoot-brief-audience summary{font-size:11.5px;font-weight:700;color:var(--text-muted);cursor:pointer;}
-.shoot-brief-audience .shoot-brief-text{margin-top:8px;}
+
+/* What to Shoot -- the hero section, a filled card (not just a divider
+   line like every other section) so it reads as the one thing that
+   actually matters on set. */
+.shoot-brief-hero{background:var(--surface2);border-radius:var(--r-lg);padding:14px 16px;}
+.shoot-brief-hero-title{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-muted);margin-bottom:8px;}
+/* Purely a numbered re-flow of the same sentences the paragraph would show
+   -- see shootingExecutionSteps() in app.js, which only ever slices the
+   original text, never rewrites it. */
+.shoot-brief-steps{list-style:none;counter-reset:shoot-step;display:flex;flex-direction:column;gap:8px;margin:0;padding:0;}
+.shoot-brief-steps li{counter-increment:shoot-step;display:flex;gap:10px;font-size:13.5px;color:var(--text);line-height:1.5;}
+.shoot-brief-steps li::before{content:counter(shoot-step, decimal-leading-zero);flex-shrink:0;font-weight:800;color:var(--teal-dark);font-size:12px;padding-top:1px;}
+
+/* Opening: Primary is the one the creator must capture, so it's the only
+   hook with real visual weight; Other Hooks read as a secondary, still
+   actionable checklist underneath it -- never equal-weight text blocks. */
+.shoot-brief-primary-hook{background:var(--teal-light);border-radius:var(--r);padding:10px 12px;}
+.shoot-brief-primary-badge{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.4px;color:var(--teal-dark);}
+.shoot-brief-primary-text{font-size:14.5px;font-weight:700;color:var(--text);line-height:1.4;margin-top:4px;}
+.shoot-brief-other-hooks-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);margin-top:10px;}
+.shoot-brief-other-hook{display:flex;gap:8px;font-size:13px;color:var(--text-secondary);margin-top:6px;}
+.shoot-brief-other-hook-num{flex-shrink:0;font-weight:700;color:var(--text-muted);font-size:11px;padding-top:1px;}
+
+/* Script/References/Audience -- collapsed by default, a plain down-chevron
+   that flips on open; nothing here shows at all unless renderShootingBrief
+   found real content for it (see the display:none default in the markup). */
+.shoot-brief-collapsible{margin-top:6px;padding-top:10px;border-top:1px solid var(--border);}
+.shoot-brief-collapsible summary{font-size:11.5px;font-weight:700;color:var(--text-muted);cursor:pointer;list-style:none;}
+.shoot-brief-collapsible summary::-webkit-details-marker{display:none;}
+.shoot-brief-collapsible summary::after{content:'↓';margin-left:5px;font-weight:400;display:inline-block;transition:transform 0.15s;}
+.shoot-brief-collapsible[open] summary::after{transform:rotate(180deg);}
+.shoot-brief-collapsible .shoot-brief-text{margin-top:8px;}
 
 .tr-kill-reason-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;}
