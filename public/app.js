@@ -4093,6 +4093,15 @@ function openConceptDevModal(conceptId) {
     nameInput.value = concept.concept_name;
   }
 
+  // Delete only offered for a concept that's actually deletable this way:
+  // a Drop's concepts are Required Concept slots (Proven Winner or a
+  // manually-added "new" one) -- deleting the underlying creative_asset
+  // here would just null out the slot's fulfilled_by_asset_id and leave an
+  // orphaned, invisible slot behind, not remove the concept the creator
+  // sees. Those get removed via Planning's own Required Concepts section
+  // (deleteConceptSlot), which drops the whole slot correctly.
+  document.getElementById('cd-modal-delete-btn').style.display = product.source === 'drop' ? 'none' : '';
+
   fillConceptDevModalFields(concept);
   openModal('concept-dev-modal');
 }
@@ -4117,8 +4126,32 @@ function openAddConceptModal(shootPlanItemId) {
   nameInput.value = '';
   document.getElementById('cd-modal-name-locked').style.display = 'none';
 
+  // Nothing to delete yet -- this concept doesn't exist server-side until
+  // Save Draft/Ready for Review creates it.
+  document.getElementById('cd-modal-delete-btn').style.display = 'none';
+
   fillConceptDevModalFields(null);
   openModal('concept-dev-modal');
+}
+
+// Only reachable for a Core/High Stock/Promotion concept (see the
+// product.source === 'drop' gate in openConceptDevModal) -- those are
+// plain creative_assets rows scoped via shoot_plan_item_id, so deleting
+// the row is a clean, complete removal (status_history cascades, and the
+// original seed-asset link on shoot_plan_items.asset_id, if this happened
+// to be it, just goes to NULL -- Concept Development doesn't read that
+// column, it lists concepts via the reverse shoot_plan_item_id link).
+async function deleteConceptDevConcept() {
+  if (!conceptDevModalConceptId) return;
+  if (!(await confirmDialog('Delete this concept? This cannot be undone.'))) return;
+  try {
+    await api(`/creative-assets/${conceptDevModalConceptId}`, { method: 'DELETE' });
+    closeModal('concept-dev-modal');
+    toast('Concept deleted');
+    loadConceptDevWeek();
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 // Status is no longer a field the creator sets directly -- it's driven by
