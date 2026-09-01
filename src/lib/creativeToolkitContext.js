@@ -441,26 +441,6 @@ Ask:
 
 If there is a weak connection between the concept and the target customer, call that out clearly and explain how it could be strengthened.`;
 
-// AI Creative Review-specific -- per the brief, Hook / Opening is never
-// required to unlock the review, but where a Primary Hook (and any
-// Alternative Hooks) exist, EXISTING CONCEPT above already carries them
-// verbatim (see formatExistingConceptBlock), so this just tells the
-// reviewer how to judge them. Included unconditionally (not gated on a
-// hook actually being present) since the "no hook yet" guidance is itself
-// part of the instruction -- some formats lead with a strong visual frame
-// rather than written or spoken copy, and that's a legitimate choice, not
-// an automatic gap.
-const HOOK_OPENING_INSTRUCTIONS = `Also assess the Hook / Opening specifically:
-
-- Is the opening strong enough to earn attention in the first few seconds?
-- Does it connect to the selected Customer Avatar?
-- Does it naturally lead into the underlying concept, or feel disconnected from it?
-- Does it create a genuine reason to keep watching?
-- Is it overly clickbait, or does it feel true to the product?
-- If Alternative Hooks are provided, are they genuinely meaningful tests of a different opening, or just minor wording changes?
-
-If no Hook / Opening has been captured yet, note that as an opportunity where relevant -- but understand that some creative formats rely primarily on a strong visual opening rather than written or spoken copy.`;
-
 // A critical reviewer, not a second idea-generator -- per the brief, this
 // must be comfortable saying a concept isn't strong enough yet rather than
 // always validating it. Structure follows the brief's 8-step review order.
@@ -532,10 +512,16 @@ Is this concept, as it stands, worth producing and putting real Meta spend behin
 // session for pressure-testing/developing an idea further). This one
 // asks for a blunt, single verdict rather than a set of recommendations
 // to act on, so the instruction text and structure are deliberately
-// different (and reproduced verbatim per the brief) even though it draws
-// on the exact same context blocks. avatar is the resolved
-// customer_avatars row for this concept's selected Customer Avatar (see
-// formatTargetCustomerBlock), or null.
+// different, even though it draws on the exact same context blocks.
+// avatar is the resolved customer_avatars row for this concept's selected
+// Customer Avatar (see formatTargetCustomerBlock), or null.
+//
+// THINK DEEPLY, RESPOND SIMPLY: the instructions still ask ChatGPT to do
+// the full detailed strategic evaluation (same rigor as before -- nothing
+// here makes the review less critical), but the OUTPUT is deliberately
+// constrained to a short, fixed-shape verdict a creator can read in under
+// a minute. Rich context in, concise judgement out -- contextBlocks below
+// is unchanged from before this rewrite.
 function buildReviewPrompt(ctx, concept, avatar) {
   const targetCustomerBlock = formatTargetCustomerBlock(concept, avatar);
   const contextBlocks = [
@@ -546,30 +532,94 @@ function buildReviewPrompt(ctx, concept, avatar) {
     formatExistingConceptBlock(concept),
   ].filter(Boolean).join('\n\n');
 
-  return `Act as a senior paid-social creative strategist reviewing a WNDRR Meta ad concept before production. Do not automatically validate the idea. Critique it honestly and focus on improving quality, not producing more creative volume.
+  return `Act as a senior paid-social creative strategist reviewing a WNDRR Meta ad concept before production.
 
-Assess:
+Your job is to improve creative quality, not validate the idea or encourage more creative volume.
 
-1. Strength of the core idea
-2. Clarity of the angle
-3. Whether the execution actually delivers the idea
-4. Strength and relevance of the primary hook
-5. Whether alternative hooks are genuinely meaningful variations
-6. Anything missing from the shot plan
-7. Whether the creative feels native to Meta/Instagram
-8. Whether this is genuinely worth spending production time and Meta budget on${targetCustomerBlock ? '\n9. Whether this concept genuinely connects with the target customer' : ''}
-${targetCustomerBlock ? `\n${TARGET_CUSTOMER_INSTRUCTIONS}\n` : ''}
-${HOOK_OPENING_INSTRUCTIONS}
+Think critically about:
 
-Identify what is strong, what is weak/generic/unclear, and the 1–3 changes that would most improve it.
+- Strength of the underlying idea
+- Whether the angle is clear and compelling
+- Whether the target customer would genuinely care
+- Whether the execution actually delivers the idea
+- Whether the Hook / Opening earns attention
+- Whether alternative hooks are meaningful tests or minor rewrites
+- Whether anything important is missing from the execution
+- Whether the creative feels native to Meta / Instagram
+- Whether this is genuinely worth WNDRR spending production time and Meta budget on
 
-If the underlying concept is weak, say so clearly rather than just polishing the execution.
-${targetCustomerBlock ? '\nA strong idea aimed at the wrong person is not ready either -- explicitly say whether the audience/idea fit is strong enough to proceed.\n' : ''}
-Finish with one verdict:
+Pay particular attention to the TARGET CUSTOMER.
+
+Ask yourself whether this feels specifically made for that person or whether it could have been made for anyone.
+
+If the underlying concept is weak, say so.
+
+If the concept is strong but the execution is weak, distinguish between the two.
+
+If the Hook / Opening is already strong, don't rewrite it simply for the sake of suggesting something.
+
+If alternative hooks are essentially the same idea with different wording, call that out.
+
+Do the detailed strategic evaluation internally, but DO NOT output a long breakdown of every criterion.
+
+THINK DEEPLY. RESPOND SIMPLY.
+
+The content creator should be able to understand the entire review in under 60 seconds.
+
+Do not use numerical scores.
+
+Do not write an essay.
+
+Do not repeat the concept brief back to me.
+
+Do not provide long explanations of marketing theory.
+
+Only surface the observations that materially affect whether this creative should be produced.
+
+Use this exact response structure:
+
+## [VERDICT]
+
+### WHAT'S WORKING
+Maximum 2 short sentences.
+Identify the strongest part of the concept.
+
+### MAIN PROBLEM
+Maximum 2 short sentences.
+Identify the single biggest weakness or risk.
+
+### CHANGE THESE
+Give a maximum of 3 changes.
+
+Each change must contain:
+- A short action title
+- 1–2 sentences explaining exactly what to change
+
+Prioritise changes that will materially improve the ad. Do not include minor suggestions simply to reach three.
+
+If only one change is genuinely needed, give one.
+
+### CUSTOMER FIT
+Give one rating:
+STRONG / UNCLEAR / WEAK
+
+Then explain why in a maximum of 2 sentences.
+
+Specifically judge whether the selected Customer Avatar would care about this idea.
+
+### TUESDAY READY?
+Maximum 2 sentences.
+
+State exactly what needs to happen next.
+
+The overall VERDICT must be exactly one of:
 
 READY FOR TUESDAY REVIEW
 NEEDS WORK
 RETHINK CONCEPT
+
+Keep the ENTIRE response concise.
+Aim for approximately 250–400 words maximum.
 
 Here is the context already captured in our creative planning system:
 
