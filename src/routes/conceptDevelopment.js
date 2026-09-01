@@ -88,6 +88,7 @@ router.get('/', async (req, res, next) => {
     // genuinely new concepts being developed, so only those are returned.
     const dropItems = items.filter((i) => i.source === 'drop');
     const dropPlanIdByItem = new Map();
+    const provenCoverageByItem = new Map();
     for (const item of dropItems) {
       const itemStyles = stylesByItem.get(item.id) || [];
       const dropId = itemStyles.map((s) => s.drop_id).find((id) => id != null);
@@ -95,6 +96,10 @@ router.get('/', async (req, res, next) => {
       const result = await generateOrTopUpPlan(dropId, item.product_code);
       if (result.notFound || !result.plan) { conceptsByItem.set(item.id, []); continue; }
       dropPlanIdByItem.set(item.id, result.plan.id);
+      // Proven Coverage: how many Proven Winner slots are already assigned to
+      // this drop product -- shown on the card/workspace so the distinction
+      // from genuinely new concepts (below) is explicit rather than implied.
+      provenCoverageByItem.set(item.id, result.slots.filter((s) => s.source === 'proven').length);
       const slotAssetsResult = await pool.query(
         `SELECT ca.*
          FROM drop_product_plan_slots dpps
@@ -119,6 +124,7 @@ router.get('/', async (req, res, next) => {
       promotion_name: i.promotion_name,
       promotion_stage_name: i.promotion_stage_name,
       drop_plan_id: dropPlanIdByItem.get(i.id) || null,
+      proven_coverage_count: provenCoverageByItem.get(i.id) || 0,
       colourways: (stylesByItem.get(i.id) || []).map((s) => ({
         style_id: s.style_id,
         style_code: s.style_code,

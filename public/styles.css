@@ -888,7 +888,16 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .cd-workspace-header-info{display:flex;flex-direction:column;gap:5px;min-width:0;}
 .cd-workspace-header-name{font-weight:700;font-size:15px;}
 .cd-workspace-header-meta{display:flex;flex-wrap:wrap;gap:5px;font-size:12px;color:var(--text-secondary);}
-.cd-new-concept-btn{margin-bottom:12px;}
+
+/* Toolbar row: a plain uppercase "New Concepts" heading makes it explicit
+   this workspace is about new concepts, not Creative Tools -- which used
+   to sit alone on its own line above "+ New Concept" and read like the
+   section's actual title. Creative Tools stays a quiet secondary link;
+   "+ New Concept" is still the one strong action here. */
+.cd-workspace-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:16px 0 10px;}
+.cd-workspace-toolbar-heading{font-size:11px;font-weight:800;letter-spacing:0.5px;text-transform:uppercase;color:var(--text-muted);}
+.cd-workspace-toolbar-actions{display:flex;align-items:center;gap:14px;}
+.cd-new-concept-btn{margin:0;}
 
 .cd-concept-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px;}
 @media (max-width:1000px){.cd-concept-grid{grid-template-columns:repeat(2,1fr);}}
@@ -994,6 +1003,32 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .cd-changes-required-label{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--amber);}
 .cd-changes-required-text{font-size:12.5px;color:var(--text);margin-top:3px;white-space:pre-wrap;}
 
+/* Approved banner -- green (matches the Approved status pill), states
+   plainly that this is a finished brief and offers the one deliberate way
+   back into editing it. See setConceptDevModalReadOnly in app.js for what
+   .cd-readonly on the modal actually disables/hides. */
+.cd-approved-banner{background:var(--green-light);border-radius:var(--r);padding:10px 13px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;gap:12px;}
+.cd-approved-banner-text{font-size:12.5px;color:var(--text);}
+.cd-approved-banner .link-btn{flex-shrink:0;color:var(--green-dark,var(--green));}
+
+/* Read-only Approved view: disabled fields read as plain finished text
+   (not greyed-out/unavailable), and every action that would mutate the
+   concept -- adding/removing a hook or reference, expanding Script/Shoot
+   Requirements to add to them, saving a new Customer Avatar, the required-
+   for-review note/asterisks -- is hidden rather than merely disabled. */
+.cd-modal-workspace.cd-readonly input:disabled,
+.cd-modal-workspace.cd-readonly textarea:disabled,
+.cd-modal-workspace.cd-readonly select:disabled{background:var(--surface2);color:var(--text);opacity:1;cursor:default;border-color:var(--border);}
+.cd-modal-workspace.cd-readonly #cd-modal-add-hook-btn,
+.cd-modal-workspace.cd-readonly .cd-hook-remove,
+.cd-modal-workspace.cd-readonly #cd-modal-add-reference-btn,
+.cd-modal-workspace.cd-readonly .cd-reference-remove,
+.cd-modal-workspace.cd-readonly #cd-modal-script-toggle-wrap,
+.cd-modal-workspace.cd-readonly #cd-modal-shoot-req-toggle-wrap,
+.cd-modal-workspace.cd-readonly #cd-modal-save-avatar-btn,
+.cd-modal-workspace.cd-readonly .cd-modal-required-note,
+.cd-modal-workspace.cd-readonly .cd-req-mark{display:none !important;}
+
 /* References: compact collapsed state by default (see
    #cd-modal-references-toggle-wrap), same as Script/Shoot Requirements
    below -- each added reference gets its own bordered white card, which
@@ -1050,6 +1085,7 @@ main{flex:1;min-width:0;padding:20px 24px;}
    plain .link-btn look as the modal's other progressive-disclosure
    toggles, so it reads as optional rather than another required action. */
 .cd-need-inspiration{display:inline-block;margin:2px 0 4px;}
+.cd-workspace-toolbar-actions .cd-need-inspiration{margin:0;}
 .ct-modal{width:520px;max-width:92vw;}
 .ct-card{background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-lg);padding:12px;margin-bottom:8px;}
 .ct-card-name{font-weight:700;font-size:13.5px;}
