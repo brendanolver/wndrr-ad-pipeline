@@ -1835,7 +1835,7 @@ function renderCoreWeeklyCard() {
         <div class="core-weekly-left">
           <div class="core-weekly-icon">🎯</div>
           <div>
-            <div class="core-weekly-label">Weekly Core Creative Target</div>
+            <div class="core-weekly-label">Weekly Creative Target</div>
             <div class="core-weekly-title">New Concepts Planned</div>
           </div>
         </div>
@@ -1851,7 +1851,7 @@ function renderCoreWeeklyCard() {
         <span class="core-weekly-pill core-weekly-pill-planned">${w.planned} Planned</span>
         <span class="core-weekly-pill core-weekly-pill-remaining">${w.remaining} Remaining</span>
       </div>
-      <div class="core-weekly-footer">Counts new Core concepts approved for shooting in Tuesday Review — Proven Winner concepts on Upcoming Drops don't count</div>`;
+      <div class="core-weekly-footer">Counts new concepts approved for shooting in Tuesday Review — Proven Winner concepts don't count</div>`;
   });
 }
 
