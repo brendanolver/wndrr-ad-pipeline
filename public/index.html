@@ -37,6 +37,7 @@
       <button class="tab-btn active" data-tab="dashboard"><span class="sidebar-nav-icon">⌂</span>Dashboard</button>
       <button class="tab-btn" data-tab="planning"><span class="sidebar-nav-icon">🗓</span>Planning</button>
       <button class="tab-btn" data-tab="concept-dev"><span class="sidebar-nav-icon">💡</span>Concept Dev</button>
+      <button class="tab-btn" data-tab="tuesday-review"><span class="sidebar-nav-icon">🗳</span>Tuesday Review</button>
       <button class="tab-btn" data-tab="board"><span class="sidebar-nav-icon">▤</span>Board</button>
       <button class="tab-btn" data-tab="admin"><span class="sidebar-nav-icon">🏷</span>Styles &amp; Categories</button>
       <button class="tab-btn" data-tab="settings"><span class="sidebar-nav-icon">⚙</span>Settings</button>
@@ -379,6 +380,31 @@
       </div>
 
       <div id="concept-dev-list"></div>
+    </section>
+
+    <!-- Tuesday Creative Review: the human quality gate right after Concept
+         Development -- a concept lands here the moment its
+         concept_dev_status becomes ready_for_review, read from the exact
+         same GET /concept-development payload Concept Dev already uses
+         (no separate backend surface for "what's in review this week").
+         Deliberately its own read-only visual language throughout (tr-*
+         classes) rather than reusing cd-modal-* -- this is a decision room,
+         not another editable form. See loadTuesdayReviewWeek in app.js. -->
+    <section id="tab-tuesday-review" class="tab-panel">
+      <h1 class="tr-page-title">Tuesday Creative Review</h1>
+      <div class="planning-header">
+        <div class="planning-week-nav">
+          <button type="button" class="week-nav-btn" id="tr-week-prev" onclick="changeTuesdayReviewWeek(-1)" aria-label="Previous week">&lsaquo;</button>
+          <button type="button" class="planning-week-label-btn" id="tr-week-label" onclick="toggleTuesdayReviewWeekPicker()"></button>
+          <button type="button" class="week-nav-btn" id="tr-week-next" onclick="changeTuesdayReviewWeek(1)" aria-label="Next week">&rsaquo;</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="tr-this-week-btn" onclick="goToCurrentTuesdayReviewWeek()" style="display:none;">This Week</button>
+          <div class="planning-week-picker" id="tr-week-picker" style="display:none;"></div>
+        </div>
+      </div>
+
+      <div id="tr-summary" class="tr-summary"></div>
+      <div class="cd-filters" id="tr-filters"></div>
+      <div id="tr-list"></div>
     </section>
 
     <section id="tab-board" class="tab-panel">
@@ -907,6 +933,15 @@
         <button type="button" class="link-btn cd-modal-tools-trigger" onclick="openCreativeToolsFromConceptModal()">🛠 Creative Tools &#9662;</button>
       </div>
 
+      <!-- Only shown when concept_dev_status is changes_required -- surfaces
+           Tuesday Review's feedback right where the creator lands when they
+           reopen the concept, so they don't have to go looking for why it
+           was sent back. See fillConceptDevModalFields in app.js. -->
+      <div class="cd-changes-required-banner" id="cd-changes-required-banner" style="display:none;">
+        <div class="cd-changes-required-label">Feedback from Tuesday Review</div>
+        <div class="cd-changes-required-text" id="cd-changes-required-text"></div>
+      </div>
+
       <div class="cd-modal-section">
         <div class="cd-modal-section-title">The Idea</div>
         <div class="cd-modal-idea-row">
@@ -1053,8 +1088,9 @@
     <div class="modal-footer">
       <button class="btn btn-danger" id="cd-modal-delete-btn" onclick="deleteConceptDevConcept()" style="display:none;">Delete</button>
       <button class="btn btn-ghost" onclick="closeModal('concept-dev-modal')">Cancel</button>
-      <button class="btn btn-ghost" onclick="saveConceptDevModal('in_development')">Save Draft</button>
-      <button class="btn btn-primary" onclick="saveConceptDevModal('ready_for_review')">Ready for Review &rarr;</button>
+      <button class="btn btn-ghost" id="cd-modal-save-draft-btn" onclick="saveConceptDevModal('in_development')">Save Draft</button>
+      <button class="btn btn-primary" id="cd-modal-save-changes-btn" onclick="saveConceptDevModal(null)" style="display:none;">Save Changes</button>
+      <button class="btn btn-primary" id="cd-modal-submit-btn" onclick="saveConceptDevModal('ready_for_review')">Ready for Review &rarr;</button>
     </div>
   </div>
 </div>
@@ -1077,6 +1113,127 @@
     <div class="modal-footer">
       <button type="button" class="btn btn-ghost" id="cd-hook-nudge-continue-btn">Continue Without</button>
       <button type="button" class="btn btn-primary" id="cd-hook-nudge-add-btn">Add Opening</button>
+    </div>
+  </div>
+</div>
+
+<!-- Tuesday Creative Review's concept view: a read-only creative brief, not
+     the editable Concept Development form -- deliberately its own tr-*
+     classes throughout (see renderTuesdayReviewConcept in app.js). Order
+     follows the brief exactly: Idea -> Audience -> Hook/Opening -> Execution
+     -- Hook/Opening intentionally comes BEFORE Execution here (the reverse
+     of Concept Development), so the team judges attention before production
+     detail. The decision bar only shows the three live actions when this
+     concept is actually awaiting a decision (ready_for_review); anything
+     opened from another filter shows what was already decided instead --
+     see updateTuesdayReviewDecisionBar. -->
+<div id="tuesday-review-modal" class="modal-backdrop">
+  <div class="modal tr-review-modal">
+    <div class="modal-header">
+      <div class="tr-review-nav">
+        <button type="button" class="link-btn" id="tr-review-prev-btn" onclick="tuesdayReviewNav(-1)">&larr; Previous</button>
+        <span class="tr-review-position" id="tr-review-position"></span>
+        <button type="button" class="link-btn" id="tr-review-next-btn" onclick="tuesdayReviewNav(1)">Next &rarr;</button>
+      </div>
+      <button class="modal-close" onclick="closeTuesdayReviewModal()">&times;</button>
+    </div>
+    <div class="modal-body tr-review-body">
+      <div class="tr-review-header">
+        <h3 id="tr-review-title"></h3>
+        <span class="cd-concept-status-pill" id="tr-review-status-pill"></span>
+      </div>
+      <div class="tr-review-product-context" id="tr-review-product-context"></div>
+
+      <div class="tr-review-section">
+        <div class="tr-review-section-title">The Idea</div>
+        <div class="tr-review-text" id="tr-review-angle"></div>
+      </div>
+
+      <div class="tr-review-section">
+        <div class="tr-review-section-title">The Audience</div>
+        <button type="button" class="tr-avatar-toggle" id="tr-review-avatar-name" onclick="toggleTuesdayReviewAvatarDetail()"></button>
+        <div class="tr-avatar-detail" id="tr-review-avatar-detail" style="display:none;"></div>
+        <div class="tr-review-subtitle">Why should they care?</div>
+        <div class="tr-review-text" id="tr-review-why-care"></div>
+      </div>
+
+      <div class="tr-review-section">
+        <div class="tr-review-section-title">Hook / Opening</div>
+        <div id="tr-review-hooks"></div>
+      </div>
+
+      <div class="tr-review-section">
+        <div class="tr-review-section-title">The Execution</div>
+        <div class="tr-review-text" id="tr-review-execution"></div>
+        <button type="button" class="link-btn" id="tr-review-script-toggle" onclick="toggleTuesdayReviewScript()" style="display:none;">View Script / Talking Points &darr;</button>
+        <div class="tr-review-text tr-review-script" id="tr-review-script" style="display:none;"></div>
+      </div>
+
+      <div class="tr-review-section" id="tr-review-references-section" style="display:none;">
+        <div class="tr-review-section-title">References</div>
+        <div id="tr-review-references"></div>
+      </div>
+
+      <div class="tr-review-section" id="tr-review-shoot-req-section" style="display:none;">
+        <div class="tr-review-section-title">Shoot Requirements</div>
+        <div class="tr-review-text" id="tr-review-shoot-req-inline"></div>
+        <button type="button" class="link-btn" id="tr-review-props-toggle" onclick="toggleTuesdayReviewProps()" style="display:none;">View Props &amp; Requirements &darr;</button>
+        <div class="tr-review-text" id="tr-review-props" style="display:none;"></div>
+      </div>
+
+      <div class="tr-review-decided-note" id="tr-review-decided-note" style="display:none;"></div>
+    </div>
+    <div class="tr-decision-bar" id="tr-decision-bar">
+      <button type="button" class="btn tr-btn-kill" onclick="openTuesdayReviewKillModal()">Kill Concept</button>
+      <button type="button" class="btn btn-ghost" onclick="openTuesdayReviewChangesModal()">Request Changes</button>
+      <button type="button" class="btn btn-primary tr-btn-approve" onclick="approveTuesdayReviewConcept()">&check; Approve for Shooting &rarr;</button>
+    </div>
+  </div>
+</div>
+
+<!-- Request Changes: a focused mini-modal, not a full form -- feedback is
+     the only field, and it's required (see submitTuesdayReviewChanges).
+     Must stay after #tuesday-review-modal in the DOM for correct stacking,
+     same convention as #cd-hook-nudge-modal above. -->
+<div id="tr-changes-modal" class="modal-backdrop">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Request Changes</h3>
+      <button class="modal-close" onclick="closeModal('tr-changes-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <label><span class="cd-field-label">What needs changing?<span class="cd-req-mark">*</span></span>
+        <textarea id="tr-changes-feedback" rows="4" placeholder="Be specific so the creator knows what to work on..."></textarea>
+        <div class="cd-field-error" id="tr-changes-feedback-error"></div>
+      </label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('tr-changes-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitTuesdayReviewChanges()">Send Back for Changes</button>
+    </div>
+  </div>
+</div>
+
+<!-- Kill Concept: reason is a set of quick-select chips (optional, single
+     choice) plus an optional note -- both entirely optional for V1, per
+     the brief. Must stay after #tuesday-review-modal for correct stacking. -->
+<div id="tr-kill-modal" class="modal-backdrop">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Kill Concept</h3>
+      <button class="modal-close" onclick="closeModal('tr-kill-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <label>Reason <span class="hint">(optional)</span>
+        <div class="tr-kill-reason-chips" id="tr-kill-reason-chips"></div>
+      </label>
+      <label>Note <span class="hint">(optional)</span>
+        <textarea id="tr-kill-note" rows="2" placeholder="Any additional context..."></textarea>
+      </label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('tr-kill-modal')">Cancel</button>
+      <button class="btn btn-danger" onclick="submitTuesdayReviewKill()">Kill Concept</button>
     </div>
   </div>
 </div>

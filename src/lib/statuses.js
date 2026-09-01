@@ -44,14 +44,20 @@ const FORMATS = ['video', 'static'];
 // Concept Development's own simple review status -- separate from STATUSES
 // above (the full production pipeline). This just tracks how ready a
 // concept is for the Tuesday review meeting.
-const CONCEPT_DEV_STATUSES = ['not_started', 'in_development', 'ready_for_review', 'changes_required', 'approved'];
+const CONCEPT_DEV_STATUSES = ['not_started', 'in_development', 'ready_for_review', 'changes_required', 'approved', 'killed'];
 const CONCEPT_DEV_STATUS_LABELS = {
   not_started: 'Not Started',
   in_development: 'In Development',
   ready_for_review: 'Ready for Review',
   changes_required: 'Changes Required',
   approved: 'Approved',
+  killed: 'Killed',
 };
+
+// Tuesday Creative Review's own three decisions -- the only concept_dev_status
+// values a review decision is ever allowed to move a concept INTO (see
+// PATCH /concept-development/concepts/:id/review).
+const TUESDAY_REVIEW_DECISIONS = ['approved', 'changes_required', 'killed'];
 
 module.exports = {
   STATUSES,
@@ -62,4 +68,5 @@ module.exports = {
   FORMATS,
   CONCEPT_DEV_STATUSES,
   CONCEPT_DEV_STATUS_LABELS,
+  TUESDAY_REVIEW_DECISIONS,
 };

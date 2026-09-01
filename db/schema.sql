@@ -719,3 +719,34 @@ CREATE TABLE IF NOT EXISTS customer_avatars (
 ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS customer_avatar_id INTEGER REFERENCES customer_avatars(id) ON DELETE SET NULL;
 ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS custom_avatar_description TEXT;
 ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS avatar_why_care TEXT;
+
+-- ---------------------------------------------------------------------------
+-- Tuesday Creative Review: the human quality gate right after Concept
+-- Development, before a concept is allowed into Shooting. A concept enters
+-- this stage the moment concept_dev_status becomes 'ready_for_review' --
+-- no separate "workflow stage" column needed, concept_dev_status already
+-- carries that meaning end to end (not_started/in_development -> pre-review,
+-- ready_for_review -> awaiting Tuesday, changes_required/approved/killed ->
+-- Tuesday's own outcomes). 'killed' is new here; the constraint has to be
+-- dropped and re-added (not just an additive ALTER TABLE) since it's
+-- changing the allowed values of an existing column -- idempotent by using
+-- Postgres's default auto-generated constraint name.
+ALTER TABLE creative_assets DROP CONSTRAINT IF EXISTS creative_assets_concept_dev_status_check;
+ALTER TABLE creative_assets ADD CONSTRAINT creative_assets_concept_dev_status_check
+  CHECK (concept_dev_status IN ('not_started', 'in_development', 'ready_for_review', 'changes_required', 'approved', 'killed'));
+
+-- reviewed_at/review_feedback/kill_reason/kill_note hold the CURRENT
+-- decision's detail, for simple, no-JSON-parsing display (e.g. surfacing
+-- "what needs changing" to the creator in Concept Development).
+-- review_history is the append-only full record -- every decision ever
+-- made on this concept, in order -- so resubmitting after Changes Required
+-- never loses the earlier feedback, and a killed concept keeps its reason
+-- for future creative learnings even though the row itself is never
+-- deleted. No dedicated audit-log UI yet (per the brief), just the data to
+-- support one later. Each entry: {decision, feedback?, kill_reason?,
+-- kill_note?, decided_at}.
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS review_feedback TEXT;
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS kill_reason VARCHAR(50);
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS kill_note TEXT;
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS review_history JSONB NOT NULL DEFAULT '[]'::jsonb;

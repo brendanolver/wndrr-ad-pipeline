@@ -1,7 +1,7 @@
 const express = require('express');
 const { pool } = require('../db');
 const { insertCreativeAsset } = require('../lib/assets');
-const { CONCEPT_DEV_STATUSES } = require('../lib/statuses');
+const { CONCEPT_DEV_STATUSES, TUESDAY_REVIEW_DECISIONS } = require('../lib/statuses');
 const { generateOrTopUpPlan } = require('./dropProductPlans');
 
 const router = express.Router();
@@ -264,6 +264,61 @@ router.patch('/concepts/:id', async (req, res, next) => {
     res.json(result.rows[0]);
   } catch (err) {
     if (err.code === '23503') return res.status(400).json({ error: 'That Customer Avatar no longer exists' });
+    next(err);
+  }
+});
+
+// Tuesday Creative Review's one write path -- the three human decisions
+// (approve/request changes/kill), deliberately separate from the general
+// PATCH /concepts/:id above (which the editable Concept Development form
+// uses). Only fires from ready_for_review -- the WHERE guard below both
+// stops a stale/double-submitted decision (two reviewers deciding on the
+// same concept at once) and gives the frontend a clear 409 to react to by
+// just re-fetching and moving on, rather than silently overwriting an
+// earlier decision. review_history is append-only (jsonb concatenation),
+// so resubmitting after Changes Required never loses the earlier feedback,
+// and a killed concept keeps its reason on record even though the row
+// itself is never deleted.
+router.patch('/concepts/:id/review', async (req, res, next) => {
+  try {
+    const { decision, feedback, kill_reason, kill_note } = req.body || {};
+    if (!TUESDAY_REVIEW_DECISIONS.includes(decision)) {
+      return res.status(400).json({ error: `decision must be one of: ${TUESDAY_REVIEW_DECISIONS.join(', ')}` });
+    }
+    const trimmedFeedback = feedback && feedback.trim() ? feedback.trim() : null;
+    if (decision === 'changes_required' && !trimmedFeedback) {
+      return res.status(400).json({ error: 'feedback is required to request changes' });
+    }
+    const trimmedKillNote = kill_note && kill_note.trim() ? kill_note.trim() : null;
+    const trimmedKillReason = kill_reason && kill_reason.trim() ? kill_reason.trim() : null;
+
+    const historyEntry = { decision, decided_at: new Date().toISOString() };
+    if (decision === 'changes_required') historyEntry.feedback = trimmedFeedback;
+    if (decision === 'killed') {
+      if (trimmedKillReason) historyEntry.kill_reason = trimmedKillReason;
+      if (trimmedKillNote) historyEntry.kill_note = trimmedKillNote;
+    }
+
+    const result = await pool.query(
+      `UPDATE creative_assets SET
+         concept_dev_status = $1::varchar,
+         reviewed_at = now(),
+         review_feedback = CASE WHEN $1::varchar = 'changes_required' THEN $2 ELSE review_feedback END,
+         kill_reason = CASE WHEN $1::varchar = 'killed' THEN $3 ELSE kill_reason END,
+         kill_note = CASE WHEN $1::varchar = 'killed' THEN $4 ELSE kill_note END,
+         review_history = review_history || $5::jsonb,
+         updated_at = now()
+       WHERE id = $6 AND concept_dev_status = 'ready_for_review'
+       RETURNING *`,
+      [decision, trimmedFeedback, trimmedKillReason, trimmedKillNote, JSON.stringify([historyEntry]), req.params.id]
+    );
+    if (!result.rows.length) {
+      const existsResult = await pool.query('SELECT id FROM creative_assets WHERE id = $1', [req.params.id]);
+      if (!existsResult.rows.length) return res.status(404).json({ error: 'Concept not found' });
+      return res.status(409).json({ error: 'This concept is no longer awaiting Tuesday Review -- it may have already been decided' });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
     next(err);
   }
 });
