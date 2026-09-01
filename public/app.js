@@ -68,6 +68,13 @@ let state = {
   // sets (product-level vs. concept-level) is shown. Unused by the global
   // Creative Toolkit drawer, which never needs a product/concept in view.
   creativeToolkit: { shootPlanItemId: null, conceptId: null },
+  // Reference Library -- the shared reference_library table, lazy-loaded
+  // like creativeResources above (see ensureReferenceLibraryLoaded). filter
+  // is the All/BAU/Sale tab; pickerMode is true when the modal was opened
+  // from a Concept's own References section (openReferenceLibraryPicker)
+  // instead of from a Creative Toolkit/Tools card -- same list, but cards
+  // offer "Use This Reference" instead of the ••• edit/delete menu.
+  referenceLibrary: [], referenceLibraryLoaded: false, referenceLibraryFilter: 'all', referenceLibraryPickerMode: false,
   // Settings' reusable Customer Avatar library -- who Concept Development's
   // "The Audience" section picks a Primary Customer Avatar from. See
   // schema.sql's comment on customer_avatars/customer_avatar_id.
@@ -3932,6 +3939,7 @@ function renderConceptDevModalReferences() {
   document.getElementById('cd-modal-references-list').innerHTML = conceptDevModalReferences.map((r, i) => `
     <div class="cd-reference-item">
       <div class="cd-reference-item-row">
+        ${r.library_reference_id ? '<span class="cd-reference-library-tag">📚 From Library</span>' : ''}
         <input type="text" value="${escapeHtml(r.url)}" oninput="conceptDevModalReferences[${i}].url=this.value" placeholder="Reference link">
         <button type="button" class="cd-reference-remove" onclick="removeConceptDevReference(${i})" aria-label="Remove reference">&times;</button>
       </div>
@@ -3948,7 +3956,7 @@ function renderConceptDevModalReferences() {
 function setConceptDevReferencesExpanded(expanded) {
   document.getElementById('cd-modal-references-toggle-wrap').style.display = expanded ? 'none' : '';
   document.getElementById('cd-modal-references-list').style.display = expanded ? '' : 'none';
-  document.getElementById('cd-modal-add-reference-btn').style.display = expanded ? '' : 'none';
+  document.getElementById('cd-modal-references-actions').style.display = expanded ? '' : 'none';
 }
 
 function addConceptDevReference() {
@@ -4422,7 +4430,9 @@ async function saveConceptDevModal(targetStatus) {
       .map((h) => ({ text: h.text.trim() }))
       .filter((h) => h.text),
     reference_items: conceptDevModalReferences
-      .map((r) => ({ url: r.url.trim(), note: r.note.trim() }))
+      .map((r) => (r.library_reference_id
+        ? { url: r.url.trim(), note: r.note.trim(), library_reference_id: r.library_reference_id }
+        : { url: r.url.trim(), note: r.note.trim() }))
       .filter((r) => r.url),
     talent_requirement: document.getElementById('cd-modal-talent').value.trim(),
     location: document.getElementById('cd-modal-location').value.trim(),
@@ -5775,6 +5785,254 @@ function viewProvenWinnersFromToolkit() {
   closeModal('creative-tools-modal');
   switchTab('settings');
   document.getElementById('pw-list').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ── Reference Library ─────────────────────────────────
+// A single shared reference_library table, reached from three places: the
+// global Creative Toolkit, the context-aware Creative Tools modal (both via
+// openReferenceLibraryFromToolkit), and a Concept's own References section
+// as a picker (openReferenceLibraryPicker) -- same modal, same data, never
+// a second copy. There's no login system to draw an "Added by" name from,
+// so identity is a one-time localStorage prompt (reference-identity-modal)
+// reusing the existing content_creators list; every Add Reference after
+// that is fully automatic, per the brief.
+let referenceAddEditId = null;
+let referenceAddType = 'bau';
+
+async function ensureReferenceLibraryLoaded(force = false) {
+  if (state.referenceLibraryLoaded && !force) return;
+  try {
+    state.referenceLibrary = await api('/reference-library');
+    state.referenceLibraryLoaded = true;
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function getReferenceIdentity() {
+  try {
+    return localStorage.getItem('wndrr_reference_identity') || '';
+  } catch (e) {
+    return '';
+  }
+}
+
+function setReferenceIdentity(name) {
+  try {
+    localStorage.setItem('wndrr_reference_identity', name);
+  } catch (e) {
+    // Private browsing / storage disabled -- identity just won't persist across visits.
+  }
+}
+
+function openReferenceIdentityModal() {
+  const sel = document.getElementById('ref-identity-select');
+  sel.innerHTML = state.contentCreators.map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join('');
+  const defaultEntry = state.contentCreators.find((c) => c.is_default) || state.contentCreators[0];
+  if (defaultEntry) sel.value = defaultEntry.name;
+  openModal('reference-identity-modal');
+}
+
+function saveReferenceIdentity() {
+  const sel = document.getElementById('ref-identity-select');
+  if (!sel.value) return;
+  setReferenceIdentity(sel.value);
+  closeModal('reference-identity-modal');
+  openReferenceAddModal();
+}
+
+function formatReferenceLibraryDate(iso) {
+  return new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
+}
+
+function referenceLibraryStyleOptionsHtml() {
+  return '<option value="">— none —</option>' + state.styles.map((s) => `<option value="${s.id}">${escapeHtml(s.style_code)} — ${escapeHtml(s.name)}</option>`).join('');
+}
+
+async function openReferenceLibraryModal() {
+  await ensureReferenceLibraryLoaded();
+  document.getElementById('ref-lib-search').value = '';
+  setReferenceLibraryFilter('all');
+  document.getElementById('reference-library-modal-title').textContent = state.referenceLibraryPickerMode ? '📚 Choose from Reference Library' : '📚 Reference Library';
+  document.getElementById('ref-lib-helper').textContent = state.referenceLibraryPickerMode
+    ? 'Pick a saved reference to attach to this concept.'
+    : "A shared bank of ads, UGC and ideas the team likes — browse for inspiration or add something you've spotted.";
+  document.getElementById('ref-lib-add-btn').style.display = state.referenceLibraryPickerMode ? 'none' : '';
+  openModal('reference-library-modal');
+}
+
+async function openReferenceLibraryFromToolkit() {
+  closeModal('creative-toolkit-modal');
+  closeModal('creative-tools-modal');
+  state.referenceLibraryPickerMode = false;
+  await openReferenceLibraryModal();
+}
+
+async function openReferenceLibraryPicker() {
+  state.referenceLibraryPickerMode = true;
+  await openReferenceLibraryModal();
+}
+
+function setReferenceLibraryFilter(filter) {
+  state.referenceLibraryFilter = filter;
+  document.getElementById('ref-lib-tab-all').classList.toggle('active', filter === 'all');
+  document.getElementById('ref-lib-tab-bau').classList.toggle('active', filter === 'bau');
+  document.getElementById('ref-lib-tab-sale').classList.toggle('active', filter === 'sale');
+  renderReferenceLibraryList();
+}
+
+function referenceLibraryCardHtml(item) {
+  const typeLabel = item.idea_type === 'sale' ? 'SALE' : 'BAU';
+  const product = item.style_code ? `${item.style_code} — ${item.style_name}` : (item.category_name || null);
+  const added = `Added by ${escapeHtml(item.added_by)} · ${formatReferenceLibraryDate(item.created_at)}`;
+  const actions = state.referenceLibraryPickerMode
+    ? `<button type="button" class="btn btn-primary btn-sm" onclick="pickReferenceLibraryItem(${item.id})">Use This Reference</button>`
+    : `<a class="btn btn-ghost btn-sm" href="${escapeHtml(item.link)}" target="_blank" rel="noopener">Open Reference &#8599;</a>
+       <div class="ref-card-menu">
+         <button type="button" class="ref-card-menu-btn" onclick="toggleReferenceCardMenu(${item.id}, event)" aria-label="More actions">&bull;&bull;&bull;</button>
+         <div class="ref-card-menu-dropdown" id="ref-card-menu-${item.id}">
+           <button type="button" class="ref-card-menu-item" onclick="closeAllReferenceCardMenus();openReferenceEditModal(${item.id})">Edit</button>
+           <button type="button" class="ref-card-menu-item ref-card-menu-item-danger" onclick="closeAllReferenceCardMenus();confirmDeleteReferenceLibraryItem(${item.id})">Delete</button>
+         </div>
+       </div>`;
+  return `
+    <div class="ref-card">
+      <div class="ref-card-top">
+        <span class="ref-card-type ref-card-type-${item.idea_type}">${typeLabel}</span>
+        ${product ? `<span class="ref-card-product">${escapeHtml(product)}</span>` : ''}
+      </div>
+      <div class="ref-card-comment">${escapeHtml(item.comment)}</div>
+      <div class="ref-card-meta">${added}</div>
+      <div class="ref-card-actions">${actions}</div>
+    </div>`;
+}
+
+function renderReferenceLibraryList() {
+  const search = document.getElementById('ref-lib-search').value.trim().toLowerCase();
+  const filtered = state.referenceLibrary.filter((r) => {
+    if (state.referenceLibraryFilter !== 'all' && r.idea_type !== state.referenceLibraryFilter) return false;
+    if (!search) return true;
+    const haystack = [r.comment, r.style_name, r.style_code, r.category_name].filter(Boolean).join(' ').toLowerCase();
+    return haystack.includes(search);
+  });
+  document.getElementById('ref-lib-list').innerHTML = filtered.map(referenceLibraryCardHtml).join('');
+  document.getElementById('ref-lib-empty').style.display = filtered.length ? 'none' : '';
+  document.getElementById('ref-lib-empty').textContent = state.referenceLibrary.length
+    ? 'No references match your filters.'
+    : 'No references yet — be the first to add one.';
+}
+
+function closeAllReferenceCardMenus() {
+  document.querySelectorAll('.ref-card-menu-dropdown.show').forEach((el) => el.classList.remove('show'));
+}
+
+function toggleReferenceCardMenu(id, event) {
+  event.stopPropagation();
+  const dropdown = document.getElementById(`ref-card-menu-${id}`);
+  const isOpen = dropdown.classList.contains('show');
+  closeAllReferenceCardMenus();
+  if (!isOpen) dropdown.classList.add('show');
+}
+
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.ref-card-menu')) closeAllReferenceCardMenus();
+});
+
+function pickReferenceLibraryItem(id) {
+  const item = state.referenceLibrary.find((r) => r.id === id);
+  if (!item) return;
+  conceptDevModalReferences.push({ url: item.link, note: '', library_reference_id: item.id });
+  renderConceptDevModalReferences();
+  setConceptDevReferencesExpanded(true);
+  closeModal('reference-library-modal');
+  toast('Reference added');
+}
+
+function setReferenceAddType(type) {
+  referenceAddType = type;
+  document.getElementById('ref-add-type-bau').classList.toggle('active', type === 'bau');
+  document.getElementById('ref-add-type-sale').classList.toggle('active', type === 'sale');
+}
+
+function openReferenceAddModal() {
+  if (!getReferenceIdentity()) {
+    openReferenceIdentityModal();
+    return;
+  }
+  referenceAddEditId = null;
+  document.getElementById('reference-add-modal-title').textContent = 'Add Reference';
+  document.getElementById('ref-add-link').value = '';
+  document.getElementById('ref-add-comment').value = '';
+  document.getElementById('ref-add-style').innerHTML = referenceLibraryStyleOptionsHtml();
+  document.getElementById('ref-add-style').value = '';
+  setReferenceAddType('bau');
+  document.getElementById('ref-add-delete-btn').style.display = 'none';
+  openModal('reference-add-modal');
+}
+
+function openReferenceEditModal(id) {
+  const item = state.referenceLibrary.find((r) => r.id === id);
+  if (!item) return;
+  referenceAddEditId = id;
+  document.getElementById('reference-add-modal-title').textContent = 'Edit Reference';
+  document.getElementById('ref-add-link').value = item.link;
+  document.getElementById('ref-add-comment').value = item.comment;
+  document.getElementById('ref-add-style').innerHTML = referenceLibraryStyleOptionsHtml();
+  document.getElementById('ref-add-style').value = item.style_id || '';
+  setReferenceAddType(item.idea_type);
+  document.getElementById('ref-add-delete-btn').style.display = '';
+  openModal('reference-add-modal');
+}
+
+async function saveReferenceAdd() {
+  const link = document.getElementById('ref-add-link').value.trim();
+  const comment = document.getElementById('ref-add-comment').value.trim();
+  const styleId = document.getElementById('ref-add-style').value;
+  if (!link) return toast('A reference link is required', true);
+  if (!comment) return toast('Add a quick note on what you like about it', true);
+
+  const payload = { link, comment, idea_type: referenceAddType, style_id: styleId ? Number(styleId) : null };
+  try {
+    if (referenceAddEditId) {
+      const updated = await api(`/reference-library/${referenceAddEditId}`, { method: 'PUT', body: JSON.stringify(payload) });
+      state.referenceLibrary = state.referenceLibrary.map((r) => (r.id === updated.id ? updated : r));
+    } else {
+      payload.added_by = getReferenceIdentity();
+      const created = await api('/reference-library', { method: 'POST', body: JSON.stringify(payload) });
+      state.referenceLibrary = [created, ...state.referenceLibrary];
+    }
+    closeModal('reference-add-modal');
+    renderReferenceLibraryList();
+    toast('Reference saved');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function confirmDeleteReferenceLibraryItem(id) {
+  if (!(await confirmDialog('Delete this reference? This cannot be undone.'))) return;
+  try {
+    await api(`/reference-library/${id}`, { method: 'DELETE' });
+    state.referenceLibrary = state.referenceLibrary.filter((r) => r.id !== id);
+    renderReferenceLibraryList();
+    toast('Reference deleted');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function deleteReferenceLibraryItem() {
+  if (!referenceAddEditId) return;
+  if (!(await confirmDialog('Delete this reference? This cannot be undone.'))) return;
+  try {
+    await api(`/reference-library/${referenceAddEditId}`, { method: 'DELETE' });
+    state.referenceLibrary = state.referenceLibrary.filter((r) => r.id !== referenceAddEditId);
+    closeModal('reference-add-modal');
+    renderReferenceLibraryList();
+    toast('Reference deleted');
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 // ── AI Creative Review ────────────────────────────────

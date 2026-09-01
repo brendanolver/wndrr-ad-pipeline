@@ -780,3 +780,33 @@ CREATE TABLE IF NOT EXISTS shoot_schedule (
 );
 CREATE INDEX IF NOT EXISTS idx_shoot_schedule_scheduled_week ON shoot_schedule(scheduled_week_start);
 CREATE INDEX IF NOT EXISTS idx_shoot_schedule_original_week ON shoot_schedule(original_week_start);
+
+-- ---------------------------------------------------------------------------
+-- Reference Library: a shared, lightweight bank of external creative
+-- references (competitor ads, UGC, anything that sparked an idea) the whole
+-- team can add to and browse. Lives inside the existing Creative Toolkit /
+-- Creative Tools modals -- deliberately not a new toolkit or nav item, see
+-- the ct-card entries in index.html. idea_type is intentionally just
+-- BAU/SALE, no further tag taxonomy, per the brief. style_id is optional
+-- context only (which product/category a reference might apply to),
+-- reusing the existing styles/categories data rather than a new table.
+--
+-- Forward-looking, not yet wired up in the UI: a Concept's own
+-- reference_items JSONB array (see below) can already hold an arbitrary
+-- object per entry, so a future "attach this Library reference to a
+-- Concept" feature can add a library_reference_id key to one of those
+-- entries with zero schema change here -- the entry's own `note` stays a
+-- separate, concept-specific field and must never be overwritten with (or
+-- by) this table's `comment`.
+CREATE TABLE IF NOT EXISTS reference_library (
+  id SERIAL PRIMARY KEY,
+  link TEXT NOT NULL,
+  comment TEXT NOT NULL,
+  idea_type VARCHAR(10) NOT NULL CHECK (idea_type IN ('bau', 'sale')),
+  style_id INTEGER REFERENCES styles(id) ON DELETE SET NULL,
+  added_by VARCHAR(255) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_reference_library_created_at ON reference_library(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_reference_library_idea_type ON reference_library(idea_type);

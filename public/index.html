@@ -1167,10 +1167,14 @@
         <div class="cd-modal-section-title">References</div>
         <div id="cd-modal-references-toggle-wrap">
           <button type="button" class="link-btn" onclick="addConceptDevReference()">+ Add Reference</button>
+          <button type="button" class="link-btn" onclick="openReferenceLibraryPicker()">+ From Library</button>
           <div class="hint cd-modal-section-helper">Add inspiration or examples for this concept.</div>
         </div>
         <div id="cd-modal-references-list" class="cd-reference-item-list" style="display:none;"></div>
-        <button type="button" class="btn btn-sm cd-add-reference-btn" id="cd-modal-add-reference-btn" onclick="addConceptDevReference()" style="display:none;">+ Add Reference</button>
+        <div class="cd-reference-list-actions" id="cd-modal-references-actions" style="display:none;">
+          <button type="button" class="btn btn-sm cd-add-reference-btn" id="cd-modal-add-reference-btn" onclick="addConceptDevReference()">+ Add Reference</button>
+          <button type="button" class="btn btn-sm btn-ghost" onclick="openReferenceLibraryPicker()">+ From Library</button>
+        </div>
       </div>
 
       <div class="cd-modal-section">
@@ -1436,6 +1440,15 @@
       <div id="ct-resources-list" class="ct-card-list"></div>
 
       <div class="ct-card">
+        <div class="ct-card-name">📚 Reference Library</div>
+        <div class="ct-card-sub">Shared team inspiration</div>
+        <div class="ct-card-helper">Browse ads, UGC and ideas the team has saved — or add one you've spotted.</div>
+        <div class="ct-card-actions">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="openReferenceLibraryFromToolkit()">Browse Library &rarr;</button>
+        </div>
+      </div>
+
+      <div class="ct-card">
         <div class="ct-card-name">Proven Winners</div>
         <div class="ct-card-sub">Review what's already working</div>
         <div class="ct-card-helper">Browse WNDRR's proven creative concepts for inspiration.</div>
@@ -1487,6 +1500,14 @@
         </div>
 
         <div class="ct-card">
+          <div class="ct-card-name">📚 Browse Reference Library</div>
+          <div class="ct-card-helper">Shared ads, UGC and ideas the team has saved for this kind of product.</div>
+          <div class="ct-card-actions">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="openReferenceLibraryFromToolkit()">Browse Library &rarr;</button>
+          </div>
+        </div>
+
+        <div class="ct-card">
           <div class="ct-card-name">View Proven Winners</div>
           <div class="ct-card-helper">Browse WNDRR's proven creative concepts for inspiration.</div>
           <div class="ct-card-actions">
@@ -1514,6 +1535,14 @@
         </div>
 
         <div class="ct-card">
+          <div class="ct-card-name">📚 Browse Reference Library</div>
+          <div class="ct-card-helper">Shared ads, UGC and ideas the team has saved — inspiration while you develop this concept.</div>
+          <div class="ct-card-actions">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="openReferenceLibraryFromToolkit()">Browse Library &rarr;</button>
+          </div>
+        </div>
+
+        <div class="ct-card">
           <div class="ct-card-name">Browse Proven Winners</div>
           <div class="ct-card-helper">Review WNDRR creative concepts that have already performed.</div>
           <div class="ct-card-actions">
@@ -1521,6 +1550,98 @@
           </div>
         </div>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Reference Library: a shared, lightweight bank of external creative
+     references the whole team can add to and browse -- one table
+     (reference_library), reached from both the global Creative Toolkit and
+     the context-aware Creative Tools modal above via
+     openReferenceLibraryFromToolkit(), never a second copy of the data.
+     Doubles as a picker (state.referenceLibraryPickerMode) when opened from
+     a Concept's own References section via
+     openReferenceLibraryPicker() -- same list, cards show "Use This
+     Reference" instead of the ••• menu, see renderReferenceLibraryList(). -->
+<div id="reference-library-modal" class="modal-backdrop">
+  <div class="modal ref-lib-modal">
+    <div class="modal-header">
+      <h3 id="reference-library-modal-title">📚 Reference Library</h3>
+      <button class="modal-close" onclick="closeModal('reference-library-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="hint ref-lib-helper" id="ref-lib-helper">A shared bank of ads, UGC and ideas the team likes — browse for inspiration or add something you've spotted.</div>
+      <div class="ref-lib-toolbar">
+        <div class="filter-tabs ref-lib-tabs">
+          <button type="button" class="filter-tab active" id="ref-lib-tab-all" onclick="setReferenceLibraryFilter('all')">All</button>
+          <button type="button" class="filter-tab" id="ref-lib-tab-bau" onclick="setReferenceLibraryFilter('bau')">BAU</button>
+          <button type="button" class="filter-tab" id="ref-lib-tab-sale" onclick="setReferenceLibraryFilter('sale')">Sale</button>
+        </div>
+        <input type="search" id="ref-lib-search" class="ref-lib-search" placeholder="Search references…" oninput="renderReferenceLibraryList()">
+      </div>
+      <button type="button" class="btn btn-primary btn-sm ref-lib-add-btn" id="ref-lib-add-btn" onclick="openReferenceAddModal()">+ Add Reference</button>
+      <div id="ref-lib-list" class="ref-lib-grid"></div>
+      <div id="ref-lib-empty" class="ref-lib-empty" style="display:none;">No references yet — be the first to add one.</div>
+    </div>
+  </div>
+</div>
+
+<!-- Add/Edit Reference: deliberately just the 3 required fields (link,
+     comment, idea type) plus one optional Product/Category -- see the
+     brief's ~10-second, "Slack-link-easy" save target. Added-by/date are
+     always automatic (see reference-identity-modal below), never entered
+     here. Reused for editing an existing reference via the ••• menu, with
+     the id tracked in referenceAddEditId. -->
+<div id="reference-add-modal" class="modal-backdrop">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="reference-add-modal-title">Add Reference</h3>
+      <button class="modal-close" onclick="closeModal('reference-add-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <label>Reference Link *
+        <input type="url" id="ref-add-link" placeholder="Paste a link — ad, video, post…">
+      </label>
+      <label>What do you like about it? *
+        <textarea id="ref-add-comment" rows="3" placeholder="A quick note on why this caught your eye"></textarea>
+      </label>
+      <label>Idea Type *
+        <div class="ref-add-type-toggle">
+          <button type="button" class="ref-type-btn active" id="ref-add-type-bau" onclick="setReferenceAddType('bau')">BAU</button>
+          <button type="button" class="ref-type-btn" id="ref-add-type-sale" onclick="setReferenceAddType('sale')">Sale</button>
+        </div>
+      </label>
+      <label>Product / Category <span class="hint">(optional)</span>
+        <select id="ref-add-style"><option value="">— none —</option></select>
+      </label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-danger" id="ref-add-delete-btn" style="display:none;" onclick="deleteReferenceLibraryItem()">Delete</button>
+      <button class="btn btn-ghost" onclick="closeModal('reference-add-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveReferenceAdd()">Save Reference</button>
+    </div>
+  </div>
+</div>
+
+<!-- One-time-per-device identity prompt -- there's no login system to draw
+     "Added by" from, so this asks once, reusing the existing
+     content_creators list (the same names used for Shooting's Owner
+     filter), and remembers the answer in localStorage so every future
+     Reference save is fully automatic -- see getReferenceIdentity() in
+     app.js. Opened in place of reference-add-modal until an identity is
+     stored, then chains straight into it. -->
+<div id="reference-identity-modal" class="modal-backdrop">
+  <div class="modal confirm-modal">
+    <div class="modal-header">
+      <h3>Quick one-time setup</h3>
+      <button class="modal-close" onclick="closeModal('reference-identity-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p>Which name should the Reference Library credit you as? We'll remember this on this device — you won't be asked again.</p>
+      <select id="ref-identity-select"></select>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-primary" onclick="saveReferenceIdentity()">Continue</button>
     </div>
   </div>
 </div>

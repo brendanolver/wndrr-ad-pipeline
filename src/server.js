@@ -34,6 +34,7 @@ const creativeResourceRoutes = require('./routes/creativeResources');
 const creativeToolkitRoutes = require('./routes/creativeToolkit');
 const customerAvatarRoutes = require('./routes/customerAvatars');
 const shootingRoutes = require('./routes/shooting');
+const referenceLibraryRoutes = require('./routes/referenceLibrary');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -67,6 +68,7 @@ app.use('/api/meta-product-mappings', requireAuth, metaProductMappingRoutes);
 app.use('/api/creative-resources', requireAuth, creativeResourceRoutes);
 app.use('/api/creative-toolkit', requireAuth, creativeToolkitRoutes);
 app.use('/api/customer-avatars', requireAuth, customerAvatarRoutes);
+app.use('/api/reference-library', requireAuth, referenceLibraryRoutes);
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
 

@@ -1021,7 +1021,7 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .cd-modal-workspace.cd-readonly select:disabled{background:var(--surface2);color:var(--text);opacity:1;cursor:default;border-color:var(--border);}
 .cd-modal-workspace.cd-readonly #cd-modal-add-hook-btn,
 .cd-modal-workspace.cd-readonly .cd-hook-remove,
-.cd-modal-workspace.cd-readonly #cd-modal-add-reference-btn,
+.cd-modal-workspace.cd-readonly #cd-modal-references-actions,
 .cd-modal-workspace.cd-readonly .cd-reference-remove,
 .cd-modal-workspace.cd-readonly #cd-modal-script-toggle-wrap,
 .cd-modal-workspace.cd-readonly #cd-modal-shoot-req-toggle-wrap,
@@ -1093,6 +1093,50 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .ct-card-helper{font-size:12px;color:var(--text-secondary);margin-top:5px;}
 .ct-card-actions{display:flex;gap:8px;margin-top:9px;}
 .ct-card-actions .btn{text-decoration:none;}
+
+/* Reference Library -- wide like .cd-modal-workspace (a browsable card
+   grid needs room), reached from both Creative Toolkit surfaces and, in
+   picker mode, from a Concept's own References section. Cards deliberately
+   match .cd-card/.ct-card's plain-bordered, low-chrome look rather than
+   inventing a new visual language. */
+.ref-lib-modal{width:70vw;min-width:640px;max-width:920px;}
+@media (max-width:900px){.ref-lib-modal{width:94vw;min-width:0;}}
+.ref-lib-helper{margin-top:-4px;}
+.ref-lib-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
+.ref-lib-tabs{margin-bottom:0;border-bottom:none;flex-shrink:0;}
+.ref-lib-search{font-family:inherit;font-size:12.5px;padding:7px 10px;border:1px solid var(--border);border-radius:var(--r);min-width:200px;}
+.ref-lib-add-btn{align-self:flex-start;}
+.ref-lib-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px;}
+.ref-lib-empty{font-size:12.5px;color:var(--text-muted);padding:18px 0;text-align:center;}
+
+.ref-card{background:white;border:1px solid var(--border);border-radius:var(--r-lg);padding:12px;display:flex;flex-direction:column;gap:8px;}
+.ref-card-top{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.ref-card-type{display:inline-block;border-radius:var(--r-pill);padding:2px 8px;font-size:10px;font-weight:700;letter-spacing:0.3px;}
+.ref-card-type-bau{background:var(--teal-light);color:var(--teal-dark);}
+.ref-card-type-sale{background:var(--purple-light);color:var(--purple);}
+.ref-card-product{font-size:11px;font-weight:600;color:var(--text-secondary);}
+.ref-card-comment{font-size:12.5px;color:var(--text);line-height:1.4;flex:1;}
+.ref-card-meta{font-size:10.5px;color:var(--text-muted);}
+.ref-card-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+.ref-card-actions .btn{text-decoration:none;}
+
+.ref-card-menu{position:relative;}
+.ref-card-menu-btn{background:none;border:none;font-size:14px;color:var(--text-muted);cursor:pointer;padding:4px 6px;line-height:1;}
+.ref-card-menu-btn:hover{color:var(--text);}
+.ref-card-menu-dropdown{display:none;position:absolute;right:0;bottom:100%;margin-bottom:4px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--shadow);min-width:110px;z-index:5;overflow:hidden;}
+.ref-card-menu-dropdown.show{display:block;}
+.ref-card-menu-item{display:block;width:100%;text-align:left;background:none;border:none;padding:8px 12px;font-family:inherit;font-size:12px;color:var(--text);cursor:pointer;}
+.ref-card-menu-item:hover{background:var(--surface2);}
+.ref-card-menu-item-danger{color:var(--red);}
+
+.ref-add-type-toggle{display:flex;gap:6px;}
+.ref-type-btn{flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--r);padding:7px;font-family:inherit;font-size:12.5px;font-weight:600;color:var(--text-secondary);cursor:pointer;}
+.ref-type-btn.active{background:var(--teal);border-color:var(--teal);color:white;}
+
+/* "From Library" tag on a Concept's own reference row -- see
+   openReferenceLibraryPicker/pickReferenceLibraryItem in app.js. */
+.cd-reference-library-tag{display:inline-flex;align-items:center;background:var(--teal-light);color:var(--teal-dark);border-radius:var(--r-pill);padding:2px 8px;font-size:10px;font-weight:700;white-space:nowrap;}
+.cd-reference-list-actions{display:flex;align-items:center;gap:10px;}
 
 /* AI Creative Review -- a quiet quality-control tool at the bottom of an
    individual concept's workspace, not another stage of the workflow, so
