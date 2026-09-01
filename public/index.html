@@ -1070,7 +1070,7 @@
             <div class="cd-field-error" id="cd-modal-name-error"></div>
           </label>
           <label><span class="cd-field-label">Angle / Idea<span class="cd-req-mark">*</span></span>
-            <textarea id="cd-modal-angle" rows="2" placeholder="Why would someone actually care about this?" oninput="updateReviewPromptGate()"></textarea>
+            <textarea id="cd-modal-angle" rows="5" placeholder="Why would someone actually care about this?" oninput="updateReviewPromptGate()"></textarea>
             <div class="cd-field-error" id="cd-modal-angle-error"></div>
           </label>
         </div>
@@ -1095,13 +1095,13 @@
             <div class="cd-field-error" id="cd-modal-avatar-select-error"></div>
           </label>
           <label><span class="cd-field-label">Why should they care?<span class="cd-req-mark">*</span></span>
-            <textarea id="cd-modal-avatar-why-care" rows="2" placeholder="What makes this product or concept relevant to this person?" oninput="updateReviewPromptGate()"></textarea>
+            <textarea id="cd-modal-avatar-why-care" rows="5" placeholder="What makes this product or concept relevant to this person?" oninput="updateReviewPromptGate()"></textarea>
             <div class="cd-field-error" id="cd-modal-avatar-why-care-error"></div>
           </label>
         </div>
         <div id="cd-modal-avatar-custom-wrap" style="display:none;">
           <label>Who are you targeting?
-            <textarea id="cd-modal-avatar-custom-desc" rows="2" placeholder="Describe the specific person, mindset or customer behaviour you're targeting." oninput="updateReviewPromptGate()"></textarea>
+            <textarea id="cd-modal-avatar-custom-desc" rows="5" placeholder="Describe the specific person, mindset or customer behaviour you're targeting." oninput="updateReviewPromptGate()"></textarea>
             <div class="cd-field-error" id="cd-modal-avatar-custom-desc-error"></div>
           </label>
           <button type="button" class="link-btn" id="cd-modal-save-avatar-btn" onclick="openSaveAvatarFromConceptModal()">Save as new Customer Avatar</button>
@@ -1111,7 +1111,7 @@
       <div class="cd-modal-section">
         <div class="cd-modal-section-title">The Execution</div>
         <label><span class="cd-field-label">Execution / Shot Plan<span class="cd-req-mark">*</span></span>
-          <textarea id="cd-modal-execution" rows="2" oninput="updateReviewPromptGate()"></textarea>
+          <textarea id="cd-modal-execution" rows="6" oninput="updateReviewPromptGate()"></textarea>
           <div class="cd-field-error" id="cd-modal-execution-error"></div>
         </label>
         <div id="cd-modal-script-toggle-wrap">
@@ -1119,7 +1119,7 @@
         </div>
         <div id="cd-modal-script-field" class="cd-modal-collapsible" style="display:none;">
           <label>Script / Talking Points
-            <textarea id="cd-modal-script" rows="3"></textarea>
+            <textarea id="cd-modal-script" rows="6"></textarea>
           </label>
           <button type="button" class="link-btn" onclick="setConceptDevScriptExpanded(false)">&minus; Hide</button>
         </div>
