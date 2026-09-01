@@ -324,7 +324,34 @@ router.patch('/concepts/:id/review', async (req, res, next) => {
       if (!existsResult.rows.length) return res.status(404).json({ error: 'Concept not found' });
       return res.status(409).json({ error: 'This concept is no longer awaiting Tuesday Review -- it may have already been decided' });
     }
-    res.json(result.rows[0]);
+
+    // Approved -> Shooting handoff, automatic and idempotent (see brief:
+    // "Do not require anyone to manually recreate the Concept... in
+    // Shooting"). The Concept's own production week -- resolved via its
+    // shoot_plan_item, the same week Concept Dev/Tuesday Review happened in
+    // -- becomes both its original and initial current week; the ON
+    // CONFLICT no-op means reopening/re-deciding this concept later (however
+    // that becomes possible) can never duplicate or reset its schedule.
+    const asset = result.rows[0];
+    if (decision === 'approved') {
+      let weekStart = null;
+      if (asset.shoot_plan_item_id) {
+        const spiResult = await pool.query('SELECT week_start FROM shoot_plan_items WHERE id = $1', [asset.shoot_plan_item_id]);
+        weekStart = spiResult.rows[0] ? spiResult.rows[0].week_start : null;
+      }
+      if (!weekStart) {
+        const fallbackResult = await pool.query(`SELECT date_trunc('week', now())::date AS week_start`);
+        weekStart = fallbackResult.rows[0].week_start;
+      }
+      await pool.query(
+        `INSERT INTO shoot_schedule (creative_asset_id, status, original_week_start, scheduled_week_start)
+         VALUES ($1, 'unscheduled', $2, $2)
+         ON CONFLICT (creative_asset_id) DO NOTHING`,
+        [asset.id, weekStart]
+      );
+    }
+
+    res.json(asset);
   } catch (err) {
     next(err);
   }

@@ -183,7 +183,7 @@ router.post('/', async (req, res, next) => {
 router.post('/:id/slots', async (req, res, next) => {
   const client = await pool.connect();
   try {
-    const { concept_name, description, format = 'video' } = req.body || {};
+    const { concept_name, description, format = 'video', shoot_plan_item_id } = req.body || {};
     if (!concept_name || !concept_name.trim()) return res.status(400).json({ error: 'concept_name is required' });
     if (!FORMATS.includes(format)) return res.status(400).json({ error: `format must be one of: ${FORMATS.join(', ')}` });
 
@@ -217,6 +217,18 @@ router.post('/:id/slots', async (req, res, next) => {
       asset.id,
       slotResult.rows[0].id,
     ]);
+    // Links this concept back to the Shoot Plan handoff it was created
+    // from, same as every Core/High Stock/Promotion concept already does
+    // (see shootPlan.js) -- optional because Planning's own product page
+    // also calls this route directly, with no shoot_plan_item in play.
+    // Without this link, a Drop concept has no reliable way to carry its
+    // product/week context into Shooting once approved.
+    if (shoot_plan_item_id) {
+      await client.query('UPDATE creative_assets SET shoot_plan_item_id = $1 WHERE id = $2', [
+        shoot_plan_item_id,
+        asset.id,
+      ]);
+    }
     await client.query('COMMIT');
 
     const data = await fetchPlanWithSlots(req.params.id);

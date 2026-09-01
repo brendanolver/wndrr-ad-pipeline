@@ -1198,4 +1198,85 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .tr-btn-approve{font-weight:700;}
 .tr-review-decided-note{margin-top:10px;padding:12px 14px;background:var(--surface2);border-radius:var(--r);font-size:12.5px;color:var(--text-secondary);}
 
+/* ── Shooting: lightweight weekly calendar, not another production
+   database -- plain bordered cards/columns, no Kanban-style drag chrome or
+   heavy shadows. Week/Today/History switcher reuses Settings' own solid-pill
+   sub-nav language (this is page-level navigation, not a quiet filter). */
+.shoot-subnav{display:flex;gap:6px;margin-bottom:14px;}
+.shoot-subnav-btn{background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-pill);padding:6px 14px;font-family:inherit;font-size:12.5px;font-weight:600;color:var(--text-secondary);cursor:pointer;}
+.shoot-subnav-btn:hover{background:var(--border);}
+.shoot-subnav-btn.active{background:var(--teal);border-color:var(--teal);color:white;}
+.shoot-panel{display:none;}
+.shoot-panel.active{display:block;}
+
+.shoot-owner-filter{background:white;border:1px solid var(--border);border-radius:var(--r);padding:6px 10px;font-family:inherit;font-size:12.5px;font-weight:600;color:var(--text-secondary);cursor:pointer;}
+.shoot-summary-line{font-size:12.5px;font-weight:600;color:var(--text-secondary);margin:2px 0 14px;}
+.shoot-today-title{font-size:18px;font-weight:800;margin:0;}
+
+/* Unscheduled sits above the weekday grid as its own bordered strip -- a
+   deliberately different container than the day columns below, so it never
+   looks like "day 0" of the week. */
+.shoot-unscheduled{background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-lg);padding:12px;margin-bottom:14px;}
+.shoot-unscheduled-header{font-size:11px;font-weight:800;letter-spacing:0.5px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;}
+.shoot-unscheduled-count{font-weight:600;text-transform:none;letter-spacing:0;color:var(--text-secondary);margin-left:4px;}
+.shoot-unscheduled-list{display:flex;flex-wrap:wrap;gap:10px;min-height:20px;}
+.shoot-unscheduled-list .shoot-card{width:220px;}
+
+.shoot-week-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;}
+@media (max-width:1100px){.shoot-week-grid{grid-template-columns:repeat(2,1fr);}}
+@media (max-width:640px){.shoot-week-grid{grid-template-columns:1fr;}}
+.shoot-day-column{background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-lg);padding:10px;min-height:80px;}
+.shoot-day-header{font-size:11px;font-weight:800;letter-spacing:0.5px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;}
+.shoot-day-cards{display:flex;flex-direction:column;gap:8px;}
+.shoot-day-empty{font-size:12px;color:var(--text-muted);text-align:center;padding:10px 0;}
+
+/* One Concept, not one Product -- compact by design (see the brief: "Do
+   NOT display the entire Concept description..."). Shot cards stay fully
+   visible (never removed, per the brief) but visually settled -- a green
+   left border and slightly muted body text, not greyed-out/disabled. */
+.shoot-card{background:white;border:1px solid var(--border);border-left:3px solid var(--border);border-radius:var(--r);padding:10px;display:flex;flex-direction:column;gap:6px;cursor:grab;}
+.shoot-card:active{cursor:grabbing;}
+.shoot-card-shot{border-left-color:var(--green);cursor:default;}
+.shoot-card-name{font-weight:700;font-size:12.5px;}
+.shoot-card-product{font-size:11.5px;color:var(--text-secondary);}
+.shoot-card-meta{font-size:11px;color:var(--text-muted);}
+.shoot-card-footer{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.shoot-card-status{font-size:10.5px;font-weight:700;color:var(--text-muted);}
+.shoot-card-status-shot{color:var(--green);}
+.shoot-carried-badge{font-size:10px;font-weight:700;color:var(--amber);background:var(--amber-light);border-radius:var(--r-pill);padding:1px 7px;}
+.shoot-card-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:2px;}
+.shoot-move-select{font-family:inherit;font-size:11px;font-weight:600;color:var(--text-secondary);background:var(--surface2);border:1px solid var(--border);border-radius:var(--r);padding:3px 6px;max-width:130px;}
+
+/* Today's worklist -- a plain vertical list, not the week grid's columns,
+   since there's only ever one day's worth of cards here. */
+.shoot-today-list{display:flex;flex-direction:column;gap:10px;}
+.shoot-today-item{background:white;border:1px solid var(--border);border-left:3px solid var(--border);border-radius:var(--r-lg);padding:14px;display:flex;justify-content:space-between;align-items:center;gap:16px;}
+.shoot-today-item.shoot-card-shot{border-left-color:var(--green);}
+.shoot-today-item-main{min-width:0;display:flex;flex-direction:column;gap:3px;}
+.shoot-today-hook{font-size:12.5px;font-style:italic;color:var(--text-secondary);margin-top:2px;}
+.shoot-today-item-actions{display:flex;align-items:center;gap:10px;flex-shrink:0;}
+
+/* History: plain compact rows, not a dashboard -- one line of stats, one
+   completion percentage, one link back into that week. */
+.shoot-history-list{display:flex;flex-direction:column;gap:8px;}
+.shoot-history-row{background:white;border:1px solid var(--border);border-radius:var(--r-lg);padding:14px 16px;display:flex;justify-content:space-between;align-items:center;gap:16px;}
+.shoot-history-week-name{font-weight:700;font-size:14px;}
+.shoot-history-range{font-size:11.5px;color:var(--text-muted);margin:1px 0 4px;}
+.shoot-history-stats{font-size:12.5px;color:var(--text-secondary);}
+.shoot-history-row-side{text-align:right;flex-shrink:0;}
+.shoot-history-rate{font-weight:700;font-size:13px;margin-bottom:3px;}
+
+/* Shoot Brief: read-only, reuses cd-modal-section/cd-field-label for
+   visual consistency with Concept Development's own modal. Audience is a
+   <details> disclosure -- present but never open by default, since the
+   strategy's already approved by this stage (see the brief). */
+.shoot-brief-modal{width:640px;max-width:94vw;}
+.shoot-brief-context{display:flex;align-items:flex-start;gap:10px;background:var(--surface2);border-radius:var(--r);padding:10px 12px;margin-bottom:14px;}
+.shoot-brief-text{font-size:13px;color:var(--text);white-space:pre-wrap;line-height:1.5;}
+.shoot-brief-hook + .shoot-brief-hook{margin-top:10px;padding-top:10px;border-top:1px solid var(--border);}
+.shoot-brief-req-row{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+.shoot-brief-audience{margin-top:6px;padding-top:10px;border-top:1px solid var(--border);}
+.shoot-brief-audience summary{font-size:11.5px;font-weight:700;color:var(--text-muted);cursor:pointer;}
+.shoot-brief-audience .shoot-brief-text{margin-top:8px;}
+
 .tr-kill-reason-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;}

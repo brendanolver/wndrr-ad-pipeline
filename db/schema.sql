@@ -750,3 +750,33 @@ ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS review_feedback TEXT;
 ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS kill_reason VARCHAR(50);
 ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS kill_note TEXT;
 ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS review_history JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+-- ---------------------------------------------------------------------------
+-- Shooting stage: Approved Concept -> Unscheduled -> Scheduled -> Shot ->
+-- Ready for Editing. One row per Concept (creative_asset), created
+-- automatically the moment Tuesday Review approves it (see
+-- PATCH /concept-development/concepts/:id/review) -- the Concept itself is
+-- never duplicated, this table just tracks where/when it gets shot.
+--
+-- original_week_start is set once and never changes -- it's the week the
+-- Concept was approved into Shooting, and is what History's per-week
+-- Planned/Shot/Carried Over/Not Completed accounting is keyed on.
+-- scheduled_week_start/scheduled_day are the CURRENT placement, and do
+-- change (assigning a day, moving between days, or carrying an unfinished
+-- Concept into a later week's Unscheduled area). A Concept is "carried
+-- over" for History purposes purely by scheduled_week_start no longer
+-- matching original_week_start -- no separate flag needed.
+CREATE TABLE IF NOT EXISTS shoot_schedule (
+  id SERIAL PRIMARY KEY,
+  creative_asset_id INTEGER NOT NULL UNIQUE REFERENCES creative_assets(id) ON DELETE CASCADE,
+  status VARCHAR(20) NOT NULL DEFAULT 'unscheduled' CHECK (status IN ('unscheduled', 'scheduled', 'shot')),
+  original_week_start DATE NOT NULL,
+  scheduled_week_start DATE NOT NULL,
+  scheduled_day VARCHAR(10) CHECK (scheduled_day IN ('monday', 'tuesday', 'wednesday', 'thursday', 'friday')),
+  shot_at TIMESTAMPTZ,
+  ready_for_editing BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_shoot_schedule_scheduled_week ON shoot_schedule(scheduled_week_start);
+CREATE INDEX IF NOT EXISTS idx_shoot_schedule_original_week ON shoot_schedule(original_week_start);
