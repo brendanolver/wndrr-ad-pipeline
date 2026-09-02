@@ -42,7 +42,6 @@
       <button class="tab-btn" data-tab="shooting"><span class="sidebar-nav-icon">🎬</span>Shooting</button>
       <button class="tab-btn" data-tab="board"><span class="sidebar-nav-icon">▤</span>Board</button>
       <button class="tab-btn" data-tab="admin"><span class="sidebar-nav-icon">🏷</span>Styles &amp; Categories</button>
-      <button class="tab-btn" data-tab="reference-library"><span class="sidebar-nav-icon">📚</span>Reference Library</button>
       <button class="tab-btn" data-tab="settings"><span class="sidebar-nav-icon">⚙</span>Settings</button>
     </nav>
     <div class="sidebar-footer">
@@ -576,17 +575,20 @@
          Creative Toolkit surfaces via openReferenceLibraryFromToolkit()
          (index.html above), never a second copy of the data. -->
     <section id="tab-reference-library" class="tab-panel">
+      <button type="button" class="link-btn ref-lib-back" onclick="switchTab('concept-dev')">&larr; Back</button>
       <h1 class="tr-page-title">📚 Reference Library</h1>
-      <div class="hint ref-lib-helper">A shared bank of ads, UGC and ideas the team likes — browse for inspiration or add something you've spotted.</div>
+      <div class="hint ref-lib-helper">A shared bank of creative inspiration saved by the team.</div>
       <div class="ref-lib-toolbar">
         <div class="filter-tabs ref-lib-tabs">
-          <button type="button" class="filter-tab active" id="ref-lib-tab-all" onclick="setReferenceLibraryFilter('all')">All</button>
-          <button type="button" class="filter-tab" id="ref-lib-tab-bau" onclick="setReferenceLibraryFilter('bau')">BAU</button>
-          <button type="button" class="filter-tab" id="ref-lib-tab-sale" onclick="setReferenceLibraryFilter('sale')">Sale</button>
+          <button type="button" class="filter-tab active" id="ref-lib-tab-all" onclick="setReferenceLibraryFilter('all')">All <span class="filter-tab-count" id="ref-lib-count-all">0</span></button>
+          <button type="button" class="filter-tab" id="ref-lib-tab-bau" onclick="setReferenceLibraryFilter('bau')">BAU <span class="filter-tab-count" id="ref-lib-count-bau">0</span></button>
+          <button type="button" class="filter-tab" id="ref-lib-tab-sale" onclick="setReferenceLibraryFilter('sale')">SALE <span class="filter-tab-count" id="ref-lib-count-sale">0</span></button>
         </div>
-        <input type="search" id="ref-lib-search" class="ref-lib-search" placeholder="Search references…" oninput="renderReferenceLibraryList()">
+        <div class="ref-lib-toolbar-actions">
+          <input type="search" id="ref-lib-search" class="ref-lib-search" placeholder="Search references…" oninput="renderReferenceLibraryList()">
+          <button type="button" class="btn btn-primary btn-sm" onclick="openReferenceAddModal()">+ Add Reference</button>
+        </div>
       </div>
-      <button type="button" class="btn btn-primary btn-sm ref-lib-add-btn" onclick="openReferenceAddModal()">+ Add Reference</button>
       <div id="ref-lib-list" class="ref-lib-grid"></div>
       <div id="ref-lib-empty" class="ref-lib-empty" style="display:none;">No references yet — be the first to add one.</div>
     </section>
@@ -1468,7 +1470,7 @@
         <div class="ct-card-sub">Shared team inspiration</div>
         <div class="ct-card-helper">Browse ads, UGC and ideas the team has saved — or add one you've spotted.</div>
         <div class="ct-card-actions">
-          <button type="button" class="btn btn-ghost btn-sm" onclick="openReferenceLibraryFromToolkit()">Browse Library &rarr;</button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="openReferenceLibraryFromToolkit()">Browse References &rarr;</button>
         </div>
       </div>
 
@@ -1527,7 +1529,7 @@
           <div class="ct-card-name">📚 Browse Reference Library</div>
           <div class="ct-card-helper">Shared ads, UGC and ideas the team has saved for this kind of product.</div>
           <div class="ct-card-actions">
-            <button type="button" class="btn btn-ghost btn-sm" onclick="openReferenceLibraryFromToolkit()">Browse Library &rarr;</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="openReferenceLibraryFromToolkit()">Browse References &rarr;</button>
           </div>
         </div>
 
@@ -1562,7 +1564,7 @@
           <div class="ct-card-name">📚 Browse Reference Library</div>
           <div class="ct-card-helper">Shared ads, UGC and ideas the team has saved — inspiration while you develop this concept.</div>
           <div class="ct-card-actions">
-            <button type="button" class="btn btn-ghost btn-sm" onclick="openReferenceLibraryFromToolkit()">Browse Library &rarr;</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="openReferenceLibraryFromToolkit()">Browse References &rarr;</button>
           </div>
         </div>
 
