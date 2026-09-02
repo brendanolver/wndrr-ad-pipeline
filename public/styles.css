@@ -1319,8 +1319,16 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .shoot-unscheduled-header{font-size:11px;font-weight:800;letter-spacing:0.5px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;}
 .shoot-unscheduled-count{font-weight:600;text-transform:none;letter-spacing:0;color:var(--text-secondary);margin-left:4px;}
 .shoot-unscheduled-hint{font-weight:600;text-transform:none;letter-spacing:0;color:var(--amber);margin-left:8px;}
+/* Distinct from the amber "Needs scheduling" hint above (that's urgency;
+   this is the how-to) -- deliberately quieter, same muted grey as the rest
+   of the secondary card text, never styled as an alert. */
+.shoot-unscheduled-drag-hint{font-weight:500;text-transform:none;letter-spacing:0;color:var(--text-muted);margin-left:8px;}
 .shoot-unscheduled-list{display:flex;flex-wrap:wrap;gap:10px;min-height:20px;margin-top:8px;}
 .shoot-unscheduled-list .shoot-card{width:220px;}
+/* Drag handle glyph on Unscheduled cards only -- a quiet visual cue that
+   this specific card is draggable onto a day, on top of the cursor:grab
+   already set on every .shoot-card. */
+.shoot-card-drag-handle{color:var(--text-muted);font-weight:400;margin-right:3px;}
 
 /* Weekday columns: a sensible minimum so an empty week never reads as a
    half-empty page, but no fixed tall height -- CSS grid's default row
