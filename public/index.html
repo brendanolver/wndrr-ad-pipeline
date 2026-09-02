@@ -587,10 +587,14 @@
         </div>
         <div class="ref-lib-toolbar-actions">
           <input type="search" id="ref-lib-search" class="ref-lib-search" placeholder="Search references…" oninput="renderReferenceLibraryList()">
+          <select id="ref-lib-sort" class="ref-lib-sort" onchange="setReferenceLibrarySort(this.value)">
+            <option value="newest">Newest</option>
+            <option value="oldest">Oldest</option>
+          </select>
           <button type="button" class="btn btn-primary btn-sm" onclick="openReferenceAddModal()">+ Add Reference</button>
         </div>
       </div>
-      <div id="ref-lib-list" class="ref-lib-grid"></div>
+      <div id="ref-lib-list" class="ref-lib-list"></div>
       <div id="ref-lib-empty" class="ref-lib-empty" style="display:none;">No references yet — be the first to add one.</div>
     </section>
 
