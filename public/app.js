@@ -76,6 +76,7 @@ let state = {
   // instead of from a Creative Toolkit/Tools card -- same list, but cards
   // offer "Use This Reference" instead of the ••• edit/delete menu.
   referenceLibrary: [], referenceLibraryLoaded: false, referenceLibraryFilter: 'all', referencePickerFilter: 'all',
+  referenceLibraryCategories: [], referenceLibraryCategoriesLoaded: false,
   // Settings' reusable Customer Avatar library -- who Concept Development's
   // "The Audience" section picks a Primary Customer Avatar from. See
   // schema.sql's comment on customer_avatars/customer_avatar_id.
@@ -5836,6 +5837,19 @@ async function ensureReferenceLibraryLoaded(force = false) {
   }
 }
 
+// The live ApparelMagic category list (same one Core Shoot Planning groups
+// by), not the app's own `categories` table -- see referenceLibrary.js's
+// GET /categories. Loaded once, lazily, alongside the library itself.
+async function ensureReferenceLibraryCategoriesLoaded() {
+  if (state.referenceLibraryCategoriesLoaded) return;
+  try {
+    state.referenceLibraryCategories = await api('/reference-library/categories');
+    state.referenceLibraryCategoriesLoaded = true;
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
 function formatReferenceLibraryDate(iso) {
   return new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
 }
@@ -5894,10 +5908,10 @@ function updateReferenceLibraryCounts() {
 }
 
 function referenceLibraryCategoryOptionsHtml() {
-  if (!state.categories.length) {
-    return '<option value="">— none — (add categories under Styles &amp; Categories)</option>';
+  if (!state.referenceLibraryCategories.length) {
+    return '<option value="">— none — (no live product categories found)</option>';
   }
-  return '<option value="">— none —</option>' + state.categories.map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+  return '<option value="">— none —</option>' + state.referenceLibraryCategories.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
 }
 
 // Shared by the page and the picker modal -- everything downstream (card
@@ -5908,7 +5922,7 @@ function referenceLibraryFilteredList(filterValue, searchValue) {
   return state.referenceLibrary.filter((r) => {
     if (filterValue !== 'all' && r.idea_type !== filterValue) return false;
     if (!search) return true;
-    const haystack = [r.comment, r.category_name].filter(Boolean).join(' ').toLowerCase();
+    const haystack = [r.comment, r.category].filter(Boolean).join(' ').toLowerCase();
     return haystack.includes(search);
   });
 }
@@ -5941,7 +5955,7 @@ function referenceCardHtml(item, mode) {
   const platform = detectReferencePlatform(item.link);
   const typeLabel = item.idea_type === 'sale' ? 'SALE' : 'BAU';
   const contextParts = [platform.label];
-  if (item.category_name) contextParts.push(item.category_name);
+  if (item.category) contextParts.push(item.category);
   const added = `${escapeHtml(item.added_by)} · ${formatReferenceLibraryDate(item.created_at)}`;
   const safeLink = escapeHtml(item.link).replace(/'/g, '&#39;');
 
@@ -6058,11 +6072,12 @@ function setReferenceAddType(type) {
   document.getElementById('ref-add-type-sale').classList.toggle('active', type === 'sale');
 }
 
-function openReferenceAddModal() {
+async function openReferenceAddModal() {
   referenceAddEditId = null;
   document.getElementById('reference-add-modal-title').textContent = 'Add Reference';
   document.getElementById('ref-add-link').value = '';
   document.getElementById('ref-add-comment').value = '';
+  await ensureReferenceLibraryCategoriesLoaded();
   document.getElementById('ref-add-category').innerHTML = referenceLibraryCategoryOptionsHtml();
   document.getElementById('ref-add-category').value = '';
   setReferenceAddType('bau');
@@ -6070,15 +6085,16 @@ function openReferenceAddModal() {
   openModal('reference-add-modal');
 }
 
-function openReferenceEditModal(id) {
+async function openReferenceEditModal(id) {
   const item = state.referenceLibrary.find((r) => r.id === id);
   if (!item) return;
   referenceAddEditId = id;
   document.getElementById('reference-add-modal-title').textContent = 'Edit Reference';
   document.getElementById('ref-add-link').value = item.link;
   document.getElementById('ref-add-comment').value = item.comment;
+  await ensureReferenceLibraryCategoriesLoaded();
   document.getElementById('ref-add-category').innerHTML = referenceLibraryCategoryOptionsHtml();
-  document.getElementById('ref-add-category').value = item.category_id || '';
+  document.getElementById('ref-add-category').value = item.category || '';
   setReferenceAddType(item.idea_type);
   document.getElementById('ref-add-delete-btn').style.display = '';
   openModal('reference-add-modal');
@@ -6087,11 +6103,11 @@ function openReferenceEditModal(id) {
 async function saveReferenceAdd() {
   const link = document.getElementById('ref-add-link').value.trim();
   const comment = document.getElementById('ref-add-comment').value.trim();
-  const categoryId = document.getElementById('ref-add-category').value;
+  const category = document.getElementById('ref-add-category').value;
   if (!link) return toast('A reference link is required', true);
   if (!comment) return toast('Add a quick note on what you like about it', true);
 
-  const payload = { link, comment, idea_type: referenceAddType, category_id: categoryId ? Number(categoryId) : null };
+  const payload = { link, comment, idea_type: referenceAddType, category: category || null };
   try {
     if (referenceAddEditId) {
       const updated = await api(`/reference-library/${referenceAddEditId}`, { method: 'PUT', body: JSON.stringify(payload) });
