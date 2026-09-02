@@ -5894,6 +5894,9 @@ function updateReferenceLibraryCounts() {
 }
 
 function referenceLibraryCategoryOptionsHtml() {
+  if (!state.categories.length) {
+    return '<option value="">— none — (add categories under Styles &amp; Categories)</option>';
+  }
   return '<option value="">— none —</option>' + state.categories.map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
 }
 
@@ -5953,7 +5956,11 @@ function referenceCardHtml(item, mode) {
 
   const footerInner = isPicker
     ? `<button type="button" class="btn btn-primary btn-sm ref-card-pick-btn" onclick="event.stopPropagation();pickReferenceLibraryItem(${item.id})">Use This Reference</button>`
-    : `<span class="ref-card-added">${added}</span><span class="ref-card-open-hint">Open &#8599;</span>`;
+    : `<span class="ref-card-added">${added}</span>
+       <span class="ref-card-footer-actions">
+         <button type="button" class="ref-card-edit-btn" onclick="event.stopPropagation();openReferenceEditModal(${item.id})">Edit</button>
+         <span class="ref-card-open-hint">Open &#8599;</span>
+       </span>`;
 
   const clickAttr = isPicker ? '' : ` onclick="window.open('${safeLink}', '_blank', 'noopener')"`;
 
