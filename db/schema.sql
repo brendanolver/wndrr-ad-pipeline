@@ -956,3 +956,40 @@ ALTER TABLE reference_library ADD COLUMN IF NOT EXISTS category_id INTEGER REFER
 -- another FK, since AM categories have no stable local id. category_id
 -- retired in place, same as style_id before it.
 ALTER TABLE reference_library ADD COLUMN IF NOT EXISTS category TEXT;
+
+-- ---------------------------------------------------------------------------
+-- Editing: turns a Shot Concept into one or more trackable Final Edits (the
+-- actual ads). A Concept becomes available here the moment Shooting marks it
+-- Shot (shoot_schedule.ready_for_editing -- that flag already existed,
+-- unused until now). Deliberately a separate table rather than more
+-- creative_assets rows: a Concept can now fan out into several independently
+-- tracked Final Edits (Primary Hook, Alt Hook 01, Visual-first, ...), which
+-- doesn't fit "one creative_assets row per style" and would otherwise flood
+-- the Board Kanban (every creative_assets row shows there via its own
+-- `status`) with rows that have nothing to do with that pipeline. Each row
+-- still links straight back to its Concept, so Product/Concept/Hook context
+-- is never re-entered -- see routes/editing.js.
+--
+-- V1 only stores the CURRENT final edit link (final_edit_link) -- a replace,
+-- not a new version -- but final_edit_history keeps a lightweight append-only
+-- log of every link this asset has ever had, purely for future reference; no
+-- versioning UI is built against it yet.
+CREATE TABLE IF NOT EXISTS final_edits (
+  id SERIAL PRIMARY KEY,
+  creative_asset_id INTEGER NOT NULL REFERENCES creative_assets(id) ON DELETE CASCADE,
+  asset_name VARCHAR(255) NOT NULL,
+  format VARCHAR(10) NOT NULL DEFAULT 'video' CHECK (format IN ('video', 'static', 'carousel')),
+  variation_text TEXT,
+  editor VARCHAR(255),
+  status VARCHAR(20) NOT NULL DEFAULT 'to_edit' CHECK (status IN ('to_edit', 'editing', 'ready_for_approval')),
+  final_edit_link TEXT,
+  final_edit_updated_at TIMESTAMPTZ,
+  final_edit_history JSONB NOT NULL DEFAULT '[]'::jsonb,
+  editor_notes TEXT,
+  ready_for_approval_at TIMESTAMPTZ,
+  created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_final_edits_creative_asset_id ON final_edits(creative_asset_id);
+CREATE INDEX IF NOT EXISTS idx_final_edits_status ON final_edits(status);
