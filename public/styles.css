@@ -1306,7 +1306,10 @@ main{flex:1;min-width:0;padding:20px 24px;}
    .open drop target still spans the whole element either way, so a card can
    always be dragged back to Unscheduled even while it's showing collapsed. */
 .shoot-unscheduled{background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-lg);padding:12px;margin-bottom:14px;}
-.shoot-unscheduled-compact{padding:8px 12px;}
+/* Still visually "collapsed" (a one-line header, not a full card list), but
+   tall enough to be a comfortable drag-and-drop target -- the previous
+   ~36px strip made dropping a card back to Unscheduled fiddly. */
+.shoot-unscheduled-compact{padding:8px 12px;min-height:72px;display:flex;align-items:center;}
 .shoot-unscheduled-compact .shoot-unscheduled-header{margin-bottom:0;}
 /* Once there's actually something sitting unscheduled, a quiet amber left
    edge + a "Needs scheduling" hint make the section a little more
