@@ -945,3 +945,14 @@ ALTER TABLE planning_settings ADD COLUMN IF NOT EXISTS updated_by_user_id INTEGE
 -- reads/writes it, kept in place same as every other retired-in-place
 -- column in this file).
 ALTER TABLE reference_library ADD COLUMN IF NOT EXISTS category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL;
+
+-- Superseding category_id above: the app's own `categories` table (used by
+-- Styles admin for Meta campaign/ad-set mapping) is a different concept from
+-- ApparelMagic's own per-product category ("BOX FIT TEES", "HEAVY WEIGHT
+-- TEES", ...) that the team actually thinks in terms of, and that Core Shoot
+-- Planning/High Stocks already group by live from AM. Reference Library's
+-- Category field should offer that same live AM category list, not the
+-- unrelated local one -- a plain denormalized string (like added_by), not
+-- another FK, since AM categories have no stable local id. category_id
+-- retired in place, same as style_id before it.
+ALTER TABLE reference_library ADD COLUMN IF NOT EXISTS category TEXT;

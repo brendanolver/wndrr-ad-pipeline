@@ -1,17 +1,33 @@
 const express = require('express');
 const { pool } = require('../db');
+const apparelmagic = require('../lib/apparelmagic');
 
 const router = express.Router();
 
 const IDEA_TYPES = ['bau', 'sale'];
 
-const LIST_QUERY = `
-  SELECT
-    rl.*,
-    c.name AS category_name
-  FROM reference_library rl
-  LEFT JOIN categories c ON c.id = rl.category_id
-`;
+const LIST_QUERY = `SELECT rl.* FROM reference_library rl`;
+
+// Categories offered on the Add/Edit Reference form -- the live AM category
+// list (e.g. "BOX FIT TEES", "HEAVY WEIGHT TEES"), the same one Core Shoot
+// Planning/High Stocks group products by, not the app's own `categories`
+// table (that's a separate Meta campaign/ad-set mapping used by Styles
+// admin). No DB round trip: same AD_EXCLUDED_CATEGORY convention as Core
+// (the team doesn't run ads for Accessories).
+router.get('/categories', async (req, res, next) => {
+  try {
+    if (!apparelmagic.configured()) return res.json([]);
+    const amDetails = await apparelmagic.getStyleCatalogue();
+    const categories = new Set();
+    for (const details of amDetails.values()) {
+      if (!details.category || apparelmagic.isAdExcludedCategory(details)) continue;
+      categories.add(details.category);
+    }
+    res.json([...categories].sort());
+  } catch (err) {
+    next(err);
+  }
+});
 
 router.get('/', async (req, res, next) => {
   try {
@@ -27,7 +43,7 @@ router.get('/', async (req, res, next) => {
 
     if (q && q.trim()) {
       params.push(`%${q.trim().toLowerCase()}%`);
-      clauses.push(`(LOWER(rl.comment) LIKE $${params.length} OR LOWER(c.name) LIKE $${params.length})`);
+      clauses.push(`(LOWER(rl.comment) LIKE $${params.length} OR LOWER(rl.category) LIKE $${params.length})`);
     }
 
     const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
@@ -40,7 +56,7 @@ router.get('/', async (req, res, next) => {
 
 router.post('/', async (req, res, next) => {
   try {
-    const { link, comment, idea_type, category_id } = req.body || {};
+    const { link, comment, idea_type, category } = req.body || {};
     if (!link || !link.trim()) return res.status(400).json({ error: 'link is required' });
     if (!comment || !comment.trim()) return res.status(400).json({ error: 'comment is required' });
     if (!IDEA_TYPES.includes(idea_type)) return res.status(400).json({ error: 'idea_type must be bau or sale' });
@@ -51,9 +67,9 @@ router.post('/', async (req, res, next) => {
     // genuinely redundant once every request already carries a real
     // identity via requireAuth.
     const inserted = await pool.query(
-      `INSERT INTO reference_library (link, comment, idea_type, category_id, added_by, added_by_user_id)
+      `INSERT INTO reference_library (link, comment, idea_type, category, added_by, added_by_user_id)
        VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-      [link.trim(), comment.trim(), idea_type, category_id || null, req.user.name, req.user.id]
+      [link.trim(), comment.trim(), idea_type, category && category.trim() ? category.trim() : null, req.user.name, req.user.id]
     );
     const result = await pool.query(`${LIST_QUERY} WHERE rl.id = $1`, [inserted.rows[0].id]);
     res.status(201).json(result.rows[0]);
@@ -64,7 +80,7 @@ router.post('/', async (req, res, next) => {
 
 router.put('/:id', async (req, res, next) => {
   try {
-    const { link, comment, idea_type, category_id, added_by } = req.body || {};
+    const { link, comment, idea_type, category, added_by } = req.body || {};
     if (link != null && !link.trim()) return res.status(400).json({ error: 'link cannot be blank' });
     if (comment != null && !comment.trim()) return res.status(400).json({ error: 'comment cannot be blank' });
     if (idea_type != null && !IDEA_TYPES.includes(idea_type)) return res.status(400).json({ error: 'idea_type must be bau or sale' });
@@ -75,7 +91,7 @@ router.put('/:id', async (req, res, next) => {
          link = COALESCE($1, link),
          comment = COALESCE($2, comment),
          idea_type = COALESCE($3, idea_type),
-         category_id = $4,
+         category = $4,
          added_by = COALESCE($5, added_by),
          updated_at = now()
        WHERE id = $6 RETURNING id`,
@@ -83,7 +99,7 @@ router.put('/:id', async (req, res, next) => {
         link ? link.trim() : null,
         comment ? comment.trim() : null,
         idea_type || null,
-        category_id || null,
+        category && category.trim() ? category.trim() : null,
         added_by ? added_by.trim() : null,
         req.params.id,
       ]
