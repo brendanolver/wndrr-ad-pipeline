@@ -5927,8 +5927,6 @@ function renderEditingWeekHeader() {
   document.getElementById('editing-this-week-btn').style.display = state.editing.weekOffset === 0 ? 'none' : '';
 }
 
-const EDITING_STATUS_LABELS = { to_edit: 'To Edit', editing: 'Editing', ready_for_approval: 'Ready for Approval' };
-const EDITING_STATUS_CLASS = { to_edit: 'editing-status-to-edit', editing: 'editing-status-editing', ready_for_approval: 'editing-status-ready' };
 const FINAL_EDIT_FORMATS = ['video', 'static', 'carousel'];
 
 function editingAllFinalEdits() {
@@ -5971,18 +5969,36 @@ function editingConceptMetaText(concept) {
   return ['Shot', concept.owner ? `Owner: ${concept.owner}` : null].filter(Boolean).join(' · ');
 }
 
+// State-aware action wording -- see the brief, item 8: what to do next is
+// derived entirely from status + whether a link exists, never a status word
+// on its own.
+function editingFinalEditActionLabel(finalEdit) {
+  if (finalEdit.status === 'ready_for_approval') return 'View Final Edit &rarr;';
+  if (finalEdit.status === 'editing') return finalEdit.final_edit_link ? 'Review Edit &rarr;' : 'Open Edit &rarr;';
+  return 'Add Final Edit &rarr;';
+}
+
 function editingFinalEditRowHtml(finalEdit) {
   return `
     <button type="button" class="editing-asset-row" onclick="openFinalEditModal(${finalEdit.id})">
-      <span class="editing-asset-row-name">${escapeHtml(finalEdit.asset_name)}</span>
-      <span class="cd-concept-status-pill ${EDITING_STATUS_CLASS[finalEdit.status] || ''}">${EDITING_STATUS_LABELS[finalEdit.status] || finalEdit.status}</span>
+      <span class="editing-asset-row-main">
+        <span class="editing-asset-row-name">${escapeHtml(finalEdit.asset_name)}</span>
+        ${finalEdit.variation_text ? `<span class="editing-asset-row-hook">&ldquo;${escapeHtml(finalEdit.variation_text)}&rdquo;</span>` : ''}
+      </span>
+      <span class="editing-asset-row-action">
+        ${finalEdit.status === 'ready_for_approval' ? '<span class="cd-concept-status-pill editing-status-ready">Ready for Approval</span>' : ''}
+        <span class="editing-asset-row-verb">${editingFinalEditActionLabel(finalEdit)}</span>
+      </span>
     </button>`;
 }
 
 // Grouped by Concept, never one flat list -- see the brief, item 3. A status
 // filter narrows to matching Final Edits and hides any Concept left with
 // none, same "scope the group, don't flatten it" pattern as the Reference
-// Library's month grouping.
+// Library's month grouping. Final Edits render directly on the card -- no
+// "Open Editing ->" intermediate hop once at least one exists (item 2) -- and
+// "View Shoot Brief" sits right here too (item 10), so the per-Concept modal
+// is only ever needed for adding more assets.
 function renderEditingList() {
   renderEditingSummary();
   renderEditingFilters();
@@ -5998,15 +6014,21 @@ function renderEditingList() {
   document.getElementById('editing-empty').style.display = concepts.length ? 'none' : '';
   document.getElementById('editing-list').innerHTML = shaped.map(({ concept, finalEdits }) => `
     <div class="editing-concept-card">
-      <div class="editing-concept-product">${escapeHtml(concept.product_name || '—')}</div>
-      <div class="editing-concept-name">${escapeHtml(concept.concept_name)}</div>
-      <div class="hint">${escapeHtml(editingConceptMetaText(concept))}</div>
-      ${finalEdits.length ? `
+      <div class="editing-concept-card-head">
+        <div>
+          <div class="editing-concept-product">${escapeHtml(concept.product_name || '—')}</div>
+          <div class="editing-concept-name">${escapeHtml(concept.concept_name)}</div>
+          <div class="hint">${escapeHtml(editingConceptMetaText(concept))}</div>
+        </div>
+        <button type="button" class="link-btn" onclick="openShootingBrief(${concept.shoot_schedule_id})">View Shoot Brief &#8599;</button>
+      </div>
+      ${concept.final_edits.length ? `
+        <div class="cd-field-label" style="margin-top:10px;">Final Edits ${concept.final_edits.length}</div>
         <div class="editing-asset-list">${finalEdits.map(editingFinalEditRowHtml).join('')}</div>
-      ` : `<div class="hint" style="margin-top:8px;">No Final Edits yet.</div>`}
-      <button type="button" class="link-btn" style="margin-top:8px;" onclick="openEditingConcept(${concept.creative_asset_id})">
-        ${concept.final_edits.length ? 'Open Editing &rarr;' : 'Create Final Edits &rarr;'}
-      </button>
+        <button type="button" class="link-btn" style="margin-top:8px;" onclick="openEditingConcept(${concept.creative_asset_id})">+ Add Another Asset</button>
+      ` : `
+        <button type="button" class="link-btn" style="margin-top:8px;" onclick="openEditingConcept(${concept.creative_asset_id})">Create Final Edits &rarr;</button>
+      `}
     </div>`).join('');
 }
 
@@ -6023,12 +6045,13 @@ function editingFindFinalEdit(finalEditId) {
   return null;
 }
 
-// The per-Concept workspace: lists existing Final Edits (each opens its own
-// workspace) plus the Create Final Edits flow. Hook Variations already on
-// the Concept are offered as suggestions only -- matched by exact text
-// against existing Final Edits' variation_text, never auto-created (see the
-// brief, item 5: "Do NOT automatically assume every Hook Variation was
-// successfully filmed").
+// The "Create Final Edits" flow: Hook Variations already on the Concept are
+// offered as suggestions only -- matched by exact text against existing
+// Final Edits' variation_text, never auto-created (see the brief, item 5:
+// "Do NOT automatically assume every Hook Variation was successfully
+// filmed"). Existing Final Edits themselves now render straight on the
+// landing-page card (see renderEditingList), so this modal is purely for
+// adding more.
 function openEditingConcept(creativeAssetId) {
   const concept = editingFindConcept(creativeAssetId);
   if (!concept) return;
@@ -6038,22 +6061,10 @@ function openEditingConcept(creativeAssetId) {
   openModal('editing-concept-modal');
 }
 
-function openEditingConceptBrief() {
-  const concept = editingFindConcept(state.editing.activeConceptAssetId);
-  if (!concept) return;
-  closeModal('editing-concept-modal');
-  openShootingBrief(concept.shoot_schedule_id);
-}
-
 function renderEditingConceptModal() {
   const concept = editingFindConcept(state.editing.activeConceptAssetId);
   if (!concept) return;
-  document.getElementById('editing-concept-modal-title').textContent = concept.concept_name;
-  document.getElementById('editing-concept-modal-subtitle').textContent = concept.product_name || '';
-
-  const wrap = document.getElementById('editing-concept-final-edits-wrap');
-  wrap.style.display = concept.final_edits.length ? '' : 'none';
-  document.getElementById('editing-concept-final-edits-list').innerHTML = concept.final_edits.map(editingFinalEditRowHtml).join('');
+  document.getElementById('editing-concept-modal-subtitle').textContent = `${concept.product_name || '—'} · ${concept.concept_name}`;
 
   const hooks = (Array.isArray(concept.hook_variations) ? concept.hook_variations : []).filter((h) => h && h.text && h.text.trim());
   const existingTexts = new Set(concept.final_edits.map((fe) => (fe.variation_text || '').trim()).filter(Boolean));
@@ -6061,10 +6072,15 @@ function renderEditingConceptModal() {
     .map((h, i) => ({ label: i === 0 ? 'Primary Hook' : `Alternative Hook ${String(i).padStart(2, '0')}`, text: h.text.trim() }))
     .filter((s) => !existingTexts.has(s.text));
 
+  // Left-aligned, with the actual hook text shown beneath each suggestion
+  // (item 7) -- not just the Primary/Alternative label.
   document.getElementById('editing-create-suggestions').innerHTML = suggestions.map((s, i) => `
     <label class="editing-suggestion-row">
       <input type="checkbox" checked data-suggestion-index="${i}" onchange="updateEditingCreateButtonState()">
-      <span>${escapeHtml(s.label)}</span>
+      <span class="editing-suggestion-text">
+        <span class="editing-suggestion-label">${escapeHtml(s.label)}</span>
+        <span class="editing-suggestion-hook">&ldquo;${escapeHtml(s.text)}&rdquo;</span>
+      </span>
     </label>`).join('');
   document.getElementById('editing-create-suggestions').dataset.suggestions = JSON.stringify(suggestions);
 
@@ -6072,8 +6088,15 @@ function renderEditingConceptModal() {
   updateEditingCreateButtonState();
 }
 
+function editingDefaultFormat() {
+  const concept = editingFindConcept(state.editing.activeConceptAssetId);
+  return (concept && FINAL_EDIT_FORMATS.includes(concept.concept_format)) ? concept.concept_format : 'video';
+}
+
+// Format is only ever asked for here, at creation, and only for a custom row
+// -- suggestions silently inherit the Concept's own format (item 6).
 function addEditingCustomAssetRow() {
-  state.editing.createRows.push({ name: '' });
+  state.editing.createRows.push({ name: '', format: editingDefaultFormat() });
   renderEditingCustomAssetRows();
   updateEditingCreateButtonState();
   const inputs = document.querySelectorAll('.editing-custom-row-input');
@@ -6091,13 +6114,15 @@ function renderEditingCustomAssetRows() {
     <div class="editing-custom-row">
       <input type="text" class="editing-custom-row-input" placeholder="Asset name" value="${escapeHtml(row.name)}"
         oninput="state.editing.createRows[${i}].name = this.value; updateEditingCreateButtonState();">
+      <select class="editing-custom-row-format" onchange="state.editing.createRows[${i}].format = this.value;">
+        ${FINAL_EDIT_FORMATS.map((f) => `<option value="${f}" ${row.format === f ? 'selected' : ''}>${f[0].toUpperCase()}${f.slice(1)}</option>`).join('')}
+      </select>
       <button type="button" class="link-btn" onclick="removeEditingCustomAssetRow(${i})">Remove</button>
     </div>`).join('');
 }
 
 function editingSelectedCreateAssets() {
-  const concept = editingFindConcept(state.editing.activeConceptAssetId);
-  const defaultFormat = (concept && FINAL_EDIT_FORMATS.includes(concept.concept_format)) ? concept.concept_format : 'video';
+  const defaultFormat = editingDefaultFormat();
   const suggestions = JSON.parse(document.getElementById('editing-create-suggestions').dataset.suggestions || '[]');
   const checked = [...document.querySelectorAll('#editing-create-suggestions input[type="checkbox"]:checked')]
     .map((el) => suggestions[Number(el.dataset.suggestionIndex)])
@@ -6105,7 +6130,7 @@ function editingSelectedCreateAssets() {
     .map((s) => ({ asset_name: s.label, variation_text: s.text, format: defaultFormat }));
   const custom = state.editing.createRows
     .filter((r) => r.name.trim())
-    .map((r) => ({ asset_name: r.name.trim(), format: defaultFormat }));
+    .map((r) => ({ asset_name: r.name.trim(), format: r.format || defaultFormat }));
   return [...checked, ...custom];
 }
 
@@ -6149,11 +6174,19 @@ function openFinalEditModal(finalEditId) {
 
   document.getElementById('final-edit-modal-title').textContent = finalEdit.asset_name;
   document.getElementById('final-edit-modal-subtitle').textContent = `${concept.product_name || '—'} · ${concept.concept_name}`;
-  document.getElementById('final-edit-format').value = finalEdit.format;
-  document.getElementById('final-edit-variation').value = finalEdit.variation_text || '';
+
+  // The actual hook text it's cutting, read-only -- already known, never
+  // re-asked (item 5).
+  const openingWrap = document.getElementById('final-edit-opening-wrap');
+  if (finalEdit.variation_text) {
+    openingWrap.style.display = '';
+    document.getElementById('final-edit-opening-text').textContent = finalEdit.variation_text;
+  } else {
+    openingWrap.style.display = 'none';
+  }
+
   populateFinalEditEditorSelect();
   document.getElementById('final-edit-editor').value = finalEdit.editor || '';
-  document.getElementById('final-edit-status').value = finalEdit.status;
 
   if (finalEdit.final_edit_link) {
     document.getElementById('final-edit-link-view').style.display = '';
@@ -6186,13 +6219,15 @@ async function saveFinalEdit(markReadyForApproval = false) {
     return toast('Add a Final Edit link before sending for approval', true);
   }
 
+  // Status is never sent directly except this one terminal transition --
+  // 'to_edit' -> 'editing' is derived server-side from the editor/link a
+  // plain Save just set (see routes/editing.js), so there's no status field
+  // here to submit (item 4).
   const payload = {
-    format: document.getElementById('final-edit-format').value,
-    variation_text: document.getElementById('final-edit-variation').value.trim(),
     editor: document.getElementById('final-edit-editor').value || null,
-    status: markReadyForApproval ? 'ready_for_approval' : document.getElementById('final-edit-status').value,
     editor_notes: document.getElementById('final-edit-notes').value.trim(),
   };
+  if (markReadyForApproval) payload.status = 'ready_for_approval';
   if (linkValue !== undefined) payload.final_edit_link = linkValue;
 
   try {
