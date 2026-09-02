@@ -5840,8 +5840,8 @@ function formatReferenceLibraryDate(iso) {
   return new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
 }
 
-function referenceLibraryStyleOptionsHtml() {
-  return '<option value="">— none —</option>' + state.styles.map((s) => `<option value="${s.id}">${escapeHtml(s.style_code)} — ${escapeHtml(s.name)}</option>`).join('');
+function referenceLibraryCategoryOptionsHtml() {
+  return '<option value="">— none —</option>' + state.categories.map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
 }
 
 // Shared by the page and the picker modal -- everything downstream (card
@@ -5852,7 +5852,7 @@ function referenceLibraryFilteredList(filterValue, searchValue) {
   return state.referenceLibrary.filter((r) => {
     if (filterValue !== 'all' && r.idea_type !== filterValue) return false;
     if (!search) return true;
-    const haystack = [r.comment, r.style_name, r.style_code, r.category_name].filter(Boolean).join(' ').toLowerCase();
+    const haystack = [r.comment, r.category_name].filter(Boolean).join(' ').toLowerCase();
     return haystack.includes(search);
   });
 }
@@ -5878,7 +5878,7 @@ function setReferenceLibraryFilter(filter) {
 
 function referenceLibraryCardHtml(item) {
   const typeLabel = item.idea_type === 'sale' ? 'SALE' : 'BAU';
-  const product = item.style_code ? `${item.style_code} — ${item.style_name}` : (item.category_name || null);
+  const product = item.category_name || null;
   const added = `Added by ${escapeHtml(item.added_by)} · ${formatReferenceLibraryDate(item.created_at)}`;
   return `
     <div class="ref-card">
@@ -5945,7 +5945,7 @@ function setReferencePickerFilter(filter) {
 
 function referencePickerCardHtml(item) {
   const typeLabel = item.idea_type === 'sale' ? 'SALE' : 'BAU';
-  const product = item.style_code ? `${item.style_code} — ${item.style_name}` : (item.category_name || null);
+  const product = item.category_name || null;
   const added = `Added by ${escapeHtml(item.added_by)} · ${formatReferenceLibraryDate(item.created_at)}`;
   return `
     <div class="ref-card">
@@ -5992,8 +5992,8 @@ function openReferenceAddModal() {
   document.getElementById('reference-add-modal-title').textContent = 'Add Reference';
   document.getElementById('ref-add-link').value = '';
   document.getElementById('ref-add-comment').value = '';
-  document.getElementById('ref-add-style').innerHTML = referenceLibraryStyleOptionsHtml();
-  document.getElementById('ref-add-style').value = '';
+  document.getElementById('ref-add-category').innerHTML = referenceLibraryCategoryOptionsHtml();
+  document.getElementById('ref-add-category').value = '';
   setReferenceAddType('bau');
   document.getElementById('ref-add-delete-btn').style.display = 'none';
   openModal('reference-add-modal');
@@ -6006,8 +6006,8 @@ function openReferenceEditModal(id) {
   document.getElementById('reference-add-modal-title').textContent = 'Edit Reference';
   document.getElementById('ref-add-link').value = item.link;
   document.getElementById('ref-add-comment').value = item.comment;
-  document.getElementById('ref-add-style').innerHTML = referenceLibraryStyleOptionsHtml();
-  document.getElementById('ref-add-style').value = item.style_id || '';
+  document.getElementById('ref-add-category').innerHTML = referenceLibraryCategoryOptionsHtml();
+  document.getElementById('ref-add-category').value = item.category_id || '';
   setReferenceAddType(item.idea_type);
   document.getElementById('ref-add-delete-btn').style.display = '';
   openModal('reference-add-modal');
@@ -6016,11 +6016,11 @@ function openReferenceEditModal(id) {
 async function saveReferenceAdd() {
   const link = document.getElementById('ref-add-link').value.trim();
   const comment = document.getElementById('ref-add-comment').value.trim();
-  const styleId = document.getElementById('ref-add-style').value;
+  const categoryId = document.getElementById('ref-add-category').value;
   if (!link) return toast('A reference link is required', true);
   if (!comment) return toast('Add a quick note on what you like about it', true);
 
-  const payload = { link, comment, idea_type: referenceAddType, style_id: styleId ? Number(styleId) : null };
+  const payload = { link, comment, idea_type: referenceAddType, category_id: categoryId ? Number(categoryId) : null };
   try {
     if (referenceAddEditId) {
       const updated = await api(`/reference-library/${referenceAddEditId}`, { method: 'PUT', body: JSON.stringify(payload) });

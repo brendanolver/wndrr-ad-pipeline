@@ -8,11 +8,9 @@ const IDEA_TYPES = ['bau', 'sale'];
 const LIST_QUERY = `
   SELECT
     rl.*,
-    s.style_code, s.name AS style_name,
     c.name AS category_name
   FROM reference_library rl
-  LEFT JOIN styles s ON s.id = rl.style_id
-  LEFT JOIN categories c ON c.id = s.category_id
+  LEFT JOIN categories c ON c.id = rl.category_id
 `;
 
 router.get('/', async (req, res, next) => {
@@ -29,7 +27,7 @@ router.get('/', async (req, res, next) => {
 
     if (q && q.trim()) {
       params.push(`%${q.trim().toLowerCase()}%`);
-      clauses.push(`(LOWER(rl.comment) LIKE $${params.length} OR LOWER(s.name) LIKE $${params.length} OR LOWER(s.style_code) LIKE $${params.length} OR LOWER(c.name) LIKE $${params.length})`);
+      clauses.push(`(LOWER(rl.comment) LIKE $${params.length} OR LOWER(c.name) LIKE $${params.length})`);
     }
 
     const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
@@ -42,7 +40,7 @@ router.get('/', async (req, res, next) => {
 
 router.post('/', async (req, res, next) => {
   try {
-    const { link, comment, idea_type, style_id } = req.body || {};
+    const { link, comment, idea_type, category_id } = req.body || {};
     if (!link || !link.trim()) return res.status(400).json({ error: 'link is required' });
     if (!comment || !comment.trim()) return res.status(400).json({ error: 'comment is required' });
     if (!IDEA_TYPES.includes(idea_type)) return res.status(400).json({ error: 'idea_type must be bau or sale' });
@@ -53,9 +51,9 @@ router.post('/', async (req, res, next) => {
     // genuinely redundant once every request already carries a real
     // identity via requireAuth.
     const inserted = await pool.query(
-      `INSERT INTO reference_library (link, comment, idea_type, style_id, added_by, added_by_user_id)
+      `INSERT INTO reference_library (link, comment, idea_type, category_id, added_by, added_by_user_id)
        VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-      [link.trim(), comment.trim(), idea_type, style_id || null, req.user.name, req.user.id]
+      [link.trim(), comment.trim(), idea_type, category_id || null, req.user.name, req.user.id]
     );
     const result = await pool.query(`${LIST_QUERY} WHERE rl.id = $1`, [inserted.rows[0].id]);
     res.status(201).json(result.rows[0]);
@@ -66,7 +64,7 @@ router.post('/', async (req, res, next) => {
 
 router.put('/:id', async (req, res, next) => {
   try {
-    const { link, comment, idea_type, style_id, added_by } = req.body || {};
+    const { link, comment, idea_type, category_id, added_by } = req.body || {};
     if (link != null && !link.trim()) return res.status(400).json({ error: 'link cannot be blank' });
     if (comment != null && !comment.trim()) return res.status(400).json({ error: 'comment cannot be blank' });
     if (idea_type != null && !IDEA_TYPES.includes(idea_type)) return res.status(400).json({ error: 'idea_type must be bau or sale' });
@@ -77,7 +75,7 @@ router.put('/:id', async (req, res, next) => {
          link = COALESCE($1, link),
          comment = COALESCE($2, comment),
          idea_type = COALESCE($3, idea_type),
-         style_id = $4,
+         category_id = $4,
          added_by = COALESCE($5, added_by),
          updated_at = now()
        WHERE id = $6 RETURNING id`,
@@ -85,7 +83,7 @@ router.put('/:id', async (req, res, next) => {
         link ? link.trim() : null,
         comment ? comment.trim() : null,
         idea_type || null,
-        style_id || null,
+        category_id || null,
         added_by ? added_by.trim() : null,
         req.params.id,
       ]

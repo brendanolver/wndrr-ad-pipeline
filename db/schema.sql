@@ -937,3 +937,11 @@ ALTER TABLE reference_library ADD COLUMN IF NOT EXISTS added_by_user_id INTEGER 
 -- single shared config row, so "who changed it" is less meaningful there
 -- and isn't instrumented yet -- deliberately out of scope for V1.
 ALTER TABLE planning_settings ADD COLUMN IF NOT EXISTS updated_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+
+-- Reference Library's optional Product/Category field is a Category picker,
+-- not a specific product/style -- there are far fewer categories than
+-- styles, so this is the one that's actually fast to pick from a dropdown
+-- while adding a reference. Superseded: style_id above (the app no longer
+-- reads/writes it, kept in place same as every other retired-in-place
+-- column in this file).
+ALTER TABLE reference_library ADD COLUMN IF NOT EXISTS category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL;
