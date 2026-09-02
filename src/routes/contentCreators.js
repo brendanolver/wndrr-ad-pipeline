@@ -3,9 +3,19 @@ const { pool } = require('../db');
 
 const router = express.Router();
 
+// Every seed user has a linked content_creators row (see
+// seedUsersAndBackfill in src/db.js), so this list is effectively "the
+// active users" now -- excluding only a row whose linked user has since
+// been deactivated. A row with no linked user (legacy/none) still shows,
+// same as before users existed.
 router.get('/', async (req, res, next) => {
   try {
-    const result = await pool.query('SELECT * FROM content_creators ORDER BY is_default DESC, name ASC');
+    const result = await pool.query(
+      `SELECT cc.* FROM content_creators cc
+       LEFT JOIN users u ON u.id = cc.user_id
+       WHERE cc.user_id IS NULL OR u.active = true
+       ORDER BY cc.is_default DESC, cc.name ASC`
+    );
     res.json(result.rows);
   } catch (err) {
     next(err);

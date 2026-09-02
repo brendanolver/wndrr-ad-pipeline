@@ -35,6 +35,7 @@ const creativeToolkitRoutes = require('./routes/creativeToolkit');
 const customerAvatarRoutes = require('./routes/customerAvatars');
 const shootingRoutes = require('./routes/shooting');
 const referenceLibraryRoutes = require('./routes/referenceLibrary');
+const userRoutes = require('./routes/users');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -69,6 +70,7 @@ app.use('/api/creative-resources', requireAuth, creativeResourceRoutes);
 app.use('/api/creative-toolkit', requireAuth, creativeToolkitRoutes);
 app.use('/api/customer-avatars', requireAuth, customerAvatarRoutes);
 app.use('/api/reference-library', requireAuth, referenceLibraryRoutes);
+app.use('/api/users', requireAuth, userRoutes);
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
 

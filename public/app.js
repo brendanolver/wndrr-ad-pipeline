@@ -12,6 +12,7 @@ const TIER_LABELS = { core_proven: 'Core/Proven', new_drop: 'New Drop' };
 const CLASSIFICATION_LABELS = { tested_proven: 'Tested/Proven', new_experimental: 'New/Experimental' };
 
 let state = {
+  currentUser: null,
   styles: [], categories: [], board: null, dashboard: null, drops: [], provenWinners: [],
   coreProducts: [], planningSettings: null, coreView: 'priority', coreAllProductsOpen: false,
   coreExpandedCategories: new Set(), coreExpandedProducts: new Set(),
@@ -111,11 +112,13 @@ async function api(path, opts = {}) {
 
 // ── Auth ─────────────────────────────────────────────
 async function login() {
+  const email = document.getElementById('pw-email').value;
   const password = document.getElementById('pw-input').value;
   const errEl = document.getElementById('pw-error');
   try {
-    await api('/auth/login', { method: 'POST', body: JSON.stringify({ password }) });
+    const { user } = await api('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
     errEl.classList.remove('show');
+    state.currentUser = user;
     showApp();
   } catch (e) {
     errEl.classList.add('show');
@@ -124,25 +127,40 @@ async function login() {
 
 async function logout() {
   await api('/auth/logout', { method: 'POST' });
+  state.currentUser = null;
   showPasswordScreen();
 }
 
 function showPasswordScreen() {
   document.getElementById('password-screen').style.display = 'flex';
   document.getElementById('app').style.display = 'none';
+  document.getElementById('pw-input').value = '';
+}
+
+function renderSidebarUser() {
+  const el = document.getElementById('sidebar-user');
+  if (!el) return;
+  el.innerHTML = state.currentUser
+    ? `${escapeHtml(state.currentUser.name)} <span class="sidebar-user-role">· ${escapeHtml(state.currentUser.role)}</span>`
+    : '';
 }
 
 function showApp() {
   document.getElementById('password-screen').style.display = 'none';
   document.getElementById('app').style.display = 'flex';
+  renderSidebarUser();
   loadAll();
 }
 
 async function checkSession() {
   try {
-    const { authenticated } = await api('/auth/session');
-    if (authenticated) showApp();
-    else showPasswordScreen();
+    const { authenticated, user } = await api('/auth/session');
+    if (authenticated) {
+      state.currentUser = user;
+      showApp();
+    } else {
+      showPasswordScreen();
+    }
   } catch (e) {
     showPasswordScreen();
   }
@@ -5802,10 +5820,9 @@ function viewProvenWinnersFromToolkit() {
 //    an existing reference -- same underlying state.referenceLibrary data,
 //    never a second copy, but its own simpler card set (Use This Reference
 //    only, no edit/delete).
-// There's no login system to draw an "Added by" name from, so identity is a
-// one-time localStorage prompt (reference-identity-modal) reusing the
-// existing content_creators list; every Add Reference after that is fully
-// automatic, per the brief.
+// "Added by" is stamped server-side from the logged-in session (see
+// referenceLibrary.js POST) now that real per-user login exists -- never
+// entered by hand, and never a client-side identity prompt either.
 let referenceAddEditId = null;
 let referenceAddType = 'bau';
 
@@ -5817,38 +5834,6 @@ async function ensureReferenceLibraryLoaded(force = false) {
   } catch (e) {
     toast(e.message, true);
   }
-}
-
-function getReferenceIdentity() {
-  try {
-    return localStorage.getItem('wndrr_reference_identity') || '';
-  } catch (e) {
-    return '';
-  }
-}
-
-function setReferenceIdentity(name) {
-  try {
-    localStorage.setItem('wndrr_reference_identity', name);
-  } catch (e) {
-    // Private browsing / storage disabled -- identity just won't persist across visits.
-  }
-}
-
-function openReferenceIdentityModal() {
-  const sel = document.getElementById('ref-identity-select');
-  sel.innerHTML = state.contentCreators.map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join('');
-  const defaultEntry = state.contentCreators.find((c) => c.is_default) || state.contentCreators[0];
-  if (defaultEntry) sel.value = defaultEntry.name;
-  openModal('reference-identity-modal');
-}
-
-function saveReferenceIdentity() {
-  const sel = document.getElementById('ref-identity-select');
-  if (!sel.value) return;
-  setReferenceIdentity(sel.value);
-  closeModal('reference-identity-modal');
-  openReferenceAddModal();
 }
 
 function formatReferenceLibraryDate(iso) {
@@ -6003,10 +5988,6 @@ function setReferenceAddType(type) {
 }
 
 function openReferenceAddModal() {
-  if (!getReferenceIdentity()) {
-    openReferenceIdentityModal();
-    return;
-  }
   referenceAddEditId = null;
   document.getElementById('reference-add-modal-title').textContent = 'Add Reference';
   document.getElementById('ref-add-link').value = '';
@@ -6045,7 +6026,6 @@ async function saveReferenceAdd() {
       const updated = await api(`/reference-library/${referenceAddEditId}`, { method: 'PUT', body: JSON.stringify(payload) });
       state.referenceLibrary = state.referenceLibrary.map((r) => (r.id === updated.id ? updated : r));
     } else {
-      payload.added_by = getReferenceIdentity();
       const created = await api('/reference-library', { method: 'POST', body: JSON.stringify(payload) });
       state.referenceLibrary = [created, ...state.referenceLibrary];
     }

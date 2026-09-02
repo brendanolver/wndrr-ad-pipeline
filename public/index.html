@@ -17,10 +17,11 @@
       <div class="logo-text">WNDRR<span>Ad Creative Pipeline</span></div>
     </div>
     <div class="pw-title">Ad Creative Pipeline</div>
-    <div class="pw-sub">Enter your password to access the tracker</div>
-    <input class="pw-input" type="password" id="pw-input" placeholder="Password" onkeydown="if(event.key==='Enter')login()">
-    <button class="pw-submit" onclick="login()">Access Tracker &rarr;</button>
-    <div class="pw-error" id="pw-error">Incorrect password. Please try again.</div>
+    <div class="pw-sub">Sign in with your account to access the tracker</div>
+    <input class="pw-input" type="email" id="pw-email" placeholder="Email" autocomplete="username" onkeydown="if(event.key==='Enter')login()">
+    <input class="pw-input" type="password" id="pw-input" placeholder="Password" autocomplete="current-password" onkeydown="if(event.key==='Enter')login()">
+    <button class="pw-submit" onclick="login()">Sign In &rarr;</button>
+    <div class="pw-error" id="pw-error">Incorrect email or password. Please try again.</div>
   </div>
 </div>
 
@@ -45,6 +46,7 @@
       <button class="tab-btn" data-tab="settings"><span class="sidebar-nav-icon">⚙</span>Settings</button>
     </nav>
     <div class="sidebar-footer">
+      <div class="sidebar-user" id="sidebar-user"></div>
       <button class="sidebar-signout" onclick="logout()">Sign out</button>
     </div>
   </aside>
@@ -1609,9 +1611,9 @@
 <!-- Add/Edit Reference: deliberately just the 3 required fields (link,
      comment, idea type) plus one optional Product/Category -- see the
      brief's ~10-second, "Slack-link-easy" save target. Added-by/date are
-     always automatic (see reference-identity-modal below), never entered
-     here. Reused for editing an existing reference via the ••• menu, with
-     the id tracked in referenceAddEditId. -->
+     always automatic, stamped server-side from the logged-in session, never
+     entered here. Reused for editing an existing reference via the ••• menu,
+     with the id tracked in referenceAddEditId. -->
 <div id="reference-add-modal" class="modal-backdrop">
   <div class="modal">
     <div class="modal-header">
@@ -1639,29 +1641,6 @@
       <button class="btn btn-danger" id="ref-add-delete-btn" style="display:none;" onclick="deleteReferenceLibraryItem()">Delete</button>
       <button class="btn btn-ghost" onclick="closeModal('reference-add-modal')">Cancel</button>
       <button class="btn btn-primary" onclick="saveReferenceAdd()">Save Reference</button>
-    </div>
-  </div>
-</div>
-
-<!-- One-time-per-device identity prompt -- there's no login system to draw
-     "Added by" from, so this asks once, reusing the existing
-     content_creators list (the same names used for Shooting's Owner
-     filter), and remembers the answer in localStorage so every future
-     Reference save is fully automatic -- see getReferenceIdentity() in
-     app.js. Opened in place of reference-add-modal until an identity is
-     stored, then chains straight into it. -->
-<div id="reference-identity-modal" class="modal-backdrop">
-  <div class="modal confirm-modal">
-    <div class="modal-header">
-      <h3>Quick one-time setup</h3>
-      <button class="modal-close" onclick="closeModal('reference-identity-modal')">&times;</button>
-    </div>
-    <div class="modal-body">
-      <p>Which name should the Reference Library credit you as? We'll remember this on this device — you won't be asked again.</p>
-      <select id="ref-identity-select"></select>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-primary" onclick="saveReferenceIdentity()">Continue</button>
     </div>
   </div>
 </div>

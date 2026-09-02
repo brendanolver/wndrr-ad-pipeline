@@ -76,6 +76,8 @@ body{font-family:'Inter',sans-serif;font-size:13px;background:var(--bg);color:va
 .sidebar-footer{margin-top:auto;padding-top:14px;border-top:1px solid rgba(255,255,255,0.12);}
 .sidebar-signout{width:100%;text-align:left;background:none;border:none;padding:8px 10px;font-family:inherit;font-size:12.5px;font-weight:500;color:rgba(255,255,255,0.5);cursor:pointer;}
 .sidebar-signout:hover{color:white;}
+.sidebar-user{padding:0 10px 6px;font-size:12px;color:rgba(255,255,255,0.75);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.sidebar-user-role{color:rgba(255,255,255,0.4);text-transform:capitalize;}
 
 .btn{border:none;border-radius:var(--r);padding:9px 14px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;}
 .btn-primary{background:var(--black);color:white;}
