@@ -5840,6 +5840,59 @@ function formatReferenceLibraryDate(iso) {
   return new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
 }
 
+// Best-effort platform detection from the saved URL -- purely client-side,
+// never asked of the user. Drives the small "BAU · Instagram" meta line and,
+// when no thumbnail is available, the placeholder card's label.
+function detectReferencePlatform(url) {
+  const lower = String(url || '').toLowerCase();
+  if (lower.includes('instagram.com')) {
+    return { label: 'Instagram', placeholder: lower.includes('/reel') ? 'Instagram Reel' : 'Instagram', icon: '📷' };
+  }
+  if (lower.includes('tiktok.com')) return { label: 'TikTok', placeholder: 'TikTok', icon: '🎵' };
+  if (lower.includes('youtube.com') || lower.includes('youtu.be')) return { label: 'YouTube', placeholder: 'YouTube', icon: '▶' };
+  if (lower.includes('facebook.com/ads/library')) return { label: 'Meta Ad', placeholder: 'Meta Ad', icon: '📣' };
+  return { label: 'External', placeholder: 'External Reference', icon: '🔗' };
+}
+
+// YouTube is the one platform with a reliable, key-free, CORS-free
+// thumbnail: img.youtube.com serves a static JPG straight from the video
+// id, no API call needed. Every other platform (Instagram, TikTok, Meta Ad
+// Library) would need either an authenticated API or a server-side fetch
+// that can silently fail or get rate-limited -- deliberately not built for
+// V1 (see the brief: "do not make automatic thumbnail generation a
+// blocker"), so those always get a clean placeholder instead.
+function youtubeThumbnailUrl(url) {
+  const match = String(url || '').match(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([\w-]{6,})/i);
+  return match ? `https://img.youtube.com/vi/${match[1]}/hqdefault.jpg` : null;
+}
+
+function referencePlaceholderHtml(platform) {
+  return `<div class="ref-card-placeholder"><span class="ref-card-placeholder-icon">${platform.icon}</span><span class="ref-card-placeholder-label">${escapeHtml(platform.placeholder)}</span></div>`;
+}
+
+function referenceVisualHtml(item, platform) {
+  const thumb = platform.label === 'YouTube' ? youtubeThumbnailUrl(item.link) : null;
+  if (!thumb) return referencePlaceholderHtml(platform);
+  const safeLabel = escapeHtml(platform.placeholder).replace(/'/g, '&#39;');
+  return `<img class="ref-card-thumb" src="${escapeHtml(thumb)}" alt="" loading="lazy" onerror="handleReferenceThumbError(this, '${platform.icon}', '${safeLabel}')">`;
+}
+
+// A YouTube thumbnail URL can still 404 (private/deleted video) -- falls
+// back to the same clean placeholder every other platform already uses,
+// rather than a broken-image icon.
+function handleReferenceThumbError(imgEl, icon, label) {
+  const placeholder = document.createElement('div');
+  placeholder.className = 'ref-card-placeholder';
+  placeholder.innerHTML = `<span class="ref-card-placeholder-icon">${icon}</span><span class="ref-card-placeholder-label">${label}</span>`;
+  imgEl.replaceWith(placeholder);
+}
+
+function updateReferenceLibraryCounts() {
+  document.getElementById('ref-lib-count-all').textContent = state.referenceLibrary.length;
+  document.getElementById('ref-lib-count-bau').textContent = state.referenceLibrary.filter((r) => r.idea_type === 'bau').length;
+  document.getElementById('ref-lib-count-sale').textContent = state.referenceLibrary.filter((r) => r.idea_type === 'sale').length;
+}
+
 function referenceLibraryCategoryOptionsHtml() {
   return '<option value="">— none —</option>' + state.categories.map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
 }
@@ -5876,29 +5929,53 @@ function setReferenceLibraryFilter(filter) {
   renderReferenceLibraryList();
 }
 
-function referenceLibraryCardHtml(item) {
+// One shared card builder for both surfaces -- the page (mode 'browse':
+// visual, ••• Edit/Delete menu, whole card opens the link) and the picker
+// modal (mode 'picker': same visual/comment/context, but "Use This
+// Reference" instead of a menu, and the card itself doesn't navigate away).
+function referenceCardHtml(item, mode) {
+  const isPicker = mode === 'picker';
+  const platform = detectReferencePlatform(item.link);
   const typeLabel = item.idea_type === 'sale' ? 'SALE' : 'BAU';
-  const product = item.category_name || null;
-  const added = `Added by ${escapeHtml(item.added_by)} · ${formatReferenceLibraryDate(item.created_at)}`;
-  return `
-    <div class="ref-card">
-      <div class="ref-card-top">
-        <span class="ref-card-type ref-card-type-${item.idea_type}">${typeLabel}</span>
-        ${product ? `<span class="ref-card-product">${escapeHtml(product)}</span>` : ''}
-      </div>
-      <div class="ref-card-comment">${escapeHtml(item.comment)}</div>
-      <div class="ref-card-meta">${added}</div>
-      <div class="ref-card-actions">
-        <a class="btn btn-ghost btn-sm" href="${escapeHtml(item.link)}" target="_blank" rel="noopener">Open Reference &#8599;</a>
-        <div class="ref-card-menu">
-          <button type="button" class="ref-card-menu-btn" onclick="toggleReferenceCardMenu(${item.id}, event)" aria-label="More actions">&bull;&bull;&bull;</button>
-          <div class="ref-card-menu-dropdown" id="ref-card-menu-${item.id}">
-            <button type="button" class="ref-card-menu-item" onclick="closeAllReferenceCardMenus();openReferenceEditModal(${item.id})">Edit</button>
-            <button type="button" class="ref-card-menu-item ref-card-menu-item-danger" onclick="closeAllReferenceCardMenus();confirmDeleteReferenceLibraryItem(${item.id})">Delete</button>
-          </div>
+  const contextParts = [platform.label];
+  if (item.category_name) contextParts.push(item.category_name);
+  const added = `${escapeHtml(item.added_by)} · ${formatReferenceLibraryDate(item.created_at)}`;
+  const safeLink = escapeHtml(item.link).replace(/'/g, '&#39;');
+
+  const menuHtml = isPicker ? '' : `
+      <div class="ref-card-menu" onclick="event.stopPropagation()">
+        <button type="button" class="ref-card-menu-btn" onclick="toggleReferenceCardMenu(${item.id}, event)" aria-label="More actions">&bull;&bull;&bull;</button>
+        <div class="ref-card-menu-dropdown" id="ref-card-menu-${item.id}">
+          <button type="button" class="ref-card-menu-item" onclick="closeAllReferenceCardMenus();openReferenceEditModal(${item.id})">Edit</button>
+          <button type="button" class="ref-card-menu-item ref-card-menu-item-danger" onclick="closeAllReferenceCardMenus();confirmDeleteReferenceLibraryItem(${item.id})">Delete</button>
         </div>
+      </div>`;
+
+  const footerInner = isPicker
+    ? `<button type="button" class="btn btn-primary btn-sm ref-card-pick-btn" onclick="event.stopPropagation();pickReferenceLibraryItem(${item.id})">Use This Reference</button>`
+    : `<span class="ref-card-added">${added}</span><span class="ref-card-open-hint">Open &#8599;</span>`;
+
+  const clickAttr = isPicker ? '' : ` onclick="window.open('${safeLink}', '_blank', 'noopener')"`;
+
+  return `
+    <div class="ref-card"${clickAttr}>
+      <div class="ref-card-visual">
+        ${referenceVisualHtml(item, platform)}
+        ${menuHtml}
+      </div>
+      <div class="ref-card-body">
+        <div class="ref-card-meta">
+          <span class="ref-card-type ref-card-type-${item.idea_type}">${typeLabel}</span>
+          <span class="ref-card-context">${contextParts.map(escapeHtml).join(' · ')}</span>
+        </div>
+        <div class="ref-card-comment">${escapeHtml(item.comment)}</div>
+        <div class="ref-card-footer">${footerInner}</div>
       </div>
     </div>`;
+}
+
+function referenceLibraryCardHtml(item) {
+  return referenceCardHtml(item, 'browse');
 }
 
 function renderReferenceLibraryList() {
@@ -5909,6 +5986,7 @@ function renderReferenceLibraryList() {
   document.getElementById('ref-lib-empty').textContent = state.referenceLibrary.length
     ? 'No references match your filters.'
     : 'No references yet — be the first to add one.';
+  updateReferenceLibraryCounts();
 }
 
 function closeAllReferenceCardMenus() {
@@ -5944,21 +6022,7 @@ function setReferencePickerFilter(filter) {
 }
 
 function referencePickerCardHtml(item) {
-  const typeLabel = item.idea_type === 'sale' ? 'SALE' : 'BAU';
-  const product = item.category_name || null;
-  const added = `Added by ${escapeHtml(item.added_by)} · ${formatReferenceLibraryDate(item.created_at)}`;
-  return `
-    <div class="ref-card">
-      <div class="ref-card-top">
-        <span class="ref-card-type ref-card-type-${item.idea_type}">${typeLabel}</span>
-        ${product ? `<span class="ref-card-product">${escapeHtml(product)}</span>` : ''}
-      </div>
-      <div class="ref-card-comment">${escapeHtml(item.comment)}</div>
-      <div class="ref-card-meta">${added}</div>
-      <div class="ref-card-actions">
-        <button type="button" class="btn btn-primary btn-sm" onclick="pickReferenceLibraryItem(${item.id})">Use This Reference</button>
-      </div>
-    </div>`;
+  return referenceCardHtml(item, 'picker');
 }
 
 function renderReferencePickerList() {

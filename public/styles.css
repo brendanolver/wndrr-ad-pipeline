@@ -1103,33 +1103,47 @@ main{flex:1;min-width:0;padding:20px 24px;}
    inventing a new visual language. */
 .ref-lib-modal{width:70vw;min-width:640px;max-width:920px;}
 @media (max-width:900px){.ref-lib-modal{width:94vw;min-width:0;}}
-.ref-lib-helper{margin-top:-4px;}
-.ref-lib-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
+.ref-lib-back{margin-bottom:6px;}
+.ref-lib-helper{margin-top:-4px;margin-bottom:14px;}
+.ref-lib-toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:18px;}
 .ref-lib-tabs{margin-bottom:0;border-bottom:none;flex-shrink:0;}
+.ref-lib-toolbar-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
 .ref-lib-search{font-family:inherit;font-size:12.5px;padding:7px 10px;border:1px solid var(--border);border-radius:var(--r);min-width:200px;}
-.ref-lib-add-btn{align-self:flex-start;}
-.ref-lib-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px;}
-.ref-lib-empty{font-size:12.5px;color:var(--text-muted);padding:18px 0;text-align:center;}
+.ref-lib-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:18px;}
+.ref-lib-empty{font-size:12.5px;color:var(--text-muted);padding:18px 0;text-align:center;grid-column:1/-1;}
 
-.ref-card{background:white;border:1px solid var(--border);border-radius:var(--r-lg);padding:12px;display:flex;flex-direction:column;gap:8px;}
-.ref-card-top{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
-.ref-card-type{display:inline-block;border-radius:var(--r-pill);padding:2px 8px;font-size:10px;font-weight:700;letter-spacing:0.3px;}
-.ref-card-type-bau{background:var(--teal-light);color:var(--teal-dark);}
-.ref-card-type-sale{background:var(--purple-light);color:var(--purple);}
-.ref-card-product{font-size:11px;font-weight:600;color:var(--text-secondary);}
-.ref-card-comment{font-size:12.5px;color:var(--text);line-height:1.4;flex:1;}
-.ref-card-meta{font-size:10.5px;color:var(--text-muted);}
-.ref-card-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;}
-.ref-card-actions .btn{text-decoration:none;}
+/* Cards are visual-first (a moodboard, not a list of links): the thumbnail/
+   placeholder is the hero (roughly 60-65% of the card via aspect-ratio),
+   the whole card opens the saved link, and the ••• menu overlays the
+   visual so it never competes with the text below for space. */
+.ref-card{background:white;border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;display:flex;flex-direction:column;cursor:pointer;transition:box-shadow 0.15s,border-color 0.15s;}
+.ref-card:hover{border-color:var(--teal);box-shadow:var(--shadow-xs);}
+.ref-card-visual{position:relative;aspect-ratio:4/3;background:var(--surface2);overflow:hidden;flex-shrink:0;}
+.ref-card-thumb{width:100%;height:100%;object-fit:cover;display:block;}
+.ref-card-placeholder{width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;background:linear-gradient(160deg,var(--surface2),var(--border));color:var(--text-muted);}
+.ref-card-placeholder-icon{font-size:26px;line-height:1;}
+.ref-card-placeholder-label{font-size:11.5px;font-weight:700;letter-spacing:0.2px;}
 
-.ref-card-menu{position:relative;}
-.ref-card-menu-btn{background:none;border:none;font-size:14px;color:var(--text-muted);cursor:pointer;padding:4px 6px;line-height:1;}
-.ref-card-menu-btn:hover{color:var(--text);}
-.ref-card-menu-dropdown{display:none;position:absolute;right:0;bottom:100%;margin-bottom:4px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--shadow);min-width:110px;z-index:5;overflow:hidden;}
+.ref-card-menu{position:absolute;top:8px;right:8px;}
+.ref-card-menu-btn{background:rgba(17,24,39,0.55);border:none;border-radius:var(--r-pill);font-size:14px;color:white;cursor:pointer;padding:3px 8px;line-height:1.4;}
+.ref-card-menu-btn:hover{background:rgba(17,24,39,0.75);}
+.ref-card-menu-dropdown{display:none;position:absolute;right:0;top:100%;margin-top:4px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--shadow);min-width:110px;z-index:5;overflow:hidden;}
 .ref-card-menu-dropdown.show{display:block;}
 .ref-card-menu-item{display:block;width:100%;text-align:left;background:none;border:none;padding:8px 12px;font-family:inherit;font-size:12px;color:var(--text);cursor:pointer;}
 .ref-card-menu-item:hover{background:var(--surface2);}
 .ref-card-menu-item-danger{color:var(--red);}
+
+.ref-card-body{padding:10px 12px 12px;display:flex;flex-direction:column;gap:6px;flex:1;}
+.ref-card-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.ref-card-type{display:inline-block;border-radius:var(--r-pill);padding:2px 8px;font-size:10px;font-weight:700;letter-spacing:0.3px;flex-shrink:0;}
+.ref-card-type-bau{background:var(--teal-light);color:var(--teal-dark);}
+.ref-card-type-sale{background:var(--purple-light);color:var(--purple);}
+.ref-card-context{font-size:11px;color:var(--text-muted);}
+.ref-card-comment{font-size:12.5px;color:var(--text);line-height:1.4;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;flex:1;}
+.ref-card-footer{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:2px;}
+.ref-card-added{font-size:10.5px;color:var(--text-muted);}
+.ref-card-open-hint{font-size:11px;font-weight:600;color:var(--teal-dark);flex-shrink:0;}
+.ref-card-pick-btn{width:100%;}
 
 .ref-add-type-toggle{display:flex;gap:6px;}
 .ref-type-btn{flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--r);padding:7px;font-family:inherit;font-size:12.5px;font-weight:600;color:var(--text-secondary);cursor:pointer;}
