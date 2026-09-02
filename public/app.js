@@ -5359,21 +5359,31 @@ async function unmarkShootingShot(scheduleId) {
 // click and a drag are already distinct browser gestures); the status pill
 // and the "•••" menu each stop that click from bubbling so they act on
 // themselves instead of also opening the Brief underneath them.
-function shootingCardHtml(item) {
+// Status label is display-only -- item.status is still just 'planned'/'shot'
+// underneath (see markShootingShot/unmarkShootingShot), this just reads
+// scheduled_day to say something more specific than "Planned" for where the
+// concept actually sits in the Shooting workflow.
+function shootingCardHtml(item, isUnscheduled = false) {
   const isShot = item.status === 'shot';
   const metaParts = [item.owner, item.location].filter(Boolean);
   const carriedBadge = item.carried_over ? `<span class="shoot-carried-badge">From W${isoWeekNumber(parseDateStr(item.original_week_start))}</span>` : '';
+  const plannedLabel = isUnscheduled ? 'Needs Scheduling' : 'Scheduled';
   const statusHtml = isShot
     ? `<button type="button" class="shoot-status-pill shoot-status-pill-shot shoot-status-pill-toggle" onclick="event.stopPropagation(); unmarkShootingShot(${item.id})" title="Undo -- mark as not Shot">&check; Shot</button>`
-    : `<button type="button" class="shoot-status-pill shoot-status-pill-toggle" onclick="event.stopPropagation(); markShootingShot(${item.id})" title="Mark as Shot">&#9675; Planned</button>`;
+    : `<button type="button" class="shoot-status-pill shoot-status-pill-toggle" onclick="event.stopPropagation(); markShootingShot(${item.id})" title="Mark as Shot">&#9675; ${plannedLabel}</button>`;
   const menuHtml = isShot ? '' : `
         <div class="shoot-card-menu" onclick="event.stopPropagation()">
           <button type="button" class="shoot-card-menu-btn" onclick="toggleShootCardMenu(${item.id})" aria-label="Move concept">&bull;&bull;&bull;</button>
           <div class="shoot-card-menu-dropdown" id="shoot-card-menu-${item.id}">${shootingMoveMenuItemsHtml(item)}</div>
         </div>`;
+  // The drag handle is only shown on Unscheduled cards -- everywhere else
+  // (a day column) the card is already sitting somewhere, so what needs
+  // surfacing is specifically "this one still needs to be dragged onto a
+  // day", not that dragging exists at all.
+  const dragHandle = isUnscheduled && !isShot ? '<span class="shoot-card-drag-handle" title="Drag onto a day to schedule">⠿</span>' : '';
   return `
     <div class="shoot-card ${isShot ? 'shoot-card-shot' : ''}" ${isShot ? '' : 'draggable="true"'} ondragstart="onShootCardDragStart(event, ${item.id})" onclick="openShootingBrief(${item.id})">
-      <div class="shoot-card-name">${escapeHtml(item.concept_name)}</div>
+      <div class="shoot-card-name">${dragHandle}${escapeHtml(item.concept_name)}</div>
       <div class="shoot-card-product">${escapeHtml(item.product_name || '—')}</div>
       ${metaParts.length ? `<div class="shoot-card-meta">${escapeHtml(metaParts.join(' · '))}</div>` : ''}
       <div class="shoot-card-footer">
@@ -5449,8 +5459,8 @@ function renderShootingWeekView() {
   unscheduledEl.classList.toggle('shoot-unscheduled-compact', unscheduled.length === 0);
   unscheduledEl.classList.toggle('shoot-unscheduled-active', unscheduled.length > 0);
   unscheduledEl.innerHTML = unscheduled.length ? `
-    <div class="shoot-unscheduled-header">Unscheduled <span class="shoot-unscheduled-count">${unscheduled.length}</span><span class="shoot-unscheduled-hint">Needs scheduling</span></div>
-    <div class="shoot-unscheduled-list">${unscheduled.map((item) => shootingCardHtml(item)).join('')}</div>`
+    <div class="shoot-unscheduled-header">Unscheduled <span class="shoot-unscheduled-count">${unscheduled.length}</span><span class="shoot-unscheduled-hint">Needs scheduling</span><span class="shoot-unscheduled-drag-hint">Drag concepts onto a day to schedule</span></div>
+    <div class="shoot-unscheduled-list">${unscheduled.map((item) => shootingCardHtml(item, true)).join('')}</div>`
     : `<div class="shoot-unscheduled-header">Unscheduled <span class="shoot-unscheduled-count">0</span></div>`;
 
   document.getElementById('shoot-week-grid').innerHTML = SHOOT_DAY_KEYS.map((day) => {
