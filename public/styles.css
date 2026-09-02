@@ -1336,6 +1336,11 @@ main{flex:1;min-width:0;padding:20px 24px;}
    "do not make the entire column brightly coloured"). Only ever set when
    Week view is showing the real current week (see shootingIsCurrentDay). */
 .shoot-day-column-today{border-color:var(--teal);}
+/* Drag-over ring: which column/Unscheduled a dragged shoot card would land
+   in if dropped right now -- same idea as .shoot-day-column-today's ring,
+   just a stronger one since it's a live target rather than a static label. */
+.shoot-day-column.drag-over,
+.shoot-unscheduled.drag-over{border-color:var(--teal);box-shadow:0 0 0 2px var(--teal);}
 .shoot-day-header{margin-bottom:6px;}
 .shoot-day-header-top{display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap;}
 .shoot-day-date-group{display:flex;align-items:baseline;gap:0;flex-wrap:wrap;}

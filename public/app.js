@@ -5304,13 +5304,25 @@ function onShootCardDragStart(e, scheduleId) {
   e.dataTransfer.effectAllowed = 'move';
 }
 
+// Rings the column/Unscheduled strip the dragged card is currently over
+// (same .drag-over convention used for reorderable rows elsewhere in the
+// app), so it's obvious exactly where a drop will land -- dragover fires
+// continuously while hovering, so re-adding the class here every time is
+// cheap and self-correcting even if a dragleave over a child element
+// briefly clears it.
 function onShootColumnDragOver(e) {
   e.preventDefault();
   e.dataTransfer.dropEffect = 'move';
+  e.currentTarget.classList.add('drag-over');
+}
+
+function onShootColumnDragLeave(e) {
+  e.currentTarget.classList.remove('drag-over');
 }
 
 function onShootColumnDrop(e, day) {
   e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
   const scheduleId = state.shooting.dragScheduleId || Number(e.dataTransfer.getData('text/plain'));
   state.shooting.dragScheduleId = null;
   if (!scheduleId) return;
@@ -5445,7 +5457,7 @@ function renderShootingWeekView() {
     const items = dayItems[day];
     const isToday = shootingIsCurrentDay(day);
     return `
-      <div class="shoot-day-column${isToday ? ' shoot-day-column-today' : ''}" ondragover="onShootColumnDragOver(event)" ondrop="onShootColumnDrop(event, '${day}')">
+      <div class="shoot-day-column${isToday ? ' shoot-day-column-today' : ''}" ondragover="onShootColumnDragOver(event)" ondragleave="onShootColumnDragLeave(event)" ondrop="onShootColumnDrop(event, '${day}')">
         <div class="shoot-day-header">${shootingDayHeaderHtml(day, items, isToday)}</div>
         <div class="shoot-day-cards">
           ${items.length ? items.map((item) => shootingCardHtml(item)).join('') : '<div class="shoot-day-empty">—</div>'}
