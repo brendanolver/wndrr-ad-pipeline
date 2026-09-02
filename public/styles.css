@@ -1096,6 +1096,23 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .ct-card-actions{display:flex;gap:8px;margin-top:9px;}
 .ct-card-actions .btn{text-decoration:none;}
 
+/* Editing -- operational, not strategic (see the brief): plain bordered
+   cards grouped by Concept, a compact status pill per Final Edit row, no
+   giant forms or KPI tiles. */
+.editing-concept-card{background:white;border:1px solid var(--border);border-radius:var(--r-lg);padding:12px 14px;margin-bottom:10px;}
+.editing-concept-product{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);}
+.editing-concept-name{font-weight:700;font-size:13.5px;margin-top:1px;}
+.editing-asset-list{display:flex;flex-direction:column;gap:5px;margin-top:8px;}
+.editing-asset-row{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;text-align:left;background:var(--surface2);border:1px solid var(--border);border-radius:var(--r);padding:7px 10px;font-family:inherit;cursor:pointer;}
+.editing-asset-row:hover{border-color:var(--teal);}
+.editing-asset-row-name{font-size:12.5px;font-weight:600;}
+.editing-status-to-edit{background:var(--amber-light);color:var(--amber);}
+.editing-status-editing{background:var(--blue-light);color:var(--blue);}
+.editing-status-ready{background:var(--green-light);color:var(--green);}
+.editing-suggestion-row{display:flex;align-items:center;gap:8px;font-size:12.5px;padding:5px 0;}
+.editing-custom-row{display:flex;align-items:center;gap:8px;margin-top:6px;}
+.editing-custom-row-input{flex:1;font-family:inherit;font-size:12.5px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--r);}
+
 /* Reference Library -- wide like .cd-modal-workspace (a browsable card
    grid needs room), reached from both Creative Toolkit surfaces and, in
    picker mode, from a Concept's own References section. Cards deliberately

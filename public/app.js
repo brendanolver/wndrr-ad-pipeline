@@ -89,6 +89,14 @@ let state = {
   // Week view); historyData is History's own GET /shooting/history.
   // ownerFilter is shared across Week/Today (client-side only, no refetch).
   shooting: { view: 'week', weekOffset: 0, data: null, todayData: null, historyData: null, ownerFilter: 'all', briefScheduleId: null, dragScheduleId: null },
+  // Editing -- same independent-weekOffset pattern as conceptDev/
+  // tuesdayReview/shooting above. data is Week's own GET /editing response
+  // (Concepts already nested with their Final Edits); activeConceptAssetId/
+  // activeFinalEditId track which modal is currently open so save handlers
+  // know what they're writing to; createRows is the "+ Add Another Asset"
+  // custom rows in the Create Final Edits flow, reset each time that modal
+  // opens.
+  editing: { weekOffset: 0, data: null, filter: 'all', activeConceptAssetId: null, activeFinalEditId: null, createRows: [] },
 };
 let dashboardWeekOffset = 0;
 
@@ -187,6 +195,10 @@ function switchTab(name) {
   // reliably shows up without a full page reload.
   if (name === 'shooting') refreshCurrentShootingView();
   if (name === 'reference-library') loadReferenceLibraryPage();
+  // Same reasoning as Shooting above -- Editing is the direct downstream
+  // consumer of Shooting's Mark as Shot action, so it needs a fresh fetch
+  // on every visit too.
+  if (name === 'editing') loadEditingWeek();
 }
 
 // [data-tab] guard: the sidebar also holds non-tab .tab-btn entries (styled
@@ -261,7 +273,7 @@ function conceptDevWeekNumber() {
 async function loadAll() {
   try {
     const weekStart = planningWeekStart();
-    const [board, styles, categories, dashboard, dropsRes, provenWinners, coreRes, planningSettings, shootPlan, contentCreators, highStockRes, promotions, weeklyConfirmation, weeklyPlanningProgress, salesCadence, metaProductMappings, metaProductFamilies, conceptDev, creativeResources, customerAvatars, tuesdayReview, shootingWeek] = await Promise.all([
+    const [board, styles, categories, dashboard, dropsRes, provenWinners, coreRes, planningSettings, shootPlan, contentCreators, highStockRes, promotions, weeklyConfirmation, weeklyPlanningProgress, salesCadence, metaProductMappings, metaProductFamilies, conceptDev, creativeResources, customerAvatars, tuesdayReview, shootingWeek, editingWeek] = await Promise.all([
       api('/board'),
       api('/styles'),
       api('/categories'),
@@ -284,6 +296,7 @@ async function loadAll() {
       api('/customer-avatars'),
       api(`/concept-development?week_start=${tuesdayReviewWeekStart()}`),
       api(`/shooting?week_start=${shootingWeekStart()}`),
+      api(`/editing?week_start=${editingWeekStart()}`),
     ]);
     state.board = board;
     state.styles = styles;
@@ -311,6 +324,7 @@ async function loadAll() {
     state.tuesdayReview.data = tuesdayReview;
     state.tuesdayReview.filter = tuesdayReviewDefaultFilter();
     state.shooting.data = shootingWeek;
+    state.editing.data = editingWeek;
     renderBoard();
     renderMissingAd();
     renderStylesTable();
@@ -336,6 +350,8 @@ async function loadAll() {
     populateShootingOwnerFilters();
     renderShootingWeekHeader();
     renderShootingWeekView();
+    renderEditingWeekHeader();
+    renderEditingList();
   } catch (e) {
     toast(e.message, true);
   }
@@ -5831,6 +5847,377 @@ function viewProvenWinnersFromToolkit() {
   closeModal('creative-tools-modal');
   switchTab('settings');
   document.getElementById('pw-list').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ── Editing ────────────────────────────────────────────
+// Turns a Shot Concept into one or more trackable Final Edits. Reads
+// GET /editing (Concepts already nested with their Final Edits, see
+// routes/editing.js) -- same independent-weekOffset week-nav pattern as
+// Concept Dev/Tuesday Review/Shooting above.
+function editingWeekStart() {
+  return isoDateStr(mondayOfWeek(state.editing.weekOffset));
+}
+function editingWeekNumber() {
+  return isoWeekNumber(mondayOfWeek(state.editing.weekOffset));
+}
+
+async function loadEditingWeek() {
+  try {
+    state.editing.data = await api(`/editing?week_start=${editingWeekStart()}`);
+    renderEditingWeekHeader();
+    renderEditingList();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function changeEditingWeek(delta) {
+  state.editing.weekOffset += delta;
+  onEditingWeekChanged();
+}
+
+function goToCurrentEditingWeek() {
+  state.editing.weekOffset = 0;
+  onEditingWeekChanged();
+}
+
+function jumpToEditingWeek(offset) {
+  state.editing.weekOffset = offset;
+  onEditingWeekChanged();
+}
+
+function onEditingWeekChanged() {
+  closeEditingWeekPicker();
+  loadEditingWeek();
+}
+
+function toggleEditingWeekPicker() {
+  const el = document.getElementById('editing-week-picker');
+  const opening = el.style.display === 'none';
+  if (opening) renderEditingWeekPicker();
+  el.style.display = opening ? '' : 'none';
+}
+
+function closeEditingWeekPicker() {
+  document.getElementById('editing-week-picker').style.display = 'none';
+}
+
+function renderEditingWeekPicker() {
+  const rows = [];
+  for (let offset = 8; offset >= -12; offset--) {
+    const monday = mondayOfWeek(offset);
+    rows.push({ offset, number: isoWeekNumber(monday), range: formatWeekRange(monday) });
+  }
+  document.getElementById('editing-week-picker').innerHTML = rows.map((r) => `
+    <button type="button" class="planning-week-picker-row ${r.offset === state.editing.weekOffset ? 'active' : ''}" onclick="jumpToEditingWeek(${r.offset})">
+      <span>Week ${r.number}${r.offset === 0 ? ' · Current' : ''}</span>
+      <span class="admin-note">${r.range}</span>
+    </button>`).join('');
+}
+
+document.addEventListener('click', (e) => {
+  const picker = document.getElementById('editing-week-picker');
+  if (!picker || picker.style.display === 'none') return;
+  if (e.target.closest('#editing-week-picker') || e.target.id === 'editing-week-label') return;
+  picker.style.display = 'none';
+});
+
+function renderEditingWeekHeader() {
+  document.getElementById('editing-week-label').textContent = `Week ${editingWeekNumber()}`;
+  document.getElementById('editing-this-week-btn').style.display = state.editing.weekOffset === 0 ? 'none' : '';
+}
+
+const EDITING_STATUS_LABELS = { to_edit: 'To Edit', editing: 'Editing', ready_for_approval: 'Ready for Approval' };
+const EDITING_STATUS_CLASS = { to_edit: 'editing-status-to-edit', editing: 'editing-status-editing', ready_for_approval: 'editing-status-ready' };
+const FINAL_EDIT_FORMATS = ['video', 'static', 'carousel'];
+
+function editingAllFinalEdits() {
+  const concepts = (state.editing.data && state.editing.data.concepts) || [];
+  const out = [];
+  for (const concept of concepts) {
+    for (const finalEdit of concept.final_edits) out.push({ finalEdit, concept });
+  }
+  return out;
+}
+
+const EDITING_FILTERS = [
+  { value: 'all', label: 'All' },
+  { value: 'to_edit', label: 'To Edit' },
+  { value: 'editing', label: 'Editing' },
+  { value: 'ready_for_approval', label: 'Ready for Approval' },
+];
+
+function renderEditingFilters() {
+  document.getElementById('editing-filters').innerHTML = EDITING_FILTERS.map((f) => `
+    <button type="button" class="filter-tab ${state.editing.filter === f.value ? 'active' : ''}" onclick="setEditingFilter('${f.value}')">${f.label}</button>`).join('');
+}
+
+function setEditingFilter(filter) {
+  state.editing.filter = filter;
+  renderEditingList();
+}
+
+// Compact card-level summary line, per the brief: "3 Concepts · 6 Final
+// Edits · 2 To Edit · 3 Editing · 1 Ready for Approval" -- computed
+// server-side (state.editing.data.summary) so it always matches the whole
+// week regardless of which filter is currently narrowing the list below it.
+function renderEditingSummary() {
+  const s = (state.editing.data && state.editing.data.summary) || { concepts: 0, final_edits: 0, to_edit: 0, editing: 0, ready_for_approval: 0 };
+  document.getElementById('editing-summary').textContent =
+    `${s.concepts} Concept${s.concepts === 1 ? '' : 's'} · ${s.final_edits} Final Edit${s.final_edits === 1 ? '' : 's'} · ${s.to_edit} To Edit · ${s.editing} Editing · ${s.ready_for_approval} Ready for Approval`;
+}
+
+function editingConceptMetaText(concept) {
+  return ['Shot', concept.owner ? `Owner: ${concept.owner}` : null].filter(Boolean).join(' · ');
+}
+
+function editingFinalEditRowHtml(finalEdit) {
+  return `
+    <button type="button" class="editing-asset-row" onclick="openFinalEditModal(${finalEdit.id})">
+      <span class="editing-asset-row-name">${escapeHtml(finalEdit.asset_name)}</span>
+      <span class="cd-concept-status-pill ${EDITING_STATUS_CLASS[finalEdit.status] || ''}">${EDITING_STATUS_LABELS[finalEdit.status] || finalEdit.status}</span>
+    </button>`;
+}
+
+// Grouped by Concept, never one flat list -- see the brief, item 3. A status
+// filter narrows to matching Final Edits and hides any Concept left with
+// none, same "scope the group, don't flatten it" pattern as the Reference
+// Library's month grouping.
+function renderEditingList() {
+  renderEditingSummary();
+  renderEditingFilters();
+  const concepts = (state.editing.data && state.editing.data.concepts) || [];
+  const filter = state.editing.filter;
+  const shaped = concepts
+    .map((concept) => ({
+      concept,
+      finalEdits: filter === 'all' ? concept.final_edits : concept.final_edits.filter((fe) => fe.status === filter),
+    }))
+    .filter((g) => filter === 'all' || g.finalEdits.length > 0);
+
+  document.getElementById('editing-empty').style.display = concepts.length ? 'none' : '';
+  document.getElementById('editing-list').innerHTML = shaped.map(({ concept, finalEdits }) => `
+    <div class="editing-concept-card">
+      <div class="editing-concept-product">${escapeHtml(concept.product_name || '—')}</div>
+      <div class="editing-concept-name">${escapeHtml(concept.concept_name)}</div>
+      <div class="hint">${escapeHtml(editingConceptMetaText(concept))}</div>
+      ${finalEdits.length ? `
+        <div class="editing-asset-list">${finalEdits.map(editingFinalEditRowHtml).join('')}</div>
+      ` : `<div class="hint" style="margin-top:8px;">No Final Edits yet.</div>`}
+      <button type="button" class="link-btn" style="margin-top:8px;" onclick="openEditingConcept(${concept.creative_asset_id})">
+        ${concept.final_edits.length ? 'Open Editing &rarr;' : 'Create Final Edits &rarr;'}
+      </button>
+    </div>`).join('');
+}
+
+function editingFindConcept(creativeAssetId) {
+  const concepts = (state.editing.data && state.editing.data.concepts) || [];
+  return concepts.find((c) => c.creative_asset_id === creativeAssetId);
+}
+
+function editingFindFinalEdit(finalEditId) {
+  for (const concept of (state.editing.data && state.editing.data.concepts) || []) {
+    const found = concept.final_edits.find((fe) => fe.id === finalEditId);
+    if (found) return { finalEdit: found, concept };
+  }
+  return null;
+}
+
+// The per-Concept workspace: lists existing Final Edits (each opens its own
+// workspace) plus the Create Final Edits flow. Hook Variations already on
+// the Concept are offered as suggestions only -- matched by exact text
+// against existing Final Edits' variation_text, never auto-created (see the
+// brief, item 5: "Do NOT automatically assume every Hook Variation was
+// successfully filmed").
+function openEditingConcept(creativeAssetId) {
+  const concept = editingFindConcept(creativeAssetId);
+  if (!concept) return;
+  state.editing.activeConceptAssetId = creativeAssetId;
+  state.editing.createRows = [];
+  renderEditingConceptModal();
+  openModal('editing-concept-modal');
+}
+
+function openEditingConceptBrief() {
+  const concept = editingFindConcept(state.editing.activeConceptAssetId);
+  if (!concept) return;
+  closeModal('editing-concept-modal');
+  openShootingBrief(concept.shoot_schedule_id);
+}
+
+function renderEditingConceptModal() {
+  const concept = editingFindConcept(state.editing.activeConceptAssetId);
+  if (!concept) return;
+  document.getElementById('editing-concept-modal-title').textContent = concept.concept_name;
+  document.getElementById('editing-concept-modal-subtitle').textContent = concept.product_name || '';
+
+  const wrap = document.getElementById('editing-concept-final-edits-wrap');
+  wrap.style.display = concept.final_edits.length ? '' : 'none';
+  document.getElementById('editing-concept-final-edits-list').innerHTML = concept.final_edits.map(editingFinalEditRowHtml).join('');
+
+  const hooks = (Array.isArray(concept.hook_variations) ? concept.hook_variations : []).filter((h) => h && h.text && h.text.trim());
+  const existingTexts = new Set(concept.final_edits.map((fe) => (fe.variation_text || '').trim()).filter(Boolean));
+  const suggestions = hooks
+    .map((h, i) => ({ label: i === 0 ? 'Primary Hook' : `Alternative Hook ${String(i).padStart(2, '0')}`, text: h.text.trim() }))
+    .filter((s) => !existingTexts.has(s.text));
+
+  document.getElementById('editing-create-suggestions').innerHTML = suggestions.map((s, i) => `
+    <label class="editing-suggestion-row">
+      <input type="checkbox" checked data-suggestion-index="${i}" onchange="updateEditingCreateButtonState()">
+      <span>${escapeHtml(s.label)}</span>
+    </label>`).join('');
+  document.getElementById('editing-create-suggestions').dataset.suggestions = JSON.stringify(suggestions);
+
+  renderEditingCustomAssetRows();
+  updateEditingCreateButtonState();
+}
+
+function addEditingCustomAssetRow() {
+  state.editing.createRows.push({ name: '' });
+  renderEditingCustomAssetRows();
+  updateEditingCreateButtonState();
+  const inputs = document.querySelectorAll('.editing-custom-row-input');
+  if (inputs.length) inputs[inputs.length - 1].focus();
+}
+
+function removeEditingCustomAssetRow(index) {
+  state.editing.createRows.splice(index, 1);
+  renderEditingCustomAssetRows();
+  updateEditingCreateButtonState();
+}
+
+function renderEditingCustomAssetRows() {
+  document.getElementById('editing-create-custom-rows').innerHTML = state.editing.createRows.map((row, i) => `
+    <div class="editing-custom-row">
+      <input type="text" class="editing-custom-row-input" placeholder="Asset name" value="${escapeHtml(row.name)}"
+        oninput="state.editing.createRows[${i}].name = this.value; updateEditingCreateButtonState();">
+      <button type="button" class="link-btn" onclick="removeEditingCustomAssetRow(${i})">Remove</button>
+    </div>`).join('');
+}
+
+function editingSelectedCreateAssets() {
+  const concept = editingFindConcept(state.editing.activeConceptAssetId);
+  const defaultFormat = (concept && FINAL_EDIT_FORMATS.includes(concept.concept_format)) ? concept.concept_format : 'video';
+  const suggestions = JSON.parse(document.getElementById('editing-create-suggestions').dataset.suggestions || '[]');
+  const checked = [...document.querySelectorAll('#editing-create-suggestions input[type="checkbox"]:checked')]
+    .map((el) => suggestions[Number(el.dataset.suggestionIndex)])
+    .filter(Boolean)
+    .map((s) => ({ asset_name: s.label, variation_text: s.text, format: defaultFormat }));
+  const custom = state.editing.createRows
+    .filter((r) => r.name.trim())
+    .map((r) => ({ asset_name: r.name.trim(), format: defaultFormat }));
+  return [...checked, ...custom];
+}
+
+function updateEditingCreateButtonState() {
+  const count = editingSelectedCreateAssets().length;
+  const btn = document.getElementById('editing-create-btn');
+  btn.disabled = count === 0;
+  btn.textContent = count ? `Create ${count} Final Edit${count === 1 ? '' : 's'}` : 'Create Final Edits';
+}
+
+async function createEditingFinalEdits() {
+  const assets = editingSelectedCreateAssets();
+  if (!assets.length) return;
+  try {
+    await api(`/editing/concepts/${state.editing.activeConceptAssetId}/final-edits`, {
+      method: 'POST',
+      body: JSON.stringify({ assets }),
+    });
+    toast('Final Edits created');
+    await loadEditingWeek();
+    closeModal('editing-concept-modal');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function populateFinalEditEditorSelect() {
+  const sel = document.getElementById('final-edit-editor');
+  sel.innerHTML = '<option value="">— unassigned —</option>' +
+    state.contentCreators.map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join('');
+}
+
+function openFinalEditModal(finalEditId) {
+  const found = editingFindFinalEdit(finalEditId);
+  if (!found) return;
+  const { finalEdit, concept } = found;
+  state.editing.activeFinalEditId = finalEditId;
+  // Opened either from the main landing list or from inside the per-Concept
+  // modal -- close the latter so the two full-screen overlays never stack.
+  closeModal('editing-concept-modal');
+
+  document.getElementById('final-edit-modal-title').textContent = finalEdit.asset_name;
+  document.getElementById('final-edit-modal-subtitle').textContent = `${concept.product_name || '—'} · ${concept.concept_name}`;
+  document.getElementById('final-edit-format').value = finalEdit.format;
+  document.getElementById('final-edit-variation').value = finalEdit.variation_text || '';
+  populateFinalEditEditorSelect();
+  document.getElementById('final-edit-editor').value = finalEdit.editor || '';
+  document.getElementById('final-edit-status').value = finalEdit.status;
+
+  if (finalEdit.final_edit_link) {
+    document.getElementById('final-edit-link-view').style.display = '';
+    document.getElementById('final-edit-link-input-wrap').style.display = 'none';
+    document.getElementById('final-edit-link-open').href = finalEdit.final_edit_link;
+  } else {
+    document.getElementById('final-edit-link-view').style.display = 'none';
+    document.getElementById('final-edit-link-input-wrap').style.display = '';
+    document.getElementById('final-edit-link-input').value = '';
+  }
+  document.getElementById('final-edit-notes').value = finalEdit.editor_notes || '';
+
+  openModal('final-edit-modal');
+}
+
+function showFinalEditLinkInput() {
+  document.getElementById('final-edit-link-view').style.display = 'none';
+  document.getElementById('final-edit-link-input-wrap').style.display = '';
+  document.getElementById('final-edit-link-input').value = '';
+  document.getElementById('final-edit-link-input').focus();
+}
+
+async function saveFinalEdit(markReadyForApproval = false) {
+  const found = editingFindFinalEdit(state.editing.activeFinalEditId);
+  if (!found) return;
+  const linkInputVisible = document.getElementById('final-edit-link-input-wrap').style.display !== 'none';
+  const linkValue = linkInputVisible ? document.getElementById('final-edit-link-input').value.trim() : undefined;
+
+  if (markReadyForApproval && !linkValue && !found.finalEdit.final_edit_link) {
+    return toast('Add a Final Edit link before sending for approval', true);
+  }
+
+  const payload = {
+    format: document.getElementById('final-edit-format').value,
+    variation_text: document.getElementById('final-edit-variation').value.trim(),
+    editor: document.getElementById('final-edit-editor').value || null,
+    status: markReadyForApproval ? 'ready_for_approval' : document.getElementById('final-edit-status').value,
+    editor_notes: document.getElementById('final-edit-notes').value.trim(),
+  };
+  if (linkValue !== undefined) payload.final_edit_link = linkValue;
+
+  try {
+    await api(`/editing/final-edits/${state.editing.activeFinalEditId}`, { method: 'PATCH', body: JSON.stringify(payload) });
+    toast(markReadyForApproval ? 'Sent for Approval' : 'Saved');
+    await loadEditingWeek();
+    closeModal('final-edit-modal');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function confirmDeleteFinalEdit() {
+  const found = editingFindFinalEdit(state.editing.activeFinalEditId);
+  if (!found) return;
+  const ok = await confirmDialog(`Delete "${found.finalEdit.asset_name}"? This can't be undone.`, { okLabel: 'Delete' });
+  if (!ok) return;
+  try {
+    await api(`/editing/final-edits/${state.editing.activeFinalEditId}`, { method: 'DELETE' });
+    toast('Final Edit deleted');
+    await loadEditingWeek();
+    closeModal('final-edit-modal');
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 // ── Reference Library ─────────────────────────────────

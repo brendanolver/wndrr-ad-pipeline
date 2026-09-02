@@ -40,6 +40,7 @@
       <button class="tab-btn" data-tab="concept-dev"><span class="sidebar-nav-icon">💡</span>Concept Dev</button>
       <button class="tab-btn" data-tab="tuesday-review"><span class="sidebar-nav-icon">🗳</span>Tuesday Review</button>
       <button class="tab-btn" data-tab="shooting"><span class="sidebar-nav-icon">🎬</span>Shooting</button>
+      <button class="tab-btn" data-tab="editing"><span class="sidebar-nav-icon">✂️</span>Editing</button>
       <button class="tab-btn" data-tab="board"><span class="sidebar-nav-icon">▤</span>Board</button>
       <button class="tab-btn" data-tab="admin"><span class="sidebar-nav-icon">🏷</span>Styles &amp; Categories</button>
       <button class="tab-btn" data-tab="reference-library"><span class="sidebar-nav-icon">📚</span>Reference Library</button>
@@ -530,6 +531,120 @@
           <button class="btn btn-ghost" onclick="closeModal('shoot-brief-modal')">Close</button>
           <button class="btn btn-danger" id="shoot-brief-unmark-shot-btn" onclick="unmarkShootingShotFromBrief()" style="display:none;">Mark as Not Shot</button>
           <button class="btn btn-primary" id="shoot-brief-mark-shot-btn" onclick="markShootingShotFromBrief()">&check; Mark as Shot</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Editing: turns a Shot Concept into one or more trackable Final Edits
+         (the actual ads). Reads shoot_schedule rows with ready_for_editing
+         (see routes/editing.js) -- a Concept appears here automatically the
+         moment Shooting marks it Shot, nothing recreated by hand. Grouped by
+         Concept, never one flat list of assets -- see the brief. -->
+    <section id="tab-editing" class="tab-panel">
+      <h1 class="tr-page-title">Editing</h1>
+      <div class="planning-header">
+        <div class="planning-week-nav">
+          <button type="button" class="week-nav-btn" id="editing-week-prev" onclick="changeEditingWeek(-1)" aria-label="Previous week">&lsaquo;</button>
+          <button type="button" class="planning-week-label-btn" id="editing-week-label" onclick="toggleEditingWeekPicker()"></button>
+          <button type="button" class="week-nav-btn" id="editing-week-next" onclick="changeEditingWeek(1)" aria-label="Next week">&rsaquo;</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="editing-this-week-btn" onclick="goToCurrentEditingWeek()" style="display:none;">This Week</button>
+          <div class="planning-week-picker" id="editing-week-picker" style="display:none;"></div>
+        </div>
+      </div>
+      <div class="shoot-summary-line" id="editing-summary"></div>
+      <div class="filter-tabs" id="editing-filters"></div>
+      <div id="editing-list"></div>
+      <div id="editing-empty" class="hint" style="display:none;padding:18px 0;text-align:center;">Nothing shot yet this week.</div>
+    </section>
+
+    <!-- Per-Concept workspace: lists its Final Edits (each opens
+         final-edit-modal) plus the "Create Final Edits" flow -- Hook
+         Variations offered as suggestions only, never auto-created (see the
+         brief, item 5). Also the jump-off point to the read-only Shoot
+         Brief for full context, rather than repeating it here. -->
+    <div id="editing-concept-modal" class="modal-backdrop">
+      <div class="modal" style="max-width:520px;">
+        <div class="modal-header">
+          <div>
+            <h3 id="editing-concept-modal-title"></h3>
+            <div class="hint" id="editing-concept-modal-subtitle"></div>
+          </div>
+          <button class="modal-close" onclick="closeModal('editing-concept-modal')">&times;</button>
+        </div>
+        <div class="modal-body">
+          <button type="button" class="link-btn" id="editing-concept-brief-link" onclick="openEditingConceptBrief()">View Shoot Brief &rarr;</button>
+
+          <div id="editing-concept-final-edits-wrap" style="display:none;">
+            <div class="cd-field-label" style="margin-top:14px;">Final Edits</div>
+            <div id="editing-concept-final-edits-list" class="editing-asset-list"></div>
+          </div>
+
+          <div style="margin-top:14px;">
+            <div class="cd-field-label">Create Final Edits</div>
+            <div id="editing-create-suggestions"></div>
+            <div id="editing-create-custom-rows"></div>
+            <button type="button" class="link-btn" onclick="addEditingCustomAssetRow()">+ Add Another Asset</button>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" onclick="closeModal('editing-concept-modal')">Close</button>
+          <button class="btn btn-primary" id="editing-create-btn" onclick="createEditingFinalEdits()" disabled>Create Final Edits</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- The Final Edit workspace itself -- deliberately compact (see the
+         brief, item 6/10): Format/Variation/Editor/Status, the one Final
+         Edit link, optional notes. No raw-footage/selects/checklist fields. -->
+    <div id="final-edit-modal" class="modal-backdrop">
+      <div class="modal" style="max-width:480px;">
+        <div class="modal-header">
+          <div>
+            <h3 id="final-edit-modal-title"></h3>
+            <div class="hint" id="final-edit-modal-subtitle"></div>
+          </div>
+          <button class="modal-close" onclick="closeModal('final-edit-modal')">&times;</button>
+        </div>
+        <div class="modal-body">
+          <label>Format
+            <select id="final-edit-format">
+              <option value="video">Video</option>
+              <option value="static">Static</option>
+              <option value="carousel">Carousel</option>
+            </select>
+          </label>
+          <label>Variation
+            <input type="text" id="final-edit-variation" placeholder="e.g. Primary Hook: ...">
+          </label>
+          <label>Editor
+            <select id="final-edit-editor"></select>
+          </label>
+          <label>Status
+            <select id="final-edit-status">
+              <option value="to_edit">To Edit</option>
+              <option value="editing">Editing</option>
+              <option value="ready_for_approval">Ready for Approval</option>
+            </select>
+          </label>
+
+          <div class="cd-field-label" style="margin-top:10px;">Final Edit</div>
+          <div id="final-edit-link-view" style="display:none;">
+            <a href="#" id="final-edit-link-open" target="_blank" rel="noopener" class="link-btn">View Final Edit &#8599;</a>
+            <button type="button" class="link-btn" onclick="showFinalEditLinkInput()" style="margin-left:10px;">Replace link</button>
+          </div>
+          <div id="final-edit-link-input-wrap">
+            <input type="url" id="final-edit-link-input" placeholder="Paste the final edit link (Drive, Frame.io, etc.)">
+          </div>
+
+          <label style="margin-top:10px;">Editor Notes <span class="hint">(optional)</span>
+            <textarea id="final-edit-notes" rows="2"></textarea>
+          </label>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-danger" id="final-edit-delete-btn" onclick="confirmDeleteFinalEdit()">Delete</button>
+          <button class="btn btn-ghost" onclick="closeModal('final-edit-modal')">Cancel</button>
+          <button class="btn btn-ghost" onclick="saveFinalEdit()">Save</button>
+          <button class="btn btn-primary" id="final-edit-ready-btn" onclick="saveFinalEdit(true)">Ready for Approval &rarr;</button>
         </div>
       </div>
     </div>

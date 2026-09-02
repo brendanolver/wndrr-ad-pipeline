@@ -77,6 +77,21 @@ const SHOOT_DAY_LABELS = {
   friday: 'Friday',
 };
 
+// Editing's own status -- separate from STATUSES above for the same reason
+// CONCEPT_DEV_STATUSES is: this tracks a Final Edit through its own simple
+// workflow, not the full downstream production pipeline (Final
+// Approval/Upload/Live, none of which exist yet).
+const EDITING_STATUSES = ['to_edit', 'editing', 'ready_for_approval'];
+const EDITING_STATUS_LABELS = {
+  to_edit: 'To Edit',
+  editing: 'Editing',
+  ready_for_approval: 'Ready for Approval',
+};
+// A Final Edit's own format options -- deliberately not the same FORMATS
+// constant as a Concept's format (video/static only): a shoot can produce a
+// carousel cut of a concept that itself is tracked as 'video'.
+const FINAL_EDIT_FORMATS = ['video', 'static', 'carousel'];
+
 module.exports = {
   STATUSES,
   STATUS_LABELS,
@@ -91,4 +106,7 @@ module.exports = {
   SHOOT_STATUS_LABELS,
   SHOOT_DAYS,
   SHOOT_DAY_LABELS,
+  EDITING_STATUSES,
+  EDITING_STATUS_LABELS,
+  FINAL_EDIT_FORMATS,
 };
