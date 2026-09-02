@@ -810,3 +810,130 @@ CREATE TABLE IF NOT EXISTS reference_library (
 );
 CREATE INDEX IF NOT EXISTS idx_reference_library_created_at ON reference_library(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_reference_library_idea_type ON reference_library(idea_type);
+
+-- ---------------------------------------------------------------------------
+-- Users & Auth foundation: real per-user accounts, replacing the single
+-- shared APP_PASSWORD gate (see src/auth.js), plus role-based permissions --
+-- structured now so the app never has to retrofit "who did this" or
+-- feature-level access control later. Deliberately minimal for V1: four
+-- broad role presets, no per-user permission overrides, no admin UI for any
+-- of this yet -- just the data model and a read-only session/permissions
+-- surface. Password hashing needs Node's crypto (scrypt), not plain SQL, so
+-- the six seed users themselves are inserted by seedUsersAndBackfill() in
+-- src/db.js right after this file runs, not here.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS users (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  email VARCHAR(255) UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  role VARCHAR(20) NOT NULL DEFAULT 'creative' CHECK (role IN ('admin', 'marketing', 'creative', 'viewer')),
+  active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
+
+-- Feature/action-level permission keys -- finer-grained than role alone, so
+-- a future "grant this one extra permission to this one person" only needs
+-- a new table (e.g. user_permissions), never a schema change here. `name`
+-- is a human label for a future admin screen; `key` is what code checks.
+CREATE TABLE IF NOT EXISTS permissions (
+  id SERIAL PRIMARY KEY,
+  key VARCHAR(50) UNIQUE NOT NULL,
+  name VARCHAR(255) NOT NULL
+);
+INSERT INTO permissions (key, name) VALUES
+  ('planning.view', 'View Planning'),
+  ('planning.edit', 'Edit Planning'),
+  ('concepts.view', 'View Concepts'),
+  ('concepts.edit', 'Edit Concepts'),
+  ('concepts.review', 'Review Concepts (Tuesday Review)'),
+  ('shooting.view', 'View Shooting'),
+  ('shooting.edit', 'Edit Shooting'),
+  ('promotions.view', 'View Promotions'),
+  ('promotions.edit', 'Edit Promotions'),
+  ('settings.view', 'View Settings'),
+  ('settings.edit', 'Edit Settings'),
+  ('results.view', 'View Results'),
+  ('users.manage', 'Manage Users')
+ON CONFLICT (key) DO NOTHING;
+
+-- Which permissions each role grants -- the only piece of "access control"
+-- actually queryable right now (see src/lib/permissions.js's hasPermission
+-- helper and GET /auth/session, which returns the caller's own permission
+-- list). Nothing in the app enforces these on any existing route yet -- per
+-- the brief, this is the data model/service layer to build on later, not a
+-- finished access-control rollout. Broad, defensible-for-now defaults:
+-- Admin gets everything; Marketing covers Planning/Promotions/Results;
+-- Creative covers the day-to-day production workflow; Viewer is read-only
+-- everywhere.
+CREATE TABLE IF NOT EXISTS role_permissions (
+  role VARCHAR(20) NOT NULL,
+  permission_key VARCHAR(50) NOT NULL REFERENCES permissions(key) ON DELETE CASCADE,
+  PRIMARY KEY (role, permission_key)
+);
+INSERT INTO role_permissions (role, permission_key)
+  SELECT 'admin', key FROM permissions
+ON CONFLICT DO NOTHING;
+INSERT INTO role_permissions (role, permission_key) VALUES
+  ('marketing', 'planning.view'), ('marketing', 'planning.edit'),
+  ('marketing', 'promotions.view'), ('marketing', 'promotions.edit'),
+  ('marketing', 'concepts.view'), ('marketing', 'results.view'),
+  ('marketing', 'settings.view'),
+  ('creative', 'planning.view'),
+  ('creative', 'concepts.view'), ('creative', 'concepts.edit'), ('creative', 'concepts.review'),
+  ('creative', 'shooting.view'), ('creative', 'shooting.edit'),
+  ('creative', 'results.view'), ('creative', 'settings.view'),
+  ('viewer', 'planning.view'), ('viewer', 'concepts.view'),
+  ('viewer', 'shooting.view'), ('viewer', 'promotions.view'),
+  ('viewer', 'settings.view'), ('viewer', 'results.view')
+ON CONFLICT DO NOTHING;
+
+-- ---------------------------------------------------------------------------
+-- Migrate name-based ownership to real user relationships. Each FK below is
+-- nullable and additive -- the existing text/name columns are left exactly
+-- as they are (never dropped, per this file's own convention) so every
+-- display call site keeps working unchanged; the FK is the new "real"
+-- relationship, backfilled by name match once users exist (see
+-- seedUsersAndBackfill() in src/db.js, which runs right after this file).
+-- ---------------------------------------------------------------------------
+
+-- Content Creators <-> Users: once seeded, this list IS effectively "the
+-- active users, plus optional per-person sample-size defaults" -- every
+-- seed user gets a linked content_creators row (see src/db.js), so the
+-- existing Shoot This Week creator dropdown (already sourced from
+-- content_creators) naturally becomes a users-backed list with zero
+-- frontend change.
+ALTER TABLE content_creators ADD COLUMN IF NOT EXISTS user_id INTEGER UNIQUE REFERENCES users(id) ON DELETE SET NULL;
+
+-- Shoot Plan: who's actually shooting this product is now a real
+-- relationship; `creator` stays the display text, unchanged.
+ALTER TABLE shoot_plan_items ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+
+-- Confirming a week's Shoot Plan didn't record who confirmed it at all
+-- before this.
+ALTER TABLE weekly_shoot_plan_confirmations ADD COLUMN IF NOT EXISTS confirmed_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+
+-- Concept Development / Tuesday Review: who created the concept, who last
+-- submitted it for review, and who made the Tuesday Review decision.
+-- Going forward, each review_history JSONB entry also carries its own
+-- decided_by/decided_by_user_id (see conceptDevelopment.js) -- no migration
+-- needed there, JSONB is schemaless and older entries simply predate it.
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS submitted_for_review_at TIMESTAMPTZ;
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS submitted_for_review_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS reviewed_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+
+-- Reference Library: added_by stays the display text; this is the real
+-- relationship, always set automatically from the logged-in session now
+-- that one exists (see referenceLibrary.js POST) -- the old client-side
+-- "who am I" localStorage prompt is retired, it's genuinely redundant now.
+ALTER TABLE reference_library ADD COLUMN IF NOT EXISTS added_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+
+-- Settings: the one genuinely shared/global settings row -- who last
+-- changed it. Every other Settings-managed table (Creative Resources,
+-- Proven Winners, Customer Avatars...) is its own CRUD list rather than a
+-- single shared config row, so "who changed it" is less meaningful there
+-- and isn't instrumented yet -- deliberately out of scope for V1.
+ALTER TABLE planning_settings ADD COLUMN IF NOT EXISTS updated_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;

@@ -121,6 +121,16 @@ router.post('/', async (req, res, next) => {
     const trimmedCreator = creator.trim();
     const trimmedNote = quick_note && quick_note.trim() ? quick_note.trim() : null;
 
+    // The Creator field is who's actually assigned to shoot this -- picked
+    // from the dropdown, not necessarily the logged-in person filling out
+    // the form -- so it's resolved to a real user by name match (via the
+    // linked content_creators row, see schema.sql), not from req.user.
+    const creatorUserResult = await client.query(
+      `SELECT user_id FROM content_creators WHERE LOWER(name) = LOWER($1) AND user_id IS NOT NULL`,
+      [trimmedCreator]
+    );
+    const createdByUserId = creatorUserResult.rows[0] ? creatorUserResult.rows[0].user_id : null;
+
     const asset = await insertCreativeAsset(client, {
       style_id: Number(colourways[0].style_id),
       concept_name: trimmedNote || `New Concept — ${product_name}`,
@@ -128,12 +138,13 @@ router.post('/', async (req, res, next) => {
       format: 'video',
       strategy_owner: trimmedCreator,
       status: 'awaiting_concept_development',
+      created_by_user_id: createdByUserId,
     });
 
     const itemResult = await client.query(
-      `INSERT INTO shoot_plan_items (product_code, product_name, stock_status, creator, initial_idea, asset_id, source, image_url, promotion_stage_id, week_start)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10::date, date_trunc('week', now())::date)) RETURNING *`,
-      [product_code, product_name, stock_status, trimmedCreator, trimmedNote, asset.id, source || null, image_url || null, promotion_stage_id || null, week_start || null]
+      `INSERT INTO shoot_plan_items (product_code, product_name, stock_status, creator, initial_idea, asset_id, source, image_url, promotion_stage_id, week_start, created_by_user_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10::date, date_trunc('week', now())::date), $11) RETURNING *`,
+      [product_code, product_name, stock_status, trimmedCreator, trimmedNote, asset.id, source || null, image_url || null, promotion_stage_id || null, week_start || null, createdByUserId]
     );
     const item = itemResult.rows[0];
 

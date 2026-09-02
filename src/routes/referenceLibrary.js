@@ -42,16 +42,20 @@ router.get('/', async (req, res, next) => {
 
 router.post('/', async (req, res, next) => {
   try {
-    const { link, comment, idea_type, style_id, added_by } = req.body || {};
+    const { link, comment, idea_type, style_id } = req.body || {};
     if (!link || !link.trim()) return res.status(400).json({ error: 'link is required' });
     if (!comment || !comment.trim()) return res.status(400).json({ error: 'comment is required' });
     if (!IDEA_TYPES.includes(idea_type)) return res.status(400).json({ error: 'idea_type must be bau or sale' });
-    if (!added_by || !added_by.trim()) return res.status(400).json({ error: 'added_by is required' });
 
+    // Added-by is always the logged-in user now -- never taken from the
+    // client (see the brief: "never manually entered"). This also retires
+    // the old client-side one-time "who am I" localStorage prompt, which is
+    // genuinely redundant once every request already carries a real
+    // identity via requireAuth.
     const inserted = await pool.query(
-      `INSERT INTO reference_library (link, comment, idea_type, style_id, added_by)
-       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-      [link.trim(), comment.trim(), idea_type, style_id || null, added_by.trim()]
+      `INSERT INTO reference_library (link, comment, idea_type, style_id, added_by, added_by_user_id)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+      [link.trim(), comment.trim(), idea_type, style_id || null, req.user.name, req.user.id]
     );
     const result = await pool.query(`${LIST_QUERY} WHERE rl.id = $1`, [inserted.rows[0].id]);
     res.status(201).json(result.rows[0]);

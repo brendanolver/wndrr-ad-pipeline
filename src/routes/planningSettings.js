@@ -49,8 +49,9 @@ router.put('/', async (req, res, next) => {
 
     const setClauses = keys.map((key, i) => `${key} = $${i + 1}`);
     const values = keys.map((key) => updates[key]);
+    values.push(req.user.id);
     const result = await pool.query(
-      `UPDATE planning_settings SET ${setClauses.join(', ')}, updated_at = now() WHERE id = 1 RETURNING *`,
+      `UPDATE planning_settings SET ${setClauses.join(', ')}, updated_at = now(), updated_by_user_id = $${values.length} WHERE id = 1 RETURNING *`,
       values
     );
     res.json(result.rows[0]);

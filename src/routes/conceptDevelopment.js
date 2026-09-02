@@ -169,6 +169,7 @@ router.post('/concepts', async (req, res, next) => {
       concept_classification: 'new_experimental',
       format: 'video',
       status: 'awaiting_concept_development',
+      created_by_user_id: req.user.id,
     });
     await pool.query('UPDATE creative_assets SET shoot_plan_item_id = $1 WHERE id = $2', [shoot_plan_item_id, asset.id]);
 
@@ -232,6 +233,14 @@ router.patch('/concepts/:id', async (req, res, next) => {
     const avatarIdProvided = Object.prototype.hasOwnProperty.call(req.body || {}, 'customer_avatar_id');
     const nextAvatarId = avatarIdProvided ? (customer_avatar_id != null ? Number(customer_avatar_id) : null) : null;
 
+    // Submitting for review is a specific, meaningful workflow event (not
+    // just another field edit), so it gets its own actor/timestamp pair --
+    // same reasoning as reviewed_at/reviewed_by_user_id on the Tuesday
+    // Review decision below. Only stamped when this save is the one that
+    // actually moves the concept into ready_for_review, not on every
+    // resave while it's already there.
+    const submittingForReview = concept_dev_status === 'ready_for_review';
+
     const result = await pool.query(
       `UPDATE creative_assets SET
          concept_name = COALESCE($1, concept_name),
@@ -247,6 +256,8 @@ router.patch('/concepts/:id', async (req, res, next) => {
          customer_avatar_id = CASE WHEN $11 THEN $12 ELSE customer_avatar_id END,
          custom_avatar_description = COALESCE($13, custom_avatar_description),
          avatar_why_care = COALESCE($14, avatar_why_care),
+         submitted_for_review_at = CASE WHEN $16 THEN now() ELSE submitted_for_review_at END,
+         submitted_for_review_by_user_id = CASE WHEN $16 THEN $17 ELSE submitted_for_review_by_user_id END,
          updated_at = now()
        WHERE id = $15 RETURNING *`,
       [
@@ -265,6 +276,8 @@ router.patch('/concepts/:id', async (req, res, next) => {
         custom_avatar_description !== undefined ? custom_avatar_description : null,
         avatar_why_care !== undefined ? avatar_why_care : null,
         req.params.id,
+        submittingForReview,
+        req.user.id,
       ]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Concept not found' });
@@ -299,7 +312,12 @@ router.patch('/concepts/:id/review', async (req, res, next) => {
     const trimmedKillNote = kill_note && kill_note.trim() ? kill_note.trim() : null;
     const trimmedKillReason = kill_reason && kill_reason.trim() ? kill_reason.trim() : null;
 
-    const historyEntry = { decision, decided_at: new Date().toISOString() };
+    const historyEntry = {
+      decision,
+      decided_at: new Date().toISOString(),
+      decided_by: req.user.name,
+      decided_by_user_id: req.user.id,
+    };
     if (decision === 'changes_required') historyEntry.feedback = trimmedFeedback;
     if (decision === 'killed') {
       if (trimmedKillReason) historyEntry.kill_reason = trimmedKillReason;
@@ -310,6 +328,7 @@ router.patch('/concepts/:id/review', async (req, res, next) => {
       `UPDATE creative_assets SET
          concept_dev_status = $1::varchar,
          reviewed_at = now(),
+         reviewed_by_user_id = $7,
          review_feedback = CASE WHEN $1::varchar = 'changes_required' THEN $2 ELSE review_feedback END,
          kill_reason = CASE WHEN $1::varchar = 'killed' THEN $3 ELSE kill_reason END,
          kill_note = CASE WHEN $1::varchar = 'killed' THEN $4 ELSE kill_note END,
@@ -317,7 +336,7 @@ router.patch('/concepts/:id/review', async (req, res, next) => {
          updated_at = now()
        WHERE id = $6 AND concept_dev_status = 'ready_for_review'
        RETURNING *`,
-      [decision, trimmedFeedback, trimmedKillReason, trimmedKillNote, JSON.stringify([historyEntry]), req.params.id]
+      [decision, trimmedFeedback, trimmedKillReason, trimmedKillNote, JSON.stringify([historyEntry]), req.params.id, req.user.id]
     );
     if (!result.rows.length) {
       const existsResult = await pool.query('SELECT id FROM creative_assets WHERE id = $1', [req.params.id]);

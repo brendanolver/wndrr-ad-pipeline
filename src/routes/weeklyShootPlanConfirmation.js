@@ -33,13 +33,14 @@ router.post('/', async (req, res, next) => {
       return res.status(400).json({ error: 'week_start must be YYYY-MM-DD' });
     }
     // ON CONFLICT DO NOTHING so a second confirm click never bumps
-    // confirmed_at -- the row should record the FIRST confirmation. The
-    // primary key on week_start makes this race-safe if two people click
-    // at once: whichever insert loses just falls through to DO NOTHING.
+    // confirmed_at/confirmed_by -- the row should record the FIRST
+    // confirmation. The primary key on week_start makes this race-safe if
+    // two people click at once: whichever insert loses just falls through
+    // to DO NOTHING.
     const inserted = await pool.query(
-      `INSERT INTO weekly_shoot_plan_confirmations (week_start) VALUES (${WEEK_START_SQL})
+      `INSERT INTO weekly_shoot_plan_confirmations (week_start, confirmed_by_user_id) VALUES (${WEEK_START_SQL}, $2)
        ON CONFLICT (week_start) DO NOTHING RETURNING *`,
-      [weekStart || null]
+      [weekStart || null, req.user.id]
     );
     if (inserted.rows.length) return res.status(201).json(inserted.rows[0]);
 
