@@ -1109,8 +1109,17 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .ref-lib-tabs{margin-bottom:0;border-bottom:none;flex-shrink:0;}
 .ref-lib-toolbar-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
 .ref-lib-search{font-family:inherit;font-size:12.5px;padding:7px 10px;border:1px solid var(--border);border-radius:var(--r);min-width:200px;}
+.ref-lib-sort{font-family:inherit;font-size:12.5px;padding:7px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface);color:var(--text);cursor:pointer;}
 .ref-lib-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:18px;}
-.ref-lib-empty{font-size:12.5px;color:var(--text-muted);padding:18px 0;text-align:center;grid-column:1/-1;}
+.ref-lib-empty{font-size:12.5px;color:var(--text-muted);padding:18px 0;text-align:center;}
+
+/* Chronological structure only -- a subtle heading + the existing card grid
+   per month, all flowing in one continuous column (never a bordered/boxed
+   section, accordion, or timeline -- see the brief). */
+.ref-lib-month-group{margin-bottom:30px;}
+.ref-lib-month-group:last-child{margin-bottom:0;}
+.ref-lib-month-heading{display:flex;align-items:baseline;gap:8px;font-size:11px;font-weight:700;letter-spacing:0.04em;color:var(--text-muted);margin-bottom:12px;}
+.ref-lib-month-count{font-size:11px;font-weight:500;color:var(--text-muted);opacity:0.7;letter-spacing:normal;}
 
 /* Cards are visual-first (a moodboard, not a list of links): the thumbnail/
    placeholder is the hero (roughly 60-65% of the card via aspect-ratio),

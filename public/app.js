@@ -76,7 +76,7 @@ let state = {
   // instead of from a Creative Toolkit/Tools card -- same list, but cards
   // offer "Use This Reference" instead of the ••• edit/delete menu.
   referenceLibrary: [], referenceLibraryLoaded: false, referenceLibraryFilter: 'all', referencePickerFilter: 'all',
-  referenceLibraryCategories: [], referenceLibraryCategoriesLoaded: false,
+  referenceLibraryCategories: [], referenceLibraryCategoriesLoaded: false, referenceLibrarySort: 'newest',
   // Settings' reusable Customer Avatar library -- who Concept Development's
   // "The Audience" section picks a Primary Customer Avatar from. See
   // schema.sql's comment on customer_avatars/customer_avatar_id.
@@ -5999,11 +5999,60 @@ function referenceLibraryCardHtml(item) {
   return referenceCardHtml(item, 'browse');
 }
 
+// Newest/Oldest is the only sort control (V1, deliberately -- see the
+// brief: no alphabetical/category/platform/etc). Sorts by created_at, not
+// array order, so it's correct regardless of how items landed in
+// state.referenceLibrary (API's default order, a local prepend on add, an
+// in-place replace on edit).
+function referenceLibrarySortedList(list, sort) {
+  const sorted = [...list].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  return sort === 'oldest' ? sorted : sorted.reverse();
+}
+
+function referenceLibraryMonthKey(iso) {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${d.getMonth()}`;
+}
+
+function referenceLibraryMonthLabel(iso) {
+  return new Date(iso).toLocaleDateString('en-AU', { month: 'long', year: 'numeric' }).toUpperCase();
+}
+
+// Chronological structure only -- no month filter/accordion/timeline (see
+// the brief). A sorted list groups into contiguous same-month runs by
+// definition, so a single pass building "start a new group when the month
+// key changes" is enough; it also means Newest/Oldest naturally reorders
+// both the months and the references within each one, with no separate
+// reversal step needed here.
+function referenceLibraryGroupedHtml(sortedList) {
+  const groups = [];
+  let current = null;
+  for (const item of sortedList) {
+    const key = referenceLibraryMonthKey(item.created_at);
+    if (!current || current.key !== key) {
+      current = { key, label: referenceLibraryMonthLabel(item.created_at), items: [] };
+      groups.push(current);
+    }
+    current.items.push(item);
+  }
+  return groups.map((g) => `
+    <div class="ref-lib-month-group">
+      <div class="ref-lib-month-heading">${escapeHtml(g.label)} <span class="ref-lib-month-count">${g.items.length} reference${g.items.length === 1 ? '' : 's'}</span></div>
+      <div class="ref-lib-grid">${g.items.map(referenceLibraryCardHtml).join('')}</div>
+    </div>`).join('');
+}
+
+function setReferenceLibrarySort(sort) {
+  state.referenceLibrarySort = sort;
+  renderReferenceLibraryList();
+}
+
 function renderReferenceLibraryList() {
   const search = document.getElementById('ref-lib-search').value;
   const filtered = referenceLibraryFilteredList(state.referenceLibraryFilter, search);
-  document.getElementById('ref-lib-list').innerHTML = filtered.map(referenceLibraryCardHtml).join('');
-  document.getElementById('ref-lib-empty').style.display = filtered.length ? 'none' : '';
+  const sorted = referenceLibrarySortedList(filtered, state.referenceLibrarySort);
+  document.getElementById('ref-lib-list').innerHTML = referenceLibraryGroupedHtml(sorted);
+  document.getElementById('ref-lib-empty').style.display = sorted.length ? 'none' : '';
   document.getElementById('ref-lib-empty').textContent = state.referenceLibrary.length
     ? 'No references match your filters.'
     : 'No references yet — be the first to add one.';
