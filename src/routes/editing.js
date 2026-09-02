@@ -1,6 +1,6 @@
 const express = require('express');
 const { pool } = require('../db');
-const { EDITING_STATUSES, FINAL_EDIT_FORMATS } = require('../lib/statuses');
+const { FINAL_EDIT_FORMATS } = require('../lib/statuses');
 
 const router = express.Router();
 
@@ -159,20 +159,25 @@ router.post('/concepts/:creativeAssetId/final-edits', async (req, res, next) => 
 
 // The one place a Final Edit's own workspace gets edited -- asset_name,
 // format, variation_text, editor, editor_notes are plain field updates.
-// status/final_edit_link are the two workflow-meaningful ones: changing the
-// link appends a lightweight history entry (see schema.sql's comment on
-// final_edit_history) rather than overwriting silently, and moving into
-// ready_for_approval requires a link to already be set (this save's own
-// link included) and stamps ready_for_approval_at once, on the transition
-// only -- same pattern as Concept Dev's submitted_for_review_at.
+// status is never client-set directly: the only status transition a request
+// may ask for is the terminal 'ready_for_approval' (the "Ready for Approval
+// -> " button); 'to_edit' -> 'editing' is instead DERIVED here the moment
+// real work exists on a still-untouched record -- an editor assigned or a
+// link saved -- so no manual status dropdown needs to exist in the UI (see
+// the simplification brief, item 4). final_edit_link is the other
+// workflow-meaningful field: changing it appends a lightweight history entry
+// (see schema.sql's comment on final_edit_history) rather than overwriting
+// silently, and moving into ready_for_approval requires a link to already be
+// set (this save's own link included) and stamps ready_for_approval_at once,
+// on the transition only -- same pattern as Concept Dev's submitted_for_review_at.
 router.patch('/final-edits/:id', async (req, res, next) => {
   try {
     const { asset_name, format, variation_text, editor, status, final_edit_link, editor_notes } = req.body || {};
     if (format !== undefined && format !== null && !FINAL_EDIT_FORMATS.includes(format)) {
       return res.status(400).json({ error: `format must be one of: ${FINAL_EDIT_FORMATS.join(', ')}` });
     }
-    if (status !== undefined && status !== null && !EDITING_STATUSES.includes(status)) {
-      return res.status(400).json({ error: `status must be one of: ${EDITING_STATUSES.join(', ')}` });
+    if (status !== undefined && status !== null && status !== 'ready_for_approval') {
+      return res.status(400).json({ error: "status can only be set to 'ready_for_approval' -- earlier stages are derived automatically" });
     }
 
     const existingResult = await pool.query('SELECT * FROM final_edits WHERE id = $1', [req.params.id]);
@@ -189,12 +194,18 @@ router.patch('/final-edits/:id', async (req, res, next) => {
     }
     const movingToReady = status === 'ready_for_approval' && existing.status !== 'ready_for_approval';
 
+    const editorProvided = editor !== undefined;
+    const effectiveEditor = editorProvided ? editor : existing.editor;
+    const derivedEditingStatus = !movingToReady && existing.status === 'to_edit' && ((effectiveEditor && effectiveEditor.trim()) || effectiveLink)
+      ? 'editing'
+      : null;
+    const newStatus = movingToReady ? 'ready_for_approval' : derivedEditingStatus;
+
     const historyEntries = linkChanging && trimmedLink
       ? JSON.stringify([{ url: trimmedLink, updated_at: new Date().toISOString(), updated_by: req.user.name }])
       : JSON.stringify([]);
 
     const variationProvided = variation_text !== undefined;
-    const editorProvided = editor !== undefined;
     const notesProvided = editor_notes !== undefined;
 
     const result = await pool.query(
@@ -216,7 +227,7 @@ router.patch('/final-edits/:id', async (req, res, next) => {
         format || null,
         variationProvided, variationProvided ? variation_text : null,
         editorProvided, editorProvided ? editor : null,
-        status || null,
+        newStatus,
         linkProvided, effectiveLink,
         linkChanging,
         historyEntries,
