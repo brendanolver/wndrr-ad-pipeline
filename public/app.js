@@ -5945,9 +5945,18 @@ const EDITING_FILTERS = [
   { value: 'ready_for_approval', label: 'Ready for Approval' },
 ];
 
+// Counts ride on every tab, same convention as Concept Dev/Tuesday Review's
+// filter-tab-count -- Ready for Approval also gets a subtle attention style
+// when it actually has something waiting, since that's the state easiest to
+// miss on a quick scan (see the brief, item 2).
 function renderEditingFilters() {
-  document.getElementById('editing-filters').innerHTML = EDITING_FILTERS.map((f) => `
-    <button type="button" class="filter-tab ${state.editing.filter === f.value ? 'active' : ''}" onclick="setEditingFilter('${f.value}')">${f.label}</button>`).join('');
+  const s = (state.editing.data && state.editing.data.summary) || { final_edits: 0, to_edit: 0, editing: 0, ready_for_approval: 0 };
+  const counts = { all: s.final_edits, to_edit: s.to_edit, editing: s.editing, ready_for_approval: s.ready_for_approval };
+  document.getElementById('editing-filters').innerHTML = EDITING_FILTERS.map((f) => {
+    const attention = f.value === 'ready_for_approval' && counts[f.value] > 0;
+    return `
+    <button type="button" class="filter-tab ${state.editing.filter === f.value ? 'active' : ''} ${attention ? 'filter-tab-attention' : ''}" onclick="setEditingFilter('${f.value}')">${f.label} <span class="filter-tab-count">${counts[f.value]}</span></button>`;
+  }).join('');
 }
 
 function setEditingFilter(filter) {
@@ -5955,14 +5964,17 @@ function setEditingFilter(filter) {
   renderEditingList();
 }
 
-// Compact card-level summary line, per the brief: "3 Concepts · 6 Final
-// Edits · 2 To Edit · 3 Editing · 1 Ready for Approval" -- computed
-// server-side (state.editing.data.summary) so it always matches the whole
-// week regardless of which filter is currently narrowing the list below it.
+// Operational, not exhaustive (see the brief, item 3): leads with the total,
+// then only the statuses that actually have something in them -- a "0
+// Editing" tells nobody anything, and the tabs above already carry the full
+// breakdown including the zeros.
 function renderEditingSummary() {
-  const s = (state.editing.data && state.editing.data.summary) || { concepts: 0, final_edits: 0, to_edit: 0, editing: 0, ready_for_approval: 0 };
-  document.getElementById('editing-summary').textContent =
-    `${s.concepts} Concept${s.concepts === 1 ? '' : 's'} · ${s.final_edits} Final Edit${s.final_edits === 1 ? '' : 's'} · ${s.to_edit} To Edit · ${s.editing} Editing · ${s.ready_for_approval} Ready for Approval`;
+  const s = (state.editing.data && state.editing.data.summary) || { final_edits: 0, to_edit: 0, editing: 0, ready_for_approval: 0 };
+  const parts = [`${s.final_edits} Final Edit${s.final_edits === 1 ? '' : 's'}`];
+  if (s.to_edit > 0) parts.push(`${s.to_edit} To Edit`);
+  if (s.editing > 0) parts.push(`${s.editing} Editing`);
+  if (s.ready_for_approval > 0) parts.push(`${s.ready_for_approval} Ready for Approval`);
+  document.getElementById('editing-summary').textContent = parts.join(' · ');
 }
 
 function editingConceptMetaText(concept) {
@@ -5978,15 +5990,25 @@ function editingFinalEditActionLabel(finalEdit) {
   return 'Add Final Edit &rarr;';
 }
 
+// Whether the actual creative file has landed, independent of who's
+// assigned -- "Final Edit Added" tracks the link, not the editor, since an
+// editor can be assigned before any work is submitted.
+function editingFinalEditStatusLine(finalEdit) {
+  if (!finalEdit.final_edit_link) return 'No final edit added';
+  return finalEdit.editor ? `Final Edit Added · ${finalEdit.editor}` : 'Final Edit Added';
+}
+
 function editingFinalEditRowHtml(finalEdit) {
+  const isReady = finalEdit.status === 'ready_for_approval';
   return `
-    <button type="button" class="editing-asset-row" onclick="openFinalEditModal(${finalEdit.id})">
+    <button type="button" class="editing-asset-row ${isReady ? 'editing-asset-row-ready' : ''}" onclick="openFinalEditModal(${finalEdit.id})">
       <span class="editing-asset-row-main">
         <span class="editing-asset-row-name">${escapeHtml(finalEdit.asset_name)}</span>
         ${finalEdit.variation_text ? `<span class="editing-asset-row-hook">&ldquo;${escapeHtml(finalEdit.variation_text)}&rdquo;</span>` : ''}
+        <span class="editing-asset-row-status">${escapeHtml(editingFinalEditStatusLine(finalEdit))}</span>
       </span>
       <span class="editing-asset-row-action">
-        ${finalEdit.status === 'ready_for_approval' ? '<span class="cd-concept-status-pill editing-status-ready">Ready for Approval</span>' : ''}
+        ${isReady ? '<span class="cd-concept-status-pill editing-status-ready">&check; Ready for Approval</span>' : ''}
         <span class="editing-asset-row-verb">${editingFinalEditActionLabel(finalEdit)}</span>
       </span>
     </button>`;
@@ -6025,7 +6047,7 @@ function renderEditingList() {
       ${concept.final_edits.length ? `
         <div class="cd-field-label" style="margin-top:10px;">Final Edits ${concept.final_edits.length}</div>
         <div class="editing-asset-list">${finalEdits.map(editingFinalEditRowHtml).join('')}</div>
-        <button type="button" class="link-btn" style="margin-top:8px;" onclick="openEditingConcept(${concept.creative_asset_id})">+ Add Another Asset</button>
+        <button type="button" class="link-btn" style="margin-top:8px;" onclick="openEditingConcept(${concept.creative_asset_id})">+ Add Another Final Edit</button>
       ` : `
         <button type="button" class="link-btn" style="margin-top:8px;" onclick="openEditingConcept(${concept.creative_asset_id})">Create Final Edits &rarr;</button>
       `}
@@ -6199,7 +6221,31 @@ function openFinalEditModal(finalEditId) {
   }
   document.getElementById('final-edit-notes').value = finalEdit.editor_notes || '';
 
+  updateFinalEditModalFooter();
   openModal('final-edit-modal');
+}
+
+// Once a Final Edit is Ready for Approval there's nothing left to do here --
+// Final Approval owns the actual review (see the brief, item 4) -- so the
+// footer collapses to just Close and the "Ready for Approval ->" button
+// never reappears. Replacing the link is the one exception: it briefly
+// brings Save/Cancel back so that correction can still be persisted.
+function updateFinalEditModalFooter() {
+  const found = editingFindFinalEdit(state.editing.activeFinalEditId);
+  if (!found) return;
+  const isReady = found.finalEdit.status === 'ready_for_approval';
+  const isEditingLink = document.getElementById('final-edit-link-input-wrap').style.display !== 'none';
+  const showWorkingFooter = !isReady || isEditingLink;
+
+  document.getElementById('final-edit-ready-badge').style.display = isReady ? '' : 'none';
+  document.getElementById('final-edit-delete-btn').style.display = isReady ? 'none' : '';
+  document.getElementById('final-edit-cancel-btn').style.display = showWorkingFooter ? '' : 'none';
+  document.getElementById('final-edit-save-btn').style.display = showWorkingFooter ? '' : 'none';
+  document.getElementById('final-edit-ready-btn').style.display = isReady ? 'none' : '';
+  document.getElementById('final-edit-close-btn').style.display = (isReady && !isEditingLink) ? '' : 'none';
+
+  document.getElementById('final-edit-editor').disabled = isReady;
+  document.getElementById('final-edit-notes').readOnly = isReady;
 }
 
 function showFinalEditLinkInput() {
@@ -6207,6 +6253,7 @@ function showFinalEditLinkInput() {
   document.getElementById('final-edit-link-input-wrap').style.display = '';
   document.getElementById('final-edit-link-input').value = '';
   document.getElementById('final-edit-link-input').focus();
+  updateFinalEditModalFooter();
 }
 
 async function saveFinalEdit(markReadyForApproval = false) {
