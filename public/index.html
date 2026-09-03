@@ -574,7 +574,7 @@
         <div class="modal-body">
           <div id="editing-create-suggestions"></div>
           <div id="editing-create-custom-rows"></div>
-          <button type="button" class="link-btn" onclick="addEditingCustomAssetRow()">+ Add Another Asset</button>
+          <button type="button" class="link-btn" onclick="addEditingCustomAssetRow()">+ Add Another Final Edit</button>
         </div>
         <div class="modal-footer">
           <button class="btn btn-ghost" onclick="closeModal('editing-concept-modal')">Cancel</button>
@@ -598,6 +598,8 @@
           <button class="modal-close" onclick="closeModal('final-edit-modal')">&times;</button>
         </div>
         <div class="modal-body">
+          <div class="editing-ready-badge" id="final-edit-ready-badge" style="display:none;">&check; Ready for Approval</div>
+
           <div id="final-edit-opening-wrap" style="display:none;">
             <div class="cd-field-label">Opening</div>
             <div class="editing-opening-text" id="final-edit-opening-text"></div>
@@ -606,7 +608,7 @@
           <div class="cd-field-label" style="margin-top:10px;">Final Edit</div>
           <div id="final-edit-link-view" style="display:none;">
             <a href="#" id="final-edit-link-open" target="_blank" rel="noopener" class="link-btn">View Final Edit &#8599;</a>
-            <button type="button" class="link-btn" onclick="showFinalEditLinkInput()" style="margin-left:10px;">Replace link</button>
+            <button type="button" class="link-btn" onclick="showFinalEditLinkInput()" style="margin-left:10px;">Replace Edit</button>
           </div>
           <div id="final-edit-link-input-wrap">
             <input type="url" id="final-edit-link-input" placeholder="Paste the final edit link (Drive, Frame.io, etc.)">
@@ -622,9 +624,10 @@
         </div>
         <div class="modal-footer">
           <button type="button" class="link-btn" id="final-edit-delete-btn" onclick="confirmDeleteFinalEdit()" style="margin-right:auto;">Delete</button>
-          <button class="btn btn-ghost" onclick="closeModal('final-edit-modal')">Cancel</button>
-          <button class="btn btn-ghost" onclick="saveFinalEdit()">Save</button>
+          <button class="btn btn-ghost" id="final-edit-cancel-btn" onclick="closeModal('final-edit-modal')">Cancel</button>
+          <button class="btn btn-ghost" id="final-edit-save-btn" onclick="saveFinalEdit()">Save</button>
           <button class="btn btn-primary" id="final-edit-ready-btn" onclick="saveFinalEdit(true)">Ready for Approval &rarr;</button>
+          <button class="btn btn-ghost" id="final-edit-close-btn" onclick="closeModal('final-edit-modal')" style="display:none;">Close</button>
         </div>
       </div>
     </div>
