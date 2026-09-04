@@ -596,11 +596,15 @@
 
     <!-- A single Hook/Final Edit's own workspace -- deliberately just what's
          needed to do the work: the actual hook it's cutting (read-only,
-         already known), the one Final Edit link, who's editing it, optional
-         notes. No Format/Variation/Status fields, and no per-asset Ready for
-         Approval -- that's a Concept-level action now (item 6/5). -->
+         already known), the one Final Edit link (the primary field -- this
+         modal exists to attach it), who's editing it (inherited from the
+         Concept when known, never re-asked), optional notes. No
+         Format/Variation/Status fields, no per-asset Ready for Approval
+         (that's a Concept-level action -- item 6), and no Delete (management
+         of an existing Final Edit lives in the parent checklist's "..."
+         menu -- item 5). -->
     <div id="final-edit-modal" class="modal-backdrop">
-      <div class="modal" style="max-width:460px;">
+      <div class="modal" style="max-width:440px;">
         <div class="modal-header">
           <div>
             <h3 id="final-edit-modal-title"></h3>
@@ -611,30 +615,31 @@
         <div class="modal-body">
           <div class="editing-ready-badge" id="final-edit-ready-badge" style="display:none;">&check; Concept Submitted for Approval</div>
 
-          <div id="final-edit-opening-wrap" style="display:none;">
-            <div class="cd-field-label">Opening</div>
+          <div class="final-edit-field" id="final-edit-opening-wrap" style="display:none;">
+            <div class="final-edit-field-label">Opening</div>
             <div class="editing-opening-text" id="final-edit-opening-text"></div>
           </div>
 
-          <div class="cd-field-label" style="margin-top:10px;">Final Edit</div>
-          <div id="final-edit-link-view" style="display:none;">
-            <a href="#" id="final-edit-link-open" target="_blank" rel="noopener" class="link-btn">View Final Edit &#8599;</a>
-            <button type="button" class="link-btn" id="final-edit-replace-btn" onclick="showFinalEditLinkInput()" style="margin-left:10px;">Replace Edit</button>
-          </div>
-          <div id="final-edit-link-input-wrap">
-            <input type="url" id="final-edit-link-input" placeholder="Paste the final edit link (Drive, Frame.io, etc.)">
+          <div class="final-edit-field final-edit-field-primary">
+            <div class="final-edit-field-label">Final Edit</div>
+            <input type="url" id="final-edit-link-input" placeholder="Paste final edit link...">
           </div>
 
-          <label style="margin-top:10px;">Editor
+          <div class="final-edit-field">
+            <div class="final-edit-field-label">Editor</div>
+            <div class="final-edit-editor-locked" id="final-edit-editor-locked" style="display:none;">
+              <span id="final-edit-editor-locked-name"></span>
+              <button type="button" class="link-btn" onclick="showFinalEditEditorSelect()">Change</button>
+            </div>
             <select id="final-edit-editor"></select>
-          </label>
+          </div>
 
-          <label style="margin-top:10px;">Editor Notes <span class="hint">(optional)</span>
-            <textarea id="final-edit-notes" rows="2"></textarea>
-          </label>
+          <div class="final-edit-field">
+            <div class="final-edit-field-label">Notes <span class="hint">(optional)</span></div>
+            <textarea id="final-edit-notes" rows="1" placeholder="Add a note..."></textarea>
+          </div>
         </div>
         <div class="modal-footer">
-          <button type="button" class="link-btn link-btn-subtle-danger" id="final-edit-delete-btn" onclick="confirmDeleteFinalEdit()" style="margin-right:auto;">Delete</button>
           <button class="btn btn-ghost" id="final-edit-cancel-btn" onclick="closeModal('final-edit-modal')">Cancel</button>
           <button class="btn btn-ghost" id="final-edit-save-btn" onclick="saveFinalEdit()">Save Final Edit</button>
           <button class="btn btn-ghost" id="final-edit-close-btn" onclick="closeModal('final-edit-modal')" style="display:none;">Close</button>

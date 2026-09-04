@@ -6320,27 +6320,33 @@ function openFinalEditModal(finalEditId) {
   document.getElementById('final-edit-modal-subtitle').textContent = `${concept.product_name || '—'} · ${concept.concept_name}`;
 
   // The actual hook text it's cutting, read-only -- already known, never
-  // re-asked (item 5).
+  // re-asked (item 1), shown as plain quoted text rather than an
+  // input-styled box.
   const openingWrap = document.getElementById('final-edit-opening-wrap');
   if (finalEdit.variation_text) {
     openingWrap.style.display = '';
-    document.getElementById('final-edit-opening-text').textContent = finalEdit.variation_text;
+    document.getElementById('final-edit-opening-text').textContent = `“${finalEdit.variation_text}”`;
   } else {
     openingWrap.style.display = 'none';
   }
 
-  populateFinalEditEditorSelect();
-  document.getElementById('final-edit-editor').value = finalEdit.editor || '';
+  // Final Edit is a single always-editable field now -- Replace/View live in
+  // the parent checklist row's "..." menu, so there's no separate view/input
+  // toggle to manage here (item 2).
+  document.getElementById('final-edit-link-input').value = finalEdit.final_edit_link || '';
 
-  if (finalEdit.final_edit_link) {
-    document.getElementById('final-edit-link-view').style.display = '';
-    document.getElementById('final-edit-link-input-wrap').style.display = 'none';
-    document.getElementById('final-edit-link-open').href = finalEdit.final_edit_link;
-  } else {
-    document.getElementById('final-edit-link-view').style.display = 'none';
-    document.getElementById('final-edit-link-input-wrap').style.display = '';
-    document.getElementById('final-edit-link-input').value = '';
-  }
+  // Inherit the Concept's Editor when one is already known (this Final
+  // Edit's own, or the single unambiguous editor across the Concept's other
+  // Final Edits) rather than re-asking every time -- shown locked with a
+  // "Change" toggle to reassign (item 3).
+  populateFinalEditEditorSelect();
+  const effectiveEditor = finalEdit.editor || editingConceptEditorLabel(concept);
+  document.getElementById('final-edit-editor').value = effectiveEditor || '';
+  const locked = !!effectiveEditor;
+  document.getElementById('final-edit-editor-locked-name').textContent = effectiveEditor || '';
+  document.getElementById('final-edit-editor-locked').style.display = locked ? '' : 'none';
+  document.getElementById('final-edit-editor').style.display = locked ? 'none' : '';
+
   document.getElementById('final-edit-notes').value = finalEdit.editor_notes || '';
 
   updateFinalEditModalFooter();
@@ -6356,21 +6362,23 @@ function updateFinalEditModalFooter() {
   const submitted = !!found.concept.editing_submitted_at;
 
   document.getElementById('final-edit-ready-badge').style.display = submitted ? '' : 'none';
-  document.getElementById('final-edit-delete-btn').style.display = submitted ? 'none' : '';
   document.getElementById('final-edit-cancel-btn').style.display = submitted ? 'none' : '';
   document.getElementById('final-edit-save-btn').style.display = submitted ? 'none' : '';
   document.getElementById('final-edit-close-btn').style.display = submitted ? '' : 'none';
-  document.getElementById('final-edit-replace-btn').style.display = submitted ? 'none' : '';
 
+  document.getElementById('final-edit-link-input').disabled = submitted;
   document.getElementById('final-edit-editor').disabled = submitted;
   document.getElementById('final-edit-notes').readOnly = submitted;
+  document.querySelector('#final-edit-editor-locked .link-btn').style.display = submitted ? 'none' : '';
 }
 
-function showFinalEditLinkInput() {
-  document.getElementById('final-edit-link-view').style.display = 'none';
-  document.getElementById('final-edit-link-input-wrap').style.display = '';
-  document.getElementById('final-edit-link-input').value = '';
-  document.getElementById('final-edit-link-input').focus();
+// Reveals the Editor <select> in place of the locked "[Name] Change" view,
+// for the rare case the inherited/known editor needs reassigning (item 3).
+function showFinalEditEditorSelect() {
+  document.getElementById('final-edit-editor-locked').style.display = 'none';
+  const sel = document.getElementById('final-edit-editor');
+  sel.style.display = '';
+  sel.focus();
 }
 
 // After saving, return to the Concept workspace (not the landing page) so
@@ -6381,14 +6389,12 @@ async function saveFinalEdit() {
   const found = editingFindFinalEdit(state.editing.activeFinalEditId);
   if (!found) return;
   const conceptAssetId = found.concept.creative_asset_id;
-  const linkInputVisible = document.getElementById('final-edit-link-input-wrap').style.display !== 'none';
-  const linkValue = linkInputVisible ? document.getElementById('final-edit-link-input').value.trim() : undefined;
 
   const payload = {
+    final_edit_link: document.getElementById('final-edit-link-input').value.trim(),
     editor: document.getElementById('final-edit-editor').value || null,
     editor_notes: document.getElementById('final-edit-notes').value.trim(),
   };
-  if (linkValue !== undefined) payload.final_edit_link = linkValue;
 
   try {
     await api(`/editing/final-edits/${state.editing.activeFinalEditId}`, { method: 'PATCH', body: JSON.stringify(payload) });
@@ -6401,10 +6407,10 @@ async function saveFinalEdit() {
   }
 }
 
-// Shared by the final-edit-modal's own Delete button and the checklist
-// row's "•••" menu (item 4) -- the only difference is whether the
-// single-edit modal needs closing first.
-async function deleteFinalEditFlow(finalEditId, { fromFinalEditModal }) {
+// Deleting a Final Edit is now exclusively a checklist row "•••" menu
+// action (item 5) -- the Add Final Edit modal never shows Delete, since a
+// brand-new Hook with no Final Edit yet has nothing to delete.
+async function deleteFinalEditFlow(finalEditId) {
   const found = editingFindFinalEdit(finalEditId);
   if (!found) return;
   const conceptAssetId = found.concept.creative_asset_id;
@@ -6414,20 +6420,15 @@ async function deleteFinalEditFlow(finalEditId, { fromFinalEditModal }) {
     await api(`/editing/final-edits/${finalEditId}`, { method: 'DELETE' });
     toast('Final Edit deleted');
     await loadEditingWeek();
-    if (fromFinalEditModal) closeModal('final-edit-modal');
     openEditingConcept(conceptAssetId);
   } catch (e) {
     toast(e.message, true);
   }
 }
 
-async function confirmDeleteFinalEdit() {
-  await deleteFinalEditFlow(state.editing.activeFinalEditId, { fromFinalEditModal: true });
-}
-
 async function deleteFinalEditFromMenu(finalEditId) {
   closeAllEditingReqMenus();
-  await deleteFinalEditFlow(finalEditId, { fromFinalEditModal: false });
+  await deleteFinalEditFlow(finalEditId);
 }
 
 // The important workflow change (item 6): Ready for Approval submits the
