@@ -993,3 +993,11 @@ CREATE TABLE IF NOT EXISTS final_edits (
 );
 CREATE INDEX IF NOT EXISTS idx_final_edits_creative_asset_id ON final_edits(creative_asset_id);
 CREATE INDEX IF NOT EXISTS idx_final_edits_status ON final_edits(status);
+
+-- Editing workflow revision: Ready for Approval is now a Concept-level
+-- action (submit once every required Final Edit is complete) rather than a
+-- per-Final-Edit one -- final_edits.status above still derives to_edit/
+-- editing per row, it just never reaches 'ready_for_approval' anymore. See
+-- src/routes/editing.js's ready-for-approval endpoint.
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS editing_submitted_at TIMESTAMPTZ;
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS editing_submitted_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;

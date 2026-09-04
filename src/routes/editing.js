@@ -22,12 +22,15 @@ function dateStr(d) {
 // context comes straight from the same shoot_plan_items join Shooting
 // already uses, so nothing here is re-entered. hook_variations rides along
 // so the "Create Final Edits" flow can suggest Primary/Alternative Hook
-// assets without a second round trip.
+// assets without a second round trip. editing_submitted_at is the Concept's
+// own Ready for Approval flag (see the workflow-revision brief) -- the
+// client derives everything else (required/complete counts, editing_status)
+// from this plus final_edits, so nothing else needs to ride along here.
 const CONCEPT_SELECT = `
   SELECT
     ss.id AS shoot_schedule_id, ss.scheduled_week_start, ss.shot_at,
     ca.id AS creative_asset_id, ca.concept_name, ca.format AS concept_format,
-    ca.hook_variations, ca.location,
+    ca.hook_variations, ca.location, ca.editing_submitted_at,
     spi.product_name, spi.image_url, spi.creator AS owner
   FROM shoot_schedule ss
   JOIN creative_assets ca ON ca.id = ss.creative_asset_id
@@ -36,12 +39,36 @@ const CONCEPT_SELECT = `
   ORDER BY ca.concept_name ASC
 `;
 
+// Same Hook-Variation-to-Final-Edit matching the client uses (see app.js's
+// editingConceptRequirements) -- required to independently validate a
+// Ready for Approval submission server-side rather than trusting the
+// client's own completion count.
+function conceptCompletion(hookVariations, finalEdits) {
+  const hookTexts = (Array.isArray(hookVariations) ? hookVariations : [])
+    .filter((h) => h && h.text && h.text.trim())
+    .map((h) => h.text.trim());
+  const used = new Set();
+  let complete = 0;
+  for (const text of hookTexts) {
+    const match = finalEdits.find((fe) => !used.has(fe.id) && (fe.variation_text || '').trim() === text);
+    if (match) {
+      used.add(match.id);
+      if (match.final_edit_link) complete += 1;
+    }
+  }
+  const customEdits = finalEdits.filter((fe) => !used.has(fe.id));
+  complete += customEdits.filter((fe) => fe.final_edit_link).length;
+  return { required: hookTexts.length + customEdits.length, complete };
+}
+
 // Editing's landing page: every Shot Concept for the week, each with its
-// Final Edits nested underneath (see the brief: "Group by Concept" --
-// Product -> Concept -> Final Edit, never one flat list). The summary
-// counts are computed here rather than client-side so the header line
-// always matches exactly what the week actually contains, filter or no
-// filter.
+// Final Edits nested underneath -- the Concept is the workflow unit now
+// (see the workflow-revision brief), so no summary counts are computed here.
+// The client derives every completion fraction, status, and aggregate
+// (landing card, filters, summary line) from hook_variations + final_edits +
+// editing_submitted_at via one shared function (editingConceptRequirements
+// in app.js), so there's a single source of truth instead of a server copy
+// that could drift from it.
 router.get('/', async (req, res, next) => {
   try {
     const weekStart = req.query.week_start;
@@ -70,48 +97,35 @@ router.get('/', async (req, res, next) => {
       editsByConcept.get(row.creative_asset_id).push(row);
     }
 
-    let toEdit = 0;
-    let editing = 0;
-    let readyForApproval = 0;
-    let totalEdits = 0;
-    const shaped = concepts.map((c) => {
-      const finalEdits = editsByConcept.get(c.creative_asset_id) || [];
-      for (const fe of finalEdits) {
-        totalEdits += 1;
-        if (fe.status === 'to_edit') toEdit += 1;
-        else if (fe.status === 'editing') editing += 1;
-        else if (fe.status === 'ready_for_approval') readyForApproval += 1;
-      }
-      return {
-        shoot_schedule_id: c.shoot_schedule_id,
-        creative_asset_id: c.creative_asset_id,
-        concept_name: c.concept_name,
-        concept_format: c.concept_format,
-        hook_variations: c.hook_variations,
-        location: c.location,
-        product_name: c.product_name,
-        image_url: c.image_url,
-        owner: c.owner,
-        shot_at: c.shot_at,
-        final_edits: finalEdits,
-      };
-    });
+    const shaped = concepts.map((c) => ({
+      shoot_schedule_id: c.shoot_schedule_id,
+      creative_asset_id: c.creative_asset_id,
+      concept_name: c.concept_name,
+      concept_format: c.concept_format,
+      hook_variations: c.hook_variations,
+      location: c.location,
+      product_name: c.product_name,
+      image_url: c.image_url,
+      owner: c.owner,
+      shot_at: c.shot_at,
+      editing_submitted_at: c.editing_submitted_at,
+      final_edits: editsByConcept.get(c.creative_asset_id) || [],
+    }));
 
-    res.json({
-      week_start: dateStr(resolvedWeekStart),
-      summary: { concepts: shaped.length, final_edits: totalEdits, to_edit: toEdit, editing, ready_for_approval: readyForApproval },
-      concepts: shaped,
-    });
+    res.json({ week_start: dateStr(resolvedWeekStart), concepts: shaped });
   } catch (err) {
     next(err);
   }
 });
 
-// Bulk-create Final Edits for one Concept -- the "Create Final Edits" flow
-// (checked Hook suggestions + any "+ Add Another Asset" rows, all created
-// together in one transaction). Never auto-creates from hook_variations on
-// its own; the editor must explicitly confirm what was actually filmed by
-// what they submit here (see the brief, item 5).
+// Bulk-create Final Edits for one Concept -- covers both the multi-select
+// "Create Final Edits" gesture and a single Hook checklist row's "Add Final
+// Edit" (a one-item array). Never auto-creates from hook_variations on its
+// own; the editor must explicitly confirm what was actually filmed by what
+// they submit here (see the brief, item 5). Locked once the Concept has
+// already been submitted for approval -- adding a Final Edit afterward
+// would silently change what "required" meant for a submission that's
+// already gone to Final Approval.
 router.post('/concepts/:creativeAssetId/final-edits', async (req, res, next) => {
   const client = await pool.connect();
   try {
@@ -131,10 +145,14 @@ router.post('/concepts/:creativeAssetId/final-edits', async (req, res, next) => 
       }
     }
 
-    const conceptResult = await client.query('SELECT id FROM creative_assets WHERE id = $1', [req.params.creativeAssetId]);
+    const conceptResult = await client.query('SELECT id, editing_submitted_at FROM creative_assets WHERE id = $1', [req.params.creativeAssetId]);
     if (!conceptResult.rows.length) {
       client.release();
       return res.status(404).json({ error: 'Concept not found' });
+    }
+    if (conceptResult.rows[0].editing_submitted_at) {
+      client.release();
+      return res.status(400).json({ error: 'Concept already submitted for approval' });
     }
 
     await client.query('BEGIN');
@@ -159,47 +177,46 @@ router.post('/concepts/:creativeAssetId/final-edits', async (req, res, next) => 
 
 // The one place a Final Edit's own workspace gets edited -- asset_name,
 // format, variation_text, editor, editor_notes are plain field updates.
-// status is never client-set directly: the only status transition a request
-// may ask for is the terminal 'ready_for_approval' (the "Ready for Approval
-// -> " button); 'to_edit' -> 'editing' is instead DERIVED here the moment
-// real work exists on a still-untouched record -- an editor assigned or a
-// link saved -- so no manual status dropdown needs to exist in the UI (see
-// the simplification brief, item 4). final_edit_link is the other
-// workflow-meaningful field: changing it appends a lightweight history entry
-// (see schema.sql's comment on final_edit_history) rather than overwriting
-// silently, and moving into ready_for_approval requires a link to already be
-// set (this save's own link included) and stamps ready_for_approval_at once,
-// on the transition only -- same pattern as Concept Dev's submitted_for_review_at.
+// status is never client-set at all anymore: Ready for Approval is now a
+// Concept-level action (see POST .../ready-for-approval below), so this
+// route only ever derives 'to_edit' -> 'editing' the moment real work
+// exists on a still-untouched record -- an editor assigned or a link saved.
+// final_edit_link changing appends a lightweight history entry (see
+// schema.sql's comment on final_edit_history) rather than overwriting
+// silently. Locked entirely once the parent Concept has been submitted for
+// approval -- see the workflow-revision brief, item 6/11.
 router.patch('/final-edits/:id', async (req, res, next) => {
   try {
     const { asset_name, format, variation_text, editor, status, final_edit_link, editor_notes } = req.body || {};
     if (format !== undefined && format !== null && !FINAL_EDIT_FORMATS.includes(format)) {
       return res.status(400).json({ error: `format must be one of: ${FINAL_EDIT_FORMATS.join(', ')}` });
     }
-    if (status !== undefined && status !== null && status !== 'ready_for_approval') {
-      return res.status(400).json({ error: "status can only be set to 'ready_for_approval' -- earlier stages are derived automatically" });
+    if (status !== undefined && status !== null) {
+      return res.status(400).json({ error: 'status is derived automatically and cannot be set directly' });
     }
 
-    const existingResult = await pool.query('SELECT * FROM final_edits WHERE id = $1', [req.params.id]);
+    const existingResult = await pool.query(
+      `SELECT fe.*, ca.editing_submitted_at FROM final_edits fe
+       JOIN creative_assets ca ON ca.id = fe.creative_asset_id
+       WHERE fe.id = $1`,
+      [req.params.id]
+    );
     if (!existingResult.rows.length) return res.status(404).json({ error: 'Final edit not found' });
     const existing = existingResult.rows[0];
+    if (existing.editing_submitted_at) {
+      return res.status(400).json({ error: 'Concept already submitted for approval -- changes are locked' });
+    }
 
     const linkProvided = final_edit_link !== undefined;
     const trimmedLink = linkProvided ? (final_edit_link && final_edit_link.trim() ? final_edit_link.trim() : null) : null;
     const linkChanging = linkProvided && trimmedLink !== existing.final_edit_link;
     const effectiveLink = linkProvided ? trimmedLink : existing.final_edit_link;
 
-    if (status === 'ready_for_approval' && !effectiveLink) {
-      return res.status(400).json({ error: 'Add a Final Edit link before sending for approval' });
-    }
-    const movingToReady = status === 'ready_for_approval' && existing.status !== 'ready_for_approval';
-
     const editorProvided = editor !== undefined;
     const effectiveEditor = editorProvided ? editor : existing.editor;
-    const derivedEditingStatus = !movingToReady && existing.status === 'to_edit' && ((effectiveEditor && effectiveEditor.trim()) || effectiveLink)
+    const newStatus = existing.status === 'to_edit' && ((effectiveEditor && effectiveEditor.trim()) || effectiveLink)
       ? 'editing'
       : null;
-    const newStatus = movingToReady ? 'ready_for_approval' : derivedEditingStatus;
 
     const historyEntries = linkChanging && trimmedLink
       ? JSON.stringify([{ url: trimmedLink, updated_at: new Date().toISOString(), updated_by: req.user.name }])
@@ -219,9 +236,8 @@ router.patch('/final-edits/:id', async (req, res, next) => {
          final_edit_updated_at = CASE WHEN $10 THEN now() ELSE final_edit_updated_at END,
          final_edit_history = final_edit_history || $11::jsonb,
          editor_notes = CASE WHEN $12 THEN $13 ELSE editor_notes END,
-         ready_for_approval_at = CASE WHEN $14 THEN now() ELSE ready_for_approval_at END,
          updated_at = now()
-       WHERE id = $15 RETURNING *`,
+       WHERE id = $14 RETURNING *`,
       [
         asset_name && asset_name.trim() ? asset_name.trim() : null,
         format || null,
@@ -232,7 +248,6 @@ router.patch('/final-edits/:id', async (req, res, next) => {
         linkChanging,
         historyEntries,
         notesProvided, notesProvided ? editor_notes : null,
-        movingToReady,
         req.params.id,
       ]
     );
@@ -242,11 +257,53 @@ router.patch('/final-edits/:id', async (req, res, next) => {
   }
 });
 
+// Concept-level submission to Final Approval -- the important workflow
+// change (see the brief, item 6/11): the Concept and its complete set of
+// Final Edits move together as one unit, not one Final Edit at a time.
+// Requires every Hook Variation to have a matching, linked Final Edit (plus
+// any custom/manual ones added) -- re-validated here rather than trusting
+// the client's own completion count. Idempotent: re-calling once already
+// submitted just returns the existing state rather than erroring.
+router.post('/concepts/:creativeAssetId/ready-for-approval', async (req, res, next) => {
+  try {
+    const conceptResult = await pool.query('SELECT * FROM creative_assets WHERE id = $1', [req.params.creativeAssetId]);
+    if (!conceptResult.rows.length) return res.status(404).json({ error: 'Concept not found' });
+    const concept = conceptResult.rows[0];
+    if (concept.editing_submitted_at) return res.json(concept);
+
+    const editsResult = await pool.query('SELECT * FROM final_edits WHERE creative_asset_id = $1', [req.params.creativeAssetId]);
+    const { required, complete } = conceptCompletion(concept.hook_variations, editsResult.rows);
+    if (required === 0 || complete < required) {
+      return res.status(400).json({ error: 'Complete all Final Edits before sending for approval' });
+    }
+
+    const result = await pool.query(
+      `UPDATE creative_assets SET editing_submitted_at = now(), editing_submitted_by_user_id = $1, updated_at = now()
+       WHERE id = $2 RETURNING *`,
+      [req.user.id, req.params.creativeAssetId]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Corrects an accidentally-created Final Edit (e.g. the wrong hook
 // suggestion checked) -- not a "discard this ad" action once real work has
-// started, just cleanup for a mistake made seconds ago.
+// started, just cleanup for a mistake made seconds ago. Locked once the
+// Concept has been submitted, same as the PATCH route above.
 router.delete('/final-edits/:id', async (req, res, next) => {
   try {
+    const existingResult = await pool.query(
+      `SELECT fe.id, ca.editing_submitted_at FROM final_edits fe
+       JOIN creative_assets ca ON ca.id = fe.creative_asset_id
+       WHERE fe.id = $1`,
+      [req.params.id]
+    );
+    if (!existingResult.rows.length) return res.status(404).json({ error: 'Final edit not found' });
+    if (existingResult.rows[0].editing_submitted_at) {
+      return res.status(400).json({ error: 'Concept already submitted for approval -- changes are locked' });
+    }
     const result = await pool.query('DELETE FROM final_edits WHERE id = $1 RETURNING id', [req.params.id]);
     if (!result.rows.length) return res.status(404).json({ error: 'Final edit not found' });
     res.status(204).end();

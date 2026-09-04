@@ -1096,46 +1096,42 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .ct-card-actions{display:flex;gap:8px;margin-top:9px;}
 .ct-card-actions .btn{text-decoration:none;}
 
-/* Editing -- operational, not strategic (see the brief): plain bordered
-   cards grouped by Concept, Final Edits inline on the card itself (no
-   intermediate "Open Editing" hop), state-aware action wording instead of a
-   status word alone, no giant forms or KPI tiles. */
-.editing-concept-card{background:white;border:1px solid var(--border);border-radius:var(--r-lg);padding:12px 14px;margin-bottom:10px;}
+/* Editing -- the Concept is the workflow unit (see the workflow-revision
+   brief): one compact card per Concept on the landing page, styled after
+   the Upcoming Drops cards for visual consistency (item 1); a completion
+   checklist -- not a form -- inside its workspace. No giant forms or KPI
+   tiles anywhere. */
+.editing-concept-card{background:white;border:1px solid var(--border);border-left:3px solid transparent;border-radius:var(--r-lg);padding:12px 14px;margin-bottom:10px;box-shadow:var(--shadow-xs);}
 .editing-concept-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}
-.editing-concept-card-head .link-btn{flex-shrink:0;white-space:nowrap;}
 .editing-concept-product{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);}
 .editing-concept-name{font-weight:700;font-size:13.5px;margin-top:1px;}
-.editing-asset-list{display:flex;flex-direction:column;gap:6px;margin-top:8px;}
-/* Slightly more room than a plain table row (item 1) -- still a compact
-   stacked row, just enough to read as a creative output rather than a
-   database record. border-left stays transparent here so the Ready variant
-   below can colour it in without shifting layout. */
-.editing-asset-row{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;text-align:left;background:var(--surface2);border:1px solid var(--border);border-left:3px solid transparent;border-radius:var(--r);padding:10px 12px;font-family:inherit;cursor:pointer;}
-.editing-asset-row:hover{border-color:var(--teal);}
-.editing-asset-row-main{display:flex;flex-direction:column;gap:3px;min-width:0;}
-.editing-asset-row-name{font-size:12.5px;font-weight:600;}
-.editing-asset-row-hook,.editing-suggestion-hook{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:11.5px;font-style:italic;color:var(--text-muted);}
-.editing-asset-row-status{font-size:11px;color:var(--text-muted);}
-.editing-asset-row-action{display:flex;align-items:center;gap:8px;flex-shrink:0;}
-.editing-asset-row-verb{font-size:12px;font-weight:600;color:var(--teal-dark);white-space:nowrap;}
+.editing-concept-progress{font-size:12.5px;font-weight:600;color:var(--text-secondary);margin-top:8px;}
+.editing-concept-progress-ready{color:var(--green);}
+/* Ready for Approval gets a subtle left-border tint, not a bright green
+   card (item 7) -- so a scan of the landing page singles out "finished,
+   waiting for review" without shouting. */
+.editing-concept-card-ready{border-left-color:var(--green);}
 .editing-status-to-edit{background:var(--amber-light);color:var(--amber);}
 .editing-status-editing{background:var(--blue-light);color:var(--blue);}
 .editing-status-ready{background:var(--green-light);color:var(--green);}
-/* Ready for Approval rows get a subtle left-border tint, not a big green
-   card (item 2) -- so a scan of the list singles out "finished, waiting for
-   review" without shouting. The plain :hover rule sets all four border
-   sides, so this comes after it in source order to keep the left edge green
-   on hover too. */
-.editing-asset-row-ready{border-left-color:var(--green);}
-.editing-asset-row-ready:hover{border-left-color:var(--green);}
 .editing-ready-badge{font-size:11px;font-weight:700;letter-spacing:0.3px;color:var(--green);margin-bottom:10px;}
 #final-edit-editor:disabled,#final-edit-notes:read-only{background:var(--surface2);color:var(--text-secondary);}
-/* .modal-body label{flex-direction:column} would otherwise stack the
-   checkbox above the text -- these rows aren't a plain form label. */
-.modal-body .editing-suggestion-row{flex-direction:row;align-items:flex-start;gap:8px;font-size:12.5px;padding:6px 0;text-align:left;}
-.editing-suggestion-row input[type="checkbox"]{margin-top:2px;flex-shrink:0;}
-.editing-suggestion-text{display:flex;flex-direction:column;gap:2px;}
-.editing-suggestion-label{font-weight:600;}
+
+/* The Concept workspace's Final Edits checklist (item 3/4) -- a checkbox
+   that reflects whether a Final Edit is attached, never one the user ticks
+   by hand. Slightly roomier than a plain table row so each entry reads as a
+   creative output, not a database record (item 1). */
+.editing-req-list{display:flex;flex-direction:column;gap:6px;margin-top:8px;}
+.editing-req-row{display:flex;align-items:flex-start;gap:10px;width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--r);padding:10px 12px;}
+.editing-req-row-complete{border-color:var(--green-light);}
+.editing-req-check{font-size:15px;line-height:1;color:var(--text-muted);flex-shrink:0;margin-top:1px;}
+.editing-req-row-complete .editing-req-check{color:var(--green);}
+.editing-req-main{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1;}
+.editing-req-label{font-size:12.5px;font-weight:600;}
+.editing-req-hook{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:11.5px;font-style:italic;color:var(--text-muted);}
+.editing-req-action{display:flex;align-items:center;gap:0;flex-shrink:0;white-space:nowrap;padding-top:1px;}
+.editing-completion-line{font-size:12.5px;font-weight:600;margin-top:12px;}
+
 .editing-custom-row{display:flex;align-items:center;gap:8px;margin-top:6px;}
 .editing-custom-row-input{flex:1;font-family:inherit;font-size:12.5px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--r);}
 .editing-custom-row-format{font-family:inherit;font-size:12.5px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--r);}
