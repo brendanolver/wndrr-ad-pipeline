@@ -6116,12 +6116,27 @@ function openEditingConceptBrief() {
   openShootingBrief(concept.shoot_schedule_id);
 }
 
+// One obvious primary action per row (item 4): a complete row's only
+// permanent action is View Final Edit -> ; Replace/Delete move into a
+// "•••" overflow menu (same pattern as Reference Library's card menu)
+// instead of sitting permanently beside it. An incomplete row keeps its
+// single Add Final Edit -> action, unchanged.
 function editingRequirementRowHtml(req, index, submitted) {
   const complete = !!(req.finalEdit && req.finalEdit.final_edit_link);
   let action = '';
   if (complete) {
-    action = `<a href="${escapeHtml(req.finalEdit.final_edit_link)}" target="_blank" rel="noopener" class="link-btn">View Final Edit &#8599;</a>`;
-    if (!submitted) action += `<button type="button" class="link-btn" onclick="openFinalEditModal(${req.finalEdit.id})" style="margin-left:8px;">Replace Edit</button>`;
+    const feId = req.finalEdit.id;
+    action = `<a href="${escapeHtml(req.finalEdit.final_edit_link)}" target="_blank" rel="noopener" class="link-btn">View Final Edit &rarr;</a>`;
+    if (!submitted) {
+      action += `
+        <div class="editing-req-menu" onclick="event.stopPropagation()">
+          <button type="button" class="editing-req-menu-btn" onclick="toggleEditingReqMenu(${feId}, event)" aria-label="More actions">&bull;&bull;&bull;</button>
+          <div class="editing-req-menu-dropdown" id="editing-req-menu-${feId}">
+            <button type="button" class="editing-req-menu-item" onclick="closeAllEditingReqMenus();openFinalEditModal(${feId})">Replace Final Edit</button>
+            <button type="button" class="editing-req-menu-item editing-req-menu-item-danger" onclick="deleteFinalEditFromMenu(${feId})">Delete Final Edit</button>
+          </div>
+        </div>`;
+    }
   } else if (!submitted) {
     action = `<button type="button" class="link-btn" onclick="editingAddRequirement(${index})">Add Final Edit &rarr;</button>`;
   }
@@ -6136,6 +6151,22 @@ function editingRequirementRowHtml(req, index, submitted) {
     </div>`;
 }
 
+function closeAllEditingReqMenus() {
+  document.querySelectorAll('.editing-req-menu-dropdown.show').forEach((el) => el.classList.remove('show'));
+}
+
+function toggleEditingReqMenu(id, event) {
+  event.stopPropagation();
+  const dropdown = document.getElementById(`editing-req-menu-${id}`);
+  const isOpen = dropdown.classList.contains('show');
+  closeAllEditingReqMenus();
+  if (!isOpen) dropdown.classList.add('show');
+}
+
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.editing-req-menu')) closeAllEditingReqMenus();
+});
+
 function renderEditingConceptModal() {
   const concept = editingFindConcept(state.editing.activeConceptAssetId);
   if (!concept) return;
@@ -6143,17 +6174,29 @@ function renderEditingConceptModal() {
   state.editing.activeRequirements = requirements;
   const submitted = !!concept.editing_submitted_at;
   const allComplete = required > 0 && complete === required;
+  const status = editingConceptStatus(concept);
+  const isReady = status === 'ready_for_approval';
 
   document.getElementById('editing-concept-modal-title').textContent = concept.concept_name;
   document.getElementById('editing-concept-modal-subtitle').textContent = concept.product_name || '';
-  document.getElementById('editing-concept-ready-badge').style.display = submitted ? '' : 'none';
+  // A small status badge in the header (item 1) doubles as the "Ready for
+  // Approval" indicator once submitted -- one status readout instead of a
+  // separate fixed badge element.
+  const statusPill = document.getElementById('editing-concept-modal-status-pill');
+  statusPill.className = `cd-concept-status-pill ${EDITING_STATUS_CLASS[status]}`;
+  statusPill.innerHTML = `${isReady ? '&check; ' : ''}${EDITING_STATUS_LABELS[status]}`;
 
   // The section heading itself carries the completion count now (item 2)
-  // -- this is the Concept's primary progress indicator, so it isn't
-  // repeated again further down (item 4).
+  // -- this is the Concept's primary progress indicator, plus a short/
+  // subtle bar beneath it (never a large one) -- so it isn't repeated
+  // again further down (item 4).
   const countBadge = document.getElementById('editing-req-heading-count');
-  countBadge.textContent = `${complete}/${required} COMPLETE`;
+  countBadge.textContent = `${complete} OF ${required} COMPLETE`;
   countBadge.classList.toggle('editing-req-heading-count-done', allComplete);
+  const pct = required > 0 ? Math.round((complete / required) * 100) : 0;
+  const progressFill = document.getElementById('editing-req-progress-fill');
+  progressFill.style.width = `${pct}%`;
+  progressFill.classList.toggle('ready', allComplete);
 
   document.getElementById('editing-concept-requirements').innerHTML =
     requirements.map((r, i) => editingRequirementRowHtml(r, i, submitted)).join('');
@@ -6162,21 +6205,22 @@ function renderEditingConceptModal() {
   if (submitted) document.getElementById('editing-create-custom-rows').innerHTML = '';
   else renderEditingCustomAssetRows();
 
-  // One short helper near the CTA (item 4/5): what's missing while
-  // incomplete, a small positive confirmation once everything's done --
-  // never both messages, and never repeating the count from the heading.
-  const helper = document.getElementById('editing-completion-helper');
+  // The footer is now the one place completion state and Ready for
+  // Approval live together (item 7/8) -- what's missing while incomplete,
+  // a positive confirmation once done, hidden once actually submitted
+  // (the header badge + Close already cover that state).
+  const footerStatus = document.getElementById('editing-concept-footer-status');
   if (submitted) {
-    helper.style.display = 'none';
+    footerStatus.style.display = 'none';
   } else {
-    helper.style.display = '';
-    helper.classList.toggle('editing-completion-helper-done', allComplete);
-    helper.textContent = allComplete
-      ? '✓ All Final Edits Complete'
-      : `Complete all ${required} Final Edit${required === 1 ? '' : 's'} to submit for approval.`;
+    footerStatus.style.display = '';
+    footerStatus.classList.toggle('editing-concept-footer-status-done', allComplete);
+    const remaining = required - complete;
+    footerStatus.innerHTML = allComplete
+      ? `&check; All ${required} Final Edit${required === 1 ? '' : 's'} complete`
+      : `${remaining} Final Edit${remaining === 1 ? '' : 's'} remaining`;
   }
 
-  document.getElementById('editing-concept-cancel-btn').style.display = submitted ? 'none' : '';
   const readyBtn = document.getElementById('editing-concept-ready-btn');
   readyBtn.style.display = submitted ? 'none' : '';
   readyBtn.disabled = !allComplete;
@@ -6357,21 +6401,33 @@ async function saveFinalEdit() {
   }
 }
 
-async function confirmDeleteFinalEdit() {
-  const found = editingFindFinalEdit(state.editing.activeFinalEditId);
+// Shared by the final-edit-modal's own Delete button and the checklist
+// row's "•••" menu (item 4) -- the only difference is whether the
+// single-edit modal needs closing first.
+async function deleteFinalEditFlow(finalEditId, { fromFinalEditModal }) {
+  const found = editingFindFinalEdit(finalEditId);
   if (!found) return;
   const conceptAssetId = found.concept.creative_asset_id;
   const ok = await confirmDialog(`Delete "${found.finalEdit.asset_name}"? This can't be undone.`, { okLabel: 'Delete' });
   if (!ok) return;
   try {
-    await api(`/editing/final-edits/${state.editing.activeFinalEditId}`, { method: 'DELETE' });
+    await api(`/editing/final-edits/${finalEditId}`, { method: 'DELETE' });
     toast('Final Edit deleted');
     await loadEditingWeek();
-    closeModal('final-edit-modal');
+    if (fromFinalEditModal) closeModal('final-edit-modal');
     openEditingConcept(conceptAssetId);
   } catch (e) {
     toast(e.message, true);
   }
+}
+
+async function confirmDeleteFinalEdit() {
+  await deleteFinalEditFlow(state.editing.activeFinalEditId, { fromFinalEditModal: true });
+}
+
+async function deleteFinalEditFromMenu(finalEditId) {
+  closeAllEditingReqMenus();
+  await deleteFinalEditFlow(finalEditId, { fromFinalEditModal: false });
 }
 
 // The important workflow change (item 6): Ready for Approval submits the

@@ -567,26 +567,27 @@
     <div id="editing-concept-modal" class="modal-backdrop">
       <div class="modal" style="max-width:480px;">
         <div class="modal-header">
-          <div>
+          <div class="editing-concept-modal-header-info">
             <h3 id="editing-concept-modal-title"></h3>
-            <div class="hint" id="editing-concept-modal-subtitle"></div>
+            <div class="editing-concept-modal-meta">
+              <span id="editing-concept-modal-subtitle"></span>
+              <span class="cd-concept-status-pill" id="editing-concept-modal-status-pill"></span>
+            </div>
+            <button type="button" class="link-btn" onclick="openEditingConceptBrief()">View Shoot Brief &rarr;</button>
           </div>
           <button class="modal-close" onclick="closeModal('editing-concept-modal')">&times;</button>
         </div>
         <div class="modal-body">
-          <button type="button" class="link-btn" onclick="openEditingConceptBrief()">View Shoot Brief &rarr;</button>
-
-          <div class="editing-ready-badge" id="editing-concept-ready-badge" style="display:none;">&check; Ready for Approval</div>
-
-          <div class="editing-req-heading" style="margin-top:14px;">Final Edits <span class="editing-req-heading-count" id="editing-req-heading-count"></span></div>
+          <div>
+            <div class="editing-req-heading">Final Edits <span class="editing-req-heading-count" id="editing-req-heading-count"></span></div>
+            <div class="editing-card-progress-track" style="margin-top:6px;"><div class="editing-card-progress-fill" id="editing-req-progress-fill"></div></div>
+          </div>
           <div id="editing-concept-requirements" class="editing-req-list"></div>
           <div id="editing-create-custom-rows"></div>
-          <button type="button" class="link-btn" id="editing-add-another-btn" onclick="addEditingCustomAssetRow()">+ Add Another Final Edit</button>
-
-          <div class="editing-completion-helper" id="editing-completion-helper"></div>
+          <button type="button" class="link-btn editing-add-variation-btn" id="editing-add-another-btn" onclick="addEditingCustomAssetRow()">+ Add variation</button>
         </div>
-        <div class="modal-footer">
-          <button class="btn btn-ghost" id="editing-concept-cancel-btn" onclick="closeModal('editing-concept-modal')">Cancel</button>
+        <div class="modal-footer editing-concept-footer">
+          <span class="editing-concept-footer-status" id="editing-concept-footer-status"></span>
           <button class="btn btn-primary" id="editing-concept-ready-btn" onclick="submitEditingConceptReady()" disabled>Ready for Approval &rarr;</button>
           <button class="btn btn-ghost" id="editing-concept-close-btn" onclick="closeModal('editing-concept-modal')" style="display:none;">Close</button>
         </div>
