@@ -1105,8 +1105,13 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .editing-concept-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}
 .editing-concept-product{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);}
 .editing-concept-name{font-weight:700;font-size:13.5px;margin-top:1px;}
-.editing-concept-progress{font-size:12.5px;font-weight:600;color:var(--text-secondary);margin-top:8px;}
+/* Completion is the main thing a card communicates now (item 1) -- a
+   bolder line plus a thin progress bar reusing the Upcoming Drops cards'
+   own track/fill classes, so Editing reads as one visual system with the
+   rest of Planning rather than inventing a second progress-bar style. */
+.editing-concept-progress{font-size:13px;font-weight:700;color:var(--text-secondary);margin-top:9px;}
 .editing-concept-progress-ready{color:var(--green);}
+.coverage-progress-fill.teal{background:var(--teal);}
 /* Ready for Approval gets a subtle left-border tint, not a bright green
    card (item 7) -- so a scan of the landing page singles out "finished,
    waiting for review" without shouting. */
@@ -1116,26 +1121,47 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .editing-status-ready{background:var(--green-light);color:var(--green);}
 .editing-ready-badge{font-size:11px;font-weight:700;letter-spacing:0.3px;color:var(--green);margin-bottom:10px;}
 #final-edit-editor:disabled,#final-edit-notes:read-only{background:var(--surface2);color:var(--text-secondary);}
+/* Muted, not the usual solid-black primary look, while the Concept isn't
+   fully edited yet (item 5) -- so "not ready to submit" is obvious at a
+   glance rather than looking like an active CTA that merely errors on
+   click. */
+#editing-concept-ready-btn:disabled{background:var(--surface2);color:var(--text-muted);cursor:not-allowed;}
 
-/* The Concept workspace's Final Edits checklist (item 3/4) -- a checkbox
-   that reflects whether a Final Edit is attached, never one the user ticks
-   by hand. Slightly roomier than a plain table row so each entry reads as a
+/* The Concept workspace's Final Edits checklist (item 2/3/4) -- the section
+   heading itself carries the live completion count (a small pill, not a
+   repeated sentence), and each row's indicator is a check-circle rather
+   than a plain glyph so complete-vs-not reads at a glance. A checkbox
+   reflects whether a Final Edit is attached, never one the user ticks by
+   hand. Slightly roomier than a plain table row so each entry reads as a
    creative output, not a database record (item 1). */
+.editing-req-heading{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);display:flex;align-items:center;gap:8px;}
+.editing-req-heading-count{font-size:10.5px;font-weight:700;letter-spacing:0.2px;color:var(--teal-dark);background:var(--teal-light);border-radius:var(--r-pill);padding:2px 8px;text-transform:none;}
+.editing-req-heading-count-done{color:var(--green);background:var(--green-light);}
 .editing-req-list{display:flex;flex-direction:column;gap:6px;margin-top:8px;}
 .editing-req-row{display:flex;align-items:flex-start;gap:10px;width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--r);padding:10px 12px;}
 .editing-req-row-complete{border-color:var(--green-light);}
-.editing-req-check{font-size:15px;line-height:1;color:var(--text-muted);flex-shrink:0;margin-top:1px;}
-.editing-req-row-complete .editing-req-check{color:var(--green);}
+.editing-req-check{width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;border:2px solid var(--border);color:transparent;font-size:11px;font-weight:900;line-height:1;}
+.editing-req-row-complete .editing-req-check{border-color:var(--green);background:var(--green);color:white;}
 .editing-req-main{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1;}
 .editing-req-label{font-size:12.5px;font-weight:600;}
 .editing-req-hook{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:11.5px;font-style:italic;color:var(--text-muted);}
 .editing-req-action{display:flex;align-items:center;gap:0;flex-shrink:0;white-space:nowrap;padding-top:1px;}
-.editing-completion-line{font-size:12.5px;font-weight:600;margin-top:12px;}
+/* One helper near the CTA, not a repeated completion sentence (item 4) --
+   muted while incomplete, a small positive confirmation once done (item 5). */
+.editing-completion-helper{font-size:12px;color:var(--text-muted);margin-top:12px;}
+.editing-completion-helper-done{color:var(--green);font-weight:700;}
 
 .editing-custom-row{display:flex;align-items:center;gap:8px;margin-top:6px;}
 .editing-custom-row-input{flex:1;font-family:inherit;font-size:12.5px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--r);}
 .editing-custom-row-format{font-family:inherit;font-size:12.5px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--r);}
 .editing-opening-text{font-size:12.5px;font-style:italic;color:var(--text-secondary);background:var(--surface2);border-radius:var(--r);padding:8px 10px;}
+
+/* Delete stays available but reads as a quiet, secondary/destructive
+   action rather than competing with Save/Cancel (item 8) -- muted grey by
+   default, only tinting red on hover/focus as a deliberate "this is
+   destructive" cue. */
+.link-btn-subtle-danger{color:var(--text-muted);font-weight:500;}
+.link-btn-subtle-danger:hover{color:var(--red);text-decoration:underline;}
 
 /* Reference Library -- wide like .cd-modal-workspace (a browsable card
    grid needs room), reached from both Creative Toolkit surfaces and, in

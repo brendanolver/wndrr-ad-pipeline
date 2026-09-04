@@ -578,13 +578,12 @@
 
           <div class="editing-ready-badge" id="editing-concept-ready-badge" style="display:none;">&check; Ready for Approval</div>
 
-          <div class="cd-field-label" style="margin-top:14px;">Final Edits</div>
+          <div class="editing-req-heading" style="margin-top:14px;">Final Edits <span class="editing-req-heading-count" id="editing-req-heading-count"></span></div>
           <div id="editing-concept-requirements" class="editing-req-list"></div>
           <div id="editing-create-custom-rows"></div>
           <button type="button" class="link-btn" id="editing-add-another-btn" onclick="addEditingCustomAssetRow()">+ Add Another Final Edit</button>
 
-          <div class="editing-completion-line" id="editing-completion-line"></div>
-          <div class="hint" id="editing-completion-helper" style="display:none;">Complete all Final Edits to submit for approval.</div>
+          <div class="editing-completion-helper" id="editing-completion-helper"></div>
         </div>
         <div class="modal-footer">
           <button class="btn btn-ghost" id="editing-concept-cancel-btn" onclick="closeModal('editing-concept-modal')">Cancel</button>
@@ -634,9 +633,9 @@
           </label>
         </div>
         <div class="modal-footer">
-          <button type="button" class="link-btn" id="final-edit-delete-btn" onclick="confirmDeleteFinalEdit()" style="margin-right:auto;">Delete</button>
+          <button type="button" class="link-btn link-btn-subtle-danger" id="final-edit-delete-btn" onclick="confirmDeleteFinalEdit()" style="margin-right:auto;">Delete</button>
           <button class="btn btn-ghost" id="final-edit-cancel-btn" onclick="closeModal('final-edit-modal')">Cancel</button>
-          <button class="btn btn-ghost" id="final-edit-save-btn" onclick="saveFinalEdit()">Save</button>
+          <button class="btn btn-ghost" id="final-edit-save-btn" onclick="saveFinalEdit()">Save Final Edit</button>
           <button class="btn btn-ghost" id="final-edit-close-btn" onclick="closeModal('final-edit-modal')" style="display:none;">Close</button>
         </div>
       </div>
