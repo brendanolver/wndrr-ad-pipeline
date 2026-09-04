@@ -1184,7 +1184,10 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .editing-custom-row{display:flex;align-items:center;gap:8px;margin-top:6px;}
 .editing-custom-row-input{flex:1;font-family:inherit;font-size:12.5px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--r);}
 .editing-custom-row-format{font-family:inherit;font-size:12.5px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--r);}
-.editing-opening-text{font-size:12.5px;font-style:italic;color:var(--text-secondary);background:var(--surface2);border-radius:var(--r);padding:8px 10px;}
+/* Plain quoted read-only text, not an input-styled box -- the Hook's
+   Opening is already known and never re-entered here, so it shouldn't look
+   editable (Add Final Edit modal, item 1). */
+.editing-opening-text{font-size:12.5px;font-style:italic;color:var(--text-secondary);}
 
 /* The footer is now the one place completion state and the submit action
    live together (item 7/8) -- no more Cancel, the header × already closes
@@ -1193,12 +1196,22 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .editing-concept-footer-status{font-size:12.5px;font-weight:600;color:var(--text-muted);}
 .editing-concept-footer-status-done{color:var(--green);}
 
-/* Delete stays available but reads as a quiet, secondary/destructive
-   action rather than competing with Save/Cancel (item 8) -- muted grey by
-   default, only tinting red on hover/focus as a deliberate "this is
-   destructive" cue. */
-.link-btn-subtle-danger{color:var(--text-muted);font-weight:500;}
-.link-btn-subtle-danger:hover{color:var(--red);text-decoration:underline;}
+/* Add Final Edit modal field blocks -- one row per field, a small uppercase
+   label above its control, relying on .modal-body's own flex gap for the
+   spacing between blocks rather than per-field margin overrides, so the
+   whole modal reads as a quick action instead of a long form. */
+.final-edit-field{display:flex;flex-direction:column;gap:5px;}
+.final-edit-field-label{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);}
+.final-edit-field-label .hint{text-transform:none;font-weight:400;letter-spacing:0;}
+/* Final Edit is the strongest field in the modal (item 2) -- the whole
+   reason this modal exists is to attach it. */
+.final-edit-field-primary .final-edit-field-label{color:var(--teal-dark);}
+.final-edit-field-primary input{font-size:13.5px;font-weight:600;padding:9px 11px;}
+/* Locked-editor display -- shown instead of the <select> once the Concept's
+   editor is already known, so it's never re-asked (item 3); "Change"
+   reveals the select for the rare reassignment case. */
+.final-edit-editor-locked{display:flex;align-items:center;gap:9px;font-size:13px;font-weight:600;color:var(--text);padding:8px 0;}
+.final-edit-editor-locked .link-btn{font-weight:500;}
 
 /* Reference Library -- wide like .cd-modal-workspace (a browsable card
    grid needs room), reached from both Creative Toolkit surfaces and, in
