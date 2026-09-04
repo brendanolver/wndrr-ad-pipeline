@@ -1132,34 +1132,66 @@ main{flex:1;min-width:0;padding:20px 24px;}
    click. */
 #editing-concept-ready-btn:disabled{background:var(--surface2);color:var(--text-muted);cursor:not-allowed;}
 
+/* The Concept workspace header (item 1) -- title, then one meta line
+   (Product · status pill), then "View Shoot Brief" folded in as a small
+   link rather than a separate centred row, all stacked tightly to the left
+   of the close button instead of spread across their own rows. */
+.editing-concept-modal-header-info{display:flex;flex-direction:column;gap:3px;min-width:0;}
+.editing-concept-modal-meta{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted);}
+.editing-concept-modal-header-info .link-btn{align-self:flex-start;margin-top:1px;}
+
 /* The Concept workspace's Final Edits checklist (item 2/3/4) -- the section
    heading itself carries the live completion count (a small pill, not a
-   repeated sentence), and each row's indicator is a check-circle rather
-   than a plain glyph so complete-vs-not reads at a glance. A checkbox
-   reflects whether a Final Edit is attached, never one the user ticks by
-   hand. Slightly roomier than a plain table row so each entry reads as a
-   creative output, not a database record (item 1). */
+   repeated sentence) plus a short/subtle progress bar (reusing the landing
+   card's own short-bar classes -- never a large one). Each row's indicator
+   is a check-circle rather than a plain glyph so complete-vs-not reads at a
+   glance. A checkbox reflects whether a Final Edit is attached, never one
+   the user ticks by hand. Slightly roomier than a plain table row so each
+   entry reads as a creative output, not a database record (item 1). */
 .editing-req-heading{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);display:flex;align-items:center;gap:8px;}
 .editing-req-heading-count{font-size:10.5px;font-weight:700;letter-spacing:0.2px;color:var(--teal-dark);background:var(--teal-light);border-radius:var(--r-pill);padding:2px 8px;text-transform:none;}
 .editing-req-heading-count-done{color:var(--green);background:var(--green-light);}
-.editing-req-list{display:flex;flex-direction:column;gap:6px;margin-top:8px;}
+.editing-req-list{display:flex;flex-direction:column;gap:6px;}
 .editing-req-row{display:flex;align-items:flex-start;gap:10px;width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--r);padding:10px 12px;}
-.editing-req-row-complete{border-color:var(--green-light);}
+/* Row background/border stays the same complete or not (item 5) -- the
+   green check-circle alone is enough at this level; stronger positive
+   treatment is reserved for the whole Concept (the header pill/footer). */
 .editing-req-check{width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;border:2px solid var(--border);color:transparent;font-size:11px;font-weight:900;line-height:1;}
 .editing-req-row-complete .editing-req-check{border-color:var(--green);background:var(--green);color:white;}
 .editing-req-main{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1;}
 .editing-req-label{font-size:12.5px;font-weight:600;}
 .editing-req-hook{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:11.5px;font-style:italic;color:var(--text-muted);}
-.editing-req-action{display:flex;align-items:center;gap:0;flex-shrink:0;white-space:nowrap;padding-top:1px;}
-/* One helper near the CTA, not a repeated completion sentence (item 4) --
-   muted while incomplete, a small positive confirmation once done (item 5). */
-.editing-completion-helper{font-size:12px;color:var(--text-muted);margin-top:12px;}
-.editing-completion-helper-done{color:var(--green);font-weight:700;}
+.editing-req-action{display:flex;align-items:center;gap:2px;flex-shrink:0;white-space:nowrap;padding-top:1px;}
+
+/* One primary action per row (item 4) -- a completed row's Replace/Delete
+   move into this small overflow menu instead of sitting permanently beside
+   View Final Edit, same "•••" pattern as Reference Library's card menu
+   (.ref-card-menu). */
+.editing-req-menu{position:relative;}
+.editing-req-menu-btn{background:none;border:none;font-family:inherit;font-size:13px;font-weight:700;letter-spacing:1px;color:var(--text-muted);cursor:pointer;padding:2px 7px;border-radius:var(--r);line-height:1.4;}
+.editing-req-menu-btn:hover{background:var(--border);color:var(--text-secondary);}
+.editing-req-menu-dropdown{display:none;position:absolute;right:0;top:100%;margin-top:4px;background:white;border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--shadow);min-width:150px;padding:4px;z-index:20;}
+.editing-req-menu-dropdown.show{display:flex;flex-direction:column;}
+.editing-req-menu-item{background:none;border:none;font-family:inherit;font-size:12px;font-weight:600;color:var(--text);text-align:left;padding:6px 8px;border-radius:var(--r);cursor:pointer;white-space:nowrap;}
+.editing-req-menu-item:hover{background:var(--surface2);}
+.editing-req-menu-item-danger{color:var(--red);}
+
+/* A secondary, exception-only action (item 6) -- visually quieter than the
+   required checklist above it. */
+.editing-add-variation-btn{font-size:11.5px;font-weight:600;color:var(--text-muted);}
+.editing-add-variation-btn:hover{color:var(--teal-dark);}
 
 .editing-custom-row{display:flex;align-items:center;gap:8px;margin-top:6px;}
 .editing-custom-row-input{flex:1;font-family:inherit;font-size:12.5px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--r);}
 .editing-custom-row-format{font-family:inherit;font-size:12.5px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--r);}
 .editing-opening-text{font-size:12.5px;font-style:italic;color:var(--text-secondary);background:var(--surface2);border-radius:var(--r);padding:8px 10px;}
+
+/* The footer is now the one place completion state and the submit action
+   live together (item 7/8) -- no more Cancel, the header × already closes
+   the workspace, and individual Final Edits already save independently. */
+.editing-concept-footer{justify-content:space-between;align-items:center;}
+.editing-concept-footer-status{font-size:12.5px;font-weight:600;color:var(--text-muted);}
+.editing-concept-footer-status-done{color:var(--green);}
 
 /* Delete stays available but reads as a quiet, secondary/destructive
    action rather than competing with Save/Cancel (item 8) -- muted grey by
