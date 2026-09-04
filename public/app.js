@@ -197,8 +197,10 @@ function switchTab(name) {
   if (name === 'reference-library') loadReferenceLibraryPage();
   // Same reasoning as Shooting above -- Editing is the direct downstream
   // consumer of Shooting's Mark as Shot action, so it needs a fresh fetch
-  // on every visit too.
-  if (name === 'editing') loadEditingWeek();
+  // on every visit too. resetFilter: true -- arriving at Editing with no
+  // filter explicitly requested should open on whatever's most actionable
+  // (see loadEditingWeek/editingDefaultFilter), not always land on All.
+  if (name === 'editing') loadEditingWeek({ resetFilter: true });
 }
 
 // [data-tab] guard: the sidebar also holds non-tab .tab-btn entries (styled
@@ -5861,9 +5863,16 @@ function editingWeekNumber() {
   return isoWeekNumber(mondayOfWeek(state.editing.weekOffset));
 }
 
-async function loadEditingWeek() {
+// resetFilter picks the most-actionable filter tab fresh from this fetch's
+// counts (see editingDefaultFilter) -- used only when the user is arriving
+// at a view with no filter explicitly requested (opening Editing, changing
+// week). Background reloads triggered by an action within the current view
+// (saving/deleting a Final Edit, submitting for approval, etc.) omit it, so
+// they never yank the user off a filter they picked themselves mid-session.
+async function loadEditingWeek({ resetFilter } = {}) {
   try {
     state.editing.data = await api(`/editing?week_start=${editingWeekStart()}`);
+    if (resetFilter) state.editing.filter = editingDefaultFilter(editingComputeSummary());
     renderEditingWeekHeader();
     renderEditingList();
   } catch (e) {
@@ -5888,7 +5897,7 @@ function jumpToEditingWeek(offset) {
 
 function onEditingWeekChanged() {
   closeEditingWeekPicker();
-  loadEditingWeek();
+  loadEditingWeek({ resetFilter: true });
 }
 
 function toggleEditingWeekPicker() {
@@ -6000,6 +6009,18 @@ function editingComputeSummary() {
     else ready += 1;
   }
   return { concepts: concepts.length, to_edit: toEdit, editing: editingCount, ready_for_approval: ready, final_edits_required: totalRequired, final_edits_complete: totalComplete };
+}
+
+// Picks the most-actionable filter tab for a fresh arrival (see
+// loadEditingWeek's resetFilter): work already underway beats work not yet
+// started, which beats a bare "All" once the week's Editing queue is empty
+// (never leave the user parked on an empty tab -- Ready for Approval stays
+// available but is never the auto-default, since Final Approval is its own
+// dedicated workflow for reviewing those Concepts).
+function editingDefaultFilter(summary) {
+  if (summary.editing > 0) return 'editing';
+  if (summary.to_edit > 0) return 'to_edit';
+  return 'all';
 }
 
 // Counts ride on every tab, same convention as Concept Dev/Tuesday Review's
