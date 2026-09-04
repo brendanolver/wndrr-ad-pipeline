@@ -5929,14 +5929,52 @@ function renderEditingWeekHeader() {
 
 const FINAL_EDIT_FORMATS = ['video', 'static', 'carousel'];
 
-function editingAllFinalEdits() {
-  const concepts = (state.editing.data && state.editing.data.concepts) || [];
-  const out = [];
-  for (const concept of concepts) {
-    for (const finalEdit of concept.final_edits) out.push({ finalEdit, concept });
-  }
-  return out;
+// Concept-level requirements checklist -- the single source of truth for
+// every completion fraction shown anywhere (landing card, filters, summary,
+// workspace checklist), so none of them can drift from each other (see the
+// workflow-revision brief: "The Concept should be the primary workflow
+// unit"). One entry per planned Hook Variation, matched to its Final Edit by
+// exact text (same principle the old Create Final Edits suggestions used --
+// never assume a Hook was filmed just because it was planned), plus any
+// custom/manual Final Edits that don't match a Hook at all (item 9/10).
+function editingConceptRequirements(concept) {
+  const hooks = (Array.isArray(concept.hook_variations) ? concept.hook_variations : [])
+    .filter((h) => h && h.text && h.text.trim())
+    .map((h, i) => ({ label: i === 0 ? 'Primary Hook' : `Alternative Hook ${String(i).padStart(2, '0')}`, text: h.text.trim() }));
+  const finalEdits = concept.final_edits || [];
+  const used = new Set();
+  const hookItems = hooks.map((h) => {
+    const match = finalEdits.find((fe) => !used.has(fe.id) && (fe.variation_text || '').trim() === h.text);
+    if (match) used.add(match.id);
+    return { type: 'hook', label: h.label, hookText: h.text, finalEdit: match || null };
+  });
+  const customItems = finalEdits.filter((fe) => !used.has(fe.id)).map((fe) => ({ type: 'custom', label: fe.asset_name, hookText: null, finalEdit: fe }));
+  return [...hookItems, ...customItems];
 }
+
+function editingConceptCompletion(concept) {
+  const requirements = editingConceptRequirements(concept);
+  const complete = requirements.filter((r) => r.finalEdit && r.finalEdit.final_edit_link).length;
+  return { requirements, required: requirements.length, complete };
+}
+
+// Ready for Approval is DERIVED from submission + completion, never chosen
+// by hand (item 2): to_edit while nothing's complete, editing once at least
+// one Final Edit is done, ready_for_approval only once the Concept has
+// actually been submitted (reaching 100% just enables the button -- see
+// submitEditingConceptReady).
+function editingConceptStatus(concept) {
+  if (concept.editing_submitted_at) return 'ready_for_approval';
+  return editingConceptCompletion(concept).complete === 0 ? 'to_edit' : 'editing';
+}
+
+function editingConceptEditorLabel(concept) {
+  const editors = new Set((concept.final_edits || []).map((fe) => fe.editor).filter(Boolean));
+  return editors.size === 1 ? [...editors][0] : null;
+}
+
+const EDITING_STATUS_LABELS = { to_edit: 'To Edit', editing: 'Editing', ready_for_approval: 'Ready for Approval' };
+const EDITING_STATUS_CLASS = { to_edit: 'editing-status-to-edit', editing: 'editing-status-editing', ready_for_approval: 'editing-status-ready' };
 
 const EDITING_FILTERS = [
   { value: 'all', label: 'All' },
@@ -5945,13 +5983,32 @@ const EDITING_FILTERS = [
   { value: 'ready_for_approval', label: 'Ready for Approval' },
 ];
 
+// Aggregates across the whole week's Concepts -- backs both the filter-tab
+// counts and the summary line, computed once per render from the same
+// per-Concept helpers the cards themselves use (item 8: filters count
+// Concepts now, not individual Final Edits).
+function editingComputeSummary() {
+  const concepts = (state.editing.data && state.editing.data.concepts) || [];
+  let toEdit = 0, editingCount = 0, ready = 0, totalRequired = 0, totalComplete = 0;
+  for (const c of concepts) {
+    const { required, complete } = editingConceptCompletion(c);
+    totalRequired += required;
+    totalComplete += complete;
+    const status = editingConceptStatus(c);
+    if (status === 'to_edit') toEdit += 1;
+    else if (status === 'editing') editingCount += 1;
+    else ready += 1;
+  }
+  return { concepts: concepts.length, to_edit: toEdit, editing: editingCount, ready_for_approval: ready, final_edits_required: totalRequired, final_edits_complete: totalComplete };
+}
+
 // Counts ride on every tab, same convention as Concept Dev/Tuesday Review's
 // filter-tab-count -- Ready for Approval also gets a subtle attention style
 // when it actually has something waiting, since that's the state easiest to
-// miss on a quick scan (see the brief, item 2).
+// miss on a quick scan.
 function renderEditingFilters() {
-  const s = (state.editing.data && state.editing.data.summary) || { final_edits: 0, to_edit: 0, editing: 0, ready_for_approval: 0 };
-  const counts = { all: s.final_edits, to_edit: s.to_edit, editing: s.editing, ready_for_approval: s.ready_for_approval };
+  const s = editingComputeSummary();
+  const counts = { all: s.concepts, to_edit: s.to_edit, editing: s.editing, ready_for_approval: s.ready_for_approval };
   document.getElementById('editing-filters').innerHTML = EDITING_FILTERS.map((f) => {
     const attention = f.value === 'ready_for_approval' && counts[f.value] > 0;
     return `
@@ -5964,94 +6021,53 @@ function setEditingFilter(filter) {
   renderEditingList();
 }
 
-// Operational, not exhaustive (see the brief, item 3): leads with the total,
-// then only the statuses that actually have something in them -- a "0
-// Editing" tells nobody anything, and the tabs above already carry the full
-// breakdown including the zeros.
+// Compact and Concept-first (item 8): concept count, the overall Final Edit
+// completion fraction, then Ready for Approval only when there's actually
+// one waiting -- individual Final Edit counts belong inside each Concept's
+// own card/workspace, not up here.
 function renderEditingSummary() {
-  const s = (state.editing.data && state.editing.data.summary) || { final_edits: 0, to_edit: 0, editing: 0, ready_for_approval: 0 };
-  const parts = [`${s.final_edits} Final Edit${s.final_edits === 1 ? '' : 's'}`];
-  if (s.to_edit > 0) parts.push(`${s.to_edit} To Edit`);
-  if (s.editing > 0) parts.push(`${s.editing} Editing`);
+  const s = editingComputeSummary();
+  const parts = [`${s.concepts} Concept${s.concepts === 1 ? '' : 's'}`, `${s.final_edits_complete}/${s.final_edits_required} Final Edits Complete`];
   if (s.ready_for_approval > 0) parts.push(`${s.ready_for_approval} Ready for Approval`);
   document.getElementById('editing-summary').textContent = parts.join(' · ');
 }
 
-function editingConceptMetaText(concept) {
-  return ['Shot', concept.owner ? `Owner: ${concept.owner}` : null].filter(Boolean).join(' · ');
-}
-
-// State-aware action wording -- see the brief, item 8: what to do next is
-// derived entirely from status + whether a link exists, never a status word
-// on its own.
-function editingFinalEditActionLabel(finalEdit) {
-  if (finalEdit.status === 'ready_for_approval') return 'View Final Edit &rarr;';
-  if (finalEdit.status === 'editing') return finalEdit.final_edit_link ? 'Review Edit &rarr;' : 'Open Edit &rarr;';
-  return 'Add Final Edit &rarr;';
-}
-
-// Whether the actual creative file has landed, independent of who's
-// assigned -- "Final Edit Added" tracks the link, not the editor, since an
-// editor can be assigned before any work is submitted.
-function editingFinalEditStatusLine(finalEdit) {
-  if (!finalEdit.final_edit_link) return 'No final edit added';
-  return finalEdit.editor ? `Final Edit Added · ${finalEdit.editor}` : 'Final Edit Added';
-}
-
-function editingFinalEditRowHtml(finalEdit) {
-  const isReady = finalEdit.status === 'ready_for_approval';
+// One compact card per Concept, styled after the Upcoming Drops cards for
+// visual consistency with the rest of the app (item 1) -- Product/Concept
+// name, a status pill, the completion fraction, the (single, unambiguous)
+// editor if there is one, and a single action into the workspace. No
+// per-Hook rows here at all; that detail lives in the Concept workspace.
+function editingConceptCardHtml(concept) {
+  const status = editingConceptStatus(concept);
+  const { required, complete } = editingConceptCompletion(concept);
+  const isReady = status === 'ready_for_approval';
+  const editor = editingConceptEditorLabel(concept);
   return `
-    <button type="button" class="editing-asset-row ${isReady ? 'editing-asset-row-ready' : ''}" onclick="openFinalEditModal(${finalEdit.id})">
-      <span class="editing-asset-row-main">
-        <span class="editing-asset-row-name">${escapeHtml(finalEdit.asset_name)}</span>
-        ${finalEdit.variation_text ? `<span class="editing-asset-row-hook">&ldquo;${escapeHtml(finalEdit.variation_text)}&rdquo;</span>` : ''}
-        <span class="editing-asset-row-status">${escapeHtml(editingFinalEditStatusLine(finalEdit))}</span>
-      </span>
-      <span class="editing-asset-row-action">
-        ${isReady ? '<span class="cd-concept-status-pill editing-status-ready">&check; Ready for Approval</span>' : ''}
-        <span class="editing-asset-row-verb">${editingFinalEditActionLabel(finalEdit)}</span>
-      </span>
-    </button>`;
+    <div class="editing-concept-card ${isReady ? 'editing-concept-card-ready' : ''}">
+      <div class="editing-concept-card-head">
+        <div>
+          <div class="editing-concept-product">${escapeHtml(concept.product_name || '—')}</div>
+          <div class="editing-concept-name">${escapeHtml(concept.concept_name)}</div>
+        </div>
+        <span class="cd-concept-status-pill ${EDITING_STATUS_CLASS[status]}">${isReady ? '&check; ' : ''}${EDITING_STATUS_LABELS[status]}</span>
+      </div>
+      <div class="editing-concept-progress ${isReady ? 'editing-concept-progress-ready' : ''}">${isReady ? '&check; ' : ''}${complete}/${required} Complete</div>
+      ${editor ? `<div class="hint">Editor: ${escapeHtml(editor)}</div>` : ''}
+      <button type="button" class="link-btn" style="margin-top:8px;" onclick="openEditingConcept(${concept.creative_asset_id})">${isReady ? 'View Editing &rarr;' : 'Open Editing &rarr;'}</button>
+    </div>`;
 }
 
-// Grouped by Concept, never one flat list -- see the brief, item 3. A status
-// filter narrows to matching Final Edits and hides any Concept left with
-// none, same "scope the group, don't flatten it" pattern as the Reference
-// Library's month grouping. Final Edits render directly on the card -- no
-// "Open Editing ->" intermediate hop once at least one exists (item 2) -- and
-// "View Shoot Brief" sits right here too (item 10), so the per-Concept modal
-// is only ever needed for adding more assets.
+// A status filter narrows to matching Concepts, same "Concept is the unit"
+// principle as everywhere else in this revision.
 function renderEditingList() {
   renderEditingSummary();
   renderEditingFilters();
   const concepts = (state.editing.data && state.editing.data.concepts) || [];
   const filter = state.editing.filter;
-  const shaped = concepts
-    .map((concept) => ({
-      concept,
-      finalEdits: filter === 'all' ? concept.final_edits : concept.final_edits.filter((fe) => fe.status === filter),
-    }))
-    .filter((g) => filter === 'all' || g.finalEdits.length > 0);
+  const shown = filter === 'all' ? concepts : concepts.filter((c) => editingConceptStatus(c) === filter);
 
   document.getElementById('editing-empty').style.display = concepts.length ? 'none' : '';
-  document.getElementById('editing-list').innerHTML = shaped.map(({ concept, finalEdits }) => `
-    <div class="editing-concept-card">
-      <div class="editing-concept-card-head">
-        <div>
-          <div class="editing-concept-product">${escapeHtml(concept.product_name || '—')}</div>
-          <div class="editing-concept-name">${escapeHtml(concept.concept_name)}</div>
-          <div class="hint">${escapeHtml(editingConceptMetaText(concept))}</div>
-        </div>
-        <button type="button" class="link-btn" onclick="openShootingBrief(${concept.shoot_schedule_id})">View Shoot Brief &#8599;</button>
-      </div>
-      ${concept.final_edits.length ? `
-        <div class="cd-field-label" style="margin-top:10px;">Final Edits ${concept.final_edits.length}</div>
-        <div class="editing-asset-list">${finalEdits.map(editingFinalEditRowHtml).join('')}</div>
-        <button type="button" class="link-btn" style="margin-top:8px;" onclick="openEditingConcept(${concept.creative_asset_id})">+ Add Another Final Edit</button>
-      ` : `
-        <button type="button" class="link-btn" style="margin-top:8px;" onclick="openEditingConcept(${concept.creative_asset_id})">Create Final Edits &rarr;</button>
-      `}
-    </div>`).join('');
+  document.getElementById('editing-list').innerHTML = shown.map(editingConceptCardHtml).join('');
 }
 
 function editingFindConcept(creativeAssetId) {
@@ -6067,13 +6083,10 @@ function editingFindFinalEdit(finalEditId) {
   return null;
 }
 
-// The "Create Final Edits" flow: Hook Variations already on the Concept are
-// offered as suggestions only -- matched by exact text against existing
-// Final Edits' variation_text, never auto-created (see the brief, item 5:
-// "Do NOT automatically assume every Hook Variation was successfully
-// filmed"). Existing Final Edits themselves now render straight on the
-// landing-page card (see renderEditingList), so this modal is purely for
-// adding more.
+// The Concept workspace: "Open Concept -> Complete each Hook edit -> N/N
+// Complete -> Ready for Approval" (item 12). Every row here is one checklist
+// entry from editingConceptRequirements -- a checkbox representing whether a
+// Final Edit is attached, never one the user ticks by hand (item 4).
 function openEditingConcept(creativeAssetId) {
   const concept = editingFindConcept(creativeAssetId);
   if (!concept) return;
@@ -6083,31 +6096,61 @@ function openEditingConcept(creativeAssetId) {
   openModal('editing-concept-modal');
 }
 
+function openEditingConceptBrief() {
+  const concept = editingFindConcept(state.editing.activeConceptAssetId);
+  if (!concept) return;
+  closeModal('editing-concept-modal');
+  openShootingBrief(concept.shoot_schedule_id);
+}
+
+function editingRequirementRowHtml(req, index, submitted) {
+  const complete = !!(req.finalEdit && req.finalEdit.final_edit_link);
+  let action = '';
+  if (complete) {
+    action = `<a href="${escapeHtml(req.finalEdit.final_edit_link)}" target="_blank" rel="noopener" class="link-btn">View Final Edit &#8599;</a>`;
+    if (!submitted) action += `<button type="button" class="link-btn" onclick="openFinalEditModal(${req.finalEdit.id})" style="margin-left:8px;">Replace Edit</button>`;
+  } else if (!submitted) {
+    action = `<button type="button" class="link-btn" onclick="editingAddRequirement(${index})">Add Final Edit &rarr;</button>`;
+  }
+  return `
+    <div class="editing-req-row ${complete ? 'editing-req-row-complete' : ''}">
+      <span class="editing-req-check">${complete ? '&#9745;' : '&#9744;'}</span>
+      <span class="editing-req-main">
+        <span class="editing-req-label">${escapeHtml(req.label)}</span>
+        ${req.hookText ? `<span class="editing-req-hook">&ldquo;${escapeHtml(req.hookText)}&rdquo;</span>` : ''}
+      </span>
+      <span class="editing-req-action">${action}</span>
+    </div>`;
+}
+
 function renderEditingConceptModal() {
   const concept = editingFindConcept(state.editing.activeConceptAssetId);
   if (!concept) return;
-  document.getElementById('editing-concept-modal-subtitle').textContent = `${concept.product_name || '—'} · ${concept.concept_name}`;
+  const { requirements, required, complete } = editingConceptCompletion(concept);
+  state.editing.activeRequirements = requirements;
+  const submitted = !!concept.editing_submitted_at;
+  const allComplete = required > 0 && complete === required;
 
-  const hooks = (Array.isArray(concept.hook_variations) ? concept.hook_variations : []).filter((h) => h && h.text && h.text.trim());
-  const existingTexts = new Set(concept.final_edits.map((fe) => (fe.variation_text || '').trim()).filter(Boolean));
-  const suggestions = hooks
-    .map((h, i) => ({ label: i === 0 ? 'Primary Hook' : `Alternative Hook ${String(i).padStart(2, '0')}`, text: h.text.trim() }))
-    .filter((s) => !existingTexts.has(s.text));
+  document.getElementById('editing-concept-modal-title').textContent = concept.concept_name;
+  document.getElementById('editing-concept-modal-subtitle').textContent = concept.product_name || '';
+  document.getElementById('editing-concept-ready-badge').style.display = submitted ? '' : 'none';
 
-  // Left-aligned, with the actual hook text shown beneath each suggestion
-  // (item 7) -- not just the Primary/Alternative label.
-  document.getElementById('editing-create-suggestions').innerHTML = suggestions.map((s, i) => `
-    <label class="editing-suggestion-row">
-      <input type="checkbox" checked data-suggestion-index="${i}" onchange="updateEditingCreateButtonState()">
-      <span class="editing-suggestion-text">
-        <span class="editing-suggestion-label">${escapeHtml(s.label)}</span>
-        <span class="editing-suggestion-hook">&ldquo;${escapeHtml(s.text)}&rdquo;</span>
-      </span>
-    </label>`).join('');
-  document.getElementById('editing-create-suggestions').dataset.suggestions = JSON.stringify(suggestions);
+  document.getElementById('editing-concept-requirements').innerHTML =
+    requirements.map((r, i) => editingRequirementRowHtml(r, i, submitted)).join('');
 
-  renderEditingCustomAssetRows();
-  updateEditingCreateButtonState();
+  document.getElementById('editing-add-another-btn').style.display = submitted ? 'none' : '';
+  if (submitted) document.getElementById('editing-create-custom-rows').innerHTML = '';
+  else renderEditingCustomAssetRows();
+
+  document.getElementById('editing-completion-line').innerHTML =
+    `${allComplete ? '&check; ' : ''}${complete} of ${required} Final Edit${required === 1 ? '' : 's'} Complete`;
+  document.getElementById('editing-completion-helper').style.display = (!submitted && !allComplete) ? '' : 'none';
+
+  document.getElementById('editing-concept-cancel-btn').style.display = submitted ? 'none' : '';
+  const readyBtn = document.getElementById('editing-concept-ready-btn');
+  readyBtn.style.display = submitted ? 'none' : '';
+  readyBtn.disabled = !allComplete;
+  document.getElementById('editing-concept-close-btn').style.display = submitted ? '' : 'none';
 }
 
 function editingDefaultFormat() {
@@ -6115,12 +6158,37 @@ function editingDefaultFormat() {
   return (concept && FINAL_EDIT_FORMATS.includes(concept.concept_format)) ? concept.concept_format : 'video';
 }
 
-// Format is only ever asked for here, at creation, and only for a custom row
-// -- suggestions silently inherit the Concept's own format (item 6).
+// A Hook row with no Final Edit yet creates one (single-item array, same
+// endpoint the old bulk "Create Final Edits" step used) and immediately
+// opens its workspace to fill in the link/editor/notes -- one continuous
+// motion, no separate create-then-open steps (item 5). A row that already
+// has a Final Edit just opens it.
+async function editingAddRequirement(index) {
+  const req = (state.editing.activeRequirements || [])[index];
+  if (!req) return;
+  if (req.finalEdit) {
+    openFinalEditModal(req.finalEdit.id);
+    return;
+  }
+  try {
+    const created = await api(`/editing/concepts/${state.editing.activeConceptAssetId}/final-edits`, {
+      method: 'POST',
+      body: JSON.stringify({ assets: [{ asset_name: req.label, variation_text: req.hookText, format: editingDefaultFormat() }] }),
+    });
+    await loadEditingWeek();
+    openFinalEditModal(created[0].id);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// "+ Add Another Final Edit" (item 9) -- for a variation that wasn't
+// originally planned. Format is asked here, at creation, since a manual row
+// has no Hook to inherit it from (item 6); saved immediately as its own
+// Final Edit, becoming part of the Concept's required count right away.
 function addEditingCustomAssetRow() {
   state.editing.createRows.push({ name: '', format: editingDefaultFormat() });
   renderEditingCustomAssetRows();
-  updateEditingCreateButtonState();
   const inputs = document.querySelectorAll('.editing-custom-row-input');
   if (inputs.length) inputs[inputs.length - 1].focus();
 }
@@ -6128,52 +6196,32 @@ function addEditingCustomAssetRow() {
 function removeEditingCustomAssetRow(index) {
   state.editing.createRows.splice(index, 1);
   renderEditingCustomAssetRows();
-  updateEditingCreateButtonState();
 }
 
 function renderEditingCustomAssetRows() {
   document.getElementById('editing-create-custom-rows').innerHTML = state.editing.createRows.map((row, i) => `
     <div class="editing-custom-row">
-      <input type="text" class="editing-custom-row-input" placeholder="Asset name" value="${escapeHtml(row.name)}"
-        oninput="state.editing.createRows[${i}].name = this.value; updateEditingCreateButtonState();">
+      <input type="text" class="editing-custom-row-input" placeholder="Final Edit name" value="${escapeHtml(row.name)}"
+        oninput="state.editing.createRows[${i}].name = this.value;">
       <select class="editing-custom-row-format" onchange="state.editing.createRows[${i}].format = this.value;">
         ${FINAL_EDIT_FORMATS.map((f) => `<option value="${f}" ${row.format === f ? 'selected' : ''}>${f[0].toUpperCase()}${f.slice(1)}</option>`).join('')}
       </select>
-      <button type="button" class="link-btn" onclick="removeEditingCustomAssetRow(${i})">Remove</button>
+      <button type="button" class="link-btn" onclick="saveEditingCustomAssetRow(${i})">Add</button>
+      <button type="button" class="link-btn" onclick="removeEditingCustomAssetRow(${i})">Cancel</button>
     </div>`).join('');
 }
 
-function editingSelectedCreateAssets() {
-  const defaultFormat = editingDefaultFormat();
-  const suggestions = JSON.parse(document.getElementById('editing-create-suggestions').dataset.suggestions || '[]');
-  const checked = [...document.querySelectorAll('#editing-create-suggestions input[type="checkbox"]:checked')]
-    .map((el) => suggestions[Number(el.dataset.suggestionIndex)])
-    .filter(Boolean)
-    .map((s) => ({ asset_name: s.label, variation_text: s.text, format: defaultFormat }));
-  const custom = state.editing.createRows
-    .filter((r) => r.name.trim())
-    .map((r) => ({ asset_name: r.name.trim(), format: r.format || defaultFormat }));
-  return [...checked, ...custom];
-}
-
-function updateEditingCreateButtonState() {
-  const count = editingSelectedCreateAssets().length;
-  const btn = document.getElementById('editing-create-btn');
-  btn.disabled = count === 0;
-  btn.textContent = count ? `Create ${count} Final Edit${count === 1 ? '' : 's'}` : 'Create Final Edits';
-}
-
-async function createEditingFinalEdits() {
-  const assets = editingSelectedCreateAssets();
-  if (!assets.length) return;
+async function saveEditingCustomAssetRow(index) {
+  const row = state.editing.createRows[index];
+  if (!row || !row.name.trim()) return toast('Enter a name for the Final Edit', true);
   try {
     await api(`/editing/concepts/${state.editing.activeConceptAssetId}/final-edits`, {
       method: 'POST',
-      body: JSON.stringify({ assets }),
+      body: JSON.stringify({ assets: [{ asset_name: row.name.trim(), format: row.format || editingDefaultFormat() }] }),
     });
-    toast('Final Edits created');
+    state.editing.createRows.splice(index, 1);
     await loadEditingWeek();
-    closeModal('editing-concept-modal');
+    renderEditingConceptModal();
   } catch (e) {
     toast(e.message, true);
   }
@@ -6190,8 +6238,8 @@ function openFinalEditModal(finalEditId) {
   if (!found) return;
   const { finalEdit, concept } = found;
   state.editing.activeFinalEditId = finalEditId;
-  // Opened either from the main landing list or from inside the per-Concept
-  // modal -- close the latter so the two full-screen overlays never stack.
+  // Always opened from inside the Concept workspace now -- close it so the
+  // two full-screen overlays never stack.
   closeModal('editing-concept-modal');
 
   document.getElementById('final-edit-modal-title').textContent = finalEdit.asset_name;
@@ -6225,27 +6273,23 @@ function openFinalEditModal(finalEditId) {
   openModal('final-edit-modal');
 }
 
-// Once a Final Edit is Ready for Approval there's nothing left to do here --
-// Final Approval owns the actual review (see the brief, item 4) -- so the
-// footer collapses to just Close and the "Ready for Approval ->" button
-// never reappears. Replacing the link is the one exception: it briefly
-// brings Save/Cancel back so that correction can still be persisted.
+// Locked entirely once the Concept has been submitted -- Final Approval
+// owns it from here (item 6/11), so there's no per-asset Ready for Approval
+// button and no way to edit a submitted Concept's Final Edits from here.
 function updateFinalEditModalFooter() {
   const found = editingFindFinalEdit(state.editing.activeFinalEditId);
   if (!found) return;
-  const isReady = found.finalEdit.status === 'ready_for_approval';
-  const isEditingLink = document.getElementById('final-edit-link-input-wrap').style.display !== 'none';
-  const showWorkingFooter = !isReady || isEditingLink;
+  const submitted = !!found.concept.editing_submitted_at;
 
-  document.getElementById('final-edit-ready-badge').style.display = isReady ? '' : 'none';
-  document.getElementById('final-edit-delete-btn').style.display = isReady ? 'none' : '';
-  document.getElementById('final-edit-cancel-btn').style.display = showWorkingFooter ? '' : 'none';
-  document.getElementById('final-edit-save-btn').style.display = showWorkingFooter ? '' : 'none';
-  document.getElementById('final-edit-ready-btn').style.display = isReady ? 'none' : '';
-  document.getElementById('final-edit-close-btn').style.display = (isReady && !isEditingLink) ? '' : 'none';
+  document.getElementById('final-edit-ready-badge').style.display = submitted ? '' : 'none';
+  document.getElementById('final-edit-delete-btn').style.display = submitted ? 'none' : '';
+  document.getElementById('final-edit-cancel-btn').style.display = submitted ? 'none' : '';
+  document.getElementById('final-edit-save-btn').style.display = submitted ? 'none' : '';
+  document.getElementById('final-edit-close-btn').style.display = submitted ? '' : 'none';
+  document.getElementById('final-edit-replace-btn').style.display = submitted ? 'none' : '';
 
-  document.getElementById('final-edit-editor').disabled = isReady;
-  document.getElementById('final-edit-notes').readOnly = isReady;
+  document.getElementById('final-edit-editor').disabled = submitted;
+  document.getElementById('final-edit-notes').readOnly = submitted;
 }
 
 function showFinalEditLinkInput() {
@@ -6253,35 +6297,31 @@ function showFinalEditLinkInput() {
   document.getElementById('final-edit-link-input-wrap').style.display = '';
   document.getElementById('final-edit-link-input').value = '';
   document.getElementById('final-edit-link-input').focus();
-  updateFinalEditModalFooter();
 }
 
-async function saveFinalEdit(markReadyForApproval = false) {
+// After saving, return to the Concept workspace (not the landing page) so
+// the checklist visibly ticks off and the editor can move straight on to
+// the next Hook -- matches the "Open Concept -> complete each edit" mental
+// model (item 12) rather than dropping them back out each time.
+async function saveFinalEdit() {
   const found = editingFindFinalEdit(state.editing.activeFinalEditId);
   if (!found) return;
+  const conceptAssetId = found.concept.creative_asset_id;
   const linkInputVisible = document.getElementById('final-edit-link-input-wrap').style.display !== 'none';
   const linkValue = linkInputVisible ? document.getElementById('final-edit-link-input').value.trim() : undefined;
 
-  if (markReadyForApproval && !linkValue && !found.finalEdit.final_edit_link) {
-    return toast('Add a Final Edit link before sending for approval', true);
-  }
-
-  // Status is never sent directly except this one terminal transition --
-  // 'to_edit' -> 'editing' is derived server-side from the editor/link a
-  // plain Save just set (see routes/editing.js), so there's no status field
-  // here to submit (item 4).
   const payload = {
     editor: document.getElementById('final-edit-editor').value || null,
     editor_notes: document.getElementById('final-edit-notes').value.trim(),
   };
-  if (markReadyForApproval) payload.status = 'ready_for_approval';
   if (linkValue !== undefined) payload.final_edit_link = linkValue;
 
   try {
     await api(`/editing/final-edits/${state.editing.activeFinalEditId}`, { method: 'PATCH', body: JSON.stringify(payload) });
-    toast(markReadyForApproval ? 'Sent for Approval' : 'Saved');
+    toast('Saved');
     await loadEditingWeek();
     closeModal('final-edit-modal');
+    openEditingConcept(conceptAssetId);
   } catch (e) {
     toast(e.message, true);
   }
@@ -6290,6 +6330,7 @@ async function saveFinalEdit(markReadyForApproval = false) {
 async function confirmDeleteFinalEdit() {
   const found = editingFindFinalEdit(state.editing.activeFinalEditId);
   if (!found) return;
+  const conceptAssetId = found.concept.creative_asset_id;
   const ok = await confirmDialog(`Delete "${found.finalEdit.asset_name}"? This can't be undone.`, { okLabel: 'Delete' });
   if (!ok) return;
   try {
@@ -6297,6 +6338,24 @@ async function confirmDeleteFinalEdit() {
     toast('Final Edit deleted');
     await loadEditingWeek();
     closeModal('final-edit-modal');
+    openEditingConcept(conceptAssetId);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// The important workflow change (item 6): Ready for Approval submits the
+// whole Concept -- its complete set of Final Edits -- as one unit to Final
+// Approval, rather than each Final Edit going individually. Re-checked
+// server-side, so this can't succeed against a stale/incomplete client view.
+async function submitEditingConceptReady() {
+  const conceptAssetId = state.editing.activeConceptAssetId;
+  if (conceptAssetId == null) return;
+  try {
+    await api(`/editing/concepts/${conceptAssetId}/ready-for-approval`, { method: 'POST' });
+    toast('Sent for Approval');
+    await loadEditingWeek();
+    renderEditingConceptModal();
   } catch (e) {
     toast(e.message, true);
   }

@@ -557,37 +557,48 @@
       <div id="editing-empty" class="hint" style="display:none;padding:18px 0;text-align:center;">Nothing shot yet this week.</div>
     </section>
 
-    <!-- The "Create Final Edits" flow only -- Hook Variations already on the
-         Concept are offered as suggestions with their actual text shown, never
-         auto-created (see the brief, item 5/7). Format is asked here, not in
-         the per-asset workspace, and only ever needed for a manual/custom row
-         -- suggestions silently inherit the Concept's own format (item 6). -->
+    <!-- The Concept workspace -- the primary unit of work in Editing now
+         (see the workflow-revision brief). A completion checklist of every
+         required Hook/Final Edit, "View Shoot Brief" for full context, and
+         the one Concept-level "Ready for Approval" action -- disabled until
+         every row is checked off. Individual rows open final-edit-modal to
+         do the actual work; this modal never asks for Format/Variation/
+         Status itself, it's purely the checklist + submit surface. -->
     <div id="editing-concept-modal" class="modal-backdrop">
       <div class="modal" style="max-width:480px;">
         <div class="modal-header">
           <div>
-            <h3 id="editing-concept-modal-title">Create Final Edits</h3>
+            <h3 id="editing-concept-modal-title"></h3>
             <div class="hint" id="editing-concept-modal-subtitle"></div>
           </div>
           <button class="modal-close" onclick="closeModal('editing-concept-modal')">&times;</button>
         </div>
         <div class="modal-body">
-          <div id="editing-create-suggestions"></div>
+          <button type="button" class="link-btn" onclick="openEditingConceptBrief()">View Shoot Brief &rarr;</button>
+
+          <div class="editing-ready-badge" id="editing-concept-ready-badge" style="display:none;">&check; Ready for Approval</div>
+
+          <div class="cd-field-label" style="margin-top:14px;">Final Edits</div>
+          <div id="editing-concept-requirements" class="editing-req-list"></div>
           <div id="editing-create-custom-rows"></div>
-          <button type="button" class="link-btn" onclick="addEditingCustomAssetRow()">+ Add Another Final Edit</button>
+          <button type="button" class="link-btn" id="editing-add-another-btn" onclick="addEditingCustomAssetRow()">+ Add Another Final Edit</button>
+
+          <div class="editing-completion-line" id="editing-completion-line"></div>
+          <div class="hint" id="editing-completion-helper" style="display:none;">Complete all Final Edits to submit for approval.</div>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-ghost" onclick="closeModal('editing-concept-modal')">Cancel</button>
-          <button class="btn btn-primary" id="editing-create-btn" onclick="createEditingFinalEdits()" disabled>Create Final Edits</button>
+          <button class="btn btn-ghost" id="editing-concept-cancel-btn" onclick="closeModal('editing-concept-modal')">Cancel</button>
+          <button class="btn btn-primary" id="editing-concept-ready-btn" onclick="submitEditingConceptReady()" disabled>Ready for Approval &rarr;</button>
+          <button class="btn btn-ghost" id="editing-concept-close-btn" onclick="closeModal('editing-concept-modal')" style="display:none;">Close</button>
         </div>
       </div>
     </div>
 
-    <!-- The Final Edit workspace -- deliberately just what's needed to do
-         the work: the actual hook it's cutting (read-only, already known),
-         the one Final Edit link, who's editing it, optional notes. No
-         Format/Variation/Status fields -- status is derived from what's
-         filled in below, not chosen by hand (see the brief, item 4/5). -->
+    <!-- A single Hook/Final Edit's own workspace -- deliberately just what's
+         needed to do the work: the actual hook it's cutting (read-only,
+         already known), the one Final Edit link, who's editing it, optional
+         notes. No Format/Variation/Status fields, and no per-asset Ready for
+         Approval -- that's a Concept-level action now (item 6/5). -->
     <div id="final-edit-modal" class="modal-backdrop">
       <div class="modal" style="max-width:460px;">
         <div class="modal-header">
@@ -598,7 +609,7 @@
           <button class="modal-close" onclick="closeModal('final-edit-modal')">&times;</button>
         </div>
         <div class="modal-body">
-          <div class="editing-ready-badge" id="final-edit-ready-badge" style="display:none;">&check; Ready for Approval</div>
+          <div class="editing-ready-badge" id="final-edit-ready-badge" style="display:none;">&check; Concept Submitted for Approval</div>
 
           <div id="final-edit-opening-wrap" style="display:none;">
             <div class="cd-field-label">Opening</div>
@@ -608,7 +619,7 @@
           <div class="cd-field-label" style="margin-top:10px;">Final Edit</div>
           <div id="final-edit-link-view" style="display:none;">
             <a href="#" id="final-edit-link-open" target="_blank" rel="noopener" class="link-btn">View Final Edit &#8599;</a>
-            <button type="button" class="link-btn" onclick="showFinalEditLinkInput()" style="margin-left:10px;">Replace Edit</button>
+            <button type="button" class="link-btn" id="final-edit-replace-btn" onclick="showFinalEditLinkInput()" style="margin-left:10px;">Replace Edit</button>
           </div>
           <div id="final-edit-link-input-wrap">
             <input type="url" id="final-edit-link-input" placeholder="Paste the final edit link (Drive, Frame.io, etc.)">
@@ -626,7 +637,6 @@
           <button type="button" class="link-btn" id="final-edit-delete-btn" onclick="confirmDeleteFinalEdit()" style="margin-right:auto;">Delete</button>
           <button class="btn btn-ghost" id="final-edit-cancel-btn" onclick="closeModal('final-edit-modal')">Cancel</button>
           <button class="btn btn-ghost" id="final-edit-save-btn" onclick="saveFinalEdit()">Save</button>
-          <button class="btn btn-primary" id="final-edit-ready-btn" onclick="saveFinalEdit(true)">Ready for Approval &rarr;</button>
           <button class="btn btn-ghost" id="final-edit-close-btn" onclick="closeModal('final-edit-modal')" style="display:none;">Close</button>
         </div>
       </div>
