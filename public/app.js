@@ -6027,35 +6027,46 @@ function setEditingFilter(filter) {
 // own card/workspace, not up here.
 function renderEditingSummary() {
   const s = editingComputeSummary();
-  const parts = [`${s.concepts} Concept${s.concepts === 1 ? '' : 's'}`, `${s.final_edits_complete}/${s.final_edits_required} Final Edits Complete`];
+  const parts = [`${s.concepts} Concept${s.concepts === 1 ? '' : 's'}`, `${s.final_edits_complete}/${s.final_edits_required} Final Edits`];
   if (s.ready_for_approval > 0) parts.push(`${s.ready_for_approval} Ready for Approval`);
   document.getElementById('editing-summary').textContent = parts.join(' · ');
 }
 
-// One compact card per Concept, styled after the Upcoming Drops cards for
-// visual consistency with the rest of the app (item 1) -- Product/Concept
-// name, a status pill, the completion fraction, the (single, unambiguous)
-// editor if there is one, and a single action into the workspace. No
-// per-Hook rows here at all; that detail lives in the Concept workspace.
+// Same compact 3-across card grid as Concept Development (.cd-card /
+// .cd-product-grid / .high-stock-thumb), not a bespoke card system -- so
+// Editing feels like the same product rather than an admin screen bolted
+// on (see the landing-page brief). Each card is one Concept: product image
+// + name, the Concept name as the strong title, a status pill, the
+// completion fraction with a short in-card progress bar (never the giant
+// full-width one), the single unambiguous editor if there is one, and one
+// contextual CTA. No per-Hook rows here at all -- that detail lives in the
+// Concept workspace, unchanged by this pass.
+function editingConceptCtaLabel(status, complete) {
+  if (status === 'ready_for_approval') return 'View Editing';
+  return complete === 0 ? 'Start Editing' : 'Open Editing';
+}
+
 function editingConceptCardHtml(concept) {
   const status = editingConceptStatus(concept);
   const { required, complete } = editingConceptCompletion(concept);
   const isReady = status === 'ready_for_approval';
   const editor = editingConceptEditorLabel(concept);
   const pct = required > 0 ? Math.round((complete / required) * 100) : 0;
+  const thumb = concept.image_url
+    ? `<img class="high-stock-thumb" src="${concept.image_url}" alt="">`
+    : '<span class="high-stock-thumb high-stock-noimg">🖼</span>';
   return `
-    <div class="editing-concept-card ${isReady ? 'editing-concept-card-ready' : ''}">
-      <div class="editing-concept-card-head">
-        <div>
-          <div class="editing-concept-product">${escapeHtml(concept.product_name || '—')}</div>
-          <div class="editing-concept-name">${escapeHtml(concept.concept_name)}</div>
-        </div>
-        <span class="cd-concept-status-pill ${EDITING_STATUS_CLASS[status]}">${isReady ? '&check; ' : ''}${EDITING_STATUS_LABELS[status]}</span>
+    <div class="cd-card editing-concept-card ${isReady ? 'editing-concept-card-ready' : ''}" onclick="openEditingConcept(${concept.creative_asset_id})">
+      <div class="cd-card-top">
+        ${thumb}
+        <div class="editing-concept-product">${escapeHtml(concept.product_name || '—')}</div>
       </div>
-      <div class="editing-concept-progress ${isReady ? 'editing-concept-progress-ready' : ''}">${isReady ? '&check; ' : ''}${complete}/${required} Final Edit${required === 1 ? '' : 's'} Complete</div>
-      <div class="coverage-progress-track"><div class="coverage-progress-fill ${isReady ? 'green' : 'teal'}" style="width:${pct}%;"></div></div>
-      ${editor ? `<div class="hint">Editor: ${escapeHtml(editor)}</div>` : ''}
-      <button type="button" class="link-btn" style="margin-top:8px;" onclick="openEditingConcept(${concept.creative_asset_id})">${isReady ? 'View Editing &rarr;' : 'Open Editing &rarr;'}</button>
+      <div class="editing-concept-name">${escapeHtml(concept.concept_name)}</div>
+      <span class="cd-concept-status-pill ${EDITING_STATUS_CLASS[status]}">${isReady ? '&check; ' : ''}${EDITING_STATUS_LABELS[status]}</span>
+      <div class="editing-concept-progress ${isReady ? 'editing-concept-progress-ready' : ''}">${complete} of ${required} Final Edit${required === 1 ? '' : 's'}</div>
+      <div class="editing-card-progress-track"><div class="editing-card-progress-fill ${isReady ? 'ready' : ''}" style="width:${pct}%;"></div></div>
+      ${editor ? `<div class="cd-card-meta">Editor: ${escapeHtml(editor)}</div>` : ''}
+      <div class="cd-card-action">${editingConceptCtaLabel(status, complete)} &rarr;</div>
     </div>`;
 }
 
