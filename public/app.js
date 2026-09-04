@@ -6042,6 +6042,7 @@ function editingConceptCardHtml(concept) {
   const { required, complete } = editingConceptCompletion(concept);
   const isReady = status === 'ready_for_approval';
   const editor = editingConceptEditorLabel(concept);
+  const pct = required > 0 ? Math.round((complete / required) * 100) : 0;
   return `
     <div class="editing-concept-card ${isReady ? 'editing-concept-card-ready' : ''}">
       <div class="editing-concept-card-head">
@@ -6051,7 +6052,8 @@ function editingConceptCardHtml(concept) {
         </div>
         <span class="cd-concept-status-pill ${EDITING_STATUS_CLASS[status]}">${isReady ? '&check; ' : ''}${EDITING_STATUS_LABELS[status]}</span>
       </div>
-      <div class="editing-concept-progress ${isReady ? 'editing-concept-progress-ready' : ''}">${isReady ? '&check; ' : ''}${complete}/${required} Complete</div>
+      <div class="editing-concept-progress ${isReady ? 'editing-concept-progress-ready' : ''}">${isReady ? '&check; ' : ''}${complete}/${required} Final Edit${required === 1 ? '' : 's'} Complete</div>
+      <div class="coverage-progress-track"><div class="coverage-progress-fill ${isReady ? 'green' : 'teal'}" style="width:${pct}%;"></div></div>
       ${editor ? `<div class="hint">Editor: ${escapeHtml(editor)}</div>` : ''}
       <button type="button" class="link-btn" style="margin-top:8px;" onclick="openEditingConcept(${concept.creative_asset_id})">${isReady ? 'View Editing &rarr;' : 'Open Editing &rarr;'}</button>
     </div>`;
@@ -6114,7 +6116,7 @@ function editingRequirementRowHtml(req, index, submitted) {
   }
   return `
     <div class="editing-req-row ${complete ? 'editing-req-row-complete' : ''}">
-      <span class="editing-req-check">${complete ? '&#9745;' : '&#9744;'}</span>
+      <span class="editing-req-check">&#10003;</span>
       <span class="editing-req-main">
         <span class="editing-req-label">${escapeHtml(req.label)}</span>
         ${req.hookText ? `<span class="editing-req-hook">&ldquo;${escapeHtml(req.hookText)}&rdquo;</span>` : ''}
@@ -6135,6 +6137,13 @@ function renderEditingConceptModal() {
   document.getElementById('editing-concept-modal-subtitle').textContent = concept.product_name || '';
   document.getElementById('editing-concept-ready-badge').style.display = submitted ? '' : 'none';
 
+  // The section heading itself carries the completion count now (item 2)
+  // -- this is the Concept's primary progress indicator, so it isn't
+  // repeated again further down (item 4).
+  const countBadge = document.getElementById('editing-req-heading-count');
+  countBadge.textContent = `${complete}/${required} COMPLETE`;
+  countBadge.classList.toggle('editing-req-heading-count-done', allComplete);
+
   document.getElementById('editing-concept-requirements').innerHTML =
     requirements.map((r, i) => editingRequirementRowHtml(r, i, submitted)).join('');
 
@@ -6142,9 +6151,19 @@ function renderEditingConceptModal() {
   if (submitted) document.getElementById('editing-create-custom-rows').innerHTML = '';
   else renderEditingCustomAssetRows();
 
-  document.getElementById('editing-completion-line').innerHTML =
-    `${allComplete ? '&check; ' : ''}${complete} of ${required} Final Edit${required === 1 ? '' : 's'} Complete`;
-  document.getElementById('editing-completion-helper').style.display = (!submitted && !allComplete) ? '' : 'none';
+  // One short helper near the CTA (item 4/5): what's missing while
+  // incomplete, a small positive confirmation once everything's done --
+  // never both messages, and never repeating the count from the heading.
+  const helper = document.getElementById('editing-completion-helper');
+  if (submitted) {
+    helper.style.display = 'none';
+  } else {
+    helper.style.display = '';
+    helper.classList.toggle('editing-completion-helper-done', allComplete);
+    helper.textContent = allComplete
+      ? '✓ All Final Edits Complete'
+      : `Complete all ${required} Final Edit${required === 1 ? '' : 's'} to submit for approval.`;
+  }
 
   document.getElementById('editing-concept-cancel-btn').style.display = submitted ? 'none' : '';
   const readyBtn = document.getElementById('editing-concept-ready-btn');
