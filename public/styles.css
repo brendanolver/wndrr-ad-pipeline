@@ -1026,6 +1026,7 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .cd-modal-workspace.cd-readonly .cd-shot-item-actions,
 .cd-modal-workspace.cd-readonly .cd-reference-add-wrap,
 .cd-modal-workspace.cd-readonly .cd-reference-card-actions,
+.cd-modal-workspace.cd-readonly .cd-location-clear,
 .cd-modal-workspace.cd-readonly #cd-modal-script-toggle-wrap,
 .cd-modal-workspace.cd-readonly #cd-modal-shoot-req-toggle-wrap,
 .cd-modal-workspace.cd-readonly #cd-modal-save-avatar-btn,
@@ -1089,6 +1090,20 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .cd-shot-quickadd-chip{font-size:12px;font-weight:600;color:var(--text-secondary);background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-pill);padding:5px 10px;cursor:pointer;}
 .cd-shot-quickadd-chip:hover{background:var(--teal-light);color:var(--teal-dark);border-color:var(--teal);}
 .cd-shot-quickadd-chip-custom{background:none;border-style:dashed;}
+
+/* Location: searchable combobox -- the input's value IS the location (no
+   hidden select), so a genuinely new place always just works. The dropdown
+   below it is a fast-pick/search assist over known locations, with a
+   "+ Add" row appended whenever the typed text doesn't already match one. */
+.cd-location-combo{position:relative;}
+.cd-location-combo input{padding-right:26px;}
+.cd-location-clear{position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:15px;line-height:1;padding:2px 4px;}
+.cd-location-clear:hover{color:var(--red);}
+.cd-location-dropdown{position:absolute;top:100%;left:0;right:0;z-index:5;margin-top:4px;background:white;border:1px solid var(--border);border-radius:var(--r);box-shadow:0 4px 14px rgba(0,0,0,0.1);max-height:220px;overflow-y:auto;}
+.cd-location-option{display:block;width:100%;text-align:left;padding:7px 10px;font-size:13px;background:none;border:none;cursor:pointer;}
+.cd-location-option:hover{background:var(--surface2);}
+.cd-location-option-add{color:var(--teal-dark);font-weight:600;}
+.cd-location-empty{padding:7px 10px;font-size:12px;color:var(--text-muted);}
 
 .shoot-plan-edit-size-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--border);font-size:13px;font-weight:600;}
 .shoot-plan-edit-size-row:last-child{border-bottom:none;}
