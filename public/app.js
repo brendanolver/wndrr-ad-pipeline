@@ -850,6 +850,23 @@ document.addEventListener('keydown', (e) => {
   closeConceptDevShotQuickAdd();
 });
 
+// Location's searchable combobox dropdown is likewise a dismissible
+// popover -- click outside it or press Escape to close without
+// changing whatever's currently typed in the input (closing never
+// touches the input's value, only the dropdown's visibility).
+document.addEventListener('click', (e) => {
+  const dropdown = document.getElementById('cd-modal-location-dropdown');
+  if (!dropdown || dropdown.style.display === 'none') return;
+  if (e.target.closest('.cd-location-combo')) return;
+  closeConceptDevLocationDropdown();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const dropdown = document.getElementById('cd-modal-location-dropdown');
+  if (!dropdown || dropdown.style.display === 'none') return;
+  closeConceptDevLocationDropdown();
+});
+
 // ── Planning: step nav doubles as the Monday meeting checklist ───────
 // The 5 nav tabs themselves answer "where are we / what's reviewed / what's
 // left" -- no separate checklist row. First four sections are manually
@@ -4290,6 +4307,86 @@ function conceptDevSelectWithOtherValue(selectId, customId) {
   return select.value === '__other__' ? document.getElementById(customId).value.trim() : select.value;
 }
 
+// Location: a searchable combobox rather than a fixed dropdown -- WNDRR
+// shoots in too many places for a short predefined list to ever be
+// complete. The text input's own value IS the location (no hidden
+// select), so typing a brand-new place always works; the dropdown below
+// it is purely a fast-pick/search assist over state.conceptDevLocations
+// (itself just the distinct locations already saved on past concepts --
+// see GET /concept-development/locations). Selecting or adding a location
+// closes the dropdown and pushes it into state.conceptDevLocations
+// immediately client-side, so it's available to pick again later in the
+// same session without waiting for a full reload.
+function fillConceptDevLocationCombo(value) {
+  const input = document.getElementById('cd-modal-location-input');
+  input.value = value || '';
+  closeConceptDevLocationDropdown();
+  updateConceptDevLocationClearVisibility();
+}
+
+function updateConceptDevLocationClearVisibility() {
+  const input = document.getElementById('cd-modal-location-input');
+  document.getElementById('cd-modal-location-clear').style.display = input.value.trim() ? '' : 'none';
+}
+
+function closeConceptDevLocationDropdown() {
+  document.getElementById('cd-modal-location-dropdown').style.display = 'none';
+}
+
+function openConceptDevLocationDropdown() {
+  renderConceptDevLocationDropdown();
+}
+
+function onConceptDevLocationInput() {
+  updateConceptDevLocationClearVisibility();
+  renderConceptDevLocationDropdown();
+}
+
+// Empty input shows every known location (a quick browse/click list);
+// typing filters it live. A "+ Add" row appears whenever what's typed
+// doesn't exactly match an existing location (case-insensitively) --
+// clicking it (or an existing option) both just call selectConceptDevLocation,
+// which is the only thing that actually changes conceptDevLocations.
+function renderConceptDevLocationDropdown() {
+  const dropdown = document.getElementById('cd-modal-location-dropdown');
+  const query = document.getElementById('cd-modal-location-input').value.trim();
+  const queryLower = query.toLowerCase();
+  const matches = state.conceptDevLocations.filter((loc) => loc.toLowerCase().includes(queryLower));
+  const exactMatch = state.conceptDevLocations.some((loc) => loc.toLowerCase() === queryLower);
+
+  const rows = matches.map((loc) => `<button type="button" class="cd-location-option" onclick="selectConceptDevLocation('${escapeHtml(loc).replace(/'/g, "\\'")}')">${escapeHtml(loc)}</button>`);
+  if (query && !exactMatch) {
+    rows.push(`<button type="button" class="cd-location-option cd-location-option-add" onclick="addConceptDevLocationCustom(document.getElementById('cd-modal-location-input').value.trim())">+ Add &ldquo;${escapeHtml(query)}&rdquo;</button>`);
+  }
+  dropdown.innerHTML = rows.length ? rows.join('') : '<div class="cd-location-empty">No locations yet -- type to add one.</div>';
+  dropdown.style.display = '';
+}
+
+function selectConceptDevLocation(value) {
+  document.getElementById('cd-modal-location-input').value = value;
+  closeConceptDevLocationDropdown();
+  updateConceptDevLocationClearVisibility();
+}
+
+// Newly added locations become reusable immediately -- pushed into the
+// same client-side list the dropdown itself reads from, deduplicated
+// case-insensitively against what's already there.
+function addConceptDevLocationCustom(value) {
+  const trimmed = value.trim();
+  if (!trimmed) return;
+  const alreadyKnown = state.conceptDevLocations.some((loc) => loc.toLowerCase() === trimmed.toLowerCase());
+  if (!alreadyKnown) state.conceptDevLocations.push(trimmed);
+  selectConceptDevLocation(trimmed);
+}
+
+function clearConceptDevLocation() {
+  const input = document.getElementById('cd-modal-location-input');
+  input.value = '';
+  closeConceptDevLocationDropdown();
+  updateConceptDevLocationClearVisibility();
+  input.focus();
+}
+
 // Shared by both the create ("+ Add Concept") and edit (click a concept
 // card) paths -- concept is null in create mode, so every field just starts
 // blank. Status is no longer an editable field here (see saveConceptDevModal)
@@ -4300,7 +4397,7 @@ function fillConceptDevModalFields(concept) {
   document.getElementById('cd-modal-script').value = concept ? (concept.script_notes || '') : '';
   document.getElementById('cd-modal-props').value = concept ? (concept.props_notes || '') : '';
   fillConceptDevSelectWithOther('cd-modal-talent-select', 'cd-modal-talent-custom', state.contentCreators.map((c) => c.name), concept ? concept.talent_requirement : '');
-  fillConceptDevSelectWithOther('cd-modal-location-select', 'cd-modal-location-custom', state.conceptDevLocations, concept ? concept.location : '');
+  fillConceptDevLocationCombo(concept ? concept.location : '');
 
   // Execution / Shot Plan is legacy -- superseded by structured What to
   // Shoot. Never shown for a new concept and never required; only surfaced
@@ -4674,7 +4771,7 @@ async function saveConceptDevModal(targetStatus) {
         : { url: r.url.trim(), note: r.note.trim() }))
       .filter((r) => r.url),
     talent_requirement: conceptDevSelectWithOtherValue('cd-modal-talent-select', 'cd-modal-talent-custom'),
-    location: conceptDevSelectWithOtherValue('cd-modal-location-select', 'cd-modal-location-custom'),
+    location: document.getElementById('cd-modal-location-input').value.trim(),
     props_notes: document.getElementById('cd-modal-props').value.trim(),
   };
   // targetStatus is null for "Save Changes" on an already-submitted concept
@@ -7555,7 +7652,7 @@ async function copyReviewPrompt() {
     shots: conceptDevModalShots.map((s) => ({ name: s.name.trim(), capture: s.capture.trim() })).filter((s) => s.name),
     reference_items: conceptDevModalReferences.map((r) => ({ url: r.url.trim(), note: r.note.trim() })).filter((r) => r.url),
     talent_requirement: conceptDevSelectWithOtherValue('cd-modal-talent-select', 'cd-modal-talent-custom'),
-    location: conceptDevSelectWithOtherValue('cd-modal-location-select', 'cd-modal-location-custom'),
+    location: document.getElementById('cd-modal-location-input').value.trim(),
     props_notes: document.getElementById('cd-modal-props').value.trim(),
   };
   try {

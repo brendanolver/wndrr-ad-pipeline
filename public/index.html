@@ -1428,13 +1428,15 @@
         </div>
       </div>
 
-      <!-- Shoot Setup: kept compact and optional. Talent/Location are
-           selects populated from data the app already has (content
-           creators already used for this exact purpose elsewhere, and
-           locations already typed into past concepts) with an Other/
-           custom fallback -- never a hard-coded list. See
-           fillConceptDevSelectWithOther/conceptDevSelectWithOtherValue in
-           app.js. -->
+      <!-- Shoot Setup: kept compact and optional. Talent is a select
+           populated from data the app already has (content creators,
+           already used for this exact purpose elsewhere) with an Other/
+           custom fallback -- see fillConceptDevSelectWithOther/
+           conceptDevSelectWithOtherValue in app.js. Location is a
+           searchable combobox instead of a fixed dropdown -- WNDRR shoots
+           in too many places for a short predefined list to ever cover,
+           so typing always works as a genuinely new location, not just a
+           fallback. See conceptDevLocationCombo* in app.js. -->
       <div class="cd-modal-section">
         <div class="cd-modal-section-title">Shoot Setup</div>
         <div id="cd-modal-shoot-req-toggle-wrap">
@@ -1447,8 +1449,11 @@
               <input type="text" id="cd-modal-talent-custom" placeholder="e.g. UGC creator, none" style="display:none;">
             </label>
             <label>Location
-              <select id="cd-modal-location-select" onchange="onConceptDevSelectWithOtherChange('cd-modal-location-select','cd-modal-location-custom')"></select>
-              <input type="text" id="cd-modal-location-custom" placeholder="e.g. External" style="display:none;">
+              <div class="cd-location-combo" id="cd-modal-location-combo">
+                <input type="text" id="cd-modal-location-input" placeholder="Click to browse, or type to search / add new" autocomplete="off" oninput="onConceptDevLocationInput()" onfocus="openConceptDevLocationDropdown()">
+                <button type="button" class="cd-location-clear" id="cd-modal-location-clear" onclick="clearConceptDevLocation()" aria-label="Clear location" style="display:none;">&times;</button>
+                <div class="cd-location-dropdown" id="cd-modal-location-dropdown" style="display:none;"></div>
+              </div>
             </label>
           </div>
           <label>Props / Special Requirements
