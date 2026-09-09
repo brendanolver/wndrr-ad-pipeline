@@ -4186,17 +4186,14 @@ function renderConceptDevAvatarOptions(selectedAvatarId) {
   ].join('');
 }
 
-// Toggles "Who are you targeting?" and swaps the "Why will they care?"
-// placeholder between the two modes -- one shared field either way (see
-// the HTML comment on cd-modal-audience-section), never two parallel
-// "why care" fields to keep in sync.
+// Toggles "Who are you targeting?" -- one shared "Why will they care?"
+// field either way (see the HTML comment on cd-modal-audience-section),
+// never two parallel "why care" fields to keep in sync. Its placeholder is
+// fixed in the HTML and doesn't vary by avatar mode.
 function onConceptDevAvatarChange() {
   const select = document.getElementById('cd-modal-avatar-select');
   const isOther = select.value === '__other__';
   document.getElementById('cd-modal-avatar-custom-wrap').style.display = isOther ? '' : 'none';
-  document.getElementById('cd-modal-avatar-why-care').placeholder = isOther
-    ? 'Why should this person care about this product or creative idea?'
-    : 'What makes this product or concept relevant to this person?';
   select.classList.remove('cd-field-invalid');
   document.getElementById('cd-modal-avatar-custom-desc').classList.remove('cd-field-invalid');
   hideConceptDevFieldError('cd-modal-avatar-select-error');
