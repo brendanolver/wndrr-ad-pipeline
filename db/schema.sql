@@ -653,6 +653,20 @@ ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS hook_variations JSONB NOT N
 UPDATE creative_assets SET hook_variations = jsonb_build_array(jsonb_build_object('text', hook))
  WHERE hook_variations = '[]'::jsonb AND hook IS NOT NULL AND trim(hook) <> '';
 
+-- What to Shoot: the literal, physical footage list a concept needs
+-- captured -- deliberately separate from both Execution (the creative
+-- flow/direction, still free text, untouched) and hook_variations (the
+-- opening variations being tested). Exactly the hook_variations/
+-- reference_items pattern -- one JSONB array of { name, capture } objects
+-- directly on the row, array order IS shot order (no separate rank
+-- column to keep in sync). Purely additive: defaults to '[]' so every
+-- existing Concept keeps working with no structured shots at all -- the
+-- Shooting page's "does this concept have What to Shoot data" check is
+-- just "is this array non-empty", never a destructive backfill from the
+-- existing free-text Execution (see the brief: never invent Shot records
+-- for a Concept that never had them).
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS shots JSONB NOT NULL DEFAULT '[]'::jsonb;
+
 -- ---------------------------------------------------------------------------
 -- Creative Toolkit: research/inspiration resources shown alongside Concept
 -- Development, configurable so the team can add their own (TikTok Creative

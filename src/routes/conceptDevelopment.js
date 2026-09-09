@@ -198,6 +198,7 @@ router.patch('/concepts/:id', async (req, res, next) => {
       execution,
       script_notes,
       hook_variations,
+      shots,
       reference_items,
       talent_requirement,
       location,
@@ -221,6 +222,15 @@ router.patch('/concepts/:id', async (req, res, next) => {
         (h) => h && typeof h === 'object' && typeof h.text === 'string'
       );
       if (!valid) return res.status(400).json({ error: 'hook_variations must be an array of { text }' });
+    }
+    // What to Shoot -- separate from hook_variations (openings) and
+    // execution (creative flow): the literal footage list. Same
+    // whole-array-replace pattern, array order is shot order.
+    if (shots !== undefined) {
+      const valid = Array.isArray(shots) && shots.every(
+        (s) => s && typeof s === 'object' && typeof s.name === 'string' && typeof s.capture === 'string'
+      );
+      if (!valid) return res.status(400).json({ error: 'shots must be an array of { name, capture }' });
     }
 
     // customer_avatar_id is the one field here that must support explicit
@@ -258,6 +268,7 @@ router.patch('/concepts/:id', async (req, res, next) => {
          avatar_why_care = COALESCE($14, avatar_why_care),
          submitted_for_review_at = CASE WHEN $16 THEN now() ELSE submitted_for_review_at END,
          submitted_for_review_by_user_id = CASE WHEN $16 THEN $17 ELSE submitted_for_review_by_user_id END,
+         shots = COALESCE($18, shots),
          updated_at = now()
        WHERE id = $15 RETURNING *`,
       [
@@ -278,6 +289,7 @@ router.patch('/concepts/:id', async (req, res, next) => {
         req.params.id,
         submittingForReview,
         req.user.id,
+        shots !== undefined ? JSON.stringify(shots) : null,
       ]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Concept not found' });

@@ -121,7 +121,7 @@ router.get('/:id/brief', async (req, res, next) => {
       `SELECT
          ss.id, ss.status, ss.original_week_start, ss.scheduled_week_start,
          ss.scheduled_day, ss.shot_at, ss.ready_for_editing,
-         ca.concept_name, ca.angle, ca.execution, ca.script_notes, ca.hook_variations,
+         ca.concept_name, ca.angle, ca.execution, ca.script_notes, ca.hook_variations, ca.shots,
          ca.reference_items, ca.talent_requirement, ca.location, ca.props_notes,
          ca.customer_avatar_id, ca.custom_avatar_description, ca.avatar_why_care,
          ca.concept_dev_status, ca.reviewed_at,
