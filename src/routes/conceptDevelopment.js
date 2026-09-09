@@ -140,6 +140,27 @@ router.get('/', async (req, res, next) => {
   }
 });
 
+// Distinct locations already used across saved Concepts -- backs the New
+// Concept form's Location select (item: "selector with existing/common
+// locations where possible, with an Other/custom option") without ever
+// hard-coding a location list. Purely a read of what the team has already
+// typed in before; no new table, no seeded values.
+router.get('/locations', async (req, res, next) => {
+  try {
+    const result = await pool.query(
+      `SELECT location, COUNT(*)::int AS uses
+       FROM creative_assets
+       WHERE location IS NOT NULL AND btrim(location) <> ''
+       GROUP BY location
+       ORDER BY uses DESC, location ASC
+       LIMIT 20`
+    );
+    res.json(result.rows.map((r) => r.location));
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Ad-hoc concept for a Core/High Stock/Promotion product -- a Drop
 // product's "+ Add Concept" instead reuses the existing
 // POST /drop-product-plans/:id/slots (adds a 'new' Required Concept slot,

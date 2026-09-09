@@ -356,16 +356,23 @@ WHICH CONCEPT WOULD YOU PRODUCE FIRST AND WHY?`;
 }
 
 // A concept's already-captured Concept Development content -- Concept
-// Name/Angle/Execution/Primary Hook/Alternative Hooks/Script/References/
-// Reference Notes/Shoot Requirements, per the brief -- omitting anything
-// blank. References and their notes are kept paired (one line each) rather
-// than split into two flat lists, since a note only makes sense next to the
-// link it's about.
+// Name/Angle/Execution (legacy)/What to Shoot/Primary Hook/Alternative
+// Hooks/Script/References/Reference Notes/Shoot Requirements, per the
+// brief -- omitting anything blank. References and their notes are kept
+// paired (one line each) rather than split into two flat lists, since a
+// note only makes sense next to the link it's about.
 function formatExistingConceptBlock(concept) {
   const lines = [];
   if (concept.concept_name) lines.push(`Concept Name: ${concept.concept_name}`);
   if (concept.angle) lines.push(`Angle / Idea: ${concept.angle}`);
-  if (concept.execution) lines.push(`Execution / Shot Plan: ${concept.execution}`);
+  if (concept.execution) lines.push(`Execution / Shot Plan (legacy): ${concept.execution}`);
+
+  const shots = (Array.isArray(concept.shots) ? concept.shots : [])
+    .filter((s) => s && s.name && s.name.trim());
+  if (shots.length) {
+    lines.push('What to Shoot:');
+    for (const s of shots) lines.push(`- ${s.name.trim()}${s.capture && s.capture.trim() ? `: ${s.capture.trim()}` : ''}`);
+  }
 
   const hooks = (Array.isArray(concept.hook_variations) ? concept.hook_variations : [])
     .map((h) => (h && h.text ? h.text.trim() : ''))

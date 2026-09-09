@@ -19,6 +19,7 @@ let state = {
   coreShootExpandedCategories: new Set(),
   shootPlan: [], coverageImageIndex: new Map(),
   contentCreators: [],
+  conceptDevLocations: [],
   highStockProducts: [], highStockExpandedProducts: new Set(),
   // Monday Planning's 5-step guided workflow -- always starts at Core on
   // load (not persisted to localStorage): this is a recurring weekly
@@ -275,7 +276,7 @@ function conceptDevWeekNumber() {
 async function loadAll() {
   try {
     const weekStart = planningWeekStart();
-    const [board, styles, categories, dashboard, dropsRes, provenWinners, coreRes, planningSettings, shootPlan, contentCreators, highStockRes, promotions, weeklyConfirmation, weeklyPlanningProgress, salesCadence, metaProductMappings, metaProductFamilies, conceptDev, creativeResources, customerAvatars, tuesdayReview, shootingWeek, editingWeek] = await Promise.all([
+    const [board, styles, categories, dashboard, dropsRes, provenWinners, coreRes, planningSettings, shootPlan, contentCreators, highStockRes, promotions, weeklyConfirmation, weeklyPlanningProgress, salesCadence, metaProductMappings, metaProductFamilies, conceptDev, creativeResources, customerAvatars, tuesdayReview, shootingWeek, editingWeek, conceptDevLocations] = await Promise.all([
       api('/board'),
       api('/styles'),
       api('/categories'),
@@ -299,6 +300,7 @@ async function loadAll() {
       api(`/concept-development?week_start=${tuesdayReviewWeekStart()}`),
       api(`/shooting?week_start=${shootingWeekStart()}`),
       api(`/editing?week_start=${editingWeekStart()}`),
+      api('/concept-development/locations'),
     ]);
     state.board = board;
     state.styles = styles;
@@ -327,6 +329,7 @@ async function loadAll() {
     state.tuesdayReview.filter = tuesdayReviewDefaultFilter();
     state.shooting.data = shootingWeek;
     state.editing.data = editingWeek;
+    state.conceptDevLocations = conceptDevLocations;
     renderBoard();
     renderMissingAd();
     renderStylesTable();
@@ -3940,6 +3943,10 @@ function findConceptDevConcept(conceptId) {
 let conceptDevModalConceptId = null;
 let conceptDevModalProduct = null;
 let conceptDevModalReferences = [];
+// Which reference the compact paste form is editing (null = adding a new
+// one) -- see startConceptDevReferencePaste/editConceptDevReference/
+// saveConceptDevReferencePaste.
+let conceptDevReferenceEditIndex = null;
 let conceptDevModalHooks = [];
 let conceptDevModalShots = [];
 // Once a concept has been Approved in Tuesday Review, it's the final brief
@@ -3960,7 +3967,7 @@ function renderConceptDevModalHooks() {
   document.getElementById('cd-modal-hooks-list').innerHTML = conceptDevModalHooks.map((h, i) => `
     <div class="cd-hook-item">
       <label>${i === 0 ? 'Primary Hook / Opening' : `Alternative Hook ${i + 1}`}
-        <textarea rows="2" oninput="conceptDevModalHooks[${i}].text=this.value" placeholder="${i === 0 ? 'Describe the opening — dialogue, on-screen text, visual moment, action, reveal, etc.' : 'A different opening for the same concept'}">${escapeHtml(h.text)}</textarea>
+        <textarea ${i === 0 ? 'id="cd-modal-hook-primary"' : ''} rows="2" oninput="conceptDevModalHooks[${i}].text=this.value" placeholder="${i === 0 ? 'Describe the opening — dialogue, on-screen text, visual moment, action, reveal, etc.' : 'A different opening for the same concept'}">${escapeHtml(h.text)}</textarea>
       </label>
       ${i > 0 ? `<button type="button" class="link-btn cd-hook-remove" onclick="removeConceptDevHook(${i})">Remove</button>` : ''}
     </div>`).join('');
@@ -3979,36 +3986,59 @@ function removeConceptDevHook(index) {
 }
 
 // What to Shoot -- the literal footage list, deliberately separate from
-// Hooks (openings) and Execution (creative flow). Each Shot is just a
-// name + what to capture (see the brief: no timestamps/camera/duration/
-// etc), freely addable/removable/reorderable, with no minimum enforced
-// here -- see the Ready for Review validation in saveConceptDevModal for
-// where "at least 1 Shot" actually gets checked.
+// Hooks (openings) and the legacy Execution field. Each Shot is just a
+// name (usually a quick-add chip label, see addConceptDevQuickShot) + an
+// optional short detail -- no timestamps/camera/duration/etc, and Detail
+// is never required (only Shot Name counts towards "at least 1 Shot" --
+// see the Ready for Review validation in saveConceptDevModal). Freely
+// addable/removable/reorderable, no minimum enforced here.
 function renderConceptDevModalShots() {
   document.getElementById('cd-modal-shots-list').innerHTML = conceptDevModalShots.map((s, i) => `
     <div class="cd-shot-item">
       <div class="cd-shot-item-header">
-        <span class="cd-shot-item-num">Shot ${i + 1}</span>
+        <input type="text" class="cd-shot-name-input" value="${escapeHtml(s.name)}" oninput="conceptDevModalShots[${i}].name=this.value" placeholder="Shot name">
         <div class="cd-shot-item-actions">
           <button type="button" class="cd-shot-move" onclick="moveConceptDevShot(${i}, -1)" ${i === 0 ? 'disabled' : ''} aria-label="Move shot up">&uarr;</button>
           <button type="button" class="cd-shot-move" onclick="moveConceptDevShot(${i}, 1)" ${i === conceptDevModalShots.length - 1 ? 'disabled' : ''} aria-label="Move shot down">&darr;</button>
           <button type="button" class="link-btn cd-shot-remove" onclick="removeConceptDevShot(${i})">Remove</button>
         </div>
       </div>
-      <label>Shot Name
-        <input type="text" value="${escapeHtml(s.name)}" oninput="conceptDevModalShots[${i}].name=this.value" placeholder="e.g. Overhead Colour Rotation">
-      </label>
-      <label>What to Capture
-        <textarea rows="2" oninput="conceptDevModalShots[${i}].capture=this.value" placeholder="e.g. Fast overhead flatlay with different colourways swapped in and out.">${escapeHtml(s.capture)}</textarea>
-      </label>
+      <input type="text" class="cd-shot-detail-input" value="${escapeHtml(s.capture)}" oninput="conceptDevModalShots[${i}].capture=this.value" placeholder="Add detail (optional) — e.g. Panel construction">
     </div>`).join('');
 }
 
-function addConceptDevShot() {
-  conceptDevModalShots.push({ name: '', capture: '' });
+// Common shot types a creator would otherwise retype every time -- clicking
+// one adds it to the list immediately with that name pre-filled, so typing
+// is only ever needed for the optional Detail line or a genuinely custom
+// shot. Deliberately a fixed, small, non-configurable list (not backed by
+// any table) -- these are generic film-set vocabulary, not app data.
+const CONCEPT_DEV_QUICK_SHOT_TYPES = [
+  'Full Body', 'Front', 'Back', 'Side', 'Close-up / Detail', 'Product Detail',
+  'Movement / Walking', 'Talking to Camera', 'Outfit / Styling', 'Transition',
+];
+
+function toggleConceptDevShotQuickAdd() {
+  const menu = document.getElementById('cd-modal-shot-quickadd-menu');
+  const opening = menu.style.display === 'none';
+  if (opening) {
+    menu.innerHTML = CONCEPT_DEV_QUICK_SHOT_TYPES.map((label) => `<button type="button" class="cd-shot-quickadd-chip" onclick="addConceptDevQuickShot('${label}')">${escapeHtml(label)}</button>`).join('')
+      + `<button type="button" class="cd-shot-quickadd-chip cd-shot-quickadd-chip-custom" onclick="addConceptDevQuickShot('')">Custom Shot</button>`;
+  }
+  menu.style.display = opening ? '' : 'none';
+}
+
+// name === '' is the "Custom Shot" chip -- adds a blank Shot and focuses
+// its Name input for typing, instead of a pre-filled Detail line.
+function addConceptDevQuickShot(name) {
+  conceptDevModalShots.push({ name, capture: '' });
+  document.getElementById('cd-modal-shot-quickadd-menu').style.display = 'none';
   renderConceptDevModalShots();
-  const inputs = document.querySelectorAll('#cd-modal-shots-list input');
-  if (inputs.length) inputs[inputs.length - 1].focus();
+  const items = document.querySelectorAll('#cd-modal-shots-list .cd-shot-item');
+  const last = items[items.length - 1];
+  if (last) {
+    const focusTarget = name ? last.querySelector('.cd-shot-detail-input') : last.querySelector('.cd-shot-name-input');
+    if (focusTarget) focusTarget.focus();
+  }
 }
 
 function removeConceptDevShot(index) {
@@ -4023,42 +4053,90 @@ function moveConceptDevShot(index, delta) {
   renderConceptDevModalShots();
 }
 
-function renderConceptDevModalReferences() {
-  document.getElementById('cd-modal-references-list').innerHTML = conceptDevModalReferences.map((r, i) => `
-    <div class="cd-reference-item">
-      <div class="cd-reference-item-row">
-        ${r.library_reference_id ? '<span class="cd-reference-library-tag">📚 From Library</span>' : ''}
-        <input type="text" value="${escapeHtml(r.url)}" oninput="conceptDevModalReferences[${i}].url=this.value" placeholder="Reference link">
-        <button type="button" class="cd-reference-remove" onclick="removeConceptDevReference(${i})" aria-label="Remove reference">&times;</button>
+// References render as compact cards (label + truncated note) rather than
+// permanently-visible URL/note text fields -- editing happens through the
+// same paste form used to add one (see editConceptDevReference), not
+// inline in the card itself.
+function conceptDevReferenceCardHtml(r, i) {
+  const label = referenceLabelFromUrl(r.url);
+  const note = r.note && r.note.trim();
+  return `
+    <div class="cd-reference-card">
+      <div class="cd-reference-card-main">
+        <a href="${escapeHtml(r.url)}" target="_blank" rel="noopener" class="cd-reference-card-label">${r.library_reference_id ? '📚 ' : ''}${escapeHtml(label)}</a>
+        ${note ? `<div class="cd-reference-card-note">${escapeHtml(note)}</div>` : ''}
       </div>
-      <textarea rows="2" oninput="conceptDevModalReferences[${i}].note=this.value" placeholder="What do we like about it?">${escapeHtml(r.note)}</textarea>
-    </div>`).join('');
+      <div class="cd-reference-card-actions">
+        <button type="button" class="link-btn" onclick="editConceptDevReference(${i})">Edit</button>
+        <button type="button" class="link-btn" onclick="removeConceptDevReference(${i})">Remove</button>
+      </div>
+    </div>`;
 }
 
-// References defaults to the same compact collapsed state as Script/Shoot
-// Requirements -- an empty optional field shouldn't carry a big grey card's
-// worth of visual weight. Unlike those two it's a repeatable list, so both
-// the collapsed and expanded "+ Add Reference" triggers call the same
-// addConceptDevReference(), and removing the last reference collapses the
-// section back down rather than leaving an empty expanded list showing.
-function setConceptDevReferencesExpanded(expanded) {
-  document.getElementById('cd-modal-references-toggle-wrap').style.display = expanded ? 'none' : '';
-  document.getElementById('cd-modal-references-list').style.display = expanded ? '' : 'none';
-  document.getElementById('cd-modal-references-actions').style.display = expanded ? '' : 'none';
-}
-
-function addConceptDevReference() {
-  conceptDevModalReferences.push({ url: '', note: '' });
-  renderConceptDevModalReferences();
-  setConceptDevReferencesExpanded(true);
-  const inputs = document.querySelectorAll('#cd-modal-references-list .cd-reference-item-row input');
-  if (inputs.length) inputs[inputs.length - 1].focus();
+function renderConceptDevModalReferences() {
+  document.getElementById('cd-modal-references-list').innerHTML = conceptDevModalReferences
+    .map((r, i) => conceptDevReferenceCardHtml(r, i)).join('');
 }
 
 function removeConceptDevReference(index) {
   conceptDevModalReferences.splice(index, 1);
   renderConceptDevModalReferences();
-  if (!conceptDevModalReferences.length) setConceptDevReferencesExpanded(false);
+}
+
+// "+ Add Reference" opens a small menu (Paste Link / Choose From Reference
+// Library) instead of two permanently-visible actions -- see the brief.
+function toggleConceptDevReferenceAddMenu() {
+  const menu = document.getElementById('cd-modal-reference-add-menu');
+  menu.style.display = menu.style.display === 'none' ? '' : 'none';
+}
+
+function chooseConceptDevReferenceFromLibrary() {
+  document.getElementById('cd-modal-reference-add-menu').style.display = 'none';
+  openReferenceLibraryPicker();
+}
+
+// The same compact paste form handles both adding a new reference and
+// editing an existing one -- conceptDevReferenceEditIndex tracks which
+// (null while adding). See saveConceptDevReferencePaste.
+function startConceptDevReferencePaste() {
+  conceptDevReferenceEditIndex = null;
+  document.getElementById('cd-modal-reference-add-menu').style.display = 'none';
+  document.getElementById('cd-modal-reference-paste-url').value = '';
+  document.getElementById('cd-modal-reference-paste-note').value = '';
+  document.getElementById('cd-modal-reference-paste-save-btn').textContent = 'Add Reference';
+  document.getElementById('cd-modal-reference-paste-form').style.display = '';
+  document.getElementById('cd-modal-reference-paste-url').focus();
+}
+
+function editConceptDevReference(index) {
+  const r = conceptDevModalReferences[index];
+  if (!r) return;
+  conceptDevReferenceEditIndex = index;
+  document.getElementById('cd-modal-reference-add-menu').style.display = 'none';
+  document.getElementById('cd-modal-reference-paste-url').value = r.url;
+  document.getElementById('cd-modal-reference-paste-note').value = r.note;
+  document.getElementById('cd-modal-reference-paste-save-btn').textContent = 'Save Reference';
+  document.getElementById('cd-modal-reference-paste-form').style.display = '';
+  document.getElementById('cd-modal-reference-paste-url').focus();
+}
+
+function cancelConceptDevReferencePaste() {
+  conceptDevReferenceEditIndex = null;
+  document.getElementById('cd-modal-reference-paste-form').style.display = 'none';
+}
+
+function saveConceptDevReferencePaste() {
+  const url = document.getElementById('cd-modal-reference-paste-url').value.trim();
+  const note = document.getElementById('cd-modal-reference-paste-note').value.trim();
+  if (!url) { toast('A reference link is required', true); return; }
+  if (conceptDevReferenceEditIndex !== null) {
+    conceptDevModalReferences[conceptDevReferenceEditIndex] = { ...conceptDevModalReferences[conceptDevReferenceEditIndex], url, note };
+  } else {
+    conceptDevModalReferences.push({ url, note });
+  }
+  conceptDevReferenceEditIndex = null;
+  document.getElementById('cd-modal-reference-paste-form').style.display = 'none';
+  renderConceptDevModalReferences();
 }
 
 // Read-only Planning-handoff context shown at the top of the workspace --
@@ -4148,6 +4226,46 @@ function openSaveAvatarFromConceptModal() {
   openCaModal(null, { who: description });
 }
 
+// A dropdown of options the app already has (Talent/Model from
+// state.contentCreators, Location from state.conceptDevLocations) plus an
+// "Other / custom" fallback -- same sentinel pattern as the Customer
+// Avatar select above, reused here rather than inventing a second one.
+// Never hard-codes a list: options come entirely from real existing data.
+function fillConceptDevSelectWithOther(selectId, customId, options, currentValue) {
+  const select = document.getElementById(selectId);
+  const custom = document.getElementById(customId);
+  select.innerHTML = ['<option value="">Select…</option>']
+    .concat(options.map((o) => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`))
+    .concat(['<option value="__other__">Other / custom…</option>'])
+    .join('');
+  const value = (currentValue || '').trim();
+  if (value && options.includes(value)) {
+    select.value = value;
+    custom.style.display = 'none';
+    custom.value = '';
+  } else if (value) {
+    select.value = '__other__';
+    custom.style.display = '';
+    custom.value = value;
+  } else {
+    select.value = '';
+    custom.style.display = 'none';
+    custom.value = '';
+  }
+}
+
+function onConceptDevSelectWithOtherChange(selectId, customId) {
+  const select = document.getElementById(selectId);
+  const custom = document.getElementById(customId);
+  custom.style.display = select.value === '__other__' ? '' : 'none';
+  if (select.value === '__other__') custom.focus();
+}
+
+function conceptDevSelectWithOtherValue(selectId, customId) {
+  const select = document.getElementById(selectId);
+  return select.value === '__other__' ? document.getElementById(customId).value.trim() : select.value;
+}
+
 // Shared by both the create ("+ Add Concept") and edit (click a concept
 // card) paths -- concept is null in create mode, so every field just starts
 // blank. Status is no longer an editable field here (see saveConceptDevModal)
@@ -4155,16 +4273,29 @@ function openSaveAvatarFromConceptModal() {
 // header badge.
 function fillConceptDevModalFields(concept) {
   document.getElementById('cd-modal-angle').value = concept ? (concept.angle || '') : '';
-  document.getElementById('cd-modal-execution').value = concept ? (concept.execution || '') : '';
   document.getElementById('cd-modal-script').value = concept ? (concept.script_notes || '') : '';
-  document.getElementById('cd-modal-talent').value = concept ? (concept.talent_requirement || '') : '';
-  document.getElementById('cd-modal-location').value = concept ? (concept.location || '') : '';
   document.getElementById('cd-modal-props').value = concept ? (concept.props_notes || '') : '';
+  fillConceptDevSelectWithOther('cd-modal-talent-select', 'cd-modal-talent-custom', state.contentCreators.map((c) => c.name), concept ? concept.talent_requirement : '');
+  fillConceptDevSelectWithOther('cd-modal-location-select', 'cd-modal-location-custom', state.conceptDevLocations, concept ? concept.location : '');
+
+  // Execution / Shot Plan is legacy -- superseded by structured What to
+  // Shoot. Never shown for a new concept and never required; only surfaced
+  // (still editable, still saved) when reopening a concept that already
+  // has this data from before Shots existed, so nothing already written is
+  // hidden or silently dropped on the next save.
+  const executionField = document.getElementById('cd-modal-execution');
+  const executionSection = document.getElementById('cd-modal-execution-legacy-section');
+  const hasLegacyExecution = Boolean(concept && concept.execution && concept.execution.trim());
+  executionField.value = hasLegacyExecution ? concept.execution : '';
+  executionSection.style.display = hasLegacyExecution ? '' : 'none';
+
+  conceptDevReferenceEditIndex = null;
+  document.getElementById('cd-modal-reference-paste-form').style.display = 'none';
+  document.getElementById('cd-modal-reference-add-menu').style.display = 'none';
   conceptDevModalReferences = concept
-    ? (concept.reference_items || []).map((r) => ({ url: r.url || '', note: r.note || '' }))
+    ? (concept.reference_items || []).map((r) => ({ url: r.url || '', note: r.note || '', library_reference_id: r.library_reference_id || null }))
     : [];
   renderConceptDevModalReferences();
-  setConceptDevReferencesExpanded(conceptDevModalReferences.length > 0);
 
   // The Audience: exactly one of customer_avatar_id / custom_avatar_description
   // is ever set (see schema.sql's comment) -- the select reflects whichever
@@ -4296,7 +4427,7 @@ function setConceptDevShootRequirementsExpanded(expanded) {
 
 function toggleConceptDevShootRequirements() {
   setConceptDevShootRequirementsExpanded(true);
-  document.getElementById('cd-modal-talent').focus();
+  document.getElementById('cd-modal-talent-select').focus();
 }
 
 // Required-field ids Ready for Review validates -- kept as one list so the
@@ -4304,7 +4435,7 @@ function toggleConceptDevShootRequirements() {
 // one, and the individual error-message ids below all stay in sync.
 const CD_REQUIRED_FIELD_IDS = [
   'cd-modal-name', 'cd-modal-angle', 'cd-modal-avatar-select',
-  'cd-modal-avatar-custom-desc', 'cd-modal-avatar-why-care', 'cd-modal-execution',
+  'cd-modal-avatar-custom-desc', 'cd-modal-avatar-why-care', 'cd-modal-hook-primary',
 ];
 
 function hideConceptDevFieldError(errorId) {
@@ -4473,37 +4604,6 @@ async function deleteConceptDevConceptCard(conceptId) {
 // Draft) or 'ready_for_review' (Ready for Review); a concept that's never
 // been saved stays Not Started (see schema.sql's concept_dev_status
 // default) until one of these two actions actually moves it.
-// Opens the lightweight Hook / Opening nudge (see #cd-hook-nudge-modal) and
-// resolves true if the creator picked "Continue Without" (proceed to save
-// Ready for Review anyway) or false for "Add Opening" (cancel the save and
-// focus the Primary Hook field instead) -- mirrors confirmDialog's
-// promise-based pattern but deliberately its own modal, since this is a
-// thinking prompt, not a warning.
-function showConceptDevHookNudge() {
-  return new Promise((resolve) => {
-    const continueBtn = document.getElementById('cd-hook-nudge-continue-btn');
-    const addBtn = document.getElementById('cd-hook-nudge-add-btn');
-    const cleanup = (result) => {
-      continueBtn.removeEventListener('click', onContinue);
-      addBtn.removeEventListener('click', onAdd);
-      closeModal('cd-hook-nudge-modal');
-      resolve(result);
-    };
-    const onContinue = () => cleanup(true);
-    const onAdd = () => {
-      cleanup(false);
-      const textareas = document.querySelectorAll('#cd-modal-hooks-list textarea');
-      if (textareas.length) {
-        textareas[0].focus();
-        textareas[0].scrollIntoView({ block: 'center', behavior: 'smooth' });
-      }
-    };
-    continueBtn.addEventListener('click', onContinue);
-    addBtn.addEventListener('click', onAdd);
-    openModal('cd-hook-nudge-modal');
-  });
-}
-
 async function saveConceptDevModal(targetStatus) {
   const product = conceptDevModalProduct;
   if (!product) return;
@@ -4513,8 +4613,11 @@ async function saveConceptDevModal(targetStatus) {
   const name = nameLocked ? found.concept.concept_name : nameInput.value.trim();
   const angleInput = document.getElementById('cd-modal-angle');
   const angle = angleInput.value.trim();
-  const executionInput = document.getElementById('cd-modal-execution');
-  const execution = executionInput.value.trim();
+  // Execution / Shot Plan is legacy (see fillConceptDevModalFields) -- its
+  // section only ever renders for a concept that already had this data,
+  // so reading its current value here (blank for every new concept, since
+  // the field is never shown/touched) never wipes or requires anything.
+  const execution = document.getElementById('cd-modal-execution').value.trim();
 
   const avatarSelect = document.getElementById('cd-modal-avatar-select');
   const isOtherAvatar = avatarSelect.value === '__other__';
@@ -4535,16 +4638,19 @@ async function saveConceptDevModal(targetStatus) {
     hook_variations: conceptDevModalHooks
       .map((h) => ({ text: h.text.trim() }))
       .filter((h) => h.text),
+    // Detail ("What to Capture") is an optional short customisation, not a
+    // requirement -- only Shot Name has to be filled in for a Shot to
+    // count (see the hasCompleteShot check below).
     shots: conceptDevModalShots
       .map((s) => ({ name: s.name.trim(), capture: s.capture.trim() }))
-      .filter((s) => s.name && s.capture),
+      .filter((s) => s.name),
     reference_items: conceptDevModalReferences
       .map((r) => (r.library_reference_id
         ? { url: r.url.trim(), note: r.note.trim(), library_reference_id: r.library_reference_id }
         : { url: r.url.trim(), note: r.note.trim() }))
       .filter((r) => r.url),
-    talent_requirement: document.getElementById('cd-modal-talent').value.trim(),
-    location: document.getElementById('cd-modal-location').value.trim(),
+    talent_requirement: conceptDevSelectWithOtherValue('cd-modal-talent-select', 'cd-modal-talent-custom'),
+    location: conceptDevSelectWithOtherValue('cd-modal-location-select', 'cd-modal-location-custom'),
     props_notes: document.getElementById('cd-modal-props').value.trim(),
   };
   // targetStatus is null for "Save Changes" on an already-submitted concept
@@ -4563,20 +4669,22 @@ async function saveConceptDevModal(targetStatus) {
   // can jot down an idea and come back later. Each missing field gets its
   // own concise message directly beneath it (never a combined "please
   // complete all required fields" banner), and the first missing field is
-  // focused/scrolled to -- every concept needs a specific person on the
-  // other side of it (a Customer Avatar or a completed Other/New Avatar,
-  // plus why THIS concept matters to them) before it's ready, same bar as
-  // Angle/Execution.
+  // focused/scrolled to. Required: Concept Name, The Idea, Customer Avatar,
+  // Why will they care?, Primary Hook, and at least one What to Shoot item
+  // -- everything else (Script, References, Shoot Setup, legacy Execution)
+  // is optional and never blocks submission.
   if (targetStatus === 'ready_for_review') {
     const missing = [];
     if (!nameLocked && !name) missing.push({ field: nameInput, errorId: 'cd-modal-name-error', message: 'Concept Name is required' });
-    if (!angle) missing.push({ field: angleInput, errorId: 'cd-modal-angle-error', message: 'Add an Angle / Idea' });
+    if (!angle) missing.push({ field: angleInput, errorId: 'cd-modal-angle-error', message: 'Add The Idea' });
     if (!hasAvatar) {
       if (isOtherAvatar) missing.push({ field: customDescInput, errorId: 'cd-modal-avatar-custom-desc-error', message: 'Describe who you\'re targeting' });
       else missing.push({ field: avatarSelect, errorId: 'cd-modal-avatar-select-error', message: 'Customer Avatar is required' });
     }
-    if (!avatarWhyCare) missing.push({ field: whyCareInput, errorId: 'cd-modal-avatar-why-care-error', message: 'Explain why this audience should care' });
-    if (!execution) missing.push({ field: executionInput, errorId: 'cd-modal-execution-error', message: 'Add an Execution / Shot Plan' });
+    if (!avatarWhyCare) missing.push({ field: whyCareInput, errorId: 'cd-modal-avatar-why-care-error', message: 'Add why they\'ll care' });
+    const primaryHookInput = document.getElementById('cd-modal-hook-primary');
+    const primaryHookText = ((conceptDevModalHooks[0] && conceptDevModalHooks[0].text) || '').trim();
+    if (!primaryHookText) missing.push({ field: primaryHookInput, errorId: 'cd-modal-hook-primary-error', message: 'Add a Primary Hook / Opening' });
 
     if (missing.length) {
       for (const m of missing) showConceptDevFieldError(m.field.id, m.errorId, m.message);
@@ -4585,31 +4693,22 @@ async function saveConceptDevModal(targetStatus) {
       return;
     }
 
-    // What to Shoot needs at least one complete Shot (Shot Name + What to
-    // Capture) before Ready for Review -- same bar as the fields above,
-    // just anchored to the list itself rather than a single input since a
-    // Shot has no fixed field id to flag invalid. This only ever fires when
-    // someone actively submits/resubmits a concept -- an existing concept
-    // already sitting in Ready for Review/Approved/etc from before this
-    // requirement existed is never re-validated just for having no
-    // structured Shots (see schema.sql's comment on the shots column).
-    const hasCompleteShot = conceptDevModalShots.some((s) => s.name.trim() && s.capture.trim());
+    // What to Shoot needs at least one Shot with a name before Ready for
+    // Review -- same bar as the fields above, just anchored to the list
+    // itself rather than a single input since a Shot has no fixed field id
+    // to flag invalid. Detail is optional (see the body.shots filter
+    // above). This only ever fires when someone actively submits/
+    // resubmits a concept -- an existing concept already sitting in Ready
+    // for Review/Approved/etc from before this requirement existed is
+    // never re-validated just for having no structured Shots (see
+    // schema.sql's comment on the shots column).
+    const hasCompleteShot = conceptDevModalShots.some((s) => s.name.trim());
     if (!hasCompleteShot) {
       const shotsError = document.getElementById('cd-modal-shots-error');
-      shotsError.textContent = 'Add at least one Shot (Shot Name + What to Capture)';
+      shotsError.textContent = 'Add at least one Shot';
       shotsError.classList.add('show');
       document.getElementById('cd-modal-shots-list').scrollIntoView({ block: 'center', behavior: 'smooth' });
       return;
-    }
-
-    // All five core fields (plus What to Shoot) are complete -- Hook / Opening is a creative
-    // thinking nudge, not a requirement (per the brief), so pause once to
-    // ask rather than silently letting a concept through with nobody
-    // having considered the opening at all.
-    const primaryHookText = ((conceptDevModalHooks[0] && conceptDevModalHooks[0].text) || '').trim();
-    if (!primaryHookText) {
-      const continueWithout = await showConceptDevHookNudge();
-      if (!continueWithout) return;
     }
   }
 
@@ -5044,13 +5143,13 @@ function renderTuesdayReviewConcept() {
   // with no structured Shots simply never show this section (no error /
   // empty-required state), and keep showing their Execution text above as
   // they always have.
-  const shots = (Array.isArray(concept.shots) ? concept.shots : []).filter((s) => s && s.name && s.name.trim() && s.capture && s.capture.trim());
+  const shots = (Array.isArray(concept.shots) ? concept.shots : []).filter((s) => s && s.name && s.name.trim());
   const shotsSection = document.getElementById('tr-review-shots-section');
   if (!shots.length) {
     shotsSection.style.display = 'none';
   } else {
     shotsSection.style.display = '';
-    document.getElementById('tr-review-shots').innerHTML = shots.map((s) => `<div class="tr-hook-item"><span class="tr-hook-label">${escapeHtml(s.name.trim())}</span><div class="tr-hook-text">${escapeHtml(s.capture.trim())}</div></div>`).join('');
+    document.getElementById('tr-review-shots').innerHTML = shots.map((s) => `<div class="tr-hook-item"><span class="tr-hook-label">${escapeHtml(s.name.trim())}</span>${s.capture && s.capture.trim() ? `<div class="tr-hook-text">${escapeHtml(s.capture.trim())}</div>` : ''}</div>`).join('');
   }
 
   const refs = (Array.isArray(concept.reference_items) ? concept.reference_items : []).filter((r) => r && r.url);
@@ -5916,7 +6015,7 @@ function renderShootingBrief(brief) {
   // Concept that never had structured Shots keeps using the exact
   // beats-from-Execution rendering below, completely untouched -- this is
   // the only thing that decides which mode runs.
-  const shots = Array.isArray(brief.shots) ? brief.shots.filter((s) => s && s.name && s.name.trim() && s.capture && s.capture.trim()) : [];
+  const shots = Array.isArray(brief.shots) ? brief.shots.filter((s) => s && s.name && s.name.trim()) : [];
   const usingStructuredShots = shots.length > 0;
 
   if (usingStructuredShots) {
@@ -6133,7 +6232,8 @@ function renderShootingBriefStructured(brief, hooks, shots) {
   shotsSection.style.display = '';
   document.getElementById('shoot-brief-shots').innerHTML = shots.map((s, i) => {
     const item = shotItems[i];
-    const bodyHtml = `<div class="shoot-brief-text">${escapeHtml(s.capture.trim())}</div>`;
+    const capture = s.capture && s.capture.trim();
+    const bodyHtml = capture ? `<div class="shoot-brief-text">${escapeHtml(capture)}</div>` : '';
     return shootingCaptureBlockHtml(item.key, item.label, bodyHtml, checked[item.key]);
   }).join('');
 
@@ -7280,7 +7380,6 @@ function pickReferenceLibraryItem(id) {
   if (!item) return;
   conceptDevModalReferences.push({ url: item.link, note: '', library_reference_id: item.id });
   renderConceptDevModalReferences();
-  setConceptDevReferencesExpanded(true);
   closeModal('reference-picker-modal');
   toast('Reference added');
 }
@@ -7390,7 +7489,6 @@ function updateReviewPromptGate() {
     ? nameInput.value
     : document.getElementById('cd-modal-name-locked').textContent;
   const angle = document.getElementById('cd-modal-angle').value;
-  const execution = document.getElementById('cd-modal-execution').value;
 
   const avatarSelect = document.getElementById('cd-modal-avatar-select');
   const isOtherAvatar = avatarSelect.value === '__other__';
@@ -7399,10 +7497,10 @@ function updateReviewPromptGate() {
     : Boolean(avatarSelect.value);
   const avatarWhyCare = document.getElementById('cd-modal-avatar-why-care').value;
 
-  // Same five-field minimum Ready for Review itself requires -- there's
+  // Same core-field minimum Ready for Review itself requires -- there's
   // nothing meaningful to pressure-test before a concept has its strategic
-  // foundation: who it's for, why they'd care, and how it's executed.
-  const ready = Boolean(name.trim() && angle.trim() && execution.trim() && hasAvatar && avatarWhyCare.trim());
+  // foundation: what it is, who it's for, and why they'd care.
+  const ready = Boolean(name.trim() && angle.trim() && hasAvatar && avatarWhyCare.trim());
   document.getElementById('cd-review-copy-btn').disabled = !ready;
   document.getElementById('cd-review-chatgpt-btn').disabled = !ready;
   document.getElementById('cd-ai-review-helper').textContent = ready
@@ -7430,9 +7528,10 @@ async function copyReviewPrompt() {
     avatar_why_care: document.getElementById('cd-modal-avatar-why-care').value.trim(),
     script_notes: document.getElementById('cd-modal-script').value.trim(),
     hook_variations: conceptDevModalHooks.map((h) => ({ text: h.text.trim() })).filter((h) => h.text),
+    shots: conceptDevModalShots.map((s) => ({ name: s.name.trim(), capture: s.capture.trim() })).filter((s) => s.name),
     reference_items: conceptDevModalReferences.map((r) => ({ url: r.url.trim(), note: r.note.trim() })).filter((r) => r.url),
-    talent_requirement: document.getElementById('cd-modal-talent').value.trim(),
-    location: document.getElementById('cd-modal-location').value.trim(),
+    talent_requirement: conceptDevSelectWithOtherValue('cd-modal-talent-select', 'cd-modal-talent-custom'),
+    location: conceptDevSelectWithOtherValue('cd-modal-location-select', 'cd-modal-location-custom'),
     props_notes: document.getElementById('cd-modal-props').value.trim(),
   };
   try {
