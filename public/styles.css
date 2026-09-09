@@ -183,16 +183,6 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .confirm-modal .modal-footer{justify-content:center;}
 .confirm-modal .btn-danger{margin-right:0;}
 
-/* Hook / Opening nudge -- same centered layout as .confirm-modal, but
-   deliberately its own classes rather than reusing it: no warning icon,
-   no danger button, since this is a thinking prompt, not an error. */
-.cd-hook-nudge{width:360px;}
-.cd-hook-nudge .modal-body{align-items:center;text-align:center;padding:28px 22px 8px;}
-.cd-hook-nudge-icon{font-size:28px;line-height:1;}
-.cd-hook-nudge-title{font-size:14px;font-weight:700;color:var(--text);margin-top:4px;}
-.cd-hook-nudge-message{font-size:13px;color:var(--text-secondary);line-height:1.5;margin-top:2px;}
-.cd-hook-nudge .modal-footer{justify-content:center;}
-
 /* ── TOAST ── */
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--text);color:white;padding:10px 18px;border-radius:var(--r);font-size:12px;opacity:0;pointer-events:none;transition:all 0.2s;z-index:200;}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
@@ -969,6 +959,11 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .cd-modal-section-helper{font-size:12px;}
 .cd-modal-field-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
 @media (max-width:600px){.cd-modal-field-row{grid-template-columns:1fr;}}
+
+/* Talent/Location: a select of existing options with an Other/custom text
+   input revealed only when "Other / custom…" is picked -- same sentinel
+   pattern as the Customer Avatar select above. */
+.cd-modal-field-row label input[type="text"]{margin-top:6px;}
 .cd-modal-idea-row{display:grid;grid-template-columns:35% 1fr;gap:12px;}
 @media (max-width:600px){.cd-modal-idea-row{grid-template-columns:1fr;}}
 
@@ -979,16 +974,14 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .cd-modal-collapsible>.link-btn{align-self:flex-start;}
 
 /* Required-field indicators: a subtle grey asterisk on the label (never
-   red by default), a small "Recommended" badge for Hook/Opening (positive
-   framing, not a warning), and a quiet legend at the bottom of the form --
-   per the brief, this must never read as an aggressive validation UI.
+   red by default) and a quiet legend at the bottom of the form -- per the
+   brief, this must never read as an aggressive validation UI.
    .cd-field-label wraps the label text + asterisk together into a single
    node -- .modal-body label is a column flex container, so without this
    wrapper the asterisk (a separate child) becomes its own flex item and
    drops onto its own line below the label text. */
 .cd-field-label{display:inline-flex;align-items:baseline;}
 .cd-req-mark{color:var(--text-muted);font-weight:400;margin-left:3px;}
-.cd-badge-recommended{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.2px;color:var(--teal-dark);background:var(--teal-light);border-radius:var(--r-pill);padding:2px 7px;flex-shrink:0;}
 .cd-modal-required-note{padding-top:10px;border-top:1px solid var(--border);font-size:11px;color:var(--text-muted);}
 
 /* Per-field inline validation -- concise text directly beneath the field
@@ -1023,29 +1016,34 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .cd-modal-workspace.cd-readonly select:disabled{background:var(--surface2);color:var(--text);opacity:1;cursor:default;border-color:var(--border);}
 .cd-modal-workspace.cd-readonly #cd-modal-add-hook-btn,
 .cd-modal-workspace.cd-readonly .cd-hook-remove,
-.cd-modal-workspace.cd-readonly #cd-modal-add-shot-btn,
+.cd-modal-workspace.cd-readonly .cd-shot-quickadd-wrap,
 .cd-modal-workspace.cd-readonly .cd-shot-item-actions,
-.cd-modal-workspace.cd-readonly #cd-modal-references-actions,
-.cd-modal-workspace.cd-readonly .cd-reference-remove,
+.cd-modal-workspace.cd-readonly .cd-reference-add-wrap,
+.cd-modal-workspace.cd-readonly .cd-reference-card-actions,
 .cd-modal-workspace.cd-readonly #cd-modal-script-toggle-wrap,
 .cd-modal-workspace.cd-readonly #cd-modal-shoot-req-toggle-wrap,
 .cd-modal-workspace.cd-readonly #cd-modal-save-avatar-btn,
 .cd-modal-workspace.cd-readonly .cd-modal-required-note,
 .cd-modal-workspace.cd-readonly .cd-req-mark{display:none !important;}
 
-/* References: compact collapsed state by default (see
-   #cd-modal-references-toggle-wrap), same as Script/Shoot Requirements
-   below -- each added reference gets its own bordered white card, which
-   already reads as "the place links live" without an extra grey wrapper
-   around the whole section. */
-.cd-reference-item-list{display:flex;flex-direction:column;gap:10px;}
-.cd-reference-item{background:white;border:1px solid var(--border);border-radius:var(--r);padding:8px;display:flex;flex-direction:column;gap:6px;}
-.cd-reference-item-row{display:flex;gap:8px;align-items:center;}
-.cd-reference-item-row input{flex:1;}
-.cd-reference-remove{background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:16px;line-height:1;padding:2px 6px;flex-shrink:0;}
-.cd-reference-remove:hover{color:var(--red);}
-.cd-add-reference-btn{align-self:flex-start;background:var(--teal-light);color:var(--teal-dark);border:1px dashed var(--teal);font-weight:700;}
-.cd-add-reference-btn:hover{background:var(--teal);color:white;border-style:solid;}
+/* References: a compact card per saved reference -- domain label + a
+   truncated note, not a permanently-visible URL/note text field pair.
+   .cd-reference-item is a separate, older class still used by the
+   read-only Shooting Brief's reference display -- kept as-is there. */
+.cd-reference-card{background:white;border:1px solid var(--border);border-radius:var(--r);padding:9px 11px;display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}
+.cd-reference-card + .cd-reference-card{margin-top:8px;}
+.cd-reference-card-main{min-width:0;}
+.cd-reference-card-label{font-size:13px;font-weight:700;color:var(--teal-dark);}
+.cd-reference-card-note{font-size:12px;color:var(--text-secondary);margin-top:2px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
+.cd-reference-card-actions{display:flex;gap:10px;flex-shrink:0;}
+
+/* "+ Add Reference" opens a small menu (Paste Link / Choose From Reference
+   Library) instead of two permanently-visible actions. */
+.cd-reference-add-wrap{position:relative;}
+.cd-reference-add-menu{position:absolute;top:100%;left:0;z-index:5;margin-top:4px;background:white;border:1px solid var(--border);border-radius:var(--r);box-shadow:0 4px 14px rgba(0,0,0,0.1);padding:6px;display:flex;flex-direction:column;gap:2px;min-width:220px;}
+.cd-reference-add-menu .link-btn{padding:7px 9px;border-radius:6px;text-align:left;}
+.cd-reference-add-menu .link-btn:hover{background:var(--surface2);text-decoration:none;}
+.cd-reference-paste-actions{display:flex;align-items:center;gap:10px;}
 
 /* Hook Variations -- Primary Hook has no remove control (a concept always
    keeps its one primary opening slot), Alternative Hooks get a plain text
@@ -1058,19 +1056,33 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .cd-hook-remove:hover{color:var(--red);text-decoration:underline;}
 
 /* What to Shoot -- each Shot is a plain bordered card (a compact list, not
-   a form-in-a-form): a small header row carries the "Shot N" ordinal plus
-   up/down reorder and Remove, deliberately low-emphasis (text buttons, no
-   icons) since a concept usually only has a handful of these. */
-.cd-shot-item{background:white;border:1px solid var(--border);border-radius:var(--r);padding:10px 12px;display:flex;flex-direction:column;gap:6px;}
+   a form-in-a-form): the Shot Name doubles as the card's title (usually
+   pre-filled by a quick-add chip, see .cd-shot-quickadd-*), with a
+   lighter single-line Detail field below it and up/down reorder + Remove
+   in the header, deliberately low-emphasis (text buttons, no icons) since
+   a concept usually only has a handful of these. */
+.cd-shot-item{background:white;border:1px solid var(--border);border-radius:var(--r);padding:9px 11px;display:flex;flex-direction:column;gap:5px;}
 .cd-shot-item + .cd-shot-item{margin-top:8px;}
-.cd-shot-item-header{display:flex;align-items:center;justify-content:space-between;}
-.cd-shot-item-num{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);}
-.cd-shot-item-actions{display:flex;align-items:center;gap:4px;}
+.cd-shot-item-header{display:flex;align-items:center;gap:8px;}
+.cd-shot-name-input{flex:1;min-width:0;font-weight:700;border:none;background:none;padding:2px 0;}
+.cd-shot-name-input:focus{outline:none;background:var(--surface2);border-radius:4px;padding:2px 4px;}
+.cd-shot-item-actions{display:flex;align-items:center;gap:4px;flex-shrink:0;}
 .cd-shot-move{background:none;border:1px solid var(--border);border-radius:var(--r);width:22px;height:22px;line-height:1;font-size:11px;color:var(--text-secondary);cursor:pointer;padding:0;}
 .cd-shot-move:hover:not(:disabled){background:var(--surface2);color:var(--text);}
 .cd-shot-move:disabled{opacity:0.35;cursor:default;}
 .cd-shot-remove{background:none;border:none;padding:0;font-family:inherit;font-size:11.5px;font-weight:600;color:var(--text-muted);cursor:pointer;margin-left:4px;}
 .cd-shot-remove:hover{color:var(--red);text-decoration:underline;}
+.cd-shot-detail-input{font-size:12.5px;color:var(--text-secondary);border:none;background:none;padding:0;}
+.cd-shot-detail-input:focus{outline:none;background:var(--surface2);border-radius:4px;padding:2px 4px;}
+
+/* "+ Add Shot" opens a chip menu of common shot types -- clicking one adds
+   it immediately, so typing is only needed for the optional Detail line or
+   a genuinely custom shot. */
+.cd-shot-quickadd-wrap{position:relative;align-self:flex-start;}
+.cd-shot-quickadd-menu{position:absolute;top:100%;left:0;z-index:5;margin-top:4px;background:white;border:1px solid var(--border);border-radius:var(--r);box-shadow:0 4px 14px rgba(0,0,0,0.1);padding:8px;display:flex;flex-wrap:wrap;gap:6px;width:300px;}
+.cd-shot-quickadd-chip{font-size:12px;font-weight:600;color:var(--text-secondary);background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-pill);padding:5px 10px;cursor:pointer;}
+.cd-shot-quickadd-chip:hover{background:var(--teal-light);color:var(--teal-dark);border-color:var(--teal);}
+.cd-shot-quickadd-chip-custom{background:none;border-style:dashed;}
 
 .shoot-plan-edit-size-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--border);font-size:13px;font-weight:600;}
 .shoot-plan-edit-size-row:last-child{border-bottom:none;}

@@ -1285,21 +1285,23 @@
 
       <div class="cd-modal-section">
         <div class="cd-modal-section-title">The Idea</div>
+        <div class="hint cd-modal-section-helper">Describe the concept in 1–2 sentences.</div>
         <div class="cd-modal-idea-row">
           <label><span class="cd-field-label">Concept Name<span class="cd-req-mark">*</span></span>
             <input type="text" id="cd-modal-name" oninput="updateReviewPromptGate()">
             <div class="hint cd-modal-locked-name" id="cd-modal-name-locked" style="display:none;"></div>
             <div class="cd-field-error" id="cd-modal-name-error"></div>
           </label>
-          <label><span class="cd-field-label">Angle / Idea<span class="cd-req-mark">*</span></span>
-            <textarea id="cd-modal-angle" rows="5" placeholder="Why would someone actually care about this?" oninput="updateReviewPromptGate()"></textarea>
+          <label><span class="cd-field-label">The Idea<span class="cd-req-mark">*</span></span>
+            <textarea id="cd-modal-angle" rows="2" placeholder="e.g. Compare the standard fit against the new baggy fit side by side." oninput="updateReviewPromptGate()"></textarea>
             <div class="cd-field-error" id="cd-modal-angle-error"></div>
           </label>
         </div>
       </div>
 
-      <!-- The Audience: forces "who exactly are we making this for, and why
-           should they care" before the idea gets executed. One Primary
+      <!-- Who's It For?: forces "who exactly are we making this for, and why
+           should they care" before the idea gets executed -- deliberately
+           lightweight (one sentence, not a strategy writeup). One Primary
            Customer Avatar per concept, deliberately -- a plain dropdown
            over the reusable Settings library, never an unlimited
            multi-select (see schema.sql's comment on the customer_avatar_id
@@ -1310,50 +1312,53 @@
            library avatar -- never auto-saved to the library unless the
            creator explicitly clicks "Save as new Customer Avatar". -->
       <div class="cd-modal-section" id="cd-modal-audience-section">
-        <div class="cd-modal-section-title">The Audience</div>
+        <div class="cd-modal-section-title">Who's It For?</div>
         <div class="cd-modal-idea-row">
           <label><span class="cd-field-label">Customer Avatar<span class="cd-req-mark">*</span></span>
             <select id="cd-modal-avatar-select" onchange="onConceptDevAvatarChange()"></select>
             <div class="cd-field-error" id="cd-modal-avatar-select-error"></div>
           </label>
-          <label><span class="cd-field-label">Why should they care?<span class="cd-req-mark">*</span></span>
-            <textarea id="cd-modal-avatar-why-care" rows="5" placeholder="What makes this product or concept relevant to this person?" oninput="updateReviewPromptGate()"></textarea>
+          <label><span class="cd-field-label">Why will they care?<span class="cd-req-mark">*</span></span>
+            <input type="text" id="cd-modal-avatar-why-care" placeholder="One sentence — why will this idea matter to this customer?" oninput="updateReviewPromptGate()">
             <div class="cd-field-error" id="cd-modal-avatar-why-care-error"></div>
           </label>
         </div>
         <div id="cd-modal-avatar-custom-wrap" style="display:none;">
           <label>Who are you targeting?
-            <textarea id="cd-modal-avatar-custom-desc" rows="5" placeholder="Describe the specific person, mindset or customer behaviour you're targeting." oninput="updateReviewPromptGate()"></textarea>
+            <textarea id="cd-modal-avatar-custom-desc" rows="3" placeholder="Describe the specific person, mindset or customer behaviour you're targeting." oninput="updateReviewPromptGate()"></textarea>
             <div class="cd-field-error" id="cd-modal-avatar-custom-desc-error"></div>
           </label>
           <button type="button" class="link-btn" id="cd-modal-save-avatar-btn" onclick="openSaveAvatarFromConceptModal()">Save as new Customer Avatar</button>
         </div>
       </div>
 
+      <!-- The Hook: moved up to directly follow "who's it for" -- what
+           earns attention is as core a creative decision as the audience
+           itself, not an afterthought below the shot list. Primary Hook is
+           now a hard requirement (replacing the old optional "Recommended"
+           nudge) since a concept without one gives Tuesday Review nothing
+           to actually judge for attention. Alternative Hooks stay opt-in
+           progressive disclosure -- no minimum count enforced there. -->
       <div class="cd-modal-section">
-        <div class="cd-modal-section-title">The Execution</div>
-        <div class="hint cd-modal-section-helper">How does the ad play out?</div>
-        <label><span class="cd-field-label">Execution / Shot Plan<span class="cd-req-mark">*</span></span>
-          <textarea id="cd-modal-execution" rows="6" oninput="updateReviewPromptGate()"></textarea>
-          <div class="cd-field-error" id="cd-modal-execution-error"></div>
-        </label>
-        <div id="cd-modal-script-toggle-wrap">
-          <button type="button" class="link-btn" onclick="toggleConceptDevScript()">+ Add Script / Talking Points <span class="hint">(optional)</span></button>
+        <div class="cd-modal-section-title-row">
+          <div class="cd-modal-section-title">The Hook</div>
+          <span class="cd-req-mark">*</span>
         </div>
-        <div id="cd-modal-script-field" class="cd-modal-collapsible" style="display:none;">
-          <label>Script / Talking Points
-            <textarea id="cd-modal-script" rows="6"></textarea>
-          </label>
-          <button type="button" class="link-btn" onclick="setConceptDevScriptExpanded(false)">&minus; Hide</button>
-        </div>
+        <div class="hint cd-modal-section-helper">How does this creative earn attention in the first few seconds? This can be spoken, text-based or visual.</div>
+        <div id="cd-modal-hooks-list"></div>
+        <div class="cd-field-error" id="cd-modal-hook-primary-error"></div>
+        <button type="button" class="link-btn" id="cd-modal-add-hook-btn" onclick="addConceptDevHook()">+ Add Alternative Hook</button>
       </div>
 
       <!-- What to Shoot -- the literal footage list, deliberately separate
-           from both Execution above (creative flow/direction) and Hook /
-           Opening below (the variations being tested). Each Shot is just a
-           name + what to capture, nothing else (see the brief: no
-           timestamps/camera/lens/duration/etc here) -- see
-           conceptDevModalShots in app.js for add/remove/reorder. -->
+           from Hook / Opening above (the variations being tested) and
+           Execution below (legacy creative-flow prose, kept only for
+           concepts that already have it). Each Shot is just a name + an
+           optional short detail -- nothing else (see the brief: no
+           timestamps/camera/lens/duration/etc here). "+ Add Shot" opens a
+           quick-add menu of common shot types so a Shot Name rarely needs
+           typing from scratch -- see conceptDevModalShots/
+           toggleConceptDevShotQuickAdd/addConceptDevQuickShot in app.js. -->
       <div class="cd-modal-section">
         <div class="cd-modal-section-title-row">
           <div class="cd-modal-section-title">What to Shoot</div>
@@ -1361,60 +1366,88 @@
         </div>
         <div class="hint cd-modal-section-helper">List the footage that must be captured to make this concept.</div>
         <div id="cd-modal-shots-list"></div>
-        <button type="button" class="link-btn" id="cd-modal-add-shot-btn" onclick="addConceptDevShot()">+ Add Shot</button>
+        <div class="cd-shot-quickadd-wrap">
+          <button type="button" class="link-btn" id="cd-modal-add-shot-btn" onclick="toggleConceptDevShotQuickAdd()">+ Add Shot</button>
+          <div class="cd-shot-quickadd-menu" id="cd-modal-shot-quickadd-menu" style="display:none;"></div>
+        </div>
         <div class="cd-field-error" id="cd-modal-shots-error"></div>
       </div>
 
-      <!-- Hook Variations belong to THIS concept -- "1 Concept -> 3 Hook
-           Variations", never 3 concepts (see hook_variations column
-           comment in schema.sql). Primary Hook is always visible (not
-           progressive -- every concept needs at least the option of one),
-           Alternative Hooks are opt-in and freely removable; there's no
-           minimum count enforced anywhere in this section. -->
       <div class="cd-modal-section">
-        <div class="cd-modal-section-title-row">
-          <div class="cd-modal-section-title">Hook / Opening</div>
-          <span class="cd-badge-recommended">Recommended</span>
+        <div id="cd-modal-script-toggle-wrap">
+          <button type="button" class="link-btn" onclick="toggleConceptDevScript()">+ Add Script / Talking Points <span class="hint">(optional)</span></button>
         </div>
-        <div class="hint cd-modal-section-helper">How does this creative earn attention in the first few seconds? This can be spoken, text-based or visual.</div>
-        <div id="cd-modal-hooks-list"></div>
-        <button type="button" class="link-btn" id="cd-modal-add-hook-btn" onclick="addConceptDevHook()">+ Add Alternative Hook</button>
+        <div id="cd-modal-script-field" class="cd-modal-collapsible" style="display:none;">
+          <div class="cd-modal-section-title">Script / Talking Points</div>
+          <textarea id="cd-modal-script" rows="6"></textarea>
+          <button type="button" class="link-btn" onclick="setConceptDevScriptExpanded(false)">&minus; Hide</button>
+        </div>
       </div>
 
-      <!-- References defaults to the same compact collapsed state as Script
-           and Shoot Requirements below -- an empty optional field shouldn't
-           carry the visual weight of a populated one. Unlike those two,
-           it's a repeatable list rather than a single toggle: the same
-           addConceptDevReference() is wired to both the collapsed and
-           expanded "+ Add Reference" triggers, and removing the last
-           reference collapses the section back down (see
-           setConceptDevReferencesExpanded in app.js). -->
+      <!-- Execution / Shot Plan -- legacy free-text field, superseded by
+           structured What to Shoot above. Never shown or required for a
+           new concept; only appears (still editable, never destructively
+           dropped) when reopening a concept that already has this data
+           from before structured Shots existed, so nothing already written
+           is hidden or silently lost. See fillConceptDevModalFields. -->
+      <div class="cd-modal-section" id="cd-modal-execution-legacy-section" style="display:none;">
+        <div class="cd-modal-section-title">Execution / Shot Plan <span class="hint">(legacy)</span></div>
+        <div class="hint cd-modal-section-helper">Kept from before structured Shots existed — no longer required.</div>
+        <textarea id="cd-modal-execution" rows="4"></textarea>
+      </div>
+
+      <!-- References: one "+ Add Reference" trigger opens a small menu
+           (Paste Link / Choose From Reference Library) instead of two
+           permanently-visible actions. A pasted link becomes a compact
+           card (label + truncated note) with Edit/Remove, rather than
+           permanently showing full URL/note text fields for every
+           reference -- see renderConceptDevModalReferences in app.js. -->
       <div class="cd-modal-section">
         <div class="cd-modal-section-title">References</div>
-        <div id="cd-modal-references-toggle-wrap">
-          <button type="button" class="link-btn" onclick="addConceptDevReference()">+ Add Reference</button>
-          <button type="button" class="link-btn" onclick="openReferenceLibraryPicker()">+ From Library</button>
-          <div class="hint cd-modal-section-helper">Add inspiration or examples for this concept.</div>
+        <div class="hint cd-modal-section-helper">Add inspiration or examples for this concept.</div>
+        <div id="cd-modal-references-list"></div>
+        <div class="cd-reference-add-wrap">
+          <button type="button" class="link-btn" id="cd-modal-reference-add-btn" onclick="toggleConceptDevReferenceAddMenu()">+ Add Reference</button>
+          <div class="cd-reference-add-menu" id="cd-modal-reference-add-menu" style="display:none;">
+            <button type="button" class="link-btn" onclick="startConceptDevReferencePaste()">📎 Paste Link</button>
+            <button type="button" class="link-btn" onclick="chooseConceptDevReferenceFromLibrary()">📚 Choose From Reference Library</button>
+          </div>
         </div>
-        <div id="cd-modal-references-list" class="cd-reference-item-list" style="display:none;"></div>
-        <div class="cd-reference-list-actions" id="cd-modal-references-actions" style="display:none;">
-          <button type="button" class="btn btn-sm cd-add-reference-btn" id="cd-modal-add-reference-btn" onclick="addConceptDevReference()">+ Add Reference</button>
-          <button type="button" class="btn btn-sm btn-ghost" onclick="openReferenceLibraryPicker()">+ From Library</button>
+        <div id="cd-modal-reference-paste-form" class="cd-modal-collapsible" style="display:none;">
+          <label>URL
+            <input type="text" id="cd-modal-reference-paste-url" placeholder="Paste a link">
+          </label>
+          <label>What do you like about this?
+            <input type="text" id="cd-modal-reference-paste-note" placeholder="A quick note (optional)">
+          </label>
+          <div class="cd-reference-paste-actions">
+            <button type="button" class="btn btn-sm btn-primary" id="cd-modal-reference-paste-save-btn" onclick="saveConceptDevReferencePaste()">Add Reference</button>
+            <button type="button" class="link-btn" onclick="cancelConceptDevReferencePaste()">Cancel</button>
+          </div>
         </div>
       </div>
 
+      <!-- Shoot Setup: kept compact and optional. Talent/Location are
+           selects populated from data the app already has (content
+           creators already used for this exact purpose elsewhere, and
+           locations already typed into past concepts) with an Other/
+           custom fallback -- never a hard-coded list. See
+           fillConceptDevSelectWithOther/conceptDevSelectWithOtherValue in
+           app.js. -->
       <div class="cd-modal-section">
-        <div class="cd-modal-section-title">Shoot Requirements</div>
+        <div class="cd-modal-section-title">Shoot Setup</div>
         <div id="cd-modal-shoot-req-toggle-wrap">
-          <button type="button" class="link-btn" onclick="toggleConceptDevShootRequirements()">+ Add Requirements</button>
+          <button type="button" class="link-btn" onclick="toggleConceptDevShootRequirements()">+ Add Shoot Setup</button>
         </div>
         <div id="cd-modal-shoot-req-fields" class="cd-modal-collapsible" style="display:none;">
           <div class="cd-modal-field-row">
             <label>Talent / Model
-              <input type="text" id="cd-modal-talent" placeholder="e.g. In-house model, UGC creator, none">
+              <select id="cd-modal-talent-select" onchange="onConceptDevSelectWithOtherChange('cd-modal-talent-select','cd-modal-talent-custom')"></select>
+              <input type="text" id="cd-modal-talent-custom" placeholder="e.g. UGC creator, none" style="display:none;">
             </label>
             <label>Location
-              <input type="text" id="cd-modal-location" placeholder="e.g. Studio, warehouse, external">
+              <select id="cd-modal-location-select" onchange="onConceptDevSelectWithOtherChange('cd-modal-location-select','cd-modal-location-custom')"></select>
+              <input type="text" id="cd-modal-location-custom" placeholder="e.g. External" style="display:none;">
             </label>
           </div>
           <label>Props / Special Requirements
@@ -1430,11 +1463,11 @@
            saved concept to review (id-less new/unsaved concepts have
            nothing in the database yet to build a review prompt from); both
            actions stay disabled (with an explanatory helper line swapped in,
-           see updateReviewPromptGate) until the same five core fields Ready
+           see updateReviewPromptGate) until the same core fields Ready
            for Review itself requires are complete -- there's nothing
            meaningful to critique before then. The prompt itself pulls in
            everything else already captured for this concept (hooks, script,
-           references, shoot requirements) plus the same Planning context
+           references, shoot setup) plus the same Planning context
            the other Creative Tools prompts use, omitting anything blank --
            see buildReviewPrompt in creativeToolkitContext.js. -->
       <div class="cd-ai-review" id="cd-ai-review-section" style="display:none;">
@@ -1458,27 +1491,6 @@
   </div>
 </div>
 
-<!-- Hook / Opening nudge: a thinking prompt, not a validation error -- shown
-     once, only when all five core required fields are already complete and
-     Primary Hook / Opening is still blank, so it never blocks a concept
-     that genuinely has no room for one. Deliberately not the red/warning
-     #confirm-modal used for destructive actions elsewhere -- see
-     showConceptDevHookNudge in app.js. Must stay AFTER #concept-dev-modal
-     in the DOM so it paints on top (same z-index-stacking convention as
-     #ca-modal and #creative-tools-modal below). -->
-<div id="cd-hook-nudge-modal" class="modal-backdrop">
-  <div class="modal cd-hook-nudge">
-    <div class="modal-body">
-      <div class="cd-hook-nudge-icon">💡</div>
-      <div class="cd-hook-nudge-title">No Hook / Opening added</div>
-      <div class="cd-hook-nudge-message">Have you considered how this creative earns attention in the first few seconds?</div>
-    </div>
-    <div class="modal-footer">
-      <button type="button" class="btn btn-ghost" id="cd-hook-nudge-continue-btn">Continue Without</button>
-      <button type="button" class="btn btn-primary" id="cd-hook-nudge-add-btn">Add Opening</button>
-    </div>
-  </div>
-</div>
 
 <!-- Tuesday Creative Review's concept view: a read-only creative brief, not
      the editable Concept Development form -- deliberately its own tr-*
@@ -1566,8 +1578,7 @@
 
 <!-- Request Changes: a focused mini-modal, not a full form -- feedback is
      the only field, and it's required (see submitTuesdayReviewChanges).
-     Must stay after #tuesday-review-modal in the DOM for correct stacking,
-     same convention as #cd-hook-nudge-modal above. -->
+     Must stay after #tuesday-review-modal in the DOM for correct stacking. -->
 <div id="tr-changes-modal" class="modal-backdrop">
   <div class="modal">
     <div class="modal-header">
