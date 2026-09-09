@@ -5669,22 +5669,69 @@ function shootingExecutionBeats(text) {
   return [trimmed];
 }
 
-// A beat sometimes already starts with its own short label the creator
-// wrote themselves -- a timing cue like "0-2 SEC: Wardrobe Problem" or a
-// shot label like "Shot 1:". Only a colon or middle-dot count as the
-// separator (never a bare dash/hyphen -- those already show up inside the
-// timing ranges themselves, e.g. "0-2" or "10-12", so treating one as a
-// heading boundary would cut a label in half). The label itself must be
-// short and clearly a label (contains a digit, or is entirely
-// caps/punctuation), so an ordinary sentence that happens to contain a
-// colon is never mistaken for one and split apart.
+// A heading reads as a short tag or timing cue -- mostly capitals,
+// digits, and light punctuation (a dash is fine INSIDE a label, e.g.
+// "3-5 SEC -- Pick Your Rotation") -- never a lowercase sentence, and
+// never containing its own colon (that would actually be a "Label:
+// instruction" line -- see shootingLabeledLine -- not a whole heading).
+function shootingLooksLikeShootLabel(text) {
+  const t = text.trim();
+  if (!t || t.length > 56 || t.includes(':')) return false;
+  return /\d/.test(t) || /^[A-Z0-9 /&'.,+—–-]+$/.test(t);
+}
+
+// A beat/Hook's heading can show up in two shapes the creator might
+// actually write, and this only ever recognises them -- never invents
+// one that isn't there:
+//   (A) "LABEL: rest of the beat" run together on one line/paragraph,
+//       e.g. "0-2 SEC: Wardrobe Problem. James stands at his wardrobe...".
+//       Colon/middle-dot only as the separator -- never a bare hyphen,
+//       since hyphens already appear inside timing ranges like "0-2".
+//   (B) the heading is its own whole line -- e.g. "3-5 SEC -- Pick Your
+//       Rotation" or "FIT DETAILS" -- with the actual direction starting
+//       fresh on the next line. No timestamp is required for this shape.
 function shootingBeatHeading(beat) {
-  const m = beat.match(/^([^\n:·]{1,48})[:·]\s+(\S[\s\S]*)$/);
-  if (!m) return { heading: null, body: beat };
-  const [, head, rest] = m;
-  const looksLikeLabel = /\d/.test(head) || /^[A-Z0-9 /&'.-]+$/.test(head);
-  if (!looksLikeLabel) return { heading: null, body: beat };
-  return { heading: head.trim(), body: rest.trim() };
+  const inline = beat.match(/^([^\n:·]{1,48})[:·]\s+(\S[\s\S]*)$/);
+  if (inline && shootingLooksLikeShootLabel(inline[1])) {
+    return { heading: inline[1].trim(), body: inline[2].trim() };
+  }
+  const nlIndex = beat.indexOf('\n');
+  if (nlIndex > -1) {
+    const firstLine = beat.slice(0, nlIndex).trim();
+    const rest = beat.slice(nlIndex + 1).trim();
+    if (rest && shootingLooksLikeShootLabel(firstLine)) {
+      return { heading: firstLine, body: rest };
+    }
+  }
+  return { heading: null, body: beat };
+}
+
+// A supporting line the creator already wrote as "Label: the actual
+// instruction" -- e.g. "Shot: Overhead flatlay...", "Text / VO: \"3 tees.
+// $130.\"", "Transition: ...", "Direction: ...". Only the label gets
+// bolded (Level 3); the instruction itself is never touched. The label
+// must stay short (at most 4 words) so an ordinary sentence that happens
+// to contain a colon is never mistaken for one.
+function shootingLabeledLine(line) {
+  const m = line.match(/^([A-Za-z][A-Za-z0-9 /&'-]{0,26}):\s+(\S[\s\S]*)$/);
+  if (!m) return null;
+  const [, label, value] = m;
+  if (label.trim().split(/\s+/).length > 4) return null;
+  return { label: label.trim(), value: value.trim() };
+}
+
+// Renders a beat/Hook's body one line at a time -- any line already
+// written as "Label: value" gets its label bolded (Level 3, see
+// shootingLabeledLine); every other line stays a plain paragraph. Wording
+// is never rewritten either way, only how it's grouped on screen.
+function shootingRenderBeatBody(body) {
+  const lines = body.split(/\n+/).map((l) => l.trim()).filter(Boolean);
+  return lines.map((line) => {
+    const labeled = shootingLabeledLine(line);
+    return labeled
+      ? `<div class="shoot-brief-line"><span class="shoot-brief-line-label">${escapeHtml(labeled.label)}:</span> ${escapeHtml(labeled.value)}</div>`
+      : `<div class="shoot-brief-text">${escapeHtml(line)}</div>`;
+  }).join('');
 }
 
 function shootingChecklistStorageKey(scheduleId) {
@@ -5764,18 +5811,34 @@ function renderShootingBrief(brief) {
   // OPENINGS -- every Hook Variation gets equal visual weight as its own
   // compact block (item 2), not a single highlighted "Primary" plus a
   // buried list of others: on set, each one is a separate thing to film.
-  // "Film All N" only appears once there's actually a choice to make.
+  // "Film All N" only appears once there's actually a choice to make. A
+  // Hook that's just its literal opening line (the common case) renders
+  // as quoted copy; a Hook the creator wrote with its own multi-line
+  // structure (a label plus Shot/Text-VO/Transition-style lines) gets the
+  // same heading + labelled-line treatment as a Backend beat, since that
+  // structure is already there in the approved text -- never fabricated.
   const hooks = Array.isArray(brief.hook_variations) ? brief.hook_variations.filter((h) => h.text && h.text.trim()) : [];
   const openingsSection = document.getElementById('shoot-brief-openings-section');
   if (hooks.length) {
     openingsSection.style.display = '';
     document.getElementById('shoot-brief-openings-badge').innerHTML = hooks.length > 1
       ? `<span class="shoot-brief-film-badge shoot-brief-film-badge-all">Film All ${hooks.length}</span>` : '';
-    document.getElementById('shoot-brief-hooks').innerHTML = hooks.map((h, i) => `
-      <div class="shoot-brief-hook-block">
-        ${hooks.length > 1 ? `<div class="shoot-brief-hook-label">Hook ${i + 1}</div>` : ''}
-        <div class="shoot-brief-hook-text">&ldquo;${escapeHtml(h.text)}&rdquo;</div>
-      </div>`).join('');
+    document.getElementById('shoot-brief-hooks').innerHTML = hooks.map((h, i) => {
+      const text = h.text.trim();
+      const hookNum = hooks.length > 1 ? `Hook ${i + 1}` : '';
+      if (!text.includes('\n')) {
+        return `<div class="shoot-brief-hook-block">
+          ${hookNum ? `<div class="shoot-brief-hook-label">${escapeHtml(hookNum)}</div>` : ''}
+          <div class="shoot-brief-hook-text">&ldquo;${escapeHtml(text)}&rdquo;</div>
+        </div>`;
+      }
+      const { heading, body } = shootingBeatHeading(text);
+      const label = [hookNum, heading].filter(Boolean).join(' — ');
+      return `<div class="shoot-brief-hook-block">
+        ${label ? `<div class="shoot-brief-hook-label">${escapeHtml(label)}</div>` : ''}
+        ${shootingRenderBeatBody(body)}
+      </div>`;
+    }).join('');
   } else {
     openingsSection.style.display = 'none';
   }
@@ -5783,7 +5846,11 @@ function renderShootingBrief(brief) {
   // BACKEND -- the shared Execution/Shot Plan, captured once regardless of
   // how many Openings lead into it (item 3/4). Broken into whatever beats
   // the creator's own writing already contains (shootingExecutionBeats),
-  // never re-flowed into an artificial numbered list.
+  // never re-flowed into an artificial numbered list. Each beat's own
+  // heading (if any) and labelled lines (Shot/Direction/Production
+  // Note/etc.) come from shootingBeatHeading/shootingRenderBeatBody --
+  // the same structure-detection Hooks above use, applied here to the
+  // shared footage instead.
   const beats = shootingExecutionBeats(brief.execution);
   const backendSection = document.getElementById('shoot-brief-backend-section');
   if (beats.length) {
@@ -5792,7 +5859,7 @@ function renderShootingBrief(brief) {
       const { heading, body } = shootingBeatHeading(beat);
       return `<div class="shoot-brief-beat">
         ${heading ? `<div class="shoot-brief-beat-heading">${escapeHtml(heading)}</div>` : ''}
-        <div class="shoot-brief-text">${escapeHtml(body)}</div>
+        ${shootingRenderBeatBody(body)}
       </div>`;
     }).join('');
   } else {

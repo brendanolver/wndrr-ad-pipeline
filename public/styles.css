@@ -1591,17 +1591,37 @@ main{flex:1;min-width:0;padding:20px 24px;}
    highlighted "Primary" plus a buried list of others), since on set each
    one is its own thing to film. A lone Hook skips the "Hook N" label
    entirely -- there's nothing to disambiguate. */
-.shoot-brief-hook-block{background:var(--surface2);border-radius:var(--r);padding:10px 12px;}
-.shoot-brief-hook-block + .shoot-brief-hook-block{margin-top:8px;}
-.shoot-brief-hook-label{font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:0.3px;color:var(--teal-dark);margin-bottom:3px;}
+.shoot-brief-hook-block{background:var(--surface2);border-radius:var(--r);padding:11px 13px;}
+.shoot-brief-hook-block + .shoot-brief-hook-block{margin-top:10px;}
 .shoot-brief-hook-text{font-size:14px;font-weight:700;color:var(--text);line-height:1.4;}
 
+/* LEVEL 2 -- Hook/beat headings ("Hook 1", "3-5 SEC -- Pick Your
+   Rotation", "FIT DETAILS") are bold and a step up from body copy, the
+   one consistent size/weight used everywhere a beat or Hook needs its own
+   heading (colour alone tells OPENINGS teal from BACKEND purple apart). */
+.shoot-brief-hook-label,
+.shoot-brief-beat-heading{font-size:12.5px;font-weight:800;text-transform:uppercase;letter-spacing:0.3px;margin-bottom:5px;}
+.shoot-brief-hook-label{color:var(--teal-dark);}
+.shoot-brief-beat-heading{color:var(--purple);}
+
 /* BACKEND -- broken into whatever natural beats the creator's own writing
-   already contains (shootingExecutionBeats in app.js); a thin top border
-   separates beats instead of a numbered list or repeated grey boxes. */
-.shoot-brief-beat{padding:9px 0;border-top:1px solid var(--border);}
-.shoot-brief-beat:first-child{border-top:none;padding-top:0;}
-.shoot-brief-beat-heading{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.3px;color:var(--purple);margin-bottom:3px;}
+   already contains (shootingExecutionBeats in app.js). Spacing and the
+   bold heading above are what separate one beat from the next -- not a
+   repeated divider line, so the page reads as production notes rather
+   than a spreadsheet. */
+.shoot-brief-beat + .shoot-brief-beat{margin-top:16px;}
+
+/* LEVEL 3 -- supporting lines the creator already labelled themselves
+   ("Shot: ...", "Text / VO: ...", "Transition: ...", "Direction: ...").
+   Only the label is bold; the instruction stays normal weight, same size
+   and colour as an unlabelled paragraph, so it never competes with a
+   Level 2 heading. */
+.shoot-brief-line{font-size:13px;color:var(--text);line-height:1.5;}
+.shoot-brief-line-label{font-weight:700;color:var(--text-secondary);}
+.shoot-brief-text + .shoot-brief-text,
+.shoot-brief-text + .shoot-brief-line,
+.shoot-brief-line + .shoot-brief-text,
+.shoot-brief-line + .shoot-brief-line{margin-top:5px;}
 
 /* CHECK -- one compact chip per major footage group (a Hook, or Backend),
    never one per instruction. A plain checkbox + label, not a styled
