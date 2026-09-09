@@ -1023,6 +1023,8 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .cd-modal-workspace.cd-readonly select:disabled{background:var(--surface2);color:var(--text);opacity:1;cursor:default;border-color:var(--border);}
 .cd-modal-workspace.cd-readonly #cd-modal-add-hook-btn,
 .cd-modal-workspace.cd-readonly .cd-hook-remove,
+.cd-modal-workspace.cd-readonly #cd-modal-add-shot-btn,
+.cd-modal-workspace.cd-readonly .cd-shot-item-actions,
 .cd-modal-workspace.cd-readonly #cd-modal-references-actions,
 .cd-modal-workspace.cd-readonly .cd-reference-remove,
 .cd-modal-workspace.cd-readonly #cd-modal-script-toggle-wrap,
@@ -1054,6 +1056,21 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .cd-hook-item + .cd-hook-item{margin-top:10px;padding-top:10px;border-top:1px solid var(--border);}
 .cd-hook-remove{align-self:flex-start;background:none;border:none;padding:0;font-family:inherit;font-size:11.5px;font-weight:600;color:var(--text-muted);cursor:pointer;}
 .cd-hook-remove:hover{color:var(--red);text-decoration:underline;}
+
+/* What to Shoot -- each Shot is a plain bordered card (a compact list, not
+   a form-in-a-form): a small header row carries the "Shot N" ordinal plus
+   up/down reorder and Remove, deliberately low-emphasis (text buttons, no
+   icons) since a concept usually only has a handful of these. */
+.cd-shot-item{background:white;border:1px solid var(--border);border-radius:var(--r);padding:10px 12px;display:flex;flex-direction:column;gap:6px;}
+.cd-shot-item + .cd-shot-item{margin-top:8px;}
+.cd-shot-item-header{display:flex;align-items:center;justify-content:space-between;}
+.cd-shot-item-num{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);}
+.cd-shot-item-actions{display:flex;align-items:center;gap:4px;}
+.cd-shot-move{background:none;border:1px solid var(--border);border-radius:var(--r);width:22px;height:22px;line-height:1;font-size:11px;color:var(--text-secondary);cursor:pointer;padding:0;}
+.cd-shot-move:hover:not(:disabled){background:var(--surface2);color:var(--text);}
+.cd-shot-move:disabled{opacity:0.35;cursor:default;}
+.cd-shot-remove{background:none;border:none;padding:0;font-family:inherit;font-size:11.5px;font-weight:600;color:var(--text-muted);cursor:pointer;margin-left:4px;}
+.cd-shot-remove:hover{color:var(--red);text-decoration:underline;}
 
 .shoot-plan-edit-size-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--border);font-size:13px;font-weight:600;}
 .shoot-plan-edit-size-row:last-child{border-bottom:none;}
@@ -1633,6 +1650,30 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .shoot-brief-checklist-item{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;color:var(--text-secondary);background:var(--surface2);border-radius:var(--r-pill);padding:5px 11px 5px 9px;cursor:pointer;}
 .shoot-brief-checklist-item input{accent-color:var(--teal);cursor:pointer;}
 .shoot-brief-checklist-item.is-checked{color:var(--green);background:var(--green-light);}
+
+/* Structured Shoot Brief (items 8-11) -- the OPENINGS/SHOTS blocks
+   themselves are the checklist, so each one is a clickable label wrapping
+   a real checkbox, never a separate list underneath. Checked state reuses
+   the same quiet green already used by .shoot-brief-checklist-item.is-checked
+   instead of inventing a new "done" colour. */
+.shoot-brief-capture-item{display:flex;align-items:flex-start;gap:10px;background:var(--surface2);border-radius:var(--r);padding:11px 13px;cursor:pointer;}
+.shoot-brief-capture-item + .shoot-brief-capture-item{margin-top:10px;}
+.shoot-brief-capture-item input{margin-top:3px;accent-color:var(--teal);cursor:pointer;flex-shrink:0;}
+.shoot-brief-capture-body{flex:1;min-width:0;}
+.shoot-brief-capture-item.is-checked{background:var(--green-light);}
+.shoot-brief-capture-item.is-checked .shoot-brief-hook-label{color:var(--green);}
+.shoot-brief-capture-item.is-checked .shoot-brief-hook-text,
+.shoot-brief-capture-item.is-checked .shoot-brief-text{color:var(--text-secondary);}
+
+/* Compact "X/Y captured" progress next to the OPENINGS/SHOTS section
+   titles -- sits alongside the "Film All"/"Capture All" badge rather than
+   replacing it: the badge says what to do, this says how far along it is. */
+.shoot-brief-progress{font-size:11px;font-weight:700;color:var(--text-muted);margin-left:auto;}
+
+/* Overall progress in the footer, left of Close/Mark as Shot -- flips to a
+   checkmark once every Opening and Shot is captured. */
+.shoot-brief-overall-progress{font-size:12px;font-weight:700;color:var(--text-muted);margin-right:auto;align-self:center;}
+.shoot-brief-overall-progress.is-complete{color:var(--green);}
 
 /* Script/References/Audience -- collapsed by default, a plain down-chevron
    that flips on open; nothing here shows at all unless renderShootingBrief

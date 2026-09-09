@@ -88,7 +88,7 @@ let state = {
   // calendar date falls in (never the same as the week being browsed in
   // Week view); historyData is History's own GET /shooting/history.
   // ownerFilter is shared across Week/Today (client-side only, no refetch).
-  shooting: { view: 'week', weekOffset: 0, data: null, todayData: null, historyData: null, ownerFilter: 'all', briefScheduleId: null, dragScheduleId: null, briefChecklistItems: [], briefChecklistChecked: {} },
+  shooting: { view: 'week', weekOffset: 0, data: null, todayData: null, historyData: null, ownerFilter: 'all', briefScheduleId: null, dragScheduleId: null, briefChecklistItems: [], briefChecklistChecked: {}, briefData: null },
   // Editing -- same independent-weekOffset pattern as conceptDev/
   // tuesdayReview/shooting above. data is Week's own GET /editing response
   // (Concepts already nested with their Final Edits); activeConceptAssetId/
@@ -3941,6 +3941,7 @@ let conceptDevModalConceptId = null;
 let conceptDevModalProduct = null;
 let conceptDevModalReferences = [];
 let conceptDevModalHooks = [];
+let conceptDevModalShots = [];
 // Once a concept has been Approved in Tuesday Review, it's the final brief
 // moving into production -- the modal opens read-only by default so it
 // can't be edited by accident, with "Edit Approved Concept" (behind a
@@ -3975,6 +3976,51 @@ function addConceptDevHook() {
 function removeConceptDevHook(index) {
   conceptDevModalHooks.splice(index, 1);
   renderConceptDevModalHooks();
+}
+
+// What to Shoot -- the literal footage list, deliberately separate from
+// Hooks (openings) and Execution (creative flow). Each Shot is just a
+// name + what to capture (see the brief: no timestamps/camera/duration/
+// etc), freely addable/removable/reorderable, with no minimum enforced
+// here -- see the Ready for Review validation in saveConceptDevModal for
+// where "at least 1 Shot" actually gets checked.
+function renderConceptDevModalShots() {
+  document.getElementById('cd-modal-shots-list').innerHTML = conceptDevModalShots.map((s, i) => `
+    <div class="cd-shot-item">
+      <div class="cd-shot-item-header">
+        <span class="cd-shot-item-num">Shot ${i + 1}</span>
+        <div class="cd-shot-item-actions">
+          <button type="button" class="cd-shot-move" onclick="moveConceptDevShot(${i}, -1)" ${i === 0 ? 'disabled' : ''} aria-label="Move shot up">&uarr;</button>
+          <button type="button" class="cd-shot-move" onclick="moveConceptDevShot(${i}, 1)" ${i === conceptDevModalShots.length - 1 ? 'disabled' : ''} aria-label="Move shot down">&darr;</button>
+          <button type="button" class="link-btn cd-shot-remove" onclick="removeConceptDevShot(${i})">Remove</button>
+        </div>
+      </div>
+      <label>Shot Name
+        <input type="text" value="${escapeHtml(s.name)}" oninput="conceptDevModalShots[${i}].name=this.value" placeholder="e.g. Overhead Colour Rotation">
+      </label>
+      <label>What to Capture
+        <textarea rows="2" oninput="conceptDevModalShots[${i}].capture=this.value" placeholder="e.g. Fast overhead flatlay with different colourways swapped in and out.">${escapeHtml(s.capture)}</textarea>
+      </label>
+    </div>`).join('');
+}
+
+function addConceptDevShot() {
+  conceptDevModalShots.push({ name: '', capture: '' });
+  renderConceptDevModalShots();
+  const inputs = document.querySelectorAll('#cd-modal-shots-list input');
+  if (inputs.length) inputs[inputs.length - 1].focus();
+}
+
+function removeConceptDevShot(index) {
+  conceptDevModalShots.splice(index, 1);
+  renderConceptDevModalShots();
+}
+
+function moveConceptDevShot(index, delta) {
+  const target = index + delta;
+  if (target < 0 || target >= conceptDevModalShots.length) return;
+  [conceptDevModalShots[index], conceptDevModalShots[target]] = [conceptDevModalShots[target], conceptDevModalShots[index]];
+  renderConceptDevModalShots();
 }
 
 function renderConceptDevModalReferences() {
@@ -4145,6 +4191,16 @@ function fillConceptDevModalFields(concept) {
     : [{ text: '' }];
   renderConceptDevModalHooks();
 
+  // What to Shoot -- unlike Hooks, no default blank slot: an existing
+  // Concept with no structured Shots yet (every Concept before this
+  // feature shipped) should open showing genuinely zero rows, not one
+  // pre-created empty one, so it's obvious nothing's been added rather
+  // than looking like a half-filled-in Shot.
+  conceptDevModalShots = concept && Array.isArray(concept.shots)
+    ? concept.shots.map((s) => ({ name: s.name || '', capture: s.capture || '' }))
+    : [];
+  renderConceptDevModalShots();
+
   const status = concept ? concept.concept_dev_status : 'not_started';
   const badge = document.getElementById('cd-modal-status-badge');
   badge.className = `cd-concept-status-pill ${CONCEPT_DEV_STATUS_CLASS[status] || ''}`;
@@ -4270,6 +4326,7 @@ function hideConceptDevValidation() {
     document.getElementById(fieldId).classList.remove('cd-field-invalid');
     hideConceptDevFieldError(`${fieldId}-error`);
   }
+  hideConceptDevFieldError('cd-modal-shots-error');
 }
 
 // concept_name is locked to a read-only label for a Drop's Proven Winner
@@ -4471,6 +4528,9 @@ async function saveConceptDevModal(targetStatus) {
     hook_variations: conceptDevModalHooks
       .map((h) => ({ text: h.text.trim() }))
       .filter((h) => h.text),
+    shots: conceptDevModalShots
+      .map((s) => ({ name: s.name.trim(), capture: s.capture.trim() }))
+      .filter((s) => s.name && s.capture),
     reference_items: conceptDevModalReferences
       .map((r) => (r.library_reference_id
         ? { url: r.url.trim(), note: r.note.trim(), library_reference_id: r.library_reference_id }
@@ -4518,7 +4578,24 @@ async function saveConceptDevModal(targetStatus) {
       return;
     }
 
-    // All five core fields are complete -- Hook / Opening is a creative
+    // What to Shoot needs at least one complete Shot (Shot Name + What to
+    // Capture) before Ready for Review -- same bar as the fields above,
+    // just anchored to the list itself rather than a single input since a
+    // Shot has no fixed field id to flag invalid. This only ever fires when
+    // someone actively submits/resubmits a concept -- an existing concept
+    // already sitting in Ready for Review/Approved/etc from before this
+    // requirement existed is never re-validated just for having no
+    // structured Shots (see schema.sql's comment on the shots column).
+    const hasCompleteShot = conceptDevModalShots.some((s) => s.name.trim() && s.capture.trim());
+    if (!hasCompleteShot) {
+      const shotsError = document.getElementById('cd-modal-shots-error');
+      shotsError.textContent = 'Add at least one Shot (Shot Name + What to Capture)';
+      shotsError.classList.add('show');
+      document.getElementById('cd-modal-shots-list').scrollIntoView({ block: 'center', behavior: 'smooth' });
+      return;
+    }
+
+    // All five core fields (plus What to Shoot) are complete -- Hook / Opening is a creative
     // thinking nudge, not a requirement (per the brief), so pause once to
     // ask rather than silently letting a concept through with nobody
     // having considered the opening at all.
@@ -4954,6 +5031,20 @@ function renderTuesdayReviewConcept() {
   scriptEl.style.display = 'none';
   scriptEl.textContent = concept.script_notes || '';
   scriptToggle.style.display = concept.script_notes && concept.script_notes.trim() ? '' : 'none';
+
+  // Structured Shots (item 7): read-only here -- Tuesday Review only needs
+  // to confirm it's clear what to shoot, not to edit it. Legacy Concepts
+  // with no structured Shots simply never show this section (no error /
+  // empty-required state), and keep showing their Execution text above as
+  // they always have.
+  const shots = (Array.isArray(concept.shots) ? concept.shots : []).filter((s) => s && s.name && s.name.trim() && s.capture && s.capture.trim());
+  const shotsSection = document.getElementById('tr-review-shots-section');
+  if (!shots.length) {
+    shotsSection.style.display = 'none';
+  } else {
+    shotsSection.style.display = '';
+    document.getElementById('tr-review-shots').innerHTML = shots.map((s) => `<div class="tr-hook-item"><span class="tr-hook-label">${escapeHtml(s.name.trim())}</span><div class="tr-hook-text">${escapeHtml(s.capture.trim())}</div></div>`).join('');
+  }
 
   const refs = (Array.isArray(concept.reference_items) ? concept.reference_items : []).filter((r) => r && r.url);
   const refsSection = document.getElementById('tr-review-references-section');
@@ -5640,6 +5731,7 @@ async function openShootingBrief(scheduleId) {
   try {
     const brief = await api(`/shooting/${scheduleId}/brief`);
     state.shooting.briefScheduleId = scheduleId;
+    state.shooting.briefData = brief;
     renderShootingBrief(brief);
     openModal('shoot-brief-modal');
   } catch (e) {
@@ -5808,6 +5900,40 @@ function renderShootingBrief(brief) {
     ${brief.image_url ? `<img class="cd-modal-context-thumb" src="${brief.image_url}" alt="">` : '<span class="cd-modal-context-thumb cd-modal-context-noimg">🖼</span>'}
     <div class="cd-modal-context-lines"><div class="cd-modal-context-line">${contextLine}</div></div>`;
 
+  const hooks = Array.isArray(brief.hook_variations) ? brief.hook_variations.filter((h) => h.text && h.text.trim()) : [];
+
+  // Structured What to Shoot (items 8-11): once a Concept has real, named
+  // Shot records, the Shoot Brief stops reverse-engineering a shot list
+  // from Execution prose and instead renders OPENINGS + SHOTS directly
+  // from that structured data, each individually checkable. A legacy
+  // Concept that never had structured Shots keeps using the exact
+  // beats-from-Execution rendering below, completely untouched -- this is
+  // the only thing that decides which mode runs.
+  const shots = Array.isArray(brief.shots) ? brief.shots.filter((s) => s && s.name && s.name.trim() && s.capture && s.capture.trim()) : [];
+  const usingStructuredShots = shots.length > 0;
+
+  if (usingStructuredShots) {
+    renderShootingBriefStructured(brief, hooks, shots);
+  } else {
+    renderShootingBriefLegacy(brief, hooks);
+  }
+
+  document.getElementById('shoot-brief-mark-shot-btn').style.display = isShot ? 'none' : '';
+  document.getElementById('shoot-brief-unmark-shot-btn').style.display = isShot ? '' : 'none';
+}
+
+// Legacy Shoot Brief rendering (items 7/11) -- byte-for-byte the same
+// behaviour that shipped before structured What to Shoot existed. Also
+// resets every structured-mode-only element to hidden, since the modal's
+// DOM is reused across Concepts and a previous open might have been a
+// structured-mode one.
+function renderShootingBriefLegacy(brief, hooks) {
+  document.getElementById('shoot-brief-shots-section').style.display = 'none';
+  document.getElementById('shoot-brief-execution-collapsible').style.display = 'none';
+  document.getElementById('shoot-brief-requirements-collapsible').style.display = 'none';
+  document.getElementById('shoot-brief-overall-progress').style.display = 'none';
+  document.getElementById('shoot-brief-openings-progress').textContent = '';
+
   // OPENINGS -- every Hook Variation gets equal visual weight as its own
   // compact block (item 2), not a single highlighted "Primary" plus a
   // buried list of others: on set, each one is a separate thing to film.
@@ -5817,7 +5943,6 @@ function renderShootingBrief(brief) {
   // structure (a label plus Shot/Text-VO/Transition-style lines) gets the
   // same heading + labelled-line treatment as a Backend beat, since that
   // structure is already there in the approved text -- never fabricated.
-  const hooks = Array.isArray(brief.hook_variations) ? brief.hook_variations.filter((h) => h.text && h.text.trim()) : [];
   const openingsSection = document.getElementById('shoot-brief-openings-section');
   if (hooks.length) {
     openingsSection.style.display = '';
@@ -5897,6 +6022,20 @@ function renderShootingBrief(brief) {
     reqSection.style.display = 'none';
   }
 
+  renderShootingBriefSharedContext(brief);
+
+  // CHECK -- compact completion tracker for the major footage groups only
+  // (item 5), persisted per shoot-schedule entry so it survives an
+  // accidental close mid-shoot.
+  state.shooting.briefChecklistItems = shootingChecklistItems(hooks, beats);
+  state.shooting.briefChecklistChecked = shootingChecklistLoad(state.shooting.briefScheduleId);
+  renderShootingChecklist();
+}
+
+// References + Customer Avatar/Audience context render identically
+// regardless of which mode is active -- neither depends on Execution or
+// structured Shots, so there's nothing to branch on.
+function renderShootingBriefSharedContext(brief) {
   const refs = Array.isArray(brief.reference_items) ? brief.reference_items.filter((r) => r.url) : [];
   const refSection = document.getElementById('shoot-brief-references-section');
   if (refs.length) {
@@ -5921,16 +6060,157 @@ function renderShootingBrief(brief) {
   } else {
     audienceWrap.style.display = 'none';
   }
+}
 
-  // CHECK -- compact completion tracker for the major footage groups only
-  // (item 5), persisted per shoot-schedule entry so it survives an
-  // accidental close mid-shoot.
-  state.shooting.briefChecklistItems = shootingChecklistItems(hooks, beats);
+// A single checkable footage block shared by structured OPENINGS and
+// SHOTS rows (item 9: the brief itself is the checklist, not a separate
+// section underneath). `label` is the heading line (Hook N / Opening /
+// the Shot Name), `body` is pre-rendered inner HTML for the capture text.
+function shootingCaptureBlockHtml(key, label, bodyHtml, checked) {
+  return `<label class="shoot-brief-capture-item ${checked ? 'is-checked' : ''}">
+    <input type="checkbox" class="shoot-brief-capture-checkbox" ${checked ? 'checked' : ''} onchange="toggleShootingStructuredCapture('${key}')">
+    <div class="shoot-brief-capture-body">
+      ${label ? `<div class="shoot-brief-hook-label">${escapeHtml(label)}</div>` : ''}
+      ${bodyHtml}
+    </div>
+  </label>`;
+}
+
+// Structured Shoot Brief rendering (items 8-11): OPENINGS and SHOTS come
+// straight from Primary/Alternative Hooks and the Concept's own What to
+// Shoot records -- never parsed or guessed from Execution prose. Execution,
+// Requirements, Audience and References all step back into secondary,
+// collapsed-by-default context, since OPENINGS + SHOTS now carry the actual
+// shot-day instructions. Hidden entirely for legacy Concepts (item 11).
+function renderShootingBriefStructured(brief, hooks, shots) {
+  document.getElementById('shoot-brief-backend-section').style.display = 'none';
+  document.getElementById('shoot-brief-requirements-section').style.display = 'none';
+  document.getElementById('shoot-brief-checklist-section').style.display = 'none';
+
+  const openingItems = hooks.map((h, i) => ({ key: `opening-${i + 1}`, label: hooks.length > 1 ? `Hook ${i + 1}` : 'Opening' }));
+  const shotItems = shots.map((s, i) => ({ key: `shot-${i + 1}`, label: s.name.trim() }));
+  state.shooting.briefChecklistItems = [...openingItems, ...shotItems];
   state.shooting.briefChecklistChecked = shootingChecklistLoad(state.shooting.briefScheduleId);
-  renderShootingChecklist();
+  const checked = state.shooting.briefChecklistChecked;
 
-  document.getElementById('shoot-brief-mark-shot-btn').style.display = isShot ? 'none' : '';
-  document.getElementById('shoot-brief-unmark-shot-btn').style.display = isShot ? '' : 'none';
+  // OPENINGS -- same equal-weight-per-Hook treatment as the legacy
+  // rendering (quoted copy for a plain one-line Hook, heading + labelled
+  // lines for one the creator wrote with its own structure), just made
+  // individually checkable and with the fixed "Film All" badge (item 8)
+  // instead of a conditional count.
+  const openingsSection = document.getElementById('shoot-brief-openings-section');
+  if (hooks.length) {
+    openingsSection.style.display = '';
+    document.getElementById('shoot-brief-openings-badge').innerHTML = '<span class="shoot-brief-film-badge shoot-brief-film-badge-all">Film All</span>';
+    document.getElementById('shoot-brief-hooks').innerHTML = hooks.map((h, i) => {
+      const text = h.text.trim();
+      const item = openingItems[i];
+      let bodyHtml;
+      if (!text.includes('\n')) {
+        bodyHtml = `<div class="shoot-brief-hook-text">&ldquo;${escapeHtml(text)}&rdquo;</div>`;
+        return shootingCaptureBlockHtml(item.key, item.label, bodyHtml, checked[item.key]);
+      }
+      const { heading, body } = shootingBeatHeading(text);
+      const label = [item.label, heading].filter(Boolean).join(' — ');
+      bodyHtml = shootingRenderBeatBody(body);
+      return shootingCaptureBlockHtml(item.key, label, bodyHtml, checked[item.key]);
+    }).join('');
+  } else {
+    openingsSection.style.display = 'none';
+  }
+
+  // SHOTS -- populated directly from structured What to Shoot records
+  // (Shot Name + What to Capture only, item 2/3), each its own checkable
+  // block with the fixed "Capture All" badge.
+  const shotsSection = document.getElementById('shoot-brief-shots-section');
+  shotsSection.style.display = '';
+  document.getElementById('shoot-brief-shots').innerHTML = shots.map((s, i) => {
+    const item = shotItems[i];
+    const bodyHtml = `<div class="shoot-brief-text">${escapeHtml(s.capture.trim())}</div>`;
+    return shootingCaptureBlockHtml(item.key, item.label, bodyHtml, checked[item.key]);
+  }).join('');
+
+  const scriptSection = document.getElementById('shoot-brief-script-section');
+  if (brief.script_notes && brief.script_notes.trim()) {
+    scriptSection.style.display = '';
+    document.getElementById('shoot-brief-script').textContent = brief.script_notes;
+  } else {
+    scriptSection.style.display = 'none';
+  }
+
+  // Creative Direction / Execution -- supporting context only now (item
+  // 10), shown exactly as written, collapsed by default, entirely hidden
+  // when there's no Execution text at all.
+  const executionCollapsible = document.getElementById('shoot-brief-execution-collapsible');
+  if (brief.execution && brief.execution.trim()) {
+    executionCollapsible.style.display = '';
+    document.getElementById('shoot-brief-execution-text').textContent = brief.execution.trim();
+  } else {
+    executionCollapsible.style.display = 'none';
+  }
+
+  // Requirements -- same content as the legacy section, moved into the
+  // collapsed secondary area (item 10).
+  const reqCollapsible = document.getElementById('shoot-brief-requirements-collapsible');
+  const reqCells = [];
+  if (brief.talent_requirement && brief.talent_requirement.trim()) reqCells.push(`<div><span class="cd-field-label">Talent</span><div class="shoot-brief-text">${escapeHtml(brief.talent_requirement)}</div></div>`);
+  if (brief.location && brief.location.trim()) reqCells.push(`<div><span class="cd-field-label">Location</span><div class="shoot-brief-text">${escapeHtml(brief.location)}</div></div>`);
+  const hasProps = brief.props_notes && brief.props_notes.trim();
+  if (reqCells.length || hasProps) {
+    reqCollapsible.style.display = '';
+    document.getElementById('shoot-brief-req-row-structured').innerHTML = reqCells.join('');
+    document.getElementById('shoot-brief-req-row-structured').style.display = reqCells.length ? '' : 'none';
+    const propsWrap = document.getElementById('shoot-brief-props-wrap-structured');
+    if (hasProps) {
+      propsWrap.style.display = '';
+      document.getElementById('shoot-brief-props-structured').textContent = brief.props_notes;
+    } else {
+      propsWrap.style.display = 'none';
+    }
+  } else {
+    reqCollapsible.style.display = 'none';
+  }
+
+  renderShootingBriefSharedContext(brief);
+  renderShootingStructuredProgress();
+}
+
+// Progress display for structured mode (item 9): per-section "X/Y
+// captured" next to OPENINGS/SHOTS, plus an overall count in the footer
+// that reads "captured" until everything is done, then flips to a
+// checkmark -- the Shoot Brief itself is the checklist, so this is the
+// only completion tracker shown (no separate Shoot Checklist section).
+function renderShootingStructuredProgress() {
+  const items = state.shooting.briefChecklistItems;
+  const checked = state.shooting.briefChecklistChecked;
+  const openingItems = items.filter((it) => it.key.startsWith('opening-'));
+  const shotItems = items.filter((it) => it.key.startsWith('shot-'));
+  const countDone = (list) => list.filter((it) => checked[it.key]).length;
+
+  const openingsProgress = document.getElementById('shoot-brief-openings-progress');
+  openingsProgress.textContent = openingItems.length ? `${countDone(openingItems)}/${openingItems.length} captured` : '';
+  const shotsProgress = document.getElementById('shoot-brief-shots-progress');
+  shotsProgress.textContent = shotItems.length ? `${countDone(shotItems)}/${shotItems.length} captured` : '';
+
+  const overall = document.getElementById('shoot-brief-overall-progress');
+  if (items.length) {
+    overall.style.display = '';
+    const done = countDone(items);
+    overall.textContent = done === items.length ? `✓ ${done}/${items.length} captured` : `${done}/${items.length} captured`;
+    overall.classList.toggle('is-complete', done === items.length);
+  } else {
+    overall.style.display = 'none';
+  }
+}
+
+function toggleShootingStructuredCapture(key) {
+  const scheduleId = state.shooting.briefScheduleId;
+  if (!scheduleId) return;
+  state.shooting.briefChecklistChecked[key] = !state.shooting.briefChecklistChecked[key];
+  shootingChecklistSave(scheduleId, state.shooting.briefChecklistChecked);
+  renderShootingStructuredProgress();
+  const input = document.querySelector(`.shoot-brief-capture-checkbox[onchange="toggleShootingStructuredCapture('${key}')"]`);
+  if (input) input.closest('.shoot-brief-capture-item').classList.toggle('is-checked', !!state.shooting.briefChecklistChecked[key]);
 }
 
 // Mark as Shot stays the primary, un-blocked action (item 6) -- an

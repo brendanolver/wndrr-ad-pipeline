@@ -492,8 +492,23 @@
             <div class="cd-modal-section-title-row">
               <div class="cd-modal-section-title">Openings</div>
               <span id="shoot-brief-openings-badge"></span>
+              <span class="shoot-brief-progress" id="shoot-brief-openings-progress"></span>
             </div>
             <div id="shoot-brief-hooks"></div>
+          </div>
+
+          <!-- SHOTS -- only populated/shown for Concepts with structured
+               What to Shoot data (item 8): footage rendered directly from
+               those records, never reverse-engineered from Execution
+               prose. Stays hidden entirely for legacy Concepts, which keep
+               using the Backend section above instead (item 11). -->
+          <div class="cd-modal-section" id="shoot-brief-shots-section" style="display:none;">
+            <div class="cd-modal-section-title-row">
+              <div class="cd-modal-section-title">Shots</div>
+              <span class="shoot-brief-film-badge shoot-brief-film-badge-all">Capture All</span>
+              <span class="shoot-brief-progress" id="shoot-brief-shots-progress"></span>
+            </div>
+            <div id="shoot-brief-shots"></div>
           </div>
 
           <!-- BACKEND -- the shared Execution/Shot Plan, captured once
@@ -528,6 +543,27 @@
             </div>
           </div>
 
+          <!-- Structured-mode-only supporting context (item 10): once
+               OPENINGS + SHOTS carry the operational "what to capture"
+               detail directly, Execution and Requirements become secondary
+               creative context rather than shot-day instructions, so they
+               move into the same collapsed-by-default pattern as
+               References/Audience below. Legacy Concepts never populate or
+               show these -- their Backend/Requirements sections above stay
+               exactly as they are today (item 11). -->
+          <details class="shoot-brief-collapsible" id="shoot-brief-execution-collapsible" style="display:none;">
+            <summary>Creative Direction / Execution</summary>
+            <div class="shoot-brief-text" id="shoot-brief-execution-text"></div>
+          </details>
+          <details class="shoot-brief-collapsible" id="shoot-brief-requirements-collapsible" style="display:none;">
+            <summary>Requirements</summary>
+            <div class="shoot-brief-req-row" id="shoot-brief-req-row-structured"></div>
+            <div id="shoot-brief-props-wrap-structured" style="display:none;">
+              <span class="cd-field-label">Props / Special Requirements</span>
+              <div class="shoot-brief-text" id="shoot-brief-props-structured"></div>
+            </div>
+          </details>
+
           <!-- Strategic/supporting material, not shot-day operational
                information -- collapsed by default and entirely hidden (not
                just an empty accordion) when a Concept has nothing recorded
@@ -555,6 +591,7 @@
           </div>
         </div>
         <div class="modal-footer">
+          <span class="shoot-brief-overall-progress" id="shoot-brief-overall-progress" style="display:none;"></span>
           <button class="btn btn-ghost" onclick="closeModal('shoot-brief-modal')">Close</button>
           <button class="btn btn-danger" id="shoot-brief-unmark-shot-btn" onclick="unmarkShootingShotFromBrief()" style="display:none;">Mark as Not Shot</button>
           <button class="btn btn-primary" id="shoot-brief-mark-shot-btn" onclick="markShootingShotFromBrief()">&check; Mark as Shot</button>
@@ -1295,6 +1332,7 @@
 
       <div class="cd-modal-section">
         <div class="cd-modal-section-title">The Execution</div>
+        <div class="hint cd-modal-section-helper">How does the ad play out?</div>
         <label><span class="cd-field-label">Execution / Shot Plan<span class="cd-req-mark">*</span></span>
           <textarea id="cd-modal-execution" rows="6" oninput="updateReviewPromptGate()"></textarea>
           <div class="cd-field-error" id="cd-modal-execution-error"></div>
@@ -1308,6 +1346,23 @@
           </label>
           <button type="button" class="link-btn" onclick="setConceptDevScriptExpanded(false)">&minus; Hide</button>
         </div>
+      </div>
+
+      <!-- What to Shoot -- the literal footage list, deliberately separate
+           from both Execution above (creative flow/direction) and Hook /
+           Opening below (the variations being tested). Each Shot is just a
+           name + what to capture, nothing else (see the brief: no
+           timestamps/camera/lens/duration/etc here) -- see
+           conceptDevModalShots in app.js for add/remove/reorder. -->
+      <div class="cd-modal-section">
+        <div class="cd-modal-section-title-row">
+          <div class="cd-modal-section-title">What to Shoot</div>
+          <span class="cd-req-mark">*</span>
+        </div>
+        <div class="hint cd-modal-section-helper">List the footage that must be captured to make this concept.</div>
+        <div id="cd-modal-shots-list"></div>
+        <button type="button" class="link-btn" id="cd-modal-add-shot-btn" onclick="addConceptDevShot()">+ Add Shot</button>
+        <div class="cd-field-error" id="cd-modal-shots-error"></div>
       </div>
 
       <!-- Hook Variations belong to THIS concept -- "1 Concept -> 3 Hook
@@ -1476,6 +1531,15 @@
         <div class="tr-review-text" id="tr-review-execution"></div>
         <button type="button" class="link-btn" id="tr-review-script-toggle" onclick="toggleTuesdayReviewScript()" style="display:none;">View Script / Talking Points &darr;</button>
         <div class="tr-review-text tr-review-script" id="tr-review-script" style="display:none;"></div>
+      </div>
+
+      <!-- What to Shoot -- read-only, entirely hidden (not an empty/error
+           state) for a Concept that never had structured Shots (item 7):
+           "If we approve this Concept, is it actually clear what needs
+           filming?" is the question this answers, nothing more. -->
+      <div class="tr-review-section" id="tr-review-shots-section" style="display:none;">
+        <div class="tr-review-section-title">What to Shoot</div>
+        <div id="tr-review-shots"></div>
       </div>
 
       <div class="tr-review-section" id="tr-review-references-section" style="display:none;">
