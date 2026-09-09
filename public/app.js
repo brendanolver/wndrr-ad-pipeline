@@ -867,6 +867,25 @@ document.addEventListener('keydown', (e) => {
   closeConceptDevLocationDropdown();
 });
 
+// References' "+ Add Reference" menu is the same dismissible popover --
+// click outside it or press Escape to close without picking Paste Link or
+// Choose From Reference Library (closing never touches conceptDevModalReferences).
+// The trigger button lives inside .cd-reference-add-wrap alongside the menu,
+// so a click on it is excluded here -- toggleConceptDevReferenceAddMenu's own
+// onclick already handles opening/closing that case.
+document.addEventListener('click', (e) => {
+  const menu = document.getElementById('cd-modal-reference-add-menu');
+  if (!menu || menu.style.display === 'none') return;
+  if (e.target.closest('.cd-reference-add-wrap')) return;
+  closeConceptDevReferenceAddMenu();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const menu = document.getElementById('cd-modal-reference-add-menu');
+  if (!menu || menu.style.display === 'none') return;
+  closeConceptDevReferenceAddMenu();
+});
+
 // ── Planning: step nav doubles as the Monday meeting checklist ───────
 // The 5 nav tabs themselves answer "where are we / what's reviewed / what's
 // left" -- no separate checklist row. First four sections are manually
@@ -4132,6 +4151,10 @@ function removeConceptDevReference(index) {
 function toggleConceptDevReferenceAddMenu() {
   const menu = document.getElementById('cd-modal-reference-add-menu');
   menu.style.display = menu.style.display === 'none' ? '' : 'none';
+}
+
+function closeConceptDevReferenceAddMenu() {
+  document.getElementById('cd-modal-reference-add-menu').style.display = 'none';
 }
 
 function chooseConceptDevReferenceFromLibrary() {
