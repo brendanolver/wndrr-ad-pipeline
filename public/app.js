@@ -4681,6 +4681,35 @@ function tuesdayReviewCounts() {
   };
 }
 
+// One ad per Hook/Opening a concept has -- shared by the per-concept
+// summary line and the week-level "Ads to Film" total below.
+function tuesdayReviewHookCount(concept) {
+  return (Array.isArray(concept.hook_variations) ? concept.hook_variations : []).filter((h) => h && h.text && h.text.trim()).length;
+}
+
+// The production question this page exists to answer isn't "how many
+// concepts" -- it's "how many ads do we actually need to shoot this week."
+// Each Hook/Opening on a concept becomes its own filmed ad, so the total is
+// hooks summed across every concept still in play. Killed concepts are
+// excluded -- they were explicitly decided not to be made, so counting
+// their hooks would overstate the week's real shoot list. Approved,
+// Ready for Review, and Changes Required all stay in (nothing's been ruled
+// out yet), so this reads as the week's full scope going into the meeting
+// and shrinks live as concepts get killed during review.
+function tuesdayReviewAdsToFilmCount() {
+  return tuesdayReviewAllConcepts()
+    .filter((x) => x.concept.concept_dev_status !== 'killed')
+    .reduce((sum, x) => sum + tuesdayReviewHookCount(x.concept), 0);
+}
+
+function renderTuesdayReviewSummary() {
+  const activeConcepts = tuesdayReviewAllConcepts().filter((x) => x.concept.concept_dev_status !== 'killed').length;
+  const adsCount = tuesdayReviewAdsToFilmCount();
+  const el = document.getElementById('tr-summary');
+  if (!el) return;
+  el.textContent = `${activeConcepts} Concept${activeConcepts === 1 ? '' : 's'} · ${adsCount} Ad${adsCount === 1 ? '' : 's'} to Film This Week`;
+}
+
 // While the meeting is still working through the queue, landing on Ready
 // is the point (that's the whole agenda); once it's empty, staying on
 // Ready would land the team on a confusing "nothing here" empty state
@@ -4741,7 +4770,7 @@ function tuesdayReviewAvatarLabel(concept) {
 // (product/source/pathway/Owner), and omits any part with no data rather
 // than showing a placeholder.
 function tuesdayReviewSummaryLineText(concept) {
-  const hookCount = (Array.isArray(concept.hook_variations) ? concept.hook_variations : []).filter((h) => h && h.text && h.text.trim()).length;
+  const hookCount = tuesdayReviewHookCount(concept);
   const refCount = (Array.isArray(concept.reference_items) ? concept.reference_items : []).filter((r) => r && r.url).length;
   return [
     tuesdayReviewAvatarLabel(concept),
@@ -4772,6 +4801,7 @@ function tuesdayReviewConceptCardHtml(concept) {
 
 function renderTuesdayReviewList() {
   renderTuesdayReviewFilters();
+  renderTuesdayReviewSummary();
   const list = document.getElementById('tr-list');
   const data = state.tuesdayReview.data;
   if (!data || !data.confirmed) {
