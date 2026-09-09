@@ -464,10 +464,11 @@
     </section>
 
     <!-- Read-only Shoot Brief -- reuses the approved Concept's own data
-         (see GET /shooting/:id/brief), never another editable form. "What
-         exactly am I meant to capture", so Execution/Hook/Script/References/
-         Shoot Requirements are the point; Audience is present but
-         deliberately de-emphasized (the strategy was already approved). -->
+         (see GET /shooting/:id/brief), never another editable form. Built
+         around the shooting structure rather than a numbered document: what
+         Openings need filming, what Backend footage is shared across them,
+         then a compact completion checklist right before Mark as Shot. See
+         renderShootingBrief in app.js. -->
     <div id="shoot-brief-modal" class="modal-backdrop">
       <div class="modal shoot-brief-modal">
         <div class="modal-header">
@@ -480,45 +481,57 @@
         <div class="modal-body">
           <div class="shoot-brief-context" id="shoot-brief-context"></div>
 
-          <!-- What to Shoot is the hero: the one thing a creator standing on
-               set actually needs, so it comes before anything strategic (see
-               the brief: "the creator should not have to scroll through
-               strategic information before seeing what they actually need to
-               shoot"). shootingExecutionSteps() in app.js turns it into a
-               scannable numbered sequence purely by splitting the ORIGINAL
-               Execution text on sentence boundaries -- never rewritten,
-               never fabricated -- falling back to the plain paragraph
-               whenever that split isn't reliable. -->
-          <div class="shoot-brief-hero">
-            <div class="shoot-brief-hero-title">What to Shoot</div>
-            <div id="shoot-brief-execution"></div>
-          </div>
-
-          <div class="cd-modal-section">
-            <div class="cd-modal-section-title">Opening</div>
+          <!-- OPENINGS -- one equal-weight compact block per Hook Variation,
+               never a single highlighted "Primary" hook plus a buried list
+               of others: on set each one is its own thing to capture. The
+               "Film All N" badge only shows once there's more than one, so
+               the person filming immediately reads this as "N openings",
+               not "N separate ads". Whole section hidden when the Concept
+               has no Hook recorded at all (item 9). -->
+          <div class="cd-modal-section" id="shoot-brief-openings-section" style="display:none;">
+            <div class="cd-modal-section-title-row">
+              <div class="cd-modal-section-title">Openings</div>
+              <span id="shoot-brief-openings-badge"></span>
+            </div>
             <div id="shoot-brief-hooks"></div>
           </div>
 
-          <div class="cd-modal-section">
-            <div class="cd-modal-section-title">Shoot Requirements</div>
-            <div class="shoot-brief-req-row">
-              <div><span class="cd-field-label">Talent</span><div class="shoot-brief-text" id="shoot-brief-talent"></div></div>
-              <div><span class="cd-field-label">Location</span><div class="shoot-brief-text" id="shoot-brief-location"></div></div>
+          <!-- BACKEND -- the shared Execution/Shot Plan, captured once
+               regardless of how many Openings lead into it. "Film Once"
+               reinforces the same "N openings + 1 shared backend" mental
+               model as the badge above. Broken into whatever beats the
+               creator's own writing already contains (shootingExecutionBeats
+               in app.js), never re-flowed into a numbered list. Hidden
+               entirely when there's no Execution text at all. -->
+          <div class="cd-modal-section" id="shoot-brief-backend-section" style="display:none;">
+            <div class="cd-modal-section-title-row">
+              <div class="cd-modal-section-title">Backend</div>
+              <span class="shoot-brief-film-badge shoot-brief-film-badge-once">Film Once</span>
             </div>
+            <div id="shoot-brief-backend"></div>
+          </div>
+
+          <div class="cd-modal-section" id="shoot-brief-script-section" style="display:none;">
+            <div class="cd-modal-section-title">Script / Talking Points</div>
+            <div class="shoot-brief-text" id="shoot-brief-script"></div>
+          </div>
+
+          <!-- Requirements -- entirely hidden (not "—" placeholders) unless
+               at least one of Talent/Location/Props was actually recorded
+               (item 9: omit empty sections rather than showing N/A). -->
+          <div class="cd-modal-section" id="shoot-brief-requirements-section" style="display:none;">
+            <div class="cd-modal-section-title">Requirements</div>
+            <div class="shoot-brief-req-row" id="shoot-brief-req-row"></div>
             <div id="shoot-brief-props-wrap" style="display:none;">
               <span class="cd-field-label">Props / Special Requirements</span>
               <div class="shoot-brief-text" id="shoot-brief-props"></div>
             </div>
           </div>
 
-          <!-- Everything below here is supporting/strategic material, not
-               shot-day operational information -- collapsed by default and
-               entirely hidden (not just an empty accordion) when a Concept
-               has nothing recorded for it. -->
-          <details class="shoot-brief-collapsible" id="shoot-brief-script-section" style="display:none;">
-            <summary>Script / Talking Points</summary>
-            <div class="shoot-brief-text" id="shoot-brief-script"></div>
-          </details>
+          <!-- Strategic/supporting material, not shot-day operational
+               information -- collapsed by default and entirely hidden (not
+               just an empty accordion) when a Concept has nothing recorded
+               for it. -->
           <details class="shoot-brief-collapsible" id="shoot-brief-references-section" style="display:none;">
             <summary>References</summary>
             <div id="shoot-brief-references"></div>
@@ -527,6 +540,19 @@
             <summary>Customer Avatar / Audience context</summary>
             <div class="shoot-brief-text" id="shoot-brief-audience"></div>
           </details>
+
+          <!-- CHECK -- compact completion tracker for the major footage
+               groups only (one per Hook + Backend), never one per
+               instruction. Sits right before the sticky Mark as Shot
+               footer to match the OPENINGS -> BACKEND -> CHECK -> MARK AS
+               SHOT mental model. Hidden when there's nothing to track. -->
+          <div class="shoot-brief-checklist-section" id="shoot-brief-checklist-section" style="display:none;">
+            <div class="cd-modal-section-title-row">
+              <div class="cd-modal-section-title">Shoot Checklist</div>
+              <span class="shoot-brief-checklist-count" id="shoot-brief-checklist-count"></span>
+            </div>
+            <div class="shoot-brief-checklist" id="shoot-brief-checklist"></div>
+          </div>
         </div>
         <div class="modal-footer">
           <button class="btn btn-ghost" onclick="closeModal('shoot-brief-modal')">Close</button>
