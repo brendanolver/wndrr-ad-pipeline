@@ -4425,6 +4425,13 @@ function openAddConceptModal(shootPlanItemId) {
 
   fillConceptDevModalFields(null);
   openModal('concept-dev-modal');
+
+  // The modal body is a single reused scrollable element, so without this
+  // a fresh New Concept form can open still scrolled to wherever the
+  // previously viewed concept happened to leave it. Always start at the
+  // top -- header + THE IDEA fields visible -- regardless of that.
+  const modalBody = document.querySelector('#concept-dev-modal .modal-body');
+  if (modalBody) modalBody.scrollTop = 0;
 }
 
 // Only reachable for a Core/High Stock/Promotion concept (see the
