@@ -88,7 +88,7 @@ let state = {
   // calendar date falls in (never the same as the week being browsed in
   // Week view); historyData is History's own GET /shooting/history.
   // ownerFilter is shared across Week/Today (client-side only, no refetch).
-  shooting: { view: 'week', weekOffset: 0, data: null, todayData: null, historyData: null, ownerFilter: 'all', briefScheduleId: null, dragScheduleId: null },
+  shooting: { view: 'week', weekOffset: 0, data: null, todayData: null, historyData: null, ownerFilter: 'all', briefScheduleId: null, dragScheduleId: null, briefChecklistItems: [], briefChecklistChecked: {} },
   // Editing -- same independent-weekOffset pattern as conceptDev/
   // tuesdayReview/shooting above. data is Week's own GET /editing response
   // (Concepts already nested with their Final Edits); activeConceptAssetId/
@@ -5647,18 +5647,100 @@ async function openShootingBrief(scheduleId) {
   }
 }
 
-// Purely mechanical: splits the ORIGINAL Execution text on sentence
-// boundaries so it can render as a scannable numbered sequence, without
-// rewriting, reordering, or inventing a single word of it -- see the
-// brief: "Do NOT alter or overwrite the original Execution / Shot Plan".
-// Returns null (render the plain paragraph instead) whenever that split
-// wouldn't actually read as a sensible step list -- a single sentence, or
-// text that's already short, gains nothing from being forced into "01 ...".
-function shootingExecutionSteps(text) {
-  if (!text || !text.trim()) return null;
-  const sentences = text.trim().split(/(?<=[.!?])\s+(?=[A-Z0-9])/).map((s) => s.trim()).filter(Boolean);
-  if (sentences.length < 2) return null;
-  return sentences;
+// Purely mechanical text layout -- none of these functions rewrite,
+// reorder, or invent a single word of the approved Execution/Hook text
+// (see the brief: "Do not change or rewrite the underlying approved
+// Concept / Execution / Shot Plan data"). They only decide how the
+// existing text is grouped and labelled on screen.
+
+// Splits the Execution/Shot Plan into its natural shoot beats using the
+// creator's OWN line/paragraph breaks -- never the old forced sentence
+// splitting that produced an arbitrary "01 02 03" numbered wall of text.
+// A single unbroken block of prose stays as one beat rather than being
+// chopped up into fragments that don't map to anything you'd actually
+// shoot.
+function shootingExecutionBeats(text) {
+  if (!text || !text.trim()) return [];
+  const trimmed = text.trim();
+  const paragraphs = trimmed.split(/\n\s*\n+/).map((p) => p.trim()).filter(Boolean);
+  if (paragraphs.length > 1) return paragraphs;
+  const lines = trimmed.split(/\n+/).map((p) => p.trim()).filter(Boolean);
+  if (lines.length > 1) return lines;
+  return [trimmed];
+}
+
+// A beat sometimes already starts with its own short label the creator
+// wrote themselves -- a timing cue like "0-2 SEC: Wardrobe Problem" or a
+// shot label like "Shot 1:". Only a colon or middle-dot count as the
+// separator (never a bare dash/hyphen -- those already show up inside the
+// timing ranges themselves, e.g. "0-2" or "10-12", so treating one as a
+// heading boundary would cut a label in half). The label itself must be
+// short and clearly a label (contains a digit, or is entirely
+// caps/punctuation), so an ordinary sentence that happens to contain a
+// colon is never mistaken for one and split apart.
+function shootingBeatHeading(beat) {
+  const m = beat.match(/^([^\n:·]{1,48})[:·]\s+(\S[\s\S]*)$/);
+  if (!m) return { heading: null, body: beat };
+  const [, head, rest] = m;
+  const looksLikeLabel = /\d/.test(head) || /^[A-Z0-9 /&'.-]+$/.test(head);
+  if (!looksLikeLabel) return { heading: null, body: beat };
+  return { heading: head.trim(), body: rest.trim() };
+}
+
+function shootingChecklistStorageKey(scheduleId) {
+  return `wndrr-shoot-checklist-${scheduleId}`;
+}
+
+function shootingChecklistLoad(scheduleId) {
+  try {
+    const raw = localStorage.getItem(shootingChecklistStorageKey(scheduleId));
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function shootingChecklistSave(scheduleId, checked) {
+  try {
+    localStorage.setItem(shootingChecklistStorageKey(scheduleId), JSON.stringify(checked));
+  } catch (e) { /* private-browsing / storage full -- checklist just won't persist */ }
+}
+
+// Major footage groups only (item 5) -- one item per Hook plus one for the
+// shared Backend, never one per sentence/instruction. Adapts to whatever
+// the Concept actually has: a single Hook reads as "Opening", not "Hook 1".
+function shootingChecklistItems(hooks, beats) {
+  const items = hooks.length > 1
+    ? hooks.map((h, i) => ({ key: `hook-${i + 1}`, label: `Hook ${i + 1}` }))
+    : hooks.length === 1 ? [{ key: 'hook-1', label: 'Opening' }] : [];
+  if (beats.length) items.push({ key: 'backend', label: 'Backend' });
+  return items;
+}
+
+function renderShootingChecklist() {
+  const items = state.shooting.briefChecklistItems;
+  const checked = state.shooting.briefChecklistChecked;
+  const section = document.getElementById('shoot-brief-checklist-section');
+  if (!items.length) {
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = '';
+  const doneCount = items.filter((it) => checked[it.key]).length;
+  document.getElementById('shoot-brief-checklist-count').textContent = `${doneCount}/${items.length} captured`;
+  document.getElementById('shoot-brief-checklist').innerHTML = items.map((it) => `
+    <label class="shoot-brief-checklist-item ${checked[it.key] ? 'is-checked' : ''}">
+      <input type="checkbox" ${checked[it.key] ? 'checked' : ''} onchange="toggleShootingChecklistItem('${it.key}')">
+      <span>${escapeHtml(it.label)}</span>
+    </label>`).join('');
+}
+
+function toggleShootingChecklistItem(key) {
+  const scheduleId = state.shooting.briefScheduleId;
+  if (!scheduleId) return;
+  state.shooting.briefChecklistChecked[key] = !state.shooting.briefChecklistChecked[key];
+  shootingChecklistSave(scheduleId, state.shooting.briefChecklistChecked);
+  renderShootingChecklist();
 }
 
 function renderShootingBrief(brief) {
@@ -5679,25 +5761,43 @@ function renderShootingBrief(brief) {
     ${brief.image_url ? `<img class="cd-modal-context-thumb" src="${brief.image_url}" alt="">` : '<span class="cd-modal-context-thumb cd-modal-context-noimg">🖼</span>'}
     <div class="cd-modal-context-lines"><div class="cd-modal-context-line">${contextLine}</div></div>`;
 
-  // Opening: the Primary hook is the one the creator actually needs to
-  // capture, so it gets the visual weight; everything after it is
-  // secondary-but-actionable "also get these if you can" coverage.
+  // OPENINGS -- every Hook Variation gets equal visual weight as its own
+  // compact block (item 2), not a single highlighted "Primary" plus a
+  // buried list of others: on set, each one is a separate thing to film.
+  // "Film All N" only appears once there's actually a choice to make.
   const hooks = Array.isArray(brief.hook_variations) ? brief.hook_variations.filter((h) => h.text && h.text.trim()) : [];
-  const [primaryHook, ...otherHooks] = hooks;
-  let hooksHtml = primaryHook
-    ? `<div class="shoot-brief-primary-hook"><span class="shoot-brief-primary-badge">Primary</span><div class="shoot-brief-primary-text">&ldquo;${escapeHtml(primaryHook.text)}&rdquo;</div></div>`
-    : '<div class="shoot-brief-text hint">No hook recorded.</div>';
-  if (otherHooks.length) {
-    hooksHtml += `<div class="shoot-brief-other-hooks-label">Other Hooks to Capture</div>` +
-      otherHooks.map((h, i) => `<div class="shoot-brief-other-hook"><span class="shoot-brief-other-hook-num">${String(i + 1).padStart(2, '0')}</span><span>${escapeHtml(h.text)}</span></div>`).join('');
+  const openingsSection = document.getElementById('shoot-brief-openings-section');
+  if (hooks.length) {
+    openingsSection.style.display = '';
+    document.getElementById('shoot-brief-openings-badge').innerHTML = hooks.length > 1
+      ? `<span class="shoot-brief-film-badge shoot-brief-film-badge-all">Film All ${hooks.length}</span>` : '';
+    document.getElementById('shoot-brief-hooks').innerHTML = hooks.map((h, i) => `
+      <div class="shoot-brief-hook-block">
+        ${hooks.length > 1 ? `<div class="shoot-brief-hook-label">Hook ${i + 1}</div>` : ''}
+        <div class="shoot-brief-hook-text">&ldquo;${escapeHtml(h.text)}&rdquo;</div>
+      </div>`).join('');
+  } else {
+    openingsSection.style.display = 'none';
   }
-  document.getElementById('shoot-brief-hooks').innerHTML = hooksHtml;
 
-  const execEl = document.getElementById('shoot-brief-execution');
-  const steps = shootingExecutionSteps(brief.execution);
-  execEl.innerHTML = steps
-    ? `<ol class="shoot-brief-steps">${steps.map((s) => `<li>${escapeHtml(s)}</li>`).join('')}</ol>`
-    : `<div class="shoot-brief-text">${escapeHtml(brief.execution || '—')}</div>`;
+  // BACKEND -- the shared Execution/Shot Plan, captured once regardless of
+  // how many Openings lead into it (item 3/4). Broken into whatever beats
+  // the creator's own writing already contains (shootingExecutionBeats),
+  // never re-flowed into an artificial numbered list.
+  const beats = shootingExecutionBeats(brief.execution);
+  const backendSection = document.getElementById('shoot-brief-backend-section');
+  if (beats.length) {
+    backendSection.style.display = '';
+    document.getElementById('shoot-brief-backend').innerHTML = beats.map((beat) => {
+      const { heading, body } = shootingBeatHeading(beat);
+      return `<div class="shoot-brief-beat">
+        ${heading ? `<div class="shoot-brief-beat-heading">${escapeHtml(heading)}</div>` : ''}
+        <div class="shoot-brief-text">${escapeHtml(body)}</div>
+      </div>`;
+    }).join('');
+  } else {
+    backendSection.style.display = 'none';
+  }
 
   const scriptSection = document.getElementById('shoot-brief-script-section');
   if (brief.script_notes && brief.script_notes.trim()) {
@@ -5705,6 +5805,29 @@ function renderShootingBrief(brief) {
     document.getElementById('shoot-brief-script').textContent = brief.script_notes;
   } else {
     scriptSection.style.display = 'none';
+  }
+
+  // Requirements -- one compact section, entirely hidden (not shown with
+  // "—" placeholders) unless at least one of Talent/Location/Props was
+  // actually recorded (item 9).
+  const reqSection = document.getElementById('shoot-brief-requirements-section');
+  const reqCells = [];
+  if (brief.talent_requirement && brief.talent_requirement.trim()) reqCells.push(`<div><span class="cd-field-label">Talent</span><div class="shoot-brief-text">${escapeHtml(brief.talent_requirement)}</div></div>`);
+  if (brief.location && brief.location.trim()) reqCells.push(`<div><span class="cd-field-label">Location</span><div class="shoot-brief-text">${escapeHtml(brief.location)}</div></div>`);
+  const hasProps = brief.props_notes && brief.props_notes.trim();
+  if (reqCells.length || hasProps) {
+    reqSection.style.display = '';
+    document.getElementById('shoot-brief-req-row').innerHTML = reqCells.join('');
+    document.getElementById('shoot-brief-req-row').style.display = reqCells.length ? '' : 'none';
+    const propsWrap = document.getElementById('shoot-brief-props-wrap');
+    if (hasProps) {
+      propsWrap.style.display = '';
+      document.getElementById('shoot-brief-props').textContent = brief.props_notes;
+    } else {
+      propsWrap.style.display = 'none';
+    }
+  } else {
+    reqSection.style.display = 'none';
   }
 
   const refs = Array.isArray(brief.reference_items) ? brief.reference_items.filter((r) => r.url) : [];
@@ -5720,16 +5843,6 @@ function renderShootingBrief(brief) {
     refSection.style.display = 'none';
   }
 
-  document.getElementById('shoot-brief-talent').textContent = brief.talent_requirement || '—';
-  document.getElementById('shoot-brief-location').textContent = brief.location || '—';
-  const propsWrap = document.getElementById('shoot-brief-props-wrap');
-  if (brief.props_notes && brief.props_notes.trim()) {
-    propsWrap.style.display = '';
-    document.getElementById('shoot-brief-props').textContent = brief.props_notes;
-  } else {
-    propsWrap.style.display = 'none';
-  }
-
   const audienceParts = [];
   if (brief.avatar_name) audienceParts.push(brief.avatar_name);
   else if (brief.custom_avatar_description) audienceParts.push(brief.custom_avatar_description);
@@ -5742,12 +5855,27 @@ function renderShootingBrief(brief) {
     audienceWrap.style.display = 'none';
   }
 
+  // CHECK -- compact completion tracker for the major footage groups only
+  // (item 5), persisted per shoot-schedule entry so it survives an
+  // accidental close mid-shoot.
+  state.shooting.briefChecklistItems = shootingChecklistItems(hooks, beats);
+  state.shooting.briefChecklistChecked = shootingChecklistLoad(state.shooting.briefScheduleId);
+  renderShootingChecklist();
+
   document.getElementById('shoot-brief-mark-shot-btn').style.display = isShot ? 'none' : '';
   document.getElementById('shoot-brief-unmark-shot-btn').style.display = isShot ? '' : 'none';
 }
 
+// Mark as Shot stays the primary, un-blocked action (item 6) -- an
+// incomplete checklist only earns a single lightweight confirmation, never
+// a hard block.
 async function markShootingShotFromBrief() {
   if (!state.shooting.briefScheduleId) return;
+  const incomplete = state.shooting.briefChecklistItems.some((it) => !state.shooting.briefChecklistChecked[it.key]);
+  if (incomplete) {
+    const ok = await confirmDialog("Some shoot sections haven't been checked off. Mark as Shot anyway?", { okLabel: 'Mark as Shot' });
+    if (!ok) return;
+  }
   await markShootingShot(state.shooting.briefScheduleId);
   closeModal('shoot-brief-modal');
 }

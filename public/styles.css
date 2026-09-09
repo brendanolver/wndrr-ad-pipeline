@@ -1557,14 +1557,12 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .shoot-history-rate{font-weight:700;font-size:13px;margin-bottom:3px;}
 
 /* Shoot Brief: read-only, reuses cd-modal-section/cd-field-label for
-   visual consistency with Concept Development's own modal. Ordered for
-   shot-day execution rather than strategic review -- What to Shoot, then
-   Opening, then Shoot Requirements, are the only things visible without
-   opening a disclosure (see the brief: "the creator should not have to
-   scroll through strategic information before seeing what they actually
-   need to shoot"). Script/References/Audience are collapsed <details>
-   further down, each entirely hidden rather than an empty accordion when a
-   Concept has nothing recorded for it. */
+   visual consistency with Concept Development's own modal. Organised
+   around the shooting structure -- Openings, then the shared Backend, then
+   a compact completion Checklist right before Mark as Shot -- rather than
+   a strategic-review document. Script/References/Audience stay collapsed
+   <details> further down, each entirely hidden (not an empty accordion)
+   when a Concept has nothing recorded for it. */
 /* Sticky footer -- same flex-column treatment as .cd-modal-workspace: the
    outer modal clips (max-height:88vh from .modal, overflow hidden here) so
    .modal-body is the only thing that scrolls, and the footer's Close/Mark
@@ -1581,27 +1579,40 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .shoot-brief-text{font-size:13px;color:var(--text);white-space:pre-wrap;line-height:1.5;}
 .shoot-brief-req-row{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
 
-/* What to Shoot -- the hero section, a filled card (not just a divider
-   line like every other section) so it reads as the one thing that
-   actually matters on set. */
-.shoot-brief-hero{background:var(--surface2);border-radius:var(--r-lg);padding:14px 16px;}
-.shoot-brief-hero-title{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-muted);margin-bottom:8px;}
-/* Purely a numbered re-flow of the same sentences the paragraph would show
-   -- see shootingExecutionSteps() in app.js, which only ever slices the
-   original text, never rewrites it. */
-.shoot-brief-steps{list-style:none;counter-reset:shoot-step;display:flex;flex-direction:column;gap:8px;margin:0;padding:0;}
-.shoot-brief-steps li{counter-increment:shoot-step;display:flex;gap:10px;font-size:13.5px;color:var(--text);line-height:1.5;}
-.shoot-brief-steps li::before{content:counter(shoot-step, decimal-leading-zero);flex-shrink:0;font-weight:800;color:var(--teal-dark);font-size:12px;padding-top:1px;}
+/* Subtle badges only (never a large coloured alert box) -- the entire
+   point is to make "N openings + 1 shared backend" obvious at a glance
+   without shouting it. Distinct but equally quiet colours (teal vs purple)
+   so the two ideas read as clearly different at a glance. */
+.shoot-brief-film-badge{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.3px;border-radius:var(--r-pill);padding:2px 8px;white-space:nowrap;}
+.shoot-brief-film-badge-all{color:var(--teal-dark);background:var(--teal-light);}
+.shoot-brief-film-badge-once{color:var(--purple);background:var(--purple-light);}
 
-/* Opening: Primary is the one the creator must capture, so it's the only
-   hook with real visual weight; Other Hooks read as a secondary, still
-   actionable checklist underneath it -- never equal-weight text blocks. */
-.shoot-brief-primary-hook{background:var(--teal-light);border-radius:var(--r);padding:10px 12px;}
-.shoot-brief-primary-badge{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.4px;color:var(--teal-dark);}
-.shoot-brief-primary-text{font-size:14.5px;font-weight:700;color:var(--text);line-height:1.4;margin-top:4px;}
-.shoot-brief-other-hooks-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);margin-top:10px;}
-.shoot-brief-other-hook{display:flex;gap:8px;font-size:13px;color:var(--text-secondary);margin-top:6px;}
-.shoot-brief-other-hook-num{flex-shrink:0;font-weight:700;color:var(--text-muted);font-size:11px;padding-top:1px;}
+/* OPENINGS -- every Hook is an equal-weight compact block (never one
+   highlighted "Primary" plus a buried list of others), since on set each
+   one is its own thing to film. A lone Hook skips the "Hook N" label
+   entirely -- there's nothing to disambiguate. */
+.shoot-brief-hook-block{background:var(--surface2);border-radius:var(--r);padding:10px 12px;}
+.shoot-brief-hook-block + .shoot-brief-hook-block{margin-top:8px;}
+.shoot-brief-hook-label{font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:0.3px;color:var(--teal-dark);margin-bottom:3px;}
+.shoot-brief-hook-text{font-size:14px;font-weight:700;color:var(--text);line-height:1.4;}
+
+/* BACKEND -- broken into whatever natural beats the creator's own writing
+   already contains (shootingExecutionBeats in app.js); a thin top border
+   separates beats instead of a numbered list or repeated grey boxes. */
+.shoot-brief-beat{padding:9px 0;border-top:1px solid var(--border);}
+.shoot-brief-beat:first-child{border-top:none;padding-top:0;}
+.shoot-brief-beat-heading{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.3px;color:var(--purple);margin-bottom:3px;}
+
+/* CHECK -- one compact chip per major footage group (a Hook, or Backend),
+   never one per instruction. A plain checkbox + label, not a styled
+   pseudo-checkbox -- this is a working tool on set, not a moment for
+   visual flourish. */
+.shoot-brief-checklist-section{border-top:1px solid var(--border);margin-top:16px;padding-top:14px;}
+.shoot-brief-checklist-count{font-size:11px;font-weight:700;color:var(--text-muted);}
+.shoot-brief-checklist{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;}
+.shoot-brief-checklist-item{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;color:var(--text-secondary);background:var(--surface2);border-radius:var(--r-pill);padding:5px 11px 5px 9px;cursor:pointer;}
+.shoot-brief-checklist-item input{accent-color:var(--teal);cursor:pointer;}
+.shoot-brief-checklist-item.is-checked{color:var(--green);background:var(--green-light);}
 
 /* Script/References/Audience -- collapsed by default, a plain down-chevron
    that flips on open; nothing here shows at all unless renderShootingBrief
