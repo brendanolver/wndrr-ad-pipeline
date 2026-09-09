@@ -830,6 +830,26 @@ document.addEventListener('click', (e) => {
   picker.style.display = 'none';
 });
 
+// What to Shoot's quick-add picker behaves like a normal dismissible
+// popover -- click outside it or press Escape to back out without
+// selecting a shot (see closeConceptDevShotQuickAdd; dismissing never
+// touches conceptDevModalShots). The "+ Add Shot" trigger itself lives
+// inside .cd-shot-quickadd-wrap alongside the menu, so a click on it is
+// excluded here -- toggleConceptDevShotQuickAdd's own onclick already
+// handles opening/closing that case.
+document.addEventListener('click', (e) => {
+  const menu = document.getElementById('cd-modal-shot-quickadd-menu');
+  if (!menu || menu.style.display === 'none') return;
+  if (e.target.closest('.cd-shot-quickadd-wrap')) return;
+  closeConceptDevShotQuickAdd();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const menu = document.getElementById('cd-modal-shot-quickadd-menu');
+  if (!menu || menu.style.display === 'none') return;
+  closeConceptDevShotQuickAdd();
+});
+
 // ── Planning: step nav doubles as the Monday meeting checklist ───────
 // The 5 nav tabs themselves answer "where are we / what's reviewed / what's
 // left" -- no separate checklist row. First four sections are manually
@@ -4027,11 +4047,18 @@ function toggleConceptDevShotQuickAdd() {
   menu.style.display = opening ? '' : 'none';
 }
 
+// Dismissing the picker (click outside, Escape, or "+ Add Shot" again)
+// only ever hides the menu -- it never touches conceptDevModalShots, so
+// changing your mind costs nothing.
+function closeConceptDevShotQuickAdd() {
+  document.getElementById('cd-modal-shot-quickadd-menu').style.display = 'none';
+}
+
 // name === '' is the "Custom Shot" chip -- adds a blank Shot and focuses
 // its Name input for typing, instead of a pre-filled Detail line.
 function addConceptDevQuickShot(name) {
   conceptDevModalShots.push({ name, capture: '' });
-  document.getElementById('cd-modal-shot-quickadd-menu').style.display = 'none';
+  closeConceptDevShotQuickAdd();
   renderConceptDevModalShots();
   const items = document.querySelectorAll('#cd-modal-shots-list .cd-shot-item');
   const last = items[items.length - 1];
