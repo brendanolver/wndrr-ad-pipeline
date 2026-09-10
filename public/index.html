@@ -1530,11 +1530,12 @@
         </div>
       </div>
 
-      <!-- Hooks double as the Tuesday Review decision on which opening(s)
-           actually get produced -- each row is a checkbox (checked by
-           default), not just a display list. Selection lives on the same
-           hook_variations entries (a `selected` flag), persisted only when
-           Approve for Shooting is clicked -- see toggleTuesdayReviewHookSelected
+      <!-- Hooks double as the Tuesday Review decision on which ONE opening
+           actually gets produced -- each row is a plain clickable button
+           (no checkbox/tick, which would imply multiple), not just a
+           display list. Selection lives on the same hook_variations
+           entries (a `selected` flag on exactly one), persisted only when
+           Approve for Shooting is clicked -- see selectTuesdayReviewHook
            and approveTuesdayReviewConcept in app.js. -->
       <div class="tr-review-section">
         <div class="tr-review-section-title">Hooks</div>

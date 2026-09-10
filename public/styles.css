@@ -1350,24 +1350,32 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .filter-tab-attention .filter-tab-count{background:var(--green-light);color:var(--green);opacity:1;border-radius:var(--r-pill);padding:1px 6px;font-weight:700;}
 
 /* Product grouping on the landing page -- a plain header line (name + meta)
-   over a stack of compact agenda cards, not a bordered card-of-cards. */
+   over a compact grid of small concept tiles, not a stack of full-width
+   agenda cards. A Style/Product section is only ever rendered when it has
+   at least one matching concept (see renderTuesdayReviewList's groups
+   filter), so switching filters never leaves an empty heading on screen. */
 .tr-product-group{margin-bottom:22px;}
 .tr-product-header{margin-bottom:8px;}
 .tr-product-name{font-weight:700;font-size:13.5px;text-transform:uppercase;letter-spacing:0.2px;}
 .tr-product-meta{font-size:11.5px;color:var(--text-muted);margin-top:1px;}
-.tr-concept-list{display:flex;flex-direction:column;gap:8px;}
 
-/* Agenda card: name, avatar, idea/opening preview, status + CTA -- never
-   the full brief. Bordered like other list rows in the app, hover lifts
-   it slightly to read as clickable without any heavier treatment. */
-.tr-concept-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:11px 14px;cursor:pointer;transition:border-color 0.1s;}
-.tr-concept-card:hover{border-color:var(--teal);}
-.tr-concept-card-name{font-weight:700;font-size:13.5px;}
-.tr-concept-card-avatar{font-size:11.5px;color:var(--teal-dark);font-weight:600;margin-top:2px;}
-.tr-concept-card-field{font-size:12px;color:var(--text-secondary);margin-top:4px;}
-.tr-concept-card-label{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);margin-right:5px;}
-.tr-concept-card-footer{display:flex;justify-content:space-between;align-items:center;margin-top:8px;}
-.tr-concept-card-cta{font-size:11.5px;font-weight:700;color:var(--teal-dark);}
+/* Four small, square-ish tiles per row at the app's normal laptop/desktop
+   width, stepping down at narrower widths so tiles never get crushed. */
+.tr-concept-list{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}
+@media (max-width:1150px){.tr-concept-list{grid-template-columns:repeat(3,1fr);}}
+@media (max-width:760px){.tr-concept-list{grid-template-columns:repeat(2,1fr);}}
+@media (max-width:480px){.tr-concept-list{grid-template-columns:1fr;}}
+
+/* Concept tile -- Name / Avatar / Status only, the minimum needed to know
+   "what is this, who's it for, where is it at" before deciding whether to
+   open it. A <button> so the whole tile is one native, keyboard-reachable
+   control (see tuesdayReviewConceptTileHtml) -- no separate CTA text. */
+.tr-concept-tile{display:flex;flex-direction:column;justify-content:space-between;gap:6px;min-height:92px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:10px 11px;text-align:left;font-family:inherit;cursor:pointer;transition:border-color 0.1s;}
+.tr-concept-tile:hover{border-color:var(--teal);}
+.tr-concept-tile:focus-visible{outline:2px solid var(--teal);outline-offset:2px;}
+.tr-concept-tile-name{font-weight:700;font-size:12.5px;line-height:1.3;color:var(--text);}
+.tr-concept-tile-avatar{font-size:11px;color:var(--teal-dark);font-weight:600;line-height:1.3;}
+.tr-concept-tile .cd-concept-status-pill{align-self:flex-start;}
 
 /* Read-only Review modal -- wide like .cd-modal-workspace (this is the same
    "level 3" surface), but its own class so nothing here can accidentally
@@ -1410,27 +1418,24 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .tr-avatar-detail{margin-top:6px;padding:9px 11px;background:var(--surface2);border-radius:var(--r);display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:var(--text-secondary);}
 .tr-avatar-detail-label{display:block;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);}
 
-/* Hooks: compact, checkable rows so Primary/Alt 01/Alt 02 can be compared
-   AND selected for production at a glance, rather than each needing its
-   own generously-spaced block. Primary keeps a light teal wash + border so
-   it still reads as the main hook regardless of selection; an unselected
-   row simply dims rather than changing color, so "excluded" never fights
-   with the Primary/Alt hierarchy for attention. */
+/* Hooks: compact, clickable rows so Primary/Alt 01/Alt 02 can be compared
+   AND one picked as the winner, rather than each needing its own
+   generously-spaced block. Single-selection only -- each row is a plain
+   button (no checkbox/tick, which would imply "any number"); the chosen
+   row gets a teal wash + border, everything else stays neutral. The
+   Primary tag keeps a distinguishing color purely as a label ("this was
+   proposed as the primary hook"), independent of which row is selected. */
 .tr-hook-list{display:flex;flex-direction:column;}
-/* Each row is a <label> (click anywhere to toggle its checkbox), which
-   means it's also targeted by the generic .modal-body label form-field
-   rule (display:flex;flex-direction:column;gap:5px) -- #tr-review-hooks
-   here isn't extra scoping for its own sake, it's what wins that
-   specificity fight and keeps these laid out as a row. */
-#tr-review-hooks .tr-hook-row{display:flex;flex-direction:row;align-items:center;gap:10px;padding:6px 2px;border-bottom:1px solid var(--border);cursor:pointer;}
-.tr-hook-row:last-child{border-bottom:none;}
-.tr-hook-checkbox{flex:0 0 auto;width:15px;height:15px;accent-color:var(--teal);cursor:pointer;}
+.tr-hook-row{display:flex;flex-direction:row;align-items:center;gap:10px;width:100%;padding:7px 9px;border:1px solid transparent;border-radius:var(--r);background:none;font-family:inherit;text-align:left;cursor:pointer;}
+.tr-hook-row + .tr-hook-row{margin-top:2px;}
+.tr-hook-row:not(:disabled):hover{background:var(--surface2);}
+.tr-hook-row:focus-visible{outline:2px solid var(--teal);outline-offset:1px;}
+.tr-hook-row:disabled{cursor:default;}
 .tr-hook-tag{flex:0 0 54px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);}
+.tr-hook-tag.tr-hook-tag-primary{color:var(--teal-dark);}
 .tr-hook-text{font-size:13.5px;font-weight:600;color:var(--text);}
-.tr-hook-row.tr-hook-primary{background:var(--teal-light);border:1px solid var(--teal);border-radius:var(--r);padding:7px 9px;margin-bottom:2px;}
-.tr-hook-row.tr-hook-primary .tr-hook-tag{color:var(--teal-dark);}
-.tr-hook-row.tr-hook-primary .tr-hook-text{font-size:14px;}
-.tr-hook-row.tr-hook-unselected{opacity:0.5;}
+.tr-hook-row.tr-hook-selected{background:var(--teal-light);border-color:var(--teal);}
+.tr-hook-row.tr-hook-selected .tr-hook-text{font-size:14px;}
 
 /* What to Shoot: each Shot is a compact visual card, not a paragraph --
    Shot Type and Location sit on the same line (what + where, together at
