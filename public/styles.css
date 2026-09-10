@@ -1410,18 +1410,27 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .tr-avatar-detail{margin-top:6px;padding:9px 11px;background:var(--surface2);border-radius:var(--r);display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:var(--text-secondary);}
 .tr-avatar-detail-label{display:block;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);}
 
-/* Hooks: compact rows so Primary/Alt 01/Alt 02 can be compared at a
-   glance, rather than each needing its own generously-spaced block.
-   Primary keeps a light teal wash + border so it still reads as the main
-   hook even at a glance, without shouting over the Alts. */
+/* Hooks: compact, checkable rows so Primary/Alt 01/Alt 02 can be compared
+   AND selected for production at a glance, rather than each needing its
+   own generously-spaced block. Primary keeps a light teal wash + border so
+   it still reads as the main hook regardless of selection; an unselected
+   row simply dims rather than changing color, so "excluded" never fights
+   with the Primary/Alt hierarchy for attention. */
 .tr-hook-list{display:flex;flex-direction:column;}
-.tr-hook-row{display:flex;align-items:baseline;gap:10px;padding:6px 2px;border-bottom:1px solid var(--border);}
+/* Each row is a <label> (click anywhere to toggle its checkbox), which
+   means it's also targeted by the generic .modal-body label form-field
+   rule (display:flex;flex-direction:column;gap:5px) -- #tr-review-hooks
+   here isn't extra scoping for its own sake, it's what wins that
+   specificity fight and keeps these laid out as a row. */
+#tr-review-hooks .tr-hook-row{display:flex;flex-direction:row;align-items:center;gap:10px;padding:6px 2px;border-bottom:1px solid var(--border);cursor:pointer;}
 .tr-hook-row:last-child{border-bottom:none;}
+.tr-hook-checkbox{flex:0 0 auto;width:15px;height:15px;accent-color:var(--teal);cursor:pointer;}
 .tr-hook-tag{flex:0 0 54px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);}
 .tr-hook-text{font-size:13.5px;font-weight:600;color:var(--text);}
 .tr-hook-row.tr-hook-primary{background:var(--teal-light);border:1px solid var(--teal);border-radius:var(--r);padding:7px 9px;margin-bottom:2px;}
 .tr-hook-row.tr-hook-primary .tr-hook-tag{color:var(--teal-dark);}
 .tr-hook-row.tr-hook-primary .tr-hook-text{font-size:14px;}
+.tr-hook-row.tr-hook-unselected{opacity:0.5;}
 
 /* What to Shoot: each Shot is a compact visual card, not a paragraph --
    Shot Type and Location sit on the same line (what + where, together at
@@ -1447,6 +1456,13 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .tr-reference-note{font-size:12px;color:var(--text-secondary);line-height:1.4;}
 .tr-reference-open{font-size:12px;font-weight:700;color:var(--teal-dark);text-decoration:none;margin-top:auto;padding-top:2px;}
 .tr-reference-open:hover{text-decoration:underline;}
+
+/* Shoot Setup: compact label/value rows, all shown immediately -- no
+   expand/collapse. Only populated fields ever render a row. */
+.tr-shoot-setup-list{display:flex;flex-direction:column;gap:6px;}
+.tr-shoot-setup-row + .tr-shoot-setup-row{padding-top:6px;border-top:1px dashed var(--border);}
+.tr-shoot-setup-label{display:block;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);margin-bottom:1px;}
+.tr-shoot-setup-value{font-size:13px;color:var(--text);line-height:1.4;}
 
 /* Decision bar: fixed footer, three actions in ascending priority left to
    right -- Kill (lowest, plain/destructive), Request Changes (secondary,
