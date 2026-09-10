@@ -5081,22 +5081,20 @@ function tuesdayReviewOverviewMetaText(concept, product) {
   ].filter(Boolean).join(' · ');
 }
 
-// Agenda-card, not a brief -- name/avatar/idea preview/opening/status only,
-// per the brief. Full detail only appears once "Review Concept" is clicked.
-function tuesdayReviewConceptCardHtml(concept) {
+// Compact tile, not an agenda card -- name/avatar/status only. The overview
+// is a visual board for "see the Style -> see its concepts -> see who
+// they're for -> see the status -> click one to review it," not a place to
+// read Idea/Opening previews (that's the whole modal's job). A <button>
+// (not a div+onclick) so the entire tile is a single native, keyboard-
+// reachable control -- no separate "Review Concept ->" text needed.
+function tuesdayReviewConceptTileHtml(concept) {
   const avatarLabel = tuesdayReviewAvatarLabel(concept);
-  const primaryHookText = ((concept.hook_variations && concept.hook_variations[0] && concept.hook_variations[0].text) || '').trim();
   return `
-    <div class="tr-concept-card" onclick="openTuesdayReviewConcept(${concept.id})">
-      <div class="tr-concept-card-name">${escapeHtml(concept.concept_name)}</div>
-      ${avatarLabel ? `<div class="tr-concept-card-avatar">${escapeHtml(avatarLabel)}</div>` : ''}
-      ${concept.angle && concept.angle.trim() ? `<div class="tr-concept-card-field"><span class="tr-concept-card-label">Idea</span>${escapeHtml(truncateText(concept.angle, 140))}</div>` : ''}
-      ${primaryHookText ? `<div class="tr-concept-card-field"><span class="tr-concept-card-label">Opening</span>&ldquo;${escapeHtml(truncateText(primaryHookText, 100))}&rdquo;</div>` : ''}
-      <div class="tr-concept-card-footer">
-        <span class="cd-concept-status-pill ${CONCEPT_DEV_STATUS_CLASS[concept.concept_dev_status] || ''}">${CONCEPT_DEV_STATUS_LABELS[concept.concept_dev_status] || concept.concept_dev_status}</span>
-        <span class="tr-concept-card-cta">Review Concept &rarr;</span>
-      </div>
-    </div>`;
+    <button type="button" class="tr-concept-tile" onclick="openTuesdayReviewConcept(${concept.id})">
+      <div class="tr-concept-tile-name">${escapeHtml(concept.concept_name)}</div>
+      ${avatarLabel ? `<div class="tr-concept-tile-avatar">${escapeHtml(avatarLabel)}</div>` : ''}
+      <span class="cd-concept-status-pill ${CONCEPT_DEV_STATUS_CLASS[concept.concept_dev_status] || ''}">${CONCEPT_DEV_STATUS_LABELS[concept.concept_dev_status] || concept.concept_dev_status}</span>
+    </button>`;
 }
 
 function renderTuesdayReviewList() {
@@ -5129,7 +5127,7 @@ function renderTuesdayReviewList() {
         <div class="tr-product-name">${escapeHtml(g.product.product_name)}</div>
         <div class="tr-product-meta">${escapeHtml(tuesdayReviewProductMetaText(g.product))}</div>
       </div>
-      <div class="tr-concept-list">${g.concepts.map((c) => tuesdayReviewConceptCardHtml(c)).join('')}</div>
+      <div class="tr-concept-list">${g.concepts.map((c) => tuesdayReviewConceptTileHtml(c)).join('')}</div>
     </div>`).join('');
 }
 
@@ -5243,42 +5241,58 @@ function formatTuesdayReviewDate(iso) {
   return new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
 }
 
-// One selectable row per hook -- checked by default (see
-// toggleTuesdayReviewHookSelected for what "checked" means for a hook that
-// has never been explicitly toggled). Primary keeps its existing accent
-// treatment regardless of selection; an unchecked row dims instead of
-// changing color, so "excluded" reads clearly without competing with the
-// Primary/Alt hierarchy.
-function tuesdayReviewHookRowHtml(h, index, readOnly) {
+// One selectable row per hook -- the team picks exactly ONE winning hook
+// to run with, not an opt-out multi-select, so this renders as a plain
+// button (no checkbox/tick, which would imply "any number") and only the
+// chosen row gets a highlight. Nothing is pre-selected by default: a fresh
+// concept, or a legacy one with no `selected` flag at all, shows every row
+// unhighlighted until the team actually picks one -- see
+// selectTuesdayReviewHook and the isSelected === true check below.
+function tuesdayReviewHookRowHtml(h, index, readOnly, isSelected) {
   const tag = index === 0 ? 'Primary' : `Alt ${String(index).padStart(2, '0')}`;
-  const checked = h.selected !== false;
   return `
-    <label class="tr-hook-row ${index === 0 ? 'tr-hook-primary' : ''} ${checked ? '' : 'tr-hook-unselected'}">
-      <input type="checkbox" class="tr-hook-checkbox" ${checked ? 'checked' : ''} ${readOnly ? 'disabled' : ''} onchange="toggleTuesdayReviewHookSelected(${index}, this.checked, this)">
-      <span class="tr-hook-tag">${tag}</span>
+    <button type="button" class="tr-hook-row ${isSelected ? 'tr-hook-selected' : ''}" ${readOnly ? 'disabled' : ''} onclick="selectTuesdayReviewHook(${index})">
+      <span class="tr-hook-tag ${index === 0 ? 'tr-hook-tag-primary' : ''}">${tag}</span>
       <div class="tr-hook-text">&ldquo;${escapeHtml(h.text.trim())}&rdquo;</div>
-    </label>`;
+    </button>`;
 }
 
-// Toggling never round-trips to the server on its own -- it mutates the
-// exact hook object referenced by state.tuesdayReview.currentHooks (the
-// same array rendered into concept.hook_variations), which is enough for
-// the selection to survive closing/reopening this modal within the same
-// session. It's only actually persisted when Approve for Shooting sends
-// the current selection along -- see approveTuesdayReviewConcept.
-function toggleTuesdayReviewHookSelected(index, checked, checkboxEl) {
+// Selecting a hook marks exactly one entry in state.tuesdayReview.currentHooks
+// as selected (and every other entry as not) for instant visual feedback,
+// then saves it immediately via the same general-edit endpoint Concept
+// Development itself uses for hook_variations -- deliberately not left as
+// in-memory-only: deciding on ANY other concept in the week (Approve/
+// Request Changes/Kill) reloads the whole week's data from the server (see
+// submitTuesdayReviewDecision), which would silently wipe an unsaved
+// selection on a concept the team hasn't gotten to yet. Saving on click is
+// what actually makes the choice survive closing/reopening this modal, or
+// coming back to this concept later in the same meeting. Approve for
+// Shooting still resends it (see approveTuesdayReviewConcept) so the two
+// stay in sync even if this save is still in flight.
+async function selectTuesdayReviewHook(index) {
   const hooks = state.tuesdayReview.currentHooks;
   if (!hooks || !hooks[index]) return;
-  hooks[index].selected = checked;
-  const row = checkboxEl.closest('.tr-hook-row');
-  if (row) row.classList.toggle('tr-hook-unselected', !checked);
+  hooks.forEach((h, i) => { h.selected = i === index; });
+  const rows = document.querySelectorAll('#tr-review-hooks .tr-hook-row');
+  rows.forEach((row, i) => row.classList.toggle('tr-hook-selected', i === index));
   hideTuesdayReviewHookSelectionError();
+
+  const entry = state.tuesdayReview.queue[state.tuesdayReview.queueIndex];
+  if (!entry) return;
+  try {
+    await api(`/concept-development/concepts/${entry.concept.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ hook_variations: hooks }),
+    });
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 function showTuesdayReviewHookSelectionError() {
   const el = document.getElementById('tr-review-hooks-error');
   if (!el) return;
-  el.textContent = 'Select at least one hook to approve this concept for shooting.';
+  el.textContent = 'Select a hook to approve this concept for shooting.';
   el.classList.add('show');
 }
 
@@ -5372,22 +5386,22 @@ function renderTuesdayReviewConcept() {
   whyCareWrap.style.display = hasWhyCare ? '' : 'none';
   if (hasWhyCare) document.getElementById('tr-review-why-care').textContent = concept.avatar_why_care.trim();
 
-  // Hooks double as the Tuesday Review hook-selection decision -- the exact
-  // objects filtered into `hooks` are the same references living inside
-  // concept.hook_variations, so toggling a checkbox (see
-  // toggleTuesdayReviewHookSelected) mutates the concept in place with no
-  // extra bookkeeping. Kept on state so the toggle handler can reach them
-  // without re-deriving the same filter (and risking a mismatched index).
+  // Hooks double as the Tuesday Review single-hook-selection decision --
+  // the exact objects filtered into `hooks` are the same references living
+  // inside concept.hook_variations, so selecting a row (see
+  // selectTuesdayReviewHook) mutates the concept in place with no extra
+  // bookkeeping. Kept on state so the click handler can reach them without
+  // re-deriving the same filter (and risking a mismatched index).
   const hooks = (Array.isArray(concept.hook_variations) ? concept.hook_variations : []).filter((h) => h && h.text && h.text.trim());
   state.tuesdayReview.currentHooks = hooks;
   // Selection only makes sense while this concept is still awaiting a
-  // decision -- once it's been Approved/Changes Required/Killed, the
-  // checkboxes just show what was (or, for a concept never touched by this
-  // feature, defaults to) selected, read-only.
+  // decision -- once it's been Approved/Changes Required/Killed, the rows
+  // just show whichever one was (or, for a concept never touched by this
+  // feature, none) selected, read-only.
   const hooksReadOnly = concept.concept_dev_status !== 'ready_for_review';
   const hooksEl = document.getElementById('tr-review-hooks');
   hooksEl.innerHTML = hooks.length
-    ? hooks.map((h, i) => tuesdayReviewHookRowHtml(h, i, hooksReadOnly)).join('')
+    ? hooks.map((h, i) => tuesdayReviewHookRowHtml(h, i, hooksReadOnly, h.selected === true)).join('')
     : '<div class="tr-review-subtle">No specific Hook / Opening provided</div>';
   hideTuesdayReviewHookSelectionError();
 
@@ -5519,11 +5533,9 @@ function tuesdayReviewAdvanceAfterDecision() {
   renderTuesdayReviewList();
 }
 
-// Approving is the one decision that also persists the Tuesday Review hook
-// selection (see toggleTuesdayReviewHookSelected) -- normalizes every hook's
-// effective checked state (undefined/true -> true, so a hook nobody touched
-// still counts as selected) into an explicit boolean before sending, and
-// blocks with an inline message rather than an alert() if nothing is
+// Approving is the one decision that also persists the Tuesday Review
+// single-hook selection (see selectTuesdayReviewHook) -- blocks with an
+// inline message rather than an alert() unless exactly one hook is marked
 // selected. A concept with zero hooks (shouldn't normally happen -- the
 // Concept Development gate requires a Primary hook) skips this entirely
 // rather than blocking an otherwise-valid approval.
@@ -5531,13 +5543,12 @@ async function approveTuesdayReviewConcept() {
   const entry = state.tuesdayReview.queue[state.tuesdayReview.queueIndex];
   if (!entry) return;
   const hooks = state.tuesdayReview.currentHooks || [];
-  if (hooks.length && !hooks.some((h) => h.selected !== false)) {
+  const selectedCount = hooks.filter((h) => h.selected === true).length;
+  if (hooks.length && selectedCount !== 1) {
     showTuesdayReviewHookSelectionError();
     return;
   }
-  const extra = hooks.length
-    ? { hook_variations: hooks.map((h) => ({ ...h, selected: h.selected !== false })) }
-    : {};
+  const extra = hooks.length ? { hook_variations: hooks } : {};
   await submitTuesdayReviewDecision(entry.concept.id, 'approved', extra);
 }
 

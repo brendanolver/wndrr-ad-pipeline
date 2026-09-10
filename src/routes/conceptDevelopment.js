@@ -345,22 +345,25 @@ router.patch('/concepts/:id/review', async (req, res, next) => {
     const trimmedKillNote = kill_note && kill_note.trim() ? kill_note.trim() : null;
     const trimmedKillReason = kill_reason && kill_reason.trim() ? kill_reason.trim() : null;
 
-    // Approving also records which hook(s) the team actually wants to
+    // Approving also records which ONE hook the team decided to actually
     // produce -- reuses the existing hook_variations array (a `selected`
-    // flag per hook) rather than a new column or table, matching the
-    // "reuse existing structures" brief. Deliberately scoped to the
-    // 'approved' decision only: Request Changes and Kill Concept never
-    // touch or require it (see TESTING item 10), and a hookless legacy
-    // concept (hook_variations omitted) is left completely alone so old
-    // Approved concepts are never retroactively invalidated.
+    // flag on exactly one entry) rather than a new column or table,
+    // matching the "reuse existing structures, avoid duplicate fields"
+    // brief. Deliberately scoped to the 'approved' decision only: Request
+    // Changes and Kill Concept never touch or require it (see TESTING item
+    // 10), and a hookless legacy concept (hook_variations omitted) is left
+    // completely alone so old Approved concepts -- including ones approved
+    // before single-hook selection existed -- are never retroactively
+    // invalidated.
     let approvedHookVariations = null;
     if (decision === 'approved' && hook_variations !== undefined) {
       const valid = Array.isArray(hook_variations) && hook_variations.every(
         (h) => h && typeof h === 'object' && typeof h.text === 'string'
       );
       if (!valid) return res.status(400).json({ error: 'hook_variations must be an array of { text }' });
-      if (hook_variations.length && !hook_variations.some((h) => h.selected === true)) {
-        return res.status(400).json({ error: 'Select at least one hook to approve this concept for shooting.' });
+      const selectedCount = hook_variations.filter((h) => h.selected === true).length;
+      if (hook_variations.length && selectedCount !== 1) {
+        return res.status(400).json({ error: 'Select a hook to approve this concept for shooting.' });
       }
       approvedHookVariations = hook_variations;
     }
