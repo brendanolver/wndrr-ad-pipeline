@@ -850,23 +850,6 @@ document.addEventListener('keydown', (e) => {
   closeConceptDevShotQuickAdd();
 });
 
-// Location's searchable combobox dropdown is likewise a dismissible
-// popover -- click outside it or press Escape to close without
-// changing whatever's currently typed in the input (closing never
-// touches the input's value, only the dropdown's visibility).
-document.addEventListener('click', (e) => {
-  const dropdown = document.getElementById('cd-modal-location-dropdown');
-  if (!dropdown || dropdown.style.display === 'none') return;
-  if (e.target.closest('.cd-location-combo')) return;
-  closeConceptDevLocationDropdown();
-});
-document.addEventListener('keydown', (e) => {
-  if (e.key !== 'Escape') return;
-  const dropdown = document.getElementById('cd-modal-location-dropdown');
-  if (!dropdown || dropdown.style.display === 'none') return;
-  closeConceptDevLocationDropdown();
-});
-
 // References' "+ Add Reference" menu is the same dismissible popover --
 // click outside it or press Escape to close without picking Paste Link or
 // Choose From Reference Library (closing never touches conceptDevModalReferences).
@@ -4042,14 +4025,30 @@ function removeConceptDevHook(index) {
 }
 
 // What to Shoot -- the literal footage list, deliberately separate from
-// Hooks (openings) and the legacy Execution field. Each Shot is just a
-// name (usually a quick-add chip label, see addConceptDevQuickShot) + an
-// optional short detail -- no timestamps/camera/duration/etc, and Detail
-// is never required (only Shot Name counts towards "at least 1 Shot" --
-// see the Ready for Review validation in saveConceptDevModal). Freely
-// addable/removable/reorderable, no minimum enforced here.
+// Hooks (openings) and the legacy Execution field. Each Shot is a name
+// (usually a quick-add chip label, see addConceptDevQuickShot) + an
+// optional short detail + a Location -- no timestamps/camera/duration/etc,
+// and Detail is never required (only Shot Name and Location count towards
+// a "complete" Shot -- see the Ready for Review validation in
+// saveConceptDevModal). Freely addable/removable/reorderable, no minimum
+// enforced here.
+//
+// Location is a fixed WNDRR Office / WNDRR Warehouse pick (no typing for
+// the common case) plus a "Custom Location" option that progressively
+// reveals a "Where?" text field -- see onConceptDevShotLocationChange.
+// The shot's own `location` field always holds the final resolved value
+// (either "WNDRR Office"/"WNDRR Warehouse", or the free-typed custom
+// place), so re-showing an existing Shot just needs to check whether its
+// location matches one of the two fixed options -- anything else (custom
+// text, or blank) falls through to the Custom Location state.
+const CD_SHOT_FIXED_LOCATIONS = ['WNDRR Office', 'WNDRR Warehouse'];
+
 function renderConceptDevModalShots() {
-  document.getElementById('cd-modal-shots-list').innerHTML = conceptDevModalShots.map((s, i) => `
+  document.getElementById('cd-modal-shots-list').innerHTML = conceptDevModalShots.map((s, i) => {
+    const loc = s.location || '';
+    const isCustomLoc = Boolean(loc) && !CD_SHOT_FIXED_LOCATIONS.includes(loc);
+    const selectValue = isCustomLoc ? '__custom__' : loc;
+    return `
     <div class="cd-shot-item">
       <div class="cd-shot-item-header">
         <input type="text" class="cd-shot-name-input" value="${escapeHtml(s.name)}" oninput="conceptDevModalShots[${i}].name=this.value" placeholder="Shot name">
@@ -4059,8 +4058,45 @@ function renderConceptDevModalShots() {
           <button type="button" class="link-btn cd-shot-remove" onclick="removeConceptDevShot(${i})">Remove</button>
         </div>
       </div>
-      <input type="text" class="cd-shot-detail-input" value="${escapeHtml(s.capture)}" oninput="conceptDevModalShots[${i}].capture=this.value" placeholder="Add detail (optional) — e.g. Panel construction">
-    </div>`).join('');
+      <input type="text" class="cd-shot-detail-input" value="${escapeHtml(s.capture)}" oninput="conceptDevModalShots[${i}].capture=this.value" placeholder="What should be captured in this shot?">
+      <div class="cd-shot-location-row">
+        <select class="cd-shot-location-select" onchange="onConceptDevShotLocationChange(${i}, this)">
+          <option value="" ${selectValue === '' ? 'selected' : ''}>Select location…</option>
+          <option value="WNDRR Office" ${selectValue === 'WNDRR Office' ? 'selected' : ''}>WNDRR Office</option>
+          <option value="WNDRR Warehouse" ${selectValue === 'WNDRR Warehouse' ? 'selected' : ''}>WNDRR Warehouse</option>
+          <option value="__custom__" ${selectValue === '__custom__' ? 'selected' : ''}>Custom Location</option>
+        </select>
+        <label class="cd-shot-location-custom-label" style="display:${isCustomLoc ? '' : 'none'};">Where?
+          <input type="text" class="cd-shot-location-custom" value="${isCustomLoc ? escapeHtml(loc) : ''}" placeholder="Enter location…" oninput="conceptDevModalShots[${i}].location=this.value">
+        </label>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// Picking a fixed option sets the Shot's location directly and hides/clears
+// the custom field; picking "Custom Location" clears location back to
+// blank (nothing chosen yet) and reveals the "Where?" field, focused ready
+// to type -- exactly the progressive-disclosure pattern used elsewhere in
+// this modal (e.g. Talent's select+other). Direct DOM update, not a full
+// re-render, so it doesn't disturb anything else being typed in the list.
+function onConceptDevShotLocationChange(index, selectEl) {
+  const shot = conceptDevModalShots[index];
+  if (!shot) return;
+  const isCustom = selectEl.value === '__custom__';
+  const item = selectEl.closest('.cd-shot-item');
+  const customLabel = item.querySelector('.cd-shot-location-custom-label');
+  const customInput = item.querySelector('.cd-shot-location-custom');
+  if (isCustom) {
+    shot.location = '';
+    customLabel.style.display = '';
+    customInput.value = '';
+    customInput.focus();
+  } else {
+    shot.location = selectEl.value;
+    customLabel.style.display = 'none';
+    customInput.value = '';
+  }
 }
 
 // Common shot types a creator would otherwise retype every time -- clicking
@@ -4093,7 +4129,7 @@ function closeConceptDevShotQuickAdd() {
 // name === '' is the "Custom Shot" chip -- adds a blank Shot and focuses
 // its Name input for typing, instead of a pre-filled Detail line.
 function addConceptDevQuickShot(name) {
-  conceptDevModalShots.push({ name, capture: '' });
+  conceptDevModalShots.push({ name, capture: '', location: '' });
   closeConceptDevShotQuickAdd();
   renderConceptDevModalShots();
   const items = document.querySelectorAll('#cd-modal-shots-list .cd-shot-item');
@@ -4330,86 +4366,6 @@ function conceptDevSelectWithOtherValue(selectId, customId) {
   return select.value === '__other__' ? document.getElementById(customId).value.trim() : select.value;
 }
 
-// Location: a searchable combobox rather than a fixed dropdown -- WNDRR
-// shoots in too many places for a short predefined list to ever be
-// complete. The text input's own value IS the location (no hidden
-// select), so typing a brand-new place always works; the dropdown below
-// it is purely a fast-pick/search assist over state.conceptDevLocations
-// (itself just the distinct locations already saved on past concepts --
-// see GET /concept-development/locations). Selecting or adding a location
-// closes the dropdown and pushes it into state.conceptDevLocations
-// immediately client-side, so it's available to pick again later in the
-// same session without waiting for a full reload.
-function fillConceptDevLocationCombo(value) {
-  const input = document.getElementById('cd-modal-location-input');
-  input.value = value || '';
-  closeConceptDevLocationDropdown();
-  updateConceptDevLocationClearVisibility();
-}
-
-function updateConceptDevLocationClearVisibility() {
-  const input = document.getElementById('cd-modal-location-input');
-  document.getElementById('cd-modal-location-clear').style.display = input.value.trim() ? '' : 'none';
-}
-
-function closeConceptDevLocationDropdown() {
-  document.getElementById('cd-modal-location-dropdown').style.display = 'none';
-}
-
-function openConceptDevLocationDropdown() {
-  renderConceptDevLocationDropdown();
-}
-
-function onConceptDevLocationInput() {
-  updateConceptDevLocationClearVisibility();
-  renderConceptDevLocationDropdown();
-}
-
-// Empty input shows every known location (a quick browse/click list);
-// typing filters it live. A "+ Add" row appears whenever what's typed
-// doesn't exactly match an existing location (case-insensitively) --
-// clicking it (or an existing option) both just call selectConceptDevLocation,
-// which is the only thing that actually changes conceptDevLocations.
-function renderConceptDevLocationDropdown() {
-  const dropdown = document.getElementById('cd-modal-location-dropdown');
-  const query = document.getElementById('cd-modal-location-input').value.trim();
-  const queryLower = query.toLowerCase();
-  const matches = state.conceptDevLocations.filter((loc) => loc.toLowerCase().includes(queryLower));
-  const exactMatch = state.conceptDevLocations.some((loc) => loc.toLowerCase() === queryLower);
-
-  const rows = matches.map((loc) => `<button type="button" class="cd-location-option" onclick="selectConceptDevLocation('${escapeHtml(loc).replace(/'/g, "\\'")}')">${escapeHtml(loc)}</button>`);
-  if (query && !exactMatch) {
-    rows.push(`<button type="button" class="cd-location-option cd-location-option-add" onclick="addConceptDevLocationCustom(document.getElementById('cd-modal-location-input').value.trim())">+ Add &ldquo;${escapeHtml(query)}&rdquo;</button>`);
-  }
-  dropdown.innerHTML = rows.length ? rows.join('') : '<div class="cd-location-empty">No locations yet -- type to add one.</div>';
-  dropdown.style.display = '';
-}
-
-function selectConceptDevLocation(value) {
-  document.getElementById('cd-modal-location-input').value = value;
-  closeConceptDevLocationDropdown();
-  updateConceptDevLocationClearVisibility();
-}
-
-// Newly added locations become reusable immediately -- pushed into the
-// same client-side list the dropdown itself reads from, deduplicated
-// case-insensitively against what's already there.
-function addConceptDevLocationCustom(value) {
-  const trimmed = value.trim();
-  if (!trimmed) return;
-  const alreadyKnown = state.conceptDevLocations.some((loc) => loc.toLowerCase() === trimmed.toLowerCase());
-  if (!alreadyKnown) state.conceptDevLocations.push(trimmed);
-  selectConceptDevLocation(trimmed);
-}
-
-function clearConceptDevLocation() {
-  const input = document.getElementById('cd-modal-location-input');
-  input.value = '';
-  closeConceptDevLocationDropdown();
-  updateConceptDevLocationClearVisibility();
-  input.focus();
-}
-
 // Shared by both the create ("+ Add Concept") and edit (click a concept
 // card) paths -- concept is null in create mode, so every field just starts
 // blank. Status is no longer an editable field here (see saveConceptDevModal)
@@ -4420,7 +4376,6 @@ function fillConceptDevModalFields(concept) {
   document.getElementById('cd-modal-script').value = concept ? (concept.script_notes || '') : '';
   document.getElementById('cd-modal-props').value = concept ? (concept.props_notes || '') : '';
   fillConceptDevSelectWithOther('cd-modal-talent-select', 'cd-modal-talent-custom', state.contentCreators.map((c) => c.name), concept ? concept.talent_requirement : '');
-  fillConceptDevLocationCombo(concept ? concept.location : '');
 
   // Execution / Shot Plan is legacy -- superseded by structured What to
   // Shoot. Never shown for a new concept and never required; only surfaced
@@ -4453,7 +4408,16 @@ function fillConceptDevModalFields(concept) {
   } else {
     avatarSelect.value = '';
   }
-  document.getElementById('cd-modal-avatar-why-care').value = concept ? (concept.avatar_why_care || '') : '';
+  // "Why will they care?" is no longer asked for new concepts (see the
+  // HTML comment on cd-modal-avatar-why-care-wrap) -- hidden and blank by
+  // default, only shown (still editable, still saved) when reopening a
+  // concept that already has this data from before it became optional,
+  // exactly the same pattern as legacy Execution above.
+  const whyCareField = document.getElementById('cd-modal-avatar-why-care');
+  const whyCareWrap = document.getElementById('cd-modal-avatar-why-care-wrap');
+  const hasLegacyWhyCare = Boolean(concept && concept.avatar_why_care && concept.avatar_why_care.trim());
+  whyCareField.value = hasLegacyWhyCare ? concept.avatar_why_care : '';
+  whyCareWrap.style.display = hasLegacyWhyCare ? '' : 'none';
   document.getElementById('cd-modal-avatar-custom-desc').value = concept ? (concept.custom_avatar_description || '') : '';
   onConceptDevAvatarChange();
 
@@ -4472,7 +4436,7 @@ function fillConceptDevModalFields(concept) {
   // pre-created empty one, so it's obvious nothing's been added rather
   // than looking like a half-filled-in Shot.
   conceptDevModalShots = concept && Array.isArray(concept.shots)
-    ? concept.shots.map((s) => ({ name: s.name || '', capture: s.capture || '' }))
+    ? concept.shots.map((s) => ({ name: s.name || '', capture: s.capture || '', location: s.location || '' }))
     : [];
   renderConceptDevModalShots();
 
@@ -4500,8 +4464,11 @@ function fillConceptDevModalFields(concept) {
   // there -- a creator revisiting it should never have to go hunting for
   // information that's already been entered.
   setConceptDevScriptExpanded(Boolean(concept && concept.script_notes));
+  // Location no longer has a field here (see the removed overall Location
+  // in Shoot Setup, now per-Shot) -- only Talent/Props decide whether this
+  // auto-expands, so it never opens to show nothing new.
   setConceptDevShootRequirementsExpanded(Boolean(
-    concept && (concept.talent_requirement || concept.location || concept.props_notes)
+    concept && (concept.talent_requirement || concept.props_notes)
   ));
 
   updateReviewPromptGate();
@@ -4579,7 +4546,7 @@ function toggleConceptDevShootRequirements() {
 // one, and the individual error-message ids below all stay in sync.
 const CD_REQUIRED_FIELD_IDS = [
   'cd-modal-name', 'cd-modal-angle', 'cd-modal-avatar-select',
-  'cd-modal-avatar-custom-desc', 'cd-modal-avatar-why-care', 'cd-modal-hook-primary',
+  'cd-modal-avatar-custom-desc', 'cd-modal-hook-primary',
 ];
 
 function hideConceptDevFieldError(errorId) {
@@ -4784,9 +4751,13 @@ async function saveConceptDevModal(targetStatus) {
       .filter((h) => h.text),
     // Detail ("What to Capture") is an optional short customisation, not a
     // requirement -- only Shot Name has to be filled in for a Shot to
-    // count (see the hasCompleteShot check below).
+    // count (see the hasCompleteShot check below). Location is required
+    // per-Shot once a Shot has a name (see the missingShotLocation check
+    // below) -- different shots in the same concept can need different
+    // places, so location now lives here instead of once on the whole
+    // concept (see the removed cd-modal-location-input in Shoot Setup).
     shots: conceptDevModalShots
-      .map((s) => ({ name: s.name.trim(), capture: s.capture.trim() }))
+      .map((s) => ({ name: s.name.trim(), capture: s.capture.trim(), location: (s.location || '').trim() }))
       .filter((s) => s.name),
     reference_items: conceptDevModalReferences
       .map((r) => (r.library_reference_id
@@ -4794,7 +4765,6 @@ async function saveConceptDevModal(targetStatus) {
         : { url: r.url.trim(), note: r.note.trim() }))
       .filter((r) => r.url),
     talent_requirement: conceptDevSelectWithOtherValue('cd-modal-talent-select', 'cd-modal-talent-custom'),
-    location: document.getElementById('cd-modal-location-input').value.trim(),
     props_notes: document.getElementById('cd-modal-props').value.trim(),
   };
   // targetStatus is null for "Save Changes" on an already-submitted concept
@@ -4814,9 +4784,9 @@ async function saveConceptDevModal(targetStatus) {
   // own concise message directly beneath it (never a combined "please
   // complete all required fields" banner), and the first missing field is
   // focused/scrolled to. Required: Concept Name, The Idea, Customer Avatar,
-  // Why will they care?, Primary Hook, and at least one What to Shoot item
-  // -- everything else (Script, References, Shoot Setup, legacy Execution)
-  // is optional and never blocks submission.
+  // Primary Hook, at least one What to Shoot item, and a Location on every
+  // named Shot -- everything else (Why will they care?, Script, References,
+  // Shoot Setup, legacy Execution) is optional and never blocks submission.
   if (targetStatus === 'ready_for_review') {
     const missing = [];
     if (!nameLocked && !name) missing.push({ field: nameInput, errorId: 'cd-modal-name-error', message: 'Concept Name is required' });
@@ -4825,7 +4795,6 @@ async function saveConceptDevModal(targetStatus) {
       if (isOtherAvatar) missing.push({ field: customDescInput, errorId: 'cd-modal-avatar-custom-desc-error', message: 'Describe who you\'re targeting' });
       else missing.push({ field: avatarSelect, errorId: 'cd-modal-avatar-select-error', message: 'Customer Avatar is required' });
     }
-    if (!avatarWhyCare) missing.push({ field: whyCareInput, errorId: 'cd-modal-avatar-why-care-error', message: 'Add why they\'ll care' });
     const primaryHookInput = document.getElementById('cd-modal-hook-primary');
     const primaryHookText = ((conceptDevModalHooks[0] && conceptDevModalHooks[0].text) || '').trim();
     if (!primaryHookText) missing.push({ field: primaryHookInput, errorId: 'cd-modal-hook-primary-error', message: 'Add a Primary Hook / Opening' });
@@ -4846,10 +4815,22 @@ async function saveConceptDevModal(targetStatus) {
     // for Review/Approved/etc from before this requirement existed is
     // never re-validated just for having no structured Shots (see
     // schema.sql's comment on the shots column).
-    const hasCompleteShot = conceptDevModalShots.some((s) => s.name.trim());
-    if (!hasCompleteShot) {
+    const namedShots = conceptDevModalShots.filter((s) => s.name.trim());
+    if (!namedShots.length) {
       const shotsError = document.getElementById('cd-modal-shots-error');
       shotsError.textContent = 'Add at least one Shot';
+      shotsError.classList.add('show');
+      document.getElementById('cd-modal-shots-list').scrollIntoView({ block: 'center', behavior: 'smooth' });
+      return;
+    }
+
+    // Every named Shot also needs its own Location -- different shots in
+    // the same concept can need different places, so this is now as
+    // required as the Shot Name itself (see the removed overall Location
+    // field in Shoot Setup).
+    if (namedShots.some((s) => !(s.location || '').trim())) {
+      const shotsError = document.getElementById('cd-modal-shots-error');
+      shotsError.textContent = 'Add a Location for every Shot';
       shotsError.classList.add('show');
       document.getElementById('cd-modal-shots-list').scrollIntoView({ block: 'center', behavior: 'smooth' });
       return;
@@ -5213,9 +5194,12 @@ function formatTuesdayReviewDate(iso) {
   return new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
 }
 
-// Order deliberately follows the brief, NOT Concept Development's own order
-// -- Hook/Opening comes before Execution here, so the team judges attention
-// before production detail. Everything is plain text, no inputs.
+// Order deliberately follows the brief: Idea -> Audience -> Hook / Opening
+// -> What to Shoot -> Script (if provided) -> References (if provided) ->
+// Shoot Setup (if provided). Legacy Execution (superseded by structured
+// Shots) sits right after What to Shoot, but only ever renders for an
+// older concept that actually has that data -- a new-format concept never
+// shows it. Everything is plain text, no inputs.
 function renderTuesdayReviewConcept() {
   const entry = state.tuesdayReview.queue[state.tuesdayReview.queueIndex];
   if (!entry) return;
@@ -5264,7 +5248,14 @@ function renderTuesdayReviewConcept() {
     avatarNameBtn.textContent = 'No Customer Avatar selected';
     avatarNameBtn.disabled = true;
   }
-  document.getElementById('tr-review-why-care').textContent = concept.avatar_why_care && concept.avatar_why_care.trim() ? concept.avatar_why_care.trim() : '—';
+  // "Why should they care?" is no longer asked for new concepts -- hidden
+  // entirely here unless an older concept actually has this answer on
+  // record (same backwards-compatible show-only-if-present treatment as
+  // legacy Execution below).
+  const whyCareWrap = document.getElementById('tr-review-why-care-wrap');
+  const hasWhyCare = Boolean(concept.avatar_why_care && concept.avatar_why_care.trim());
+  whyCareWrap.style.display = hasWhyCare ? '' : 'none';
+  if (hasWhyCare) document.getElementById('tr-review-why-care').textContent = concept.avatar_why_care.trim();
 
   const hooks = (Array.isArray(concept.hook_variations) ? concept.hook_variations : []).filter((h) => h && h.text && h.text.trim());
   const hooksEl = document.getElementById('tr-review-hooks');
@@ -5275,25 +5266,37 @@ function renderTuesdayReviewConcept() {
       ].join('')
     : '<div class="tr-review-subtle">No specific Hook / Opening provided</div>';
 
-  document.getElementById('tr-review-execution').textContent = concept.execution && concept.execution.trim() ? concept.execution.trim() : 'No Execution / Shot Plan provided';
-  const scriptToggle = document.getElementById('tr-review-script-toggle');
-  const scriptEl = document.getElementById('tr-review-script');
-  scriptEl.style.display = 'none';
-  scriptEl.textContent = concept.script_notes || '';
-  scriptToggle.style.display = concept.script_notes && concept.script_notes.trim() ? '' : 'none';
-
-  // Structured Shots (item 7): read-only here -- Tuesday Review only needs
-  // to confirm it's clear what to shoot, not to edit it. Legacy Concepts
-  // with no structured Shots simply never show this section (no error /
-  // empty-required state), and keep showing their Execution text above as
-  // they always have.
+  // Structured Shots: read-only here -- Tuesday Review only needs to
+  // confirm it's clear what to shoot (and where), not to edit it. Legacy
+  // Concepts with no structured Shots simply never show this section (no
+  // error/empty-required state), and keep showing their Execution text
+  // below instead, as they always have. Each shot's Location (required for
+  // new concepts, see saveConceptDevModal) shows right under its capture
+  // text -- compact, no extra visual weight.
   const shots = (Array.isArray(concept.shots) ? concept.shots : []).filter((s) => s && s.name && s.name.trim());
   const shotsSection = document.getElementById('tr-review-shots-section');
   if (!shots.length) {
     shotsSection.style.display = 'none';
   } else {
     shotsSection.style.display = '';
-    document.getElementById('tr-review-shots').innerHTML = shots.map((s) => `<div class="tr-hook-item"><span class="tr-hook-label">${escapeHtml(s.name.trim())}</span>${s.capture && s.capture.trim() ? `<div class="tr-hook-text">${escapeHtml(s.capture.trim())}</div>` : ''}</div>`).join('');
+    document.getElementById('tr-review-shots').innerHTML = shots.map((s) => `<div class="tr-hook-item"><span class="tr-hook-label">${escapeHtml(s.name.trim())}</span>${s.capture && s.capture.trim() ? `<div class="tr-hook-text">${escapeHtml(s.capture.trim())}</div>` : ''}${s.location && s.location.trim() ? `<div class="tr-shot-location">Location: ${escapeHtml(s.location.trim())}</div>` : ''}</div>`).join('');
+  }
+
+  // Execution / Shot Plan is legacy, superseded by structured Shots above
+  // -- entirely hidden (never "No Execution / Shot Plan provided", which
+  // would misleadingly make a new-format concept look incomplete) unless
+  // an older concept actually has this data on record.
+  const executionSection = document.getElementById('tr-review-execution-section');
+  const hasExecution = Boolean(concept.execution && concept.execution.trim());
+  executionSection.style.display = hasExecution ? '' : 'none';
+  if (hasExecution) document.getElementById('tr-review-execution').textContent = concept.execution.trim();
+
+  const scriptSection = document.getElementById('tr-review-script-section');
+  const hasScript = Boolean(concept.script_notes && concept.script_notes.trim());
+  scriptSection.style.display = hasScript ? '' : 'none';
+  if (hasScript) {
+    document.getElementById('tr-review-script').style.display = 'none';
+    document.getElementById('tr-review-script').textContent = concept.script_notes;
   }
 
   const refs = (Array.isArray(concept.reference_items) ? concept.reference_items : []).filter((r) => r && r.url);
@@ -7639,12 +7642,12 @@ function updateReviewPromptGate() {
   const hasAvatar = isOtherAvatar
     ? Boolean(document.getElementById('cd-modal-avatar-custom-desc').value.trim())
     : Boolean(avatarSelect.value);
-  const avatarWhyCare = document.getElementById('cd-modal-avatar-why-care').value;
 
   // Same core-field minimum Ready for Review itself requires -- there's
   // nothing meaningful to pressure-test before a concept has its strategic
-  // foundation: what it is, who it's for, and why they'd care.
-  const ready = Boolean(name.trim() && angle.trim() && hasAvatar && avatarWhyCare.trim());
+  // foundation: what it is and who it's for. "Why will they care?" is no
+  // longer part of that minimum (see cd-modal-avatar-why-care-wrap).
+  const ready = Boolean(name.trim() && angle.trim() && hasAvatar);
   document.getElementById('cd-review-copy-btn').disabled = !ready;
   document.getElementById('cd-review-chatgpt-btn').disabled = !ready;
   document.getElementById('cd-ai-review-helper').textContent = ready
@@ -7675,7 +7678,6 @@ async function copyReviewPrompt() {
     shots: conceptDevModalShots.map((s) => ({ name: s.name.trim(), capture: s.capture.trim() })).filter((s) => s.name),
     reference_items: conceptDevModalReferences.map((r) => ({ url: r.url.trim(), note: r.note.trim() })).filter((r) => r.url),
     talent_requirement: conceptDevSelectWithOtherValue('cd-modal-talent-select', 'cd-modal-talent-custom'),
-    location: document.getElementById('cd-modal-location-input').value.trim(),
     props_notes: document.getElementById('cd-modal-props').value.trim(),
   };
   try {

@@ -1299,37 +1299,45 @@
         </div>
       </div>
 
-      <!-- Who's It For?: forces "who exactly are we making this for, and why
-           should they care" before the idea gets executed -- deliberately
-           lightweight (one sentence, not a strategy writeup). One Primary
-           Customer Avatar per concept, deliberately -- a plain dropdown
-           over the reusable Settings library, never an unlimited
-           multi-select (see schema.sql's comment on the customer_avatar_id
-           column). "Why will they care?" is never pre-filled from the
-           avatar profile; the creator has to connect THIS concept to that
-           person themselves. "+ Other / New Avatar" (the select's last
-           option) reveals a one-off description instead of picking a
-           library avatar -- never auto-saved to the library unless the
-           creator explicitly clicks "Save as new Customer Avatar". -->
+      <!-- Who's It For?: forces "who exactly are we making this for" before
+           the idea gets executed -- deliberately lightweight (a Customer
+           Avatar pick, not a strategy writeup). One Primary Customer
+           Avatar per concept, deliberately -- a plain dropdown over the
+           reusable Settings library, never an unlimited multi-select (see
+           schema.sql's comment on the customer_avatar_id column). "+
+           Other / New Avatar" (the select's last option) reveals a one-off
+           description instead of picking a library avatar -- never
+           auto-saved to the library unless the creator explicitly clicks
+           "Save as new Customer Avatar".
+
+           "Why will they care?" (avatar_why_care) is no longer asked for
+           new concepts -- one less required field, less typing, per the
+           brief. The column/data is untouched (never deleted, never
+           required to be blank) -- exactly the Execution-legacy pattern
+           below: this section stays hidden and unrequired for a brand-new
+           concept, but still shows up (still editable, never silently
+           dropped on save) when reopening an older concept that already
+           has this answer, so nothing already written is hidden or lost.
+           See fillConceptDevModalFields/hasLegacyWhyCare in app.js. -->
       <div class="cd-modal-section" id="cd-modal-audience-section">
         <div class="cd-modal-section-title">Who's It For?</div>
-        <div class="cd-modal-idea-row">
-          <label><span class="cd-field-label">Customer Avatar<span class="cd-req-mark">*</span></span>
-            <select id="cd-modal-avatar-select" onchange="onConceptDevAvatarChange()"></select>
-            <div class="cd-field-error" id="cd-modal-avatar-select-error"></div>
-          </label>
-          <label><span class="cd-field-label">Why will they care?<span class="cd-req-mark">*</span></span>
-            <div class="hint cd-field-hint">One sentence — why will this idea matter to this customer?</div>
-            <input type="text" id="cd-modal-avatar-why-care" placeholder="e.g. They want a baggier fit that makes their outfit feel more considered." oninput="updateReviewPromptGate()">
-            <div class="cd-field-error" id="cd-modal-avatar-why-care-error"></div>
-          </label>
-        </div>
+        <label><span class="cd-field-label">Customer Avatar<span class="cd-req-mark">*</span></span>
+          <select id="cd-modal-avatar-select" onchange="onConceptDevAvatarChange()"></select>
+          <div class="cd-field-error" id="cd-modal-avatar-select-error"></div>
+        </label>
         <div id="cd-modal-avatar-custom-wrap" style="display:none;">
           <label>Who are you targeting?
             <textarea id="cd-modal-avatar-custom-desc" rows="3" placeholder="Describe the specific person, mindset or customer behaviour you're targeting." oninput="updateReviewPromptGate()"></textarea>
             <div class="cd-field-error" id="cd-modal-avatar-custom-desc-error"></div>
           </label>
           <button type="button" class="link-btn" id="cd-modal-save-avatar-btn" onclick="openSaveAvatarFromConceptModal()">Save as new Customer Avatar</button>
+        </div>
+        <div id="cd-modal-avatar-why-care-wrap" style="display:none;">
+          <label><span class="cd-field-label">Why will they care?</span>
+            <div class="hint cd-field-hint">Kept from before this became optional — no longer required.</div>
+            <input type="text" id="cd-modal-avatar-why-care" placeholder="e.g. They want a baggier fit that makes their outfit feel more considered." oninput="updateReviewPromptGate()">
+            <div class="cd-field-error" id="cd-modal-avatar-why-care-error"></div>
+          </label>
         </div>
       </div>
 
@@ -1353,9 +1361,12 @@
 
       <!-- What to Shoot -- the literal footage list, deliberately separate
            from Hook / Opening above (the variations being tested) and
-           Execution below (legacy creative-flow prose, kept only for
-           concepts that already have it). Each Shot is just a name + an
-           optional short detail -- nothing else (see the brief: no
+           Execution (legacy creative-flow prose, kept only for concepts
+           that already have it -- What to Shoot is now the production
+           execution information). Each Shot is a name + an optional short
+           detail + a required Location (different shots in the same
+           concept can need different places, e.g. an office shot and a
+           street shot) -- nothing else (see the brief: no
            timestamps/camera/lens/duration/etc here). "+ Add Shot" opens a
            quick-add menu of common shot types so a Shot Name rarely needs
            typing from scratch -- see conceptDevModalShots/
@@ -1380,6 +1391,7 @@
         </div>
         <div id="cd-modal-script-field" class="cd-modal-collapsible" style="display:none;">
           <div class="cd-modal-section-title">Script / Talking Points</div>
+          <div class="hint cd-modal-section-helper">Keep this short — only include what needs to be said.</div>
           <textarea id="cd-modal-script" rows="6"></textarea>
           <button type="button" class="link-btn" onclick="setConceptDevScriptExpanded(false)">&minus; Hide</button>
         </div>
@@ -1432,30 +1444,24 @@
            populated from data the app already has (content creators,
            already used for this exact purpose elsewhere) with an Other/
            custom fallback -- see fillConceptDevSelectWithOther/
-           conceptDevSelectWithOtherValue in app.js. Location is a
-           searchable combobox instead of a fixed dropdown -- WNDRR shoots
-           in too many places for a short predefined list to ever cover,
-           so typing always works as a genuinely new location, not just a
-           fallback. See conceptDevLocationCombo* in app.js. -->
+           conceptDevSelectWithOtherValue in app.js. The old overall
+           Location field that used to live here is gone -- location is now
+           captured per-Shot under What to Shoot instead (different shots in
+           the same concept can need different places), so this section only
+           ever asks for production requirements that genuinely apply to the
+           whole shoot, never location twice. Historical `location` data on
+           older concepts is untouched in the database, just no longer shown
+           or editable here. -->
       <div class="cd-modal-section">
         <div class="cd-modal-section-title">Shoot Setup</div>
         <div id="cd-modal-shoot-req-toggle-wrap">
           <button type="button" class="link-btn" onclick="toggleConceptDevShootRequirements()">+ Add Shoot Setup</button>
         </div>
         <div id="cd-modal-shoot-req-fields" class="cd-modal-collapsible" style="display:none;">
-          <div class="cd-modal-field-row">
-            <label>Talent / Model
-              <select id="cd-modal-talent-select" onchange="onConceptDevSelectWithOtherChange('cd-modal-talent-select','cd-modal-talent-custom')"></select>
-              <input type="text" id="cd-modal-talent-custom" placeholder="e.g. UGC creator, none" style="display:none;">
-            </label>
-            <label>Location
-              <div class="cd-location-combo" id="cd-modal-location-combo">
-                <input type="text" id="cd-modal-location-input" placeholder="Click to browse, or type to search / add new" autocomplete="off" oninput="onConceptDevLocationInput()" onfocus="openConceptDevLocationDropdown()">
-                <button type="button" class="cd-location-clear" id="cd-modal-location-clear" onclick="clearConceptDevLocation()" aria-label="Clear location" style="display:none;">&times;</button>
-                <div class="cd-location-dropdown" id="cd-modal-location-dropdown" style="display:none;"></div>
-              </div>
-            </label>
-          </div>
+          <label>Talent / Model
+            <select id="cd-modal-talent-select" onchange="onConceptDevSelectWithOtherChange('cd-modal-talent-select','cd-modal-talent-custom')"></select>
+            <input type="text" id="cd-modal-talent-custom" placeholder="e.g. UGC creator, none" style="display:none;">
+          </label>
           <label>Props / Special Requirements
             <textarea id="cd-modal-props" rows="2"></textarea>
           </label>
@@ -1535,8 +1541,15 @@
         <div class="tr-review-section-title">The Audience</div>
         <button type="button" class="tr-avatar-toggle" id="tr-review-avatar-name" onclick="toggleTuesdayReviewAvatarDetail()"></button>
         <div class="tr-avatar-detail" id="tr-review-avatar-detail" style="display:none;"></div>
-        <div class="tr-review-subtitle">Why should they care?</div>
-        <div class="tr-review-text" id="tr-review-why-care"></div>
+        <!-- "Why should they care?" is no longer asked for new concepts
+             (see the New Concept form's cd-modal-avatar-why-care-wrap) --
+             hidden entirely here unless an older concept actually has this
+             answer on record, exactly the same backwards-compatible
+             show-only-if-present pattern as Execution below. -->
+        <div id="tr-review-why-care-wrap" style="display:none;">
+          <div class="tr-review-subtitle">Why should they care?</div>
+          <div class="tr-review-text" id="tr-review-why-care"></div>
+        </div>
       </div>
 
       <div class="tr-review-section">
@@ -1544,20 +1557,32 @@
         <div id="tr-review-hooks"></div>
       </div>
 
-      <div class="tr-review-section">
-        <div class="tr-review-section-title">The Execution</div>
-        <div class="tr-review-text" id="tr-review-execution"></div>
-        <button type="button" class="link-btn" id="tr-review-script-toggle" onclick="toggleTuesdayReviewScript()" style="display:none;">View Script / Talking Points &darr;</button>
-        <div class="tr-review-text tr-review-script" id="tr-review-script" style="display:none;"></div>
-      </div>
-
       <!-- What to Shoot -- read-only, entirely hidden (not an empty/error
-           state) for a Concept that never had structured Shots (item 7):
-           "If we approve this Concept, is it actually clear what needs
-           filming?" is the question this answers, nothing more. -->
+           state) for a Concept that never had structured Shots: "If we
+           approve this Concept, is it actually clear what needs filming
+           and where?" is the question this answers, nothing more. Moved
+           ahead of legacy Execution -- What to Shoot IS the production
+           execution information for a new-format concept. -->
       <div class="tr-review-section" id="tr-review-shots-section" style="display:none;">
         <div class="tr-review-section-title">What to Shoot</div>
         <div id="tr-review-shots"></div>
+      </div>
+
+      <!-- Execution / Shot Plan -- legacy free-text, superseded by
+           structured What to Shoot above. Entirely hidden (not a "No
+           Execution / Shot Plan provided" empty state) for a new-format
+           concept using structured Shots instead -- only shown, still
+           read-only, for an older concept that actually has this data on
+           record, so nothing already written is hidden or lost. -->
+      <div class="tr-review-section" id="tr-review-execution-section" style="display:none;">
+        <div class="tr-review-section-title">Execution / Shot Plan <span class="hint">(legacy)</span></div>
+        <div class="tr-review-text" id="tr-review-execution"></div>
+      </div>
+
+      <div class="tr-review-section" id="tr-review-script-section" style="display:none;">
+        <div class="tr-review-section-title">Script / Talking Points</div>
+        <button type="button" class="link-btn" id="tr-review-script-toggle" onclick="toggleTuesdayReviewScript()">View Script / Talking Points &darr;</button>
+        <div class="tr-review-text tr-review-script" id="tr-review-script" style="display:none;"></div>
       </div>
 
       <div class="tr-review-section" id="tr-review-references-section" style="display:none;">

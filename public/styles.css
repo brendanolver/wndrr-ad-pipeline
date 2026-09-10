@@ -1026,7 +1026,6 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .cd-modal-workspace.cd-readonly .cd-shot-item-actions,
 .cd-modal-workspace.cd-readonly .cd-reference-add-wrap,
 .cd-modal-workspace.cd-readonly .cd-reference-card-actions,
-.cd-modal-workspace.cd-readonly .cd-location-clear,
 .cd-modal-workspace.cd-readonly #cd-modal-script-toggle-wrap,
 .cd-modal-workspace.cd-readonly #cd-modal-shoot-req-toggle-wrap,
 .cd-modal-workspace.cd-readonly #cd-modal-save-avatar-btn,
@@ -1082,6 +1081,15 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .cd-shot-detail-input{font-size:12.5px;color:var(--text-secondary);border:none;background:none;padding:0;}
 .cd-shot-detail-input:focus{outline:none;background:var(--surface2);border-radius:4px;padding:2px 4px;}
 
+/* Per-Shot Location -- a plain compact select (WNDRR Office/Warehouse are
+   one click, no typing) with "Custom Location" progressively revealing a
+   "Where?" text field right below it, same low-emphasis card styling as
+   the rest of a Shot. */
+.cd-shot-location-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:2px;}
+.cd-shot-location-select{font-size:12.5px;padding:4px 6px;width:auto;}
+.cd-shot-location-custom-label{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-secondary);font-weight:600;}
+.cd-shot-location-custom{font-size:12.5px;padding:4px 6px;width:auto;flex:1;min-width:120px;}
+
 /* "+ Add Shot" opens a chip menu of common shot types -- clicking one adds
    it immediately, so typing is only needed for the optional Detail line or
    a genuinely custom shot. */
@@ -1090,20 +1098,6 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .cd-shot-quickadd-chip{font-size:12px;font-weight:600;color:var(--text-secondary);background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-pill);padding:5px 10px;cursor:pointer;}
 .cd-shot-quickadd-chip:hover{background:var(--teal-light);color:var(--teal-dark);border-color:var(--teal);}
 .cd-shot-quickadd-chip-custom{background:none;border-style:dashed;}
-
-/* Location: searchable combobox -- the input's value IS the location (no
-   hidden select), so a genuinely new place always just works. The dropdown
-   below it is a fast-pick/search assist over known locations, with a
-   "+ Add" row appended whenever the typed text doesn't already match one. */
-.cd-location-combo{position:relative;}
-.cd-location-combo input{padding-right:26px;}
-.cd-location-clear{position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:15px;line-height:1;padding:2px 4px;}
-.cd-location-clear:hover{color:var(--red);}
-.cd-location-dropdown{position:absolute;top:100%;left:0;right:0;z-index:5;margin-top:4px;background:white;border:1px solid var(--border);border-radius:var(--r);box-shadow:0 4px 14px rgba(0,0,0,0.1);max-height:220px;overflow-y:auto;}
-.cd-location-option{display:block;width:100%;text-align:left;padding:7px 10px;font-size:13px;background:none;border:none;cursor:pointer;}
-.cd-location-option:hover{background:var(--surface2);}
-.cd-location-option-add{color:var(--teal-dark);font-weight:600;}
-.cd-location-empty{padding:7px 10px;font-size:12px;color:var(--text-muted);}
 
 .shoot-plan-edit-size-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--border);font-size:13px;font-weight:600;}
 .shoot-plan-edit-size-row:last-child{border-bottom:none;}
@@ -1423,6 +1417,10 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .tr-hook-item + .tr-hook-item{margin-top:10px;}
 .tr-hook-label{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--teal-dark);}
 .tr-hook-text{font-size:14px;font-weight:600;margin-top:2px;}
+/* Each What to Shoot item's Location -- deliberately lighter weight than
+   the capture text above it, so a reviewer reads WHAT then WHERE at a
+   glance without it competing for attention. */
+.tr-shot-location{font-size:12px;color:var(--text-secondary);margin-top:2px;}
 
 .tr-reference-item{background:var(--surface2);border:1px solid var(--border);border-radius:var(--r);padding:7px 10px;}
 .tr-reference-item + .tr-reference-item{margin-top:6px;}
