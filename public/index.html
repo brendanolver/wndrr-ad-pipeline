@@ -1530,9 +1530,16 @@
         </div>
       </div>
 
+      <!-- Hooks double as the Tuesday Review decision on which opening(s)
+           actually get produced -- each row is a checkbox (checked by
+           default), not just a display list. Selection lives on the same
+           hook_variations entries (a `selected` flag), persisted only when
+           Approve for Shooting is clicked -- see toggleTuesdayReviewHookSelected
+           and approveTuesdayReviewConcept in app.js. -->
       <div class="tr-review-section">
         <div class="tr-review-section-title">Hooks</div>
         <div class="tr-hook-list" id="tr-review-hooks"></div>
+        <div class="cd-field-error" id="tr-review-hooks-error"></div>
       </div>
 
       <!-- What to Shoot -- read-only, entirely hidden (not an empty/error
@@ -1581,14 +1588,16 @@
       </div>
 
       <!-- Shoot Setup -- concept-level production requirements only
-           (Talent/Model, Props). Location lives per-Shot now (see What to
-           Shoot above), so it's deliberately never repeated here for a
-           new-format concept -- see hasShootReq in renderTuesdayReviewConcept. -->
+           (Talent/Model, Props, and legacy overall Location). Shown
+           immediately, no expand/collapse -- this is exactly the production
+           info Tuesday Review exists to catch before approving. Location
+           lives per-Shot now (see What to Shoot above), so it's deliberately
+           never repeated here for a new-format concept (their concept.location
+           is simply never set) -- see renderTuesdayReviewConcept. Only
+           fields that actually contain information render at all. -->
       <div class="tr-review-section" id="tr-review-shoot-req-section" style="display:none;">
         <div class="tr-review-section-title">Shoot Setup</div>
-        <div class="tr-review-text" id="tr-review-shoot-req-inline"></div>
-        <button type="button" class="link-btn" id="tr-review-props-toggle" onclick="toggleTuesdayReviewProps()" style="display:none;">View Props &amp; Requirements &darr;</button>
-        <div class="tr-review-text" id="tr-review-props" style="display:none;"></div>
+        <div class="tr-shoot-setup-list" id="tr-review-shoot-setup"></div>
       </div>
 
       <div class="tr-review-decided-note" id="tr-review-decided-note" style="display:none;"></div>

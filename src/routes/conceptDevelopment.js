@@ -334,7 +334,7 @@ router.patch('/concepts/:id', async (req, res, next) => {
 // itself is never deleted.
 router.patch('/concepts/:id/review', async (req, res, next) => {
   try {
-    const { decision, feedback, kill_reason, kill_note } = req.body || {};
+    const { decision, feedback, kill_reason, kill_note, hook_variations } = req.body || {};
     if (!TUESDAY_REVIEW_DECISIONS.includes(decision)) {
       return res.status(400).json({ error: `decision must be one of: ${TUESDAY_REVIEW_DECISIONS.join(', ')}` });
     }
@@ -344,6 +344,26 @@ router.patch('/concepts/:id/review', async (req, res, next) => {
     }
     const trimmedKillNote = kill_note && kill_note.trim() ? kill_note.trim() : null;
     const trimmedKillReason = kill_reason && kill_reason.trim() ? kill_reason.trim() : null;
+
+    // Approving also records which hook(s) the team actually wants to
+    // produce -- reuses the existing hook_variations array (a `selected`
+    // flag per hook) rather than a new column or table, matching the
+    // "reuse existing structures" brief. Deliberately scoped to the
+    // 'approved' decision only: Request Changes and Kill Concept never
+    // touch or require it (see TESTING item 10), and a hookless legacy
+    // concept (hook_variations omitted) is left completely alone so old
+    // Approved concepts are never retroactively invalidated.
+    let approvedHookVariations = null;
+    if (decision === 'approved' && hook_variations !== undefined) {
+      const valid = Array.isArray(hook_variations) && hook_variations.every(
+        (h) => h && typeof h === 'object' && typeof h.text === 'string'
+      );
+      if (!valid) return res.status(400).json({ error: 'hook_variations must be an array of { text }' });
+      if (hook_variations.length && !hook_variations.some((h) => h.selected === true)) {
+        return res.status(400).json({ error: 'Select at least one hook to approve this concept for shooting.' });
+      }
+      approvedHookVariations = hook_variations;
+    }
 
     const historyEntry = {
       decision,
@@ -366,10 +386,14 @@ router.patch('/concepts/:id/review', async (req, res, next) => {
          kill_reason = CASE WHEN $1::varchar = 'killed' THEN $3 ELSE kill_reason END,
          kill_note = CASE WHEN $1::varchar = 'killed' THEN $4 ELSE kill_note END,
          review_history = review_history || $5::jsonb,
+         hook_variations = COALESCE($8, hook_variations),
          updated_at = now()
        WHERE id = $6 AND concept_dev_status = 'ready_for_review'
        RETURNING *`,
-      [decision, trimmedFeedback, trimmedKillReason, trimmedKillNote, JSON.stringify([historyEntry]), req.params.id, req.user.id]
+      [
+        decision, trimmedFeedback, trimmedKillReason, trimmedKillNote, JSON.stringify([historyEntry]), req.params.id, req.user.id,
+        approvedHookVariations !== null ? JSON.stringify(approvedHookVariations) : null,
+      ]
     );
     if (!result.rows.length) {
       const existsResult = await pool.query('SELECT id FROM creative_assets WHERE id = $1', [req.params.id]);
