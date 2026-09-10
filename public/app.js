@@ -5067,17 +5067,17 @@ function tuesdayReviewAvatarLabel(concept) {
 }
 
 // Concept Overview's single compact metadata line -- Product / Customer
-// Avatar / Number of Hooks / Status, the fields the brief calls out,
-// joined into one small line under the concept name rather than the old
-// three separate header/context/summary rows. Omits any part with no
-// data rather than showing a placeholder.
+// Avatar / Number of Hooks, joined into one small line under the concept
+// name rather than the old three separate header/context/summary rows.
+// Status is deliberately left out here -- the status pill right next to
+// the title already shows it, so repeating it in text would just be the
+// same fact twice. Omits any part with no data rather than a placeholder.
 function tuesdayReviewOverviewMetaText(concept, product) {
   const hookCount = tuesdayReviewHookCount(concept);
   return [
     product.product_name || null,
     tuesdayReviewAvatarLabel(concept),
     hookCount ? `${hookCount} Hook${hookCount === 1 ? '' : 's'}` : null,
-    CONCEPT_DEV_STATUS_LABELS[concept.concept_dev_status] || concept.concept_dev_status || null,
   ].filter(Boolean).join(' · ');
 }
 
@@ -5243,6 +5243,24 @@ function formatTuesdayReviewDate(iso) {
   return new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
 }
 
+// One compact card per Shot -- type and location sit on the same visual
+// level (what + where, glanceable together), with the capture direction
+// as secondary text underneath. Location is only ever the actual saved
+// per-shot value (fixed option or free-typed custom text) -- there is no
+// separate "Custom Location" label to accidentally display.
+function tuesdayReviewShotCardHtml(s) {
+  const hasLocation = Boolean(s.location && s.location.trim());
+  const hasCapture = Boolean(s.capture && s.capture.trim());
+  return `
+    <div class="tr-shot-card">
+      <div class="tr-shot-card-top">
+        <span class="tr-shot-type">${escapeHtml(s.name.trim())}</span>
+        ${hasLocation ? `<span class="tr-shot-pin">📍 ${escapeHtml(s.location.trim())}</span>` : ''}
+      </div>
+      ${hasCapture ? `<div class="tr-shot-detail">${escapeHtml(s.capture.trim())}</div>` : ''}
+    </div>`;
+}
+
 // Order deliberately follows the brief: Idea -> Audience -> Hooks -> What
 // to Shoot -> References (if provided) -> Script (if provided) -> Shoot
 // Setup (if provided). Legacy Execution (superseded by structured Shots)
@@ -5306,8 +5324,8 @@ function renderTuesdayReviewConcept() {
   const hooksEl = document.getElementById('tr-review-hooks');
   hooksEl.innerHTML = hooks.length
     ? [
-        `<div class="tr-hook-item"><span class="tr-hook-label">Primary</span><div class="tr-hook-text">&ldquo;${escapeHtml(hooks[0].text.trim())}&rdquo;</div></div>`,
-        ...hooks.slice(1).map((h, i) => `<div class="tr-hook-item"><span class="tr-hook-label">Alt ${String(i + 1).padStart(2, '0')}</span><div class="tr-hook-text">&ldquo;${escapeHtml(h.text.trim())}&rdquo;</div></div>`),
+        `<div class="tr-hook-row tr-hook-primary"><span class="tr-hook-tag">Primary</span><div class="tr-hook-text">&ldquo;${escapeHtml(hooks[0].text.trim())}&rdquo;</div></div>`,
+        ...hooks.slice(1).map((h, i) => `<div class="tr-hook-row"><span class="tr-hook-tag">Alt ${String(i + 1).padStart(2, '0')}</span><div class="tr-hook-text">&ldquo;${escapeHtml(h.text.trim())}&rdquo;</div></div>`),
       ].join('')
     : '<div class="tr-review-subtle">No specific Hook / Opening provided</div>';
 
@@ -5315,16 +5333,16 @@ function renderTuesdayReviewConcept() {
   // confirm it's clear what to shoot (and where), not to edit it. Legacy
   // Concepts with no structured Shots simply never show this section (no
   // error/empty-required state), and keep showing their Execution text
-  // below instead, as they always have. Each shot's Location (required for
-  // new concepts, see saveConceptDevModal) shows right under its capture
-  // text -- compact, no extra visual weight.
+  // below instead, as they always have. Each shot renders as a compact
+  // visual card via tuesdayReviewShotCardHtml -- type + location together,
+  // capture direction secondary underneath.
   const shots = (Array.isArray(concept.shots) ? concept.shots : []).filter((s) => s && s.name && s.name.trim());
   const shotsSection = document.getElementById('tr-review-shots-section');
   if (!shots.length) {
     shotsSection.style.display = 'none';
   } else {
     shotsSection.style.display = '';
-    document.getElementById('tr-review-shots').innerHTML = shots.map((s) => `<div class="tr-hook-item"><span class="tr-hook-label">${escapeHtml(s.name.trim())}</span>${s.capture && s.capture.trim() ? `<div class="tr-hook-text">${escapeHtml(s.capture.trim())}</div>` : ''}${s.location && s.location.trim() ? `<div class="tr-shot-location">📍 ${escapeHtml(s.location.trim())}</div>` : ''}</div>`).join('');
+    document.getElementById('tr-review-shots').innerHTML = shots.map((s) => tuesdayReviewShotCardHtml(s)).join('');
   }
 
   // Execution / Shot Plan is legacy, superseded by structured Shots above
@@ -5339,10 +5357,7 @@ function renderTuesdayReviewConcept() {
   const scriptSection = document.getElementById('tr-review-script-section');
   const hasScript = Boolean(concept.script_notes && concept.script_notes.trim());
   scriptSection.style.display = hasScript ? '' : 'none';
-  if (hasScript) {
-    document.getElementById('tr-review-script').style.display = 'none';
-    document.getElementById('tr-review-script').textContent = concept.script_notes;
-  }
+  if (hasScript) document.getElementById('tr-review-script').textContent = concept.script_notes;
 
   const refs = (Array.isArray(concept.reference_items) ? concept.reference_items : []).filter((r) => r && r.url);
   const refsSection = document.getElementById('tr-review-references-section');
@@ -5376,10 +5391,6 @@ function renderTuesdayReviewConcept() {
 
 function toggleTuesdayReviewAvatarDetail() {
   const el = document.getElementById('tr-review-avatar-detail');
-  el.style.display = el.style.display === 'none' ? '' : 'none';
-}
-function toggleTuesdayReviewScript() {
-  const el = document.getElementById('tr-review-script');
   el.style.display = el.style.display === 'none' ? '' : 'none';
 }
 function toggleTuesdayReviewProps() {

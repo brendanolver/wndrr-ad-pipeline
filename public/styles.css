@@ -1378,8 +1378,9 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .tr-review-nav{display:flex;align-items:center;gap:10px;}
 .tr-review-position{font-size:11.5px;font-weight:700;color:var(--text-muted);}
 /* Concept Overview: name prominent, one compact metadata line underneath
-   (Product / Customer Avatar / Number of Hooks / Status) -- see
-   tuesdayReviewOverviewMetaText in app.js. Replaces the old three-line
+   (Product / Customer Avatar / Number of Hooks) -- see
+   tuesdayReviewOverviewMetaText in app.js. Status is not repeated here, it
+   already has its own pill next to the title. Replaces the old three-line
    header/product-context/summary stack with one tight block. */
 .tr-overview{margin-bottom:10px;}
 .tr-overview-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;}
@@ -1398,7 +1399,10 @@ main{flex:1;min-width:0;padding:20px 24px;}
    bigger/bolder than other section text so it reads as the headline. */
 .tr-idea-text{font-size:15.5px;font-weight:600;}
 .tr-review-subtle{font-size:12.5px;color:var(--text-muted);font-style:italic;}
-.tr-review-script{margin-top:6px;padding-top:6px;border-top:1px dashed var(--border);}
+/* Script shows immediately (no expand/collapse) but stays visually
+   secondary to Idea/Hooks/Shots -- a touch smaller than the base review
+   text, never the loudest thing on screen. */
+.tr-review-script{font-size:12.5px;color:var(--text-secondary);}
 
 .tr-avatar-toggle{background:none;border:none;padding:0;font-family:inherit;font-size:13.5px;font-weight:700;color:var(--teal-dark);cursor:pointer;}
 .tr-avatar-toggle:hover{text-decoration:underline;}
@@ -1406,16 +1410,30 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .tr-avatar-detail{margin-top:6px;padding:9px 11px;background:var(--surface2);border-radius:var(--r);display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:var(--text-secondary);}
 .tr-avatar-detail-label{display:block;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);}
 
-/* Hook / Opening stays the most generously spaced section -- one of the
-   two or three things the team is actually there to judge, so it keeps
-   its own breathing room even though everything around it tightened up. */
-.tr-hook-item + .tr-hook-item{margin-top:10px;}
-.tr-hook-label{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--teal-dark);}
-.tr-hook-text{font-size:14px;font-weight:600;margin-top:2px;}
-/* Each What to Shoot item's Location -- deliberately lighter weight than
-   the capture text above it, so a reviewer reads WHAT then WHERE at a
-   glance without it competing for attention. */
-.tr-shot-location{font-size:12px;color:var(--text-secondary);margin-top:2px;}
+/* Hooks: compact rows so Primary/Alt 01/Alt 02 can be compared at a
+   glance, rather than each needing its own generously-spaced block.
+   Primary keeps a light teal wash + border so it still reads as the main
+   hook even at a glance, without shouting over the Alts. */
+.tr-hook-list{display:flex;flex-direction:column;}
+.tr-hook-row{display:flex;align-items:baseline;gap:10px;padding:6px 2px;border-bottom:1px solid var(--border);}
+.tr-hook-row:last-child{border-bottom:none;}
+.tr-hook-tag{flex:0 0 54px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);}
+.tr-hook-text{font-size:13.5px;font-weight:600;color:var(--text);}
+.tr-hook-row.tr-hook-primary{background:var(--teal-light);border:1px solid var(--teal);border-radius:var(--r);padding:7px 9px;margin-bottom:2px;}
+.tr-hook-row.tr-hook-primary .tr-hook-tag{color:var(--teal-dark);}
+.tr-hook-row.tr-hook-primary .tr-hook-text{font-size:14px;}
+
+/* What to Shoot: each Shot is a compact visual card, not a paragraph --
+   Shot Type and Location sit on the same line (what + where, together at
+   a glance), capture direction is secondary text underneath. A left
+   accent bar (not a full border box) keeps it lightweight -- a shoot
+   checklist, not another set of bordered panels. */
+.tr-shot-list{display:flex;flex-direction:column;gap:6px;}
+.tr-shot-card{background:var(--surface2);border-left:3px solid var(--teal);border-radius:0 var(--r) var(--r) 0;padding:6px 10px;}
+.tr-shot-card-top{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;}
+.tr-shot-type{font-size:12.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text);}
+.tr-shot-pin{font-size:12px;font-weight:600;color:var(--text-secondary);white-space:nowrap;}
+.tr-shot-detail{font-size:12.5px;color:var(--text-secondary);margin-top:2px;line-height:1.4;}
 
 /* Reference cards -- a clean fallback (platform + note + a big Open action)
    that always works, with a YouTube-only thumbnail layered on top when
