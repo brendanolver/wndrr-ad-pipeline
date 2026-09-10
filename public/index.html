@@ -1532,7 +1532,7 @@
 
       <div class="tr-review-section">
         <div class="tr-review-section-title">Hooks</div>
-        <div id="tr-review-hooks"></div>
+        <div class="tr-hook-list" id="tr-review-hooks"></div>
       </div>
 
       <!-- What to Shoot -- read-only, entirely hidden (not an empty/error
@@ -1540,10 +1540,12 @@
            approve this Concept, is it actually clear what needs filming
            and where?" is the question this answers, nothing more. Moved
            ahead of legacy Execution -- What to Shoot IS the production
-           execution information for a new-format concept. -->
+           execution information for a new-format concept. Each Shot renders
+           as a compact visual card (type + location on one line, direction
+           secondary underneath) -- see tuesdayReviewShotCardHtml in app.js. -->
       <div class="tr-review-section" id="tr-review-shots-section" style="display:none;">
         <div class="tr-review-section-title">What to Shoot</div>
-        <div id="tr-review-shots"></div>
+        <div class="tr-shot-list" id="tr-review-shots"></div>
       </div>
 
       <!-- Execution / Shot Plan -- legacy free-text, superseded by
@@ -1569,10 +1571,13 @@
         <div class="tr-reference-grid" id="tr-review-references"></div>
       </div>
 
+      <!-- Shown immediately, no expand/collapse -- scripts are short enough
+           that a click-to-reveal step only slows the meeting down. Kept
+           visually secondary (smaller than Idea/Hooks/Shots) via
+           .tr-review-script, not by hiding it. -->
       <div class="tr-review-section" id="tr-review-script-section" style="display:none;">
         <div class="tr-review-section-title">Script / Talking Points</div>
-        <button type="button" class="link-btn" id="tr-review-script-toggle" onclick="toggleTuesdayReviewScript()">View Script / Talking Points &darr;</button>
-        <div class="tr-review-text tr-review-script" id="tr-review-script" style="display:none;"></div>
+        <div class="tr-review-text tr-review-script" id="tr-review-script"></div>
       </div>
 
       <!-- Shoot Setup -- concept-level production requirements only
