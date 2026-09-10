@@ -189,7 +189,7 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .toast.error{background:var(--red);}
 
 /* ── DASHBOARD: ACTION CARDS ── */
-.action-cards{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px;}
+.action-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px;}
 .action-card{display:flex;flex-direction:column;align-items:flex-start;gap:4px;border:none;border-radius:var(--r-lg);padding:16px 18px;cursor:pointer;color:white;text-align:left;font-family:inherit;transition:transform 0.12s, box-shadow 0.12s;}
 .action-card:hover{transform:translateY(-1px);box-shadow:var(--shadow);}
 .action-icon{font-size:18px;opacity:0.9;margin-bottom:4px;}
@@ -1081,13 +1081,13 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .cd-shot-detail-input{font-size:12.5px;color:var(--text-secondary);border:none;background:none;padding:0;}
 .cd-shot-detail-input:focus{outline:none;background:var(--surface2);border-radius:4px;padding:2px 4px;}
 
-/* Per-Shot Location -- a plain compact select (WNDRR Office/Warehouse are
-   one click, no typing) with "Custom Location" progressively revealing a
-   "Where?" text field right below it, same low-emphasis card styling as
-   the rest of a Shot. */
+/* Per-Shot Location -- a proper labelled field belonging to the Shot (WNDRR
+   Office/Warehouse are one click, no typing), with "Custom Location"
+   progressively revealing a plain text field right beside it. Compact,
+   same low-emphasis card styling as the rest of a Shot. */
 .cd-shot-location-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:2px;}
+.cd-shot-location-field{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-secondary);font-weight:600;}
 .cd-shot-location-select{font-size:12.5px;padding:4px 6px;width:auto;}
-.cd-shot-location-custom-label{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-secondary);font-weight:600;}
 .cd-shot-location-custom{font-size:12.5px;padding:4px 6px;width:auto;flex:1;min-width:120px;}
 
 /* "+ Add Shot" opens a chip menu of common shot types -- clicking one adds
@@ -1327,15 +1327,6 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .cd-reference-library-tag{display:inline-flex;align-items:center;background:var(--teal-light);color:var(--teal-dark);border-radius:var(--r-pill);padding:2px 8px;font-size:10px;font-weight:700;white-space:nowrap;}
 .cd-reference-list-actions{display:flex;align-items:center;gap:10px;}
 
-/* AI Creative Review -- a quiet quality-control tool at the bottom of an
-   individual concept's workspace, not another stage of the workflow, so
-   it's deliberately quieter than every .cd-modal-section above it: no
-   card background, just a hairline rule and small muted type. */
-.cd-ai-review{margin-top:18px;padding-top:14px;border-top:1px solid var(--border);}
-.cd-ai-review-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-muted);}
-.cd-ai-review-helper{font-size:12.5px;color:var(--text-secondary);margin-top:3px;}
-.cd-ai-review-actions{display:flex;gap:8px;margin-top:8px;}
-
 /* Tuesday Creative Review -- the human quality gate, deliberately its own
    visual language (tr-*) rather than reusing cd-modal-* anywhere: this is a
    decision room (read-only, scannable, judgement-focused), not another
@@ -1386,22 +1377,26 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .tr-review-body{flex:1;min-height:0;overflow-y:auto;}
 .tr-review-nav{display:flex;align-items:center;gap:10px;}
 .tr-review-position{font-size:11.5px;font-weight:700;color:var(--text-muted);}
-.tr-review-header{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:2px;}
-.tr-review-header h3{font-size:17px;font-weight:800;}
-.tr-review-product-context{font-size:11.5px;color:var(--text-muted);margin-bottom:3px;}
-/* Compact "before you scroll" briefing line -- see
-   tuesdayReviewSummaryLineText in app.js. Sits right under the product
-   context line, closing off the header block before the first section. */
-.tr-review-summary-line{font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:12px;}
+/* Concept Overview: name prominent, one compact metadata line underneath
+   (Product / Customer Avatar / Number of Hooks / Status) -- see
+   tuesdayReviewOverviewMetaText in app.js. Replaces the old three-line
+   header/product-context/summary stack with one tight block. */
+.tr-overview{margin-bottom:10px;}
+.tr-overview-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;}
+.tr-overview-top h3{font-size:18px;font-weight:800;}
+.tr-overview-meta{font-size:12px;font-weight:600;color:var(--text-secondary);margin-top:3px;}
 
 /* Section rhythm tightened for meeting use -- a clear hairline still marks
    each section, just with less air around it, so more of the concept is
    readable without scrolling (see the Tuesday Review density refinement). */
-.tr-review-section{margin-top:10px;padding-top:10px;border-top:1px solid var(--border);}
+.tr-review-section{margin-top:9px;padding-top:9px;border-top:1px solid var(--border);}
 .tr-review-section:first-of-type{margin-top:0;padding-top:0;border-top:none;}
 .tr-review-section-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-muted);margin-bottom:4px;}
 .tr-review-subtitle{font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-top:8px;margin-bottom:2px;}
 .tr-review-text{font-size:13.5px;color:var(--text);line-height:1.45;white-space:pre-wrap;}
+/* The Idea is one of the first things Mark talks through -- noticeably
+   bigger/bolder than other section text so it reads as the headline. */
+.tr-idea-text{font-size:15.5px;font-weight:600;}
 .tr-review-subtle{font-size:12.5px;color:var(--text-muted);font-style:italic;}
 .tr-review-script{margin-top:6px;padding-top:6px;border-top:1px dashed var(--border);}
 
@@ -1422,12 +1417,18 @@ main{flex:1;min-width:0;padding:20px 24px;}
    glance without it competing for attention. */
 .tr-shot-location{font-size:12px;color:var(--text-secondary);margin-top:2px;}
 
-.tr-reference-item{background:var(--surface2);border:1px solid var(--border);border-radius:var(--r);padding:7px 10px;}
-.tr-reference-item + .tr-reference-item{margin-top:6px;}
-.tr-reference-link{font-size:12.5px;font-weight:700;color:var(--teal-dark);text-decoration:none;}
-.tr-reference-link:hover{text-decoration:underline;}
-.tr-reference-note{font-size:12px;color:var(--text-secondary);margin-top:3px;}
-.tr-reference-note-label{display:block;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);}
+/* Reference cards -- a clean fallback (platform + note + a big Open action)
+   that always works, with a YouTube-only thumbnail layered on top when
+   available (see tuesdayReviewReferenceCardHtml in app.js). Never depends
+   on the thumbnail loading or any embed/API -- the Open action getting
+   Mark to the reference immediately is the one thing every card guarantees. */
+.tr-reference-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;}
+.tr-reference-card{background:var(--surface2);border:1px solid var(--border);border-radius:var(--r);padding:9px 10px;display:flex;flex-direction:column;gap:5px;}
+.tr-reference-thumb{width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:var(--r);background:var(--border);}
+.tr-reference-platform{font-size:11px;font-weight:700;color:var(--text-secondary);}
+.tr-reference-note{font-size:12px;color:var(--text-secondary);line-height:1.4;}
+.tr-reference-open{font-size:12px;font-weight:700;color:var(--teal-dark);text-decoration:none;margin-top:auto;padding-top:2px;}
+.tr-reference-open:hover{text-decoration:underline;}
 
 /* Decision bar: fixed footer, three actions in ascending priority left to
    right -- Kill (lowest, plain/destructive), Request Changes (secondary,

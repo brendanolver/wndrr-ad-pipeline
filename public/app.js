@@ -570,7 +570,6 @@ document.getElementById('week-current').addEventListener('click', () => {
   loadDashboard();
 });
 
-document.getElementById('action-new-creative').addEventListener('click', () => openAssetModal(null));
 document.getElementById('action-pipeline').addEventListener('click', () => switchTab('board'));
 document.getElementById('action-library').addEventListener('click', () => switchTab('board'));
 document.getElementById('action-brief-builder').addEventListener('click', () => {
@@ -1655,7 +1654,6 @@ function confirmDialog(message, opts) {
   });
 }
 
-document.getElementById('new-asset-btn').addEventListener('click', () => openAssetModal(null));
 document.getElementById('new-style-btn').addEventListener('click', () => openStyleModal(null));
 document.getElementById('new-category-btn').addEventListener('click', () => {
   document.getElementById('category-name').value = '';
@@ -4060,15 +4058,15 @@ function renderConceptDevModalShots() {
       </div>
       <input type="text" class="cd-shot-detail-input" value="${escapeHtml(s.capture)}" oninput="conceptDevModalShots[${i}].capture=this.value" placeholder="What should be captured in this shot?">
       <div class="cd-shot-location-row">
-        <select class="cd-shot-location-select" onchange="onConceptDevShotLocationChange(${i}, this)">
-          <option value="" ${selectValue === '' ? 'selected' : ''}>Select location…</option>
-          <option value="WNDRR Office" ${selectValue === 'WNDRR Office' ? 'selected' : ''}>WNDRR Office</option>
-          <option value="WNDRR Warehouse" ${selectValue === 'WNDRR Warehouse' ? 'selected' : ''}>WNDRR Warehouse</option>
-          <option value="__custom__" ${selectValue === '__custom__' ? 'selected' : ''}>Custom Location</option>
-        </select>
-        <label class="cd-shot-location-custom-label" style="display:${isCustomLoc ? '' : 'none'};">Where?
-          <input type="text" class="cd-shot-location-custom" value="${isCustomLoc ? escapeHtml(loc) : ''}" placeholder="Enter location…" oninput="conceptDevModalShots[${i}].location=this.value">
+        <label class="cd-shot-location-field">Location
+          <select class="cd-shot-location-select" onchange="onConceptDevShotLocationChange(${i}, this)">
+            <option value="" ${selectValue === '' ? 'selected' : ''}>Select location…</option>
+            <option value="WNDRR Office" ${selectValue === 'WNDRR Office' ? 'selected' : ''}>WNDRR Office</option>
+            <option value="WNDRR Warehouse" ${selectValue === 'WNDRR Warehouse' ? 'selected' : ''}>WNDRR Warehouse</option>
+            <option value="__custom__" ${selectValue === '__custom__' ? 'selected' : ''}>Custom Location</option>
+          </select>
         </label>
+        <input type="text" class="cd-shot-location-custom" value="${isCustomLoc ? escapeHtml(loc) : ''}" placeholder="Enter location…" style="display:${isCustomLoc ? '' : 'none'};" oninput="conceptDevModalShots[${i}].location=this.value">
       </div>
     </div>`;
   }).join('');
@@ -4076,25 +4074,25 @@ function renderConceptDevModalShots() {
 
 // Picking a fixed option sets the Shot's location directly and hides/clears
 // the custom field; picking "Custom Location" clears location back to
-// blank (nothing chosen yet) and reveals the "Where?" field, focused ready
-// to type -- exactly the progressive-disclosure pattern used elsewhere in
-// this modal (e.g. Talent's select+other). Direct DOM update, not a full
-// re-render, so it doesn't disturb anything else being typed in the list.
+// blank (nothing chosen yet) and reveals the custom text field, focused
+// ready to type -- exactly the progressive-disclosure pattern used
+// elsewhere in this modal (e.g. Talent's select+other). Direct DOM update,
+// not a full re-render, so it doesn't disturb anything else being typed
+// in the list.
 function onConceptDevShotLocationChange(index, selectEl) {
   const shot = conceptDevModalShots[index];
   if (!shot) return;
   const isCustom = selectEl.value === '__custom__';
   const item = selectEl.closest('.cd-shot-item');
-  const customLabel = item.querySelector('.cd-shot-location-custom-label');
   const customInput = item.querySelector('.cd-shot-location-custom');
   if (isCustom) {
     shot.location = '';
-    customLabel.style.display = '';
+    customInput.style.display = '';
     customInput.value = '';
     customInput.focus();
   } else {
     shot.location = selectEl.value;
-    customLabel.style.display = 'none';
+    customInput.style.display = 'none';
     customInput.value = '';
   }
 }
@@ -4301,7 +4299,6 @@ function onConceptDevAvatarChange() {
   document.getElementById('cd-modal-avatar-custom-desc').classList.remove('cd-field-invalid');
   hideConceptDevFieldError('cd-modal-avatar-select-error');
   hideConceptDevFieldError('cd-modal-avatar-custom-desc-error');
-  updateReviewPromptGate();
 }
 
 // Called after "Save as new Customer Avatar" (see openSaveAvatarFromConceptModal
@@ -4471,7 +4468,6 @@ function fillConceptDevModalFields(concept) {
     concept && (concept.talent_requirement || concept.props_notes)
   ));
 
-  updateReviewPromptGate();
   hideConceptDevValidation();
 }
 
@@ -5070,22 +5066,18 @@ function tuesdayReviewAvatarLabel(concept) {
   return null;
 }
 
-// One-line "before you scroll" briefing for the review modal -- pulls
-// together the pieces of context otherwise scattered across the sections
-// below (Audience, Hook count, Reference count, Talent, Location) so the
-// team has quick orientation before reviewing the detail. Deliberately
-// skips anything already shown in the product context line right above it
-// (product/source/pathway/Owner), and omits any part with no data rather
-// than showing a placeholder.
-function tuesdayReviewSummaryLineText(concept) {
+// Concept Overview's single compact metadata line -- Product / Customer
+// Avatar / Number of Hooks / Status, the fields the brief calls out,
+// joined into one small line under the concept name rather than the old
+// three separate header/context/summary rows. Omits any part with no
+// data rather than showing a placeholder.
+function tuesdayReviewOverviewMetaText(concept, product) {
   const hookCount = tuesdayReviewHookCount(concept);
-  const refCount = (Array.isArray(concept.reference_items) ? concept.reference_items : []).filter((r) => r && r.url).length;
   return [
+    product.product_name || null,
     tuesdayReviewAvatarLabel(concept),
     hookCount ? `${hookCount} Hook${hookCount === 1 ? '' : 's'}` : null,
-    refCount ? `${refCount} Reference${refCount === 1 ? '' : 's'}` : null,
-    concept.talent_requirement || null,
-    concept.location || null,
+    CONCEPT_DEV_STATUS_LABELS[concept.concept_dev_status] || concept.concept_dev_status || null,
   ].filter(Boolean).join(' · ');
 }
 
@@ -5190,16 +5182,73 @@ function referenceLabelFromUrl(url) {
   }
 }
 
+// Best-effort platform detection for a Tuesday Review reference card --
+// purely cosmetic (icon + label), independent of whether a thumbnail can
+// be fetched, so it always resolves even for an unrecognized domain.
+function tuesdayReviewReferenceInfo(url) {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, '');
+    if (host.includes('tiktok')) return { icon: '🎵', platform: 'TikTok' };
+    if (host.includes('instagram')) return { icon: '📸', platform: 'Instagram' };
+    if (host.includes('youtube') || host.includes('youtu.be')) return { icon: '▶️', platform: 'YouTube' };
+    if (host.includes('pinterest')) return { icon: '📌', platform: 'Pinterest' };
+    return { icon: '🔗', platform: host };
+  } catch {
+    return { icon: '🔗', platform: 'Website' };
+  }
+}
+
+// YouTube's still-image thumbnail is a plain, dependency-free <img src> --
+// no embed SDK, no API key, no CORS/CSP risk -- so it's the one platform
+// safe to show a real preview for. Every other platform (notably TikTok
+// and Instagram, whose previews need an embed/API that can silently break)
+// intentionally gets no thumbnail attempt at all -- the fallback card
+// below already satisfies "get to the reference immediately."
+function youTubeThumbnailUrl(url) {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^www\./, '');
+    let id = null;
+    if (host === 'youtu.be') id = u.pathname.slice(1);
+    else if (host.includes('youtube')) {
+      if (u.pathname === '/watch') id = u.searchParams.get('v');
+      else if (u.pathname.startsWith('/shorts/')) id = u.pathname.split('/')[2];
+      else if (u.pathname.startsWith('/embed/')) id = u.pathname.split('/')[2];
+    }
+    return id ? `https://img.youtube.com/vi/${id}/hqdefault.jpg` : null;
+  } catch {
+    return null;
+  }
+}
+
+// One card per Tuesday Review reference -- platform + note + a big, obvious
+// Open action that's always present regardless of whether a thumbnail
+// loads. A thumbnail (YouTube only, see youTubeThumbnailUrl) sits on top
+// when available; onerror removes it and the card still works the same
+// without one -- nothing here ever depends on it.
+function tuesdayReviewReferenceCardHtml(r) {
+  const info = tuesdayReviewReferenceInfo(r.url);
+  const thumb = youTubeThumbnailUrl(r.url);
+  const note = r.note && r.note.trim();
+  return `
+    <div class="tr-reference-card">
+      ${thumb ? `<img class="tr-reference-thumb" src="${escapeHtml(thumb)}" alt="" onerror="this.remove()">` : ''}
+      <div class="tr-reference-platform">${info.icon} ${escapeHtml(info.platform)}</div>
+      ${note ? `<div class="tr-reference-note">${escapeHtml(note)}</div>` : ''}
+      <a href="${escapeHtml(r.url)}" target="_blank" rel="noopener" class="tr-reference-open">Open Reference &#8599;</a>
+    </div>`;
+}
+
 function formatTuesdayReviewDate(iso) {
   return new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
 }
 
-// Order deliberately follows the brief: Idea -> Audience -> Hook / Opening
-// -> What to Shoot -> Script (if provided) -> References (if provided) ->
-// Shoot Setup (if provided). Legacy Execution (superseded by structured
-// Shots) sits right after What to Shoot, but only ever renders for an
-// older concept that actually has that data -- a new-format concept never
-// shows it. Everything is plain text, no inputs.
+// Order deliberately follows the brief: Idea -> Audience -> Hooks -> What
+// to Shoot -> References (if provided) -> Script (if provided) -> Shoot
+// Setup (if provided). Legacy Execution (superseded by structured Shots)
+// sits right after What to Shoot, but only ever renders for an older
+// concept that actually has that data -- a new-format concept never shows
+// it. Everything is plain text, no inputs.
 function renderTuesdayReviewConcept() {
   const entry = state.tuesdayReview.queue[state.tuesdayReview.queueIndex];
   if (!entry) return;
@@ -5214,11 +5263,7 @@ function renderTuesdayReviewConcept() {
   statusPill.className = `cd-concept-status-pill ${CONCEPT_DEV_STATUS_CLASS[concept.concept_dev_status] || ''}`;
   statusPill.textContent = CONCEPT_DEV_STATUS_LABELS[concept.concept_dev_status] || concept.concept_dev_status;
 
-  document.getElementById('tr-review-product-context').textContent = [product.product_name, tuesdayReviewProductMetaText(product)].filter(Boolean).join(' · ');
-  const summaryLineEl = document.getElementById('tr-review-summary-line');
-  const summaryLineText = tuesdayReviewSummaryLineText(concept);
-  summaryLineEl.textContent = summaryLineText;
-  summaryLineEl.style.display = summaryLineText ? '' : 'none';
+  document.getElementById('tr-review-overview-meta').textContent = tuesdayReviewOverviewMetaText(concept, product);
 
   document.getElementById('tr-review-angle').textContent = concept.angle && concept.angle.trim() ? concept.angle.trim() : 'No Angle / Idea provided';
 
@@ -5279,7 +5324,7 @@ function renderTuesdayReviewConcept() {
     shotsSection.style.display = 'none';
   } else {
     shotsSection.style.display = '';
-    document.getElementById('tr-review-shots').innerHTML = shots.map((s) => `<div class="tr-hook-item"><span class="tr-hook-label">${escapeHtml(s.name.trim())}</span>${s.capture && s.capture.trim() ? `<div class="tr-hook-text">${escapeHtml(s.capture.trim())}</div>` : ''}${s.location && s.location.trim() ? `<div class="tr-shot-location">Location: ${escapeHtml(s.location.trim())}</div>` : ''}</div>`).join('');
+    document.getElementById('tr-review-shots').innerHTML = shots.map((s) => `<div class="tr-hook-item"><span class="tr-hook-label">${escapeHtml(s.name.trim())}</span>${s.capture && s.capture.trim() ? `<div class="tr-hook-text">${escapeHtml(s.capture.trim())}</div>` : ''}${s.location && s.location.trim() ? `<div class="tr-shot-location">📍 ${escapeHtml(s.location.trim())}</div>` : ''}</div>`).join('');
   }
 
   // Execution / Shot Plan is legacy, superseded by structured Shots above
@@ -5305,11 +5350,7 @@ function renderTuesdayReviewConcept() {
     refsSection.style.display = 'none';
   } else {
     refsSection.style.display = '';
-    document.getElementById('tr-review-references').innerHTML = refs.map((r) => `
-      <div class="tr-reference-item">
-        <a href="${escapeHtml(r.url)}" target="_blank" rel="noopener" class="tr-reference-link">${escapeHtml(referenceLabelFromUrl(r.url))} &#8599;</a>
-        ${r.note ? `<div class="tr-reference-note"><span class="tr-reference-note-label">What we like about it</span>${escapeHtml(r.note)}</div>` : ''}
-      </div>`).join('');
+    document.getElementById('tr-review-references').innerHTML = refs.map((r) => tuesdayReviewReferenceCardHtml(r)).join('');
   }
 
   const shootReqSection = document.getElementById('tr-review-shoot-req-section');
@@ -7615,82 +7656,6 @@ async function deleteReferenceLibraryItem() {
   }
 }
 
-// ── AI Creative Review ────────────────────────────────
-// A small, optional quality-control pass at the bottom of an individual
-// concept's own workspace -- distinct from both the global Creative
-// Toolkit and the context-aware Creative Tools modal above (neither of
-// which is scoped to "is THIS specific, already-saved concept actually
-// ready for Tuesday?"). Only shown once the concept exists server-side
-// (a brand-new "+ Add Concept" has no id yet to build a review prompt
-// from); even then, Copy Review Prompt itself stays disabled until there
-// is enough substance to critique.
-function updateReviewPromptGate() {
-  const section = document.getElementById('cd-ai-review-section');
-  if (!section) return;
-  const hasConcept = Boolean(conceptDevModalConceptId);
-  section.style.display = hasConcept ? '' : 'none';
-  if (!hasConcept) return;
-
-  const nameInput = document.getElementById('cd-modal-name');
-  const name = nameInput.style.display !== 'none'
-    ? nameInput.value
-    : document.getElementById('cd-modal-name-locked').textContent;
-  const angle = document.getElementById('cd-modal-angle').value;
-
-  const avatarSelect = document.getElementById('cd-modal-avatar-select');
-  const isOtherAvatar = avatarSelect.value === '__other__';
-  const hasAvatar = isOtherAvatar
-    ? Boolean(document.getElementById('cd-modal-avatar-custom-desc').value.trim())
-    : Boolean(avatarSelect.value);
-
-  // Same core-field minimum Ready for Review itself requires -- there's
-  // nothing meaningful to pressure-test before a concept has its strategic
-  // foundation: what it is and who it's for. "Why will they care?" is no
-  // longer part of that minimum (see cd-modal-avatar-why-care-wrap).
-  const ready = Boolean(name.trim() && angle.trim() && hasAvatar);
-  document.getElementById('cd-review-copy-btn').disabled = !ready;
-  document.getElementById('cd-review-chatgpt-btn').disabled = !ready;
-  document.getElementById('cd-ai-review-helper').textContent = ready
-    ? 'Want a second opinion before sending this to Tuesday review?'
-    : 'Complete the core concept fields to unlock AI Review.';
-}
-
-// Builds from the modal's current field values (not a re-fetch of the
-// last-saved row) so the review always reflects exactly what's on screen,
-// including anything typed since the last Save Draft/Ready for Review.
-async function copyReviewPrompt() {
-  if (!conceptDevModalProduct || !conceptDevModalConceptId) return;
-  const nameInput = document.getElementById('cd-modal-name');
-  const conceptName = nameInput.style.display !== 'none'
-    ? nameInput.value.trim()
-    : document.getElementById('cd-modal-name-locked').textContent;
-  const avatarSelect = document.getElementById('cd-modal-avatar-select');
-  const isOtherAvatar = avatarSelect.value === '__other__';
-  const concept = {
-    concept_name: conceptName,
-    angle: document.getElementById('cd-modal-angle').value.trim(),
-    execution: document.getElementById('cd-modal-execution').value.trim(),
-    customer_avatar_id: avatarSelect.value && !isOtherAvatar ? Number(avatarSelect.value) : null,
-    custom_avatar_description: isOtherAvatar ? document.getElementById('cd-modal-avatar-custom-desc').value.trim() : '',
-    avatar_why_care: document.getElementById('cd-modal-avatar-why-care').value.trim(),
-    script_notes: document.getElementById('cd-modal-script').value.trim(),
-    hook_variations: conceptDevModalHooks.map((h) => ({ text: h.text.trim() })).filter((h) => h.text),
-    shots: conceptDevModalShots.map((s) => ({ name: s.name.trim(), capture: s.capture.trim() })).filter((s) => s.name),
-    reference_items: conceptDevModalReferences.map((r) => ({ url: r.url.trim(), note: r.note.trim() })).filter((r) => r.url),
-    talent_requirement: conceptDevSelectWithOtherValue('cd-modal-talent-select', 'cd-modal-talent-custom'),
-    props_notes: document.getElementById('cd-modal-props').value.trim(),
-  };
-  try {
-    const { prompt } = await api('/creative-toolkit/review-prompt', {
-      method: 'POST',
-      body: JSON.stringify({ shoot_plan_item_id: conceptDevModalProduct.shoot_plan_item_id, concept }),
-    });
-    await navigator.clipboard.writeText(prompt);
-    toast('Review prompt copied — paste it into ChatGPT');
-  } catch (e) {
-    toast(e.message, true);
-  }
-}
 
 // ── Settings: Creative Resources ─────────────────────
 // Same rank/reorder/edit-modal pattern as Proven Winners just above --
