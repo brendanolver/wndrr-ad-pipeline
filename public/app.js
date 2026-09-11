@@ -2826,10 +2826,20 @@ function wirePromotionCardRow(row) {
   });
 }
 
+// Rolling major-sales calendar: a promotion counts as "active/upcoming"
+// until its own end date passes (not its start date -- a sale that has
+// already launched but hasn't finished yet still belongs here), and the
+// landing view only ever shows the next four chronologically -- a
+// historic sale never accumulates on this screen, it just stops
+// qualifying the moment days_until_end goes negative. Already sorted
+// chronologically by the API (ORDER BY start_date ASC in promotions.js),
+// so no client-side re-sort is needed here.
 function renderPromotionsRow() {
   const list = document.getElementById('promotions-list');
   if (!list) return; // guards a load race before index.html's panel exists
-  const upcoming = state.promotions.filter((p) => p.days_until_launch >= 0);
+  const upcoming = state.promotions
+    .filter((p) => p.days_until_end === null || p.days_until_end >= 0)
+    .slice(0, 4);
   list.innerHTML = upcoming.length
     ? upcoming.map(promotionCardHtml).join('')
     : '<div class="attention-empty">No upcoming promotions yet — add one to start planning creative coverage.</div>';

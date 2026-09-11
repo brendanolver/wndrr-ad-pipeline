@@ -65,6 +65,11 @@ function summarizePromotion(promotion, stages) {
   const totalMissing = Math.max(0, totalRequired - totalReady - totalPlanned);
   const overallPct = totalRequired > 0 ? Math.round((totalReady / totalRequired) * 100) : null;
   const daysUntilLaunch = Math.ceil((new Date(promotion.start_date) - new Date()) / 86400000);
+  // Drives the rolling major-sales calendar on the Promotions landing tab:
+  // a promotion with no end_date is never "finished"; one with an end_date
+  // in the past is -- separate from days_until_launch, which goes negative
+  // the moment a sale STARTS even though it may still be actively running.
+  const daysUntilEnd = promotion.end_date ? Math.ceil((new Date(promotion.end_date) - new Date()) / 86400000) : null;
 
   const onTrackCount = stages.filter((s) => s.urgency === 'on_track').length;
   const needsAttentionCount = stages.filter((s) => s.urgency === 'needs_attention').length;
@@ -97,6 +102,7 @@ function summarizePromotion(promotion, stages) {
   return {
     ...promotion,
     days_until_launch: daysUntilLaunch,
+    days_until_end: daysUntilEnd,
     stages,
     summary: {
       stage_count: stages.length,

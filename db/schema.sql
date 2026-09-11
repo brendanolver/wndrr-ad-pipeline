@@ -639,6 +639,22 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
+-- Rolling major-sales calendar: tags a promotion as one of the four
+-- recurring annual sale types WNDRR runs, so the Promotions screen can
+-- distinguish "the next occurrence of an annual sale" from an ad-hoc/
+-- custom promotion. Nullable and untouched for every existing promotion
+-- except Black Friday 2026 (backfilled below) -- a custom promotion is
+-- simply never tagged, and behaves exactly as it always has. No dates for
+-- Boxing Day/Birthday Sale/Mid Year Sale (or future years of any of the
+-- four) are seeded here -- there is no source of truth for them anywhere
+-- in this codebase/database (searched thoroughly), so nothing is guessed;
+-- see the accompanying report.
+ALTER TABLE promotions ADD COLUMN IF NOT EXISTS sale_type VARCHAR(20)
+  CHECK (sale_type IN ('black_friday', 'boxing_day', 'birthday_sale', 'mid_year_sale'));
+
+UPDATE promotions SET sale_type = 'black_friday' WHERE name = 'Black Friday 2026' AND sale_type IS NULL;
+
+-- ---------------------------------------------------------------------------
 -- Default Shoot Sizes (Settings -> Default Shoot Sizes): pre-fills each
 -- selected colourway's size when the "Shoot This Week" modal opens, keyed
 -- by garment type (top vs bottom) and, for bottoms, alpha vs waist sizing
