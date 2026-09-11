@@ -644,15 +644,77 @@ END $$;
 -- distinguish "the next occurrence of an annual sale" from an ad-hoc/
 -- custom promotion. Nullable and untouched for every existing promotion
 -- except Black Friday 2026 (backfilled below) -- a custom promotion is
--- simply never tagged, and behaves exactly as it always has. No dates for
--- Boxing Day/Birthday Sale/Mid Year Sale (or future years of any of the
--- four) are seeded here -- there is no source of truth for them anywhere
--- in this codebase/database (searched thoroughly), so nothing is guessed;
--- see the accompanying report.
+-- simply never tagged, and behaves exactly as it always has.
 ALTER TABLE promotions ADD COLUMN IF NOT EXISTS sale_type VARCHAR(20)
-  CHECK (sale_type IN ('black_friday', 'boxing_day', 'birthday_sale', 'mid_year_sale'));
+  CHECK (sale_type IN ('black_friday', 'boxing_day', 'birthday_sale', 'eofy_winter_sale'));
 
 UPDATE promotions SET sale_type = 'black_friday' WHERE name = 'Black Friday 2026' AND sale_type IS NULL;
+
+-- ---------------------------------------------------------------------------
+-- WNDRR Yearly Cadence: generates upcoming occurrences of the four
+-- recurring annual sales from their real source of truth -- the ISO
+-- calendar WEEK each one falls in (Birthday Sale W12-13, EOFY Winter Sale
+-- W28-30, Black Friday W46-48, Boxing Day W52-53), not a fixed date that
+-- would drift awkwardly copied year to year. For each sale type, this
+-- walks forward from the current ISO year until it finds the first
+-- occurrence that hasn't finished yet, seeds that one, then seeds the one
+-- after it too -- two occurrences of headroom per type, so the rolling
+-- "next 4 sales" view never runs dry between deploys even if nobody
+-- touches this file for a while.
+--
+-- Existing promotions are never touched: each occurrence is only inserted
+-- if no promotion already exists under its exact computed name (e.g.
+-- "Black Friday 2026") -- this is how the already-seeded/corrected Black
+-- Friday 2026 (real dates, four stages, 83 target) is left completely
+-- alone here, while "Black Friday 2027" still gets created fresh from the
+-- week pattern once its year comes up. New occurrences get NO campaign
+-- stages of their own -- never copies Black Friday's structure -- and the
+-- pre-existing "General" stage backfill (elsewhere in this file) is left
+-- exactly as-is, applying to these the same way it always has to any
+-- stage-less promotion.
+DO $$
+DECLARE
+  cadence RECORD;
+  candidate_year INTEGER;
+  occurrence_start DATE;
+  occurrence_end DATE;
+  occurrences_made INTEGER;
+  i INTEGER;
+BEGIN
+  FOR cadence IN
+    SELECT * FROM (VALUES
+      ('black_friday', 'Black Friday', 46, 48),
+      ('boxing_day', 'Boxing Day', 52, 53),
+      ('birthday_sale', 'Birthday Sale', 12, 13),
+      ('eofy_winter_sale', 'EOFY Winter Sale', 28, 30)
+    ) AS c(sale_type, name_prefix, week_start, week_end)
+  LOOP
+    candidate_year := EXTRACT(ISOYEAR FROM CURRENT_DATE)::INTEGER;
+    occurrences_made := 0;
+
+    -- Bounded to 6 years ahead so a malformed week number can never loop
+    -- forever -- in practice this always resolves within 1-2 iterations.
+    FOR i IN 0..6 LOOP
+      EXIT WHEN occurrences_made >= 2;
+
+      -- Postgres's IYYY-IW-ID format gives the Monday (ID=1) of a given
+      -- ISO week/year for the start, Sunday (ID=7) for the end.
+      occurrence_start := to_date(candidate_year || '-' || cadence.week_start || '-1', 'IYYY-IW-ID');
+      occurrence_end := to_date(candidate_year || '-' || cadence.week_end || '-7', 'IYYY-IW-ID');
+
+      IF occurrence_end >= CURRENT_DATE THEN
+        INSERT INTO promotions (name, start_date, end_date, sale_type)
+        SELECT cadence.name_prefix || ' ' || candidate_year, occurrence_start, occurrence_end, cadence.sale_type
+        WHERE NOT EXISTS (
+          SELECT 1 FROM promotions WHERE name = cadence.name_prefix || ' ' || candidate_year
+        );
+        occurrences_made := occurrences_made + 1;
+      END IF;
+
+      candidate_year := candidate_year + 1;
+    END LOOP;
+  END LOOP;
+END $$;
 
 -- ---------------------------------------------------------------------------
 -- Default Shoot Sizes (Settings -> Default Shoot Sizes): pre-fills each
