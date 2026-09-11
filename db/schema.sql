@@ -534,6 +534,44 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_meta_product_mappings_key
 ALTER TABLE promotion_stages ADD COLUMN IF NOT EXISTS due_date DATE;
 
 -- ---------------------------------------------------------------------------
+-- Black Friday 2026 starter promotion: seeds a Promotion Overview with a
+-- realistic multi-stage campaign structure (Hype / Sale Live Ads / Mid Sale
+-- Offers / Last Chance) instead of the single generic "General" stage every
+-- other promotion gets from the backfill above, since planning the biggest
+-- sale of the year needs a real example structure to start from. The four
+-- required_count values (20/30/25/8) are STARTING targets only -- fully
+-- editable afterwards from each stage card exactly like any other stage,
+-- and the Promotion Overview's totals (e.g. 83 target) are never stored
+-- anywhere; they're always computed live from whatever these four numbers
+-- currently are (see summarizePromotion in promotions.js), so editing,
+-- removing, reordering, or adding a stage updates the overview automatically
+-- with no extra code. Guarded to run only once: if a "Black Friday 2026"
+-- promotion already exists (created manually, or by an earlier boot of this
+-- block, and possibly since edited by the team), nothing here touches it
+-- again -- same never-overwrite convention as the "General" stage backfill
+-- above. Placed after that backfill so it never fires for this promotion
+-- (Black Friday gets its real stages in the same breath it's created).
+DO $$
+DECLARE
+  bf_id INTEGER;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM promotions WHERE name = 'Black Friday 2026') THEN
+    INSERT INTO promotions (name, start_date, end_date, notes)
+    VALUES (
+      'Black Friday 2026', '2026-11-12', '2026-12-01',
+      'Starter Campaign Stages seeded automatically -- rename, retarget, reorder, or add more stages as needed.'
+    )
+    RETURNING id INTO bf_id;
+
+    INSERT INTO promotion_stages (promotion_id, name, required_count, sort_order) VALUES
+      (bf_id, 'Hype', 20, 0),
+      (bf_id, 'Sale Live Ads', 30, 1),
+      (bf_id, 'Mid Sale Offers', 25, 2),
+      (bf_id, 'Last Chance / Ends Today', 8, 3);
+  END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
 -- Default Shoot Sizes (Settings -> Default Shoot Sizes): pre-fills each
 -- selected colourway's size when the "Shoot This Week" modal opens, keyed
 -- by garment type (top vs bottom) and, for bottoms, alpha vs waist sizing
