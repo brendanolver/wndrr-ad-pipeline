@@ -599,6 +599,46 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
+-- Remove the obsolete duplicate "Black Friday 2026" promotion. Root cause:
+-- the correction block above (and the original seed before it) only ever
+-- matches the exact string 'Black Friday 2026'. The live app already had a
+-- promotion whose name differs only by case/whitespace (e.g. the "BLACK
+-- FRIDAY 2026" spelling used earlier when this feature was first
+-- specified) -- that row never matched, so it was left behind untouched
+-- with its old single "Hype"/15 stage while a second, correctly-templated
+-- row got created (or corrected) under the exact-match name, producing two
+-- cards on the Promotions screen.
+--
+-- Only ever removes a case/whitespace-variant duplicate, and only when it
+-- is provably unused: no Shoot Plan items linked to any of its stages
+-- (i.e. nothing of production value would be lost). If a duplicate has any
+-- real linked data, it's left alone -- same "never destructively touch
+-- real progress" rule as everywhere else in this file -- for a human to
+-- look at instead of being silently deleted.
+DO $$
+DECLARE
+  bf_id INTEGER;
+  dup RECORD;
+BEGIN
+  SELECT id INTO bf_id FROM promotions WHERE name = 'Black Friday 2026';
+  IF bf_id IS NOT NULL THEN
+    FOR dup IN
+      SELECT id FROM promotions
+      WHERE id != bf_id AND TRIM(name) ILIKE 'black friday 2026'
+    LOOP
+      IF NOT EXISTS (
+        SELECT 1 FROM shoot_plan_items spi
+        JOIN promotion_stages ps ON ps.id = spi.promotion_stage_id
+        WHERE ps.promotion_id = dup.id
+      ) THEN
+        DELETE FROM promotion_stages WHERE promotion_id = dup.id;
+        DELETE FROM promotions WHERE id = dup.id;
+      END IF;
+    END LOOP;
+  END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
 -- Default Shoot Sizes (Settings -> Default Shoot Sizes): pre-fills each
 -- selected colourway's size when the "Shoot This Week" modal opens, keyed
 -- by garment type (top vs bottom) and, for bottoms, alpha vs waist sizing
