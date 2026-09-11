@@ -1015,3 +1015,54 @@ CREATE INDEX IF NOT EXISTS idx_final_edits_status ON final_edits(status);
 -- src/routes/editing.js's ready-for-approval endpoint.
 ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS editing_submitted_at TIMESTAMPTZ;
 ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS editing_submitted_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+
+-- ---------------------------------------------------------------------------
+-- Promotions: Creative Mix. A stage's Target (promotion_stages.required_count)
+-- is a creative-OUTPUT planning number, not a concept count -- one concept
+-- can later produce several finished assets, and that relationship isn't
+-- defined yet (deliberately out of scope here, see the brief this table
+-- was built from). Creative Mix is the lightweight layer that answers
+-- "what kind of creative, and how many of each, makes up this stage's
+-- target" -- e.g. Hype: Founder Video x2, UGC Video x5, Graphic Tile x4.
+-- creative_type is free text on purpose (no CHECK/enum): the starter list
+-- (Graphic Tile, GWP Video, UGC Video, ...) lives in the frontend only, as
+-- suggested options, so the team can add new types later with no code
+-- change. Quantities here are what promotions.js now reports as a stage's
+-- "planned" figure -- deliberately independent of shoot_plan_items/
+-- creative_assets ("Ready" still means real production progress, exactly
+-- as before; see promotions.js's READY_STATUSES) so a target can be
+-- over-planned here without implying anything has actually been produced.
+CREATE TABLE IF NOT EXISTS promotion_stage_creative_mix (
+  id SERIAL PRIMARY KEY,
+  promotion_stage_id INTEGER NOT NULL REFERENCES promotion_stages(id) ON DELETE CASCADE,
+  creative_type VARCHAR(255) NOT NULL,
+  quantity INTEGER NOT NULL DEFAULT 0 CHECK (quantity >= 0),
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_promotion_stage_creative_mix_stage_id ON promotion_stage_creative_mix(promotion_stage_id);
+
+-- One-time working example (per the brief: "Use BLACK FRIDAY 2026 as the
+-- working example"), not a template or a hardcoded structure -- Campaign
+-- Stages stay fully custom per promotion (see promotion_stages above), this
+-- just gives the team a real starting promotion to plan against instead of
+-- an empty list. Idempotent on name (never runs twice, never overwrites a
+-- promotion the team has since edited), same guarded-DO-block convention as
+-- the "General stage" backfill earlier in this file.
+DO $$
+DECLARE
+  bf_promo_id INTEGER;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM promotions WHERE name = 'Black Friday 2026') THEN
+    INSERT INTO promotions (name, start_date, end_date)
+    VALUES ('Black Friday 2026', '2026-11-12', '2026-12-01')
+    RETURNING id INTO bf_promo_id;
+
+    INSERT INTO promotion_stages (promotion_id, name, required_count, sort_order, due_date) VALUES
+      (bf_promo_id, 'Hype', 20, 0, '2026-11-11'),
+      (bf_promo_id, 'Sale Live', 30, 1, '2026-11-12'),
+      (bf_promo_id, 'Mid Sale Offers', 25, 2, '2026-11-21'),
+      (bf_promo_id, 'Last Chance / Ends Today', 8, 3, '2026-12-01');
+  END IF;
+END $$;

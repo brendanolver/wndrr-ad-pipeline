@@ -353,10 +353,33 @@
           <span id="promotion-stage-view-urgency" class="drop-card-status"></span>
         </div>
         <div id="promotion-stage-view-summary" class="drop-view-summary"></div>
-        <button class="btn btn-primary" id="promotion-stage-view-shoot-btn">+ Shoot This Week</button>
 
+        <!-- Creative Mix: what kind of creative, and how many of each, makes
+             up this stage's target -- a planning quantity, not a concept or
+             asset record (see promotion_stage_creative_mix in schema.sql).
+             creative_type is free text; the select below just offers a
+             starter list plus a custom option so the team isn't stuck
+             re-typing common types. -->
+        <div class="planning-section-header">
+          <h2>Creative Mix</h2>
+          <span class="admin-note" id="promotion-stage-mix-summary"></span>
+        </div>
+        <div id="promotion-stage-mix-list" class="promo-mix-list"></div>
+        <div class="promo-mix-add-row">
+          <select id="promotion-stage-mix-type-select" onchange="updatePromotionStageMixCustomVisibility()"></select>
+          <input type="text" id="promotion-stage-mix-custom-type" placeholder="Custom creative type" style="display:none;">
+          <input type="number" min="0" id="promotion-stage-mix-qty" placeholder="Qty" value="1">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="addPromotionStageCreativeMixItem()">+ Add Creative Type</button>
+        </div>
+
+        <!-- Once a specific product/style is genuinely ready to shoot for
+             this stage, this sends it into Concept Development -- a
+             separate, deliberate action from Creative Mix planning above,
+             not the primary way to plan a stage (see the brief: Promotion
+             planning must not jump straight to production). -->
         <div class="planning-section-header">
           <h2>What We Have</h2>
+          <button class="btn btn-ghost btn-sm" id="promotion-stage-view-shoot-btn">+ Send to Concept Development</button>
         </div>
         <div id="promotion-stage-view-items" class="jobs-grid"></div>
       </div>

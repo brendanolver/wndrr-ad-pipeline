@@ -2803,20 +2803,25 @@ async function removeShootPlanItem(id) {
 function promotionUrgencyColor(u) { return u === 'at_risk' ? 'red' : u === 'needs_attention' ? 'amber' : 'green'; }
 function promotionUrgencyLabel(u) { return u === 'at_risk' ? 'At Risk' : u === 'needs_attention' ? 'Needs Attention' : 'On Track'; }
 
+// Landing-tab card: a useful summary without opening the promotion -- Total
+// Planned/Ready up top, then every stage's own ready/target at a glance
+// (per-stage detail lives one click away on the promotion's own page, so
+// this stays a compact scan, not a second copy of the full stage grid).
 function promotionCardHtml(p) {
   const color = promotionUrgencyColor(p.status);
   const dateRange = p.end_date ? `${formatDate(p.start_date)} – ${formatDate(p.end_date)}` : formatDate(p.start_date);
-  const pct = p.summary.overall_pct;
+  const s = p.summary;
   return `
-    <div class="drop-card" data-promotion-id="${p.id}">
+    <div class="drop-card promo-summary-card" data-promotion-id="${p.id}">
       <div class="drop-card-header">
         <div class="drop-card-name">${escapeHtml(p.name)}</div>
         <div class="drop-card-status ${color === 'green' ? 'on-track' : color === 'amber' ? 'needs-attention' : 'at-risk'}">${promotionUrgencyLabel(p.status)}</div>
       </div>
       <div class="drop-card-date">${dateRange} · ${p.days_until_launch >= 0 ? p.days_until_launch + ' days to launch' : 'Launched'}</div>
-      <div class="drop-card-pct">${p.summary.total_ready} / ${p.summary.total_required} Ready${pct !== null ? ' — ' + pct + '%' : ''}</div>
-      ${pct !== null ? `<div class="coverage-progress-track"><div class="coverage-progress-fill ${color}" style="width:${Math.min(100, pct)}%;"></div></div>` : ''}
-      ${p.most_urgent_stage ? `<div class="drop-card-urgent">Next priority: ${escapeHtml(p.most_urgent_stage.name)} — ${p.most_urgent_stage.still_required} missing</div>` : ''}
+      <div class="promo-summary-line">${s.total_planned} / ${s.total_required} planned</div>
+      <div class="promo-summary-line">${s.total_ready} ready</div>
+      ${p.stages.length ? `<div class="promo-summary-stages">${p.stages.map((st) => `<span class="promo-summary-stage-chip">${escapeHtml(st.name)} ${st.ready}/${st.target}</span>`).join('')}</div>` : ''}
+      <div class="promo-summary-cta">Open Creative Plan &rarr;</div>
     </div>`;
 }
 
@@ -2911,9 +2916,9 @@ async function loadPromotionView(id) {
 // The prominent progress card at the top of a promotion's detail page --
 // same visual language as the Core weekly card (big %, thick progress bar,
 // pill breakdown) so Promotions reads as one of "the other WNDRR internal
-// dashboards" rather than a bespoke layout. Ready/Planned/Missing pills sum
-// to Total Required by construction (see summarizePromotion's total_planned
-// comment in promotions.js).
+// dashboards" rather than a bespoke layout. Total Target is always the live
+// sum of every stage's own target (see summarizePromotion in promotions.js)
+// -- editing one stage immediately changes it here, never hardcoded.
 function promotionOverviewHtml(p) {
   const color = promotionUrgencyColor(p.status);
   const dateRange = p.end_date ? `${formatDate(p.start_date)} – ${formatDate(p.end_date)}` : formatDate(p.start_date);
@@ -2924,19 +2929,20 @@ function promotionOverviewHtml(p) {
       <div class="promo-overview-top">
         <div>
           <div class="promo-overview-label">PROMOTION OVERVIEW</div>
-          <div class="promo-overview-dates">${dateRange}</div>
+          <div class="promo-overview-dates">${dateRange} · ${p.days_until_launch >= 0 ? p.days_until_launch + ' days to launch' : 'Launched'}</div>
         </div>
         <div class="drop-card-status ${color === 'green' ? 'on-track' : color === 'amber' ? 'needs-attention' : 'at-risk'}">${promotionUrgencyLabel(p.status)}</div>
       </div>
       <div class="promo-overview-pct-row">
         <div class="promo-overview-pct">${pct !== null ? pct + '%' : '—'}</div>
-        <div class="promo-overview-pct-sub">${s.total_ready} / ${s.total_required} Ready · ${p.days_until_launch >= 0 ? p.days_until_launch + ' days to launch' : 'Launched'}</div>
+        <div class="promo-overview-pct-sub">${s.total_ready} / ${s.total_required} Ready</div>
       </div>
       <div class="promo-overview-progress-track"><div class="promo-overview-progress-fill ${color}" style="width:${pct !== null ? Math.min(100, pct) : 0}%;"></div></div>
       <div class="promo-overview-pills">
-        <span class="promo-pill promo-pill-ready">${s.total_ready} Ready</span>
+        <span class="promo-pill promo-pill-target">${s.total_required} Target</span>
         <span class="promo-pill promo-pill-planned">${s.total_planned} Planned</span>
-        <span class="promo-pill promo-pill-missing">${s.total_missing} Missing</span>
+        <span class="promo-pill promo-pill-ready">${s.total_ready} Ready</span>
+        <span class="promo-pill promo-pill-missing">${s.total_missing} Remaining</span>
       </div>
     </div>`;
 }
@@ -2971,6 +2977,16 @@ function promotionStageGapLabel(s) {
   if (s.still_required <= 0) return '🟢 COVERAGE COMPLETE';
   const icon = s.urgency === 'at_risk' ? '🔴' : s.urgency === 'needs_attention' ? '🟠' : '🟢';
   return `${icon} ${s.still_required} still required`;
+}
+
+// Targets are minimum planning goals, not hard caps (per the brief) -- a
+// stage's Creative Mix total can legitimately exceed its target, and this
+// is the one line that says so plainly rather than clamping/hiding it.
+function promotionStagePlannedLabel(s) {
+  const diff = s.planned_vs_target;
+  if (diff > 0) return `${s.planned} allocated / ${s.target} target — Target exceeded by ${diff}`;
+  if (diff === 0 && s.target > 0) return `${s.planned} allocated / ${s.target} target — Fully allocated`;
+  return `${s.planned} allocated / ${s.target} target — ${-diff} still unallocated`;
 }
 
 function promotionStageItemRowHtml(item) {
@@ -3013,11 +3029,12 @@ function promotionStageCardHtml(stage, index, total) {
           <span>Ready: ${stage.ready}</span>
         </div>
         <div class="coverage-card-gap ${color}">${promotionStageGapLabel(stage)}</div>
+        <div class="promotion-stage-mix-summary-line ${stage.planned_vs_target > 0 ? 'exceeded' : ''}">${promotionStagePlannedLabel(stage)}</div>
         <label class="promotion-stage-required-row">Target
           <input type="number" min="0" class="promotion-stage-count-input" value="${stage.target}" onchange="savePromotionStageCount(${stage.id}, this.value)">
         </label>
         ${items.length ? `<div class="promotion-stage-item-list">${items.map(promotionStageItemRowHtml).join('')}</div>` : ''}
-        <button type="button" class="btn btn-primary btn-sm coverage-card-shoot-btn" onclick="shootThisWeekForPromotionStage(${stage.id})">+ Shoot This Week</button>
+        <button type="button" class="btn btn-primary btn-sm coverage-card-shoot-btn" onclick="event.stopPropagation(); window.location.hash = '#planning/promotion/${state.currentPromotionId}/stage/${stage.id}';">Plan Creative &rarr;</button>
       </div>
     </div>`;
 }
@@ -3200,11 +3217,12 @@ async function renderPromotionStageDetailView() {
     <div><strong>${dueLabel}</strong><br>Due date</div>
   `;
   document.getElementById('promotion-stage-view-shoot-btn').onclick = () => shootThisWeekForPromotionStage(stage.id);
+  renderPromotionStageMixList(stage);
 
   const items = stage.items || [];
   const grid = document.getElementById('promotion-stage-view-items');
   if (!items.length) {
-    grid.innerHTML = '<div class="attention-empty">Nothing shot for this stage yet — click "+ Shoot This Week" to send the first requirement into Concept Development.</div>';
+    grid.innerHTML = '<div class="attention-empty">Nothing shot for this stage yet — click "+ Send to Concept Development" to send the first requirement in.</div>';
     return;
   }
 
@@ -3232,6 +3250,103 @@ async function renderPromotionStageDetailView() {
         if (asset) openAssetModal(asset);
       });
     });
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// ── Creative Mix: per-stage planned creative-output breakdown ─────────
+// A starter list of common WNDRR creative types (per the brief), never a
+// closed set -- "+ Custom Creative Type" always lets the team add one that
+// isn't listed, with no code change needed on the backend (creative_type is
+// free text there, see schema.sql). Kept as a plain JS array, not an admin-
+// editable list, since it's just default suggestions, not a source of truth.
+const CREATIVE_MIX_TYPE_OPTIONS = [
+  'Graphic Tile', 'GWP Graphic', 'GWP Video', 'GIF', 'PNG Frame — Single', 'PNG Frame — Carousel',
+  'DPA', 'Price Strikethrough', 'Founder Video', 'EGC Video', 'UGC Video', 'BAU Video', 'Campaign Video', 'Other Video',
+];
+const CREATIVE_MIX_CUSTOM_VALUE = '__custom__';
+
+function populatePromotionStageMixTypeSelect() {
+  const select = document.getElementById('promotion-stage-mix-type-select');
+  select.innerHTML = CREATIVE_MIX_TYPE_OPTIONS.map((t) => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('')
+    + `<option value="${CREATIVE_MIX_CUSTOM_VALUE}">+ Custom Creative Type</option>`;
+  select.value = CREATIVE_MIX_TYPE_OPTIONS[0];
+  updatePromotionStageMixCustomVisibility();
+}
+
+function updatePromotionStageMixCustomVisibility() {
+  const select = document.getElementById('promotion-stage-mix-type-select');
+  const customInput = document.getElementById('promotion-stage-mix-custom-type');
+  const isCustom = select.value === CREATIVE_MIX_CUSTOM_VALUE;
+  customInput.style.display = isCustom ? '' : 'none';
+  if (isCustom) customInput.focus();
+}
+
+function promotionStageMixRowHtml(item) {
+  return `
+    <div class="promo-mix-row" data-mix-id="${item.id}">
+      <span class="promo-mix-type">${escapeHtml(item.creative_type)}</span>
+      <input type="number" min="0" class="promo-mix-qty-input" value="${item.quantity}" onchange="savePromotionStageMixQuantity(${item.id}, this.value)">
+      <button type="button" class="btn btn-ghost btn-sm" onclick="deletePromotionStageMixItem(${item.id})">Remove</button>
+    </div>`;
+}
+
+// Sum of the mix is what promotions.js now reports back as the stage's own
+// `planned` (see fetchStagesWithCoverage) -- rendered here from that same
+// field rather than re-summed client-side, so the two can never drift.
+function renderPromotionStageMixList(stage) {
+  populatePromotionStageMixTypeSelect();
+  document.getElementById('promotion-stage-mix-custom-type').value = '';
+  document.getElementById('promotion-stage-mix-qty').value = '1';
+
+  const rows = stage.creative_mix || [];
+  const list = document.getElementById('promotion-stage-mix-list');
+  list.innerHTML = rows.length
+    ? rows.map(promotionStageMixRowHtml).join('')
+    : '<div class="attention-empty">No Creative Mix planned yet — add a creative type below to start planning this stage\'s output.</div>';
+
+  document.getElementById('promotion-stage-mix-summary').textContent = promotionStagePlannedLabel(stage);
+}
+
+async function addPromotionStageCreativeMixItem() {
+  const select = document.getElementById('promotion-stage-mix-type-select');
+  const customInput = document.getElementById('promotion-stage-mix-custom-type');
+  const qtyInput = document.getElementById('promotion-stage-mix-qty');
+  const creative_type = select.value === CREATIVE_MIX_CUSTOM_VALUE ? customInput.value.trim() : select.value;
+  if (!creative_type) return toast('Enter a custom creative type', true);
+  const quantity = Number(qtyInput.value);
+  if (!Number.isFinite(quantity) || quantity < 0) return toast('Quantity must be 0 or more', true);
+
+  try {
+    await api(`/promotions/stages/${state.currentPromotionStageId}/creative-mix`, {
+      method: 'POST',
+      body: JSON.stringify({ creative_type, quantity }),
+    });
+    await loadPromotionStageView(state.currentPromotionId, state.currentPromotionStageId);
+    renderPromotionsRow();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function savePromotionStageMixQuantity(id, value) {
+  const quantity = Number(value);
+  if (!Number.isFinite(quantity) || quantity < 0) return toast('Quantity must be 0 or more', true);
+  try {
+    await api(`/promotions/creative-mix/${id}`, { method: 'PUT', body: JSON.stringify({ quantity }) });
+    await loadPromotionStageView(state.currentPromotionId, state.currentPromotionStageId);
+    renderPromotionsRow();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function deletePromotionStageMixItem(id) {
+  try {
+    await api(`/promotions/creative-mix/${id}`, { method: 'DELETE' });
+    await loadPromotionStageView(state.currentPromotionId, state.currentPromotionStageId);
+    renderPromotionsRow();
   } catch (e) {
     toast(e.message, true);
   }

@@ -422,6 +422,12 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .promotion-stage-due-row{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11.5px;color:var(--text-muted);margin-bottom:9px;}
 .promotion-stage-due-input{font-size:11.5px;padding:3px 5px;width:130px;}
 .promotion-stage-stats-row{display:flex;gap:14px;font-size:12px;color:var(--text-secondary);margin:5px 0;}
+/* Creative Mix allocation-vs-target line on the stage card -- deliberately
+   its own colour signal, separate from the Ready-driven urgency badge
+   above, since "exceeded" here is informational (targets are minimum
+   planning goals, not caps), never a warning. */
+.promotion-stage-mix-summary-line{font-size:11.5px;color:var(--text-muted);margin-bottom:9px;}
+.promotion-stage-mix-summary-line.exceeded{color:var(--teal-dark);font-weight:600;}
 
 /* Promotion detail page overview -- same visual language as the Core
    weekly card (icon-free variant: big %, thick progress bar, pill
@@ -441,9 +447,29 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .promo-overview-progress-fill.red{background:var(--red);}
 .promo-overview-pills{display:flex;gap:8px;flex-wrap:wrap;}
 .promo-pill{padding:4px 10px;border-radius:var(--r-pill);font-size:11px;font-weight:700;}
+.promo-pill-target{background:var(--surface2);color:var(--text-secondary);}
 .promo-pill-ready{background:var(--green-light);color:var(--green);}
 .promo-pill-planned{background:var(--amber-light);color:var(--amber);}
 .promo-pill-missing{background:var(--red-light);color:var(--red);}
+
+/* Creative Mix -- per-stage planning quantities by type (see
+   promotion_stage_creative_mix in schema.sql). Plain rows, not a table --
+   this list is usually short (a handful of creative types per stage). */
+.promo-mix-list{display:flex;flex-direction:column;gap:6px;margin-bottom:10px;}
+.promo-mix-row{display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:8px 12px;}
+.promo-mix-type{flex:1;min-width:0;font-size:13px;font-weight:600;color:var(--text);}
+.promo-mix-qty-input{width:64px;}
+.promo-mix-add-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:20px;}
+.promo-mix-add-row select{flex:1;min-width:160px;}
+.promo-mix-add-row input[type="text"]{flex:1;min-width:160px;}
+.promo-mix-add-row input[type="number"]{width:70px;}
+
+/* Landing-tab promotion card -- adds a compact per-stage chip row and its
+   own CTA line beneath the shared .drop-card shell (see promotionCardHtml). */
+.promo-summary-line{font-size:13px;color:var(--text-secondary);font-weight:600;margin-bottom:2px;}
+.promo-summary-stages{display:flex;flex-wrap:wrap;gap:6px;margin:9px 0;}
+.promo-summary-stage-chip{background:var(--surface2);border-radius:var(--r-pill);padding:3px 9px;font-size:11px;font-weight:600;color:var(--text-secondary);}
+.promo-summary-cta{font-size:12px;font-weight:700;color:var(--teal-dark);margin-top:9px;border-top:1px solid var(--border);padding-top:9px;}
 
 .back-link{background:none;border:none;color:var(--teal-dark);font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;padding:0;margin-bottom:14px;display:inline-block;}
 .back-link:hover{text-decoration:underline;}

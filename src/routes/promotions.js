@@ -12,6 +12,15 @@ const router = express.Router();
 // (the bug this whole redesign replaces: counting any linked item as
 // "covered" regardless of status).
 const READY_STATUSES = new Set(['qc', 'uploaded_live']);
+
+// "Planned" is a stage's Creative Mix allocation total (see
+// promotion_stage_creative_mix in schema.sql) -- a lightweight, editable
+// planning-quantity layer, deliberately independent of "Ready" above. A
+// stage target is a creative-OUTPUT planning goal, not a concept count (one
+// concept can later produce several finished assets -- that relationship is
+// intentionally not modelled yet), so Planned here can legitimately exceed
+// Target; nothing in this file treats Planned as fulfilling the requirement
+// the way Ready does.
 const URGENCY_RANK = { at_risk: 2, needs_attention: 1, on_track: 0 };
 const URGENCY_DUE_SOON_DAYS = 7;
 const URGENCY_DUE_APPROACHING_DAYS = 21;
@@ -29,11 +38,14 @@ function stageUrgency(stillRequired, daysUntilDue) {
   return 'on_track';
 }
 
-// counts: { ready, planned } -- planned is EVERY shoot_plan_item linked to
-// this stage regardless of status ("committed into the workflow"), ready is
-// the ones through qc/uploaded_live. still_required (not "planned") is what
-// drives urgency and the headline gap badge -- per the spec, planned
-// creative is never treated as fully covering the requirement.
+// counts: { ready, planned } -- ready is shoot_plan_items linked to this
+// stage that have reached qc/uploaded_live (real production progress);
+// planned is the stage's Creative Mix quantity total (see the comment on
+// READY_STATUSES above). still_required/urgency are driven by ready alone
+// -- per the spec, planned creative is never treated as fully covering the
+// requirement. planned_vs_target is the signed gap the Creative Mix UI
+// needs to show "N still unallocated" or "Target exceeded by N" from one
+// number, since targets are minimum planning goals, not hard caps.
 function summarizeStage(stage, { ready = 0, planned = 0 } = {}) {
   const target = stage.required_count;
   const stillRequired = Math.max(0, target - ready);
@@ -46,6 +58,7 @@ function summarizeStage(stage, { ready = 0, planned = 0 } = {}) {
     target,
     ready,
     planned,
+    planned_vs_target: planned - target,
     still_required: stillRequired,
     coverage_pct: coveragePct,
     days_until_due: daysUntilDue,
@@ -54,14 +67,15 @@ function summarizeStage(stage, { ready = 0, planned = 0 } = {}) {
 }
 
 function summarizePromotion(promotion, stages) {
+  // Total Target is always the live sum of each stage's own target -- never
+  // hardcoded -- so editing one stage's target immediately changes this.
   const totalRequired = stages.reduce((sum, s) => sum + s.target, 0);
   const totalReady = stages.reduce((sum, s) => sum + s.ready, 0);
-  // The overview's "Planned" bucket is deliberately the NOT-yet-ready
-  // portion of each stage's committed work (not each stage's own raw
-  // "planned" count, which includes its ready items too) -- so Ready +
-  // Planned + Missing always adds back up to Total Required for the
-  // progress-bar breakdown, matching the spec's own worked example.
-  const totalPlanned = stages.reduce((sum, s) => sum + Math.max(0, s.planned - s.ready), 0);
+  // Total Planned is the raw sum of every stage's Creative Mix allocation
+  // (see READY_STATUSES comment above) -- independent of Ready, since the
+  // two are separate measurement systems (real production status vs.
+  // lightweight planning quantity) with no structural overlap to subtract.
+  const totalPlanned = stages.reduce((sum, s) => sum + s.planned, 0);
   const totalMissing = Math.max(0, totalRequired - totalReady - totalPlanned);
   const overallPct = totalRequired > 0 ? Math.round((totalReady / totalRequired) * 100) : null;
   const daysUntilLaunch = Math.ceil((new Date(promotion.start_date) - new Date()) / 86400000);
@@ -121,7 +135,8 @@ async function fetchStagesWithCoverage(promotionIds) {
     [promotionIds]
   );
   const stageIds = stagesResult.rows.map((s) => s.id);
-  const coveredResult = stageIds.length
+
+  const readyResult = stageIds.length
     ? await pool.query(
         `SELECT spi.promotion_stage_id, ca.status FROM shoot_plan_items spi
          LEFT JOIN creative_assets ca ON ca.id = spi.asset_id
@@ -129,18 +144,29 @@ async function fetchStagesWithCoverage(promotionIds) {
         [stageIds]
       )
     : { rows: [] };
-  const countsByStage = new Map();
-  for (const row of coveredResult.rows) {
-    const counts = countsByStage.get(row.promotion_stage_id) || { ready: 0, planned: 0 };
-    counts.planned += 1;
-    if (READY_STATUSES.has(row.status)) counts.ready += 1;
-    countsByStage.set(row.promotion_stage_id, counts);
+  const readyByStage = new Map();
+  for (const row of readyResult.rows) {
+    if (!READY_STATUSES.has(row.status)) continue;
+    readyByStage.set(row.promotion_stage_id, (readyByStage.get(row.promotion_stage_id) || 0) + 1);
   }
+
+  const mixResult = stageIds.length
+    ? await pool.query(
+        `SELECT promotion_stage_id, COALESCE(SUM(quantity), 0)::int AS total
+         FROM promotion_stage_creative_mix WHERE promotion_stage_id = ANY($1::int[])
+         GROUP BY promotion_stage_id`,
+        [stageIds]
+      )
+    : { rows: [] };
+  const plannedByStage = new Map(mixResult.rows.map((r) => [r.promotion_stage_id, r.total]));
 
   const stagesByPromotion = new Map();
   for (const stage of stagesResult.rows) {
     if (!stagesByPromotion.has(stage.promotion_id)) stagesByPromotion.set(stage.promotion_id, []);
-    stagesByPromotion.get(stage.promotion_id).push(summarizeStage(stage, countsByStage.get(stage.id)));
+    stagesByPromotion.get(stage.promotion_id).push(summarizeStage(stage, {
+      ready: readyByStage.get(stage.id) || 0,
+      planned: plannedByStage.get(stage.id) || 0,
+    }));
   }
   return stagesByPromotion;
 }
@@ -204,7 +230,23 @@ router.get('/:id', async (req, res, next) => {
         created_at: row.created_at,
       });
     }
-    const stagesWithItems = stages.map((s) => ({ ...s, items: itemsByStage.get(s.id) || [] }));
+    const mixRowsResult = stageIds.length
+      ? await pool.query(
+          `SELECT * FROM promotion_stage_creative_mix WHERE promotion_stage_id = ANY($1::int[]) ORDER BY sort_order ASC, id ASC`,
+          [stageIds]
+        )
+      : { rows: [] };
+    const mixByStage = new Map();
+    for (const row of mixRowsResult.rows) {
+      if (!mixByStage.has(row.promotion_stage_id)) mixByStage.set(row.promotion_stage_id, []);
+      mixByStage.get(row.promotion_stage_id).push(row);
+    }
+
+    const stagesWithItems = stages.map((s) => ({
+      ...s,
+      items: itemsByStage.get(s.id) || [],
+      creative_mix: mixByStage.get(s.id) || [],
+    }));
 
     res.json(summarizePromotion(promotion, stagesWithItems));
   } catch (err) {
@@ -315,15 +357,20 @@ router.put('/stages/:stageId', async (req, res, next) => {
       `UPDATE promotion_stages SET name = $1, required_count = $2, due_date = $3, updated_at = now() WHERE id = $4 RETURNING *`,
       [nextName, nextCount, nextDueDate, req.params.stageId]
     );
-    const coveredResult = await pool.query(
-      `SELECT ca.status FROM shoot_plan_items spi
-       LEFT JOIN creative_assets ca ON ca.id = spi.asset_id
-       WHERE spi.promotion_stage_id = $1`,
-      [req.params.stageId]
-    );
-    const counts = { ready: 0, planned: 0 };
+    const [coveredResult, mixResult] = await Promise.all([
+      pool.query(
+        `SELECT ca.status FROM shoot_plan_items spi
+         LEFT JOIN creative_assets ca ON ca.id = spi.asset_id
+         WHERE spi.promotion_stage_id = $1`,
+        [req.params.stageId]
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(quantity), 0)::int AS total FROM promotion_stage_creative_mix WHERE promotion_stage_id = $1`,
+        [req.params.stageId]
+      ),
+    ]);
+    const counts = { ready: 0, planned: mixResult.rows[0].total };
     for (const row of coveredResult.rows) {
-      counts.planned += 1;
       if (READY_STATUSES.has(row.status)) counts.ready += 1;
     }
     res.json(summarizeStage(result.rows[0], counts));
@@ -336,6 +383,74 @@ router.delete('/stages/:stageId', async (req, res, next) => {
   try {
     const result = await pool.query('DELETE FROM promotion_stages WHERE id = $1 RETURNING id', [req.params.stageId]);
     if (!result.rows.length) return res.status(404).json({ error: 'Stage not found' });
+    res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── Creative Mix: a stage's planned creative-output breakdown by type
+// (Founder Video x2, UGC Video x5, ...) -- see promotion_stage_creative_mix
+// in schema.sql for why this is deliberately separate from Ready/
+// shoot_plan_items. creative_type is free text, never validated against a
+// fixed list -- the frontend offers a starter set of common types plus a
+// custom option, but any string is accepted here so the team can introduce
+// new types without a code change. ──
+
+router.post('/stages/:stageId/creative-mix', async (req, res, next) => {
+  try {
+    const { creative_type, quantity } = req.body || {};
+    if (!creative_type || !creative_type.trim()) return res.status(400).json({ error: 'creative_type is required' });
+    const qty = quantity === undefined ? 0 : Number(quantity);
+    if (!Number.isFinite(qty) || qty < 0) return res.status(400).json({ error: 'quantity must be a non-negative number' });
+
+    const stage = await pool.query('SELECT id FROM promotion_stages WHERE id = $1', [req.params.stageId]);
+    if (!stage.rows.length) return res.status(404).json({ error: 'Stage not found' });
+
+    const maxOrder = await pool.query(
+      'SELECT COALESCE(MAX(sort_order), -1) AS max_order FROM promotion_stage_creative_mix WHERE promotion_stage_id = $1',
+      [req.params.stageId]
+    );
+    const result = await pool.query(
+      `INSERT INTO promotion_stage_creative_mix (promotion_stage_id, creative_type, quantity, sort_order)
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [req.params.stageId, creative_type.trim(), qty, maxOrder.rows[0].max_order + 1]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put('/creative-mix/:id', async (req, res, next) => {
+  try {
+    const { creative_type, quantity } = req.body || {};
+    const existing = await pool.query('SELECT * FROM promotion_stage_creative_mix WHERE id = $1', [req.params.id]);
+    if (!existing.rows.length) return res.status(404).json({ error: 'Creative mix item not found' });
+    const current = existing.rows[0];
+
+    const nextType = creative_type !== undefined && creative_type.trim() ? creative_type.trim() : current.creative_type;
+    let nextQty = current.quantity;
+    if (quantity !== undefined) {
+      const qty = Number(quantity);
+      if (!Number.isFinite(qty) || qty < 0) return res.status(400).json({ error: 'quantity must be a non-negative number' });
+      nextQty = qty;
+    }
+
+    const result = await pool.query(
+      `UPDATE promotion_stage_creative_mix SET creative_type = $1, quantity = $2, updated_at = now() WHERE id = $3 RETURNING *`,
+      [nextType, nextQty, req.params.id]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/creative-mix/:id', async (req, res, next) => {
+  try {
+    const result = await pool.query('DELETE FROM promotion_stage_creative_mix WHERE id = $1 RETURNING id', [req.params.id]);
+    if (!result.rows.length) return res.status(404).json({ error: 'Creative mix item not found' });
     res.status(204).end();
   } catch (err) {
     next(err);
