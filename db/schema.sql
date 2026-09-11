@@ -717,6 +717,64 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
+-- Standard creative structure for recurring main sales: applies the same
+-- four Campaign Stages Black Friday already uses (Hype Ads 20, Sale Live
+-- Ads 30, Mid Sale Offers Ads 25, Last Chance / Ends Today 8, total 83) to
+-- every OTHER recurring annual sale generated above (Boxing Day, Birthday
+-- Sale, EOFY Winter Sale, and any future year of any of the four types) --
+-- these are starting targets only, editable per stage exactly like Black
+-- Friday's, not a permanent rule. Part of the same recurring migration
+-- set, so a newly generated occurrence (e.g. Black Friday 2027, once its
+-- cycle comes up) gets this structure automatically the same deploy it's
+-- created, with no separate step required.
+--
+-- Never touches "Black Friday 2026" itself (explicit name guard, on top
+-- of the structural check below already making it a no-op there). Only
+-- ever applies to a promotion that is CLEARLY still on the untouched
+-- default: either zero stages, or exactly one stage literally named
+-- "General" with required_count = 1 -- exactly what the "General"
+-- backfill above creates, and not something a person would deliberately
+-- configure as their real structure. A promotion carrying any other stage
+-- setup -- partial, renamed, or fully custom -- is left completely alone,
+-- protecting real manual configuration per the safeguard. Also idempotent
+-- against itself: a promotion that already has all four of these stage
+-- names (even alongside extra stages someone has since added) is skipped
+-- outright, so re-running this block can never create duplicates.
+DO $$
+DECLARE
+  promo RECORD;
+  stage_names TEXT[];
+BEGIN
+  FOR promo IN
+    SELECT id, name FROM promotions
+    WHERE sale_type IS NOT NULL AND name != 'Black Friday 2026'
+  LOOP
+    SELECT array_agg(name) INTO stage_names FROM promotion_stages WHERE promotion_id = promo.id;
+
+    CONTINUE WHEN stage_names @> ARRAY['Hype Ads', 'Sale Live Ads', 'Mid Sale Offers Ads', 'Last Chance / Ends Today'];
+
+    IF stage_names IS NULL THEN
+      INSERT INTO promotion_stages (promotion_id, name, required_count, sort_order) VALUES
+        (promo.id, 'Hype Ads', 20, 0),
+        (promo.id, 'Sale Live Ads', 30, 1),
+        (promo.id, 'Mid Sale Offers Ads', 25, 2),
+        (promo.id, 'Last Chance / Ends Today', 8, 3);
+    ELSIF stage_names = ARRAY['General'] AND EXISTS (
+      SELECT 1 FROM promotion_stages WHERE promotion_id = promo.id AND name = 'General' AND required_count = 1
+    ) THEN
+      DELETE FROM promotion_stages WHERE promotion_id = promo.id AND name = 'General' AND required_count = 1;
+      INSERT INTO promotion_stages (promotion_id, name, required_count, sort_order) VALUES
+        (promo.id, 'Hype Ads', 20, 0),
+        (promo.id, 'Sale Live Ads', 30, 1),
+        (promo.id, 'Mid Sale Offers Ads', 25, 2),
+        (promo.id, 'Last Chance / Ends Today', 8, 3);
+    END IF;
+    -- Any other existing stage configuration (partial, renamed, or fully
+    -- custom) is left completely alone.
+  END LOOP;
+END $$;
+
+-- ---------------------------------------------------------------------------
 -- Default Shoot Sizes (Settings -> Default Shoot Sizes): pre-fills each
 -- selected colourway's size when the "Shoot This Week" modal opens, keyed
 -- by garment type (top vs bottom) and, for bottoms, alpha vs waist sizing
