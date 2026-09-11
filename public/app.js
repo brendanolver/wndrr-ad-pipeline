@@ -5241,66 +5241,21 @@ function formatTuesdayReviewDate(iso) {
   return new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
 }
 
-// One selectable row per hook -- the team picks exactly ONE winning hook
-// to run with, not an opt-out multi-select, so this renders as a plain
-// button (no checkbox/tick, which would imply "any number") and only the
-// chosen row gets a highlight. Nothing is pre-selected by default: a fresh
-// concept, or a legacy one with no `selected` flag at all, shows every row
-// unhighlighted until the team actually picks one -- see
-// selectTuesdayReviewHook and the isSelected === true check below.
-function tuesdayReviewHookRowHtml(h, index, readOnly, isSelected) {
+// Read-only row per hook -- ALL hooks belonging to an approved concept get
+// filmed (the backend/body of the video can be shared, with each hook shot
+// as its own opening variation), so Tuesday Review is not a "pick the one
+// winning hook" decision. Primary / Alt 01 / Alt 02 remain as organising
+// labels only -- every row displays neutrally, with no highlight/selection
+// state and no click action. See the Shoot Brief (renderShootingBriefStructured
+// in this file), which already renders every hook as its own "Film All"
+// capture item regardless of any legacy `selected` flag.
+function tuesdayReviewHookRowHtml(h, index) {
   const tag = index === 0 ? 'Primary' : `Alt ${String(index).padStart(2, '0')}`;
   return `
-    <button type="button" class="tr-hook-row ${isSelected ? 'tr-hook-selected' : ''}" ${readOnly ? 'disabled' : ''} onclick="selectTuesdayReviewHook(${index})">
-      <span class="tr-hook-tag ${index === 0 ? 'tr-hook-tag-primary' : ''}">${tag}</span>
+    <div class="tr-hook-row">
+      <span class="tr-hook-tag">${tag}</span>
       <div class="tr-hook-text">&ldquo;${escapeHtml(h.text.trim())}&rdquo;</div>
-    </button>`;
-}
-
-// Selecting a hook marks exactly one entry in state.tuesdayReview.currentHooks
-// as selected (and every other entry as not) for instant visual feedback,
-// then saves it immediately via the same general-edit endpoint Concept
-// Development itself uses for hook_variations -- deliberately not left as
-// in-memory-only: deciding on ANY other concept in the week (Approve/
-// Request Changes/Kill) reloads the whole week's data from the server (see
-// submitTuesdayReviewDecision), which would silently wipe an unsaved
-// selection on a concept the team hasn't gotten to yet. Saving on click is
-// what actually makes the choice survive closing/reopening this modal, or
-// coming back to this concept later in the same meeting. Approve for
-// Shooting still resends it (see approveTuesdayReviewConcept) so the two
-// stay in sync even if this save is still in flight.
-async function selectTuesdayReviewHook(index) {
-  const hooks = state.tuesdayReview.currentHooks;
-  if (!hooks || !hooks[index]) return;
-  hooks.forEach((h, i) => { h.selected = i === index; });
-  const rows = document.querySelectorAll('#tr-review-hooks .tr-hook-row');
-  rows.forEach((row, i) => row.classList.toggle('tr-hook-selected', i === index));
-  hideTuesdayReviewHookSelectionError();
-
-  const entry = state.tuesdayReview.queue[state.tuesdayReview.queueIndex];
-  if (!entry) return;
-  try {
-    await api(`/concept-development/concepts/${entry.concept.id}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ hook_variations: hooks }),
-    });
-  } catch (e) {
-    toast(e.message, true);
-  }
-}
-
-function showTuesdayReviewHookSelectionError() {
-  const el = document.getElementById('tr-review-hooks-error');
-  if (!el) return;
-  el.textContent = 'Select a hook to approve this concept for shooting.';
-  el.classList.add('show');
-}
-
-function hideTuesdayReviewHookSelectionError() {
-  const el = document.getElementById('tr-review-hooks-error');
-  if (!el) return;
-  el.classList.remove('show');
-  el.textContent = '';
+    </div>`;
 }
 
 // One compact label/value row per populated Shoot Setup field -- only
@@ -5386,24 +5341,14 @@ function renderTuesdayReviewConcept() {
   whyCareWrap.style.display = hasWhyCare ? '' : 'none';
   if (hasWhyCare) document.getElementById('tr-review-why-care').textContent = concept.avatar_why_care.trim();
 
-  // Hooks double as the Tuesday Review single-hook-selection decision --
-  // the exact objects filtered into `hooks` are the same references living
-  // inside concept.hook_variations, so selecting a row (see
-  // selectTuesdayReviewHook) mutates the concept in place with no extra
-  // bookkeeping. Kept on state so the click handler can reach them without
-  // re-deriving the same filter (and risking a mismatched index).
+  // Every hook belonging to this concept gets filmed if the concept is
+  // approved -- Tuesday Review is not choosing a single winning hook here,
+  // just displaying them (see tuesdayReviewHookRowHtml).
   const hooks = (Array.isArray(concept.hook_variations) ? concept.hook_variations : []).filter((h) => h && h.text && h.text.trim());
-  state.tuesdayReview.currentHooks = hooks;
-  // Selection only makes sense while this concept is still awaiting a
-  // decision -- once it's been Approved/Changes Required/Killed, the rows
-  // just show whichever one was (or, for a concept never touched by this
-  // feature, none) selected, read-only.
-  const hooksReadOnly = concept.concept_dev_status !== 'ready_for_review';
   const hooksEl = document.getElementById('tr-review-hooks');
   hooksEl.innerHTML = hooks.length
-    ? hooks.map((h, i) => tuesdayReviewHookRowHtml(h, i, hooksReadOnly, h.selected === true)).join('')
+    ? hooks.map((h, i) => tuesdayReviewHookRowHtml(h, i)).join('')
     : '<div class="tr-review-subtle">No specific Hook / Opening provided</div>';
-  hideTuesdayReviewHookSelectionError();
 
   // Structured Shots: read-only here -- Tuesday Review only needs to
   // confirm it's clear what to shoot (and where), not to edit it. Legacy
@@ -5533,23 +5478,15 @@ function tuesdayReviewAdvanceAfterDecision() {
   renderTuesdayReviewList();
 }
 
-// Approving is the one decision that also persists the Tuesday Review
-// single-hook selection (see selectTuesdayReviewHook) -- blocks with an
-// inline message rather than an alert() unless exactly one hook is marked
-// selected. A concept with zero hooks (shouldn't normally happen -- the
-// Concept Development gate requires a Primary hook) skips this entirely
-// rather than blocking an otherwise-valid approval.
+// Approving moves the whole concept -- every one of its hooks included --
+// into Shooting as a single unit. There is no per-hook decision here: all
+// hooks the concept has get filmed (the shared backend/body footage can be
+// reused across each hook's opening), so nothing about hook_variations
+// needs to be sent or validated on approval.
 async function approveTuesdayReviewConcept() {
   const entry = state.tuesdayReview.queue[state.tuesdayReview.queueIndex];
   if (!entry) return;
-  const hooks = state.tuesdayReview.currentHooks || [];
-  const selectedCount = hooks.filter((h) => h.selected === true).length;
-  if (hooks.length && selectedCount !== 1) {
-    showTuesdayReviewHookSelectionError();
-    return;
-  }
-  const extra = hooks.length ? { hook_variations: hooks } : {};
-  await submitTuesdayReviewDecision(entry.concept.id, 'approved', extra);
+  await submitTuesdayReviewDecision(entry.concept.id, 'approved', {});
 }
 
 function openTuesdayReviewChangesModal() {

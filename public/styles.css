@@ -1426,16 +1426,10 @@ main{flex:1;min-width:0;padding:20px 24px;}
    Primary tag keeps a distinguishing color purely as a label ("this was
    proposed as the primary hook"), independent of which row is selected. */
 .tr-hook-list{display:flex;flex-direction:column;}
-.tr-hook-row{display:flex;flex-direction:row;align-items:center;gap:10px;width:100%;padding:7px 9px;border:1px solid transparent;border-radius:var(--r);background:none;font-family:inherit;text-align:left;cursor:pointer;}
+.tr-hook-row{display:flex;flex-direction:row;align-items:center;gap:10px;width:100%;padding:7px 9px;}
 .tr-hook-row + .tr-hook-row{margin-top:2px;}
-.tr-hook-row:not(:disabled):hover{background:var(--surface2);}
-.tr-hook-row:focus-visible{outline:2px solid var(--teal);outline-offset:1px;}
-.tr-hook-row:disabled{cursor:default;}
 .tr-hook-tag{flex:0 0 54px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);}
-.tr-hook-tag.tr-hook-tag-primary{color:var(--teal-dark);}
 .tr-hook-text{font-size:13.5px;font-weight:600;color:var(--text);}
-.tr-hook-row.tr-hook-selected{background:var(--teal-light);border-color:var(--teal);}
-.tr-hook-row.tr-hook-selected .tr-hook-text{font-size:14px;}
 
 /* What to Shoot: each Shot is a compact visual card, not a paragraph --
    Shot Type and Location sit on the same line (what + where, together at
