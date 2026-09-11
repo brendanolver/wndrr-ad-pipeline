@@ -527,6 +527,80 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_meta_product_mappings_key
   ON meta_product_mappings (UPPER(meta_product), UPPER(meta_product_type));
 
 -- ---------------------------------------------------------------------------
+-- Meta Ads Stage 1: durable per-ad storage. Previously metaAds.js only ever
+-- held a transient in-memory list of ACTIVE ad *names*, recomputed from
+-- scratch every 45-minute cache refresh and never persisted -- no ad ID, ad
+-- set ID, campaign ID, or creative ID was ever stored, and the parser
+-- assumed a "+"-delimited "Product + Product Type" name that doesn't match
+-- the team's real underscore-delimited 11-field naming template (Batch No.,
+-- Week No., Date, Product, Product Type, Hook, Media, Ad Type, Creator,
+-- Concept, URL Link Page -- see metaAdNameTemplate.js). This table is the
+-- foundation fix: one durable row per real Meta ad, upserted idempotently
+-- by meta_ad_id on every sync (see metaAds.js's syncMetaAdsToDb).
+--
+-- Deliberately does NOT attempt to map an ad to a WNDRR style/product here
+-- -- that's the alias/mapping layer described for a later stage. This table
+-- only stores and parses what Meta actually gives us.
+--
+-- raw_ad_name/raw_ad_set_name/raw_campaign_name are NEVER overwritten with
+-- a derived value -- normalized_ad_name and the parsed_* columns are always
+-- computed alongside them, never replacing them, so parsing rules can be
+-- improved later without losing the original Meta strings. Ads are
+-- duplicated from Creative Library into live campaigns with Meta-generated
+-- suffixes ("- Copy", "- Copy 2", "UPDATED") and no API-exposed "duplicated
+-- from" lineage -- normalized_ad_name strips just those known suffixes as a
+-- conservative aid for future reconciliation; it is never used to merge or
+-- drop rows, and every real Meta ad ID always keeps its own row.
+--
+-- parsed_batch_no comes from the ad name's own Batch No. field; adset_batch_no
+-- is separately extracted from the Creative Library ad set's name (e.g.
+-- "2026-I September #315 Drop 1 Creatives"), which is a second, independent
+-- source of the same batch context. The two are kept apart, never merged or
+-- silently overwritten when they disagree, since batch number is explicitly
+-- NOT a style-matching key -- it only identifies a creative upload/group,
+-- which can span many products.
+CREATE TABLE IF NOT EXISTS meta_ads (
+  id SERIAL PRIMARY KEY,
+  meta_ad_id VARCHAR(64) UNIQUE NOT NULL,
+  meta_ad_set_id VARCHAR(64),
+  meta_campaign_id VARCHAR(64),
+  meta_creative_id VARCHAR(64),
+  raw_ad_name TEXT NOT NULL,
+  raw_ad_set_name TEXT,
+  raw_campaign_name TEXT,
+  normalized_ad_name TEXT,
+  effective_status VARCHAR(64),
+  first_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  -- 'parsed': the name split cleanly into all 11 template fields.
+  -- 'partial': at least Batch No./Week No./Date were recognisable but the
+  --   full template didn't cleanly apply (old naming pattern, extra/missing
+  --   underscores, etc.) -- whatever could be confidently extracted is kept.
+  -- 'unparsed': the name doesn't resemble the template at all; the ad is
+  --   still stored in full, just with every parsed_* column NULL.
+  parse_status VARCHAR(20) NOT NULL DEFAULT 'unparsed'
+    CHECK (parse_status IN ('parsed', 'partial', 'unparsed')),
+  parse_error TEXT,
+  parsed_batch_no VARCHAR(32),
+  parsed_week_no VARCHAR(32),
+  parsed_date VARCHAR(32),
+  parsed_product_raw VARCHAR(255),
+  parsed_product_type_raw VARCHAR(255),
+  parsed_hook VARCHAR(255),
+  parsed_media VARCHAR(64),
+  parsed_ad_type VARCHAR(64),
+  parsed_creator VARCHAR(128),
+  parsed_concept VARCHAR(255),
+  parsed_url_link_page VARCHAR(255),
+  adset_batch_no VARCHAR(32),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_meta_ads_effective_status ON meta_ads(effective_status);
+CREATE INDEX IF NOT EXISTS idx_meta_ads_parse_status ON meta_ads(parse_status);
+CREATE INDEX IF NOT EXISTS idx_meta_ads_meta_ad_set_id ON meta_ads(meta_ad_set_id);
+
+-- ---------------------------------------------------------------------------
 -- Promotions V2: a stage's own go-live/due date drives its urgency (On
 -- Track / Needs Attention / At Risk in promotions.js) -- the closer the
 -- date, the more a remaining gap matters. Optional: plenty of stages

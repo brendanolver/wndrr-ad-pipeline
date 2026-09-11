@@ -128,6 +128,56 @@ router.get('/meta-ads/status', async (req, res, next) => {
   }
 });
 
+// Diagnostic only -- inspects the new Stage 1 durable meta_ads table (not
+// linked from the UI). Summary counts by effective_status/parse_status, plus
+// a small sample of the most-recently-synced rows so a real ad name/parse
+// result can be eyeballed without direct DB access. ?status=/?parse_status=
+// narrow the sample; ?limit= caps it (default 20, max 200).
+router.get('/meta-ads/synced', async (req, res, next) => {
+  try {
+    const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 20, 1), 200);
+    const conditions = [];
+    const params = [];
+    if (req.query.status) {
+      params.push(req.query.status);
+      conditions.push(`effective_status = $${params.length}`);
+    }
+    if (req.query.parse_status) {
+      params.push(req.query.parse_status);
+      conditions.push(`parse_status = $${params.length}`);
+    }
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const [totalsResult, statusBreakdownResult, parseBreakdownResult, sampleResult] = await Promise.all([
+      pool.query('SELECT COUNT(*)::int AS count FROM meta_ads'),
+      pool.query('SELECT effective_status, COUNT(*)::int AS count FROM meta_ads GROUP BY effective_status ORDER BY count DESC'),
+      pool.query('SELECT parse_status, COUNT(*)::int AS count FROM meta_ads GROUP BY parse_status ORDER BY count DESC'),
+      pool.query(
+        `SELECT meta_ad_id, meta_ad_set_id, meta_campaign_id, meta_creative_id,
+                raw_ad_name, raw_ad_set_name, raw_campaign_name, normalized_ad_name,
+                effective_status, parse_status, parse_error,
+                parsed_batch_no, parsed_week_no, parsed_date, parsed_product_raw,
+                parsed_product_type_raw, parsed_hook, parsed_media, parsed_ad_type,
+                parsed_creator, parsed_concept, parsed_url_link_page, adset_batch_no,
+                first_seen_at, last_seen_at
+         FROM meta_ads ${where} ORDER BY last_seen_at DESC LIMIT $${params.length + 1}`,
+        [...params, limit]
+      ),
+    ]);
+
+    res.json({
+      configured: metaAds.configured(),
+      total_synced: totalsResult.rows[0].count,
+      by_effective_status: statusBreakdownResult.rows,
+      by_parse_status: parseBreakdownResult.rows,
+      synced_effective_statuses: metaAds.SYNCED_EFFECTIVE_STATUSES,
+      sample: sampleResult.rows,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Diagnostic only -- returns a raw ApparelMagic product record so we can see
 // real field names (e.g. images) instead of guessing. Requires auth like
 // everything else; not linked from the UI.
