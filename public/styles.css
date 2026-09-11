@@ -441,9 +441,17 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .promo-overview-progress-fill.red{background:var(--red);}
 .promo-overview-pills{display:flex;gap:8px;flex-wrap:wrap;}
 .promo-pill{padding:4px 10px;border-radius:var(--r-pill);font-size:11px;font-weight:700;}
+.promo-pill-target{background:var(--surface2);color:var(--text-muted);}
 .promo-pill-ready{background:var(--green-light);color:var(--green);}
 .promo-pill-planned{background:var(--amber-light);color:var(--amber);}
 .promo-pill-missing{background:var(--red-light);color:var(--red);}
+/* Campaign Stages grid: promotions commonly run several stages at once (e.g.
+   Black Friday's Hype/Sale Live Ads/Mid Sale Offers/Last Chance), unlike the
+   shared .coverage-grid's auto-fill which leaves empty track space beside a
+   handful of cards -- auto-fit collapses those empty tracks so the cards
+   stretch to use the page width instead. Scoped to this grid only so Drops'
+   coverage grid (which also uses .coverage-grid) is untouched. */
+#promotion-stage-grid{grid-template-columns:repeat(auto-fit,minmax(260px,1fr));}
 
 .back-link{background:none;border:none;color:var(--teal-dark);font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;padding:0;margin-bottom:14px;display:inline-block;}
 .back-link:hover{text-decoration:underline;}

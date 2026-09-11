@@ -534,6 +534,71 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_meta_product_mappings_key
 ALTER TABLE promotion_stages ADD COLUMN IF NOT EXISTS due_date DATE;
 
 -- ---------------------------------------------------------------------------
+-- Black Friday 2026 starter promotion: seeds a Promotion Overview with a
+-- realistic multi-stage campaign structure (Hype Ads / Sale Live Ads / Mid
+-- Sale Offers Ads / Last Chance) instead of the single generic "General"
+-- stage every other promotion gets from the backfill above, since planning
+-- the biggest sale of the year needs a real example structure to start
+-- from. The four required_count values (20/30/25/8) are STARTING targets
+-- only -- fully editable afterwards from each stage card exactly like any
+-- other stage, and the Promotion Overview's totals (e.g. 83 target) are
+-- never stored anywhere; they're always computed live from whatever these
+-- four numbers currently are (see summarizePromotion in promotions.js), so
+-- editing, removing, reordering, or adding a stage updates the overview
+-- automatically with no extra code.
+--
+-- Handles two cases without ever touching any OTHER promotion:
+--  1. No "Black Friday 2026" promotion exists yet -- create it with all
+--     four stages together.
+--  2. It already exists (e.g. created by hand through the UI, with just a
+--     single "Hype" stage, before this template existed) -- bring it up to
+--     the four-stage template in place rather than delete-and-recreate, so
+--     any Shoot Plan items already linked to that stage stay linked. The
+--     'Hype'/'Mid Sale Offers' -> '...Ads' renames only ever match the
+--     literal old name, so once corrected once they never re-fire and can't
+--     clobber a later manual edit; any of the four stages still missing
+--     (by name) gets topped up, and a stage the team has already renamed to
+--     something else, or added themselves, is left completely alone.
+DO $$
+DECLARE
+  bf_id INTEGER;
+BEGIN
+  SELECT id INTO bf_id FROM promotions WHERE name = 'Black Friday 2026';
+
+  IF bf_id IS NULL THEN
+    INSERT INTO promotions (name, start_date, end_date, notes)
+    VALUES (
+      'Black Friday 2026', '2026-11-12', '2026-12-01',
+      'Starter Campaign Stages seeded automatically -- rename, retarget, reorder, or add more stages as needed.'
+    )
+    RETURNING id INTO bf_id;
+
+    INSERT INTO promotion_stages (promotion_id, name, required_count, sort_order) VALUES
+      (bf_id, 'Hype Ads', 20, 0),
+      (bf_id, 'Sale Live Ads', 30, 1),
+      (bf_id, 'Mid Sale Offers Ads', 25, 2),
+      (bf_id, 'Last Chance / Ends Today', 8, 3);
+  ELSE
+    UPDATE promotion_stages SET name = 'Hype Ads', required_count = 20, updated_at = now()
+    WHERE promotion_id = bf_id AND name = 'Hype';
+    UPDATE promotion_stages SET name = 'Mid Sale Offers Ads', required_count = 25, updated_at = now()
+    WHERE promotion_id = bf_id AND name = 'Mid Sale Offers';
+
+    INSERT INTO promotion_stages (promotion_id, name, required_count, sort_order)
+    SELECT bf_id, v.name, v.required_count, v.sort_order
+    FROM (VALUES
+      ('Hype Ads', 20, 0),
+      ('Sale Live Ads', 30, 1),
+      ('Mid Sale Offers Ads', 25, 2),
+      ('Last Chance / Ends Today', 8, 3)
+    ) AS v(name, required_count, sort_order)
+    WHERE NOT EXISTS (
+      SELECT 1 FROM promotion_stages ps WHERE ps.promotion_id = bf_id AND ps.name = v.name
+    );
+  END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
 -- Default Shoot Sizes (Settings -> Default Shoot Sizes): pre-fills each
 -- selected colourway's size when the "Shoot This Week" modal opens, keyed
 -- by garment type (top vs bottom) and, for bottoms, alpha vs waist sizing

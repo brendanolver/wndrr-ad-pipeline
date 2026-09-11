@@ -2934,6 +2934,7 @@ function promotionOverviewHtml(p) {
       </div>
       <div class="promo-overview-progress-track"><div class="promo-overview-progress-fill ${color}" style="width:${pct !== null ? Math.min(100, pct) : 0}%;"></div></div>
       <div class="promo-overview-pills">
+        <span class="promo-pill promo-pill-target">${s.total_required} Target</span>
         <span class="promo-pill promo-pill-ready">${s.total_ready} Ready</span>
         <span class="promo-pill promo-pill-planned">${s.total_planned} Planned</span>
         <span class="promo-pill promo-pill-missing">${s.total_missing} Missing</span>
