@@ -416,8 +416,17 @@ main{flex:1;min-width:0;padding:20px 24px;}
    overrides to read as editable rather than part of the click target. */
 .promotion-stage-card.dragging{opacity:0.4;}
 .promotion-stage-card.drag-over{border-color:var(--teal);box-shadow:0 0 0 2px var(--teal-light);}
-.promotion-stage-head{display:flex;align-items:center;gap:6px;margin-bottom:9px;}
-.promotion-stage-name-input{flex:1;min-width:0;font-size:13.5px;font-weight:700;font-family:inherit;border:1px solid transparent;border-radius:4px;padding:3px 5px;background:none;}
+.promotion-stage-head{display:flex;align-items:flex-start;gap:6px;margin-bottom:9px;}
+/* A <textarea> (not <input>) so a long stage name -- "Mid Sale Offers Ads",
+   "Last Chance / Ends Today" -- can wrap onto a second line instead of
+   being clipped; a native text input can never wrap regardless of CSS.
+   rows="2" + this fixed line-height/height reserve the same two-line
+   height on every card whether a name needs one line or two, so the
+   urgency badge/due date/progress/stats below always start at the same
+   vertical position -- same approach as the Promotions landing cards'
+   title-height fix. resize is disabled since this is a compact card
+   field, not a free-form text box. */
+.promotion-stage-name-input{flex:1;min-width:0;font-size:13.5px;font-weight:700;font-family:inherit;line-height:16px;height:40px;border:1px solid transparent;border-radius:4px;padding:3px 5px;background:none;resize:none;overflow:hidden;white-space:normal;word-break:break-word;}
 .promotion-stage-name-input:hover,.promotion-stage-name-input:focus{border-color:var(--border);background:var(--surface2);}
 .promotion-stage-required-row{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-secondary);margin-bottom:9px;}
 .promotion-stage-count-input{width:56px;}

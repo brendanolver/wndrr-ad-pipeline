@@ -3007,7 +3007,7 @@ function promotionStageCardHtml(stage, index, total) {
       <div class="coverage-card-body">
         <div class="promotion-stage-head">
           <span class="pw-drag-handle" title="Drag to reorder">⠿</span>
-          <input type="text" class="promotion-stage-name-input" value="${escapeHtml(stage.name)}" onchange="renamePromotionStage(${stage.id}, this.value)">
+          <textarea class="promotion-stage-name-input" rows="2" onchange="renamePromotionStage(${stage.id}, this.value)">${escapeHtml(stage.name)}</textarea>
           <button type="button" class="btn btn-ghost btn-sm" ${index === 0 ? 'disabled' : ''} onclick="movePromotionStage(${stage.id}, -1)" title="Move up">&uarr;</button>
           <button type="button" class="btn btn-ghost btn-sm" ${index === total - 1 ? 'disabled' : ''} onclick="movePromotionStage(${stage.id}, 1)" title="Move down">&darr;</button>
           <button type="button" class="btn btn-ghost btn-sm" onclick="deletePromotionStage(${stage.id})" title="Delete stage">&times;</button>
