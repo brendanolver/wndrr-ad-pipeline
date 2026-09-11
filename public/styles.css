@@ -1418,24 +1418,16 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .tr-avatar-detail{margin-top:6px;padding:9px 11px;background:var(--surface2);border-radius:var(--r);display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:var(--text-secondary);}
 .tr-avatar-detail-label{display:block;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);}
 
-/* Hooks: compact, clickable rows so Primary/Alt 01/Alt 02 can be compared
-   AND one picked as the winner, rather than each needing its own
-   generously-spaced block. Single-selection only -- each row is a plain
-   button (no checkbox/tick, which would imply "any number"); the chosen
-   row gets a teal wash + border, everything else stays neutral. The
-   Primary tag keeps a distinguishing color purely as a label ("this was
-   proposed as the primary hook"), independent of which row is selected. */
+/* Hooks: compact, non-interactive rows for comparing Primary/Alt 01/Alt 02
+   side by side. All of a concept's hooks get filmed together if it's
+   approved, so there is no "winning" hook to highlight -- every row
+   renders identically (no background/border distinction, no hover/click
+   state); Primary/Alt 01/Alt 02 are organising labels only. */
 .tr-hook-list{display:flex;flex-direction:column;}
-.tr-hook-row{display:flex;flex-direction:row;align-items:center;gap:10px;width:100%;padding:7px 9px;border:1px solid transparent;border-radius:var(--r);background:none;font-family:inherit;text-align:left;cursor:pointer;}
+.tr-hook-row{display:flex;flex-direction:row;align-items:center;gap:10px;width:100%;padding:7px 9px;}
 .tr-hook-row + .tr-hook-row{margin-top:2px;}
-.tr-hook-row:not(:disabled):hover{background:var(--surface2);}
-.tr-hook-row:focus-visible{outline:2px solid var(--teal);outline-offset:1px;}
-.tr-hook-row:disabled{cursor:default;}
 .tr-hook-tag{flex:0 0 54px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);}
-.tr-hook-tag.tr-hook-tag-primary{color:var(--teal-dark);}
 .tr-hook-text{font-size:13.5px;font-weight:600;color:var(--text);}
-.tr-hook-row.tr-hook-selected{background:var(--teal-light);border-color:var(--teal);}
-.tr-hook-row.tr-hook-selected .tr-hook-text{font-size:14px;}
 
 /* What to Shoot: each Shot is a compact visual card, not a paragraph --
    Shot Type and Location sit on the same line (what + where, together at

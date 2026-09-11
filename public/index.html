@@ -1530,17 +1530,15 @@
         </div>
       </div>
 
-      <!-- Hooks double as the Tuesday Review decision on which ONE opening
-           actually gets produced -- each row is a plain clickable button
-           (no checkbox/tick, which would imply multiple), not just a
-           display list. Selection lives on the same hook_variations
-           entries (a `selected` flag on exactly one), persisted only when
-           Approve for Shooting is clicked -- see selectTuesdayReviewHook
-           and approveTuesdayReviewConcept in app.js. -->
+      <!-- Hooks: a plain read-only display list, not a decision. All hooks
+           belonging to this concept get filmed together if it's approved --
+           Primary / Alt 01 / Alt 02 are organising labels only, with no
+           selected/highlighted state (see tuesdayReviewHookRowHtml in
+           app.js). The shared backend/body footage lives elsewhere (Script,
+           What to Shoot); this section is just the opening variations. -->
       <div class="tr-review-section">
         <div class="tr-review-section-title">Hooks</div>
         <div class="tr-hook-list" id="tr-review-hooks"></div>
-        <div class="cd-field-error" id="tr-review-hooks-error"></div>
       </div>
 
       <!-- What to Shoot -- read-only, entirely hidden (not an empty/error

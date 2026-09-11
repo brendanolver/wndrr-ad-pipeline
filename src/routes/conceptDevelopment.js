@@ -334,7 +334,7 @@ router.patch('/concepts/:id', async (req, res, next) => {
 // itself is never deleted.
 router.patch('/concepts/:id/review', async (req, res, next) => {
   try {
-    const { decision, feedback, kill_reason, kill_note, hook_variations } = req.body || {};
+    const { decision, feedback, kill_reason, kill_note } = req.body || {};
     if (!TUESDAY_REVIEW_DECISIONS.includes(decision)) {
       return res.status(400).json({ error: `decision must be one of: ${TUESDAY_REVIEW_DECISIONS.join(', ')}` });
     }
@@ -345,29 +345,14 @@ router.patch('/concepts/:id/review', async (req, res, next) => {
     const trimmedKillNote = kill_note && kill_note.trim() ? kill_note.trim() : null;
     const trimmedKillReason = kill_reason && kill_reason.trim() ? kill_reason.trim() : null;
 
-    // Approving also records which ONE hook the team decided to actually
-    // produce -- reuses the existing hook_variations array (a `selected`
-    // flag on exactly one entry) rather than a new column or table,
-    // matching the "reuse existing structures, avoid duplicate fields"
-    // brief. Deliberately scoped to the 'approved' decision only: Request
-    // Changes and Kill Concept never touch or require it (see TESTING item
-    // 10), and a hookless legacy concept (hook_variations omitted) is left
-    // completely alone so old Approved concepts -- including ones approved
-    // before single-hook selection existed -- are never retroactively
-    // invalidated.
-    let approvedHookVariations = null;
-    if (decision === 'approved' && hook_variations !== undefined) {
-      const valid = Array.isArray(hook_variations) && hook_variations.every(
-        (h) => h && typeof h === 'object' && typeof h.text === 'string'
-      );
-      if (!valid) return res.status(400).json({ error: 'hook_variations must be an array of { text }' });
-      const selectedCount = hook_variations.filter((h) => h.selected === true).length;
-      if (hook_variations.length && selectedCount !== 1) {
-        return res.status(400).json({ error: 'Select a hook to approve this concept for shooting.' });
-      }
-      approvedHookVariations = hook_variations;
-    }
-
+    // Approving takes the whole concept -- every hook it already has --
+    // into Shooting as one unit. There is no per-hook decision on this
+    // route (or anywhere else in Tuesday Review): hook_variations is left
+    // completely untouched by an approval. A concept approved by an
+    // earlier build of this feature may still carry a stray `selected: true`
+    // on one entry -- that's harmless leftover data, ignored everywhere
+    // downstream (Shooting's brief renders every hook with text, regardless
+    // of `selected`), so it's never stripped or migrated here.
     const historyEntry = {
       decision,
       decided_at: new Date().toISOString(),
@@ -389,14 +374,10 @@ router.patch('/concepts/:id/review', async (req, res, next) => {
          kill_reason = CASE WHEN $1::varchar = 'killed' THEN $3 ELSE kill_reason END,
          kill_note = CASE WHEN $1::varchar = 'killed' THEN $4 ELSE kill_note END,
          review_history = review_history || $5::jsonb,
-         hook_variations = COALESCE($8, hook_variations),
          updated_at = now()
        WHERE id = $6 AND concept_dev_status = 'ready_for_review'
        RETURNING *`,
-      [
-        decision, trimmedFeedback, trimmedKillReason, trimmedKillNote, JSON.stringify([historyEntry]), req.params.id, req.user.id,
-        approvedHookVariations !== null ? JSON.stringify(approvedHookVariations) : null,
-      ]
+      [decision, trimmedFeedback, trimmedKillReason, trimmedKillNote, JSON.stringify([historyEntry]), req.params.id, req.user.id]
     );
     if (!result.rows.length) {
       const existsResult = await pool.query('SELECT id FROM creative_assets WHERE id = $1', [req.params.id]);
