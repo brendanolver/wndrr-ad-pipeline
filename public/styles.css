@@ -357,6 +357,15 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .drop-card-status.needs-attention{background:var(--amber-light);color:var(--amber);}
 .drop-card-status.at-risk{background:var(--red-light);color:var(--red);}
 .drop-card-review-link-btn{font-size:12px;font-weight:600;color:var(--teal-dark);background:none;border:none;padding:0;cursor:pointer;font-family:inherit;display:block;}
+/* Promotions landing cards only (scoped via #promotions-list so Drops'
+   shared .drop-card classes are untouched): reserves a consistent
+   two-line title height so the date/progress/next-priority rows below
+   start at the same vertical position whether a promotion's name wraps
+   to one line (e.g. "Boxing Day 2026") or two (e.g. "Birthday Sale
+   2027") -- an explicit line-height keeps the two-line reservation
+   pixel-exact instead of depending on the browser's own "normal" metric. */
+#promotions-list .drop-card-name{line-height:17px;}
+#promotions-list .drop-card-header{min-height:34px;}
 
 /* ── DROP MODAL: date quickpicks + auto-populated style checklist ── */
 .quickpick-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:-6px;}
