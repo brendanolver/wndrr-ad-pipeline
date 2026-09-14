@@ -1,7 +1,7 @@
 const express = require('express');
 const { pool } = require('../db');
 const { insertCreativeAsset } = require('../lib/assets');
-const { STATUS_LABELS } = require('../lib/statuses');
+const { STATUS_LABELS, FORMATS } = require('../lib/statuses');
 const apparelmagic = require('../lib/apparelmagic');
 const { fetchAmData } = require('../lib/planningData');
 
@@ -85,7 +85,7 @@ router.get('/', async (req, res, next) => {
 });
 
 router.post('/', async (req, res, next) => {
-  const { product_code, product_name, colourways, stock_status, creator, quick_note, source, image_url, promotion_stage_id, week_start } = req.body || {};
+  const { product_code, product_name, colourways, stock_status, creator, quick_note, source, image_url, promotion_stage_id, week_start, format } = req.body || {};
 
   if (!product_code || !product_name) {
     return res.status(400).json({ error: 'product_code and product_name are required' });
@@ -104,6 +104,9 @@ router.post('/', async (req, res, next) => {
   }
   if (week_start !== undefined && week_start !== null && !WEEK_RE.test(week_start)) {
     return res.status(400).json({ error: 'week_start must be YYYY-MM-DD' });
+  }
+  if (format !== undefined && format !== null && !FORMATS.includes(format)) {
+    return res.status(400).json({ error: `format must be one of ${FORMATS.join(', ')}` });
   }
 
   const client = await pool.connect();
@@ -135,7 +138,7 @@ router.post('/', async (req, res, next) => {
       style_id: Number(colourways[0].style_id),
       concept_name: trimmedNote || `New Concept — ${product_name}`,
       concept_classification: 'new_experimental',
-      format: 'video',
+      format: FORMATS.includes(format) ? format : 'video',
       strategy_owner: trimmedCreator,
       status: 'awaiting_concept_development',
       created_by_user_id: createdByUserId,
