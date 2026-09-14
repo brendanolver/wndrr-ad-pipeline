@@ -1900,6 +1900,42 @@
   </div>
 </div>
 
+<!-- Dashboard -> Brief Builder: the entry point for starting a normal
+     product creative brief. Like the Promotion modal below, there's no
+     pre-known product to launch this from, so it reuses the exact same
+     searchable style picker (renderStyleSearchResults). Feeds the exact
+     same Concept Development pipeline via POST /shoot-plan (source:
+     'core' -- fresh creative for an existing/core product, same source
+     Core's own "Shoot This Week" already uses; not drop/high_stock/
+     promotion) -- no separate Brief Builder record type. -->
+<div id="brief-builder-modal" class="modal-backdrop">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Start a New Concept</h3>
+      <button class="modal-close" onclick="closeModal('brief-builder-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <label>Product / style <span class="hint">(search by SKU or product name)</span>
+        <div class="promo-shoot-search">
+          <input type="text" id="brief-builder-style-search" placeholder="Search SKU or product name…" autocomplete="off" oninput="filterBriefBuilderStyles()" onfocus="filterBriefBuilderStyles()">
+          <input type="hidden" id="brief-builder-style-id">
+          <div id="brief-builder-style-results" class="promo-shoot-search-results" style="display:none;"></div>
+        </div>
+      </label>
+      <label>Format
+        <select id="brief-builder-format">
+          <option value="video">Video</option>
+          <option value="static">Static</option>
+        </select>
+      </label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('brief-builder-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="startBriefBuilderConcept()">Start Concept &rarr;</button>
+    </div>
+  </div>
+</div>
+
 <!-- Cover a Promotion Campaign Stage requirement -- unlike the product-row
      "Shoot This Week" modal above, there's no single pre-known product to
      launch this from (a promotion may cover multiple products, a bundle,
