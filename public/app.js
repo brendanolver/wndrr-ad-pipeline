@@ -2656,7 +2656,25 @@ function openShootPlanModal(preset) {
     ? `<img src="${headerImage.image_url}" alt="">`
     : '<span class="shoot-plan-noimg">🖼</span>';
 
-  document.getElementById('shoot-plan-colours').innerHTML = preset.colours.map((c) => {
+  renderColourwayRows('shoot-plan-colours', preset.colours);
+
+  // Bring from Warehouse is the default -- most shoots need something
+  // pulled, and defaulting here means the size fields the warehouse pull
+  // list depends on are visible unless someone actively says otherwise.
+  document.getElementById('shoot-plan-stock-status').value = 'needs_to_be_brought_in';
+  populateShootPlanCreatorSelect();
+  document.getElementById('shoot-plan-initial-idea').value = '';
+  applyShootPlanSizeDefaults();
+  updateShootPlanSampleStatusVisibility();
+  openModal('shoot-plan-modal');
+}
+
+// Colourway checkbox + size picker -- one implementation shared by every
+// modal that needs it (Core/Drop's own "Shoot This Week" here, Dashboard ->
+// Brief Builder's Colourways & sizes needed section), rather than a copy
+// per modal. containerId lets each modal keep its own DOM/CSS scope.
+function renderColourwayRows(containerId, colours) {
+  document.getElementById(containerId).innerHTML = colours.map((c) => {
     const sizeControl = c.sizes && c.sizes.length
       ? `<select class="shoot-plan-colour-size" data-style-id="${c.style_id}">${c.sizes.map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('')}</select>`
       : `<input type="text" class="shoot-plan-colour-size" data-style-id="${c.style_id}" placeholder="Size">`;
@@ -2673,16 +2691,33 @@ function openShootPlanModal(preset) {
       ${sizeControl}
     </div>`;
   }).join('');
+}
 
-  // Bring from Warehouse is the default -- most shoots need something
-  // pulled, and defaulting here means the size fields the warehouse pull
-  // list depends on are visible unless someone actively says otherwise.
-  document.getElementById('shoot-plan-stock-status').value = 'needs_to_be_brought_in';
-  populateShootPlanCreatorSelect();
-  document.getElementById('shoot-plan-initial-idea').value = '';
-  applyShootPlanSizeDefaults();
-  updateShootPlanSampleStatusVisibility();
-  openModal('shoot-plan-modal');
+// Generalized Select All / Clear All -- a many-colourway product otherwise
+// means clicking every single checkbox just to shoot the whole family.
+function selectAllColourwayRows(containerId, checked) {
+  document.querySelectorAll(`#${containerId} .shoot-plan-colour-required`).forEach((el) => { el.checked = checked; });
+}
+
+// Generalized "which colourways are checked, with what size" collector --
+// same [{style_id, size, colour_label}] shape POST /shoot-plan's colourways
+// array expects either way. requireSize mirrors "bringing from warehouse"
+// (Core's own Stock Status field, or Brief Builder's silent default of the
+// same status -- see startBriefBuilderConcept). Returns { error } instead
+// of throwing/toasting directly, so each caller can word the message (or
+// combine it with its own extra validation) however fits its own modal.
+function collectCheckedColourways(containerId, colours, requireSize) {
+  const colourways = [];
+  for (const row of document.querySelectorAll(`#${containerId} .shoot-plan-colour-row`)) {
+    const checkbox = row.querySelector('.shoot-plan-colour-required');
+    if (!checkbox.checked) continue;
+    const size = row.querySelector('.shoot-plan-colour-size').value.trim();
+    if (requireSize && !size) return { error: 'Select a size for every required colourway' };
+    const styleId = Number(checkbox.value);
+    const colour = colours.find((c) => c.style_id === styleId);
+    colourways.push({ style_id: styleId, size: requireSize ? size : null, colour_label: colour?.colour_label || null });
+  }
+  return { colourways };
 }
 
 // Populates the Content Creator dropdown from the Settings-managed list
@@ -2705,28 +2740,32 @@ function updateShootPlanSampleStatusVisibility() {
   document.getElementById('shoot-plan-colours').classList.toggle('hide-sizes', !bringingFromWarehouse);
 }
 
-// Select All / Clear All -- a many-colourway product otherwise means
-// clicking every single checkbox just to shoot the whole family.
 function selectAllShootPlanColours(checked) {
-  document.querySelectorAll('#shoot-plan-colours .shoot-plan-colour-required').forEach((el) => { el.checked = checked; });
+  selectAllColourwayRows('shoot-plan-colours', checked);
 }
 
 // Pre-fills every still-required colourway's size from Settings -> Default
-// Shoot Sizes -- called once when the modal opens. Purely a starting point:
+// Shoot Sizes -- called once when a modal opens. Purely a starting point:
 // each <select> stays a normal control the user can change by hand, and
 // nothing re-runs this afterward (Select All/Clear All only toggle which
-// colourways are required, they never touch an already-set size).
-function applyShootPlanSizeDefaults() {
-  if (!shootPlanModalContext) return;
-  const garmentType = classifyGarmentType(shootPlanModalContext.category);
-  document.querySelectorAll('#shoot-plan-colours .shoot-plan-colour-size').forEach((el) => {
+// colourways are required, they never touch an already-set size). Shared by
+// Core's own modal and Brief Builder's Colourways section, same reasoning
+// as renderColourwayRows above.
+function applyColourwaySizeDefaults(containerId, colours, category) {
+  const garmentType = classifyGarmentType(category);
+  document.querySelectorAll(`#${containerId} .shoot-plan-colour-size`).forEach((el) => {
     const styleId = Number(el.dataset.styleId);
-    const checkbox = document.querySelector(`#shoot-plan-colours .shoot-plan-colour-required[value="${styleId}"]`);
+    const checkbox = document.querySelector(`#${containerId} .shoot-plan-colour-required[value="${styleId}"]`);
     if (!checkbox || !checkbox.checked) return;
-    const colour = shootPlanModalContext.colours.find((c) => c.style_id === styleId);
+    const colour = colours.find((c) => c.style_id === styleId);
     if (!colour) return;
     el.value = defaultSizeForColourway(garmentType, colour.sizing_system, colour.sizes);
   });
+}
+
+function applyShootPlanSizeDefaults() {
+  if (!shootPlanModalContext) return;
+  applyColourwaySizeDefaults('shoot-plan-colours', shootPlanModalContext.colours, shootPlanModalContext.category);
 }
 
 async function saveShootPlanItem() {
@@ -2734,16 +2773,8 @@ async function saveShootPlanItem() {
   // in -- if it's already in the office, nobody needs a size on a pull
   // list that doesn't exist for this shoot.
   const bringingFromWarehouse = document.getElementById('shoot-plan-stock-status').value === 'needs_to_be_brought_in';
-  const colourways = [];
-  for (const row of document.querySelectorAll('#shoot-plan-colours .shoot-plan-colour-row')) {
-    const checkbox = row.querySelector('.shoot-plan-colour-required');
-    if (!checkbox.checked) continue;
-    const size = row.querySelector('.shoot-plan-colour-size').value.trim();
-    if (bringingFromWarehouse && !size) return toast('Select a size for every required colourway', true);
-    const styleId = Number(checkbox.value);
-    const colour = shootPlanModalContext.colours.find((c) => c.style_id === styleId);
-    colourways.push({ style_id: styleId, size: bringingFromWarehouse ? size : null, colour_label: colour?.colour_label || null });
-  }
+  const { colourways, error } = collectCheckedColourways('shoot-plan-colours', shootPlanModalContext.colours, bringingFromWarehouse);
+  if (error) return toast(error, true);
   const creator = document.getElementById('shoot-plan-creator').value.trim();
   if (!colourways.length) return toast('Select at least one colourway', true);
   if (!creator) return toast('Content creator is required', true);
@@ -3365,13 +3396,17 @@ async function savePromotionShootItem() {
 // promotion) -- one normal concept entity, no separate Brief Builder record
 // type.
 let briefBuilderContext = null;
+let briefBuilderColours = [];
 
 function openBriefBuilderModal() {
   briefBuilderContext = { styleId: null };
+  briefBuilderColours = [];
   document.getElementById('brief-builder-style-search').value = '';
   document.getElementById('brief-builder-style-id').value = '';
   document.getElementById('brief-builder-style-results').style.display = 'none';
   document.getElementById('brief-builder-format').value = 'video';
+  document.getElementById('brief-builder-colours').innerHTML = '';
+  document.getElementById('brief-builder-colours-label').style.display = 'none';
   openModal('brief-builder-modal');
 }
 
@@ -3379,13 +3414,36 @@ function filterBriefBuilderStyles() {
   renderStyleSearchResults('brief-builder-style-search', 'brief-builder-style-results', selectBriefBuilderStyle);
 }
 
-function selectBriefBuilderStyle(styleId) {
+// Once a style is picked, pull in every other colourway of the same
+// product (GET /styles/:id/colourways -- the exact same deriveProductCode +
+// AM sizing/colour resolution Planning's Core "Shoot This Week" already
+// groups colourways with) and render them with the same shared colourway
+// picker Core uses, so multiple colourways of one style can be selected
+// for the same concept instead of just the single searched-for SKU.
+async function selectBriefBuilderStyle(styleId) {
   const style = state.styles.find((s) => s.id === styleId);
   if (!style) return;
   briefBuilderContext.styleId = styleId;
   document.getElementById('brief-builder-style-id').value = styleId;
   document.getElementById('brief-builder-style-search').value = `${style.style_code} — ${style.name}`;
   document.getElementById('brief-builder-style-results').style.display = 'none';
+
+  try {
+    const data = await api(`/styles/${styleId}/colourways`);
+    briefBuilderColours = data.colours;
+    briefBuilderContext.productCode = data.product_code;
+    briefBuilderContext.productName = data.product_name;
+    briefBuilderContext.category = data.category;
+    renderColourwayRows('brief-builder-colours', briefBuilderColours);
+    applyColourwaySizeDefaults('brief-builder-colours', briefBuilderColours, briefBuilderContext.category);
+    document.getElementById('brief-builder-colours-label').style.display = '';
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function selectAllBriefBuilderColours(checked) {
+  selectAllColourwayRows('brief-builder-colours', checked);
 }
 
 async function startBriefBuilderConcept() {
@@ -3395,8 +3453,15 @@ async function startBriefBuilderConcept() {
   if (!style) return toast('Select a product / style', true);
   const format = document.getElementById('brief-builder-format').value;
 
+  // Same colourway/size collection Core's own Shoot This Week modal uses
+  // (collectCheckedColourways) -- one concept for the product, every
+  // checked colourway/size attached to it, not one concept per colourway.
+  const { colourways, error } = collectCheckedColourways('brief-builder-colours', briefBuilderColours, true);
+  if (error) return toast(error, true);
+  if (!colourways.length) return toast('Select at least one colourway', true);
+
   // Same silent-default reasoning as Promotion's savePromotionShootItem
-  // above -- stock status/size/creator aren't asked for here, shoot-plan.js
+  // above -- stock status/creator aren't asked for here, shoot-plan.js
   // still needs sensible values for every item regardless of source.
   const defaultCreator = state.contentCreators.find((c) => c.is_default) || state.contentCreators[0];
 
@@ -3410,9 +3475,9 @@ async function startBriefBuilderConcept() {
     const item = await api('/shoot-plan', {
       method: 'POST',
       body: JSON.stringify({
-        product_code: style.style_code,
-        product_name: style.name,
-        colourways: [{ style_id: style.id, size: null, colour_label: null }],
+        product_code: briefBuilderContext.productCode || style.style_code,
+        product_name: briefBuilderContext.productName || style.name,
+        colourways,
         stock_status: 'needs_to_be_brought_in',
         creator: defaultCreator ? defaultCreator.name : DEFAULT_CREATOR,
         format,

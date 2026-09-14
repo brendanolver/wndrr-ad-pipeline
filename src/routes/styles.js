@@ -1,6 +1,8 @@
 const express = require('express');
 const { pool } = require('../db');
 const { TIERS } = require('../lib/statuses');
+const apparelmagic = require('../lib/apparelmagic');
+const { fetchAmData } = require('../lib/planningData');
 
 const router = express.Router();
 
@@ -110,6 +112,54 @@ router.delete('/:id', async (req, res, next) => {
     const result = await pool.query('DELETE FROM styles WHERE id = $1 RETURNING id', [req.params.id]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Style not found' });
     res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Every other colourway of the same product as this style, in the exact
+// same shape Planning's Core Products already groups them into (see
+// computeCoreProducts in coreProducts.js: deriveProductCode + AM sizing/
+// colour-label resolution) -- reused here as-is, not re-implemented, so
+// Dashboard -> Brief Builder's colourway picker groups products exactly the
+// way Core's own "Shoot This Week" does. Deliberately NOT scoped to
+// core_proven tier (unlike coreProducts.js) -- Brief Builder can start a
+// concept for any tracked style, so this groups across every locally
+// tracked style regardless of tier. Like Core's own flow, it can only see
+// colourways that already have a local styles row -- it doesn't reach out
+// to ApparelMagic to backfill missing ones, same limitation Core already
+// lives with.
+router.get('/:id/colourways', async (req, res, next) => {
+  try {
+    const styleResult = await pool.query('SELECT * FROM styles WHERE id = $1', [req.params.id]);
+    if (!styleResult.rows.length) return res.status(404).json({ error: 'Style not found' });
+    const style = styleResult.rows[0];
+    const productCode = apparelmagic.deriveProductCode(style.style_code);
+
+    const allStylesResult = await pool.query('SELECT * FROM styles ORDER BY style_code ASC');
+    const members = allStylesResult.rows.filter((s) => apparelmagic.deriveProductCode(s.style_code) === productCode);
+
+    const am = await fetchAmData();
+    const colours = members.map((s) => {
+      const details = am.amDetails ? am.amDetails.get(s.style_code) : null;
+      const sizing = apparelmagic.resolveStyleSizing(am.amDetails, am.amSizeRanges, s.style_code);
+      return {
+        style_id: s.id,
+        style_code: s.style_code,
+        image_url: details?.imageUrl || null,
+        colour_label: apparelmagic.resolveColourLabel(am.amDetails, s.style_code),
+        sizes: sizing.sizes,
+        sizing_system: sizing.system,
+      };
+    });
+
+    const firstDetails = am.amDetails ? am.amDetails.get(members[0].style_code) : null;
+    res.json({
+      product_code: productCode,
+      product_name: firstDetails?.productName || members[0].name,
+      category: firstDetails?.category || null,
+      colours,
+    });
   } catch (err) {
     next(err);
   }
