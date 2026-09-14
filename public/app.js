@@ -51,7 +51,7 @@ let state = {
   // navigation (see renderConceptDevList); filter is the landing page's
   // own client-side status filter, applied over the same week's data with
   // no extra API call.
-  conceptDev: { weekOffset: 0, data: null, view: 'list', currentItemId: null, filter: 'all' },
+  conceptDev: { weekOffset: 0, data: null, view: 'list', currentItemId: null, filter: 'all', standaloneItemId: null },
   // Tuesday Review's own week nav -- independent from conceptDev's, same
   // reasoning as above. data is the exact same GET /concept-development
   // payload Concept Dev uses (products -> concepts); filter is the landing
@@ -574,7 +574,7 @@ document.getElementById('week-current').addEventListener('click', () => {
 document.getElementById('action-pipeline').addEventListener('click', () => switchTab('board'));
 document.getElementById('action-library').addEventListener('click', () => switchTab('board'));
 document.getElementById('action-brief-builder').addEventListener('click', () => {
-  toast("Brief Builder isn't built yet — coming in a future phase.");
+  openBriefBuilderModal();
 });
 
 // ── Planning ─────────────────────────────────────────
@@ -3275,10 +3275,13 @@ function shootThisWeekForPromotionStage(stageId) {
 // Searchable product/style picker -- SKU or name, partial, case-insensitive
 // -- reusing the same "SKU — Product Name" display convention already used
 // everywhere else styles are listed (e.g. the old giant <select>), just
-// filtered as you type instead of scrolled through.
-function filterPromotionShootStyles() {
-  const query = document.getElementById('promotion-shoot-style-search').value.trim().toLowerCase();
-  const results = document.getElementById('promotion-shoot-style-results');
+// filtered as you type instead of scrolled through. Shared by every modal
+// that needs to pick an arbitrary tracked style with no pre-known product
+// context (Promotion's "+ Shoot This Week" below, Brief Builder's "Start
+// Concept") -- one search implementation, not a copy per modal.
+function renderStyleSearchResults(inputId, resultsId, onSelect) {
+  const query = document.getElementById(inputId).value.trim().toLowerCase();
+  const results = document.getElementById(resultsId);
   if (!query) { results.style.display = 'none'; results.innerHTML = ''; return; }
   const matches = state.styles.filter((s) =>
     (s.style_code && s.style_code.toLowerCase().includes(query)) ||
@@ -3294,8 +3297,12 @@ function filterPromotionShootStyles() {
   ).join('');
   results.style.display = '';
   results.querySelectorAll('.promo-shoot-search-result').forEach((row) => {
-    row.addEventListener('click', () => selectPromotionShootStyle(Number(row.dataset.styleId)));
+    row.addEventListener('click', () => onSelect(Number(row.dataset.styleId)));
   });
+}
+
+function filterPromotionShootStyles() {
+  renderStyleSearchResults('promotion-shoot-style-search', 'promotion-shoot-style-results', selectPromotionShootStyle);
 }
 
 function selectPromotionShootStyle(styleId) {
@@ -3343,6 +3350,91 @@ async function savePromotionShootItem() {
       renderPromotionStageDetailView();
     }
     loadAll();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// ── Dashboard -- Brief Builder: Select Product -> Concept Development ────
+// The entry point for starting a normal product creative brief. No
+// pre-known product context (unlike a Core product row's own "Shoot This
+// Week"), so this reuses the exact same searchable style picker as
+// Promotion's "+ Shoot This Week" above (renderStyleSearchResults). Feeds
+// the exact same Concept Development pipeline via POST /shoot-plan (source:
+// 'core' -- fresh creative for an existing product, not drop/high_stock/
+// promotion) -- one normal concept entity, no separate Brief Builder record
+// type.
+let briefBuilderContext = null;
+
+function openBriefBuilderModal() {
+  briefBuilderContext = { styleId: null };
+  document.getElementById('brief-builder-style-search').value = '';
+  document.getElementById('brief-builder-style-id').value = '';
+  document.getElementById('brief-builder-style-results').style.display = 'none';
+  document.getElementById('brief-builder-format').value = 'video';
+  openModal('brief-builder-modal');
+}
+
+function filterBriefBuilderStyles() {
+  renderStyleSearchResults('brief-builder-style-search', 'brief-builder-style-results', selectBriefBuilderStyle);
+}
+
+function selectBriefBuilderStyle(styleId) {
+  const style = state.styles.find((s) => s.id === styleId);
+  if (!style) return;
+  briefBuilderContext.styleId = styleId;
+  document.getElementById('brief-builder-style-id').value = styleId;
+  document.getElementById('brief-builder-style-search').value = `${style.style_code} — ${style.name}`;
+  document.getElementById('brief-builder-style-results').style.display = 'none';
+}
+
+async function startBriefBuilderConcept() {
+  if (!briefBuilderContext) return;
+  const styleId = Number(document.getElementById('brief-builder-style-id').value);
+  const style = state.styles.find((s) => s.id === styleId);
+  if (!style) return toast('Select a product / style', true);
+  const format = document.getElementById('brief-builder-format').value;
+
+  // Same silent-default reasoning as Promotion's savePromotionShootItem
+  // above -- stock status/size/creator aren't asked for here, shoot-plan.js
+  // still needs sensible values for every item regardless of source.
+  const defaultCreator = state.contentCreators.find((c) => c.is_default) || state.contentCreators[0];
+
+  // Always today's actual current week, independent of whatever week
+  // Planning's or Concept Dev's own navigation might currently be scrolled
+  // to -- Brief Builder is a Dashboard shortcut, not a Planning action, so
+  // it shouldn't inherit either tab's transient nav state.
+  const weekStart = isoDateStr(mondayOfWeek(0));
+
+  try {
+    const item = await api('/shoot-plan', {
+      method: 'POST',
+      body: JSON.stringify({
+        product_code: style.style_code,
+        product_name: style.name,
+        colourways: [{ style_id: style.id, size: null, colour_label: null }],
+        stock_status: 'needs_to_be_brought_in',
+        creator: defaultCreator ? defaultCreator.name : DEFAULT_CREATOR,
+        format,
+        source: 'core',
+        week_start: weekStart,
+      }),
+    });
+    closeModal('brief-builder-modal');
+
+    // Concept Development only lists a week once its Shoot Plan has been
+    // confirmed (see weeklyShootPlanConfirmation.js and GET / in
+    // conceptDevelopment.js) -- but starting a concept and confirming the
+    // whole week's Shoot Plan are different actions, and Brief Builder must
+    // never silently do the latter (that would also expose everyone else's
+    // still-in-progress picks for the week). So this opens the new item
+    // standalone instead, via GET /concept-development/item/:id -- a
+    // narrow, additive read that returns this one item's own Concept
+    // Development data independent of its week's confirmation state. The
+    // week's confirmation is left completely untouched.
+    switchTab('concept-dev');
+    await openConceptDevProductStandalone(item.id);
+    toast('Concept started');
   } catch (e) {
     toast(e.message, true);
   }
@@ -3673,6 +3765,8 @@ function onConceptDevWeekChanged() {
   closeConceptDevWeekPicker();
   state.conceptDev.view = 'list';
   state.conceptDev.currentItemId = null;
+  state.conceptDev.standaloneItemId = null;
+  conceptDevStandaloneProduct = null;
   loadConceptDevWeek();
 }
 
@@ -3854,9 +3948,44 @@ function openConceptDevProduct(itemId) {
   renderConceptDevList();
 }
 
+// A single item's own Concept Development workspace, fetched independent
+// of its week's Shoot Plan confirmation (see GET /concept-development/item/
+// :id) -- used only by Dashboard -> Brief Builder's "Start Concept", which
+// creates a fresh core-sourced item on demand and must never silently
+// confirm the whole week's Shoot Plan just to open it. Every other entry
+// point into a product's workspace goes through the normal weekly list
+// (openConceptDevProduct above), untouched.
+let conceptDevStandaloneProduct = null;
+
+async function openConceptDevProductStandalone(itemId) {
+  try {
+    conceptDevStandaloneProduct = await api(`/concept-development/item/${itemId}`);
+    state.conceptDev.view = 'product';
+    state.conceptDev.currentItemId = itemId;
+    state.conceptDev.standaloneItemId = itemId;
+    renderConceptDevList();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// Re-renders whatever product workspace is currently open after a save or
+// delete -- standalone items refetch via their own item endpoint (never
+// the week-scoped one, which would come back empty for an unconfirmed
+// week), everything else keeps the existing weekly reload unchanged.
+async function refreshConceptDevAfterChange() {
+  if (state.conceptDev.standaloneItemId != null) {
+    await openConceptDevProductStandalone(state.conceptDev.standaloneItemId);
+  } else {
+    loadConceptDevWeek();
+  }
+}
+
 function closeConceptDevProduct() {
   state.conceptDev.view = 'list';
   state.conceptDev.currentItemId = null;
+  state.conceptDev.standaloneItemId = null;
+  conceptDevStandaloneProduct = null;
   renderConceptDevList();
 }
 
@@ -3984,6 +4113,16 @@ function renderConceptDevProductWorkspace(product) {
 // was changed while a product workspace was open.
 function renderConceptDevList() {
   const list = document.getElementById('concept-dev-list');
+
+  // A standalone product (see openConceptDevProductStandalone) renders
+  // straight from its own fetched data, bypassing the weekly confirmation
+  // gate below entirely -- its week's Shoot Plan may not be confirmed at
+  // all, deliberately.
+  if (state.conceptDev.view === 'product' && state.conceptDev.standaloneItemId === state.conceptDev.currentItemId && conceptDevStandaloneProduct) {
+    list.innerHTML = renderConceptDevProductWorkspace(conceptDevStandaloneProduct);
+    return;
+  }
+
   const data = state.conceptDev.data;
   if (!data || !data.confirmed) {
     state.conceptDev.view = 'list';
@@ -4015,6 +4154,13 @@ function renderConceptDevList() {
 }
 
 function findConceptDevConcept(conceptId) {
+  // Standalone product checked first (see openConceptDevProductStandalone)
+  // -- it never appears in state.conceptDev.data.products, since its week
+  // may not be confirmed at all.
+  if (conceptDevStandaloneProduct) {
+    const c = conceptDevStandaloneProduct.concepts.find((c) => c.id === conceptId);
+    if (c) return { concept: c, product: conceptDevStandaloneProduct };
+  }
   for (const p of (state.conceptDev.data && state.conceptDev.data.products) || []) {
     const c = p.concepts.find((c) => c.id === conceptId);
     if (c) return { concept: c, product: p };
@@ -4687,7 +4833,8 @@ function updateConceptDevFooterButtons(status) {
 // PATCHes the rest in.
 function openAddConceptModal(shootPlanItemId) {
   const data = state.conceptDev.data;
-  const product = data && data.products.find((p) => p.shoot_plan_item_id === shootPlanItemId);
+  const product = (conceptDevStandaloneProduct && conceptDevStandaloneProduct.shoot_plan_item_id === shootPlanItemId && conceptDevStandaloneProduct)
+    || (data && data.products.find((p) => p.shoot_plan_item_id === shootPlanItemId));
   if (!product) return;
   conceptDevModalConceptId = null;
   conceptDevModalProduct = product;
@@ -4731,7 +4878,7 @@ async function deleteConceptDevConcept() {
     await api(`/creative-assets/${conceptDevModalConceptId}`, { method: 'DELETE' });
     closeModal('concept-dev-modal');
     toast('Concept deleted');
-    loadConceptDevWeek();
+    refreshConceptDevAfterChange();
   } catch (e) {
     toast(e.message, true);
   }
@@ -4745,7 +4892,7 @@ async function deleteConceptDevConceptCard(conceptId) {
   try {
     await api(`/creative-assets/${conceptId}`, { method: 'DELETE' });
     toast('Concept deleted');
-    loadConceptDevWeek();
+    refreshConceptDevAfterChange();
   } catch (e) {
     toast(e.message, true);
   }
@@ -4921,7 +5068,7 @@ async function saveConceptDevModal(targetStatus) {
       closeModal('concept-dev-modal');
       toast(savedToast);
     }
-    loadConceptDevWeek();
+    refreshConceptDevAfterChange();
   } catch (e) {
     toast(e.message, true);
   }
