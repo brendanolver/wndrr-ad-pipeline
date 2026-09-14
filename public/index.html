@@ -1909,32 +1909,31 @@
 <div id="promotion-shoot-modal" class="modal-backdrop">
   <div class="modal">
     <div class="modal-header">
-      <h3 id="promotion-shoot-modal-title">Cover Requirement</h3>
+      <h3 id="promotion-shoot-modal-title">Shoot This Week</h3>
       <button class="modal-close" onclick="closeModal('promotion-shoot-modal')">&times;</button>
     </div>
     <div class="modal-body">
-      <label>Product / style <span class="hint">(whichever's most relevant to this stage — a bundle/GWP/sitewide message still shoots against some product, so pick the closest fit)</span>
-        <select id="promotion-shoot-style"></select>
+      <div class="promo-shoot-context">
+        <div><span class="admin-note">Promotion</span><br><strong id="promotion-shoot-context-promotion"></strong></div>
+        <div><span class="admin-note">Campaign Stage</span><br><strong id="promotion-shoot-context-stage"></strong></div>
+      </div>
+      <label>Product / style <span class="hint">(search by SKU or product name)</span>
+        <div class="promo-shoot-search">
+          <input type="text" id="promotion-shoot-style-search" placeholder="Search SKU or product name…" autocomplete="off" oninput="filterPromotionShootStyles()" onfocus="filterPromotionShootStyles()">
+          <input type="hidden" id="promotion-shoot-style-id">
+          <div id="promotion-shoot-style-results" class="promo-shoot-search-results" style="display:none;"></div>
+        </div>
       </label>
-      <label>Sample Status
-        <select id="promotion-shoot-stock-status" onchange="updatePromotionShootSizeVisibility()">
-          <option value="needs_to_be_brought_in">Bring from Warehouse</option>
-          <option value="in_office">In Office</option>
+      <label>Format
+        <select id="promotion-shoot-format">
+          <option value="video">Video</option>
+          <option value="static">Static</option>
         </select>
-      </label>
-      <label id="promotion-shoot-size-row">Size
-        <input type="text" id="promotion-shoot-size" placeholder="Size (optional)">
-      </label>
-      <label>Content Creator / Owner
-        <select id="promotion-shoot-creator"></select>
-      </label>
-      <label>Quick Note <span class="hint">(optional — not a creative brief)</span>
-        <textarea id="promotion-shoot-note" rows="2" placeholder="e.g. Hero video for the launch push"></textarea>
       </label>
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('promotion-shoot-modal')">Cancel</button>
-      <button class="btn btn-primary" onclick="savePromotionShootItem()">Send to Concept Development</button>
+      <button class="btn btn-primary" onclick="savePromotionShootItem()">Add to Concept Development</button>
     </div>
   </div>
 </div>

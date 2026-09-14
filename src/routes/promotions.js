@@ -29,14 +29,19 @@ function stageUrgency(stillRequired, daysUntilDue) {
   return 'on_track';
 }
 
-// counts: { ready, planned } -- planned is EVERY shoot_plan_item linked to
-// this stage regardless of status ("committed into the workflow"), ready is
-// the ones through qc/uploaded_live. still_required (not "planned") is what
-// drives urgency and the headline gap badge -- per the spec, planned
-// creative is never treated as fully covering the requirement.
+// counts: { ready, planned } -- every shoot_plan_item linked to this stage
+// is either "ready" (through qc/uploaded_live) or "planned" (committed into
+// the workflow but not there yet), never both -- see the mutual-exclusivity
+// comment on fetchStagesWithCoverage below. still_required subtracts BOTH --
+// a requirement that already has a creative record moving through the
+// pipeline (Planned) is no longer "still required" in the sense of needing
+// someone to start one, even though it isn't Ready/Approved yet. When that
+// same record later reaches Ready, it moves out of Planned and into Ready,
+// so still_required is unchanged by the transition (see the "+ Shoot This
+// Week" worked example: 20/0/1/19 -> 20/1/0/19).
 function summarizeStage(stage, { ready = 0, planned = 0 } = {}) {
   const target = stage.required_count;
-  const stillRequired = Math.max(0, target - ready);
+  const stillRequired = Math.max(0, target - ready - planned);
   const coveragePct = target > 0 ? Math.min(100, Math.round((ready / target) * 100)) : 100;
   const daysUntilDue = stage.due_date ? Math.ceil((new Date(stage.due_date) - new Date()) / 86400000) : null;
   const urgency = stageUrgency(stillRequired, daysUntilDue);
@@ -56,12 +61,11 @@ function summarizeStage(stage, { ready = 0, planned = 0 } = {}) {
 function summarizePromotion(promotion, stages) {
   const totalRequired = stages.reduce((sum, s) => sum + s.target, 0);
   const totalReady = stages.reduce((sum, s) => sum + s.ready, 0);
-  // The overview's "Planned" bucket is deliberately the NOT-yet-ready
-  // portion of each stage's committed work (not each stage's own raw
-  // "planned" count, which includes its ready items too) -- so Ready +
-  // Planned + Missing always adds back up to Total Required for the
-  // progress-bar breakdown, matching the spec's own worked example.
-  const totalPlanned = stages.reduce((sum, s) => sum + Math.max(0, s.planned - s.ready), 0);
+  // Each stage's own "planned" count is already the NOT-yet-ready portion of
+  // its committed work (see the mutual-exclusivity comment on
+  // fetchStagesWithCoverage below), so a plain sum keeps Ready + Planned +
+  // Missing adding back up to Total Required for the progress-bar breakdown.
+  const totalPlanned = stages.reduce((sum, s) => sum + s.planned, 0);
   const totalMissing = Math.max(0, totalRequired - totalReady - totalPlanned);
   const overallPct = totalRequired > 0 ? Math.round((totalReady / totalRequired) * 100) : null;
   const daysUntilLaunch = Math.ceil((new Date(promotion.start_date) - new Date()) / 86400000);
@@ -138,8 +142,10 @@ async function fetchStagesWithCoverage(promotionIds) {
   const countsByStage = new Map();
   for (const row of coveredResult.rows) {
     const counts = countsByStage.get(row.promotion_stage_id) || { ready: 0, planned: 0 };
-    counts.planned += 1;
+    // A linked requirement is either Planned or Ready, never both -- once it
+    // reaches a READY_STATUSES status it stops counting toward Planned.
     if (READY_STATUSES.has(row.status)) counts.ready += 1;
+    else counts.planned += 1;
     countsByStage.set(row.promotion_stage_id, counts);
   }
 
@@ -329,8 +335,9 @@ router.put('/stages/:stageId', async (req, res, next) => {
     );
     const counts = { ready: 0, planned: 0 };
     for (const row of coveredResult.rows) {
-      counts.planned += 1;
+      // Same mutual-exclusivity rule as fetchStagesWithCoverage above.
       if (READY_STATUSES.has(row.status)) counts.ready += 1;
+      else counts.planned += 1;
     }
     res.json(summarizeStage(result.rows[0], counts));
   } catch (err) {

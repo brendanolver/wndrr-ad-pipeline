@@ -1,7 +1,8 @@
-const STATUSES = ['not_started', 'awaiting_proven_concept', 'concept_script', 'filming', 'editing', 'qc', 'uploaded_live'];
+const STATUSES = ['not_started', 'awaiting_proven_concept', 'awaiting_concept_development', 'concept_script', 'filming', 'editing', 'qc', 'uploaded_live'];
 const STATUS_LABELS = {
   not_started: 'Not Started',
   awaiting_proven_concept: 'Awaiting Proven Concept',
+  awaiting_concept_development: 'Awaiting Concept Development',
   concept_script: 'Concept/Script',
   filming: 'Filming',
   editing: 'Editing',
@@ -1185,6 +1186,7 @@ function cycleCoverageImage(productCode, delta) {
 const ASSET_STATUS_COLORS = {
   not_started: ['var(--surface2)', 'var(--text-muted)'],
   awaiting_proven_concept: ['var(--purple-light)', 'var(--purple)'],
+  awaiting_concept_development: ['var(--purple-light)', 'var(--purple)'],
   concept_script: ['var(--blue-light)', 'var(--blue)'],
   filming: ['var(--amber-light)', 'var(--amber)'],
   editing: ['var(--amber-light)', 'var(--amber)'],
@@ -3229,8 +3231,8 @@ async function renderPromotionStageDetailView() {
       const [bg, fg] = ASSET_STATUS_COLORS[asset.status] || ASSET_STATUS_COLORS.not_started;
       return `
       <div class="job-card" data-asset-id="${asset.id}">
-        <div class="job-card-concept">${escapeHtml(asset.concept_name)}</div>
-        <div class="job-card-products">${escapeHtml(asset.style_code)} · ${asset.format}</div>
+        <div class="job-card-concept">${escapeHtml(asset.style_name || asset.style_code)}</div>
+        <div class="job-card-products">Concept: ${escapeHtml(asset.concept_name)} · ${asset.format}</div>
         <div class="job-status-row">
           <span class="job-status-pill" style="background:${bg};color:${fg};">${STATUS_LABELS[asset.status]}</span>
           <span class="badge badge-${asset.concept_classification}">${CLASSIFICATION_LABELS[asset.concept_classification]}</span>
@@ -3256,46 +3258,68 @@ async function renderPromotionStageDetailView() {
 let promotionShootContext = null;
 
 function shootThisWeekForPromotionStage(stageId) {
-  const stage = ((state.currentPromotion && state.currentPromotion.stages) || []).find((s) => s.id === stageId);
+  const promotion = state.currentPromotion;
+  const stage = ((promotion && promotion.stages) || []).find((s) => s.id === stageId);
   if (!stage) return;
-  promotionShootContext = { stageId };
-  document.getElementById('promotion-shoot-modal-title').textContent = `Cover Requirement — ${stage.name}`;
-  populatePromotionShootStyleSelect();
-  populatePromotionShootCreatorSelect();
-  document.getElementById('promotion-shoot-stock-status').value = 'needs_to_be_brought_in';
-  document.getElementById('promotion-shoot-size').value = '';
-  document.getElementById('promotion-shoot-note').value = '';
-  updatePromotionShootSizeVisibility();
+  promotionShootContext = { stageId, styleId: null };
+  document.getElementById('promotion-shoot-modal-title').textContent = 'Shoot This Week';
+  document.getElementById('promotion-shoot-context-promotion').textContent = promotion.name;
+  document.getElementById('promotion-shoot-context-stage').textContent = stage.name;
+  document.getElementById('promotion-shoot-style-search').value = '';
+  document.getElementById('promotion-shoot-style-id').value = '';
+  document.getElementById('promotion-shoot-style-results').style.display = 'none';
+  document.getElementById('promotion-shoot-format').value = 'video';
   openModal('promotion-shoot-modal');
 }
 
-function populatePromotionShootStyleSelect() {
-  const sel = document.getElementById('promotion-shoot-style');
-  sel.innerHTML = state.styles.map((s) => `<option value="${s.id}">${escapeHtml(s.style_code)} — ${escapeHtml(s.name)}</option>`).join('');
+// Searchable product/style picker -- SKU or name, partial, case-insensitive
+// -- reusing the same "SKU — Product Name" display convention already used
+// everywhere else styles are listed (e.g. the old giant <select>), just
+// filtered as you type instead of scrolled through.
+function filterPromotionShootStyles() {
+  const query = document.getElementById('promotion-shoot-style-search').value.trim().toLowerCase();
+  const results = document.getElementById('promotion-shoot-style-results');
+  if (!query) { results.style.display = 'none'; results.innerHTML = ''; return; }
+  const matches = state.styles.filter((s) =>
+    (s.style_code && s.style_code.toLowerCase().includes(query)) ||
+    (s.name && s.name.toLowerCase().includes(query))
+  ).slice(0, 20);
+  if (!matches.length) {
+    results.innerHTML = '<div class="promo-shoot-search-empty">No matching product / style</div>';
+    results.style.display = '';
+    return;
+  }
+  results.innerHTML = matches.map((s) =>
+    `<div class="promo-shoot-search-result" data-style-id="${s.id}">${escapeHtml(s.style_code)} — ${escapeHtml(s.name)}</div>`
+  ).join('');
+  results.style.display = '';
+  results.querySelectorAll('.promo-shoot-search-result').forEach((row) => {
+    row.addEventListener('click', () => selectPromotionShootStyle(Number(row.dataset.styleId)));
+  });
 }
 
-function populatePromotionShootCreatorSelect() {
-  const sel = document.getElementById('promotion-shoot-creator');
-  sel.innerHTML = state.contentCreators.map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join('');
-  const defaultEntry = state.contentCreators.find((c) => c.is_default) || state.contentCreators[0];
-  sel.value = defaultEntry ? defaultEntry.name : DEFAULT_CREATOR;
-}
-
-function updatePromotionShootSizeVisibility() {
-  const bringingFromWarehouse = document.getElementById('promotion-shoot-stock-status').value === 'needs_to_be_brought_in';
-  document.getElementById('promotion-shoot-size-row').style.display = bringingFromWarehouse ? '' : 'none';
+function selectPromotionShootStyle(styleId) {
+  const style = state.styles.find((s) => s.id === styleId);
+  if (!style) return;
+  promotionShootContext.styleId = styleId;
+  document.getElementById('promotion-shoot-style-id').value = styleId;
+  document.getElementById('promotion-shoot-style-search').value = `${style.style_code} — ${style.name}`;
+  document.getElementById('promotion-shoot-style-results').style.display = 'none';
 }
 
 async function savePromotionShootItem() {
   if (!promotionShootContext) return;
-  const styleId = Number(document.getElementById('promotion-shoot-style').value);
+  const styleId = Number(document.getElementById('promotion-shoot-style-id').value);
   const style = state.styles.find((s) => s.id === styleId);
   if (!style) return toast('Select a product / style', true);
-  const stockStatus = document.getElementById('promotion-shoot-stock-status').value;
-  const size = document.getElementById('promotion-shoot-size').value.trim();
-  const creator = document.getElementById('promotion-shoot-creator').value.trim();
-  if (!creator) return toast('Content creator is required', true);
-  const note = document.getElementById('promotion-shoot-note').value.trim();
+  const format = document.getElementById('promotion-shoot-format').value;
+
+  // Sample status/size, creator and a quick note aren't asked for here --
+  // this modal deliberately only captures product/style and format (see
+  // the file-header comment above); shoot-plan.js still requires a stock
+  // status and creator on every item regardless of source, so those go in
+  // as sensible silent defaults rather than weakening that shared endpoint.
+  const defaultCreator = state.contentCreators.find((c) => c.is_default) || state.contentCreators[0];
 
   try {
     await api('/shoot-plan', {
@@ -3303,17 +3327,17 @@ async function savePromotionShootItem() {
       body: JSON.stringify({
         product_code: style.style_code,
         product_name: style.name,
-        colourways: [{ style_id: style.id, size: size || null, colour_label: null }],
-        stock_status: stockStatus,
-        creator,
-        quick_note: note,
+        colourways: [{ style_id: style.id, size: null, colour_label: null }],
+        stock_status: 'needs_to_be_brought_in',
+        creator: defaultCreator ? defaultCreator.name : DEFAULT_CREATOR,
+        format,
         source: 'promotion',
         promotion_stage_id: promotionShootContext.stageId,
         week_start: planningWeekStart(),
       }),
     });
     closeModal('promotion-shoot-modal');
-    toast('Sent to Concept Development');
+    toast('Added to Concept Development');
     await refreshCurrentPromotion();
     if (document.getElementById('planning-promotion-stage-view').style.display !== 'none') {
       renderPromotionStageDetailView();
@@ -3848,10 +3872,20 @@ function conceptDevWorkspaceHeaderHtml(product) {
     .map((c) => `<span class="shoot-plan-style-chip">${escapeHtml(c.colour_label || c.style_code)}${c.size ? ` · ${escapeHtml(c.size)}` : ''}</span>`)
     .join('');
   const count = product.concepts.length;
+  // Promotion-sourced products need the Promotion name front and centre --
+  // the pathway badge below only carries the Campaign Stage name, so
+  // someone opening this workspace cold (e.g. from a Concept Development
+  // link, not having come from the Promotion page) wouldn't otherwise know
+  // WHY this concept exists. Scoped to source === 'promotion' only, so
+  // Core/High Stock/Drop workspaces are unaffected.
+  const promoOrigin = product.source === 'promotion' && product.promotion_name
+    ? `<div class="cd-workspace-promo-origin">Promotion: <strong>${escapeHtml(product.promotion_name)}</strong> — ${escapeHtml(product.promotion_stage_name || '')}</div>`
+    : '';
   return `
     <div class="cd-workspace-header">
       ${thumb}
       <div class="cd-workspace-header-info">
+        ${promoOrigin}
         <div class="cd-workspace-header-name">${escapeHtml(product.product_name)}</div>
         <div class="cd-workspace-header-meta">
           <span>${escapeHtml(sourceLabel)}</span>
