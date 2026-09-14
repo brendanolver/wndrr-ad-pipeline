@@ -51,7 +51,7 @@ let state = {
   // navigation (see renderConceptDevList); filter is the landing page's
   // own client-side status filter, applied over the same week's data with
   // no extra API call.
-  conceptDev: { weekOffset: 0, data: null, view: 'list', currentItemId: null, filter: 'all' },
+  conceptDev: { weekOffset: 0, data: null, view: 'list', currentItemId: null, filter: 'all', standaloneItemId: null },
   // Tuesday Review's own week nav -- independent from conceptDev's, same
   // reasoning as above. data is the exact same GET /concept-development
   // payload Concept Dev uses (products -> concepts); filter is the landing
@@ -3423,24 +3423,17 @@ async function startBriefBuilderConcept() {
     closeModal('brief-builder-modal');
 
     // Concept Development only lists a week once its Shoot Plan has been
-    // confirmed (every other source already goes through this same gate --
-    // see weeklyShootPlanConfirmation.js). Brief Builder's whole point is
-    // landing straight in Concept Development, so if nobody's confirmed
-    // today's week yet, this completes that same existing step itself
-    // rather than stranding the new concept behind a "not confirmed yet"
-    // wall. Reuses the exact POST /weekly-shoot-plan-confirmation action
-    // Planning's own "Confirm & Send Shoot Plan" button already calls --
-    // idempotent (ON CONFLICT DO NOTHING) and touches nothing else about
-    // that week's picks, so it's safe to call even if already confirmed.
-    const existingConfirmation = await api(`/weekly-shoot-plan-confirmation?week_start=${weekStart}`);
-    if (!existingConfirmation) {
-      await api('/weekly-shoot-plan-confirmation', { method: 'POST', body: JSON.stringify({ week_start: weekStart }) });
-    }
-
+    // confirmed (see weeklyShootPlanConfirmation.js and GET / in
+    // conceptDevelopment.js) -- but starting a concept and confirming the
+    // whole week's Shoot Plan are different actions, and Brief Builder must
+    // never silently do the latter (that would also expose everyone else's
+    // still-in-progress picks for the week). So this opens the new item
+    // standalone instead, via GET /concept-development/item/:id -- a
+    // narrow, additive read that returns this one item's own Concept
+    // Development data independent of its week's confirmation state. The
+    // week's confirmation is left completely untouched.
     switchTab('concept-dev');
-    state.conceptDev.weekOffset = 0;
-    await loadConceptDevWeek();
-    openConceptDevProduct(item.id);
+    await openConceptDevProductStandalone(item.id);
     toast('Concept started');
   } catch (e) {
     toast(e.message, true);
@@ -3772,6 +3765,8 @@ function onConceptDevWeekChanged() {
   closeConceptDevWeekPicker();
   state.conceptDev.view = 'list';
   state.conceptDev.currentItemId = null;
+  state.conceptDev.standaloneItemId = null;
+  conceptDevStandaloneProduct = null;
   loadConceptDevWeek();
 }
 
@@ -3953,9 +3948,44 @@ function openConceptDevProduct(itemId) {
   renderConceptDevList();
 }
 
+// A single item's own Concept Development workspace, fetched independent
+// of its week's Shoot Plan confirmation (see GET /concept-development/item/
+// :id) -- used only by Dashboard -> Brief Builder's "Start Concept", which
+// creates a fresh core-sourced item on demand and must never silently
+// confirm the whole week's Shoot Plan just to open it. Every other entry
+// point into a product's workspace goes through the normal weekly list
+// (openConceptDevProduct above), untouched.
+let conceptDevStandaloneProduct = null;
+
+async function openConceptDevProductStandalone(itemId) {
+  try {
+    conceptDevStandaloneProduct = await api(`/concept-development/item/${itemId}`);
+    state.conceptDev.view = 'product';
+    state.conceptDev.currentItemId = itemId;
+    state.conceptDev.standaloneItemId = itemId;
+    renderConceptDevList();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// Re-renders whatever product workspace is currently open after a save or
+// delete -- standalone items refetch via their own item endpoint (never
+// the week-scoped one, which would come back empty for an unconfirmed
+// week), everything else keeps the existing weekly reload unchanged.
+async function refreshConceptDevAfterChange() {
+  if (state.conceptDev.standaloneItemId != null) {
+    await openConceptDevProductStandalone(state.conceptDev.standaloneItemId);
+  } else {
+    loadConceptDevWeek();
+  }
+}
+
 function closeConceptDevProduct() {
   state.conceptDev.view = 'list';
   state.conceptDev.currentItemId = null;
+  state.conceptDev.standaloneItemId = null;
+  conceptDevStandaloneProduct = null;
   renderConceptDevList();
 }
 
@@ -4083,6 +4113,16 @@ function renderConceptDevProductWorkspace(product) {
 // was changed while a product workspace was open.
 function renderConceptDevList() {
   const list = document.getElementById('concept-dev-list');
+
+  // A standalone product (see openConceptDevProductStandalone) renders
+  // straight from its own fetched data, bypassing the weekly confirmation
+  // gate below entirely -- its week's Shoot Plan may not be confirmed at
+  // all, deliberately.
+  if (state.conceptDev.view === 'product' && state.conceptDev.standaloneItemId === state.conceptDev.currentItemId && conceptDevStandaloneProduct) {
+    list.innerHTML = renderConceptDevProductWorkspace(conceptDevStandaloneProduct);
+    return;
+  }
+
   const data = state.conceptDev.data;
   if (!data || !data.confirmed) {
     state.conceptDev.view = 'list';
@@ -4114,6 +4154,13 @@ function renderConceptDevList() {
 }
 
 function findConceptDevConcept(conceptId) {
+  // Standalone product checked first (see openConceptDevProductStandalone)
+  // -- it never appears in state.conceptDev.data.products, since its week
+  // may not be confirmed at all.
+  if (conceptDevStandaloneProduct) {
+    const c = conceptDevStandaloneProduct.concepts.find((c) => c.id === conceptId);
+    if (c) return { concept: c, product: conceptDevStandaloneProduct };
+  }
   for (const p of (state.conceptDev.data && state.conceptDev.data.products) || []) {
     const c = p.concepts.find((c) => c.id === conceptId);
     if (c) return { concept: c, product: p };
@@ -4786,7 +4833,8 @@ function updateConceptDevFooterButtons(status) {
 // PATCHes the rest in.
 function openAddConceptModal(shootPlanItemId) {
   const data = state.conceptDev.data;
-  const product = data && data.products.find((p) => p.shoot_plan_item_id === shootPlanItemId);
+  const product = (conceptDevStandaloneProduct && conceptDevStandaloneProduct.shoot_plan_item_id === shootPlanItemId && conceptDevStandaloneProduct)
+    || (data && data.products.find((p) => p.shoot_plan_item_id === shootPlanItemId));
   if (!product) return;
   conceptDevModalConceptId = null;
   conceptDevModalProduct = product;
@@ -4830,7 +4878,7 @@ async function deleteConceptDevConcept() {
     await api(`/creative-assets/${conceptDevModalConceptId}`, { method: 'DELETE' });
     closeModal('concept-dev-modal');
     toast('Concept deleted');
-    loadConceptDevWeek();
+    refreshConceptDevAfterChange();
   } catch (e) {
     toast(e.message, true);
   }
@@ -4844,7 +4892,7 @@ async function deleteConceptDevConceptCard(conceptId) {
   try {
     await api(`/creative-assets/${conceptId}`, { method: 'DELETE' });
     toast('Concept deleted');
-    loadConceptDevWeek();
+    refreshConceptDevAfterChange();
   } catch (e) {
     toast(e.message, true);
   }
@@ -5020,7 +5068,7 @@ async function saveConceptDevModal(targetStatus) {
       closeModal('concept-dev-modal');
       toast(savedToast);
     }
-    loadConceptDevWeek();
+    refreshConceptDevAfterChange();
   } catch (e) {
     toast(e.message, true);
   }

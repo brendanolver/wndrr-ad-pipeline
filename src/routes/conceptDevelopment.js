@@ -161,6 +161,92 @@ router.get('/locations', async (req, res, next) => {
   }
 });
 
+// A single item's Concept Development view, independent of its week's
+// Shoot Plan confirmation. Used only by Dashboard -> Brief Builder's "Start
+// Concept": that flow creates one shoot_plan_item on demand (source:
+// 'core') outside the normal Monday planning ceremony, and should open
+// straight into its own Concept Development workspace without also
+// confirming -- and thereby exposing -- everyone else's still-in-progress
+// picks for that week (see GET / above, which stays gated on
+// weekly_shoot_plan_confirmations for the normal weekly list). Returns the
+// exact same per-product shape as one entry of GET /'s products array, for
+// exactly one item.
+router.get('/item/:shootPlanItemId', async (req, res, next) => {
+  try {
+    const itemId = Number(req.params.shootPlanItemId);
+    if (!Number.isFinite(itemId)) return res.status(400).json({ error: 'Invalid shoot plan item id' });
+
+    const itemResult = await pool.query(
+      `SELECT spi.*, p.id AS promotion_id, p.name AS promotion_name, ps.name AS promotion_stage_name
+       FROM shoot_plan_items spi
+       LEFT JOIN promotion_stages ps ON ps.id = spi.promotion_stage_id
+       LEFT JOIN promotions p ON p.id = ps.promotion_id
+       WHERE spi.id = $1`,
+      [itemId]
+    );
+    if (!itemResult.rows.length) return res.status(404).json({ error: 'Shoot plan item not found' });
+    const item = itemResult.rows[0];
+
+    const stylesResult = await pool.query(
+      `SELECT s.id AS style_id, s.style_code, s.drop_id, spis.size, spis.colour_label
+       FROM shoot_plan_item_styles spis
+       JOIN styles s ON s.id = spis.style_id
+       WHERE spis.shoot_plan_item_id = $1`,
+      [itemId]
+    );
+    const colourways = stylesResult.rows.map((s) => ({ style_id: s.style_id, style_code: s.style_code, colour_label: s.colour_label, size: s.size }));
+
+    let concepts = [];
+    let dropPlanId = null;
+    let provenCoverageCount = 0;
+    if (item.source === 'drop') {
+      const dropId = stylesResult.rows.map((s) => s.drop_id).find((id) => id != null);
+      if (dropId) {
+        const result = await generateOrTopUpPlan(dropId, item.product_code);
+        if (!result.notFound && result.plan) {
+          dropPlanId = result.plan.id;
+          provenCoverageCount = result.slots.filter((s) => s.source === 'proven').length;
+          const slotAssetsResult = await pool.query(
+            `SELECT ca.*
+             FROM drop_product_plan_slots dpps
+             JOIN creative_assets ca ON ca.id = dpps.fulfilled_by_asset_id
+             WHERE dpps.plan_id = $1 AND dpps.source = 'new'
+             ORDER BY dpps.slot_rank ASC`,
+            [result.plan.id]
+          );
+          concepts = slotAssetsResult.rows.map((row) => ({ ...row, name_locked: false }));
+        }
+      }
+    } else {
+      const conceptsResult = await pool.query(
+        `SELECT * FROM creative_assets WHERE shoot_plan_item_id = $1 ORDER BY created_at ASC`,
+        [itemId]
+      );
+      concepts = conceptsResult.rows.map((row) => ({ ...row, name_locked: false }));
+    }
+
+    res.json({
+      shoot_plan_item_id: item.id,
+      product_code: item.product_code,
+      product_name: item.product_name,
+      image_url: item.image_url,
+      stock_status: item.stock_status,
+      creator: item.creator,
+      initial_idea: item.initial_idea,
+      source: item.source,
+      promotion_stage_id: item.promotion_stage_id,
+      promotion_name: item.promotion_name,
+      promotion_stage_name: item.promotion_stage_name,
+      drop_plan_id: dropPlanId,
+      proven_coverage_count: provenCoverageCount,
+      colourways,
+      concepts,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Ad-hoc concept for a Core/High Stock/Promotion product -- a Drop
 // product's "+ Add Concept" instead reuses the existing
 // POST /drop-product-plans/:id/slots (adds a 'new' Required Concept slot,
