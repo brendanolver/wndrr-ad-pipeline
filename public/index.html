@@ -1903,11 +1903,18 @@
 <!-- Dashboard -> Brief Builder: the entry point for starting a normal
      product creative brief. Like the Promotion modal below, there's no
      pre-known product to launch this from, so it reuses the exact same
-     searchable style picker (renderStyleSearchResults). Feeds the exact
-     same Concept Development pipeline via POST /shoot-plan (source:
-     'core' -- fresh creative for an existing/core product, same source
-     Core's own "Shoot This Week" already uses; not drop/high_stock/
-     promotion) -- no separate Brief Builder record type. -->
+     searchable style picker (renderStyleSearchResults). Once a style is
+     picked, GET /styles/:id/colourways groups it with its sibling
+     colourways the same way Planning's Core Products already does, and the
+     Colourways & sizes needed section below reuses Core's own "Shoot This
+     Week" markup/logic verbatim (renderColourwayRows/selectAllColourwayRows/
+     collectCheckedColourways) -- multiple colourways selected here become
+     one shoot_plan_item with all of them attached (shoot_plan_item_styles),
+     not one item per colourway. Feeds the exact same Concept Development
+     pipeline via POST /shoot-plan (source: 'core' -- fresh creative for an
+     existing/core product, same source Core's own "Shoot This Week" already
+     uses; not drop/high_stock/promotion) -- no separate Brief Builder
+     record type. -->
 <div id="brief-builder-modal" class="modal-backdrop">
   <div class="modal">
     <div class="modal-header">
@@ -1921,6 +1928,13 @@
           <input type="hidden" id="brief-builder-style-id">
           <div id="brief-builder-style-results" class="promo-shoot-search-results" style="display:none;"></div>
         </div>
+      </label>
+      <label id="brief-builder-colours-label" style="display:none;">Colourways &amp; sizes needed
+        <div class="shoot-plan-colours-toolbar">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="selectAllBriefBuilderColours(true)">Select All</button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="selectAllBriefBuilderColours(false)">Clear All</button>
+        </div>
+        <div id="brief-builder-colours" class="shoot-plan-colours-list"></div>
       </label>
       <label>Format
         <select id="brief-builder-format">
