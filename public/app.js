@@ -1260,9 +1260,17 @@ function renderCoverageGrid(coverage) {
       images = '<span class="coverage-card-noimg">🖼</span>';
     }
     const pct = c.creative_target ? Math.min(100, Math.round((c.current_coverage / c.creative_target) * 100)) : 0;
-    const stockLines = c.soh !== null
-      ? c.styles.map((s) => `<div>${c.styles.length > 1 ? s.style_code + ': ' : ''}${colourStatsLine(s)}</div>`).join('')
-      : '<div class="coverage-card-unavailable">Stock unavailable</div>';
+    // Colourway identity (style_code, and colour_label when ApparelMagic
+    // resolves one) is local `styles` table data, always known regardless
+    // of AM being configured -- only the SOH/On Order figures depend on AM,
+    // and colourStatsLine already degrades those to "SOH --" on its own. So
+    // this always lists every colourway, rather than the previous all-or-
+    // nothing "Stock unavailable" block that hid the colourway list itself
+    // whenever AM wasn't connected.
+    const colourwayLines = c.styles.map((s) => {
+      const label = s.colour_label ? `${escapeHtml(s.style_code)} — ${escapeHtml(s.colour_label)}` : escapeHtml(s.style_code);
+      return `<div>${label} · ${colourStatsLine(s)}</div>`;
+    }).join('');
 
     return `
     <div class="coverage-card" data-product-code="${c.product_code}">
@@ -1270,7 +1278,7 @@ function renderCoverageGrid(coverage) {
       <div class="coverage-card-body">
         <div class="coverage-card-name">${escapeHtml(c.product_name)}</div>
         <div class="coverage-card-code">${c.product_code} · ${c.styles.length} colour${c.styles.length === 1 ? '' : 's'}</div>
-        <div class="coverage-card-stats-stack">${stockLines}</div>
+        <div class="coverage-card-stats-stack">${colourwayLines}</div>
         ${c.soh !== null ? `
           <div class="coverage-card-ratio">${c.current_coverage} / ${c.creative_target}</div>
           <div class="coverage-progress-track"><div class="coverage-progress-fill ${c.status}" style="width:${pct}%;"></div></div>
