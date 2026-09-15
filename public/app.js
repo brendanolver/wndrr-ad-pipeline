@@ -22,12 +22,10 @@ let state = {
   contentCreators: [],
   conceptDevLocations: [],
   highStockProducts: [], highStockExpandedProducts: new Set(),
-  // Monday Planning's 5-step guided workflow -- always starts at Core on
-  // load (not persisted to localStorage): this is a recurring weekly
-  // ritual, not a session to resume, so a stale mid-flow step from a prior
-  // visit would only confuse. The one place it's overridden is entering
-  // the drop/product/promotion drill-in (see renderPlanningRoute), so "Back
-  // to Planning" always returns to the Drops step, not Core.
+  // Monday Planning's 3-step guided workflow (Core/High Stocks/Shoot Plan)
+  // -- always starts at Core on load (not persisted to localStorage): this
+  // is a recurring weekly ritual, not a session to resume, so a stale
+  // mid-flow step from a prior visit would only confuse.
   planningStep: 'core',
   promotions: [], currentPromotionId: null, currentPromotion: null,
   weeklyShootPlanConfirmation: null,
@@ -161,6 +159,11 @@ function showApp() {
   document.getElementById('app').style.display = 'flex';
   renderSidebarUser();
   loadAll();
+  // Opens straight into the right sidebar tab for a deep link present at
+  // load time (e.g. #drops/5, or a pre-restructure #planning/drop/5) --
+  // doesn't need to wait on loadAll(), switchTab itself has no data
+  // dependency.
+  handleHashRoute();
 }
 
 async function checkSession() {
@@ -348,6 +351,8 @@ async function loadAll() {
     renderMetaProductMappings();
     renderHighStockProducts();
     renderPromotionsRow();
+    renderDropsRoute();
+    renderPromotionsRoute();
     renderPlanningShootSummary();
     renderConceptDevWeekHeader();
     renderConceptDevList();
@@ -588,18 +593,17 @@ function renderPlanning() {
   renderPlanningStepNav();
   renderDropsRow();
   loadDropSuggestions();
-  renderPlanningRoute();
   renderShootPlanStep();
   renderPlanningShootPlanSummary();
 }
 
 // ── Planning steps (Monday's guided workflow) ────────
-// Core -> High Stocks -> Upcoming Drops -> Promotions -> Shoot Plan: one
-// step visible at a time (mutually exclusive, unlike the accordion pattern
-// still used for the independent Past Drops section below), freely
+// Core -> High Stocks -> Shoot Plan: one step visible at a time, freely
 // clickable forward/backward. No refetch on switch -- everything's already
-// loaded by loadAll().
-const PLANNING_STEPS = ['core', 'high-stocks', 'drops', 'promotions', 'shoot-plan'];
+// loaded by loadAll(). Upcoming Drops and Promotions used to be steps 3
+// and 4 here -- they're now their own sidebar tabs (#tab-drops /
+// #tab-promotions), so this workflow is Core/High Stocks/Shoot Plan only.
+const PLANNING_STEPS = ['core', 'high-stocks', 'shoot-plan'];
 function setPlanningStep(key) {
   state.planningStep = key;
   document.querySelectorAll('.planning-step-btn').forEach((btn) => btn.classList.toggle('active', btn.dataset.step === key));
@@ -621,65 +625,112 @@ function renderPlanningShootSummary() {
     `${state.shootPlan.length} product${state.shootPlan.length === 1 ? '' : 's'} selected · ${samplesRequired} sample${samplesRequired === 1 ? '' : 's'} required`;
 }
 
-// ── Planning sub-navigation (list / drop / product / promotion / stage) ──
-// Hash-routed so a drop, product, promotion, or stage is a genuinely
-// separate view (not an inline expand), with working back/forward. Scheme:
-//   #planning/drop/<id>
-//   #planning/drop/<id>/product/<productCode>
-//   #planning/promotion/<id>
-//   #planning/promotion/<id>/stage/<stageId>
-function parsePlanningHash() {
-  const parts = window.location.hash.replace(/^#planning\/?/, '').split('/').filter(Boolean);
-  if (parts[0] === 'drop' && parts[1]) {
-    if (parts[2] === 'product' && parts[3]) {
-      return { view: 'product', dropId: Number(parts[1]), productCode: decodeURIComponent(parts[3]) };
-    }
-    return { view: 'drop', dropId: Number(parts[1]) };
+// ── Upcoming Drops sub-navigation (list / drop / product) ────────────
+// Own sidebar tab (#tab-drops), hash-routed so a drop or product is a
+// genuinely separate view (not an inline expand), with working
+// back/forward. Scheme:
+//   #drops
+//   #drops/<id>
+//   #drops/<id>/product/<productCode>
+// Was #planning/drop/... before Upcoming Drops moved out of Planning's
+// step flow -- see handleHashRoute below for the redirect that keeps old
+// links working.
+function parseDropsHash() {
+  const parts = window.location.hash.replace(/^#drops\/?/, '').split('/').filter(Boolean);
+  if (parts[0] && parts[1] === 'product' && parts[2]) {
+    return { view: 'product', dropId: Number(parts[0]), productCode: decodeURIComponent(parts[2]) };
   }
-  if (parts[0] === 'promotion' && parts[1]) {
-    if (parts[2] === 'stage' && parts[3]) {
-      return { view: 'promotion-stage', promotionId: Number(parts[1]), stageId: Number(parts[3]) };
-    }
-    return { view: 'promotion', promotionId: Number(parts[1]) };
-  }
+  if (parts[0]) return { view: 'drop', dropId: Number(parts[0]) };
   return { view: 'list' };
 }
 
-function goToPlanningList() {
-  window.location.hash = '#planning';
+function goToDropsList() {
+  window.location.hash = '#drops';
 }
 
-function renderPlanningRoute() {
-  const route = parsePlanningHash();
-  document.getElementById('planning-list-view').style.display = route.view === 'list' ? 'block' : 'none';
+// Safe to call on every loadAll() refresh (mirrors renderDropsRow/
+// renderPromotionsRow above) -- it only ever touches elements inside
+// #tab-drops, never switches which sidebar tab is active, so it can't
+// yank someone away from whatever tab they're actually looking at.
+// Switching to #tab-drops itself only happens from an actual hashchange
+// event or the initial page load -- see handleHashRoute.
+function renderDropsRoute() {
+  const route = parseDropsHash();
+  document.getElementById('drops-list-view').style.display = route.view === 'list' ? 'block' : 'none';
   document.getElementById('planning-drop-view').style.display = route.view === 'drop' ? 'block' : 'none';
   document.getElementById('planning-product-view').style.display = route.view === 'product' ? 'block' : 'none';
-  document.getElementById('planning-promotion-view').style.display = route.view === 'promotion' ? 'block' : 'none';
-  document.getElementById('planning-promotion-stage-view').style.display = route.view === 'promotion-stage' ? 'block' : 'none';
-
-  if (route.view === 'drop' || route.view === 'product') {
-    // So "Back to Planning" always lands on the Drops step, not Core --
-    // covers both clicking into a drop from Step 3 and a direct page
-    // reload on a #planning/drop/<id> hash (state.planningStep resets to
-    // 'core' on every fresh load otherwise).
-    setPlanningStep('drops');
-  } else if (route.view === 'promotion' || route.view === 'promotion-stage') {
-    setPlanningStep('promotions');
-  }
 
   if (route.view === 'drop') {
     loadDropView(route.dropId);
   } else if (route.view === 'product') {
-    document.getElementById('product-view-back').onclick = () => { window.location.hash = `#planning/drop/${route.dropId}`; };
+    document.getElementById('product-view-back').onclick = () => { window.location.hash = `#drops/${route.dropId}`; };
     loadProductView(route.dropId, route.productCode);
-  } else if (route.view === 'promotion') {
+  }
+}
+
+// ── Promotions sub-navigation (list / promotion / stage) ─────────────
+// Own sidebar tab (#tab-promotions). Same pattern as Upcoming Drops above.
+// Scheme:
+//   #promotions
+//   #promotions/<id>
+//   #promotions/<id>/stage/<stageId>
+// Was #planning/promotion/... before Promotions moved out of Planning's
+// step flow -- see handleHashRoute below for the redirect.
+function parsePromotionsHash() {
+  const parts = window.location.hash.replace(/^#promotions\/?/, '').split('/').filter(Boolean);
+  if (parts[0] && parts[1] === 'stage' && parts[2]) {
+    return { view: 'promotion-stage', promotionId: Number(parts[0]), stageId: Number(parts[2]) };
+  }
+  if (parts[0]) return { view: 'promotion', promotionId: Number(parts[0]) };
+  return { view: 'list' };
+}
+
+function goToPromotionsList() {
+  window.location.hash = '#promotions';
+}
+
+function renderPromotionsRoute() {
+  const route = parsePromotionsHash();
+  document.getElementById('promotions-list-view').style.display = route.view === 'list' ? 'block' : 'none';
+  document.getElementById('planning-promotion-view').style.display = route.view === 'promotion' ? 'block' : 'none';
+  document.getElementById('planning-promotion-stage-view').style.display = route.view === 'promotion-stage' ? 'block' : 'none';
+
+  if (route.view === 'promotion') {
     loadPromotionView(route.promotionId);
   } else if (route.view === 'promotion-stage') {
-    document.getElementById('promotion-stage-view-back').onclick = () => { window.location.hash = `#planning/promotion/${route.promotionId}`; };
+    document.getElementById('promotion-stage-view-back').onclick = () => { window.location.hash = `#promotions/${route.promotionId}`; };
     loadPromotionStageView(route.promotionId, route.stageId);
   }
 }
-window.addEventListener('hashchange', renderPlanningRoute);
+
+// ── Hash routing entry point ──────────────────────────────────────────
+// Keeps the active sidebar tab in sync with real navigation events (a
+// drop/promotion card click, a back-link, browser back/forward, a fresh
+// page load on a deep link) -- unlike renderDropsRoute/renderPromotionsRoute
+// above, this DOES switch tabs, so it must only ever run from an actual
+// hashchange (or once at startup), never from the loadAll() refresh path.
+// Also transparently upgrades pre-restructure #planning/drop and
+// #planning/promotion links (Upcoming Drops/Promotions used to be Planning
+// steps) to their new homes, so old bookmarks/shares keep working.
+function handleHashRoute() {
+  const hash = window.location.hash;
+  if (hash.startsWith('#planning/drop')) {
+    window.location.hash = hash.replace('#planning/drop', '#drops');
+    return;
+  }
+  if (hash.startsWith('#planning/promotion')) {
+    window.location.hash = hash.replace('#planning/promotion', '#promotions');
+    return;
+  }
+  if (hash.startsWith('#drops')) {
+    switchTab('drops');
+    renderDropsRoute();
+  } else if (hash.startsWith('#promotions')) {
+    switchTab('promotions');
+    renderPromotionsRoute();
+  }
+}
+window.addEventListener('hashchange', handleHashRoute);
 
 // Every ApparelMagic launch date -- upcoming AND already-launched within the
 // Past Drops window -- should already have a Drop card on the Planning page
@@ -896,8 +947,12 @@ async function toggleWeeklyProgress(field) {
 // show "as it was" for a past week on them; Shoot Plan (the actual
 // historical record) stays open. Also repaints each step's own "Mark as
 // Reviewed" button so both surfaces always agree.
+// drops/promotions stay in these two maps even though they're no longer
+// .planning-step-btn steps (that loop below only ever finds the 3 buttons
+// that still exist) -- their Mark as Reviewed buttons are still real,
+// relocated to #tab-drops/#tab-promotions, and still painted from here.
 const PLANNING_STEP_REVIEW_FIELD = { core: 'core_reviewed', 'high-stocks': 'high_stock_reviewed', drops: 'drops_reviewed', promotions: 'promotions_reviewed' };
-const PLANNING_STEP_LABELS = { core: '1 Core', 'high-stocks': '2 High Stocks', drops: '3 Upcoming Drops', promotions: '4 Promotions', 'shoot-plan': '5 Shoot Plan' };
+const PLANNING_STEP_LABELS = { core: '1 Core', 'high-stocks': '2 High Stocks', 'shoot-plan': '3 Shoot Plan' };
 const PLANNING_REVIEW_BTN_IDS = { core: 'core-review-btn', 'high-stocks': 'high-stocks-review-btn', drops: 'drops-review-btn', promotions: 'promotions-review-btn' };
 
 function renderPlanningStepNav() {
@@ -956,7 +1011,7 @@ function dropCardHtml(d) {
 
 function wireDropCardRow(row) {
   row.querySelectorAll('.drop-card').forEach((card) => {
-    card.addEventListener('click', () => { window.location.hash = `#planning/drop/${card.dataset.dropId}`; });
+    card.addEventListener('click', () => { window.location.hash = `#drops/${card.dataset.dropId}`; });
   });
   row.querySelectorAll('.drop-card-edit-btn').forEach((btn) => {
     btn.addEventListener('click', (e) => {
@@ -1165,7 +1220,7 @@ function renderCoverageGrid(coverage) {
   }).join('');
   grid.querySelectorAll('.coverage-card').forEach((card) => {
     card.addEventListener('click', () => {
-      window.location.hash = `#planning/drop/${state.currentDropId}/product/${encodeURIComponent(card.dataset.productCode)}`;
+      window.location.hash = `#drops/${state.currentDropId}/product/${encodeURIComponent(card.dataset.productCode)}`;
     });
   });
 }
@@ -1208,7 +1263,7 @@ async function loadProductView(dropId, productCode) {
     const group = drop.coverage.find((c) => c.product_code === productCode);
     if (!group) {
       toast('Product not found in this drop', true);
-      window.location.hash = `#planning/drop/${dropId}`;
+      window.location.hash = `#drops/${dropId}`;
       return;
     }
     state.currentProduct = group;
@@ -2824,7 +2879,7 @@ function promotionCardHtml(p) {
 
 function wirePromotionCardRow(row) {
   row.querySelectorAll('.drop-card').forEach((card) => {
-    card.addEventListener('click', () => { window.location.hash = `#planning/promotion/${card.dataset.promotionId}`; });
+    card.addEventListener('click', () => { window.location.hash = `#promotions/${card.dataset.promotionId}`; });
   });
 }
 
@@ -2887,7 +2942,7 @@ async function savePromotion() {
       // Straight into the new promotion's detail page -- that's where
       // Campaign Stages get added, and there's nothing else to do on the
       // landing card yet.
-      window.location.hash = `#planning/promotion/${created.id}`;
+      window.location.hash = `#promotions/${created.id}`;
     }
   } catch (e) {
     toast(e.message, true);
@@ -2902,7 +2957,7 @@ async function deletePromotion() {
     await api(`/promotions/${id}`, { method: 'DELETE' });
     closeModal('promotion-modal');
     toast('Promotion deleted');
-    goToPlanningList();
+    goToPromotionsList();
     loadAll();
   } catch (e) {
     toast(e.message, true);
@@ -3054,7 +3109,7 @@ function wirePromotionStageDragEvents() {
     // controls -- every one of them is an <input> or <button>.
     card.addEventListener('click', (e) => {
       if (e.target.closest('input, button')) return;
-      window.location.hash = `#planning/promotion/${state.currentPromotionId}/stage/${card.dataset.stageId}`;
+      window.location.hash = `#promotions/${state.currentPromotionId}/stage/${card.dataset.stageId}`;
     });
     card.addEventListener('dragstart', () => {
       promotionStageDragId = Number(card.dataset.stageId);
