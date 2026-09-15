@@ -36,6 +36,8 @@
     <nav class="sidebar-nav">
       <button class="tab-btn active" data-tab="dashboard"><span class="sidebar-nav-icon">⌂</span>Dashboard</button>
       <button class="tab-btn" data-tab="planning"><span class="sidebar-nav-icon">🗓</span>Planning</button>
+      <button class="tab-btn" data-tab="drops"><span class="sidebar-nav-icon">📦</span>Upcoming Drops</button>
+      <button class="tab-btn" data-tab="promotions"><span class="sidebar-nav-icon">📢</span>Promotions</button>
       <button class="tab-btn" data-tab="concept-dev"><span class="sidebar-nav-icon">💡</span>Concept Dev</button>
       <button class="tab-btn" data-tab="tuesday-review"><span class="sidebar-nav-icon">🗳</span>Tuesday Review</button>
       <button class="tab-btn" data-tab="shooting"><span class="sidebar-nav-icon">🎬</span>Shooting</button>
@@ -123,20 +125,17 @@
             <button type="button" class="btn btn-ghost btn-sm" id="planning-this-week-btn" onclick="goToCurrentPlanningWeek()" style="display:none;">This Week</button>
             <div class="planning-week-picker" id="planning-week-picker" style="display:none;"></div>
           </div>
-          <div class="planning-actions">
-            <button class="btn btn-ghost btn-sm" id="new-drop-btn">+ New Drop</button>
-          </div>
         </div>
 
         <!-- Monday's guided workflow: one step visible at a time, freely
-             clickable forward/backward -- mutually exclusive, unlike the
-             independent Past Drops accordion further down. -->
+             clickable forward/backward. Upcoming Drops and Promotions used
+             to be steps 3 and 4 here -- they're now their own sidebar
+             sections (see #tab-drops / #tab-promotions below), reusing this
+             exact same list/detail markup unchanged, just relocated. -->
         <div class="planning-steps">
           <button type="button" class="planning-step-btn active" data-step="core">1 Core</button>
           <button type="button" class="planning-step-btn" data-step="high-stocks">2 High Stocks</button>
-          <button type="button" class="planning-step-btn" data-step="drops">3 Upcoming Drops</button>
-          <button type="button" class="planning-step-btn" data-step="promotions">4 Promotions</button>
-          <button type="button" class="planning-step-btn" data-step="shoot-plan">5 Shoot Plan</button>
+          <button type="button" class="planning-step-btn" data-step="shoot-plan">3 Shoot Plan</button>
         </div>
         <div class="planning-shoot-summary" id="planning-shoot-summary">0 products selected · 0 samples required</div>
 
@@ -182,43 +181,6 @@
             <span id="high-stock-step-footer-count">0 High Stock products selected</span>
             <div class="planning-step-footer-actions">
               <button type="button" class="planning-review-btn" id="high-stocks-review-btn" onclick="toggleWeeklyProgress('high_stock_reviewed')">&#10003; Mark as Reviewed</button>
-              <button type="button" class="btn btn-primary planning-step-continue-btn" onclick="setPlanningStep('drops')">Continue to Upcoming Drops &rarr;</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="planning-step-panel" data-step="drops" id="planning-step-drops">
-          <div id="drops-row-upcoming" class="drops-row"></div>
-
-          <div class="planning-accordion">
-            <button type="button" class="accordion-toggle" data-section="past-drops">
-              <span class="accordion-arrow">&#9656;</span> Past Drops <span class="accordion-subtitle">(last 60 days)</span>
-            </button>
-            <div class="accordion-body" id="section-body-past-drops" style="display:none;">
-              <div id="drops-row-past" class="drops-row"></div>
-            </div>
-          </div>
-
-          <div class="planning-step-footer">
-            <span id="drops-step-footer-count">0 upcoming drops</span>
-            <div class="planning-step-footer-actions">
-              <button type="button" class="planning-review-btn" id="drops-review-btn" onclick="toggleWeeklyProgress('drops_reviewed')">&#10003; Mark as Reviewed</button>
-              <button type="button" class="btn btn-primary planning-step-continue-btn" onclick="setPlanningStep('promotions')">Continue to Promotions &rarr;</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="planning-step-panel" data-step="promotions" id="planning-step-promotions">
-          <div class="planning-section-header">
-            <h2>Promotions</h2>
-            <button type="button" class="btn btn-ghost btn-sm" id="new-promotion-btn">+ New Promotion</button>
-          </div>
-          <div id="promotions-list" class="drops-row"></div>
-
-          <div class="planning-step-footer">
-            <span id="promotions-step-footer-count">0 upcoming promotions</span>
-            <div class="planning-step-footer-actions">
-              <button type="button" class="planning-review-btn" id="promotions-review-btn" onclick="toggleWeeklyProgress('promotions_reviewed')">&#10003; Mark as Reviewed</button>
               <button type="button" class="btn btn-primary planning-step-continue-btn" onclick="setPlanningStep('shoot-plan')">Continue to Shoot Plan &rarr;</button>
             </div>
           </div>
@@ -254,12 +216,11 @@
           </div>
         </div>
 
-        <!-- Persistent across Core/High Stock/Upcoming Drops/Promotions only
-             -- a product added at any of those stages shows up here
-             immediately, so you don't have to switch tabs to see what's
-             selected. Hidden on the Shoot Plan step itself (see
-             setPlanningStep), since that step already IS this, in full
-             (stat bar, Confirm & Send CTA, CSV export). -->
+        <!-- Persistent across Core/High Stock only -- a product added at
+             either stage shows up here immediately, so you don't have to
+             switch tabs to see what's selected. Hidden on the Shoot Plan
+             step itself (see setPlanningStep), since that step already IS
+             this, in full (stat bar, Confirm & Send CTA, CSV export). -->
         <div id="planning-shoot-plan-summary-block">
           <div class="planning-section-header">
             <h2>This Week's Shoot Plan</h2>
@@ -272,8 +233,45 @@
         </div>
       </div>
 
+    </section>
+
+    <!-- Upcoming Drops: its own sidebar section (previously Planning step
+         3). List/drop/product views below are the exact same markup and
+         ids that lived under Planning -- only relocated, not rebuilt -- so
+         all existing drops.js/coverage.js/dropProductPlans.js data and
+         rendering (renderDropsRow, loadDropView, loadProductView, etc. in
+         app.js) keeps working unchanged. See renderDropsRoute/
+         parseDropsHash in app.js for the #drops/... hash routing that
+         replaces the old #planning/drop/... scheme (with a transparent
+         redirect from old links, see handleHashRoute). -->
+    <section id="tab-drops" class="tab-panel">
+      <div id="drops-list-view">
+        <div class="planning-section-header">
+          <h2>Upcoming Drops</h2>
+          <button class="btn btn-ghost btn-sm" id="new-drop-btn">+ New Drop</button>
+        </div>
+
+        <div id="drops-row-upcoming" class="drops-row"></div>
+
+        <div class="planning-accordion">
+          <button type="button" class="accordion-toggle" data-section="past-drops">
+            <span class="accordion-arrow">&#9656;</span> Past Drops <span class="accordion-subtitle">(last 60 days)</span>
+          </button>
+          <div class="accordion-body" id="section-body-past-drops" style="display:none;">
+            <div id="drops-row-past" class="drops-row"></div>
+          </div>
+        </div>
+
+        <div class="planning-step-footer">
+          <span id="drops-step-footer-count">0 upcoming drops</span>
+          <div class="planning-step-footer-actions">
+            <button type="button" class="planning-review-btn" id="drops-review-btn" onclick="toggleWeeklyProgress('drops_reviewed')">&#10003; Mark as Reviewed</button>
+          </div>
+        </div>
+      </div>
+
       <div id="planning-drop-view" style="display:none;">
-        <button class="back-link" onclick="goToPlanningList()">&larr; Back to Planning</button>
+        <button class="back-link" onclick="goToDropsList()">&larr; Back to Upcoming Drops</button>
         <div class="planning-section-header">
           <div class="drop-view-title-row">
             <h2 id="drop-view-title">Drop</h2>
@@ -323,9 +321,31 @@
         </div>
         <div id="product-view-concepts" class="jobs-grid"></div>
       </div>
+    </section>
+
+    <!-- Promotions: its own sidebar section (previously Planning step 4).
+         Same relocated-not-rebuilt approach as Upcoming Drops above -- see
+         renderPromotionsRoute/parsePromotionsHash in app.js for the
+         #promotions/... hash routing (with a transparent redirect from the
+         old #planning/promotion/... links, see handleHashRoute). -->
+    <section id="tab-promotions" class="tab-panel">
+      <div id="promotions-list-view">
+        <div class="planning-section-header">
+          <h2>Promotions</h2>
+          <button type="button" class="btn btn-ghost btn-sm" id="new-promotion-btn">+ New Promotion</button>
+        </div>
+        <div id="promotions-list" class="drops-row"></div>
+
+        <div class="planning-step-footer">
+          <span id="promotions-step-footer-count">0 upcoming promotions</span>
+          <div class="planning-step-footer-actions">
+            <button type="button" class="planning-review-btn" id="promotions-review-btn" onclick="toggleWeeklyProgress('promotions_reviewed')">&#10003; Mark as Reviewed</button>
+          </div>
+        </div>
+      </div>
 
       <div id="planning-promotion-view" style="display:none;">
-        <button class="back-link" onclick="goToPlanningList()">&larr; Back to Planning</button>
+        <button class="back-link" onclick="goToPromotionsList()">&larr; Back to Promotions</button>
         <div class="planning-section-header">
           <div class="drop-view-title-row">
             <h2 id="promotion-view-title">Promotion</h2>
@@ -360,7 +380,6 @@
         </div>
         <div id="promotion-stage-view-items" class="jobs-grid"></div>
       </div>
-
     </section>
 
     <section id="tab-concept-dev" class="tab-panel">
