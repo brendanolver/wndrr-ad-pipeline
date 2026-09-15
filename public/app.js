@@ -206,6 +206,18 @@ function switchTab(name) {
   // filter explicitly requested should open on whatever's most actionable
   // (see loadEditingWeek/editingDefaultFilter), not always land on All.
   if (name === 'editing') loadEditingWeek({ resetFilter: true });
+  // Upcoming Drops/Promotions are hash-routed within their own tab (list vs
+  // drop/product or promotion/stage sub-views -- see renderDropsRoute/
+  // renderPromotionsRoute). Arriving here via a plain sidebar click (not a
+  // hash navigation) leaves no history entry for the list itself, so
+  // browser Back from a drop/promotion detail would skip straight past the
+  // list to whatever was on-screen before this tab was ever opened. Only
+  // pushes the list hash when not already somewhere in that tab's hash
+  // space, so this never fires (or double-pushes) when handleHashRoute
+  // itself calls switchTab while routing an already-set #drops/... or
+  // #promotions/... hash.
+  if (name === 'drops' && !window.location.hash.startsWith('#drops')) window.location.hash = '#drops';
+  if (name === 'promotions' && !window.location.hash.startsWith('#promotions')) window.location.hash = '#promotions';
 }
 
 // [data-tab] guard: the sidebar also holds non-tab .tab-btn entries (styled
