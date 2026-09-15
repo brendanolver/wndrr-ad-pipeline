@@ -980,17 +980,32 @@ function renderPlanningStepNav() {
   });
 }
 
-// Compact, exception-based card for Step 3 (Upcoming Drops): "are we on
-// track?" not a per-product worksheet. Derived purely from the already-
-// computed d.summary (red/amber counts) -- never recomputes or re-sums
-// coverage, just conditionally renders less of the same server data when
-// nothing needs attention.
+// What's launching, not just "are we on track" -- the landing page's job is
+// primarily "what products are launching and when" (see renderDropsByMonth
+// below), so each card leads with a compact product strip built from the
+// same per-product data GET /drops/:id already computes for the Drop
+// detail page's own coverage grid (see GET /drops in drops.js -- products
+// is the lean code/name/image projection of that same coverage array, not
+// a second computation). Creative progress/urgency stays, just demoted
+// below the products as a secondary line rather than the card's headline.
+const DROP_CARD_MAX_PRODUCTS = 4;
+function dropCardProductsHtml(products) {
+  if (!products || !products.length) {
+    return '<div class="drop-card-products-empty">No styles assigned yet</div>';
+  }
+  const shown = products.slice(0, DROP_CARD_MAX_PRODUCTS);
+  const extra = products.length - shown.length;
+  const rows = shown.map((p) => `
+    <div class="drop-card-product-row">
+      ${p.image_url ? `<img src="${p.image_url}" alt="">` : '<span class="drop-card-product-noimg">🖼</span>'}
+      <span class="drop-card-product-label">${escapeHtml(p.product_code)} — ${escapeHtml(p.product_name)}</span>
+    </div>`).join('');
+  const more = extra > 0 ? `<div class="drop-card-product-more">+${extra} more product${extra === 1 ? '' : 's'}</div>` : '';
+  return `<div class="drop-card-products">${rows}${more}</div>`;
+}
+
 function dropCardHtml(d) {
   const pct = d.summary.overallPct;
-  // Same green/amber/red bracket coverageStatus() uses server-side --
-  // there's no single overall status field, so it's derived from the
-  // already-computed overallPct rather than re-summing per-product statuses.
-  const barStatus = pct === null ? '' : (pct >= 100 ? 'green' : pct >= 50 ? 'amber' : 'red');
   return `
     <div class="drop-card" data-drop-id="${d.id}">
       <div class="drop-card-header">
@@ -998,15 +1013,50 @@ function dropCardHtml(d) {
         <button type="button" class="drop-card-edit-btn" data-drop-id="${d.id}" title="Edit launch date / notes">Edit</button>
       </div>
       <div class="drop-card-date">${formatDate(d.launch_date)} · ${d.days_until_launch >= 0 ? d.days_until_launch + ' days to launch' : 'Launched'}</div>
-      <div class="drop-card-counts">
-        <span class="green">🟢 ${d.summary.green}</span>
-        <span class="amber">🟠 ${d.summary.amber}</span>
-        <span class="red">🔴 ${d.summary.red}</span>
+      ${dropCardProductsHtml(d.products)}
+      <div class="drop-card-secondary">
+        <span class="drop-card-counts">
+          <span class="green">🟢 ${d.summary.green}</span>
+          <span class="amber">🟠 ${d.summary.amber}</span>
+          <span class="red">🔴 ${d.summary.red}</span>
+        </span>
+        <span class="drop-card-pct">${d.summary.totalCovered}/${d.summary.totalTarget}${pct !== null ? ' — ' + pct + '%' : ''}</span>
       </div>
-      <div class="drop-card-pct">${d.summary.totalCovered} / ${d.summary.totalTarget} creatives${pct !== null ? ' — ' + pct + '%' : ''}</div>
-      ${pct !== null ? `<div class="coverage-progress-track"><div class="coverage-progress-fill ${barStatus}" style="width:${Math.min(100, pct)}%;"></div></div>` : ''}
-      ${d.most_urgent[0] ? `<div class="drop-card-urgent">Most urgent: ${escapeHtml(d.most_urgent[0].product_name)} (${d.most_urgent[0].current_coverage}/${d.most_urgent[0].creative_target ?? '—'})</div>` : ''}
+      <div class="drop-card-view-link">View Drop &rarr;</div>
     </div>`;
+}
+
+// Landing page organisation: "what's launching and when" reads best grouped
+// by calendar month, most-imminent first -- state.drops already arrives
+// sorted by launch_date ASC (see GET /drops in drops.js), so this is a
+// single pass building contiguous same-month runs, not a re-sort. Same
+// month-key/month-label pattern as Reference Library's own month grouping
+// (referenceLibraryMonthKey/Label) -- kept as its own small pair here
+// rather than sharing, since the two features' grouping has no other
+// relationship and shouldn't be coupled just because the date math matches.
+function dropsMonthKey(iso) {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${d.getMonth()}`;
+}
+function dropsMonthLabel(iso) {
+  return new Date(iso).toLocaleDateString('en-AU', { month: 'long', year: 'numeric' }).toUpperCase();
+}
+function renderDropsByMonth(drops) {
+  const groups = [];
+  let current = null;
+  for (const d of drops) {
+    const key = dropsMonthKey(d.launch_date);
+    if (!current || current.key !== key) {
+      current = { key, label: dropsMonthLabel(d.launch_date), drops: [] };
+      groups.push(current);
+    }
+    current.drops.push(d);
+  }
+  return groups.map((g) => `
+    <div class="drops-month-group">
+      <div class="drops-month-heading">${g.label}</div>
+      <div class="drops-row">${g.drops.map(dropCardHtml).join('')}</div>
+    </div>`).join('');
 }
 
 function wireDropCardRow(row) {
@@ -1040,7 +1090,7 @@ function renderDropsRow() {
 
   const upcomingRow = document.getElementById('drops-row-upcoming');
   upcomingRow.innerHTML = upcoming.length
-    ? upcoming.map(dropCardHtml).join('')
+    ? renderDropsByMonth(upcoming)
     : '<div class="attention-empty">No upcoming drops yet — add one to start planning creative coverage.</div>';
   wireDropCardRow(upcomingRow);
 
