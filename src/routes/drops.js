@@ -65,6 +65,18 @@ router.get('/', async (req, res, next) => {
         days_until_launch: daysUntilLaunch,
         summary: summarize(coverage),
         most_urgent: coverage.slice(0, 3),
+        // Lean per-product projection (code/name/first image) for the
+        // Upcoming Drops landing page's product list -- coverage itself is
+        // already computed above for summary/most_urgent, this just also
+        // exposes it product-by-product instead of discarding it. Not the
+        // full coverage object (stock/creative-target detail) since the
+        // landing page only needs enough to identify each product; that
+        // fuller detail still comes from GET /drops/:id when a drop is opened.
+        products: coverage.map((c) => ({
+          product_code: c.product_code,
+          product_name: c.product_name,
+          image_url: c.images[0] || null,
+        })),
       };
     });
 

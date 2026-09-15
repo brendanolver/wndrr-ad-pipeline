@@ -251,7 +251,10 @@
           <button class="btn btn-ghost btn-sm" id="new-drop-btn">+ New Drop</button>
         </div>
 
-        <div id="drops-row-upcoming" class="drops-row"></div>
+        <!-- Grouped by month via JS (renderDropsByMonth in app.js), each
+             month rendering its own nested .drops-row grid -- this outer
+             div is just the vertical stack of month groups. -->
+        <div id="drops-row-upcoming"></div>
 
         <div class="planning-accordion">
           <button type="button" class="accordion-toggle" data-section="past-drops">
