@@ -3429,6 +3429,15 @@ async function renderPromotionStageDetailView() {
 // same Concept Development pipeline via POST /shoot-plan.
 let promotionShootContext = null;
 
+// Concept Type is reusable vocabulary (state.conceptTypes) classified by an
+// optional format ('video'/'static'/NULL=Either, see schema.sql's comment on
+// concept_types.format) -- this filters the dropdown to only the types that
+// actually apply to the format currently selected, purely client-side (no
+// server-side enforcement, no admin UI to classify a type from).
+function conceptTypesForFormat(format) {
+  return state.conceptTypes.filter((t) => !t.format || t.format === format).map((t) => t.name);
+}
+
 function shootThisWeekForPromotionStage(stageId) {
   const promotion = state.currentPromotion;
   const stage = ((promotion && promotion.stages) || []).find((s) => s.id === stageId);
@@ -3437,11 +3446,19 @@ function shootThisWeekForPromotionStage(stageId) {
   document.getElementById('promotion-shoot-modal-title').textContent = 'Shoot This Week';
   document.getElementById('promotion-shoot-context-promotion').textContent = promotion.name;
   document.getElementById('promotion-shoot-context-stage').textContent = stage.name;
-  fillConceptDevSelectWithOther('promotion-shoot-concept-type-select', 'promotion-shoot-concept-type-custom', state.conceptTypes.map((t) => t.name), '');
   document.getElementById('promotion-shoot-assignee').value = '';
   document.getElementById('promotion-shoot-concept-name').value = '';
   document.getElementById('promotion-shoot-format').value = 'video';
+  fillConceptDevSelectWithOther('promotion-shoot-concept-type-select', 'promotion-shoot-concept-type-custom', conceptTypesForFormat('video'), '');
   openModal('promotion-shoot-modal');
+}
+
+// Re-filters the Concept Type dropdown when Format changes, keeping
+// whatever was already picked/typed if it's still valid for the new format.
+function onPromotionShootFormatChange() {
+  const currentValue = conceptDevSelectWithOtherValue('promotion-shoot-concept-type-select', 'promotion-shoot-concept-type-custom');
+  const format = document.getElementById('promotion-shoot-format').value;
+  fillConceptDevSelectWithOther('promotion-shoot-concept-type-select', 'promotion-shoot-concept-type-custom', conceptTypesForFormat(format), currentValue);
 }
 
 // Searchable product/style picker -- SKU or name, partial, case-insensitive
@@ -4578,6 +4595,7 @@ function closeConceptDevReferenceAddMenu() {
 
 function chooseConceptDevReferenceFromLibrary() {
   document.getElementById('cd-modal-reference-add-menu').style.display = 'none';
+  referencePickerTarget = 'normal';
   openReferenceLibraryPicker();
 }
 
@@ -5035,6 +5053,16 @@ function openConceptDevModal(conceptId) {
   const found = findConceptDevConcept(conceptId);
   if (!found) return;
   const { concept, product } = found;
+
+  // Promotion-sourced concepts get their own, separate UI (see the
+  // Promotion Concept Development section below) -- everything else
+  // (Core/High Stock/Drop) falls through to this modal completely
+  // unchanged.
+  if (product.source === 'promotion') {
+    openPromotionConceptDevModal(concept, product);
+    return;
+  }
+
   conceptDevModalConceptId = conceptId;
   conceptDevModalProduct = product;
 
@@ -5106,6 +5134,14 @@ function openAddConceptModal(shootPlanItemId) {
   const product = (conceptDevStandaloneProduct && conceptDevStandaloneProduct.shoot_plan_item_id === shootPlanItemId && conceptDevStandaloneProduct)
     || (data && data.products.find((p) => p.shoot_plan_item_id === shootPlanItemId));
   if (!product) return;
+
+  // Promotion-sourced concepts get their own, separate UI -- see the
+  // Promotion Concept Development section below.
+  if (product.source === 'promotion') {
+    openPromotionConceptDevModal(null, product);
+    return;
+  }
+
   conceptDevModalConceptId = null;
   conceptDevModalProduct = product;
 
@@ -5363,6 +5399,599 @@ async function saveConceptDevModal(targetStatus) {
       closeModal('concept-dev-modal');
       toast(savedToast);
     }
+    refreshConceptDevAfterChange();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// ── Promotion Concept Development ─────────────────────
+// A separate UI for Promotion-sourced concepts (product.source === 'promotion'),
+// dispatched to automatically from openConceptDevModal/openAddConceptModal
+// above -- deliberately its own promo-modal-* ids and its own state/
+// functions throughout (Option A: duplicate, don't parameterize the normal
+// modal's widgets), so nothing here can ever regress Core/High Stock/Drop
+// Concept Development. It still writes the exact same creative_assets row
+// via the same PATCH /concept-development/concepts/:id endpoint used
+// everywhere else -- a different UI over the same record and lifecycle, not
+// a new entity. One modal element covers both Static and Video (see
+// applyPromotionConceptDevFormat), since format is fixed at creation
+// forever, exactly like the normal modal has no editable format field.
+let promoConceptDevModalConceptId = null;
+let promoConceptDevModalProduct = null;
+let promoConceptDevModalReferences = [];
+let promoConceptDevReferenceEditIndex = null;
+let promoConceptDevModalHooks = [];
+let promoConceptDevModalShots = [];
+let promoConceptDevModalReadOnly = false;
+let promoConceptDevModalFormat = 'video';
+
+function renderPromotionConceptDevModalHooks() {
+  document.getElementById('promo-modal-hooks-list').innerHTML = promoConceptDevModalHooks.map((h, i) => `
+    <div class="cd-hook-item">
+      <label>${i === 0 ? 'Primary Hook / Opening' : `Alternative Hook ${i + 1}`}
+        <textarea rows="2" oninput="promoConceptDevModalHooks[${i}].text=this.value" placeholder="${i === 0 ? 'Describe the opening — dialogue, on-screen text, visual moment, action, reveal, etc.' : 'A different opening for the same concept'}">${escapeHtml(h.text)}</textarea>
+      </label>
+      ${i > 0 ? `<button type="button" class="link-btn cd-hook-remove" onclick="removePromotionConceptDevHook(${i})">Remove</button>` : ''}
+    </div>`).join('');
+}
+
+function addPromotionConceptDevHook() {
+  promoConceptDevModalHooks.push({ text: '' });
+  renderPromotionConceptDevModalHooks();
+  const textareas = document.querySelectorAll('#promo-modal-hooks-list textarea');
+  if (textareas.length) textareas[textareas.length - 1].focus();
+}
+
+function removePromotionConceptDevHook(index) {
+  promoConceptDevModalHooks.splice(index, 1);
+  renderPromotionConceptDevModalHooks();
+}
+
+// What to Shoot -- same fixed WNDRR Office/WNDRR Warehouse/Custom Location
+// pattern as the normal modal, reusing its CD_SHOT_FIXED_LOCATIONS/
+// CONCEPT_DEV_QUICK_SHOT_TYPES data constants directly (generic vocabulary,
+// not concept-dev-modal-specific state -- safe to share, see those
+// constants' own comments).
+function renderPromotionConceptDevModalShots() {
+  document.getElementById('promo-modal-shots-list').innerHTML = promoConceptDevModalShots.map((s, i) => {
+    const loc = s.location || '';
+    const isCustomLoc = Boolean(loc) && !CD_SHOT_FIXED_LOCATIONS.includes(loc);
+    const selectValue = isCustomLoc ? '__custom__' : loc;
+    return `
+    <div class="cd-shot-item">
+      <div class="cd-shot-item-header">
+        <input type="text" class="cd-shot-name-input" value="${escapeHtml(s.name)}" oninput="promoConceptDevModalShots[${i}].name=this.value" placeholder="Shot name">
+        <div class="cd-shot-item-actions">
+          <button type="button" class="cd-shot-move" onclick="movePromotionConceptDevShot(${i}, -1)" ${i === 0 ? 'disabled' : ''} aria-label="Move shot up">&uarr;</button>
+          <button type="button" class="cd-shot-move" onclick="movePromotionConceptDevShot(${i}, 1)" ${i === promoConceptDevModalShots.length - 1 ? 'disabled' : ''} aria-label="Move shot down">&darr;</button>
+          <button type="button" class="link-btn cd-shot-remove" onclick="removePromotionConceptDevShot(${i})">Remove</button>
+        </div>
+      </div>
+      <input type="text" class="cd-shot-detail-input" value="${escapeHtml(s.capture)}" oninput="promoConceptDevModalShots[${i}].capture=this.value" placeholder="What should be captured in this shot?">
+      <div class="cd-shot-location-row">
+        <label class="cd-shot-location-field">Location
+          <select class="cd-shot-location-select" onchange="onPromotionConceptDevShotLocationChange(${i}, this)">
+            <option value="" ${selectValue === '' ? 'selected' : ''}>Select location…</option>
+            <option value="WNDRR Office" ${selectValue === 'WNDRR Office' ? 'selected' : ''}>WNDRR Office</option>
+            <option value="WNDRR Warehouse" ${selectValue === 'WNDRR Warehouse' ? 'selected' : ''}>WNDRR Warehouse</option>
+            <option value="__custom__" ${selectValue === '__custom__' ? 'selected' : ''}>Custom Location</option>
+          </select>
+        </label>
+        <input type="text" class="cd-shot-location-custom" value="${isCustomLoc ? escapeHtml(loc) : ''}" placeholder="Enter location…" style="display:${isCustomLoc ? '' : 'none'};" oninput="promoConceptDevModalShots[${i}].location=this.value">
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function onPromotionConceptDevShotLocationChange(index, selectEl) {
+  const shot = promoConceptDevModalShots[index];
+  if (!shot) return;
+  const isCustom = selectEl.value === '__custom__';
+  const item = selectEl.closest('.cd-shot-item');
+  const customInput = item.querySelector('.cd-shot-location-custom');
+  if (isCustom) {
+    shot.location = '';
+    customInput.style.display = '';
+    customInput.value = '';
+    customInput.focus();
+  } else {
+    shot.location = selectEl.value;
+    customInput.style.display = 'none';
+    customInput.value = '';
+  }
+}
+
+function togglePromotionConceptDevShotQuickAdd() {
+  const menu = document.getElementById('promo-modal-shot-quickadd-menu');
+  const opening = menu.style.display === 'none';
+  if (opening) {
+    menu.innerHTML = CONCEPT_DEV_QUICK_SHOT_TYPES.map((label) => `<button type="button" class="cd-shot-quickadd-chip" onclick="addPromotionConceptDevQuickShot('${label}')">${escapeHtml(label)}</button>`).join('')
+      + `<button type="button" class="cd-shot-quickadd-chip cd-shot-quickadd-chip-custom" onclick="addPromotionConceptDevQuickShot('')">Custom Shot</button>`;
+  }
+  menu.style.display = opening ? '' : 'none';
+}
+
+function closePromotionConceptDevShotQuickAdd() {
+  document.getElementById('promo-modal-shot-quickadd-menu').style.display = 'none';
+}
+
+function addPromotionConceptDevQuickShot(name) {
+  promoConceptDevModalShots.push({ name, capture: '', location: '' });
+  closePromotionConceptDevShotQuickAdd();
+  renderPromotionConceptDevModalShots();
+  const items = document.querySelectorAll('#promo-modal-shots-list .cd-shot-item');
+  const last = items[items.length - 1];
+  if (last) {
+    const focusTarget = name ? last.querySelector('.cd-shot-detail-input') : last.querySelector('.cd-shot-name-input');
+    if (focusTarget) focusTarget.focus();
+  }
+}
+
+function removePromotionConceptDevShot(index) {
+  promoConceptDevModalShots.splice(index, 1);
+  renderPromotionConceptDevModalShots();
+}
+
+function movePromotionConceptDevShot(index, delta) {
+  const target = index + delta;
+  if (target < 0 || target >= promoConceptDevModalShots.length) return;
+  [promoConceptDevModalShots[index], promoConceptDevModalShots[target]] = [promoConceptDevModalShots[target], promoConceptDevModalShots[index]];
+  renderPromotionConceptDevModalShots();
+}
+
+function promotionConceptDevReferenceCardHtml(r, i) {
+  const label = referenceLabelFromUrl(r.url);
+  const note = r.note && r.note.trim();
+  return `
+    <div class="cd-reference-card">
+      <div class="cd-reference-card-main">
+        <a href="${escapeHtml(r.url)}" target="_blank" rel="noopener" class="cd-reference-card-label">${r.library_reference_id ? '📚 ' : ''}${escapeHtml(label)}</a>
+        ${note ? `<div class="cd-reference-card-note">${escapeHtml(note)}</div>` : ''}
+      </div>
+      <div class="cd-reference-card-actions">
+        <button type="button" class="link-btn" onclick="editPromotionConceptDevReference(${i})">Edit</button>
+        <button type="button" class="link-btn" onclick="removePromotionConceptDevReference(${i})">Remove</button>
+      </div>
+    </div>`;
+}
+
+function renderPromotionConceptDevModalReferences() {
+  document.getElementById('promo-modal-references-list').innerHTML = promoConceptDevModalReferences
+    .map((r, i) => promotionConceptDevReferenceCardHtml(r, i)).join('');
+}
+
+function removePromotionConceptDevReference(index) {
+  promoConceptDevModalReferences.splice(index, 1);
+  renderPromotionConceptDevModalReferences();
+}
+
+function togglePromotionConceptDevReferenceAddMenu() {
+  const menu = document.getElementById('promo-modal-reference-add-menu');
+  menu.style.display = menu.style.display === 'none' ? '' : 'none';
+}
+
+function closePromotionConceptDevReferenceAddMenu() {
+  document.getElementById('promo-modal-reference-add-menu').style.display = 'none';
+}
+
+// referencePickerTarget (see pickReferenceLibraryItem) is the one small
+// shared touch-point with the Reference Library picker -- there is only one
+// such picker in the whole app, already reused by multiple call sites, so
+// this just tells its single "add to concept" callback which of the two
+// (fully separate) reference arrays to push into.
+function choosePromotionConceptDevReferenceFromLibrary() {
+  document.getElementById('promo-modal-reference-add-menu').style.display = 'none';
+  referencePickerTarget = 'promo';
+  openReferenceLibraryPicker();
+}
+
+function startPromotionConceptDevReferencePaste() {
+  promoConceptDevReferenceEditIndex = null;
+  document.getElementById('promo-modal-reference-add-menu').style.display = 'none';
+  document.getElementById('promo-modal-reference-paste-url').value = '';
+  document.getElementById('promo-modal-reference-paste-note').value = '';
+  document.getElementById('promo-modal-reference-paste-save-btn').textContent = 'Add Reference';
+  document.getElementById('promo-modal-reference-paste-form').style.display = '';
+  document.getElementById('promo-modal-reference-paste-url').focus();
+}
+
+function editPromotionConceptDevReference(index) {
+  const r = promoConceptDevModalReferences[index];
+  if (!r) return;
+  promoConceptDevReferenceEditIndex = index;
+  document.getElementById('promo-modal-reference-add-menu').style.display = 'none';
+  document.getElementById('promo-modal-reference-paste-url').value = r.url;
+  document.getElementById('promo-modal-reference-paste-note').value = r.note;
+  document.getElementById('promo-modal-reference-paste-save-btn').textContent = 'Save Reference';
+  document.getElementById('promo-modal-reference-paste-form').style.display = '';
+  document.getElementById('promo-modal-reference-paste-url').focus();
+}
+
+function cancelPromotionConceptDevReferencePaste() {
+  promoConceptDevReferenceEditIndex = null;
+  document.getElementById('promo-modal-reference-paste-form').style.display = 'none';
+}
+
+function savePromotionConceptDevReferencePaste() {
+  const url = document.getElementById('promo-modal-reference-paste-url').value.trim();
+  const note = document.getElementById('promo-modal-reference-paste-note').value.trim();
+  if (!url) { toast('A reference link is required', true); return; }
+  if (promoConceptDevReferenceEditIndex !== null) {
+    promoConceptDevModalReferences[promoConceptDevReferenceEditIndex] = { ...promoConceptDevModalReferences[promoConceptDevReferenceEditIndex], url, note };
+  } else {
+    promoConceptDevModalReferences.push({ url, note });
+  }
+  promoConceptDevReferenceEditIndex = null;
+  document.getElementById('promo-modal-reference-paste-form').style.display = 'none';
+  renderPromotionConceptDevModalReferences();
+}
+
+function renderPromotionConceptDevAvatarOptions(selectedAvatarId) {
+  const select = document.getElementById('promo-modal-avatar-select');
+  const options = state.customerAvatars.filter((a) => a.enabled || a.id === selectedAvatarId);
+  select.innerHTML = [
+    '<option value="">Select an avatar…</option>',
+    ...options.map((a) => `<option value="${a.id}">${escapeHtml(a.name)}${a.enabled ? '' : ' (disabled)'}</option>`),
+    '<option value="__other__">+ Other / New Avatar</option>',
+  ].join('');
+}
+
+function onPromotionConceptDevAvatarChange() {
+  const select = document.getElementById('promo-modal-avatar-select');
+  const isOther = select.value === '__other__';
+  document.getElementById('promo-modal-avatar-custom-wrap').style.display = isOther ? '' : 'none';
+}
+
+// Styles Needed -- optional, zero/one/many products, persisted immediately
+// per add/remove exactly like the normal modal's equivalent, but operating
+// on its own promoConceptDevModalProduct so it never shares state with
+// conceptDevModalProduct.
+function renderPromotionConceptDevModalStylesNeeded() {
+  const list = document.getElementById('promo-modal-styles-list');
+  const product = promoConceptDevModalProduct;
+  const colourways = (product && product.colourways) || [];
+  if (!colourways.length) {
+    list.innerHTML = '<div class="hint">No products required</div>';
+    return;
+  }
+  list.innerHTML = colourways.map((c) => `
+    <span class="cd-style-chip">
+      ${escapeHtml(c.colour_label || c.style_code)}${c.colour_label ? ` <span class="cd-style-chip-code">${escapeHtml(c.style_code)}</span>` : ''}${c.size ? ` · ${escapeHtml(c.size)}` : ''}
+      <button type="button" class="cd-style-chip-remove" onclick="removePromotionConceptDevStyle(${c.style_id})" title="Remove">&times;</button>
+    </span>`).join('');
+}
+
+function filterPromotionConceptDevStyles() {
+  renderStyleSearchResults('promo-modal-styles-search', 'promo-modal-styles-results', selectPromotionConceptDevStyle);
+}
+
+async function selectPromotionConceptDevStyle(styleId) {
+  const product = promoConceptDevModalProduct;
+  if (!product) return;
+  const style = state.styles.find((s) => s.id === styleId);
+  if (!style) return;
+  try {
+    await api(`/shoot-plan/${product.shoot_plan_item_id}/styles`, {
+      method: 'POST',
+      body: JSON.stringify({ style_id: styleId, colour_label: null, size: null }),
+    });
+    product.colourways = product.colourways || [];
+    product.colourways.push({ style_id: styleId, style_code: style.style_code, colour_label: null, size: null });
+    renderPromotionConceptDevModalStylesNeeded();
+    document.getElementById('promo-modal-styles-search').value = '';
+    document.getElementById('promo-modal-styles-results').style.display = 'none';
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function removePromotionConceptDevStyle(styleId) {
+  const product = promoConceptDevModalProduct;
+  if (!product) return;
+  try {
+    await api(`/shoot-plan/${product.shoot_plan_item_id}/styles/${styleId}`, { method: 'DELETE' });
+    product.colourways = (product.colourways || []).filter((c) => c.style_id !== styleId);
+    renderPromotionConceptDevModalStylesNeeded();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// Toggles the modal body between Static and Video sections (see the
+// .promo-section-video-only/.promo-section-static-only HTML comment on
+// #promo-concept-dev-modal), swaps the shared top section's title/helper/
+// label text, and re-filters the Concept Type dropdown to this format (see
+// conceptTypesForFormat).
+function applyPromotionConceptDevFormat(format) {
+  promoConceptDevModalFormat = format === 'static' ? 'static' : 'video';
+  document.querySelectorAll('.promo-section-video-only').forEach((el) => { el.style.display = promoConceptDevModalFormat === 'video' ? '' : 'none'; });
+  document.querySelectorAll('.promo-section-static-only').forEach((el) => { el.style.display = promoConceptDevModalFormat === 'static' ? '' : 'none'; });
+
+  if (promoConceptDevModalFormat === 'static') {
+    document.getElementById('promo-modal-top-title').textContent = 'The Brief';
+    document.getElementById('promo-modal-angle-label').textContent = 'What needs to be made?';
+    document.getElementById('promo-modal-promo-context-title').textContent = 'Promotion / Offer Context';
+  } else {
+    document.getElementById('promo-modal-top-title').textContent = 'The Idea';
+    document.getElementById('promo-modal-angle-label').textContent = 'The Idea';
+    document.getElementById('promo-modal-promo-context-title').textContent = 'Promotion Message / Offer';
+  }
+
+  const currentType = conceptDevSelectWithOtherValue('promo-modal-concept-type-select', 'promo-modal-concept-type-custom');
+  fillConceptDevSelectWithOther('promo-modal-concept-type-select', 'promo-modal-concept-type-custom', conceptTypesForFormat(promoConceptDevModalFormat), currentType);
+}
+
+// Read-only Planning-handoff context, same reasoning as
+// conceptDevModalContextHtml but without the Creative Tools trigger (not in
+// the Promotion modal's spec).
+function promotionConceptDevModalContextHtml(product) {
+  const thumb = product.image_url
+    ? `<img class="cd-modal-context-thumb" src="${product.image_url}" alt="">`
+    : '<span class="cd-modal-context-thumb cd-modal-context-noimg">🖼</span>';
+  const skuInfo = (product.colourways || [])
+    .map((c) => `${c.style_code || c.colour_label}${c.size ? `-${c.size}` : ''}`)
+    .join(', ');
+  const line = [
+    `<strong>${escapeHtml(product.product_name || 'No products required')}</strong>`,
+    'Promotion',
+    `Owner: ${escapeHtml(product.creator || '—')}`,
+    escapeHtml(skuInfo),
+  ].filter(Boolean).join(' &middot; ');
+  return `
+    ${thumb}
+    <div class="cd-modal-context-lines">
+      <div class="cd-modal-context-line">${line}</div>
+    </div>`;
+}
+
+// Promotion/Offer Context -- read-only, reuses the same promotion_name/
+// promotion_stage_name/promotion_notes data the Concept Development GET
+// already returns for the product, never duplicated onto the creative
+// asset itself.
+function promotionConceptDevPromoContextHtml(product) {
+  const parts = [product.promotion_name, product.promotion_stage_name].filter(Boolean);
+  const notes = product.promotion_notes && product.promotion_notes.trim();
+  return [
+    parts.length ? `<div><strong>${escapeHtml(parts.join(' — '))}</strong></div>` : '',
+    notes ? `<div>${escapeHtml(notes)}</div>` : '<div class="hint">No promotion notes on record.</div>',
+  ].join('');
+}
+
+// Shared by both the create ("+ New Concept") and edit (click a concept
+// card) paths -- concept is null in create mode, so every field starts
+// blank.
+function fillPromotionConceptDevModalFields(concept) {
+  document.getElementById('promo-modal-angle').value = concept ? (concept.angle || '') : '';
+  document.getElementById('promo-modal-headline').value = concept ? (concept.headline || '') : '';
+  document.getElementById('promo-modal-supporting-copy').value = concept ? (concept.supporting_copy || '') : '';
+  document.getElementById('promo-modal-cta').value = concept ? (concept.cta_text || '') : '';
+  document.getElementById('promo-modal-script').value = concept ? (concept.script_notes || '') : '';
+  document.getElementById('promo-modal-props').value = concept ? (concept.props_notes || '') : '';
+  fillConceptDevSelectWithOther('promo-modal-talent-select', 'promo-modal-talent-custom', state.contentCreators.map((c) => c.name), concept ? concept.talent_requirement : '', 'No Talent Required');
+  fillConceptDevSelectWithOther('promo-modal-concept-type-select', 'promo-modal-concept-type-custom', conceptTypesForFormat(promoConceptDevModalFormat), concept ? concept.concept_type : '');
+  document.getElementById('promo-modal-assignee-select').value = concept ? (concept.concept_assignee || '') : '';
+
+  renderPromotionConceptDevModalStylesNeeded();
+  document.getElementById('promo-modal-styles-search').value = '';
+  document.getElementById('promo-modal-styles-results').style.display = 'none';
+
+  promoConceptDevReferenceEditIndex = null;
+  document.getElementById('promo-modal-reference-paste-form').style.display = 'none';
+  document.getElementById('promo-modal-reference-add-menu').style.display = 'none';
+  promoConceptDevModalReferences = concept
+    ? (concept.reference_items || []).map((r) => ({ url: r.url || '', note: r.note || '', library_reference_id: r.library_reference_id || null }))
+    : [];
+  renderPromotionConceptDevModalReferences();
+
+  renderPromotionConceptDevAvatarOptions(concept ? concept.customer_avatar_id : null);
+  const avatarSelect = document.getElementById('promo-modal-avatar-select');
+  if (concept && concept.customer_avatar_id) {
+    avatarSelect.value = String(concept.customer_avatar_id);
+  } else if (concept && concept.custom_avatar_description) {
+    avatarSelect.value = '__other__';
+  } else {
+    avatarSelect.value = '';
+  }
+  document.getElementById('promo-modal-avatar-custom-desc').value = concept ? (concept.custom_avatar_description || '') : '';
+  onPromotionConceptDevAvatarChange();
+
+  const existingHooks = concept && Array.isArray(concept.hook_variations) ? concept.hook_variations : [];
+  promoConceptDevModalHooks = existingHooks.length
+    ? existingHooks.map((h) => ({ text: h.text || '' }))
+    : [{ text: '' }];
+  renderPromotionConceptDevModalHooks();
+
+  promoConceptDevModalShots = concept && Array.isArray(concept.shots)
+    ? concept.shots.map((s) => ({ name: s.name || '', capture: s.capture || '', location: s.location || '' }))
+    : [];
+  renderPromotionConceptDevModalShots();
+
+  const status = concept ? concept.concept_dev_status : 'not_started';
+  const badge = document.getElementById('promo-modal-status-badge');
+  badge.className = `cd-concept-status-pill ${CONCEPT_DEV_STATUS_CLASS[status] || ''}`;
+  badge.textContent = CONCEPT_DEV_STATUS_LABELS[status] || status;
+
+  const feedbackBanner = document.getElementById('promo-modal-changes-required-banner');
+  if (status === 'changes_required' && concept && concept.review_feedback) {
+    feedbackBanner.style.display = '';
+    document.getElementById('promo-modal-changes-required-text').textContent = concept.review_feedback;
+  } else {
+    feedbackBanner.style.display = 'none';
+  }
+
+  setPromotionConceptDevModalReadOnly(status === 'approved');
+}
+
+// Approved concepts default to read-only, same reasoning as the normal
+// modal's conceptDevModalReadOnly.
+function setPromotionConceptDevModalReadOnly(readOnly) {
+  promoConceptDevModalReadOnly = readOnly;
+  const modalEl = document.querySelector('#promo-concept-dev-modal .modal');
+  modalEl.classList.toggle('cd-readonly', readOnly);
+  modalEl.querySelectorAll('.modal-body input, .modal-body textarea, .modal-body select').forEach((el) => {
+    el.disabled = readOnly;
+  });
+  document.getElementById('promo-modal-approved-banner').style.display = readOnly ? '' : 'none';
+  if (readOnly) {
+    document.getElementById('promo-modal-save-draft-btn').style.display = 'none';
+    document.getElementById('promo-modal-save-changes-btn').style.display = 'none';
+    document.getElementById('promo-modal-submit-btn').style.display = 'none';
+  } else if (promoConceptDevModalConceptId) {
+    const found = findConceptDevConcept(promoConceptDevModalConceptId);
+    if (found) updatePromotionConceptDevFooterButtons(found.concept.concept_dev_status);
+  }
+}
+
+async function confirmEditApprovedPromotionConcept() {
+  const confirmed = await confirmDialog(
+    'This concept has already been approved for shooting. Editing the concept may change the brief that was approved during Tuesday Review.',
+    { okLabel: 'Edit Anyway' }
+  );
+  if (!confirmed) return;
+  setPromotionConceptDevModalReadOnly(false);
+}
+
+function updatePromotionConceptDevFooterButtons(status) {
+  const draftBtn = document.getElementById('promo-modal-save-draft-btn');
+  const changesBtn = document.getElementById('promo-modal-save-changes-btn');
+  const submitBtn = document.getElementById('promo-modal-submit-btn');
+  if (status === 'ready_for_review' || status === 'approved' || status === 'killed') {
+    draftBtn.style.display = 'none';
+    changesBtn.style.display = '';
+    submitBtn.style.display = 'none';
+  } else if (status === 'changes_required') {
+    draftBtn.style.display = '';
+    changesBtn.style.display = 'none';
+    submitBtn.style.display = '';
+    submitBtn.textContent = 'Resubmit for Review →';
+  } else {
+    draftBtn.style.display = '';
+    changesBtn.style.display = 'none';
+    submitBtn.style.display = '';
+    submitBtn.textContent = 'Ready for Review →';
+  }
+}
+
+// concept is null for a brand-new Promotion concept (create mode, reached
+// via "+ New Concept" on a Promotion product's workspace) -- only that case
+// ever shows #promo-modal-format-section, since format is permanent from
+// creation onward everywhere else in this app.
+function openPromotionConceptDevModal(concept, product) {
+  promoConceptDevModalConceptId = concept ? concept.id : null;
+  promoConceptDevModalProduct = product;
+  promoConceptDevModalFormat = concept ? (concept.format || 'video') : 'video';
+
+  document.getElementById('promo-modal-context').innerHTML = promotionConceptDevModalContextHtml(product);
+  document.getElementById('promo-modal-promo-context').innerHTML = promotionConceptDevPromoContextHtml(product);
+  document.getElementById('promo-modal-title').textContent = concept ? concept.concept_name : 'New Promotion Concept';
+
+  document.getElementById('promo-modal-name').value = concept ? concept.concept_name : '';
+
+  const formatSection = document.getElementById('promo-modal-format-section');
+  if (!concept) {
+    formatSection.style.display = '';
+    document.getElementById('promo-modal-format-select').value = 'video';
+  } else {
+    formatSection.style.display = 'none';
+  }
+
+  applyPromotionConceptDevFormat(promoConceptDevModalFormat);
+  updatePromotionConceptDevFooterButtons(concept ? concept.concept_dev_status : null);
+  fillPromotionConceptDevModalFields(concept);
+  openModal('promo-concept-dev-modal');
+
+  const modalBody = document.querySelector('#promo-concept-dev-modal .modal-body');
+  if (modalBody) modalBody.scrollTop = 0;
+}
+
+// Status is driven by which footer action was clicked, same as the normal
+// modal's saveConceptDevModal -- targetStatus is 'in_development' (Save
+// Draft), 'ready_for_review' (Ready for Review), or null (Save Changes on
+// an already-submitted concept, leaving concept_dev_status untouched via
+// the PATCH route's COALESCE). Deliberately minimal validation (just
+// Concept Name) -- per the brief, this modal doesn't carry the normal
+// modal's stricter Ready for Review gate.
+async function savePromotionConceptDevModal(targetStatus) {
+  const product = promoConceptDevModalProduct;
+  if (!product) return;
+  const name = document.getElementById('promo-modal-name').value.trim();
+  if (!name) { toast('Concept name is required', true); return; }
+
+  const avatarSelect = document.getElementById('promo-modal-avatar-select');
+  const isOtherAvatar = avatarSelect.value === '__other__';
+  const customerAvatarId = avatarSelect.value && !isOtherAvatar ? Number(avatarSelect.value) : null;
+  const customAvatarDescription = isOtherAvatar ? document.getElementById('promo-modal-avatar-custom-desc').value.trim() : '';
+
+  const conceptType = conceptDevSelectWithOtherValue('promo-modal-concept-type-select', 'promo-modal-concept-type-custom');
+  const conceptAssignee = document.getElementById('promo-modal-assignee-select').value || null;
+
+  const body = {
+    concept_name: name,
+    angle: document.getElementById('promo-modal-angle').value.trim(),
+    concept_type: conceptType,
+    customer_avatar_id: customerAvatarId,
+    custom_avatar_description: customAvatarDescription,
+    headline: document.getElementById('promo-modal-headline').value.trim(),
+    supporting_copy: document.getElementById('promo-modal-supporting-copy').value.trim(),
+    cta_text: document.getElementById('promo-modal-cta').value.trim(),
+    script_notes: document.getElementById('promo-modal-script').value.trim(),
+    hook_variations: promoConceptDevModalHooks
+      .map((h) => ({ text: h.text.trim() }))
+      .filter((h) => h.text),
+    shots: promoConceptDevModalShots
+      .map((s) => ({ name: s.name.trim(), capture: s.capture.trim(), location: (s.location || '').trim() }))
+      .filter((s) => s.name),
+    reference_items: promoConceptDevModalReferences
+      .map((r) => (r.library_reference_id
+        ? { url: r.url.trim(), note: r.note.trim(), library_reference_id: r.library_reference_id }
+        : { url: r.url.trim(), note: r.note.trim() }))
+      .filter((r) => r.url),
+    talent_requirement: conceptDevSelectWithOtherValue('promo-modal-talent-select', 'promo-modal-talent-custom'),
+    props_notes: document.getElementById('promo-modal-props').value.trim(),
+  };
+  if (targetStatus) body.concept_dev_status = targetStatus;
+  const savedToast = targetStatus === 'ready_for_review' ? 'Marked Ready for Review' : (targetStatus ? 'Draft saved' : 'Changes saved');
+
+  // "Other / New Type" persists to concept_types so it's reusable for
+  // future concepts, same as the normal modal and the Promotion "Shoot This
+  // Week" create form.
+  if (conceptType && !state.conceptTypes.some((t) => t.name.toLowerCase() === conceptType.toLowerCase())) {
+    try {
+      const created = await api('/concept-types', { method: 'POST', body: JSON.stringify({ name: conceptType }) });
+      state.conceptTypes.push(created);
+    } catch (e) { /* non-fatal -- the concept itself still saves with the typed value */ }
+  }
+
+  try {
+    if (promoConceptDevModalConceptId) {
+      await api(`/concept-development/concepts/${promoConceptDevModalConceptId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      });
+      await api(`/creative-assets/${promoConceptDevModalConceptId}/assignee`, {
+        method: 'PATCH',
+        body: JSON.stringify({ concept_assignee: conceptAssignee }),
+      });
+    } else {
+      const format = document.getElementById('promo-modal-format-select').value;
+      const asset = await api('/concept-development/concepts', {
+        method: 'POST',
+        body: JSON.stringify({ shoot_plan_item_id: product.shoot_plan_item_id, concept_name: name, format }),
+      });
+      await api(`/concept-development/concepts/${asset.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      });
+      if (conceptAssignee) {
+        await api(`/creative-assets/${asset.id}/assignee`, {
+          method: 'PATCH',
+          body: JSON.stringify({ concept_assignee: conceptAssignee }),
+        });
+      }
+    }
+    closeModal('promo-concept-dev-modal');
+    toast(savedToast);
     refreshConceptDevAfterChange();
   } catch (e) {
     toast(e.message, true);
@@ -5793,6 +6422,22 @@ function renderTuesdayReviewConcept() {
 
   document.getElementById('tr-review-angle').textContent = concept.angle && concept.angle.trim() ? concept.angle.trim() : 'No Angle / Idea provided';
 
+  // Promotion/Stage: only rendered for Promotion-sourced concepts -- reuses
+  // the same read-only promotion_name/promotion_stage_name/promotion_notes
+  // data already shown in the Promotion Concept Development modal. Hidden
+  // entirely for every Core/High Stock/Drop concept.
+  const promoSection = document.getElementById('tr-review-promotion-section');
+  if (product.source === 'promotion') {
+    promoSection.style.display = '';
+    document.getElementById('tr-review-promotion').textContent = [
+      product.promotion_name,
+      product.promotion_stage_name,
+      product.promotion_notes && product.promotion_notes.trim(),
+    ].filter(Boolean).join(' · ');
+  } else {
+    promoSection.style.display = 'none';
+  }
+
   const avatarNameBtn = document.getElementById('tr-review-avatar-name');
   const avatarDetail = document.getElementById('tr-review-avatar-detail');
   avatarDetail.style.display = 'none';
@@ -5836,6 +6481,27 @@ function renderTuesdayReviewConcept() {
   hooksEl.innerHTML = hooks.length
     ? hooks.map((h, i) => tuesdayReviewHookRowHtml(h, i)).join('')
     : '<div class="tr-review-subtle">No specific Hook / Opening provided</div>';
+
+  // Copy/Message: only rendered when a Static Promotion concept actually has
+  // at least one of headline/supporting_copy/cta_text set (see schema.sql's
+  // comment on those columns) -- hidden entirely for every Video concept and
+  // every Core/High Stock/Drop concept, which never set these fields.
+  const copySection = document.getElementById('tr-review-copy-section');
+  const hasCopy = Boolean(
+    (concept.headline && concept.headline.trim())
+    || (concept.supporting_copy && concept.supporting_copy.trim())
+    || (concept.cta_text && concept.cta_text.trim())
+  );
+  if (!hasCopy) {
+    copySection.style.display = 'none';
+  } else {
+    copySection.style.display = '';
+    document.getElementById('tr-review-copy').innerHTML = [
+      concept.headline && concept.headline.trim() ? `<div><span class="tr-avatar-detail-label">Headline / Main Copy</span>${escapeHtml(concept.headline.trim())}</div>` : '',
+      concept.supporting_copy && concept.supporting_copy.trim() ? `<div><span class="tr-avatar-detail-label">Supporting Copy</span>${escapeHtml(concept.supporting_copy.trim())}</div>` : '',
+      concept.cta_text && concept.cta_text.trim() ? `<div><span class="tr-avatar-detail-label">CTA</span>${escapeHtml(concept.cta_text.trim())}</div>` : '',
+    ].join('');
+  }
 
   // Structured Shots: read-only here -- Tuesday Review only needs to
   // confirm it's clear what to shoot (and where), not to edit it. Legacy
@@ -5882,6 +6548,26 @@ function renderTuesdayReviewConcept() {
   // legacy overall-location field only (new-format concepts never set it --
   // their location lives per-Shot, see What to Shoot above), so this never
   // duplicates it for a new-format concept.
+  // Styles Needed: only rendered when the product actually has colourways
+  // attached (product.colourways.length > 0) -- a Static Promotion concept
+  // with "No products required" simply never shows this section, reusing
+  // the same read-only per-colourway data every other section here reads
+  // from `product`.
+  const stylesSection = document.getElementById('tr-review-styles-section');
+  const colourways = product.colourways || [];
+  if (!colourways.length) {
+    stylesSection.style.display = 'none';
+  } else {
+    stylesSection.style.display = '';
+    document.getElementById('tr-review-styles').innerHTML = colourways.map((c) => `
+      <div class="tr-shot-card">
+        <div class="tr-shot-card-top">
+          <span class="tr-shot-type">${escapeHtml(c.colour_label || c.style_code)}</span>
+        </div>
+        ${c.size ? `<div class="tr-shot-detail">${escapeHtml(c.size)}</div>` : ''}
+      </div>`).join('');
+  }
+
   const shootReqSection = document.getElementById('tr-review-shoot-req-section');
   const hasTalent = Boolean(concept.talent_requirement && concept.talent_requirement.trim());
   const hasLegacyLocation = Boolean(concept.location && concept.location.trim());
@@ -8086,11 +8772,23 @@ function renderReferencePickerList() {
     : 'No references yet — be the first to add one.';
 }
 
+// Which Concept Dev modal opened the picker (see chooseConceptDevReferenceFromLibrary/
+// choosePromotionConceptDevReferenceFromLibrary) -- this is the one small
+// shared touch-point with the (fully separate) Promotion Concept Dev modal,
+// since there is only one Reference Library picker in the whole app,
+// already reused by multiple call sites.
+let referencePickerTarget = 'normal';
+
 function pickReferenceLibraryItem(id) {
   const item = state.referenceLibrary.find((r) => r.id === id);
   if (!item) return;
-  conceptDevModalReferences.push({ url: item.link, note: '', library_reference_id: item.id });
-  renderConceptDevModalReferences();
+  if (referencePickerTarget === 'promo') {
+    promoConceptDevModalReferences.push({ url: item.link, note: '', library_reference_id: item.id });
+    renderPromotionConceptDevModalReferences();
+  } else {
+    conceptDevModalReferences.push({ url: item.link, note: '', library_reference_id: item.id });
+    renderConceptDevModalReferences();
+  }
   closeModal('reference-picker-modal');
   toast('Reference added');
 }
