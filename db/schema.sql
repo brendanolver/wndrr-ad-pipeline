@@ -1327,3 +1327,52 @@ ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS concept_type VARCHAR(255);
 ALTER TABLE creative_assets ALTER COLUMN style_id DROP NOT NULL;
 ALTER TABLE shoot_plan_items ALTER COLUMN product_code DROP NOT NULL;
 ALTER TABLE shoot_plan_items ALTER COLUMN product_name DROP NOT NULL;
+
+-- ---------------------------------------------------------------------------
+-- Promotion Concept Development: a separate UI/workflow for Promotion
+-- concepts (see conceptDevelopment.js/app.js), NOT a separate concept entity
+-- -- the same creative_assets row still flows through Concept Development ->
+-- Tuesday Review -> Shooting -> Editing exactly as before. Static Promotion
+-- concepts (a graphic tile, a DPA, a countdown) need actual on-creative copy,
+-- which nothing existing represents: script_notes is spoken/talking-points
+-- content for Video, angle is the 1-2 sentence brief (reused as-is for
+-- Static's "What needs to be made?"), neither is "the words on the creative".
+-- Three small, generically-named, nullable fields -- unused by Video, same
+-- as talent_requirement/shots are unused by Static -- rather than repurposing
+-- an existing column into a second meaning.
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS headline TEXT;
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS supporting_copy TEXT;
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS cta_text VARCHAR(100);
+
+-- Static vs Video classification for a Concept Type, so the Promotion
+-- concept-first flow's Concept Type dropdown can filter out irrelevant
+-- options once a Format is picked (e.g. "Campaign Video" never needs to
+-- show up while Format = Static). NULL = Either -- the safe default for
+-- every existing type (Flatlay Photo, POV from iPhone, etc. all genuinely
+-- can apply to either format in practice) and for any future "Other / New
+-- Type" addition, which has no admin UI to classify it from yet.
+ALTER TABLE concept_types ADD COLUMN IF NOT EXISTS format VARCHAR(10) CHECK (format IN ('video', 'static'));
+
+-- New Promotion creative types from the sale Creative Calculator, added
+-- alongside (never replacing) the existing vocabulary. Same idempotent
+-- ON CONFLICT DO NOTHING pattern already used for content_creators/
+-- creative_resources above -- safe to run on every boot, never touches
+-- proven_winners in either direction (see the concept_types table comment),
+-- and has no effect on Drop Required Concepts (generateOrTopUpPlan reads
+-- only from proven_winners, never from concept_types).
+INSERT INTO concept_types (name, sort_order, format) VALUES
+  ('Graphic tile', 100, 'static'),
+  ('GWP - Graphic', 101, 'static'),
+  ('GWP - Video', 102, 'video'),
+  ('GIF', 103, 'static'),
+  ('PNG frame (flat lay, e-comm) - single', 104, 'static'),
+  ('PNG frame (flat lay, e-comm) - carousel', 105, 'static'),
+  ('DPA', 106, 'static'),
+  ('Price Strikethrough', 107, 'static'),
+  ('Founder Video', 108, 'video'),
+  ('EGC Video', 109, 'video'),
+  ('UGC Video', 110, 'video'),
+  ('BAU Video', 111, 'video'),
+  ('Campaign Video', 112, 'video'),
+  ('Other Video', 113, 'video')
+ON CONFLICT (name) DO NOTHING;

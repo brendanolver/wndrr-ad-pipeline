@@ -1,7 +1,7 @@
 const express = require('express');
 const { pool } = require('../db');
 const { insertCreativeAsset } = require('../lib/assets');
-const { CONCEPT_DEV_STATUSES, TUESDAY_REVIEW_DECISIONS } = require('../lib/statuses');
+const { CONCEPT_DEV_STATUSES, TUESDAY_REVIEW_DECISIONS, FORMATS } = require('../lib/statuses');
 const { generateOrTopUpPlan } = require('./dropProductPlans');
 
 const router = express.Router();
@@ -256,9 +256,12 @@ router.get('/item/:shootPlanItemId', async (req, res, next) => {
 // creates a Drop concept.
 router.post('/concepts', async (req, res, next) => {
   try {
-    const { shoot_plan_item_id, concept_name } = req.body || {};
+    const { shoot_plan_item_id, concept_name, format } = req.body || {};
     if (!shoot_plan_item_id) return res.status(400).json({ error: 'shoot_plan_item_id is required' });
     if (!concept_name || !concept_name.trim()) return res.status(400).json({ error: 'concept_name is required' });
+    if (format !== undefined && !FORMATS.includes(format)) {
+      return res.status(400).json({ error: `format must be one of: ${FORMATS.join(', ')}` });
+    }
 
     const itemResult = await pool.query('SELECT * FROM shoot_plan_items WHERE id = $1', [shoot_plan_item_id]);
     if (!itemResult.rows.length) return res.status(404).json({ error: 'Shoot plan item not found' });
@@ -266,17 +269,20 @@ router.post('/concepts', async (req, res, next) => {
       return res.status(409).json({ error: 'Drop products add concepts via their Required Concept slots, not this endpoint' });
     }
 
+    // A Promotion product genuinely may have zero styles (see schema.sql's
+    // comment on style_id going nullable) -- Core/High Stock always have at
+    // least one colourway from Planning's own mandatory picker, so this is
+    // only ever reachable for a Promotion product in practice.
     const styleResult = await pool.query(
       `SELECT style_id FROM shoot_plan_item_styles WHERE shoot_plan_item_id = $1 LIMIT 1`,
       [shoot_plan_item_id]
     );
-    if (!styleResult.rows.length) return res.status(400).json({ error: 'This product has no colourways to attach a concept to' });
 
     const asset = await insertCreativeAsset(pool, {
-      style_id: styleResult.rows[0].style_id,
+      style_id: styleResult.rows[0] ? styleResult.rows[0].style_id : null,
       concept_name: concept_name.trim(),
       concept_classification: 'new_experimental',
-      format: 'video',
+      format: FORMATS.includes(format) ? format : 'video',
       status: 'awaiting_concept_development',
       created_by_user_id: req.user.id,
     });
@@ -316,6 +322,9 @@ router.patch('/concepts/:id', async (req, res, next) => {
       customer_avatar_id,
       custom_avatar_description,
       avatar_why_care,
+      headline,
+      supporting_copy,
+      cta_text,
     } = req.body || {};
 
     if (concept_dev_status !== undefined && !CONCEPT_DEV_STATUSES.includes(concept_dev_status)) {
@@ -380,6 +389,9 @@ router.patch('/concepts/:id', async (req, res, next) => {
          submitted_for_review_by_user_id = CASE WHEN $16 THEN $17 ELSE submitted_for_review_by_user_id END,
          shots = COALESCE($18, shots),
          concept_type = COALESCE($19, concept_type),
+         headline = COALESCE($20, headline),
+         supporting_copy = COALESCE($21, supporting_copy),
+         cta_text = COALESCE($22, cta_text),
          updated_at = now()
        WHERE id = $15 RETURNING *`,
       [
@@ -402,6 +414,9 @@ router.patch('/concepts/:id', async (req, res, next) => {
         req.user.id,
         shots !== undefined ? JSON.stringify(shots) : null,
         concept_type && concept_type.trim() ? concept_type.trim() : null,
+        headline !== undefined ? headline : null,
+        supporting_copy !== undefined ? supporting_copy : null,
+        cta_text !== undefined ? cta_text : null,
       ]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Concept not found' });

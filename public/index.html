@@ -1538,6 +1538,237 @@
   </div>
 </div>
 
+<!-- Promotion Concept Development: a SEPARATE modal for Promotion-sourced
+     concepts (product.source === 'promotion'), dispatched to automatically
+     from openConceptDevModal/openAddConceptModal in app.js instead of
+     #concept-dev-modal above. Deliberately its own promo-modal-* ids and its
+     own JS state/functions throughout -- NOT a parameterized version of
+     #concept-dev-modal -- so Core/High Stock/Drop Concept Development (which
+     keeps using #concept-dev-modal completely unchanged) carries zero
+     regression risk from this. It still writes the exact same creative_assets
+     row via the same PATCH /concept-development/concepts/:id endpoint -- this
+     is a different UI over the same record and lifecycle, not a new entity.
+
+     One element covers both Static and Video Promotion concepts (rather than
+     two separate modals): body sections are tagged .promo-section-video-only
+     / .promo-section-static-only and toggled by JS off concept.format (see
+     applyPromotionConceptDevFormat in app.js). Format is fixed at creation
+     forever, exactly like the normal modal has no editable format field --
+     #promo-modal-format-section only ever appears for a brand-new concept
+     that doesn't have one yet. -->
+<div id="promo-concept-dev-modal" class="modal-backdrop">
+  <div class="modal cd-modal-workspace">
+    <div class="modal-header">
+      <div class="cd-modal-header-title">
+        <h3 id="promo-modal-title">Promotion Concept</h3>
+        <span id="promo-modal-status-badge" class="cd-concept-status-pill"></span>
+      </div>
+      <button class="modal-close" onclick="closeModal('promo-concept-dev-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="cd-modal-context-row">
+        <div class="cd-modal-context-compact" id="promo-modal-context"></div>
+      </div>
+
+      <!-- Same "why was this sent back" surfacing as the normal modal's
+           cd-changes-required-banner -- see fillPromotionConceptDevModalFields
+           in app.js. -->
+      <div class="cd-changes-required-banner" id="promo-modal-changes-required-banner" style="display:none;">
+        <div class="cd-changes-required-label">Feedback from Tuesday Review</div>
+        <div class="cd-changes-required-text" id="promo-modal-changes-required-text"></div>
+      </div>
+
+      <div class="cd-approved-banner" id="promo-modal-approved-banner" style="display:none;">
+        <div class="cd-approved-banner-text">Approved — this concept passed Tuesday Review and is shown here read-only, as the brief moving into production.</div>
+        <button type="button" class="link-btn" onclick="confirmEditApprovedPromotionConcept()">Edit Approved Concept</button>
+      </div>
+
+      <!-- Only shown when creating a brand-new Promotion concept that has no
+           format yet -- never shown again once the concept exists, format is
+           permanent from here on. -->
+      <div class="cd-modal-section" id="promo-modal-format-section" style="display:none;">
+        <div class="cd-modal-section-title">Format</div>
+        <label><span class="cd-field-label">Is this a Static or Video concept?<span class="cd-req-mark">*</span></span>
+          <select id="promo-modal-format-select" onchange="applyPromotionConceptDevFormat(this.value)">
+            <option value="video">Video</option>
+            <option value="static">Static</option>
+          </select>
+        </label>
+      </div>
+
+      <!-- Shared top section -- Static's "THE BRIEF"/"What needs to be made?"
+           and Video's "THE IDEA"/"The Idea" ask for the identical four
+           fields, so this one block covers both with its title/helper/last
+           label text swapped by applyPromotionConceptDevFormat in app.js
+           rather than duplicating four fields twice. -->
+      <div class="cd-modal-section">
+        <div class="cd-modal-section-title" id="promo-modal-top-title">The Idea</div>
+        <div class="hint cd-modal-section-helper" id="promo-modal-top-helper">Describe the concept in 1–2 sentences.</div>
+        <div class="cd-modal-idea-row">
+          <label><span class="cd-field-label">Concept Name<span class="cd-req-mark">*</span></span>
+            <input type="text" id="promo-modal-name">
+            <div class="cd-field-error" id="promo-modal-name-error"></div>
+          </label>
+          <label><span class="cd-field-label" id="promo-modal-angle-label">The Idea</span>
+            <textarea id="promo-modal-angle" rows="2"></textarea>
+          </label>
+        </div>
+        <div class="cd-modal-idea-row">
+          <label><span class="cd-field-label">Concept Type</span>
+            <select id="promo-modal-concept-type-select" onchange="onConceptDevSelectWithOtherChange('promo-modal-concept-type-select','promo-modal-concept-type-custom')"></select>
+            <input type="text" id="promo-modal-concept-type-custom" placeholder="New concept type…" style="display:none;margin-top:6px;">
+          </label>
+          <label><span class="cd-field-label">Assigned To</span>
+            <select id="promo-modal-assignee-select">
+              <option value="">Unassigned</option>
+              <option value="Mark">Mark</option>
+              <option value="Shez">Shez</option>
+              <option value="Til">Til</option>
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <!-- Video only -- Customer Avatar is explicitly OPTIONAL here (unlike
+           the hard requirement in #concept-dev-modal, which is unchanged). -->
+      <div class="cd-modal-section promo-section-video-only" id="promo-modal-audience-section">
+        <div class="cd-modal-section-title">Who's It For? <span class="hint">(optional)</span></div>
+        <label><span class="cd-field-label">Customer Avatar</span>
+          <select id="promo-modal-avatar-select" onchange="onPromotionConceptDevAvatarChange()"></select>
+        </label>
+        <div id="promo-modal-avatar-custom-wrap" style="display:none;">
+          <label>Who are you targeting?
+            <textarea id="promo-modal-avatar-custom-desc" rows="3" placeholder="Describe the specific person, mindset or customer behaviour you're targeting."></textarea>
+          </label>
+        </div>
+      </div>
+
+      <!-- Video only -- The Hook. -->
+      <div class="cd-modal-section promo-section-video-only">
+        <div class="cd-modal-section-title">The Hook</div>
+        <div class="hint cd-modal-section-helper">How does this creative earn attention in the first few seconds?</div>
+        <div id="promo-modal-hooks-list"></div>
+        <button type="button" class="link-btn" onclick="addPromotionConceptDevHook()">+ Add Alternative Hook</button>
+      </div>
+
+      <!-- Static only -- Copy/Message. The words that actually appear on the
+           creative -- see schema.sql's comment on headline/supporting_copy/
+           cta_text for why these are new fields rather than repurposing
+           script_notes (spoken/talking-points content for Video) or angle
+           (the 1-2 sentence brief, already reused above as "What needs to be
+           made?"). -->
+      <div class="cd-modal-section promo-section-static-only">
+        <div class="cd-modal-section-title">Copy / Message</div>
+        <label><span class="cd-field-label">Headline / Main Copy</span>
+          <input type="text" id="promo-modal-headline">
+        </label>
+        <label><span class="cd-field-label">Supporting Copy <span class="hint">(optional)</span></span>
+          <textarea id="promo-modal-supporting-copy" rows="2"></textarea>
+        </label>
+        <label><span class="cd-field-label">CTA <span class="hint">(optional)</span></span>
+          <input type="text" id="promo-modal-cta" placeholder="e.g. Shop Now">
+        </label>
+      </div>
+
+      <!-- Promotion/Offer Context -- read-only, reuses data the Concept
+           Development GET already returns for the product (promotion name,
+           campaign stage, promotion notes/message), never duplicated onto
+           the creative asset itself. Title text swaps by format. -->
+      <div class="cd-modal-section">
+        <div class="cd-modal-section-title" id="promo-modal-promo-context-title">Promotion / Offer Context</div>
+        <div class="cd-modal-context-compact" id="promo-modal-promo-context"></div>
+      </div>
+
+      <!-- Styles Needed -- optional, zero/one/many, identical behaviour to
+           #concept-dev-modal's equivalent section but fully duplicated with
+           promo-modal-* ids/state per Option A (see promoConceptDevModalProduct
+           in app.js) so it never shares state with the normal modal's
+           cd-modal-styles-*/conceptDevModalProduct. -->
+      <div class="cd-modal-section">
+        <div class="cd-modal-section-title">Styles Needed <span class="hint">(optional)</span></div>
+        <div class="hint cd-modal-section-helper">Products/colourways this concept needs, if any. Leave empty if no products are required.</div>
+        <div id="promo-modal-styles-list" class="cd-modal-styles-list"></div>
+        <div class="promo-shoot-search">
+          <input type="text" id="promo-modal-styles-search" placeholder="Search SKU or product name to add…" autocomplete="off" oninput="filterPromotionConceptDevStyles()" onfocus="filterPromotionConceptDevStyles()">
+          <div id="promo-modal-styles-results" class="promo-shoot-search-results" style="display:none;"></div>
+        </div>
+      </div>
+
+      <!-- Video only -- Talent/Model, same select+other+"No Talent Required"
+           pattern as #concept-dev-modal. -->
+      <div class="cd-modal-section promo-section-video-only">
+        <div class="cd-modal-section-title">Talent / Model</div>
+        <label>
+          <select id="promo-modal-talent-select" onchange="onConceptDevSelectWithOtherChange('promo-modal-talent-select','promo-modal-talent-custom')"></select>
+          <input type="text" id="promo-modal-talent-custom" placeholder="e.g. UGC creator, none" style="display:none;">
+        </label>
+      </div>
+
+      <!-- Video only -- What to Shoot, same shot-name + optional detail +
+           per-shot Location pattern (reusing WNDRR Office/WNDRR Warehouse/
+           Custom Location) as #concept-dev-modal. -->
+      <div class="cd-modal-section promo-section-video-only">
+        <div class="cd-modal-section-title">What to Shoot</div>
+        <div class="hint cd-modal-section-helper">List the footage that must be captured to make this concept.</div>
+        <div id="promo-modal-shots-list"></div>
+        <div class="cd-shot-quickadd-wrap">
+          <button type="button" class="link-btn" onclick="togglePromotionConceptDevShotQuickAdd()">+ Add Shot</button>
+          <div class="cd-shot-quickadd-menu" id="promo-modal-shot-quickadd-menu" style="display:none;"></div>
+        </div>
+      </div>
+
+      <!-- Video only -- Script/Talking Points. Always visible (not a
+           collapsible toggle like the normal modal's cd-modal-script-toggle-
+           wrap) since Promotion Video concepts are simpler/shorter overall
+           and this section is genuinely optional either way. -->
+      <div class="cd-modal-section promo-section-video-only">
+        <div class="cd-modal-section-title">Script / Talking Points <span class="hint">(optional)</span></div>
+        <textarea id="promo-modal-script" rows="4"></textarea>
+      </div>
+
+      <!-- Video only -- Props/Other Requirements. -->
+      <div class="cd-modal-section promo-section-video-only">
+        <div class="cd-modal-section-title">Props / Other Requirements</div>
+        <textarea id="promo-modal-props" rows="2"></textarea>
+      </div>
+
+      <!-- References -- optional, same "+ Add Reference" -> Paste Link /
+           Choose From Reference Library pattern as #concept-dev-modal, fully
+           duplicated with promo-modal-* ids/state. -->
+      <div class="cd-modal-section">
+        <div class="cd-modal-section-title">References <span class="hint">(optional)</span></div>
+        <div class="hint cd-modal-section-helper">Add inspiration or examples for this concept.</div>
+        <div id="promo-modal-references-list"></div>
+        <div class="cd-reference-add-wrap">
+          <button type="button" class="link-btn" id="promo-modal-reference-add-btn" onclick="togglePromotionConceptDevReferenceAddMenu()">+ Add Reference</button>
+          <div class="cd-reference-add-menu" id="promo-modal-reference-add-menu" style="display:none;">
+            <button type="button" class="link-btn" onclick="startPromotionConceptDevReferencePaste()">📎 Paste Link</button>
+            <button type="button" class="link-btn" onclick="choosePromotionConceptDevReferenceFromLibrary()">📚 Choose From Reference Library</button>
+          </div>
+        </div>
+        <div id="promo-modal-reference-paste-form" class="cd-modal-collapsible" style="display:none;">
+          <label>URL
+            <input type="text" id="promo-modal-reference-paste-url" placeholder="Paste a link">
+          </label>
+          <label>What do you like about this?
+            <input type="text" id="promo-modal-reference-paste-note" placeholder="A quick note (optional)">
+          </label>
+          <div class="cd-reference-paste-actions">
+            <button type="button" class="btn btn-sm btn-primary" id="promo-modal-reference-paste-save-btn" onclick="savePromotionConceptDevReferencePaste()">Add Reference</button>
+            <button type="button" class="link-btn" onclick="cancelPromotionConceptDevReferencePaste()">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('promo-concept-dev-modal')">Cancel</button>
+      <button class="btn btn-ghost" id="promo-modal-save-draft-btn" onclick="savePromotionConceptDevModal('in_development')">Save Draft</button>
+      <button class="btn btn-primary" id="promo-modal-save-changes-btn" onclick="savePromotionConceptDevModal(null)" style="display:none;">Save Changes</button>
+      <button class="btn btn-primary" id="promo-modal-submit-btn" onclick="savePromotionConceptDevModal('ready_for_review')">Ready for Review &rarr;</button>
+    </div>
+  </div>
+</div>
+
 
 <!-- Tuesday Creative Review's concept view: a read-only creative brief, not
      the editable Concept Development form -- deliberately its own tr-*
@@ -1578,6 +1809,17 @@
         <div class="tr-review-text tr-idea-text" id="tr-review-angle"></div>
       </div>
 
+      <!-- Promotion/Stage: read-only context for Promotion-sourced concepts
+           only (product.source === 'promotion') -- reuses the same
+           promotion_name/promotion_stage_name/promotion_notes data already
+           shown read-only in the Promotion Concept Development modal, never
+           duplicated onto the creative asset. Hidden entirely for every
+           Core/High Stock/Drop concept. See renderTuesdayReviewConcept. -->
+      <div class="tr-review-section" id="tr-review-promotion-section" style="display:none;">
+        <div class="tr-review-section-title">Promotion / Stage</div>
+        <div class="tr-review-text" id="tr-review-promotion"></div>
+      </div>
+
       <div class="tr-review-section">
         <div class="tr-review-section-title">Audience</div>
         <button type="button" class="tr-avatar-toggle" id="tr-review-avatar-name" onclick="toggleTuesdayReviewAvatarDetail()"></button>
@@ -1602,6 +1844,16 @@
       <div class="tr-review-section">
         <div class="tr-review-section-title">Hooks</div>
         <div class="tr-hook-list" id="tr-review-hooks"></div>
+      </div>
+
+      <!-- Copy/Message: the words that actually appear on a Static Promotion
+           creative (Headline/Main Copy, Supporting Copy, CTA) -- see
+           schema.sql's comment on the headline/supporting_copy/cta_text
+           columns. Hidden entirely when none of the three are set, same
+           hide-if-empty pattern as every other section here. -->
+      <div class="tr-review-section" id="tr-review-copy-section" style="display:none;">
+        <div class="tr-review-section-title">Copy / Message</div>
+        <div class="tr-review-text" id="tr-review-copy"></div>
       </div>
 
       <!-- What to Shoot -- read-only, entirely hidden (not an empty/error
@@ -1660,6 +1912,17 @@
       <div class="tr-review-section" id="tr-review-shoot-req-section" style="display:none;">
         <div class="tr-review-section-title">Shoot Setup</div>
         <div class="tr-shoot-setup-list" id="tr-review-shoot-setup"></div>
+      </div>
+
+      <!-- Styles Needed: only rendered when the product actually has
+           colourways attached (product.colourways.length > 0) -- a Static
+           Promotion concept with "No products required" simply never shows
+           this section, same hide-if-empty pattern as every section above.
+           Read-only chip list, reusing the same product/colourway data
+           already shown in the Concept Development modals. -->
+      <div class="tr-review-section" id="tr-review-styles-section" style="display:none;">
+        <div class="tr-review-section-title">Styles Needed</div>
+        <div class="tr-shot-list" id="tr-review-styles"></div>
       </div>
 
       <div class="tr-review-decided-note" id="tr-review-decided-note" style="display:none;"></div>
@@ -2036,7 +2299,7 @@
         <input type="text" id="promotion-shoot-concept-name" placeholder="e.g. Black Friday Price Shock">
       </label>
       <label>Format
-        <select id="promotion-shoot-format">
+        <select id="promotion-shoot-format" onchange="onPromotionShootFormatChange()">
           <option value="video">Video</option>
           <option value="static">Static</option>
         </select>
@@ -2044,7 +2307,7 @@
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('promotion-shoot-modal')">Cancel</button>
-      <button class="btn btn-primary" onclick="savePromotionShootItem()">Add to Concept Development</button>
+      <button class="btn btn-primary" onclick="savePromotionShootItem()">Develop Promotion Concept &rarr;</button>
     </div>
   </div>
 </div>
