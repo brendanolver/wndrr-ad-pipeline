@@ -1,7 +1,7 @@
 const express = require('express');
 const { pool } = require('../db');
 const { insertCreativeAsset } = require('../lib/assets');
-const { STATUS_LABELS, FORMATS } = require('../lib/statuses');
+const { STATUS_LABELS, FORMATS, CONCEPT_ASSIGNEES } = require('../lib/statuses');
 const apparelmagic = require('../lib/apparelmagic');
 const { fetchAmData } = require('../lib/planningData');
 
@@ -85,15 +85,23 @@ router.get('/', async (req, res, next) => {
 });
 
 router.post('/', async (req, res, next) => {
-  const { product_code, product_name, colourways, stock_status, creator, quick_note, source, image_url, promotion_stage_id, week_start, format } = req.body || {};
+  const {
+    product_code, product_name, colourways, stock_status, creator, quick_note, source, image_url,
+    promotion_stage_id, week_start, format, concept_name, concept_type, concept_assignee,
+  } = req.body || {};
 
-  if (!product_code || !product_name) {
-    return res.status(400).json({ error: 'product_code and product_name are required' });
+  // Product is now optional everywhere this route is called from -- Core/
+  // High Stock/Drop's own pickers still always supply one (their UI never
+  // lets you skip it), but a Promotion concept genuinely may need none (see
+  // schema.sql's comment on creative_assets.style_id / shoot_plan_items.
+  // product_code/product_name going nullable). colourways defaults to an
+  // empty list rather than being required; an empty shoot_plan_item_styles
+  // set is exactly how "No products required" is represented downstream.
+  const trimmedColourways = Array.isArray(colourways) ? colourways : [];
+  if (!trimmedColourways.every((c) => c && Number.isFinite(Number(c.style_id)))) {
+    return res.status(400).json({ error: 'Every selected colourway must have a valid style_id' });
   }
-  if (!Array.isArray(colourways) || !colourways.length || !colourways.every((c) => c && Number.isFinite(Number(c.style_id)))) {
-    return res.status(400).json({ error: 'At least one colourway must be selected' });
-  }
-  if (!STOCK_STATUSES.includes(stock_status)) {
+  if (stock_status !== undefined && stock_status !== null && !STOCK_STATUSES.includes(stock_status)) {
     return res.status(400).json({ error: 'stock_status must be in_office or needs_to_be_brought_in' });
   }
   if (!creator || !creator.trim()) {
@@ -107,6 +115,9 @@ router.post('/', async (req, res, next) => {
   }
   if (format !== undefined && format !== null && !FORMATS.includes(format)) {
     return res.status(400).json({ error: `format must be one of ${FORMATS.join(', ')}` });
+  }
+  if (concept_assignee !== undefined && concept_assignee !== null && !CONCEPT_ASSIGNEES.includes(concept_assignee)) {
+    return res.status(400).json({ error: `concept_assignee must be one of: ${CONCEPT_ASSIGNEES.join(', ')}, or null` });
   }
 
   const client = await pool.connect();
@@ -123,6 +134,13 @@ router.post('/', async (req, res, next) => {
 
     const trimmedCreator = creator.trim();
     const trimmedNote = quick_note && quick_note.trim() ? quick_note.trim() : null;
+    // Concept Name / Idea takes priority when supplied explicitly (the
+    // Promotion concept-first flow always sends this); Core/High Stock/Drop
+    // keep their existing quick_note-or-product-name fallback unchanged.
+    const trimmedConceptName = concept_name && concept_name.trim() ? concept_name.trim() : null;
+    const resolvedConceptName = trimmedConceptName || trimmedNote
+      || (product_name ? `New Concept — ${product_name}` : (concept_type || 'New Concept'));
+    const trimmedConceptType = concept_type && concept_type.trim() ? concept_type.trim() : null;
 
     // The Creator field is who's actually assigned to shoot this -- picked
     // from the dropdown, not necessarily the logged-in person filling out
@@ -135,19 +153,33 @@ router.post('/', async (req, res, next) => {
     const createdByUserId = creatorUserResult.rows[0] ? creatorUserResult.rows[0].user_id : null;
 
     const asset = await insertCreativeAsset(client, {
-      style_id: Number(colourways[0].style_id),
-      concept_name: trimmedNote || `New Concept — ${product_name}`,
+      style_id: trimmedColourways.length ? Number(trimmedColourways[0].style_id) : null,
+      concept_name: resolvedConceptName,
       concept_classification: 'new_experimental',
       format: FORMATS.includes(format) ? format : 'video',
       strategy_owner: trimmedCreator,
       status: 'awaiting_concept_development',
       created_by_user_id: createdByUserId,
+      concept_type: trimmedConceptType,
+      concept_assignee: concept_assignee || null,
     });
 
     const itemResult = await client.query(
       `INSERT INTO shoot_plan_items (product_code, product_name, stock_status, creator, initial_idea, asset_id, source, image_url, promotion_stage_id, week_start, created_by_user_id)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10::date, date_trunc('week', now())::date), $11) RETURNING *`,
-      [product_code, product_name, stock_status, trimmedCreator, trimmedNote, asset.id, source || null, image_url || null, promotion_stage_id || null, week_start || null, createdByUserId]
+      [
+        product_code || null,
+        product_name || null,
+        STOCK_STATUSES.includes(stock_status) ? stock_status : 'needs_to_be_brought_in',
+        trimmedCreator,
+        trimmedNote,
+        asset.id,
+        source || null,
+        image_url || null,
+        promotion_stage_id || null,
+        week_start || null,
+        createdByUserId,
+      ]
     );
     const item = itemResult.rows[0];
 
@@ -157,7 +189,7 @@ router.post('/', async (req, res, next) => {
     // for the style.
     await client.query('UPDATE creative_assets SET shoot_plan_item_id = $1 WHERE id = $2', [item.id, asset.id]);
 
-    for (const c of colourways) {
+    for (const c of trimmedColourways) {
       await client.query(
         `INSERT INTO shoot_plan_item_styles (shoot_plan_item_id, style_id, size, colour_label) VALUES ($1, $2, $3, $4)`,
         [item.id, Number(c.style_id), c.size && String(c.size).trim() ? String(c.size).trim() : null, c.colour_label || null]
@@ -170,6 +202,7 @@ router.post('/', async (req, res, next) => {
       quick_note: item.initial_idea,
       asset_status: asset.status,
       asset_status_label: STATUS_LABELS[asset.status] || asset.status,
+      asset_id: asset.id,
     });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -196,6 +229,58 @@ router.patch('/:itemId/styles/:styleId', async (req, res, next) => {
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Shoot plan colourway not found' });
     res.json(result.rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Styles Needed (Concept Development): add one product/colourway to an
+// existing shoot_plan_item after its concept already exists -- an execution
+// requirement only (see schema.sql's comment on style_id/product_code going
+// nullable), never touching the concept's identity. ON CONFLICT DO NOTHING
+// mirrors the PK (shoot_plan_item_id, style_id): the same style can't be
+// added twice to one item, same as the original "Shoot This Week" picker.
+router.post('/:itemId/styles', async (req, res, next) => {
+  try {
+    const itemId = Number(req.params.itemId);
+    if (!Number.isFinite(itemId)) return res.status(400).json({ error: 'Invalid item id' });
+    const { style_id, size, colour_label } = req.body || {};
+    const styleId = Number(style_id);
+    if (!Number.isFinite(styleId)) return res.status(400).json({ error: 'style_id is required' });
+
+    const itemResult = await pool.query('SELECT id FROM shoot_plan_items WHERE id = $1', [itemId]);
+    if (!itemResult.rows.length) return res.status(404).json({ error: 'Shoot plan item not found' });
+
+    const result = await pool.query(
+      `INSERT INTO shoot_plan_item_styles (shoot_plan_item_id, style_id, size, colour_label)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (shoot_plan_item_id, style_id) DO NOTHING RETURNING *`,
+      [itemId, styleId, size && String(size).trim() ? String(size).trim() : null, colour_label || null]
+    );
+    if (!result.rows.length) return res.status(409).json({ error: 'That product is already in Styles Needed for this concept' });
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    if (err.code === '23503') return res.status(400).json({ error: 'style_id does not reference a real style' });
+    next(err);
+  }
+});
+
+// Removing the last/only style leaves an empty shoot_plan_item_styles set --
+// exactly how "No products required" is represented (see schema.sql), so no
+// special-casing is needed here for going back down to zero.
+router.delete('/:itemId/styles/:styleId', async (req, res, next) => {
+  try {
+    const itemId = Number(req.params.itemId);
+    const styleId = Number(req.params.styleId);
+    if (!Number.isFinite(itemId) || !Number.isFinite(styleId)) {
+      return res.status(400).json({ error: 'Invalid item or style id' });
+    }
+    const result = await pool.query(
+      `DELETE FROM shoot_plan_item_styles WHERE shoot_plan_item_id = $1 AND style_id = $2 RETURNING style_id`,
+      [itemId, styleId]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Shoot plan colourway not found' });
+    res.status(204).send();
   } catch (err) {
     next(err);
   }

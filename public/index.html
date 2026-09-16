@@ -1313,6 +1313,27 @@
             <div class="cd-field-error" id="cd-modal-angle-error"></div>
           </label>
         </div>
+        <!-- Concept Type is the reusable ad/concept format (e.g. "Green
+             Screen Video"), deliberately separate from Concept Name/Idea
+             above (the individual creative idea, e.g. "Black Friday Price
+             Shock") -- see the concept_types table comment in schema.sql.
+             Assigned To reuses creative_assets.concept_assignee, the same
+             fixed Mark/Shez/Til list already used by Upcoming Drops'
+             Required Concepts. -->
+        <div class="cd-modal-idea-row">
+          <label><span class="cd-field-label">Concept Type</span>
+            <select id="cd-modal-concept-type-select" onchange="onConceptDevSelectWithOtherChange('cd-modal-concept-type-select','cd-modal-concept-type-custom')"></select>
+            <input type="text" id="cd-modal-concept-type-custom" placeholder="New concept type…" style="display:none;margin-top:6px;">
+          </label>
+          <label><span class="cd-field-label">Assigned To</span>
+            <select id="cd-modal-assignee-select">
+              <option value="">Unassigned</option>
+              <option value="Mark">Mark</option>
+              <option value="Shez">Shez</option>
+              <option value="Til">Til</option>
+            </select>
+          </label>
+        </div>
       </div>
 
       <!-- Who's It For?: forces "who exactly are we making this for" before
@@ -1373,6 +1394,26 @@
         <div id="cd-modal-hooks-list"></div>
         <div class="cd-field-error" id="cd-modal-hook-primary-error"></div>
         <button type="button" class="link-btn" id="cd-modal-add-hook-btn" onclick="addConceptDevHook()">+ Add Alternative Hook</button>
+      </div>
+
+      <!-- Styles Needed -- optional, zero/one/many products, reusing the
+           same style/colourway search already used by Core Planning/Brief
+           Builder (renderStyleSearchResults) and the shared
+           shoot_plan_item_styles table. An execution requirement only --
+           see schema.sql's comment on style_id/product_code going nullable
+           -- it never determines the concept's identity, so it's never
+           required. Persisted immediately per add/remove (not staged with
+           the rest of the form) since it's shared across every concept on
+           this same shoot_plan_item, same as Planning's own colourway
+           picker. -->
+      <div class="cd-modal-section">
+        <div class="cd-modal-section-title">Styles Needed <span class="hint">(optional)</span></div>
+        <div class="hint cd-modal-section-helper">Products/colourways this concept needs, if any. Leave empty if no products are required.</div>
+        <div id="cd-modal-styles-list" class="cd-modal-styles-list"></div>
+        <div class="promo-shoot-search">
+          <input type="text" id="cd-modal-styles-search" placeholder="Search SKU or product name to add…" autocomplete="off" oninput="filterConceptDevStyles()" onfocus="filterConceptDevStyles()">
+          <div id="cd-modal-styles-results" class="promo-shoot-search-results" style="display:none;"></div>
+        </div>
       </div>
 
       <!-- What to Shoot -- the literal footage list, deliberately separate
@@ -1958,12 +1999,16 @@
   </div>
 </div>
 
-<!-- Cover a Promotion Campaign Stage requirement -- unlike the product-row
-     "Shoot This Week" modal above, there's no single pre-known product to
-     launch this from (a promotion may cover multiple products, a bundle,
-     or no SKU at all), so this picks any tracked style directly rather than
-     a pre-resolved colours/sizes list. Feeds the exact same Concept
-     Development pipeline via POST /shoot-plan (source: 'promotion'). -->
+<!-- Cover a Promotion Campaign Stage requirement -- concept-first, not
+     product-first: a promotion's creative need is often the message/format
+     itself (sitewide sale messaging, a countdown graphic) with no single
+     product behind it, so this never asks the user to pick a product to
+     start. Collects Concept Type + Assigned To + Concept Name/Idea + Format,
+     then creates the standard shoot_plan_items + creative_assets pair via
+     POST /shoot-plan (source: 'promotion') -- one click, one concept, one
+     item, one asset -- and opens straight into Concept Development for it.
+     Styles Needed (optional products/colourways) is added afterwards, inside
+     Concept Development itself, not here. -->
 <div id="promotion-shoot-modal" class="modal-backdrop">
   <div class="modal">
     <div class="modal-header">
@@ -1975,12 +2020,20 @@
         <div><span class="admin-note">Promotion</span><br><strong id="promotion-shoot-context-promotion"></strong></div>
         <div><span class="admin-note">Campaign Stage</span><br><strong id="promotion-shoot-context-stage"></strong></div>
       </div>
-      <label>Product / style <span class="hint">(search by SKU or product name)</span>
-        <div class="promo-shoot-search">
-          <input type="text" id="promotion-shoot-style-search" placeholder="Search SKU or product name…" autocomplete="off" oninput="filterPromotionShootStyles()" onfocus="filterPromotionShootStyles()">
-          <input type="hidden" id="promotion-shoot-style-id">
-          <div id="promotion-shoot-style-results" class="promo-shoot-search-results" style="display:none;"></div>
-        </div>
+      <label>Concept Type
+        <select id="promotion-shoot-concept-type-select" onchange="onConceptDevSelectWithOtherChange('promotion-shoot-concept-type-select','promotion-shoot-concept-type-custom')"></select>
+        <input type="text" id="promotion-shoot-concept-type-custom" placeholder="New concept type…" style="display:none;margin-top:6px;">
+      </label>
+      <label>Assigned To
+        <select id="promotion-shoot-assignee">
+          <option value="">Unassigned</option>
+          <option value="Mark">Mark</option>
+          <option value="Shez">Shez</option>
+          <option value="Til">Til</option>
+        </select>
+      </label>
+      <label>Concept Name / Idea
+        <input type="text" id="promotion-shoot-concept-name" placeholder="e.g. Black Friday Price Shock">
       </label>
       <label>Format
         <select id="promotion-shoot-format">

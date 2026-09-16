@@ -18,7 +18,7 @@ const CARD_QUERY = `
       ORDER BY sh.changed_at DESC LIMIT 1
     ) AS stage_entered_at
   FROM creative_assets ca
-  JOIN styles s ON s.id = ca.style_id
+  LEFT JOIN styles s ON s.id = ca.style_id
   LEFT JOIN categories c ON c.id = s.category_id
   ORDER BY ca.target_date NULLS LAST, ca.id
 `;

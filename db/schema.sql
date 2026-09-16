@@ -1269,3 +1269,61 @@ ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS editing_submitted_by_user_i
 -- read/write -- a slot is just a Drop-specific pointer to it.
 ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS concept_assignee VARCHAR(20)
   CHECK (concept_assignee IS NULL OR concept_assignee IN ('Mark', 'Shez', 'Til'));
+
+-- ---------------------------------------------------------------------------
+-- Promotion concept-first flow: Promotion's "+ Shoot This Week" now starts
+-- from a Concept Type + Concept Name, not a product -- see the architecture
+-- investigation this round is built from. Two additive pieces:
+--
+-- 1. concept_types: a reusable, editable vocabulary of ad/concept formats
+--    (e.g. "Green Screen Video", "POV"), deliberately NOT proven_winners --
+--    that table drives Drops' automatic Required Concept generation
+--    (generateOrTopUpPlan pulls every active row), so writing a
+--    Promotion-only type there would silently start appearing as a Drop
+--    requirement. This table is seeded ONCE from proven_winners' current
+--    active names (so the team's existing vocabulary -- Flatlay Photo, POV
+--    from iPhone, Try on/Flatlay Video, Ecom Photo, Green Screen Video,
+--    etc. -- is already there on day one) and never synced again
+--    afterwards; proven_winners itself is never written to by this
+--    feature, in either direction.
+CREATE TABLE IF NOT EXISTS concept_types (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(255) UNIQUE NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- One-time-only seed: only fires the first time this ever runs against a
+-- database where concept_types is still empty, so a proven_winner added
+-- (or renamed) later never gets pulled in automatically -- deliberately no
+-- ongoing sync between the two tables.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM concept_types) THEN
+    INSERT INTO concept_types (name, sort_order)
+    SELECT name, rank FROM proven_winners WHERE active ORDER BY rank;
+  END IF;
+END $$;
+
+-- 2. concept_type on the concept itself -- separate from concept_name (the
+-- individual idea), e.g. concept_type = "Green Screen Video", concept_name
+-- = "Black Friday Price Shock". Free text (not an FK to concept_types) so
+-- an existing concept's type is never invalidated by a later rename/
+-- deactivation of that concept_types row, same reasoning as
+-- drop_product_plan_slots.concept_name being a snapshot, not a live FK.
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS concept_type VARCHAR(255);
+
+-- ---------------------------------------------------------------------------
+-- Genuine "no product required" Promotion concepts: a promotion's creative
+-- need is often the message/format itself (sitewide sale messaging, a
+-- countdown graphic), with no single product to require. Making style_id
+-- nullable (rather than a dummy/sentinel style row) keeps this honest --
+-- an empty shoot_plan_item_styles set simply means no products are needed,
+-- nothing fake stands in for "none". See board.js/creativeAssets.js for the
+-- corresponding LEFT JOIN fixes this requires; assertCanEnterFilming
+-- already short-circuits safely on a null style_tier (only gates
+-- style_tier = 'new_drop', see rules.js), so no rule change needed there.
+ALTER TABLE creative_assets ALTER COLUMN style_id DROP NOT NULL;
+ALTER TABLE shoot_plan_items ALTER COLUMN product_code DROP NOT NULL;
+ALTER TABLE shoot_plan_items ALTER COLUMN product_name DROP NOT NULL;

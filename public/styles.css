@@ -1032,6 +1032,15 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .cd-modal-collapsible{display:flex;flex-direction:column;gap:8px;}
 .cd-modal-collapsible>.link-btn{align-self:flex-start;}
 
+/* Styles Needed -- Concept Development's optional product/colourway list,
+   same chip language as .shoot-plan-style-chip elsewhere but with an inline
+   remove control since these are added/removed one at a time here. */
+.cd-modal-styles-list{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;}
+.cd-style-chip{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:var(--text-secondary);background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-pill);padding:3px 6px 3px 10px;}
+.cd-style-chip-code{font-weight:400;color:var(--text-muted);}
+.cd-style-chip-remove{background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:14px;line-height:1;padding:0 2px;}
+.cd-style-chip-remove:hover{color:var(--red);}
+
 /* Required-field indicators: a subtle grey asterisk on the label (never
    red by default) and a quiet legend at the bottom of the form -- per the
    brief, this must never read as an aggressive validation UI.

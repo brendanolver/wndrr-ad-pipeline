@@ -4,7 +4,7 @@
 // (the asset row + its opening status_history row), so there's only ever
 // one definition of what "creating a creative asset" means.
 async function insertCreativeAsset(db, {
-  style_id,
+  style_id = null,
   concept_name,
   concept_classification = 'new_experimental',
   format,
@@ -16,12 +16,15 @@ async function insertCreativeAsset(db, {
   qc_owner = null,
   status = 'not_started',
   created_by_user_id = null,
+  concept_type = null,
+  concept_assignee = null,
 }) {
   const result = await db.query(
     `INSERT INTO creative_assets
       (style_id, concept_name, concept_classification, format, is_deliberate_trial, target_date,
-       strategy_owner, filming_owner, editing_owner, qc_owner, status, created_by_user_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
+       strategy_owner, filming_owner, editing_owner, qc_owner, status, created_by_user_id,
+       concept_type, concept_assignee)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING *`,
     [
       style_id,
       concept_name,
@@ -35,6 +38,8 @@ async function insertCreativeAsset(db, {
       qc_owner,
       status,
       created_by_user_id,
+      concept_type,
+      concept_assignee,
     ]
   );
   const asset = result.rows[0];
