@@ -25,6 +25,7 @@ let state = {
   shootPlan: [], coverageImageIndex: new Map(),
   contentCreators: [],
   conceptDevLocations: [],
+  conceptTypes: [],
   highStockProducts: [], highStockExpandedProducts: new Set(),
   // Monday Planning's 3-step guided workflow (Core/High Stocks/Shoot Plan)
   // -- always starts at Core on load (not persisted to localStorage): this
@@ -296,7 +297,7 @@ function conceptDevWeekNumber() {
 async function loadAll() {
   try {
     const weekStart = planningWeekStart();
-    const [board, styles, categories, dashboard, dropsRes, provenWinners, coreRes, planningSettings, shootPlan, contentCreators, highStockRes, promotions, weeklyConfirmation, weeklyPlanningProgress, salesCadence, metaProductMappings, metaProductFamilies, conceptDev, creativeResources, customerAvatars, tuesdayReview, shootingWeek, editingWeek, conceptDevLocations] = await Promise.all([
+    const [board, styles, categories, dashboard, dropsRes, provenWinners, coreRes, planningSettings, shootPlan, contentCreators, highStockRes, promotions, weeklyConfirmation, weeklyPlanningProgress, salesCadence, metaProductMappings, metaProductFamilies, conceptDev, creativeResources, customerAvatars, tuesdayReview, shootingWeek, editingWeek, conceptDevLocations, conceptTypes] = await Promise.all([
       api('/board'),
       api('/styles'),
       api('/categories'),
@@ -321,6 +322,7 @@ async function loadAll() {
       api(`/shooting?week_start=${shootingWeekStart()}`),
       api(`/editing?week_start=${editingWeekStart()}`),
       api('/concept-development/locations'),
+      api('/concept-types'),
     ]);
     state.board = board;
     state.styles = styles;
@@ -350,6 +352,7 @@ async function loadAll() {
     state.shooting.data = shootingWeek;
     state.editing.data = editingWeek;
     state.conceptDevLocations = conceptDevLocations;
+    state.conceptTypes = conceptTypes;
     renderBoard();
     renderMissingAd();
     renderStylesTable();
@@ -441,10 +444,10 @@ function renderCard(card) {
   el.className = 'card';
   const stale = card.days_in_stage !== null && card.days_in_stage >= 7;
   el.innerHTML = `
-    <div class="card-style">${card.style_code} ${card.category_name ? '· ' + card.category_name : ''}</div>
+    <div class="card-style">${card.style_code ? escapeHtml(card.style_code) + (card.category_name ? ' · ' + escapeHtml(card.category_name) : '') : (card.concept_type ? escapeHtml(card.concept_type) : 'No products required')}</div>
     <div class="card-concept">${escapeHtml(card.concept_name)}</div>
     <div class="card-badges">
-      <span class="badge badge-tier-${card.style_tier}">${TIER_LABELS[card.style_tier]}</span>
+      ${card.style_tier ? `<span class="badge badge-tier-${card.style_tier}">${TIER_LABELS[card.style_tier]}</span>` : ''}
       <span class="badge badge-${card.concept_classification}">${CLASSIFICATION_LABELS[card.concept_classification]}</span>
       <span class="badge badge-format">${card.format}</span>
       ${card.is_deliberate_trial ? '<span class="badge badge-trial">Deliberate Trial</span>' : ''}
@@ -3397,10 +3400,11 @@ async function renderPromotionStageDetailView() {
       const asset = assetsById.get(item.asset_id);
       if (!asset) return '';
       const [bg, fg] = ASSET_STATUS_COLORS[asset.status] || ASSET_STATUS_COLORS.not_started;
+      const productLabel = asset.style_name || asset.style_code || 'No products required';
       return `
       <div class="job-card" data-asset-id="${asset.id}">
-        <div class="job-card-concept">${escapeHtml(asset.style_name || asset.style_code)}</div>
-        <div class="job-card-products">Concept: ${escapeHtml(asset.concept_name)} · ${asset.format}</div>
+        <div class="job-card-concept">${escapeHtml(productLabel)}</div>
+        <div class="job-card-products">${asset.concept_type ? escapeHtml(asset.concept_type) + ' · ' : ''}Concept: ${escapeHtml(asset.concept_name)} · ${asset.format}</div>
         <div class="job-status-row">
           <span class="job-status-pill" style="background:${bg};color:${fg};">${STATUS_LABELS[asset.status]}</span>
           <span class="badge badge-${asset.concept_classification}">${CLASSIFICATION_LABELS[asset.concept_classification]}</span>
@@ -3429,13 +3433,13 @@ function shootThisWeekForPromotionStage(stageId) {
   const promotion = state.currentPromotion;
   const stage = ((promotion && promotion.stages) || []).find((s) => s.id === stageId);
   if (!stage) return;
-  promotionShootContext = { stageId, styleId: null };
+  promotionShootContext = { stageId };
   document.getElementById('promotion-shoot-modal-title').textContent = 'Shoot This Week';
   document.getElementById('promotion-shoot-context-promotion').textContent = promotion.name;
   document.getElementById('promotion-shoot-context-stage').textContent = stage.name;
-  document.getElementById('promotion-shoot-style-search').value = '';
-  document.getElementById('promotion-shoot-style-id').value = '';
-  document.getElementById('promotion-shoot-style-results').style.display = 'none';
+  fillConceptDevSelectWithOther('promotion-shoot-concept-type-select', 'promotion-shoot-concept-type-custom', state.conceptTypes.map((t) => t.name), '');
+  document.getElementById('promotion-shoot-assignee').value = '';
+  document.getElementById('promotion-shoot-concept-name').value = '';
   document.getElementById('promotion-shoot-format').value = 'video';
   openModal('promotion-shoot-modal');
 }
@@ -3484,26 +3488,37 @@ function selectPromotionShootStyle(styleId) {
 
 async function savePromotionShootItem() {
   if (!promotionShootContext) return;
-  const styleId = Number(document.getElementById('promotion-shoot-style-id').value);
-  const style = state.styles.find((s) => s.id === styleId);
-  if (!style) return toast('Select a product / style', true);
+  const conceptName = document.getElementById('promotion-shoot-concept-name').value.trim();
+  if (!conceptName) return toast('Concept Name / Idea is required', true);
+  const conceptType = conceptDevSelectWithOtherValue('promotion-shoot-concept-type-select', 'promotion-shoot-concept-type-custom');
+  const conceptAssignee = document.getElementById('promotion-shoot-assignee').value || null;
   const format = document.getElementById('promotion-shoot-format').value;
 
-  // Sample status/size, creator and a quick note aren't asked for here --
-  // this modal deliberately only captures product/style and format (see
-  // the file-header comment above); shoot-plan.js still requires a stock
-  // status and creator on every item regardless of source, so those go in
-  // as sensible silent defaults rather than weakening that shared endpoint.
+  // No product is picked here at all -- the concept-first flow (see the
+  // file-header comment above) never requires one; product_code/product_name
+  // are simply omitted, leaving shoot_plan_item_styles empty ("No products
+  // required"). Sample status and creator aren't asked for either; shoot-
+  // plan.js still needs a creator on every item, so a sensible silent
+  // default goes in rather than weakening that shared endpoint.
   const defaultCreator = state.contentCreators.find((c) => c.is_default) || state.contentCreators[0];
 
+  // "Other / New Type" persists to concept_types immediately, same
+  // reasoning as saveConceptDevModal -- it becomes reusable right away,
+  // even before the concept's own workspace is opened.
+  if (conceptType && !state.conceptTypes.some((t) => t.name.toLowerCase() === conceptType.toLowerCase())) {
+    try {
+      const created = await api('/concept-types', { method: 'POST', body: JSON.stringify({ name: conceptType }) });
+      state.conceptTypes.push(created);
+    } catch (e) { /* non-fatal */ }
+  }
+
   try {
-    await api('/shoot-plan', {
+    const item = await api('/shoot-plan', {
       method: 'POST',
       body: JSON.stringify({
-        product_code: style.style_code,
-        product_name: style.name,
-        colourways: [{ style_id: style.id, size: null, colour_label: null }],
-        stock_status: 'needs_to_be_brought_in',
+        concept_name: conceptName,
+        concept_type: conceptType || null,
+        concept_assignee: conceptAssignee,
         creator: defaultCreator ? defaultCreator.name : DEFAULT_CREATOR,
         format,
         source: 'promotion',
@@ -3517,7 +3532,18 @@ async function savePromotionShootItem() {
     if (document.getElementById('planning-promotion-stage-view').style.display !== 'none') {
       renderPromotionStageDetailView();
     }
-    loadAll();
+    await loadAll();
+    // One click = one concept = one item = one asset -- straight into the
+    // exact concept just created, per the brief ("After creation, take the
+    // user into the existing Concept Development workspace for that exact
+    // concept"). Same standalone-item pattern Brief Builder's "Start
+    // Concept" already uses (the promotion stage's own campaign week may
+    // not be the currently-viewed Concept Dev week, and the week's own
+    // Shoot Plan confirmation must never be implied by adding one concept).
+    switchTab('concept-dev');
+    await openConceptDevProductStandalone(item.id);
+    const seedConcept = conceptDevStandaloneProduct && conceptDevStandaloneProduct.concepts[0];
+    if (seedConcept) openConceptDevModal(seedConcept.id);
   } catch (e) {
     toast(e.message, true);
   }
@@ -4616,17 +4642,25 @@ function conceptDevModalContextHtml(product) {
     .map((c) => `${c.style_code || c.colour_label}${c.size ? `-${c.size}` : ''}`)
     .join(', ');
   const line = [
-    `<strong>${escapeHtml(product.product_name)}</strong>`,
+    `<strong>${escapeHtml(product.product_name || 'No products required')}</strong>`,
     escapeHtml(sourceLabel),
     escapeHtml(pathwayLabel),
     `Owner: ${escapeHtml(product.creator || '—')}`,
     escapeHtml(skuInfo),
   ].filter(Boolean).join(' &middot; ');
+  // Promotion Message/Offer -- surfaces the Promotion's own notes field
+  // read-only as the offer reference, per the brief: reuse the existing
+  // Promotion-level notes rather than duplicating offer text onto each
+  // creative_asset.
+  const promoNotes = product.source === 'promotion' && product.promotion_notes && product.promotion_notes.trim()
+    ? `<div class="cd-modal-context-idea">🏷️ Promotion Message/Offer: ${escapeHtml(product.promotion_notes.trim())}</div>`
+    : '';
   return `
     ${thumb}
     <div class="cd-modal-context-lines">
       <div class="cd-modal-context-line">${line}</div>
       ${product.initial_idea ? `<div class="cd-modal-context-idea">💡 ${escapeHtml(product.initial_idea)}</div>` : ''}
+      ${promoNotes}
     </div>`;
 }
 
@@ -4687,10 +4721,10 @@ function openSaveAvatarFromConceptModal() {
 // "Other / custom" fallback -- same sentinel pattern as the Customer
 // Avatar select above, reused here rather than inventing a second one.
 // Never hard-codes a list: options come entirely from real existing data.
-function fillConceptDevSelectWithOther(selectId, customId, options, currentValue) {
+function fillConceptDevSelectWithOther(selectId, customId, options, currentValue, placeholderLabel) {
   const select = document.getElementById(selectId);
   const custom = document.getElementById(customId);
-  select.innerHTML = ['<option value="">Select…</option>']
+  select.innerHTML = [`<option value="">${escapeHtml(placeholderLabel || 'Select…')}</option>`]
     .concat(options.map((o) => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`))
     .concat(['<option value="__other__">Other / custom…</option>'])
     .join('');
@@ -4731,7 +4765,13 @@ function fillConceptDevModalFields(concept) {
   document.getElementById('cd-modal-angle').value = concept ? (concept.angle || '') : '';
   document.getElementById('cd-modal-script').value = concept ? (concept.script_notes || '') : '';
   document.getElementById('cd-modal-props').value = concept ? (concept.props_notes || '') : '';
-  fillConceptDevSelectWithOther('cd-modal-talent-select', 'cd-modal-talent-custom', state.contentCreators.map((c) => c.name), concept ? concept.talent_requirement : '');
+  fillConceptDevSelectWithOther('cd-modal-talent-select', 'cd-modal-talent-custom', state.contentCreators.map((c) => c.name), concept ? concept.talent_requirement : '', 'No Talent Required');
+
+  // Concept Type -- reusable vocabulary from state.conceptTypes, same
+  // select+other pattern as Talent/Location. Kept separate from Concept
+  // Name/Idea above (see schema.sql's concept_types comment).
+  fillConceptDevSelectWithOther('cd-modal-concept-type-select', 'cd-modal-concept-type-custom', state.conceptTypes.map((t) => t.name), concept ? concept.concept_type : '');
+  document.getElementById('cd-modal-assignee-select').value = concept ? (concept.concept_assignee || '') : '';
 
   // Execution / Shot Plan is legacy -- superseded by structured What to
   // Shoot. Never shown for a new concept and never required; only surfaced
@@ -4743,6 +4783,10 @@ function fillConceptDevModalFields(concept) {
   const hasLegacyExecution = Boolean(concept && concept.execution && concept.execution.trim());
   executionField.value = hasLegacyExecution ? concept.execution : '';
   executionSection.style.display = hasLegacyExecution ? '' : 'none';
+
+  renderConceptDevModalStylesNeeded();
+  document.getElementById('cd-modal-styles-search').value = '';
+  document.getElementById('cd-modal-styles-results').style.display = 'none';
 
   conceptDevReferenceEditIndex = null;
   document.getElementById('cd-modal-reference-paste-form').style.display = 'none';
@@ -4828,6 +4872,64 @@ function fillConceptDevModalFields(concept) {
   ));
 
   hideConceptDevValidation();
+}
+
+// Styles Needed -- optional, zero/one/many products for the concept's
+// shoot_plan_item (shared across every concept on that item, same as
+// Planning's own colourway picker). Persisted immediately per add/remove
+// (via POST/DELETE /shoot-plan/:itemId/styles) rather than staged with the
+// rest of the form, since it's execution data that other concepts on the
+// same item may already depend on. An empty list is exactly "No products
+// required" -- never a dummy/sentinel row (see schema.sql).
+function renderConceptDevModalStylesNeeded() {
+  const list = document.getElementById('cd-modal-styles-list');
+  const product = conceptDevModalProduct;
+  const colourways = (product && product.colourways) || [];
+  if (!colourways.length) {
+    list.innerHTML = '<div class="hint">No products required</div>';
+    return;
+  }
+  list.innerHTML = colourways.map((c) => `
+    <span class="cd-style-chip">
+      ${escapeHtml(c.colour_label || c.style_code)}${c.colour_label ? ` <span class="cd-style-chip-code">${escapeHtml(c.style_code)}</span>` : ''}${c.size ? ` · ${escapeHtml(c.size)}` : ''}
+      <button type="button" class="cd-style-chip-remove" onclick="removeConceptDevStyle(${c.style_id})" title="Remove">&times;</button>
+    </span>`).join('');
+}
+
+function filterConceptDevStyles() {
+  renderStyleSearchResults('cd-modal-styles-search', 'cd-modal-styles-results', selectConceptDevStyle);
+}
+
+async function selectConceptDevStyle(styleId) {
+  const product = conceptDevModalProduct;
+  if (!product) return;
+  const style = state.styles.find((s) => s.id === styleId);
+  if (!style) return;
+  try {
+    await api(`/shoot-plan/${product.shoot_plan_item_id}/styles`, {
+      method: 'POST',
+      body: JSON.stringify({ style_id: styleId, colour_label: null, size: null }),
+    });
+    product.colourways = product.colourways || [];
+    product.colourways.push({ style_id: styleId, style_code: style.style_code, colour_label: null, size: null });
+    renderConceptDevModalStylesNeeded();
+    document.getElementById('cd-modal-styles-search').value = '';
+    document.getElementById('cd-modal-styles-results').style.display = 'none';
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function removeConceptDevStyle(styleId) {
+  const product = conceptDevModalProduct;
+  if (!product) return;
+  try {
+    await api(`/shoot-plan/${product.shoot_plan_item_id}/styles/${styleId}`, { method: 'DELETE' });
+    product.colourways = (product.colourways || []).filter((c) => c.style_id !== styleId);
+    renderConceptDevModalStylesNeeded();
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 // Toggles the modal between its normal editable state and the read-only
@@ -5095,9 +5197,13 @@ async function saveConceptDevModal(targetStatus) {
   const avatarWhyCare = whyCareInput.value.trim();
   const hasAvatar = Boolean(customerAvatarId) || Boolean(customAvatarDescription);
 
+  const conceptType = conceptDevSelectWithOtherValue('cd-modal-concept-type-select', 'cd-modal-concept-type-custom');
+  const conceptAssignee = document.getElementById('cd-modal-assignee-select').value || null;
+
   const body = {
     angle,
     execution,
+    concept_type: conceptType,
     customer_avatar_id: customerAvatarId,
     custom_avatar_description: customAvatarDescription,
     avatar_why_care: avatarWhyCare,
@@ -5193,6 +5299,17 @@ async function saveConceptDevModal(targetStatus) {
     }
   }
 
+  // "Other / New Type" persists to concept_types so it's reusable for
+  // future concepts -- idempotent by name (see conceptTypes.js POST), same
+  // reasoning as Talent's Other/custom staying a one-off unless it matches
+  // an existing option.
+  if (conceptType && !state.conceptTypes.some((t) => t.name.toLowerCase() === conceptType.toLowerCase())) {
+    try {
+      const created = await api('/concept-types', { method: 'POST', body: JSON.stringify({ name: conceptType }) });
+      state.conceptTypes.push(created);
+    } catch (e) { /* non-fatal -- the concept itself still saves with the typed value */ }
+  }
+
   try {
     if (conceptDevModalConceptId) {
       if (!nameLocked) {
@@ -5202,6 +5319,10 @@ async function saveConceptDevModal(targetStatus) {
       await api(`/concept-development/concepts/${conceptDevModalConceptId}`, {
         method: 'PATCH',
         body: JSON.stringify(body),
+      });
+      await api(`/creative-assets/${conceptDevModalConceptId}/assignee`, {
+        method: 'PATCH',
+        body: JSON.stringify({ concept_assignee: conceptAssignee }),
       });
       closeModal('concept-dev-modal');
       toast(savedToast);
@@ -5233,6 +5354,12 @@ async function saveConceptDevModal(targetStatus) {
         method: 'PATCH',
         body: JSON.stringify(body),
       });
+      if (conceptAssignee) {
+        await api(`/creative-assets/${assetId}/assignee`, {
+          method: 'PATCH',
+          body: JSON.stringify({ concept_assignee: conceptAssignee }),
+        });
+      }
       closeModal('concept-dev-modal');
       toast(savedToast);
     }
@@ -5484,7 +5611,7 @@ function renderTuesdayReviewList() {
   list.innerHTML = groups.map((g) => `
     <div class="tr-product-group">
       <div class="tr-product-header">
-        <div class="tr-product-name">${escapeHtml(g.product.product_name)}</div>
+        <div class="tr-product-name">${escapeHtml(g.product.product_name || 'No products required')}</div>
         <div class="tr-product-meta">${escapeHtml(tuesdayReviewProductMetaText(g.product))}</div>
       </div>
       <div class="tr-concept-list">${g.concepts.map((c) => tuesdayReviewConceptTileHtml(c)).join('')}</div>

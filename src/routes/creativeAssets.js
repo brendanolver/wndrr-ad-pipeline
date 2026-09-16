@@ -11,7 +11,7 @@ const SELECT_QUERY = `
   SELECT ca.*, s.style_code, s.name AS style_name, s.tier AS style_tier,
     (SELECT slot_rank FROM drop_product_plan_slots WHERE fulfilled_by_asset_id = ca.id LIMIT 1) AS fulfills_slot_rank
   FROM creative_assets ca
-  JOIN styles s ON s.id = ca.style_id
+  LEFT JOIN styles s ON s.id = ca.style_id
 `;
 
 router.get('/', async (req, res, next) => {
@@ -219,7 +219,7 @@ router.patch('/:id/status', async (req, res, next) => {
 
     const current = await client.query(
       `SELECT ca.*, s.tier AS style_tier FROM creative_assets ca
-       JOIN styles s ON s.id = ca.style_id WHERE ca.id = $1 FOR UPDATE`,
+       LEFT JOIN styles s ON s.id = ca.style_id WHERE ca.id = $1 FOR UPDATE OF ca`,
       [req.params.id]
     );
     if (current.rows.length === 0) {

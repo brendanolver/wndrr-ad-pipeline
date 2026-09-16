@@ -36,7 +36,7 @@ router.get('/', async (req, res, next) => {
     }
 
     const itemsResult = await pool.query(
-      `SELECT spi.*, p.id AS promotion_id, p.name AS promotion_name, ps.name AS promotion_stage_name
+      `SELECT spi.*, p.id AS promotion_id, p.name AS promotion_name, p.notes AS promotion_notes, ps.name AS promotion_stage_name
        FROM shoot_plan_items spi
        LEFT JOIN promotion_stages ps ON ps.id = spi.promotion_stage_id
        LEFT JOIN promotions p ON p.id = ps.promotion_id
@@ -122,6 +122,7 @@ router.get('/', async (req, res, next) => {
       source: i.source,
       promotion_stage_id: i.promotion_stage_id,
       promotion_name: i.promotion_name,
+      promotion_notes: i.promotion_notes,
       promotion_stage_name: i.promotion_stage_name,
       drop_plan_id: dropPlanIdByItem.get(i.id) || null,
       proven_coverage_count: provenCoverageByItem.get(i.id) || 0,
@@ -177,7 +178,7 @@ router.get('/item/:shootPlanItemId', async (req, res, next) => {
     if (!Number.isFinite(itemId)) return res.status(400).json({ error: 'Invalid shoot plan item id' });
 
     const itemResult = await pool.query(
-      `SELECT spi.*, p.id AS promotion_id, p.name AS promotion_name, ps.name AS promotion_stage_name
+      `SELECT spi.*, p.id AS promotion_id, p.name AS promotion_name, p.notes AS promotion_notes, ps.name AS promotion_stage_name
        FROM shoot_plan_items spi
        LEFT JOIN promotion_stages ps ON ps.id = spi.promotion_stage_id
        LEFT JOIN promotions p ON p.id = ps.promotion_id
@@ -236,6 +237,7 @@ router.get('/item/:shootPlanItemId', async (req, res, next) => {
       source: item.source,
       promotion_stage_id: item.promotion_stage_id,
       promotion_name: item.promotion_name,
+      promotion_notes: item.promotion_notes,
       promotion_stage_name: item.promotion_stage_name,
       drop_plan_id: dropPlanId,
       proven_coverage_count: provenCoverageCount,
@@ -300,6 +302,7 @@ router.patch('/concepts/:id', async (req, res, next) => {
   try {
     const {
       concept_name,
+      concept_type,
       concept_dev_status,
       angle,
       execution,
@@ -376,6 +379,7 @@ router.patch('/concepts/:id', async (req, res, next) => {
          submitted_for_review_at = CASE WHEN $16 THEN now() ELSE submitted_for_review_at END,
          submitted_for_review_by_user_id = CASE WHEN $16 THEN $17 ELSE submitted_for_review_by_user_id END,
          shots = COALESCE($18, shots),
+         concept_type = COALESCE($19, concept_type),
          updated_at = now()
        WHERE id = $15 RETURNING *`,
       [
@@ -397,6 +401,7 @@ router.patch('/concepts/:id', async (req, res, next) => {
         submittingForReview,
         req.user.id,
         shots !== undefined ? JSON.stringify(shots) : null,
+        concept_type && concept_type.trim() ? concept_type.trim() : null,
       ]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Concept not found' });
