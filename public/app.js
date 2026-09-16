@@ -655,12 +655,6 @@ function renderPlanningShootSummary() {
 // step flow -- see handleHashRoute below for the redirect that keeps old
 // links working.
 function parseDropsHash() {
-  // Guard against a non-#drops hash (e.g. #promotions/1/stage/1) -- called
-  // unconditionally on every loadAll() refresh regardless of the active
-  // tab/hash (see renderDropsRoute's own comment), so without this check the
-  // replace() below no-ops and the whole hash gets misparsed as a drop id,
-  // sending a NaN request to GET /drops/:id.
-  if (!/^#drops(\/|$)/.test(window.location.hash)) return { view: 'list' };
   const parts = window.location.hash.replace(/^#drops\/?/, '').split('/').filter(Boolean);
   if (parts[0] && parts[1] === 'product' && parts[2]) {
     return { view: 'product', dropId: Number(parts[0]), productCode: decodeURIComponent(parts[2]) };
@@ -702,10 +696,6 @@ function renderDropsRoute() {
 // Was #planning/promotion/... before Promotions moved out of Planning's
 // step flow -- see handleHashRoute below for the redirect.
 function parsePromotionsHash() {
-  // Same guard as parseDropsHash above -- renderPromotionsRoute() is also
-  // called unconditionally on every loadAll() refresh, so a non-#promotions
-  // hash (e.g. #drops/1) must not be misparsed as a promotion id.
-  if (!/^#promotions(\/|$)/.test(window.location.hash)) return { view: 'list' };
   const parts = window.location.hash.replace(/^#promotions\/?/, '').split('/').filter(Boolean);
   if (parts[0] && parts[1] === 'stage' && parts[2]) {
     return { view: 'promotion-stage', promotionId: Number(parts[0]), stageId: Number(parts[2]) };
