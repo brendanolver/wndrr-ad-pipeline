@@ -43,6 +43,7 @@ async function fetchPlanWithSlots(planId) {
   const slotsResult = await pool.query(
     `SELECT s.*, ca.id AS asset_id, ca.concept_name AS asset_concept_name, ca.status AS asset_status,
             ca.concept_classification AS asset_classification, ca.format AS asset_format,
+            ca.concept_assignee AS asset_concept_assignee,
             sty.style_code AS asset_style_code
      FROM drop_product_plan_slots s
      LEFT JOIN creative_assets ca ON ca.id = s.fulfilled_by_asset_id

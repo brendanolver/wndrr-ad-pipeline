@@ -41,6 +41,12 @@ const CONCEPT_CLASSIFICATIONS = ['tested_proven', 'new_experimental'];
 const TIERS = ['core_proven', 'new_drop'];
 const FORMATS = ['video', 'static'];
 
+// Who's responsible for developing a concept (Upcoming Drops' Required
+// Concepts list) -- a fixed short list for now, deliberately not the
+// content_creators table (that's shoot-day/sizing scoped) or any of the
+// strategy_owner/filming_owner/editing_owner/qc_owner fields above.
+const CONCEPT_ASSIGNEES = ['Mark', 'Shez', 'Til'];
+
 // Concept Development's own simple review status -- separate from STATUSES
 // above (the full production pipeline). This just tracks how ready a
 // concept is for the Tuesday review meeting.
@@ -109,4 +115,5 @@ module.exports = {
   EDITING_STATUSES,
   EDITING_STATUS_LABELS,
   FINAL_EDIT_FORMATS,
+  CONCEPT_ASSIGNEES,
 };
