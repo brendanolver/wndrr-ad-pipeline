@@ -11,6 +11,10 @@ const STATUS_LABELS = {
 };
 const TIER_LABELS = { core_proven: 'Core/Proven', new_drop: 'New Drop' };
 const CLASSIFICATION_LABELS = { tested_proven: 'Tested/Proven', new_experimental: 'New/Experimental' };
+// Who's responsible for developing a Required Concept -- see the
+// concept_assignee column comment in schema.sql for why this is separate
+// from strategy_owner/filming_owner/etc. and from content_creators.
+const CONCEPT_ASSIGNEES = ['Mark', 'Shez', 'Til'];
 
 let state = {
   currentUser: null,
@@ -1468,6 +1472,17 @@ function renderRequiredConcepts(data) {
     const fulfilledLine = fulfilled
       ? `<span class="job-status-pill">${assetStatusLabel(s.asset_status)}</span>`
       : '';
+    // Only a fulfilled slot has an asset row to attach the assignee to --
+    // an open/unfulfilled slot has nowhere to persist it yet.
+    const assigneeControl = fulfilled ? `
+        <span class="pw-slot-assignee">
+          Assigned:
+          <select class="pw-slot-assignee-select" data-asset-id="${s.asset_id}">
+            <option value=""${!s.asset_concept_assignee ? ' selected' : ''}>Unassigned</option>
+            ${CONCEPT_ASSIGNEES.map((name) => `<option value="${name}"${s.asset_concept_assignee === name ? ' selected' : ''}>${name}</option>`).join('')}
+          </select>
+        </span>
+      ` : '';
     // A slot's asset is created automatically the moment the slot exists
     // (Settings already decided the concept name/format/classification),
     // so the normal path is just editing it -- style/target date/owner, or
@@ -1492,6 +1507,7 @@ function renderRequiredConcepts(data) {
       <span class="pw-slot-rank">${s.slot_rank}</span>
       <span class="pw-slot-name">${escapeHtml(s.concept_name)}</span>
       ${sourceBadge}
+      ${assigneeControl}
       ${fulfilledLine}
       ${actions}
     </div>`;
@@ -1507,6 +1523,27 @@ function renderRequiredConcepts(data) {
   list.querySelectorAll('.pw-slot-done-checkbox').forEach((cb) => {
     cb.addEventListener('change', () => toggleConceptDone(Number(cb.dataset.assetId), cb.checked));
   });
+
+  list.querySelectorAll('.pw-slot-assignee-select').forEach((sel) => {
+    sel.addEventListener('change', () => updateConceptAssignee(Number(sel.dataset.assetId), sel.value || null));
+  });
+}
+
+// Saves immediately on change (no separate Save button) -- re-renders from
+// the response so the row's visible name and the dropdown's selection stay
+// in sync with what's actually persisted. Only this one asset changes;
+// every other Required Concept row/slot is untouched.
+async function updateConceptAssignee(assetId, conceptAssignee) {
+  try {
+    await api(`/creative-assets/${assetId}/assignee`, {
+      method: 'PATCH',
+      body: JSON.stringify({ concept_assignee: conceptAssignee }),
+    });
+    const data = await loadProductPlan(state.currentDropId, state.currentProduct.product_code);
+    renderRequiredConcepts(data);
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 // Fast "mark done" shortcut straight to the Board's final Kanban status --

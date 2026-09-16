@@ -1256,3 +1256,16 @@ CREATE INDEX IF NOT EXISTS idx_final_edits_status ON final_edits(status);
 -- src/routes/editing.js's ready-for-approval endpoint.
 ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS editing_submitted_at TIMESTAMPTZ;
 ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS editing_submitted_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+
+-- Who is responsible for developing/handling this concept (Upcoming Drops'
+-- Required Concepts list) -- deliberately separate from strategy_owner/
+-- filming_owner/editing_owner/qc_owner above, which are the OLD Kanban
+-- Board's per-production-stage handoff owners (STATUS_OWNER_FIELD in
+-- statuses.js swaps which of those is "active" as status changes). This is
+-- a single stable assignment that doesn't shift with pipeline stage, so it
+-- needs its own column. NULL = Unassigned. Lives on creative_assets (not
+-- drop_product_plan_slots) so it follows the concept into Concept
+-- Development and beyond, since that's the record those stages actually
+-- read/write -- a slot is just a Drop-specific pointer to it.
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS concept_assignee VARCHAR(20)
+  CHECK (concept_assignee IS NULL OR concept_assignee IN ('Mark', 'Shez', 'Til'));

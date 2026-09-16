@@ -1,6 +1,6 @@
 const express = require('express');
 const { pool } = require('../db');
-const { STATUSES, CONCEPT_CLASSIFICATIONS, FORMATS } = require('../lib/statuses');
+const { STATUSES, CONCEPT_CLASSIFICATIONS, FORMATS, CONCEPT_ASSIGNEES } = require('../lib/statuses');
 const { assertCanEnterFilming, RuleViolationError } = require('../lib/rules');
 const { deriveProductCode } = require('../lib/apparelmagic');
 const { insertCreativeAsset } = require('../lib/assets');
@@ -255,6 +255,28 @@ router.patch('/:id/status', async (req, res, next) => {
     next(err);
   } finally {
     client.release();
+  }
+});
+
+// Dedicated single-field endpoint, same reasoning as PATCH /:id/status --
+// PUT /:id above writes strategy_owner/filming_owner/editing_owner/qc_owner
+// as plain `= $n` (not COALESCE), so it can't be reused for a save-on-change
+// dropdown without risking nulling those out on every call.
+router.patch('/:id/assignee', async (req, res, next) => {
+  try {
+    const { concept_assignee } = req.body || {};
+    if (concept_assignee !== null && !CONCEPT_ASSIGNEES.includes(concept_assignee)) {
+      return res.status(400).json({ error: `concept_assignee must be one of: ${CONCEPT_ASSIGNEES.join(', ')}, or null` });
+    }
+
+    const result = await pool.query(
+      `UPDATE creative_assets SET concept_assignee = $1, updated_at = now() WHERE id = $2 RETURNING *`,
+      [concept_assignee, req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Creative asset not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    next(err);
   }
 });
 
