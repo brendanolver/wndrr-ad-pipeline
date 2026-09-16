@@ -1011,13 +1011,19 @@ function dropCardProductsHtml(products) {
   }
   const shown = products.slice(0, DROP_CARD_MAX_PRODUCTS);
   const extra = products.length - shown.length;
-  const rows = shown.map((p) => `
-    <div class="drop-card-product-row">
+  // 2-column visual grid (image + name + code per tile) rather than the
+  // old cramped single-column text list -- each product's name gets its
+  // own line-clamped block instead of being squeezed onto one truncated
+  // line next to its code. Still one tile per product_code (already
+  // colourway-collapsed upstream by GET /drops), never per colourway.
+  const tiles = shown.map((p) => `
+    <div class="drop-card-product-tile">
       ${p.image_url ? `<img src="${p.image_url}" alt="">` : '<span class="drop-card-product-noimg">🖼</span>'}
-      <span class="drop-card-product-label">${escapeHtml(p.product_code)} — ${escapeHtml(p.product_name)}</span>
+      <span class="drop-card-product-name">${escapeHtml(p.product_name)}</span>
+      <span class="drop-card-product-code">${escapeHtml(p.product_code)}</span>
     </div>`).join('');
   const more = extra > 0 ? `<div class="drop-card-product-more">+${extra} more product${extra === 1 ? '' : 's'}</div>` : '';
-  return `<div class="drop-card-products">${rows}${more}</div>`;
+  return `<div class="drop-card-products">${tiles}${more}</div>`;
 }
 
 function dropCardHtml(d) {

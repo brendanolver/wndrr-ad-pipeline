@@ -361,12 +361,21 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .drops-month-group{margin-bottom:22px;}
 .drops-month-group:last-child{margin-bottom:0;}
 .drops-month-heading{font-size:12.5px;font-weight:800;letter-spacing:0.05em;color:var(--text-muted);margin-bottom:10px;}
-.drop-card-products{display:flex;flex-direction:column;gap:5px;margin:10px 0;}
-.drop-card-product-row{display:flex;align-items:center;gap:8px;min-width:0;}
-.drop-card-product-row img{width:26px;height:26px;object-fit:cover;border-radius:4px;flex-shrink:0;}
-.drop-card-product-noimg{width:26px;height:26px;border-radius:4px;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--text-muted);flex-shrink:0;}
-.drop-card-product-label{font-size:12px;font-weight:600;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;}
-.drop-card-product-more{font-size:11.5px;font-weight:600;color:var(--text-muted);padding-left:34px;}
+/* Compact 2-column product tile grid, replacing the old cramped single-
+   column text list. Fixed-height thumbnails (rather than aspect-ratio)
+   keep every tile's height identical regardless of column width, so
+   min-height below reserves the same footprint whether a drop has 1
+   product or 4 -- that's what keeps card heights consistent across a row. */
+.drop-card-products{display:grid;grid-template-columns:repeat(2,1fr);gap:8px 10px;margin:10px 0;min-height:214px;align-content:start;}
+.drop-card-product-tile{display:flex;flex-direction:column;gap:4px;min-width:0;}
+.drop-card-product-tile img{width:100%;height:56px;object-fit:cover;border-radius:6px;display:block;}
+.drop-card-product-tile .drop-card-product-noimg{width:100%;height:56px;border-radius:6px;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:20px;color:var(--text-muted);}
+/* 2-line clamp, not a single-line ellipsis -- avoids cutting a name off
+   mid-word; overflow-wrap only forces a break if a single word wouldn't
+   otherwise fit, so ordinary short product names just wrap at spaces. */
+.drop-card-product-name{font-size:11.5px;font-weight:600;color:var(--text-secondary);line-height:14px;max-height:28px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:break-word;}
+.drop-card-product-code{font-size:10.5px;color:var(--text-muted);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.drop-card-product-more{grid-column:1/-1;font-size:11.5px;font-weight:600;color:var(--text-muted);}
 .drop-card-products-empty{font-size:11.5px;color:var(--text-muted);font-style:italic;margin:8px 0;}
 .drop-card-secondary{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:6px;padding-top:8px;border-top:1px solid var(--border);}
 .drop-card-secondary .drop-card-counts,.drop-card-secondary .drop-card-pct{margin-bottom:0;}
