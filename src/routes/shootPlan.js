@@ -87,7 +87,7 @@ router.get('/', async (req, res, next) => {
 router.post('/', async (req, res, next) => {
   const {
     product_code, product_name, colourways, stock_status, creator, quick_note, source, image_url,
-    promotion_stage_id, week_start, format, concept_name, concept_type, concept_assignee,
+    promotion_stage_id, week_start, format, concept_name, concept_type, concept_assignee, editing_owner,
   } = req.body || {};
 
   // Product is now optional everywhere this route is called from -- Core/
@@ -162,6 +162,7 @@ router.post('/', async (req, res, next) => {
       created_by_user_id: createdByUserId,
       concept_type: trimmedConceptType,
       concept_assignee: concept_assignee || null,
+      editing_owner: editing_owner || null,
     });
 
     const itemResult = await client.query(

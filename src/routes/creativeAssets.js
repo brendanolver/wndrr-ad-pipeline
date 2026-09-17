@@ -262,18 +262,36 @@ router.patch('/:id/status', async (req, res, next) => {
 // PUT /:id above writes strategy_owner/filming_owner/editing_owner/qc_owner
 // as plain `= $n` (not COALESCE), so it can't be reused for a save-on-change
 // dropdown without risking nulling those out on every call.
+//
+// Also doubles as the save-on-change endpoint for editing_owner -- the same
+// "who's responsible" concern as concept_assignee, just for the editor
+// rather than the concept developer (see schema.sql's comment distinguishing
+// the two). Both fields are optional and independent: a caller sends only
+// the one it's changing, and the other is left exactly as it was -- a plain
+// SQL COALESCE can't do that here since an explicit null is a real "clear
+// this" value for concept_assignee (the Unassigned option), not "leave
+// alone", so presence in the body (not nullness) is what decides whether a
+// field gets touched.
 router.patch('/:id/assignee', async (req, res, next) => {
   try {
-    const { concept_assignee } = req.body || {};
-    if (concept_assignee !== null && !CONCEPT_ASSIGNEES.includes(concept_assignee)) {
+    const body = req.body || {};
+    const hasAssignee = Object.prototype.hasOwnProperty.call(body, 'concept_assignee');
+    const hasEditingOwner = Object.prototype.hasOwnProperty.call(body, 'editing_owner');
+    const { concept_assignee, editing_owner } = body;
+    if (hasAssignee && concept_assignee !== null && !CONCEPT_ASSIGNEES.includes(concept_assignee)) {
       return res.status(400).json({ error: `concept_assignee must be one of: ${CONCEPT_ASSIGNEES.join(', ')}, or null` });
     }
 
+    const current = await pool.query('SELECT concept_assignee, editing_owner FROM creative_assets WHERE id = $1', [req.params.id]);
+    if (!current.rows.length) return res.status(404).json({ error: 'Creative asset not found' });
+
+    const nextAssignee = hasAssignee ? concept_assignee : current.rows[0].concept_assignee;
+    const nextEditingOwner = hasEditingOwner ? (editing_owner || null) : current.rows[0].editing_owner;
+
     const result = await pool.query(
-      `UPDATE creative_assets SET concept_assignee = $1, updated_at = now() WHERE id = $2 RETURNING *`,
-      [concept_assignee, req.params.id]
+      `UPDATE creative_assets SET concept_assignee = $1, editing_owner = $2, updated_at = now() WHERE id = $3 RETURNING *`,
+      [nextAssignee, nextEditingOwner, req.params.id]
     );
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Creative asset not found' });
     res.json(result.rows[0]);
   } catch (err) {
     next(err);

@@ -319,10 +319,18 @@
           <button type="button" class="btn btn-ghost btn-sm" onclick="hideAddNewConceptForm()">Cancel</button>
         </div>
 
-        <div class="planning-section-header">
-          <h2>Existing Concepts</h2>
+        <!-- Only for assets not already represented as a Required Concepts
+             row above -- e.g. a legacy asset from before Required Concepts
+             existed, or one whose slot was later removed. Hidden entirely
+             when there's nothing outside Required Concepts to show, so a
+             concept never appears twice on this page (see A7). -->
+        <div id="product-view-other-concepts-section" style="display:none;">
+          <div class="planning-section-header">
+            <h2>Other Concepts</h2>
+            <div class="hint">Not part of this product's Required Concepts.</div>
+          </div>
+          <div id="product-view-concepts" class="jobs-grid"></div>
         </div>
-        <div id="product-view-concepts" class="jobs-grid"></div>
       </div>
     </section>
 
@@ -924,7 +932,13 @@
             <option value="static">Static</option>
           </select>
         </label>
-        <label>Concept classification
+        <!-- Concept Classification/deliberate-trial/legacy owner fields are
+             the OLD Kanban Board's per-production-stage vocabulary -- hidden
+             (not removed: other workflows, e.g. Board, still depend on
+             them) when this modal is opened from an Upcoming Drop, which is
+             oriented entirely around executing tested/proven concepts and
+             never shows this language. See A2/applyAssetModalDropContext. -->
+        <label id="asset-modal-classification-field">Concept classification
           <select id="asset-classification">
             <option value="new_experimental">New/Experimental</option>
             <option value="tested_proven">Tested/Proven</option>
@@ -932,14 +946,14 @@
         </label>
       </div>
       <div class="hint" id="asset-format-locked-hint" style="display:none;">Format and classification are set by this Proven Winner (Settings).</div>
-      <label class="checkbox-label">
+      <label class="checkbox-label" id="asset-modal-trial-field">
         <input type="checkbox" id="asset-deliberate-trial">
         Deliberate new-concept trial (bypasses the New Drop → Filming gate)
       </label>
       <label>Target date
         <input type="date" id="asset-target-date">
       </label>
-      <div class="field-row">
+      <div class="field-row" id="asset-modal-strategy-filming-row">
         <label>Strategy owner
           <input type="text" id="asset-strategy-owner">
         </label>
@@ -947,7 +961,7 @@
           <input type="text" id="asset-filming-owner">
         </label>
       </div>
-      <div class="field-row">
+      <div class="field-row" id="asset-modal-editing-qc-row">
         <label>Editing owner
           <input type="text" id="asset-editing-owner">
         </label>
@@ -1637,6 +1651,17 @@
             </select>
           </label>
         </div>
+        <!-- Editing -- who's responsible for editing this creative, reusing
+             creative_assets.editing_owner the same way Assigned To reuses
+             concept_assignee (see PATCH /creative-assets/:id/assignee). -->
+        <label><span class="cd-field-label">Editing</span>
+          <select id="promo-modal-editing-owner-select">
+            <option value="">Unassigned</option>
+            <option value="Mark">Mark</option>
+            <option value="Shez">Shez</option>
+            <option value="Til">Til</option>
+          </select>
+        </label>
       </div>
 
       <!-- Video only -- Customer Avatar is explicitly OPTIONAL here (unlike
@@ -1739,10 +1764,16 @@
 
       <!-- References -- optional, same "+ Add Reference" -> Paste Link /
            Choose From Reference Library pattern as #concept-dev-modal, fully
-           duplicated with promo-modal-* ids/state. -->
+           duplicated with promo-modal-* ids/state. Video only, this becomes
+           "Reference Video" (title/helper swapped by
+           applyPromotionConceptDevFormat, same pattern as
+           promo-modal-top-title) -- a previous WNDRR ad or an external
+           TikTok/Instagram/Meta/YouTube video Max wants to recreate. Static
+           keeps the generic title; the underlying data/behaviour (multiple
+           references, Reference Library picker) is identical either way. -->
       <div class="cd-modal-section">
-        <div class="cd-modal-section-title">References <span class="hint">(optional)</span></div>
-        <div class="hint cd-modal-section-helper">Add inspiration or examples for this concept.</div>
+        <div class="cd-modal-section-title"><span id="promo-modal-references-title">References</span> <span class="hint">(optional)</span></div>
+        <div class="hint cd-modal-section-helper" id="promo-modal-references-helper">Add inspiration or examples for this concept.</div>
         <div id="promo-modal-references-list"></div>
         <div class="cd-reference-add-wrap">
           <button type="button" class="link-btn" id="promo-modal-reference-add-btn" onclick="togglePromotionConceptDevReferenceAddMenu()">+ Add Reference</button>
@@ -2306,6 +2337,20 @@
       </label>
       <label>Assigned To
         <select id="promotion-shoot-assignee">
+          <option value="">Unassigned</option>
+          <option value="Mark">Mark</option>
+          <option value="Shez">Shez</option>
+          <option value="Til">Til</option>
+        </select>
+      </label>
+      <!-- Editing -- who's responsible for editing this creative, reusing
+           creative_assets.editing_owner (see PATCH /creative-assets/:id/
+           assignee): a stable one-time assignment made here at planning
+           time, well before the concept naturally reaches the Editing
+           Kanban stage, where Board already reads this same column as the
+           card's current owner. Deliberately not a new field. -->
+      <label>Editing
+        <select id="promotion-shoot-editing-owner">
           <option value="">Unassigned</option>
           <option value="Mark">Mark</option>
           <option value="Shez">Shez</option>

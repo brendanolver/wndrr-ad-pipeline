@@ -12,21 +12,33 @@ const router = express.Router();
 // (the bug this whole redesign replaces: counting any linked item as
 // "covered" regardless of status).
 const READY_STATUSES = new Set(['qc', 'uploaded_live']);
-const URGENCY_RANK = { at_risk: 2, needs_attention: 1, on_track: 0 };
+const URGENCY_RANK = { future: -1, on_track: 0, needs_attention: 1, at_risk: 2 };
 const URGENCY_DUE_SOON_DAYS = 7;
 const URGENCY_DUE_APPROACHING_DAYS = 21;
+// ~2 months -- a stage with no due date of its own shouldn't warn the team
+// the moment a far-future Promotion is created; it only starts mattering
+// once the whole Promotion's launch is within this window (see B1).
+const URGENCY_LAUNCH_WINDOW_DAYS = 60;
 
 // Simple and transparent by design (per the spec): a stage with nothing
 // still required is always On Track. Otherwise the closer its due date,
-// the more a remaining gap matters -- a stage with no due date set can't be
-// judged by closeness at all, so it defaults to Needs Attention rather than
-// silently reading as fine.
-function stageUrgency(stillRequired, daysUntilDue) {
+// the more a remaining gap matters. Campaign Stages don't get their own due
+// date by default though (the common case), so a stage with none falls back
+// to how close the whole Promotion is to launch -- a stage that's genuinely
+// months away from mattering reads as a neutral "future/planned" state
+// rather than a warning, only escalating once launch is within
+// URGENCY_LAUNCH_WINDOW_DAYS. A stage with an explicit due date of its own
+// keeps the tighter, more precise threshold since that's a real deadline
+// someone set, not a fallback.
+function stageUrgency(stillRequired, daysUntilDue, promotionDaysUntilLaunch) {
   if (stillRequired <= 0) return 'on_track';
-  if (daysUntilDue == null) return 'needs_attention';
-  if (daysUntilDue <= URGENCY_DUE_SOON_DAYS) return 'at_risk';
-  if (daysUntilDue <= URGENCY_DUE_APPROACHING_DAYS) return 'needs_attention';
-  return 'on_track';
+  if (daysUntilDue != null) {
+    if (daysUntilDue <= URGENCY_DUE_SOON_DAYS) return 'at_risk';
+    if (daysUntilDue <= URGENCY_DUE_APPROACHING_DAYS) return 'needs_attention';
+    return 'on_track';
+  }
+  if (promotionDaysUntilLaunch == null || promotionDaysUntilLaunch > URGENCY_LAUNCH_WINDOW_DAYS) return 'future';
+  return promotionDaysUntilLaunch <= URGENCY_DUE_SOON_DAYS ? 'at_risk' : 'needs_attention';
 }
 
 // counts: { ready, planned } -- every shoot_plan_item linked to this stage
@@ -39,12 +51,12 @@ function stageUrgency(stillRequired, daysUntilDue) {
 // same record later reaches Ready, it moves out of Planned and into Ready,
 // so still_required is unchanged by the transition (see the "+ Shoot This
 // Week" worked example: 20/0/1/19 -> 20/1/0/19).
-function summarizeStage(stage, { ready = 0, planned = 0 } = {}) {
+function summarizeStage(stage, { ready = 0, planned = 0 } = {}, promotionDaysUntilLaunch = null) {
   const target = stage.required_count;
   const stillRequired = Math.max(0, target - ready - planned);
   const coveragePct = target > 0 ? Math.min(100, Math.round((ready / target) * 100)) : 100;
   const daysUntilDue = stage.due_date ? Math.ceil((new Date(stage.due_date) - new Date()) / 86400000) : null;
-  const urgency = stageUrgency(stillRequired, daysUntilDue);
+  const urgency = stageUrgency(stillRequired, daysUntilDue, promotionDaysUntilLaunch);
 
   return {
     ...stage,
@@ -82,12 +94,17 @@ function summarizePromotion(promotion, stages) {
   // A promotion's own status is the worst urgency among its still-short
   // stages -- one stage close to its deadline with a real gap matters more
   // than an okay-looking overall %. Zero stages reads as Needs Attention
-  // (nothing organised yet), same convention this page has always used.
+  // (nothing organised yet), same convention this page has always used. A
+  // gap stage's urgency is never 'on_track' (stageUrgency only returns that
+  // when still_required <= 0), so the reduce starts at 'future' -- the
+  // lowest rank -- rather than 'on_track', or a Promotion whose only gaps
+  // are all comfortably far off would incorrectly read as "On Track"
+  // instead of the neutral future/planned state (see B1).
   const gapStages = stages.filter((s) => s.still_required > 0);
   let status = 'on_track';
   if (!stages.length) status = 'needs_attention';
   else if (gapStages.length) {
-    status = gapStages.reduce((worst, s) => (URGENCY_RANK[s.urgency] > URGENCY_RANK[worst] ? s.urgency : worst), 'on_track');
+    status = gapStages.reduce((worst, s) => (URGENCY_RANK[s.urgency] > URGENCY_RANK[worst] ? s.urgency : worst), 'future');
   }
 
   // "Next priority" / "Most urgent stage": worst urgency first, then
@@ -124,8 +141,12 @@ function summarizePromotion(promotion, stages) {
   };
 }
 
-async function fetchStagesWithCoverage(promotionIds) {
+async function fetchStagesWithCoverage(promotions) {
+  const promotionIds = promotions.map((p) => p.id);
   if (!promotionIds.length) return new Map();
+  const launchDaysByPromotion = new Map(
+    promotions.map((p) => [p.id, Math.ceil((new Date(p.start_date) - new Date()) / 86400000)])
+  );
   const stagesResult = await pool.query(
     'SELECT * FROM promotion_stages WHERE promotion_id = ANY($1::int[]) ORDER BY sort_order ASC, id ASC',
     [promotionIds]
@@ -152,7 +173,9 @@ async function fetchStagesWithCoverage(promotionIds) {
   const stagesByPromotion = new Map();
   for (const stage of stagesResult.rows) {
     if (!stagesByPromotion.has(stage.promotion_id)) stagesByPromotion.set(stage.promotion_id, []);
-    stagesByPromotion.get(stage.promotion_id).push(summarizeStage(stage, countsByStage.get(stage.id)));
+    stagesByPromotion.get(stage.promotion_id).push(
+      summarizeStage(stage, countsByStage.get(stage.id), launchDaysByPromotion.get(stage.promotion_id))
+    );
   }
   return stagesByPromotion;
 }
@@ -161,7 +184,7 @@ router.get('/', async (req, res, next) => {
   try {
     const promotionsResult = await pool.query('SELECT * FROM promotions ORDER BY start_date ASC');
     const promotions = promotionsResult.rows;
-    const stagesByPromotion = await fetchStagesWithCoverage(promotions.map((p) => p.id));
+    const stagesByPromotion = await fetchStagesWithCoverage(promotions);
     res.json(promotions.map((p) => summarizePromotion(p, stagesByPromotion.get(p.id) || [])));
   } catch (err) {
     next(err);
@@ -190,7 +213,7 @@ router.get('/:id', async (req, res, next) => {
     if (!promotionResult.rows.length) return res.status(404).json({ error: 'Promotion not found' });
     const promotion = promotionResult.rows[0];
 
-    const stagesByPromotion = await fetchStagesWithCoverage([promotion.id]);
+    const stagesByPromotion = await fetchStagesWithCoverage([promotion]);
     const stages = stagesByPromotion.get(promotion.id) || [];
 
     const stageIds = stages.map((s) => s.id);
@@ -236,7 +259,7 @@ router.put('/:id', async (req, res, next) => {
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Promotion not found' });
 
-    const stagesByPromotion = await fetchStagesWithCoverage([result.rows[0].id]);
+    const stagesByPromotion = await fetchStagesWithCoverage([result.rows[0]]);
     res.json(summarizePromotion(result.rows[0], stagesByPromotion.get(result.rows[0].id) || []));
   } catch (err) {
     next(err);
@@ -264,7 +287,7 @@ router.post('/:id/stages', async (req, res, next) => {
     const count = required_count === undefined ? 1 : Number(required_count);
     if (!Number.isFinite(count) || count < 0) return res.status(400).json({ error: 'required_count must be a non-negative number' });
 
-    const promotion = await pool.query('SELECT id FROM promotions WHERE id = $1', [req.params.id]);
+    const promotion = await pool.query('SELECT id, start_date FROM promotions WHERE id = $1', [req.params.id]);
     if (!promotion.rows.length) return res.status(404).json({ error: 'Promotion not found' });
 
     const maxOrder = await pool.query(
@@ -275,7 +298,8 @@ router.post('/:id/stages', async (req, res, next) => {
       `INSERT INTO promotion_stages (promotion_id, name, required_count, sort_order, due_date) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
       [req.params.id, name.trim(), count, maxOrder.rows[0].max_order + 1, due_date || null]
     );
-    res.status(201).json(summarizeStage(result.rows[0]));
+    const daysUntilLaunch = Math.ceil((new Date(promotion.rows[0].start_date) - new Date()) / 86400000);
+    res.status(201).json(summarizeStage(result.rows[0], {}, daysUntilLaunch));
   } catch (err) {
     next(err);
   }
@@ -339,7 +363,9 @@ router.put('/stages/:stageId', async (req, res, next) => {
       if (READY_STATUSES.has(row.status)) counts.ready += 1;
       else counts.planned += 1;
     }
-    res.json(summarizeStage(result.rows[0], counts));
+    const promotionResult = await pool.query('SELECT start_date FROM promotions WHERE id = $1', [current.promotion_id]);
+    const daysUntilLaunch = Math.ceil((new Date(promotionResult.rows[0].start_date) - new Date()) / 86400000);
+    res.json(summarizeStage(result.rows[0], counts, daysUntilLaunch));
   } catch (err) {
     next(err);
   }

@@ -1377,6 +1377,18 @@ INSERT INTO concept_types (name, sort_order, format) VALUES
   ('Other Video', 113, 'video')
 ON CONFLICT (name) DO NOTHING;
 
+-- Backfill: every concept_type carried over from the original proven_winners
+-- seed (the one-time DO $$ block above) never got a format classification,
+-- so it defaulted to NULL/Either -- correct for genuinely ambiguous names
+-- (e.g. "Product Close Up", "Rug Try On"), but wrong for ones that say their
+-- format right in the name (e.g. "Flatlay Photo", "Ecom Photo" showing up
+-- while Format = Video is selected -- see B4). Same keyword classification
+-- the PR #210 INSERT above already uses, applied retroactively; only ever
+-- touches a still-NULL row, so a type someone has since classified by hand
+-- is never overwritten.
+UPDATE concept_types SET format = 'static' WHERE format IS NULL AND name ILIKE '%photo%';
+UPDATE concept_types SET format = 'video' WHERE format IS NULL AND name ILIKE '%video%';
+
 -- New vs Existing Concept, for Promotion Video Concept Development only:
 -- whether Max needs to develop the strategic idea from scratch (The Idea +
 -- Audience) or is producing an execution brief for a concept the team
