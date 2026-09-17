@@ -1376,3 +1376,16 @@ INSERT INTO concept_types (name, sort_order, format) VALUES
   ('Campaign Video', 112, 'video'),
   ('Other Video', 113, 'video')
 ON CONFLICT (name) DO NOTHING;
+
+-- New vs Existing Concept, for Promotion Video Concept Development only:
+-- whether Max needs to develop the strategic idea from scratch (The Idea +
+-- Audience) or is producing an execution brief for a concept the team
+-- already understands. Deliberately NOT concept_classification (that column
+-- means "has this ad proven itself in market" and is wired to
+-- assertCanEnterFilming's New Drop -> Filming bypass gate -- a different
+-- axis, and this must never touch that gate). NULL for every Static
+-- Promotion concept, every Core/High Stock/Drop concept, and every existing
+-- row -- nothing outside the Promotion Video intake ever sets or reads
+-- this column, so it's purely additive.
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS concept_origin VARCHAR(20)
+  CHECK (concept_origin IN ('new', 'existing'));

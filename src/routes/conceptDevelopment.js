@@ -1,7 +1,7 @@
 const express = require('express');
 const { pool } = require('../db');
 const { insertCreativeAsset } = require('../lib/assets');
-const { CONCEPT_DEV_STATUSES, TUESDAY_REVIEW_DECISIONS, FORMATS } = require('../lib/statuses');
+const { CONCEPT_DEV_STATUSES, TUESDAY_REVIEW_DECISIONS, FORMATS, CONCEPT_ORIGINS } = require('../lib/statuses');
 const { generateOrTopUpPlan } = require('./dropProductPlans');
 
 const router = express.Router();
@@ -256,11 +256,14 @@ router.get('/item/:shootPlanItemId', async (req, res, next) => {
 // creates a Drop concept.
 router.post('/concepts', async (req, res, next) => {
   try {
-    const { shoot_plan_item_id, concept_name, format } = req.body || {};
+    const { shoot_plan_item_id, concept_name, format, concept_origin } = req.body || {};
     if (!shoot_plan_item_id) return res.status(400).json({ error: 'shoot_plan_item_id is required' });
     if (!concept_name || !concept_name.trim()) return res.status(400).json({ error: 'concept_name is required' });
     if (format !== undefined && !FORMATS.includes(format)) {
       return res.status(400).json({ error: `format must be one of: ${FORMATS.join(', ')}` });
+    }
+    if (concept_origin !== undefined && concept_origin !== null && !CONCEPT_ORIGINS.includes(concept_origin)) {
+      return res.status(400).json({ error: `concept_origin must be one of: ${CONCEPT_ORIGINS.join(', ')}` });
     }
 
     const itemResult = await pool.query('SELECT * FROM shoot_plan_items WHERE id = $1', [shoot_plan_item_id]);
@@ -286,9 +289,12 @@ router.post('/concepts', async (req, res, next) => {
       status: 'awaiting_concept_development',
       created_by_user_id: req.user.id,
     });
-    await pool.query('UPDATE creative_assets SET shoot_plan_item_id = $1 WHERE id = $2', [shoot_plan_item_id, asset.id]);
+    await pool.query(
+      'UPDATE creative_assets SET shoot_plan_item_id = $1, concept_origin = $2 WHERE id = $3',
+      [shoot_plan_item_id, concept_origin || null, asset.id]
+    );
 
-    res.status(201).json({ ...asset, shoot_plan_item_id: Number(shoot_plan_item_id), name_locked: false });
+    res.status(201).json({ ...asset, shoot_plan_item_id: Number(shoot_plan_item_id), concept_origin: concept_origin || null, name_locked: false });
   } catch (err) {
     next(err);
   }
@@ -325,10 +331,14 @@ router.patch('/concepts/:id', async (req, res, next) => {
       headline,
       supporting_copy,
       cta_text,
+      concept_origin,
     } = req.body || {};
 
     if (concept_dev_status !== undefined && !CONCEPT_DEV_STATUSES.includes(concept_dev_status)) {
       return res.status(400).json({ error: `concept_dev_status must be one of: ${CONCEPT_DEV_STATUSES.join(', ')}` });
+    }
+    if (concept_origin !== undefined && concept_origin !== null && !CONCEPT_ORIGINS.includes(concept_origin)) {
+      return res.status(400).json({ error: `concept_origin must be one of: ${CONCEPT_ORIGINS.join(', ')}` });
     }
     if (reference_items !== undefined) {
       const valid = Array.isArray(reference_items) && reference_items.every(
@@ -392,6 +402,7 @@ router.patch('/concepts/:id', async (req, res, next) => {
          headline = COALESCE($20, headline),
          supporting_copy = COALESCE($21, supporting_copy),
          cta_text = COALESCE($22, cta_text),
+         concept_origin = COALESCE($23, concept_origin),
          updated_at = now()
        WHERE id = $15 RETURNING *`,
       [
@@ -417,6 +428,7 @@ router.patch('/concepts/:id', async (req, res, next) => {
         headline !== undefined ? headline : null,
         supporting_copy !== undefined ? supporting_copy : null,
         cta_text !== undefined ? cta_text : null,
+        concept_origin !== undefined ? concept_origin : null,
       ]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Concept not found' });

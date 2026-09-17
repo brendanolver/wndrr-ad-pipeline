@@ -1594,6 +1594,16 @@
             <option value="static">Static</option>
           </select>
         </label>
+        <!-- Video only -- New vs Existing Concept, same compact toggle as
+             the "+ Shoot This Week" creation modal (see
+             promotionShootConceptOrigin in app.js). -->
+        <div id="promo-modal-origin-wrap" style="display:none;">
+          <span class="cd-field-label">Concept Approach</span>
+          <div class="promo-shoot-origin-toggle">
+            <button type="button" class="cd-filter-btn active" id="promo-modal-origin-new-btn" onclick="applyPromotionConceptDevOrigin('new')">New Concept</button>
+            <button type="button" class="cd-filter-btn" id="promo-modal-origin-existing-btn" onclick="applyPromotionConceptDevOrigin('existing')">Existing Concept</button>
+          </div>
+        </div>
       </div>
 
       <!-- Shared top section -- Static's "THE BRIEF"/"What needs to be made?"
@@ -1609,7 +1619,7 @@
             <input type="text" id="promo-modal-name">
             <div class="cd-field-error" id="promo-modal-name-error"></div>
           </label>
-          <label><span class="cd-field-label" id="promo-modal-angle-label">The Idea</span>
+          <label class="promo-section-new-only"><span class="cd-field-label" id="promo-modal-angle-label">The Idea</span>
             <textarea id="promo-modal-angle" rows="2"></textarea>
           </label>
         </div>
@@ -1631,7 +1641,7 @@
 
       <!-- Video only -- Customer Avatar is explicitly OPTIONAL here (unlike
            the hard requirement in #concept-dev-modal, which is unchanged). -->
-      <div class="cd-modal-section promo-section-video-only" id="promo-modal-audience-section">
+      <div class="cd-modal-section promo-section-video-only promo-section-new-only" id="promo-modal-audience-section">
         <div class="cd-modal-section-title">Who's It For? <span class="hint">(optional)</span></div>
         <label><span class="cd-field-label">Customer Avatar</span>
           <select id="promo-modal-avatar-select" onchange="onPromotionConceptDevAvatarChange()"></select>
@@ -1679,6 +1689,17 @@
         <div class="cd-modal-context-compact" id="promo-modal-promo-context"></div>
       </div>
 
+      <!-- Video only -- Talent/Model, same select+other+"No Talent Required"
+           pattern as #concept-dev-modal. Positioned before Styles Needed --
+           execution order is Talent -> Styles Needed -> What to Shoot. -->
+      <div class="cd-modal-section promo-section-video-only">
+        <div class="cd-modal-section-title">Talent / Model</div>
+        <label>
+          <select id="promo-modal-talent-select" onchange="onConceptDevSelectWithOtherChange('promo-modal-talent-select','promo-modal-talent-custom')"></select>
+          <input type="text" id="promo-modal-talent-custom" placeholder="e.g. UGC creator, none" style="display:none;">
+        </label>
+      </div>
+
       <!-- Styles Needed -- optional, zero/one/many, identical behaviour to
            #concept-dev-modal's equivalent section but fully duplicated with
            promo-modal-* ids/state per Option A (see promoConceptDevModalProduct
@@ -1692,16 +1713,6 @@
           <input type="text" id="promo-modal-styles-search" placeholder="Search SKU or product name to add…" autocomplete="off" oninput="filterPromotionConceptDevStyles()" onfocus="filterPromotionConceptDevStyles()">
           <div id="promo-modal-styles-results" class="promo-shoot-search-results" style="display:none;"></div>
         </div>
-      </div>
-
-      <!-- Video only -- Talent/Model, same select+other+"No Talent Required"
-           pattern as #concept-dev-modal. -->
-      <div class="cd-modal-section promo-section-video-only">
-        <div class="cd-modal-section-title">Talent / Model</div>
-        <label>
-          <select id="promo-modal-talent-select" onchange="onConceptDevSelectWithOtherChange('promo-modal-talent-select','promo-modal-talent-custom')"></select>
-          <input type="text" id="promo-modal-talent-custom" placeholder="e.g. UGC creator, none" style="display:none;">
-        </label>
       </div>
 
       <!-- Video only -- What to Shoot, same shot-name + optional detail +
@@ -1724,12 +1735,6 @@
       <div class="cd-modal-section promo-section-video-only">
         <div class="cd-modal-section-title">Script / Talking Points <span class="hint">(optional)</span></div>
         <textarea id="promo-modal-script" rows="4"></textarea>
-      </div>
-
-      <!-- Video only -- Props/Other Requirements. -->
-      <div class="cd-modal-section promo-section-video-only">
-        <div class="cd-modal-section-title">Props / Other Requirements</div>
-        <textarea id="promo-modal-props" rows="2"></textarea>
       </div>
 
       <!-- References -- optional, same "+ Add Reference" -> Paste Link /
@@ -1758,6 +1763,18 @@
             <button type="button" class="link-btn" onclick="cancelPromotionConceptDevReferencePaste()">Cancel</button>
           </div>
         </div>
+      </div>
+
+      <!-- Video only -- Shoot Setup: practical shoot requirements, reusing
+           the same props_notes field the normal modal's Shoot Setup section
+           already uses. Positioned last -- production logistics, not
+           creative development, so it comes after the concept is fully
+           described. -->
+      <div class="cd-modal-section promo-section-video-only">
+        <div class="cd-modal-section-title">Shoot Setup</div>
+        <label><span class="cd-field-label">Props / Other Requirements</span>
+          <textarea id="promo-modal-props" rows="2"></textarea>
+        </label>
       </div>
     </div>
     <div class="modal-footer">
@@ -2304,6 +2321,20 @@
           <option value="static">Static</option>
         </select>
       </label>
+
+      <!-- Concept Approach: Video only -- New vs Existing Concept (see
+           schema.sql's comment on creative_assets.concept_origin). Static
+           always saves concept_origin = NULL, so this whole block stays
+           hidden for Static -- see onPromotionShootFormatChange in app.js.
+           Two compact selectable chips, not a dropdown, per the brief. -->
+      <div id="promotion-shoot-origin-wrap" style="display:none;">
+        <span class="cd-field-label">Concept Approach</span>
+        <div class="promo-shoot-origin-toggle">
+          <button type="button" class="cd-filter-btn" id="promotion-shoot-origin-new-btn" onclick="selectPromotionShootConceptOrigin('new')">New Concept</button>
+          <button type="button" class="cd-filter-btn" id="promotion-shoot-origin-existing-btn" onclick="selectPromotionShootConceptOrigin('existing')">Existing Concept</button>
+        </div>
+        <div class="hint" id="promotion-shoot-origin-hint"></div>
+      </div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('promotion-shoot-modal')">Cancel</button>
