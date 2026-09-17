@@ -618,8 +618,13 @@ main{flex:1;min-width:0;padding:20px 24px;}
 /* Sits directly above .pw-slot-list, sharing .pw-slot-row's own
    grid-template-columns/column-gap (same class, same @media override) so it
    can never drift out of alignment with the rows -- only these few
-   properties are overridden to read as a label row, not another row. */
-.pw-slot-header-row{background:none;border:none;border-bottom:1px solid var(--border);border-radius:0;padding:0 12px 6px;margin-bottom:2px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-muted);}
+   properties are overridden to read as a label row, not another row.
+   Left/right border kept transparent (not simply removed) so the grid's
+   content box is exactly as wide as .pw-slot-row's own (which has a real
+   1px border on all four sides) -- dropping it entirely here would leave
+   the header 2px wider than the rows and drift the later flexible (fr)
+   columns out of alignment by a sub-pixel amount. */
+.pw-slot-header-row{background:none;border:1px solid transparent;border-bottom:1px solid var(--border);border-radius:0;padding:0 12px 6px;margin-bottom:2px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-muted);}
 .pw-slot-rank{font-weight:700;color:var(--text-muted);}
 .pw-slot-name{font-weight:600;}
 .pw-slot-row-complete{opacity:0.62;}
