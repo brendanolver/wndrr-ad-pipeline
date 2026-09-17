@@ -598,6 +598,18 @@ BEGIN
   END IF;
 END $$;
 
+-- promotions.notes is the only free-text field a promotion has -- genuinely
+-- meant to hold a real offer/message once someone adds one (see the
+-- Promotion Concept Development modal's Promotion/Offer Context block),
+-- not internal setup metadata. The one-time seed above wrote its own
+-- "stages seeded automatically" admin note straight into it, which then
+-- surfaced to creators as if it were the actual creative offer. Clear it,
+-- but ONLY while it still holds exactly that original seed text -- so a
+-- real note anyone has since typed in its place is never touched.
+UPDATE promotions SET notes = NULL, updated_at = now()
+WHERE name = 'Black Friday 2026'
+  AND notes = 'Starter Campaign Stages seeded automatically -- rename, retarget, reorder, or add more stages as needed.';
+
 -- ---------------------------------------------------------------------------
 -- Remove the obsolete duplicate "Black Friday 2026" promotion. Root cause:
 -- the correction block above (and the original seed before it) only ever

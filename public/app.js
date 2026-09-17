@@ -1233,9 +1233,11 @@ async function loadDropView(dropId) {
     metaAdsNote.textContent = drop.meta_ads.configured && drop.meta_ads.error
       ? `Meta Ads error: ${drop.meta_ads.error}`
       : '';
+    const creativeDue = dropCreativeDueInfo(drop);
     document.getElementById('drop-view-summary').innerHTML = `
       <div><strong>${formatDate(drop.launch_date)}</strong><br>Launch date</div>
       <div><strong>${drop.days_until_launch >= 0 ? drop.days_until_launch : 0}</strong><br>Days to launch</div>
+      <div class="${creativeDue.overdue ? 'drop-view-summary-overdue' : ''}"><strong>${creativeDue.text}</strong><br>Creative Due</div>
       <div><strong>${drop.summary.productCount}</strong><br>Products (${drop.summary.styleCount} colourways)</div>
       <div><strong>${drop.summary.totalCovered} / ${drop.summary.totalTarget}</strong><br>Creatives${drop.summary.overallPct !== null ? ' — ' + drop.summary.overallPct + '%' : ''}</div>
     `;
@@ -1243,6 +1245,50 @@ async function loadDropView(dropId) {
   } catch (e) {
     toast(e.message, true);
   }
+}
+
+// Business rule: all Drop creative should be ready by the Monday
+// immediately before launch. For Tue-Sun launches that's the Monday within
+// the same calendar week (already strictly before the launch). A Monday
+// launch is the one exception -- that same-week Monday IS the launch day,
+// not "before" it, so it needs the Monday a full 7 days earlier instead.
+// Reuses mondayOfWeek (the same Monday-of-week math Concept Dev's week nav
+// already relies on) rather than a second implementation, and launch_date
+// is the only input -- no new manually-maintained date anywhere (see the
+// follow-up spec's Creative Due ask).
+function dropCreativeDueDate(launchDateStr) {
+  const launch = new Date(launchDateStr);
+  const sameWeekMonday = mondayOfWeek(0, launch);
+  const launchIsMonday = isoDateStr(sameWeekMonday) === isoDateStr(launch);
+  return launchIsMonday ? mondayOfWeek(-1, launch) : sameWeekMonday;
+}
+
+// Only warns when there's something real and measurable to warn about: a
+// Drop whose target isn't known yet (AM stock unavailable) can't be judged
+// overdue, and a Drop whose required creative is already fully covered
+// never reads as alarming just because its date has passed -- see A6's
+// same "complete" convention (current_coverage only counts uploaded_live)
+// reused here rather than inventing a second definition of "done".
+function dropCreativeDueInfo(drop) {
+  const due = dropCreativeDueDate(drop.launch_date);
+  const dateLabel = due.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' }).replace(',', '');
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const daysLeft = Math.round((due.getTime() - today.getTime()) / 86400000);
+  const target = drop.summary.totalTarget;
+  const complete = target > 0 && drop.summary.totalCovered >= target;
+  const overdue = daysLeft < 0 && target > 0 && !complete;
+
+  let countdown;
+  if (overdue) countdown = 'Creative overdue';
+  else if (daysLeft > 0) countdown = `${daysLeft} day${daysLeft === 1 ? '' : 's'} left`;
+  else if (daysLeft === 0) countdown = 'due today';
+  else countdown = null; // passed, but complete or target unknown -- stay quiet, not alarming
+
+  return {
+    text: `${dateLabel}${countdown ? ' · ' + countdown : ''}`,
+    overdue,
+  };
 }
 
 function coverageGapLabel(c) {
@@ -1463,11 +1509,13 @@ async function loadProductPlan(dropId, productCode) {
 
 function renderRequiredConcepts(data) {
   const list = document.getElementById('product-plan-slots');
+  const header = document.getElementById('product-plan-slots-header');
   const note = document.getElementById('product-plan-shortfall-note');
   const addBtn = document.getElementById('product-plan-add-new-btn');
 
   if (data.target == null) {
     list.innerHTML = '<div class="attention-empty">Stock unavailable — Required Concepts can\'t be generated until SOH is known.</div>';
+    header.style.display = 'none';
     note.textContent = '';
     addBtn.style.display = 'none';
     return;
@@ -1482,8 +1530,10 @@ function renderRequiredConcepts(data) {
 
   if (!data.slots.length) {
     list.innerHTML = '<div class="attention-empty">No required concepts yet.</div>';
+    header.style.display = 'none';
     return;
   }
+  header.style.display = 'grid';
 
   list.innerHTML = data.slots.map((s) => {
     const fulfilled = !!s.asset_id;
@@ -1495,7 +1545,7 @@ function renderRequiredConcepts(data) {
     // workflow, not a trial one; the underlying `source` column is untouched,
     // still used below for the Remove action).
     const sourceBadge = s.source === 'proven' ? '<span class="badge badge-tested_proven">Proven</span>' : '';
-    const progress = fulfilled ? conceptProgressChecksHtml(s.asset_id, s.asset_status) : '<span class="pw-slot-progress-empty">—</span>';
+    const progress = fulfilled ? conceptProgressChecksHtml(s.asset_id, s.asset_status, s.asset_format) : '<span class="pw-slot-progress-empty">—</span>';
     const complete = fulfilled && s.asset_status === 'uploaded_live';
     // Only a fulfilled slot has an asset row to attach a person to -- an
     // open/unfulfilled slot has nowhere to persist Assigned To/Editing yet.
@@ -1571,25 +1621,39 @@ function renderRequiredConcepts(data) {
 // so `status` is the only production-progress state that exists for one,
 // and this is a more granular version of the same direct status toggle
 // toggleConceptDone already used (a single "mark done" checkbox). Each
-// check reads "has status reached at least this point": Filmed once status
-// is filming or later, Edited once it's passed editing into qc or later
-// (qc is real WIP the existing pipeline tracks -- collapsing it into
+// check reads "has status reached at least this point": Filmed/Shot once
+// status is filming or later, Edited once it's passed editing into qc or
+// later (qc is real WIP the existing pipeline tracks -- collapsing it into
 // "Edited: done, not yet uploaded" rather than adding a 4th check keeps
 // this a clean 3-way read of the same 8-stage enum Board already uses).
+// key/atLeast/revertTo (the canonical status mapping) are format-agnostic
+// and untouched -- only the first stage's user-facing label changes with
+// the concept's own `format` (already on creative_assets/FORMATS, not a
+// new field): "Shot" reads correctly for a static/photo concept the same
+// way "Filmed" does for video. `label` is the fallback for `format` values
+// this app doesn't otherwise expect -- FORMATS is a strict ['video',
+// 'static'] enum enforced at the API, so in practice every real asset row
+// hits one of the two branches below and this default is unreachable.
 const CONCEPT_PROGRESS_STAGES = [
   { key: 'filmed', label: 'Filmed', atLeast: 'filming', revertTo: 'concept_script' },
   { key: 'edited', label: 'Edited', atLeast: 'qc', revertTo: 'filming' },
   { key: 'uploaded', label: 'Uploaded to Meta', atLeast: 'uploaded_live', revertTo: 'qc' },
 ];
 
-function conceptProgressChecksHtml(assetId, status) {
+function conceptProgressStageLabel(stage, format) {
+  if (stage.key === 'filmed') return format === 'static' ? 'Shot' : 'Filmed';
+  return stage.label;
+}
+
+function conceptProgressChecksHtml(assetId, status, format) {
   const currentIndex = STATUSES.indexOf(status);
   return CONCEPT_PROGRESS_STAGES.map((stage) => {
     const checked = currentIndex >= STATUSES.indexOf(stage.atLeast);
+    const label = conceptProgressStageLabel(stage, format);
     return `
-      <label class="pw-slot-progress-item" title="${stage.label}">
+      <label class="pw-slot-progress-item" title="${label}">
         <input type="checkbox" class="pw-slot-progress-check" data-asset-id="${assetId}" data-stage="${stage.key}" ${checked ? 'checked' : ''}>
-        <span>${stage.label}</span>
+        <span>${label}</span>
       </label>`;
   }).join('');
 }
@@ -3063,7 +3127,15 @@ async function removeShootPlanItem(id) {
 // in promotions.js) -- distinct from 'on_track' (nothing left to do) so it
 // never reads as either "handled" or "urgent".
 function promotionUrgencyColor(u) { return u === 'at_risk' ? 'red' : u === 'needs_attention' ? 'amber' : u === 'future' ? 'grey' : 'green'; }
-function promotionUrgencyLabel(u) { return u === 'at_risk' ? 'At Risk' : u === 'needs_attention' ? 'Needs Attention' : u === 'future' ? 'Planned' : 'On Track'; }
+// 'Upcoming', not 'Planned' -- this is a derived display label for the
+// 'future' urgency state (outside the ~60-day action window; see B1's
+// stageUrgency in promotions.js), not a persisted status, and "Planned"
+// wrongly implied creative had actually been planned for it. Every
+// consumer of this one function (landing cards, overview, Campaign Stage
+// badges, stage detail) picks up the wording change together. Board's own
+// 'planned' workflow status, Core's "Planned" concepts, and Shoot This
+// Week's Planned/Shot pills are unrelated real statuses and are untouched.
+function promotionUrgencyLabel(u) { return u === 'at_risk' ? 'At Risk' : u === 'needs_attention' ? 'Needs Attention' : u === 'future' ? 'Upcoming' : 'On Track'; }
 // .drop-card-status's classes are named on/needs/at- rather than matching
 // the raw color keywords the other status pills use directly as classes.
 function dropCardStatusClass(color) { return color === 'green' ? 'on-track' : color === 'amber' ? 'needs-attention' : color === 'grey' ? 'planned' : 'at-risk'; }
@@ -5988,14 +6060,23 @@ function promotionConceptDevModalContextHtml(product) {
 // Promotion/Offer Context -- read-only, reuses the same promotion_name/
 // promotion_stage_name/promotion_notes data the Concept Development GET
 // already returns for the product, never duplicated onto the creative
-// asset itself.
+// asset itself. `promotion_notes` is promotions.notes -- a single
+// general-purpose free-text field, not a dedicated offer/message column
+// (there isn't one) -- so it genuinely can hold a real offer/message once
+// someone edits a promotion and adds one; for a promotion nobody has
+// annotated yet (e.g. Black Friday 2026, whose notes previously held an
+// internal seed-setup note -- now cleared, see schema.sql) it has nothing
+// useful to say, so the restrained empty state is shown instead rather
+// than fabricating or hiding the row.
 function promotionConceptDevPromoContextHtml(product) {
-  const parts = [product.promotion_name, product.promotion_stage_name].filter(Boolean);
   const notes = product.promotion_notes && product.promotion_notes.trim();
-  return [
-    parts.length ? `<div><strong>${escapeHtml(parts.join(' — '))}</strong></div>` : '',
-    notes ? `<div>${escapeHtml(notes)}</div>` : '<div class="hint">No promotion notes on record.</div>',
-  ].join('');
+  const rows = [
+    ['Promotion', product.promotion_name || '—'],
+    ['Stage', product.promotion_stage_name || '—'],
+  ];
+  const offerRow = `<span class="promo-context-label">Offer / Message</span><span class="promo-context-value${notes ? '' : ' promo-context-empty'}">${notes ? escapeHtml(notes) : 'No promotion message added yet'}</span>`;
+  return rows.map(([label, value]) => `<div class="promo-context-row"><span class="promo-context-label">${label}</span><span class="promo-context-value">${escapeHtml(value)}</span></div>`).join('')
+    + `<div class="promo-context-row">${offerRow}</div>`;
 }
 
 // Shared by both the create ("+ New Concept") and edit (click a concept

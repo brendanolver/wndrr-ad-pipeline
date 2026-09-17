@@ -534,6 +534,10 @@ main{flex:1;min-width:0;padding:20px 24px;}
 #drop-view-title.untitled{color:var(--text-muted);font-style:italic;}
 .drop-view-summary{display:flex;gap:20px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:14px 18px;margin-bottom:16px;font-size:12px;color:var(--text-secondary);}
 .drop-view-summary strong{color:var(--text);font-size:14px;}
+/* Restrained, not alarming -- a coloured label on the existing stat block,
+   not a banner or an icon; only shown when creative is genuinely overdue
+   (see dropCreativeDueInfo), never for a Drop that's already fully covered. */
+.drop-view-summary-overdue strong{color:var(--red);}
 
 .coverage-card{cursor:pointer;}
 .coverage-card:hover{border-color:var(--teal);}
@@ -611,6 +615,11 @@ main{flex:1;min-width:0;padding:20px 24px;}
 @media (max-width:1150px){
   .pw-slot-row{grid-template-columns:20px minmax(100px,1.2fr) 60px minmax(96px,1fr) minmax(96px,1fr) minmax(130px,1fr) minmax(130px,1fr);column-gap:8px;}
 }
+/* Sits directly above .pw-slot-list, sharing .pw-slot-row's own
+   grid-template-columns/column-gap (same class, same @media override) so it
+   can never drift out of alignment with the rows -- only these few
+   properties are overridden to read as a label row, not another row. */
+.pw-slot-header-row{background:none;border:none;border-bottom:1px solid var(--border);border-radius:0;padding:0 12px 6px;margin-bottom:2px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-muted);}
 .pw-slot-rank{font-weight:700;color:var(--text-muted);}
 .pw-slot-name{font-weight:600;}
 .pw-slot-row-complete{opacity:0.62;}
@@ -632,6 +641,21 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .pw-slot-progress-empty{color:var(--text-muted);font-size:12px;}
 .pw-slot-progress-item{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-secondary);cursor:pointer;white-space:nowrap;}
 .pw-slot-progress-item input{width:13px;height:13px;accent-color:var(--green);cursor:pointer;flex-shrink:0;}
+
+/* Same card language as .pw-slot-row (white/border/radius) so it reads as
+   part of the same Required Concepts area, not a bolted-on form -- see the
+   "Clean up + Add New Concept" ask. showAddNewConceptForm() toggles
+   display:flex/none inline (unchanged), so this is a flex column by
+   default rather than fighting that with !important. */
+.add-concept-panel{display:none;flex-direction:column;background:white;border:1px solid var(--border);border-radius:var(--r-lg);padding:14px 16px;margin-bottom:11px;gap:12px;}
+.add-concept-panel-title{font-size:12.5px;font-weight:700;color:var(--text-secondary);}
+.add-concept-panel-fields{display:grid;grid-template-columns:1.3fr 0.7fr 1.4fr;gap:10px;}
+.add-concept-panel-fields label{display:flex;flex-direction:column;gap:5px;font-size:11px;font-weight:600;color:var(--text-secondary);}
+.add-concept-panel-fields .hint{font-weight:400;color:var(--text-muted);}
+.add-concept-panel-fields input,
+.add-concept-panel-fields select{padding:7px 9px;border:1px solid var(--border);border-radius:var(--r);font-size:13px;font-weight:400;color:var(--text-primary);}
+.add-concept-panel-actions{display:flex;justify-content:flex-end;gap:8px;}
+@media (max-width:700px){.add-concept-panel-fields{grid-template-columns:1fr;}}
 
 .settings-field-row{display:flex;align-items:center;gap:10px;margin-bottom:18px;}
 .settings-field-row label{font-size:13px;font-weight:600;}
@@ -1058,6 +1082,17 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .cd-modal-context-line{font-size:12.5px;color:var(--text-secondary);}
 .cd-modal-context-idea{font-size:12px;color:var(--text-muted);font-style:italic;}
 .cd-modal-tools-trigger{flex-shrink:0;white-space:nowrap;margin-top:8px;}
+
+/* Promotion/Offer Context read-only block -- plain label/value rows sized
+   to their own content, not .cd-modal-context-compact's flex-grow (that
+   class is meant for a horizontal strip sharing a row with a sibling; used
+   as a whole section body it stretched to fill the section and left a
+   large blank gap -- see promotionConceptDevPromoContextHtml). */
+.promo-context-block{display:flex;flex-direction:column;gap:4px;}
+.promo-context-row{display:flex;gap:8px;font-size:13px;line-height:1.4;}
+.promo-context-label{flex:0 0 100px;font-weight:600;color:var(--text-muted);}
+.promo-context-value{color:var(--text-primary);}
+.promo-context-value.promo-context-empty{color:var(--text-muted);font-style:italic;}
 
 .cd-modal-section{border-top:1px solid var(--border);padding-top:12px;display:flex;flex-direction:column;gap:12px;}
 .cd-modal-section-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);}

@@ -304,19 +304,50 @@
           <h2>Required Concepts</h2>
           <span class="admin-note" id="product-plan-shortfall-note"></span>
         </div>
+        <!-- Reuses .pw-slot-row's exact grid template (see styles.css) so the
+             header always lines up with the rows beneath it, even if that
+             template's column widths change later -- one definition, not two
+             copies to keep in sync. Hidden whenever the rows themselves
+             aren't shown (no target yet / zero slots), toggled in
+             renderRequiredConcepts. -->
+        <div id="product-plan-slots-header" class="pw-slot-row pw-slot-header-row" style="display:none;">
+          <span class="pw-slot-rank"></span>
+          <span class="pw-slot-name">Concept</span>
+          <span class="pw-slot-col-badge"></span>
+          <span class="pw-slot-col-assignee">Assigned To</span>
+          <span class="pw-slot-col-editing">Editing</span>
+          <span class="pw-slot-col-progress">Progress</span>
+          <span class="pw-slot-col-actions">Action</span>
+        </div>
         <div id="product-plan-slots" class="pw-slot-list"></div>
         <div class="field-row">
           <button class="btn btn-ghost btn-sm" id="product-plan-add-new-btn">+ Add New Concept</button>
         </div>
-        <div id="product-plan-add-new-form" class="stock-request-form" style="display:none;">
-          <input type="text" id="new-concept-name" placeholder="Concept name">
-          <select id="new-concept-format">
-            <option value="video">Video</option>
-            <option value="static">Static</option>
-          </select>
-          <input type="text" id="new-concept-description" placeholder="Description (optional)">
-          <button type="button" class="btn btn-primary btn-sm" onclick="addNewConceptSlot()">Add</button>
-          <button type="button" class="btn btn-ghost btn-sm" onclick="hideAddNewConceptForm()">Cancel</button>
+        <!-- Same lightweight create-a-concept-slot flow as before (see A3) --
+             ids/API call unchanged, only the presentation is a compact card
+             instead of a raw inline row. Still tested/proven execution only:
+             no Concept Classification/New-Experimental/trial/legacy owner
+             fields here, matching the rest of Upcoming Drops planning. -->
+        <div id="product-plan-add-new-form" class="add-concept-panel" style="display:none;">
+          <div class="add-concept-panel-title">Add New Concept</div>
+          <div class="add-concept-panel-fields">
+            <label>Concept Name
+              <input type="text" id="new-concept-name" placeholder="e.g. Lifestyle Flatlay">
+            </label>
+            <label>Format
+              <select id="new-concept-format">
+                <option value="video">Video</option>
+                <option value="static">Static</option>
+              </select>
+            </label>
+            <label>Description <span class="hint">(optional)</span>
+              <input type="text" id="new-concept-description" placeholder="Any extra detail for whoever shoots this">
+            </label>
+          </div>
+          <div class="add-concept-panel-actions">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="hideAddNewConceptForm()">Cancel</button>
+            <button type="button" class="btn btn-primary btn-sm" onclick="addNewConceptSlot()">Add Concept</button>
+          </div>
         </div>
 
         <!-- Only for assets not already represented as a Required Concepts
@@ -1708,10 +1739,16 @@
       <!-- Promotion/Offer Context -- read-only, reuses data the Concept
            Development GET already returns for the product (promotion name,
            campaign stage, promotion notes/message), never duplicated onto
-           the creative asset itself. Title text swaps by format. -->
+           the creative asset itself. Title text swaps by format.
+           .promo-context-block (not .cd-modal-context-compact, which is a
+           header-adjacent horizontal strip meant to share a row with a
+           sibling and flex-grows to fill it -- reusing it here as a whole
+           section body was what stretched this block to fill the section's
+           height and left the huge blank gap the follow-up spec flagged)
+           sizes to its own content only: three plain label/value rows. -->
       <div class="cd-modal-section">
         <div class="cd-modal-section-title" id="promo-modal-promo-context-title">Promotion / Offer Context</div>
-        <div class="cd-modal-context-compact" id="promo-modal-promo-context"></div>
+        <div class="promo-context-block" id="promo-modal-promo-context"></div>
       </div>
 
       <!-- Video only -- Talent/Model, same select+other+"No Talent Required"
