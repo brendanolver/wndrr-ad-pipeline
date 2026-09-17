@@ -396,10 +396,6 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .drop-card-status.on-track{background:var(--green-light);color:var(--green);}
 .drop-card-status.needs-attention{background:var(--amber-light);color:var(--amber);}
 .drop-card-status.at-risk{background:var(--red-light);color:var(--red);}
-/* Neutral "Planned" state -- a Promotion/stage genuinely has a gap but is
-   still comfortably far from launch, so it reads as neither handled (green)
-   nor urgent (amber/red). See B1's time-aware Needs Attention rework. */
-.drop-card-status.planned{background:var(--surface2);color:var(--text-muted);}
 .drop-card-review-link-btn{font-size:12px;font-weight:600;color:var(--teal-dark);background:none;border:none;padding:0;cursor:pointer;font-family:inherit;display:block;}
 /* Promotions landing cards only (scoped via #promotions-list so Drops'
    shared .drop-card classes are untouched): reserves a consistent
@@ -442,7 +438,17 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .coverage-card-name{font-size:13.5px;font-weight:700;}
 .coverage-card-code{font-size:11.5px;color:var(--text-muted);margin-bottom:9px;}
 .coverage-card-stats{display:flex;gap:12px;font-size:12px;color:var(--text-secondary);margin-bottom:9px;}
-.coverage-card-stats-stack{font-size:11.5px;color:var(--text-secondary);margin-bottom:9px;line-height:1.6;}
+/* Fixed-height reserved slot (not "however many colourways this product
+   has"), so 0/10-style ratio/progress-bar/gap-label below it always starts
+   at the same vertical position on every card, whether the product has 1
+   colourway or 5 -- a 1-colourway card just has blank space at the bottom
+   of this slot instead of everything below it shifting up (see A1). Capped
+   at 3 lines' worth rather than reserving space for the max colourway
+   count anywhere in the drop, so a 1-colourway card isn't stretched by a
+   handful of 5+-colourway outliers elsewhere on the page; a product with
+   more than 3 colourways scrolls within this slot (same max-height+
+   overflow-y pattern already used for .shoot-plan-colours-list). */
+.coverage-card-stats-stack{font-size:11.5px;color:var(--text-secondary);margin-bottom:9px;line-height:1.6;height:56px;overflow-y:auto;}
 .coverage-card-ratio{font-size:22px;font-weight:800;}
 .coverage-progress-track{background:var(--surface2);border-radius:var(--r-pill);height:7px;margin:7px 0;overflow:hidden;}
 .coverage-progress-fill{height:100%;border-radius:var(--r-pill);}
@@ -475,7 +481,12 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .promotion-stage-count-input{width:56px;}
 .promotion-stage-item-list{display:flex;flex-direction:column;gap:6px;margin-bottom:9px;padding-top:9px;border-top:1px solid var(--border);}
 .promotion-stage-item-row{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;}
+/* Concept identity (name, then Type/Assigned To/status) stacked in one
+   column so the concept -- not whichever person happens to be on the row
+   -- is the first thing read (see C1). */
+.promotion-stage-item-info{min-width:0;flex:1;}
 .promotion-stage-item-name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.promotion-stage-item-meta{font-size:11px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .promotion-stage-urgency-badge{display:inline-block;padding:2px 8px;border-radius:var(--r-pill);font-size:11px;font-weight:700;margin-bottom:8px;}
 .promotion-stage-urgency-badge.green{background:var(--green-light);color:var(--green);}
 .promotion-stage-urgency-badge.amber{background:var(--amber-light);color:var(--amber);}

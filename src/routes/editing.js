@@ -26,11 +26,17 @@ function dateStr(d) {
 // own Ready for Approval flag (see the workflow-revision brief) -- the
 // client derives everything else (required/complete counts, editing_status)
 // from this plus final_edits, so nothing else needs to ride along here.
+// editing_owner (see G's investigation): the Editing assignment made in
+// Upcoming Drops/Promotion intake was, until now, write-only -- nothing on
+// this page ever read it back, so "Editing = Shez" had no effect once a
+// concept actually reached Editing. Selecting it here is what lets the new
+// per-editor filter (see setEditingEditorFilter in app.js) work off the
+// same assignment made at planning time, with nothing re-entered.
 const CONCEPT_SELECT = `
   SELECT
     ss.id AS shoot_schedule_id, ss.scheduled_week_start, ss.shot_at,
     ca.id AS creative_asset_id, ca.concept_name, ca.format AS concept_format,
-    ca.hook_variations, ca.location, ca.editing_submitted_at,
+    ca.hook_variations, ca.location, ca.editing_submitted_at, ca.editing_owner,
     spi.product_name, spi.image_url, spi.creator AS owner
   FROM shoot_schedule ss
   JOIN creative_assets ca ON ca.id = ss.creative_asset_id
@@ -107,6 +113,7 @@ router.get('/', async (req, res, next) => {
       product_name: c.product_name,
       image_url: c.image_url,
       owner: c.owner,
+      editing_owner: c.editing_owner,
       shot_at: c.shot_at,
       editing_submitted_at: c.editing_submitted_at,
       final_edits: editsByConcept.get(c.creative_asset_id) || [],

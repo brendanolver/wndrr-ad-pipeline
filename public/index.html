@@ -669,6 +669,12 @@
           <button type="button" class="btn btn-ghost btn-sm" id="editing-this-week-btn" onclick="goToCurrentEditingWeek()" style="display:none;">This Week</button>
           <div class="planning-week-picker" id="editing-week-picker" style="display:none;"></div>
         </div>
+        <!-- Separate from the workflow-state tabs below (All/To Edit/Editing/
+             Ready for Approval) -- this narrows WHICH person's queue is shown,
+             same pattern/markup as Shooting's owner filter, reading
+             editing_owner (see G's investigation: this is the first real
+             consumer of that column). -->
+        <select class="shoot-owner-filter" id="editing-editor-filter" onchange="setEditingEditorFilter(this.value)"></select>
       </div>
       <div class="shoot-summary-line" id="editing-summary"></div>
       <div class="filter-tabs" id="editing-filters"></div>
@@ -1846,6 +1852,11 @@
       </div>
     </div>
     <div class="modal-footer">
+      <!-- Secondary/destructive, same btn-danger treatment as Core's own
+           cd-modal-delete-btn -- Cancel/Save Draft/Ready for Review stay the
+           primary workflow actions (see E1). Only shown for a concept that
+           actually exists yet (create mode has nothing to delete). -->
+      <button class="btn btn-danger" id="promo-modal-delete-btn" onclick="deletePromotionConceptDevConcept()" style="display:none;">Delete Concept</button>
       <button class="btn btn-ghost" onclick="closeModal('promo-concept-dev-modal')">Cancel</button>
       <button class="btn btn-ghost" id="promo-modal-save-draft-btn" onclick="savePromotionConceptDevModal('in_development')">Save Draft</button>
       <button class="btn btn-primary" id="promo-modal-save-changes-btn" onclick="savePromotionConceptDevModal(null)" style="display:none;">Save Changes</button>
@@ -2368,6 +2379,33 @@
         <div><span class="admin-note">Promotion</span><br><strong id="promotion-shoot-context-promotion"></strong></div>
         <div><span class="admin-note">Campaign Stage</span><br><strong id="promotion-shoot-context-stage"></strong></div>
       </div>
+      <!-- Format leads (D1) -- it determines which Concept Types are even
+           valid (conceptTypesForFormat in app.js), so picking it first,
+           before Concept Type, means the dropdown below is never shown
+           with an option the current Format can't actually use. -->
+      <label>Format
+        <select id="promotion-shoot-format" onchange="onPromotionShootFormatChange()">
+          <option value="video">Video</option>
+          <option value="static">Static</option>
+        </select>
+      </label>
+
+      <!-- Concept Approach: Video only -- New vs Existing Concept (see
+           schema.sql's comment on creative_assets.concept_origin). Static
+           always saves concept_origin = NULL, so this whole block stays
+           hidden for Static -- see onPromotionShootFormatChange in app.js.
+           Two compact selectable chips, not a dropdown, per the brief.
+           Kept directly under Format since it's the immediate follow-up
+           decision once Video is chosen. -->
+      <div id="promotion-shoot-origin-wrap" style="display:none;">
+        <span class="cd-field-label">Concept Approach</span>
+        <div class="promo-shoot-origin-toggle">
+          <button type="button" class="cd-filter-btn" id="promotion-shoot-origin-new-btn" onclick="selectPromotionShootConceptOrigin('new')">New Concept</button>
+          <button type="button" class="cd-filter-btn" id="promotion-shoot-origin-existing-btn" onclick="selectPromotionShootConceptOrigin('existing')">Existing Concept</button>
+        </div>
+        <div class="hint" id="promotion-shoot-origin-hint"></div>
+      </div>
+
       <label>Concept Type
         <select id="promotion-shoot-concept-type-select" onchange="onConceptDevSelectWithOtherChange('promotion-shoot-concept-type-select','promotion-shoot-concept-type-custom')"></select>
         <input type="text" id="promotion-shoot-concept-type-custom" placeholder="New concept type…" style="display:none;margin-top:6px;">
@@ -2394,29 +2432,21 @@
           <option value="Til">Til</option>
         </select>
       </label>
+      <!-- Filming -- who's shooting this, backed by shoot_plan_items.creator
+           (the SAME field Core's own Shoot This Week modal already sets via
+           #shoot-plan-creator, and the field Shooting's Week/Today/owner
+           filter already reads as "owner" -- see the F investigation).
+           Previously this was never asked here and silently defaulted to
+           whichever content_creators row is_default, so every Promotion
+           concept looked identically "assigned" to Shooting regardless of
+           who was actually meant to film it. Distinct from Assigned To
+           (concept development) and Editing (post-production). -->
+      <label>Filming
+        <select id="promotion-shoot-filming"></select>
+      </label>
       <label>Concept Name / Idea
         <input type="text" id="promotion-shoot-concept-name" placeholder="e.g. Black Friday Price Shock">
       </label>
-      <label>Format
-        <select id="promotion-shoot-format" onchange="onPromotionShootFormatChange()">
-          <option value="video">Video</option>
-          <option value="static">Static</option>
-        </select>
-      </label>
-
-      <!-- Concept Approach: Video only -- New vs Existing Concept (see
-           schema.sql's comment on creative_assets.concept_origin). Static
-           always saves concept_origin = NULL, so this whole block stays
-           hidden for Static -- see onPromotionShootFormatChange in app.js.
-           Two compact selectable chips, not a dropdown, per the brief. -->
-      <div id="promotion-shoot-origin-wrap" style="display:none;">
-        <span class="cd-field-label">Concept Approach</span>
-        <div class="promo-shoot-origin-toggle">
-          <button type="button" class="cd-filter-btn" id="promotion-shoot-origin-new-btn" onclick="selectPromotionShootConceptOrigin('new')">New Concept</button>
-          <button type="button" class="cd-filter-btn" id="promotion-shoot-origin-existing-btn" onclick="selectPromotionShootConceptOrigin('existing')">Existing Concept</button>
-        </div>
-        <div class="hint" id="promotion-shoot-origin-hint"></div>
-      </div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('promotion-shoot-modal')">Cancel</button>
