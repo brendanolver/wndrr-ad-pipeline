@@ -8442,17 +8442,25 @@ const EDITING_FILTERS = [
   { value: 'ready_for_approval', label: 'Ready for Approval' },
 ];
 
-// Editor filter -- separate from the workflow-state tabs below, same
-// populated-from-content_creators pattern as Shooting's owner filter (see
-// populateShootingOwnerFilters), and the first real reader of editing_owner
-// (see G's investigation): an assignment made once in Upcoming Drops/
-// Promotion intake now surfaces the right person's queue here with nothing
-// re-entered.
+// Editor filter -- separate from the workflow-state tabs below, and the
+// first real reader of editing_owner (see G's investigation): an
+// assignment made once in Upcoming Drops/Promotion intake now surfaces the
+// right person's queue here with nothing re-entered. Sourced from
+// CONCEPT_ASSIGNEES, NOT state.contentCreators (Shooting's owner filter's
+// list) -- editing_owner is written only through the "Editing" select in
+// Upcoming Drops/Promotion intake (index.html) and updateConceptEditingOwner
+// above, both of which already only ever offer Mark/Shez/Til (the same
+// fixed roster concept_assignee uses), a different, smaller list of people
+// than content_creators (who's filming, a Shooting-only concern -- see F).
+// Populating this from content_creators would silently make any concept
+// whose editing_owner is Shez or Til unreachable by its own filter option
+// (present only in "All Editors"), since those names aren't guaranteed to
+// exist in content_creators at all.
 function populateEditingEditorFilter() {
   const el = document.getElementById('editing-editor-filter');
   if (!el) return;
   el.innerHTML = `<option value="all">All Editors</option>` +
-    state.contentCreators.map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join('');
+    CONCEPT_ASSIGNEES.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
   el.value = state.editing.editorFilter;
 }
 
