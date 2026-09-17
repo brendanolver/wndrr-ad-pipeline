@@ -3411,12 +3411,35 @@ async function renderPromotionStageDetailView() {
         </div>
       </div>`;
     }).join('');
+    const itemsByAssetId = new Map(items.map((i) => [i.asset_id, i]));
     grid.querySelectorAll('.job-card').forEach((card) => {
-      card.addEventListener('click', () => {
-        const asset = assetsById.get(Number(card.dataset.assetId));
-        if (asset) openAssetModal(asset);
-      });
+      card.addEventListener('click', () => openPromotionConceptFromStageView(Number(card.dataset.assetId), itemsByAssetId));
     });
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// Every concept in this grid is Promotion-sourced (this view only ever
+// renders for a Promotion Campaign Stage), so it always opens the
+// Promotion Concept Development modal (see #210) -- never the legacy
+// generic Edit Creative Asset modal every other job-card in the app still
+// uses. Deliberately never calls switchTab or touches state.conceptDev --
+// #planning-promotion-stage-view stays rendered underneath, so closing the
+// modal reveals the same Campaign Stage with What We Have still visible.
+// promoConceptDevOpenedFromStageView lets the save path refresh this exact
+// view afterward instead of the (hidden) Concept Dev tab -- see
+// refreshConceptDevAfterChange.
+let promoConceptDevOpenedFromStageView = false;
+
+async function openPromotionConceptFromStageView(assetId, itemsByAssetId) {
+  const item = itemsByAssetId.get(assetId);
+  if (!item) return;
+  try {
+    const product = await api(`/concept-development/item/${item.id}`);
+    const concept = product.concepts.find((c) => c.id === assetId);
+    if (!concept) return;
+    openPromotionConceptDevModal(concept, product, true);
   } catch (e) {
     toast(e.message, true);
   }
@@ -3428,6 +3451,11 @@ async function renderPromotionStageDetailView() {
 // directly rather than a pre-resolved colours/sizes list, and feeds the
 // same Concept Development pipeline via POST /shoot-plan.
 let promotionShootContext = null;
+
+// New vs Existing Concept -- Video only (see schema.sql's comment on
+// creative_assets.concept_origin). Reset on every modal open; Static always
+// saves null, so this only ever matters when format === 'video'.
+let promotionShootConceptOrigin = null;
 
 // Concept Type is reusable vocabulary (state.conceptTypes) classified by an
 // optional format ('video'/'static'/NULL=Either, see schema.sql's comment on
@@ -3450,15 +3478,48 @@ function shootThisWeekForPromotionStage(stageId) {
   document.getElementById('promotion-shoot-concept-name').value = '';
   document.getElementById('promotion-shoot-format').value = 'video';
   fillConceptDevSelectWithOther('promotion-shoot-concept-type-select', 'promotion-shoot-concept-type-custom', conceptTypesForFormat('video'), '');
+  promotionShootConceptOrigin = null;
+  renderPromotionShootConceptOrigin();
+  updatePromotionShootOriginVisibility();
   openModal('promotion-shoot-modal');
 }
 
 // Re-filters the Concept Type dropdown when Format changes, keeping
 // whatever was already picked/typed if it's still valid for the new format.
+// Concept Approach (New/Existing) only ever applies to Video -- switching to
+// Static clears the choice so it can never be silently carried over and
+// saved against a Static concept (which always persists concept_origin =
+// NULL, see schema.sql).
 function onPromotionShootFormatChange() {
   const currentValue = conceptDevSelectWithOtherValue('promotion-shoot-concept-type-select', 'promotion-shoot-concept-type-custom');
   const format = document.getElementById('promotion-shoot-format').value;
   fillConceptDevSelectWithOther('promotion-shoot-concept-type-select', 'promotion-shoot-concept-type-custom', conceptTypesForFormat(format), currentValue);
+  if (format !== 'video') promotionShootConceptOrigin = null;
+  renderPromotionShootConceptOrigin();
+  updatePromotionShootOriginVisibility();
+}
+
+function updatePromotionShootOriginVisibility() {
+  const format = document.getElementById('promotion-shoot-format').value;
+  document.getElementById('promotion-shoot-origin-wrap').style.display = format === 'video' ? '' : 'none';
+}
+
+function selectPromotionShootConceptOrigin(origin) {
+  promotionShootConceptOrigin = origin;
+  renderPromotionShootConceptOrigin();
+}
+
+function renderPromotionShootConceptOrigin() {
+  document.getElementById('promotion-shoot-origin-new-btn').classList.toggle('active', promotionShootConceptOrigin === 'new');
+  document.getElementById('promotion-shoot-origin-existing-btn').classList.toggle('active', promotionShootConceptOrigin === 'existing');
+  const hint = document.getElementById('promotion-shoot-origin-hint');
+  if (promotionShootConceptOrigin === 'new') {
+    hint.textContent = 'A genuinely new idea -- the full development flow (Idea, Audience, Hook, Talent, What to Shoot).';
+  } else if (promotionShootConceptOrigin === 'existing') {
+    hint.textContent = 'An established concept the team already understands -- a quicker execution brief.';
+  } else {
+    hint.textContent = '';
+  }
 }
 
 // Searchable product/style picker -- SKU or name, partial, case-insensitive
@@ -3510,6 +3571,12 @@ async function savePromotionShootItem() {
   const conceptType = conceptDevSelectWithOtherValue('promotion-shoot-concept-type-select', 'promotion-shoot-concept-type-custom');
   const conceptAssignee = document.getElementById('promotion-shoot-assignee').value || null;
   const format = document.getElementById('promotion-shoot-format').value;
+  // Concept Approach is a required choice for Video only -- Static always
+  // saves concept_origin = NULL (see schema.sql's comment on the column).
+  if (format === 'video' && !promotionShootConceptOrigin) {
+    return toast('Choose New Concept or Existing Concept', true);
+  }
+  const conceptOrigin = format === 'video' ? promotionShootConceptOrigin : null;
 
   // No product is picked here at all -- the concept-first flow (see the
   // file-header comment above) never requires one; product_code/product_name
@@ -3543,6 +3610,16 @@ async function savePromotionShootItem() {
         week_start: planningWeekStart(),
       }),
     });
+    // Concept Approach isn't part of POST /shoot-plan's payload (that
+    // endpoint is shared with Core/High Stock/Drop) -- persist it with an
+    // immediate follow-up PATCH, same create-then-PATCH pattern
+    // savePromotionConceptDevModal's own create path already uses.
+    if (conceptOrigin) {
+      await api(`/concept-development/concepts/${item.asset_id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ concept_origin: conceptOrigin }),
+      });
+    }
     closeModal('promotion-shoot-modal');
     toast('Added to Concept Development');
     await refreshCurrentPromotion();
@@ -5707,6 +5784,8 @@ function applyPromotionConceptDevFormat(format) {
   promoConceptDevModalFormat = format === 'static' ? 'static' : 'video';
   document.querySelectorAll('.promo-section-video-only').forEach((el) => { el.style.display = promoConceptDevModalFormat === 'video' ? '' : 'none'; });
   document.querySelectorAll('.promo-section-static-only').forEach((el) => { el.style.display = promoConceptDevModalFormat === 'static' ? '' : 'none'; });
+  document.getElementById('promo-modal-origin-wrap').style.display = promoConceptDevModalFormat === 'video' ? '' : 'none';
+  applyPromotionConceptDevOriginVisibility();
 
   if (promoConceptDevModalFormat === 'static') {
     document.getElementById('promo-modal-top-title').textContent = 'The Brief';
@@ -5720,6 +5799,50 @@ function applyPromotionConceptDevFormat(format) {
 
   const currentType = conceptDevSelectWithOtherValue('promo-modal-concept-type-select', 'promo-modal-concept-type-custom');
   fillConceptDevSelectWithOther('promo-modal-concept-type-select', 'promo-modal-concept-type-custom', conceptTypesForFormat(promoConceptDevModalFormat), currentType);
+}
+
+// New vs Existing Concept -- Video only (see schema.sql's comment on
+// creative_assets.concept_origin). .promo-section-new-only tags the two
+// strategic-development pieces (The Idea, Who's It For?) that an Existing
+// Concept skips -- same conditional-class pattern applyPromotionConceptDevFormat
+// already uses for Static/Video, extended rather than duplicated.
+let promoConceptDevModalOrigin = null;
+
+function applyPromotionConceptDevOriginVisibility() {
+  // Static always shows its own Idea/Brief field regardless of
+  // concept_origin (which stays NULL for Static, see schema.sql) -- only a
+  // Video concept explicitly marked Existing hides the New-only sections.
+  // An unset/legacy origin (null, e.g. a concept created before this
+  // feature) defaults to showing everything, never silently hiding fields
+  // nobody chose to hide.
+  const hideNewOnly = promoConceptDevModalFormat === 'video' && promoConceptDevModalOrigin === 'existing';
+  document.querySelectorAll('.promo-section-new-only').forEach((el) => {
+    // Audience carries both promo-section-video-only and promo-section-new-only
+    // -- for Static, applyPromotionConceptDevFormat's own video-only pass
+    // already hid it and must win; unconditionally showing every new-only
+    // element here would re-reveal it. Only the pure new-only elements (the
+    // Idea/Brief label, which Static needs visible too) get decided below.
+    if (el.classList.contains('promo-section-video-only') && promoConceptDevModalFormat !== 'video') return;
+    el.style.display = hideNewOnly ? 'none' : '';
+  });
+
+  // The shared top section's title/helper (set by applyPromotionConceptDevFormat
+  // to "The Idea" for every Video concept) asks a question the hidden Idea
+  // field would have answered -- for Existing Video it becomes a plain
+  // "Concept" block (Concept Name/Type/Assigned only), same as the section
+  // Existing Video Concept Development's spec calls "CONCEPT". Static is
+  // untouched (its own title/helper stays whatever applyPromotionConceptDevFormat set).
+  if (promoConceptDevModalFormat === 'video') {
+    document.getElementById('promo-modal-top-title').textContent = hideNewOnly ? 'Concept' : 'The Idea';
+    document.getElementById('promo-modal-top-helper').style.display = hideNewOnly ? 'none' : '';
+  }
+}
+
+function applyPromotionConceptDevOrigin(origin) {
+  promoConceptDevModalOrigin = origin === 'existing' ? 'existing' : 'new';
+  document.getElementById('promo-modal-origin-new-btn').classList.toggle('active', promoConceptDevModalOrigin === 'new');
+  document.getElementById('promo-modal-origin-existing-btn').classList.toggle('active', promoConceptDevModalOrigin === 'existing');
+  applyPromotionConceptDevOriginVisibility();
 }
 
 // Read-only Planning-handoff context, same reasoning as
@@ -5762,6 +5885,17 @@ function promotionConceptDevPromoContextHtml(product) {
 // card) paths -- concept is null in create mode, so every field starts
 // blank.
 function fillPromotionConceptDevModalFields(concept) {
+  // New vs Existing Concept -- reopening a concept restores whichever
+  // approach it was created with; a legacy/never-set concept (created
+  // before this feature, or any non-Video concept) defaults to showing the
+  // fuller flow rather than silently hiding fields. A brand-new create
+  // (concept === null) starts on New Concept, matching the create-mode
+  // toggle's default active state.
+  promoConceptDevModalOrigin = concept && concept.concept_origin === 'existing' ? 'existing' : 'new';
+  document.getElementById('promo-modal-origin-new-btn').classList.toggle('active', promoConceptDevModalOrigin === 'new');
+  document.getElementById('promo-modal-origin-existing-btn').classList.toggle('active', promoConceptDevModalOrigin === 'existing');
+  applyPromotionConceptDevOriginVisibility();
+
   document.getElementById('promo-modal-angle').value = concept ? (concept.angle || '') : '';
   document.getElementById('promo-modal-headline').value = concept ? (concept.headline || '') : '';
   document.getElementById('promo-modal-supporting-copy').value = concept ? (concept.supporting_copy || '') : '';
@@ -5877,7 +6011,8 @@ function updatePromotionConceptDevFooterButtons(status) {
 // via "+ New Concept" on a Promotion product's workspace) -- only that case
 // ever shows #promo-modal-format-section, since format is permanent from
 // creation onward everywhere else in this app.
-function openPromotionConceptDevModal(concept, product) {
+function openPromotionConceptDevModal(concept, product, openedFromStageView = false) {
+  promoConceptDevOpenedFromStageView = openedFromStageView;
   promoConceptDevModalConceptId = concept ? concept.id : null;
   promoConceptDevModalProduct = product;
   promoConceptDevModalFormat = concept ? (concept.format || 'video') : 'video';
@@ -5949,6 +6084,11 @@ async function savePromotionConceptDevModal(targetStatus) {
       .filter((r) => r.url),
     talent_requirement: conceptDevSelectWithOtherValue('promo-modal-talent-select', 'promo-modal-talent-custom'),
     props_notes: document.getElementById('promo-modal-props').value.trim(),
+    // New vs Existing is a one-time choice made at creation (same
+    // immutability as Format -- neither toggle is ever shown again once the
+    // concept exists), always NULL for Static. Resending the already-set
+    // value on every save of an existing concept is a harmless no-op.
+    concept_origin: promoConceptDevModalFormat === 'video' ? promoConceptDevModalOrigin : null,
   };
   if (targetStatus) body.concept_dev_status = targetStatus;
   const savedToast = targetStatus === 'ready_for_review' ? 'Marked Ready for Review' : (targetStatus ? 'Draft saved' : 'Changes saved');
@@ -5992,7 +6132,18 @@ async function savePromotionConceptDevModal(targetStatus) {
     }
     closeModal('promo-concept-dev-modal');
     toast(savedToast);
-    refreshConceptDevAfterChange();
+    // Opened from What We Have (Promotion Campaign Stage) -- refresh that
+    // page's card list in place instead of the (hidden) Concept Dev tab, so
+    // the concept just saved never looks stale. Never navigates the user
+    // away -- same refresh call savePromotionShootItem already uses.
+    if (promoConceptDevOpenedFromStageView) {
+      await refreshCurrentPromotion();
+      if (document.getElementById('planning-promotion-stage-view').style.display !== 'none') {
+        renderPromotionStageDetailView();
+      }
+    } else {
+      refreshConceptDevAfterChange();
+    }
   } catch (e) {
     toast(e.message, true);
   }

@@ -47,6 +47,14 @@ const FORMATS = ['video', 'static'];
 // strategy_owner/filming_owner/editing_owner/qc_owner fields above.
 const CONCEPT_ASSIGNEES = ['Mark', 'Shez', 'Til'];
 
+// New vs Existing Concept -- Promotion Video Concept Development only (see
+// schema.sql's comment on creative_assets.concept_origin). Deliberately not
+// CONCEPT_CLASSIFICATIONS: that's "has this ad proven itself in market" and
+// is wired to assertCanEnterFilming's New Drop -> Filming gate, a different
+// axis this must never touch. NULL (unset) covers every Static Promotion
+// concept and every Core/High Stock/Drop concept.
+const CONCEPT_ORIGINS = ['new', 'existing'];
+
 // Concept Development's own simple review status -- separate from STATUSES
 // above (the full production pipeline). This just tracks how ready a
 // concept is for the Tuesday review meeting.
@@ -116,4 +124,5 @@ module.exports = {
   EDITING_STATUS_LABELS,
   FINAL_EDIT_FORMATS,
   CONCEPT_ASSIGNEES,
+  CONCEPT_ORIGINS,
 };
