@@ -145,6 +145,14 @@ main{flex:1;min-width:0;padding:20px 24px;}
    full viewport, which visually off-centers it against the 220px sidebar.
    Scoped to this one modal's id so no other modal's centering changes. */
 #promo-concept-dev-modal{left:220px;}
+/* Drop's New/Edit Drop modal is only ever opened from a Drop-context page
+   (Planning), so it gets the same fix unconditionally (see A8). */
+#drop-modal{left:220px;}
+/* Asset modal is shared with the Kanban Board (not Drop-specific), so it
+   only gets the sidebar-aware centering when opened from a Drop context --
+   toggled by applyAssetModalDropContext in app.js -- to avoid shifting it
+   for Board, which this cleanup pass doesn't touch (see A8). */
+#asset-modal.modal-drop-context{left:220px;}
 .modal{background:var(--surface);border-radius:var(--r-lg);width:420px;max-height:88vh;overflow-y:auto;box-shadow:var(--shadow);}
 .modal-header{display:flex;justify-content:space-between;align-items:center;padding:16px 18px;border-bottom:1px solid var(--border);}
 .modal-header h3{font-size:15px;}
@@ -388,6 +396,10 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .drop-card-status.on-track{background:var(--green-light);color:var(--green);}
 .drop-card-status.needs-attention{background:var(--amber-light);color:var(--amber);}
 .drop-card-status.at-risk{background:var(--red-light);color:var(--red);}
+/* Neutral "Planned" state -- a Promotion/stage genuinely has a gap but is
+   still comfortably far from launch, so it reads as neither handled (green)
+   nor urgent (amber/red). See B1's time-aware Needs Attention rework. */
+.drop-card-status.planned{background:var(--surface2);color:var(--text-muted);}
 .drop-card-review-link-btn{font-size:12px;font-weight:600;color:var(--teal-dark);background:none;border:none;padding:0;cursor:pointer;font-family:inherit;display:block;}
 /* Promotions landing cards only (scoped via #promotions-list so Drops'
    shared .drop-card classes are untouched): reserves a consistent
@@ -406,7 +418,13 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .quickpick-chip.active{background:var(--purple);color:white;}
 
 .coverage-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px;margin-bottom:8px;}
-.coverage-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;box-shadow:var(--shadow-xs);}
+/* Grid items stretch to the tallest card in their row by default, but a
+   card's own content (variable colourway counts, a Promotion stage's
+   variable-length planned-items list) doesn't push its Shoot This Week
+   button to a consistent bottom line on its own -- flex-column + margin-
+   top:auto on the button does that without forcing every card to identical
+   height or padding out the middle content. */
+.coverage-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;box-shadow:var(--shadow-xs);display:flex;flex-direction:column;}
 /* AM's product images are wide technical flats (front+back side by side),
    not square product photos -- object-fit:contain (not cover) so the full
    flat is always visible, never cropped, letterboxed on the surface2 bg. */
@@ -420,7 +438,7 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .coverage-card-img-prev{left:8px;}
 .coverage-card-img-next{right:8px;}
 .coverage-card-img-count{position:absolute;bottom:8px;right:8px;background:rgba(17,24,39,0.65);color:white;font-size:10px;font-weight:600;padding:2px 8px;border-radius:var(--r-pill);}
-.coverage-card-body{padding:14px 16px;}
+.coverage-card-body{padding:14px 16px;display:flex;flex-direction:column;flex:1;}
 .coverage-card-name{font-size:13.5px;font-weight:700;}
 .coverage-card-code{font-size:11.5px;color:var(--text-muted);margin-bottom:9px;}
 .coverage-card-stats{display:flex;gap:12px;font-size:12px;color:var(--text-secondary);margin-bottom:9px;}
@@ -431,13 +449,15 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .coverage-progress-fill.green{background:var(--green);}
 .coverage-progress-fill.amber{background:var(--amber);}
 .coverage-progress-fill.red{background:var(--red);}
+.coverage-progress-fill.grey{background:var(--text-muted);}
 .coverage-card-gap{font-size:12px;font-weight:700;margin:5px 0 11px;}
 .coverage-card-gap.green{color:var(--green);}
 .coverage-card-gap.amber{color:var(--amber);}
 .coverage-card-gap.red{color:var(--red);}
+.coverage-card-gap.grey{color:var(--text-muted);}
 .coverage-card-unavailable{font-size:12px;color:var(--text-muted);font-style:italic;padding:11px 0;}
 .coverage-card-live-meta{font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:9px;}
-.coverage-card-shoot-btn{width:100%;margin-top:2px;}
+.coverage-card-shoot-btn{width:100%;margin-top:auto;}
 
 /* Promotion Campaign Stage cards -- built on .coverage-card (same required/
    covered/progress-bar/status pill as a Drop product) and DOUBLES as a
@@ -460,6 +480,7 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .promotion-stage-urgency-badge.green{background:var(--green-light);color:var(--green);}
 .promotion-stage-urgency-badge.amber{background:var(--amber-light);color:var(--amber);}
 .promotion-stage-urgency-badge.red{background:var(--red-light);color:var(--red);}
+.promotion-stage-urgency-badge.grey{background:var(--surface2);color:var(--text-muted);}
 .promotion-stage-due-row{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11.5px;color:var(--text-muted);margin-bottom:9px;}
 .promotion-stage-due-input{font-size:11.5px;padding:3px 5px;width:130px;}
 .promotion-stage-stats-row{display:flex;gap:14px;font-size:12px;color:var(--text-secondary);margin:5px 0;}
@@ -491,6 +512,7 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .promo-overview-progress-fill.green{background:var(--green);}
 .promo-overview-progress-fill.amber{background:var(--amber);}
 .promo-overview-progress-fill.red{background:var(--red);}
+.promo-overview-progress-fill.grey{background:var(--text-muted);}
 .promo-overview-pills{display:flex;gap:8px;flex-wrap:wrap;}
 .promo-pill{padding:4px 10px;border-radius:var(--r-pill);font-size:11px;font-weight:700;}
 .promo-pill-target{background:var(--surface2);color:var(--text-muted);}
@@ -580,16 +602,36 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .mpm-resolve-row select{flex:1;}
 
 .pw-slot-list{display:flex;flex-direction:column;gap:7px;margin-bottom:11px;}
-.pw-slot-row{display:flex;align-items:center;gap:11px;background:white;border:1px solid var(--border);border-radius:var(--r);padding:9px 12px;font-size:13.5px;flex-wrap:wrap;}
-.pw-slot-rank{font-weight:700;color:var(--text-muted);width:22px;}
-.pw-slot-name{flex:1;font-weight:600;min-width:120px;}
+/* Grid (not flex-wrap): a fixed column template is what keeps an unfulfilled
+   row (button + link-select in Actions) and a fulfilled/complete row
+   (Assigned To/Editing selects + progress checks) on the exact same
+   horizontal positions -- see A5. Completing a concept only changes
+   .pw-slot-row-complete's styling (dim/strike), never these column tracks. */
+.pw-slot-row{display:grid;grid-template-columns:22px minmax(130px,1.3fr) 72px minmax(110px,132px) minmax(110px,132px) minmax(150px,190px) minmax(150px,1fr);column-gap:12px;align-items:center;background:white;border:1px solid var(--border);border-radius:var(--r);padding:9px 12px;font-size:13.5px;}
+@media (max-width:1150px){
+  .pw-slot-row{grid-template-columns:20px minmax(100px,1.2fr) 60px minmax(96px,1fr) minmax(96px,1fr) minmax(130px,1fr) minmax(130px,1fr);column-gap:8px;}
+}
+.pw-slot-rank{font-weight:700;color:var(--text-muted);}
+.pw-slot-name{font-weight:600;}
+.pw-slot-row-complete{opacity:0.62;}
+.pw-slot-row-complete .pw-slot-name{text-decoration:line-through;color:var(--text-muted);}
 .pw-slot-status{font-size:15px;}
 .pw-slot-status.fulfilled{color:var(--green);}
 .pw-slot-status.unfulfilled{color:var(--text-muted);}
 .pw-slot-done-checkbox{width:17px;height:17px;accent-color:var(--green);cursor:pointer;flex-shrink:0;}
-.pw-slot-link-select{font-size:12px;padding:5px 7px;}
+.pw-slot-link-select{font-size:12px;padding:5px 7px;max-width:100%;}
 .pw-slot-assignee{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text-secondary);white-space:nowrap;}
-.pw-slot-assignee-select{font-size:12px;padding:3px 5px;font-weight:600;color:var(--text-primary);}
+.pw-slot-assignee-select,
+.pw-slot-editing-select{font-size:12px;padding:3px 5px;font-weight:600;color:var(--text-primary);width:100%;}
+.pw-slot-col-badge{display:flex;align-items:center;}
+.pw-slot-col-assignee,
+.pw-slot-col-editing{display:flex;align-items:center;min-width:0;}
+.pw-slot-col-progress{display:flex;flex-direction:column;gap:2px;}
+.pw-slot-col-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.pw-slot-control-empty,
+.pw-slot-progress-empty{color:var(--text-muted);font-size:12px;}
+.pw-slot-progress-item{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-secondary);cursor:pointer;white-space:nowrap;}
+.pw-slot-progress-item input{width:13px;height:13px;accent-color:var(--green);cursor:pointer;flex-shrink:0;}
 
 .settings-field-row{display:flex;align-items:center;gap:10px;margin-bottom:18px;}
 .settings-field-row label{font-size:13px;font-weight:600;}

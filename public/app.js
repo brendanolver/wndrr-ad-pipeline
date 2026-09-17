@@ -1377,12 +1377,25 @@ async function loadProductView(dropId, productCode) {
 
     const planBtn = document.getElementById('product-view-plan-btn');
     planBtn.style.display = group.creative_gap > 0 || group.creative_gap === null ? 'inline-block' : 'none';
-    planBtn.onclick = () => openAssetModal(null, { presetStyleIds: group.styles.map((s) => s.style_id) });
+    // Drop planning is oriented around executing the Required Concepts list
+    // (tested/proven concepts), not the generic legacy New Creative Asset
+    // workflow -- "+ Plan Creative" now opens the exact same simple Add
+    // Concept form Required Concepts' own "+ Add New Concept" button does,
+    // rather than a second, disconnected way to create a concept (see A3).
+    planBtn.onclick = () => {
+      showAddNewConceptForm();
+      document.getElementById('product-plan-add-new-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    };
 
     const styleIds = group.styles.map((s) => s.style_id).join(',');
     const assets = await api(`/creative-assets?style_ids=${styleIds}`);
     state.currentProductAssets = assets;
-    renderProductConcepts(assets);
+    // Every asset already linked to a Required Concept slot has its own row
+    // there -- this section is only for whatever's left (a legacy asset
+    // from before Required Concepts existed, or one whose slot was later
+    // removed), so a concept is never shown twice on this page (see A7).
+    const linkedAssetIds = new Set((currentProductPlan.slots || []).filter((s) => s.asset_id).map((s) => s.asset_id));
+    renderProductConcepts(assets.filter((a) => !linkedAssetIds.has(a.id)));
     // Re-render now that state.currentProductAssets is fresh (it feeds the
     // fallback "Link existing" list on any still-unfulfilled slot).
     renderRequiredConcepts(currentProductPlan);
@@ -1392,9 +1405,13 @@ async function loadProductView(dropId, productCode) {
 }
 
 function renderProductConcepts(assets) {
+  const section = document.getElementById('product-view-other-concepts-section');
   const grid = document.getElementById('product-view-concepts');
+  // Nothing outside Required Concepts for this product -- hide the whole
+  // section rather than show an empty/misleading state (see A7).
+  section.style.display = assets.length ? '' : 'none';
   if (!assets.length) {
-    grid.innerHTML = '<div class="attention-empty">No creative work started for this product yet.</div>';
+    grid.innerHTML = '';
     return;
   }
   grid.innerHTML = assets.map((a) => {
@@ -1413,7 +1430,7 @@ function renderProductConcepts(assets) {
   grid.querySelectorAll('.job-card').forEach((card) => {
     card.addEventListener('click', () => {
       const asset = assets.find((a) => a.id === Number(card.dataset.assetId));
-      openAssetModal(asset);
+      openAssetModal(asset, { dropContext: true });
     });
   });
 }
@@ -1470,31 +1487,35 @@ function renderRequiredConcepts(data) {
 
   list.innerHTML = data.slots.map((s) => {
     const fulfilled = !!s.asset_id;
-    const sourceBadge = s.source === 'proven'
-      ? '<span class="badge badge-tested_proven">Proven</span>'
-      : '<span class="badge badge-new_experimental">New/Test</span>';
-    // Fulfilled rows get an actual tickbox (not just a static ✓) -- checking
-    // it marks the concept done, unchecking reverts it. See toggleConceptDone.
-    const statusIcon = fulfilled
-      ? `<input type="checkbox" class="pw-slot-done-checkbox" data-asset-id="${s.asset_id}" ${s.asset_status === 'uploaded_live' ? 'checked' : ''} title="Mark this concept done">`
-      : '<span class="pw-slot-status unfulfilled">○</span>';
-    const fulfilledLine = fulfilled
-      ? `<span class="job-status-pill">${assetStatusLabel(s.asset_status)}</span>`
-      : '';
-    // Only a fulfilled slot has an asset row to attach the assignee to --
-    // an open/unfulfilled slot has nowhere to persist it yet.
+    // "Proven" (sourced from a Proven Winner) is the only sourcing badge
+    // shown here -- a manually-added slot (source === 'new') gets no badge
+    // rather than the old "New/Test" label, which read as the New/
+    // Experimental classification language Upcoming Drops planning
+    // deliberately never surfaces (see A2 -- this is a tested/proven-concept
+    // workflow, not a trial one; the underlying `source` column is untouched,
+    // still used below for the Remove action).
+    const sourceBadge = s.source === 'proven' ? '<span class="badge badge-tested_proven">Proven</span>' : '';
+    const progress = fulfilled ? conceptProgressChecksHtml(s.asset_id, s.asset_status) : '<span class="pw-slot-progress-empty">—</span>';
+    const complete = fulfilled && s.asset_status === 'uploaded_live';
+    // Only a fulfilled slot has an asset row to attach a person to -- an
+    // open/unfulfilled slot has nowhere to persist Assigned To/Editing yet.
+    // Empty (rather than omitted) placeholders in both cases keep every
+    // row on the same grid -- see A5.
     const assigneeControl = fulfilled ? `
-        <span class="pw-slot-assignee">
-          Assigned:
-          <select class="pw-slot-assignee-select" data-asset-id="${s.asset_id}">
-            <option value=""${!s.asset_concept_assignee ? ' selected' : ''}>Unassigned</option>
-            ${CONCEPT_ASSIGNEES.map((name) => `<option value="${name}"${s.asset_concept_assignee === name ? ' selected' : ''}>${name}</option>`).join('')}
-          </select>
-        </span>
-      ` : '';
+        <select class="pw-slot-assignee-select" data-asset-id="${s.asset_id}" title="Assigned To">
+          <option value=""${!s.asset_concept_assignee ? ' selected' : ''}>Unassigned</option>
+          ${CONCEPT_ASSIGNEES.map((name) => `<option value="${name}"${s.asset_concept_assignee === name ? ' selected' : ''}>${name}</option>`).join('')}
+        </select>
+      ` : '<span class="pw-slot-control-empty">—</span>';
+    const editingControl = fulfilled ? `
+        <select class="pw-slot-editing-select" data-asset-id="${s.asset_id}" title="Editing">
+          <option value=""${!s.asset_editing_owner ? ' selected' : ''}>Unassigned</option>
+          ${CONCEPT_ASSIGNEES.map((name) => `<option value="${name}"${s.asset_editing_owner === name ? ' selected' : ''}>${name}</option>`).join('')}
+        </select>
+      ` : '<span class="pw-slot-control-empty">—</span>';
     // A slot's asset is created automatically the moment the slot exists
     // (Settings already decided the concept name/format/classification),
-    // so the normal path is just editing it -- style/target date/owner, or
+    // so the normal path is just editing it -- style/target date, or
     // moving it through the pipeline. "+ Create Asset" only resurfaces as a
     // fallback for a slot that somehow has no asset (e.g. its asset was
     // deleted, or a slot generated before this behavior shipped).
@@ -1511,14 +1532,14 @@ function renderRequiredConcepts(data) {
         ${s.source === 'new' ? `<button type="button" class="btn btn-ghost btn-sm" onclick="deleteConceptSlot(${s.id})">Remove</button>` : ''}
       `;
     return `
-    <div class="pw-slot-row">
-      ${statusIcon}
+    <div class="pw-slot-row${complete ? ' pw-slot-row-complete' : ''}">
       <span class="pw-slot-rank">${s.slot_rank}</span>
       <span class="pw-slot-name">${escapeHtml(s.concept_name)}</span>
-      ${sourceBadge}
-      ${assigneeControl}
-      ${fulfilledLine}
-      ${actions}
+      <span class="pw-slot-col-badge">${sourceBadge}</span>
+      <span class="pw-slot-col-assignee">${assigneeControl}</span>
+      <span class="pw-slot-col-editing">${editingControl}</span>
+      <span class="pw-slot-col-progress">${progress}</span>
+      <span class="pw-slot-col-actions">${actions}</span>
     </div>`;
   }).join('');
 
@@ -1529,13 +1550,81 @@ function renderRequiredConcepts(data) {
     });
   });
 
-  list.querySelectorAll('.pw-slot-done-checkbox').forEach((cb) => {
-    cb.addEventListener('change', () => toggleConceptDone(Number(cb.dataset.assetId), cb.checked));
-  });
-
   list.querySelectorAll('.pw-slot-assignee-select').forEach((sel) => {
     sel.addEventListener('change', () => updateConceptAssignee(Number(sel.dataset.assetId), sel.value || null));
   });
+
+  list.querySelectorAll('.pw-slot-editing-select').forEach((sel) => {
+    sel.addEventListener('change', () => updateConceptEditingOwner(Number(sel.dataset.assetId), sel.value || null));
+  });
+
+  list.querySelectorAll('.pw-slot-progress-check').forEach((cb) => {
+    cb.addEventListener('change', () => toggleConceptProgressStage(Number(cb.dataset.assetId), cb.dataset.stage, cb.checked));
+  });
+}
+
+// Filmed / Edited / Uploaded to Meta -- three compact checkpoints along the
+// concept's own canonical `status` (STATUSES), not three independent
+// booleans: Drop concepts never flow through Concept Development/Tuesday
+// Review/Shooting/Editing the way Core/Promotion ones do (no
+// shoot_plan_item_id, no shoot_schedule row -- see conceptDevelopment.js),
+// so `status` is the only production-progress state that exists for one,
+// and this is a more granular version of the same direct status toggle
+// toggleConceptDone already used (a single "mark done" checkbox). Each
+// check reads "has status reached at least this point": Filmed once status
+// is filming or later, Edited once it's passed editing into qc or later
+// (qc is real WIP the existing pipeline tracks -- collapsing it into
+// "Edited: done, not yet uploaded" rather than adding a 4th check keeps
+// this a clean 3-way read of the same 8-stage enum Board already uses).
+const CONCEPT_PROGRESS_STAGES = [
+  { key: 'filmed', label: 'Filmed', atLeast: 'filming', revertTo: 'concept_script' },
+  { key: 'edited', label: 'Edited', atLeast: 'qc', revertTo: 'filming' },
+  { key: 'uploaded', label: 'Uploaded to Meta', atLeast: 'uploaded_live', revertTo: 'qc' },
+];
+
+function conceptProgressChecksHtml(assetId, status) {
+  const currentIndex = STATUSES.indexOf(status);
+  return CONCEPT_PROGRESS_STAGES.map((stage) => {
+    const checked = currentIndex >= STATUSES.indexOf(stage.atLeast);
+    return `
+      <label class="pw-slot-progress-item" title="${stage.label}">
+        <input type="checkbox" class="pw-slot-progress-check" data-asset-id="${assetId}" data-stage="${stage.key}" ${checked ? 'checked' : ''}>
+        <span>${stage.label}</span>
+      </label>`;
+  }).join('');
+}
+
+// Reuses the exact same PATCH /creative-assets/:id/status endpoint
+// toggleConceptDone (Board's own drag-and-drop) already writes to, so Board
+// and this row always agree on where a concept actually sits.
+async function toggleConceptProgressStage(assetId, stageKey, checked) {
+  const stage = CONCEPT_PROGRESS_STAGES.find((s) => s.key === stageKey);
+  if (!stage) return;
+  const nextStatus = checked ? stage.atLeast : stage.revertTo;
+  try {
+    await api(`/creative-assets/${assetId}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: nextStatus }),
+    });
+    const data = await loadProductPlan(state.currentDropId, state.currentProduct.product_code);
+    renderRequiredConcepts(data);
+    refreshDropsRow();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function updateConceptEditingOwner(assetId, editingOwner) {
+  try {
+    await api(`/creative-assets/${assetId}/assignee`, {
+      method: 'PATCH',
+      body: JSON.stringify({ editing_owner: editingOwner }),
+    });
+    const data = await loadProductPlan(state.currentDropId, state.currentProduct.product_code);
+    renderRequiredConcepts(data);
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 // Saves immediately on change (no separate Save button) -- re-renders from
@@ -1555,30 +1644,6 @@ async function updateConceptAssignee(assetId, conceptAssignee) {
   }
 }
 
-// Fast "mark done" shortcut straight to the Board's final Kanban status --
-// reuses the same status field/endpoint the Board's drag-and-drop uses, so
-// Board and Planning always agree, and current_coverage (this product's
-// progress bar, plus the Drop card back in Upcoming/Past Drops) picks it up
-// automatically since it now only counts 'uploaded_live' assets, not just an
-// asset row existing. Unticking reverts to 'not_started' -- same as dragging
-// a Board card backwards; nothing is lost since status_history is append-only.
-async function toggleConceptDone(assetId, done) {
-  try {
-    await api(`/creative-assets/${assetId}/status`, {
-      method: 'PATCH',
-      body: JSON.stringify({ status: done ? 'uploaded_live' : 'not_started' }),
-    });
-    await loadProductView(state.currentDropId, state.currentProduct.product_code);
-    await refreshDropsRow();
-  } catch (e) {
-    toast(e.message, true);
-  }
-}
-
-function assetStatusLabel(status) {
-  return STATUS_LABELS[status] || status;
-}
-
 
 // Proven slots snapshot their Format/Classification from the Proven Winner
 // at generation time (Settings), so there's nothing to re-pick -- those two
@@ -1593,6 +1658,7 @@ function fulfillWithNewAsset(slotId, conceptName, source, defaultFormat, default
     defaultClassification: defaultClassification || (source === 'proven' ? 'tested_proven' : 'new_experimental'),
     fulfillsSlotId: slotId,
     lockFormatClassification: source === 'proven',
+    dropContext: true,
   });
 }
 
@@ -1620,7 +1686,7 @@ async function linkExistingAsset(slotId, assetId) {
 async function editConceptAsset(assetId) {
   try {
     const asset = await api(`/creative-assets/${assetId}`);
-    openAssetModal(asset);
+    openAssetModal(asset, { dropContext: true });
   } catch (e) {
     toast(e.message, true);
   }
@@ -1836,8 +1902,27 @@ document.getElementById('new-category-btn').addEventListener('click', () => {
   openModal('category-modal');
 });
 
+// Opened from an Upcoming Drop (Required Concepts / Other Concepts), this
+// modal's fields are entirely oriented around executing tested/proven
+// concepts -- the old Kanban Board vocabulary (Concept Classification,
+// deliberate-trial, Strategy/Filming/QC owner) doesn't apply and shouldn't
+// be shown there (see A2). Board itself, and Core's "+ Plan Creative",
+// still need all of it, so the fields are hidden per-open rather than
+// removed.
+function applyAssetModalDropContext(isDropContext) {
+  const display = isDropContext ? 'none' : '';
+  document.getElementById('asset-modal-classification-field').style.display = display;
+  document.getElementById('asset-modal-trial-field').style.display = display;
+  document.getElementById('asset-modal-strategy-filming-row').style.display = display;
+  document.getElementById('asset-modal-editing-qc-row').style.display = display;
+  // Sidebar-aware centering (see A8) applies only for this Drop-context
+  // open, not Board's -- see the matching CSS comment on #asset-modal.
+  document.getElementById('asset-modal').classList.toggle('modal-drop-context', isDropContext);
+}
+
 function openAssetModal(card, presets = {}) {
   document.getElementById('asset-modal-title').textContent = card ? 'Edit Creative Asset' : 'New Creative Asset';
+  applyAssetModalDropContext(!!presets.dropContext);
   document.getElementById('asset-id').value = card ? card.id : '';
   populateStyleSelect(presets.presetStyleIds);
   document.getElementById('asset-style-id').value = card ? card.style_id : (presets.presetStyleIds ? presets.presetStyleIds[0] : (state.styles[0] ? state.styles[0].id : ''));
@@ -2973,8 +3058,15 @@ async function removeShootPlanItem(id) {
 // everywhere else in this app (coverage-progress-fill, coverage-card-gap,
 // drop-card-status), so Promotions reads as the same visual language as
 // Drops/Core/High Stock rather than inventing its own palette.
-function promotionUrgencyColor(u) { return u === 'at_risk' ? 'red' : u === 'needs_attention' ? 'amber' : 'green'; }
-function promotionUrgencyLabel(u) { return u === 'at_risk' ? 'At Risk' : u === 'needs_attention' ? 'Needs Attention' : 'On Track'; }
+// 'future' is the neutral state for a stage/promotion with a genuine gap
+// that's still comfortably far from launch (see B1/URGENCY_LAUNCH_WINDOW_DAYS
+// in promotions.js) -- distinct from 'on_track' (nothing left to do) so it
+// never reads as either "handled" or "urgent".
+function promotionUrgencyColor(u) { return u === 'at_risk' ? 'red' : u === 'needs_attention' ? 'amber' : u === 'future' ? 'grey' : 'green'; }
+function promotionUrgencyLabel(u) { return u === 'at_risk' ? 'At Risk' : u === 'needs_attention' ? 'Needs Attention' : u === 'future' ? 'Planned' : 'On Track'; }
+// .drop-card-status's classes are named on/needs/at- rather than matching
+// the raw color keywords the other status pills use directly as classes.
+function dropCardStatusClass(color) { return color === 'green' ? 'on-track' : color === 'amber' ? 'needs-attention' : color === 'grey' ? 'planned' : 'at-risk'; }
 
 function promotionCardHtml(p) {
   const color = promotionUrgencyColor(p.status);
@@ -2984,7 +3076,7 @@ function promotionCardHtml(p) {
     <div class="drop-card" data-promotion-id="${p.id}">
       <div class="drop-card-header">
         <div class="drop-card-name">${escapeHtml(p.name)}</div>
-        <div class="drop-card-status ${color === 'green' ? 'on-track' : color === 'amber' ? 'needs-attention' : 'at-risk'}">${promotionUrgencyLabel(p.status)}</div>
+        <div class="drop-card-status ${dropCardStatusClass(color)}">${promotionUrgencyLabel(p.status)}</div>
       </div>
       <div class="drop-card-date">${dateRange} · ${p.days_until_launch >= 0 ? p.days_until_launch + ' days to launch' : 'Launched'}</div>
       <div class="drop-card-pct">${p.summary.total_ready} / ${p.summary.total_required} Ready${pct !== null ? ' — ' + pct + '%' : ''}</div>
@@ -3109,7 +3201,7 @@ function promotionOverviewHtml(p) {
           <div class="promo-overview-label">PROMOTION OVERVIEW</div>
           <div class="promo-overview-dates">${dateRange}</div>
         </div>
-        <div class="drop-card-status ${color === 'green' ? 'on-track' : color === 'amber' ? 'needs-attention' : 'at-risk'}">${promotionUrgencyLabel(p.status)}</div>
+        <div class="drop-card-status ${dropCardStatusClass(color)}">${promotionUrgencyLabel(p.status)}</div>
       </div>
       <div class="promo-overview-pct-row">
         <div class="promo-overview-pct">${pct !== null ? pct + '%' : '—'}</div>
@@ -3153,7 +3245,7 @@ async function refreshCurrentPromotion() {
 
 function promotionStageGapLabel(s) {
   if (s.still_required <= 0) return '🟢 COVERAGE COMPLETE';
-  const icon = s.urgency === 'at_risk' ? '🔴' : s.urgency === 'needs_attention' ? '🟠' : '🟢';
+  const icon = s.urgency === 'at_risk' ? '🔴' : s.urgency === 'needs_attention' ? '🟠' : s.urgency === 'future' ? '⚪' : '🟢';
   return `${icon} ${s.still_required} still required`;
 }
 
@@ -3373,7 +3465,7 @@ async function renderPromotionStageDetailView() {
   const color = promotionUrgencyColor(stage.urgency);
   const urgencyEl = document.getElementById('promotion-stage-view-urgency');
   urgencyEl.textContent = promotionUrgencyLabel(stage.urgency);
-  urgencyEl.className = `drop-card-status ${color === 'green' ? 'on-track' : color === 'amber' ? 'needs-attention' : 'at-risk'}`;
+  urgencyEl.className = `drop-card-status ${dropCardStatusClass(color)}`;
 
   const dueLabel = stage.due_date ? formatDate(stage.due_date) : 'Not set';
   document.getElementById('promotion-stage-view-summary').innerHTML = `
@@ -3466,6 +3558,17 @@ function conceptTypesForFormat(format) {
   return state.conceptTypes.filter((t) => !t.format || t.format === format).map((t) => t.name);
 }
 
+// A previously-picked real Concept Type that no longer applies once Format
+// changes (e.g. "Flatlay Photo" while switching to Video) gets cleared, not
+// silently carried over as bogus "Other" custom text -- but a genuinely
+// typed-in custom value (never a real Concept Type name to begin with) has
+// nothing to do with Format, so it's left alone. See B4.
+function nextConceptTypeValueForFormat(currentValue, format) {
+  const validTypes = conceptTypesForFormat(format);
+  const isKnownType = state.conceptTypes.some((t) => t.name === currentValue);
+  return (!isKnownType || validTypes.includes(currentValue)) ? currentValue : '';
+}
+
 function shootThisWeekForPromotionStage(stageId) {
   const promotion = state.currentPromotion;
   const stage = ((promotion && promotion.stages) || []).find((s) => s.id === stageId);
@@ -3475,6 +3578,7 @@ function shootThisWeekForPromotionStage(stageId) {
   document.getElementById('promotion-shoot-context-promotion').textContent = promotion.name;
   document.getElementById('promotion-shoot-context-stage').textContent = stage.name;
   document.getElementById('promotion-shoot-assignee').value = '';
+  document.getElementById('promotion-shoot-editing-owner').value = '';
   document.getElementById('promotion-shoot-concept-name').value = '';
   document.getElementById('promotion-shoot-format').value = 'video';
   fillConceptDevSelectWithOther('promotion-shoot-concept-type-select', 'promotion-shoot-concept-type-custom', conceptTypesForFormat('video'), '');
@@ -3493,7 +3597,8 @@ function shootThisWeekForPromotionStage(stageId) {
 function onPromotionShootFormatChange() {
   const currentValue = conceptDevSelectWithOtherValue('promotion-shoot-concept-type-select', 'promotion-shoot-concept-type-custom');
   const format = document.getElementById('promotion-shoot-format').value;
-  fillConceptDevSelectWithOther('promotion-shoot-concept-type-select', 'promotion-shoot-concept-type-custom', conceptTypesForFormat(format), currentValue);
+  const nextValue = nextConceptTypeValueForFormat(currentValue, format);
+  fillConceptDevSelectWithOther('promotion-shoot-concept-type-select', 'promotion-shoot-concept-type-custom', conceptTypesForFormat(format), nextValue);
   if (format !== 'video') promotionShootConceptOrigin = null;
   renderPromotionShootConceptOrigin();
   updatePromotionShootOriginVisibility();
@@ -3570,6 +3675,7 @@ async function savePromotionShootItem() {
   if (!conceptName) return toast('Concept Name / Idea is required', true);
   const conceptType = conceptDevSelectWithOtherValue('promotion-shoot-concept-type-select', 'promotion-shoot-concept-type-custom');
   const conceptAssignee = document.getElementById('promotion-shoot-assignee').value || null;
+  const editingOwner = document.getElementById('promotion-shoot-editing-owner').value || null;
   const format = document.getElementById('promotion-shoot-format').value;
   // Concept Approach is a required choice for Video only -- Static always
   // saves concept_origin = NULL (see schema.sql's comment on the column).
@@ -3603,6 +3709,7 @@ async function savePromotionShootItem() {
         concept_name: conceptName,
         concept_type: conceptType || null,
         concept_assignee: conceptAssignee,
+        editing_owner: editingOwner,
         creator: defaultCreator ? defaultCreator.name : DEFAULT_CREATOR,
         format,
         source: 'promotion',
@@ -5791,14 +5898,24 @@ function applyPromotionConceptDevFormat(format) {
     document.getElementById('promo-modal-top-title').textContent = 'The Brief';
     document.getElementById('promo-modal-angle-label').textContent = 'What needs to be made?';
     document.getElementById('promo-modal-promo-context-title').textContent = 'Promotion / Offer Context';
+    document.getElementById('promo-modal-references-title').textContent = 'References';
+    document.getElementById('promo-modal-references-helper').textContent = 'Add inspiration or examples for this concept.';
   } else {
     document.getElementById('promo-modal-top-title').textContent = 'The Idea';
     document.getElementById('promo-modal-angle-label').textContent = 'The Idea';
     document.getElementById('promo-modal-promo-context-title').textContent = 'Promotion Message / Offer';
+    // Available for both New and Existing Video (gated on format alone, not
+    // origin) -- a previous WNDRR ad or an external TikTok/Instagram/Meta/
+    // YouTube video Max wants to recreate, reusing the exact same
+    // References data/component (multiple refs, Reference Library picker)
+    // as every other format -- just retitled so it reads as the ask.
+    document.getElementById('promo-modal-references-title').textContent = 'Reference Video';
+    document.getElementById('promo-modal-references-helper').textContent = 'A previous WNDRR video or external inspiration (TikTok/Instagram/Meta/YouTube) to recreate.';
   }
 
   const currentType = conceptDevSelectWithOtherValue('promo-modal-concept-type-select', 'promo-modal-concept-type-custom');
-  fillConceptDevSelectWithOther('promo-modal-concept-type-select', 'promo-modal-concept-type-custom', conceptTypesForFormat(promoConceptDevModalFormat), currentType);
+  const nextType = nextConceptTypeValueForFormat(currentType, promoConceptDevModalFormat);
+  fillConceptDevSelectWithOther('promo-modal-concept-type-select', 'promo-modal-concept-type-custom', conceptTypesForFormat(promoConceptDevModalFormat), nextType);
 }
 
 // New vs Existing Concept -- Video only (see schema.sql's comment on
@@ -5905,6 +6022,7 @@ function fillPromotionConceptDevModalFields(concept) {
   fillConceptDevSelectWithOther('promo-modal-talent-select', 'promo-modal-talent-custom', state.contentCreators.map((c) => c.name), concept ? concept.talent_requirement : '', 'No Talent Required');
   fillConceptDevSelectWithOther('promo-modal-concept-type-select', 'promo-modal-concept-type-custom', conceptTypesForFormat(promoConceptDevModalFormat), concept ? concept.concept_type : '');
   document.getElementById('promo-modal-assignee-select').value = concept ? (concept.concept_assignee || '') : '';
+  document.getElementById('promo-modal-editing-owner-select').value = concept ? (concept.editing_owner || '') : '';
 
   renderPromotionConceptDevModalStylesNeeded();
   document.getElementById('promo-modal-styles-search').value = '';
@@ -6060,6 +6178,7 @@ async function savePromotionConceptDevModal(targetStatus) {
 
   const conceptType = conceptDevSelectWithOtherValue('promo-modal-concept-type-select', 'promo-modal-concept-type-custom');
   const conceptAssignee = document.getElementById('promo-modal-assignee-select').value || null;
+  const editingOwner = document.getElementById('promo-modal-editing-owner-select').value || null;
 
   const body = {
     concept_name: name,
@@ -6111,7 +6230,7 @@ async function savePromotionConceptDevModal(targetStatus) {
       });
       await api(`/creative-assets/${promoConceptDevModalConceptId}/assignee`, {
         method: 'PATCH',
-        body: JSON.stringify({ concept_assignee: conceptAssignee }),
+        body: JSON.stringify({ concept_assignee: conceptAssignee, editing_owner: editingOwner }),
       });
     } else {
       const format = document.getElementById('promo-modal-format-select').value;
@@ -6123,10 +6242,10 @@ async function savePromotionConceptDevModal(targetStatus) {
         method: 'PATCH',
         body: JSON.stringify(body),
       });
-      if (conceptAssignee) {
+      if (conceptAssignee || editingOwner) {
         await api(`/creative-assets/${asset.id}/assignee`, {
           method: 'PATCH',
-          body: JSON.stringify({ concept_assignee: conceptAssignee }),
+          body: JSON.stringify({ concept_assignee: conceptAssignee, editing_owner: editingOwner }),
         });
       }
     }
