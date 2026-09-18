@@ -101,7 +101,7 @@ let state = {
   // know what they're writing to; createRows is the "+ Add Another Asset"
   // custom rows in the Create Final Edits flow, reset each time that modal
   // opens.
-  editing: { weekOffset: 0, data: null, filter: 'all', editorFilter: 'all', activeConceptAssetId: null, activeFinalEditId: null, createRows: [] },
+  editing: { view: 'week', weekOffset: 0, data: null, todayData: null, historyData: null, dragScheduleId: null, filter: 'all', editorFilter: 'all', activeConceptAssetId: null, activeFinalEditId: null, createRows: [] },
 };
 let dashboardWeekOffset = 0;
 
@@ -210,7 +210,7 @@ function switchTab(name) {
   // on every visit too. resetFilter: true -- arriving at Editing with no
   // filter explicitly requested should open on whatever's most actionable
   // (see loadEditingWeek/editingDefaultFilter), not always land on All.
-  if (name === 'editing') loadEditingWeek({ resetFilter: true });
+  if (name === 'editing') refreshCurrentEditingView({ resetFilter: true });
   // Upcoming Drops/Promotions are hash-routed within their own tab (list vs
   // drop/product or promotion/stage sub-views -- see renderDropsRoute/
   // renderPromotionsRoute). Arriving here via a plain sidebar click (not a
@@ -604,8 +604,21 @@ document.getElementById('action-brief-builder').addEventListener('click', () => 
 
 // ── Planning ─────────────────────────────────────────
 
+// Human-readable everywhere a date is displayed (Upcoming Drops' launch
+// date/Creative Due, Promotions' date ranges/stage due dates) -- see the
+// Shoot Week/Scheduling brief, item 13: raw ISO ("2026-09-24") mixed with
+// already-readable dates ("Mon 21 Sep") in the same header. Display only --
+// every caller still stores/sends the underlying YYYY-MM-DD string
+// unchanged; this never feeds a date input or a comparison, only text.
 function formatDate(value) {
-  return value ? String(value).slice(0, 10) : null;
+  if (!value) return null;
+  const dateOnly = String(value).slice(0, 10);
+  const [y, m, d] = dateOnly.split('-').map(Number);
+  if (!y || !m || !d) return dateOnly;
+  const date = new Date(y, m - 1, d);
+  const weekday = date.toLocaleDateString('en-AU', { weekday: 'short' });
+  const month = date.toLocaleDateString('en-AU', { month: 'short' });
+  return `${weekday} ${d} ${month}`;
 }
 
 function renderPlanning() {
@@ -3042,6 +3055,34 @@ function populatePromotionShootFilmingSelect() {
   sel.value = defaultEntry ? defaultEntry.name : DEFAULT_CREATOR;
 }
 
+// Shoot Week options for Promotion intake (see the Shoot Week brief) -- "This
+// Week"/"Next Week" for the two closest, then "W/C Mon DD Mon" for a dozen
+// weeks further out, reusing the same mondayOfWeek/isoDateStr/formatWeekRange
+// helpers every other week-nav in the app already builds its own picker from
+// (Shooting/Planning/Tuesday Review), not a new date-math implementation.
+// Defaults to the current week -- creating a concept never silently commits
+// to a future week the team hasn't actually chosen.
+function populatePromotionShootWeekOptions() {
+  const options = [];
+  for (let offset = 0; offset <= 12; offset++) {
+    const monday = mondayOfWeek(offset);
+    const value = isoDateStr(monday);
+    let label;
+    if (offset === 0) label = 'This Week';
+    else if (offset === 1) label = 'Next Week';
+    else label = `W/C ${monday.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' })}`;
+    options.push({ value, label });
+  }
+  return options;
+}
+
+function populatePromotionShootWeekSelect(selectedValue) {
+  const sel = document.getElementById('promotion-shoot-week');
+  const options = populatePromotionShootWeekOptions();
+  sel.innerHTML = options.map((o) => `<option value="${o.value}">${escapeHtml(o.label)}</option>`).join('');
+  sel.value = selectedValue || isoDateStr(mondayOfWeek(0));
+}
+
 // Sizes only matter when something has to be picked and brought in -- if
 // it's already in the office, hide the size controls entirely (colourway
 // checkboxes stay, since which colours are being shot is still recorded).
@@ -3182,16 +3223,21 @@ function promotionCardHtml(p) {
   const color = promotionUrgencyColor(p.status);
   const dateRange = p.end_date ? `${formatDate(p.start_date)} – ${formatDate(p.end_date)}` : formatDate(p.start_date);
   const pct = p.summary.overall_pct;
+  // Restrained readability pass (see the Shoot Week/Scheduling brief, item
+  // 14): the countdown and Ready fraction are the two numbers someone
+  // scans for first, so they get bolded up rather than sitting at the same
+  // weight as the surrounding label text -- no new layout, just hierarchy.
+  const countdownHtml = p.days_until_launch >= 0 ? `<strong>${p.days_until_launch}</strong> days to launch` : 'Launched';
   return `
     <div class="drop-card" data-promotion-id="${p.id}">
       <div class="drop-card-header">
         <div class="drop-card-name">${escapeHtml(p.name)}</div>
         ${promotionUrgencyBadgeHtml(p.status)}
       </div>
-      <div class="drop-card-date">${dateRange} · ${p.days_until_launch >= 0 ? p.days_until_launch + ' days to launch' : 'Launched'}</div>
-      <div class="drop-card-pct">${p.summary.total_ready} / ${p.summary.total_required} Ready${pct !== null ? ' — ' + pct + '%' : ''}</div>
+      <div class="drop-card-date">${dateRange} · ${countdownHtml}</div>
+      <div class="drop-card-pct"><strong>${p.summary.total_ready} / ${p.summary.total_required}</strong> Ready${pct !== null ? ' — ' + pct + '%' : ''}</div>
       ${pct !== null ? `<div class="coverage-progress-track"><div class="coverage-progress-fill ${color}" style="width:${Math.min(100, pct)}%;"></div></div>` : ''}
-      ${p.most_urgent_stage ? `<div class="drop-card-urgent">Next priority: ${escapeHtml(p.most_urgent_stage.name)} — ${p.most_urgent_stage.still_required} missing</div>` : ''}
+      ${p.most_urgent_stage ? `<div class="drop-card-urgent">Next priority: <strong>${escapeHtml(p.most_urgent_stage.name)}</strong> — ${p.most_urgent_stage.still_required} missing</div>` : ''}
     </div>`;
 }
 
@@ -3412,7 +3458,7 @@ function promotionStageCardHtml(stage, index, total) {
           <input type="number" min="0" class="promotion-stage-count-input" value="${stage.target}" onchange="savePromotionStageCount(${stage.id}, this.value)">
         </label>
         ${items.length ? `<div class="promotion-stage-item-list">${items.map(promotionStageItemRowHtml).join('')}</div>` : ''}
-        <button type="button" class="btn btn-primary btn-sm coverage-card-shoot-btn" onclick="shootThisWeekForPromotionStage(${stage.id})">+ Shoot This Week</button>
+        <button type="button" class="btn btn-primary btn-sm coverage-card-shoot-btn" onclick="shootThisWeekForPromotionStage(${stage.id})">+ Add Concept</button>
       </div>
     </div>`;
 }
@@ -3604,7 +3650,7 @@ async function renderPromotionStageDetailView() {
   const items = stage.items || [];
   const grid = document.getElementById('promotion-stage-view-items');
   if (!items.length) {
-    grid.innerHTML = '<div class="attention-empty">Nothing shot for this stage yet — click "+ Shoot This Week" to send the first requirement into Concept Development.</div>';
+    grid.innerHTML = '<div class="attention-empty">Nothing planned for this stage yet — click "+ Add Concept" to send the first requirement into Concept Development.</div>';
     return;
   }
 
@@ -3698,7 +3744,7 @@ function shootThisWeekForPromotionStage(stageId) {
   const stage = ((promotion && promotion.stages) || []).find((s) => s.id === stageId);
   if (!stage) return;
   promotionShootContext = { stageId };
-  document.getElementById('promotion-shoot-modal-title').textContent = 'Shoot This Week';
+  document.getElementById('promotion-shoot-modal-title').textContent = 'Add Concept';
   document.getElementById('promotion-shoot-context-promotion').textContent = promotion.name;
   document.getElementById('promotion-shoot-context-stage').textContent = stage.name;
   document.getElementById('promotion-shoot-assignee').value = '';
@@ -3710,6 +3756,7 @@ function shootThisWeekForPromotionStage(stageId) {
   // the two modals' selects have different ids, not because the logic
   // differs.
   populatePromotionShootFilmingSelect();
+  populatePromotionShootWeekSelect();
   fillConceptDevSelectWithOther('promotion-shoot-concept-type-select', 'promotion-shoot-concept-type-custom', conceptTypesForFormat('video'), '');
   promotionShootConceptOrigin = null;
   renderPromotionShootConceptOrigin();
@@ -3846,7 +3893,7 @@ async function savePromotionShootItem() {
         format,
         source: 'promotion',
         promotion_stage_id: promotionShootContext.stageId,
-        week_start: planningWeekStart(),
+        week_start: document.getElementById('promotion-shoot-week').value,
       }),
     });
     // Concept Approach isn't part of POST /shoot-plan's payload (that
@@ -4537,6 +4584,15 @@ function conceptDevWorkspaceHeaderHtml(product) {
   const promoOrigin = product.source === 'promotion' && product.promotion_name
     ? `<div class="cd-workspace-promo-origin">Promotion: <strong>${escapeHtml(product.promotion_name)}</strong> — ${escapeHtml(product.promotion_stage_name || '')}</div>`
     : '';
+  // Shoot Week -- Promotion only (see the Shoot Week brief, section 2:
+  // "Promotion Concept Dev cards should retain useful context... planned
+  // Shoot Week"). Editable in place until Tuesday Review approves it (the
+  // PATCH itself 409s once a shoot_schedule row exists, at which point
+  // Shooting's own move/reschedule is the correct place to change it) --
+  // see editConceptDevShootWeek.
+  const shootWeekHtml = product.source === 'promotion'
+    ? `<span id="cd-shoot-week-display-${product.shoot_plan_item_id}">Shoot Week: ${escapeHtml(conceptDevShootWeekLabel(product.shoot_week))} <button type="button" class="link-btn" onclick="editConceptDevShootWeek(${product.shoot_plan_item_id}, '${product.shoot_week}')">Change</button></span>`
+    : '';
   return `
     <div class="cd-workspace-header">
       ${thumb}
@@ -4551,11 +4607,50 @@ function conceptDevWorkspaceHeaderHtml(product) {
           <span>Owner: ${escapeHtml(product.creator || '—')}</span>
           <span>&middot;</span>
           <span>${count} New Concept${count === 1 ? '' : 's'}</span>
+          ${shootWeekHtml ? `<span>&middot;</span>${shootWeekHtml}` : ''}
         </div>
         <div class="shoot-plan-style-chips">${chips}</div>
         ${product.initial_idea ? `<div class="shoot-plan-idea">💡 ${escapeHtml(product.initial_idea)}</div>` : ''}
       </div>
     </div>`;
+}
+
+// "This Week" / "Next Week" / "W/C Mon DD Mon" -- same labelling as the
+// intake modal's Shoot Week select (populatePromotionShootWeekOptions),
+// computed fresh here since the product payload only carries the raw date.
+function conceptDevShootWeekLabel(weekStartStr) {
+  if (!weekStartStr) return '—';
+  const monday = mondayOfWeek(0);
+  const thisWeek = isoDateStr(monday);
+  const nextWeek = isoDateStr(mondayOfWeek(1));
+  if (weekStartStr === thisWeek) return 'This Week';
+  if (weekStartStr === nextWeek) return 'Next Week';
+  const [y, m, d] = weekStartStr.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  return `W/C ${date.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' })}`;
+}
+
+async function editConceptDevShootWeek(shootPlanItemId, currentValue) {
+  const display = document.getElementById(`cd-shoot-week-display-${shootPlanItemId}`);
+  if (!display) return;
+  const options = populatePromotionShootWeekOptions();
+  display.innerHTML = `<select onchange="saveConceptDevShootWeek(${shootPlanItemId}, this.value)">${
+    options.map((o) => `<option value="${o.value}" ${o.value === currentValue ? 'selected' : ''}>${escapeHtml(o.label)}</option>`).join('')
+  }</select>`;
+}
+
+async function saveConceptDevShootWeek(shootPlanItemId, weekStart) {
+  try {
+    await api(`/shoot-plan/${shootPlanItemId}/week`, { method: 'PATCH', body: JSON.stringify({ week_start: weekStart }) });
+    toast('Shoot Week updated');
+    if (conceptDevStandaloneProduct && conceptDevStandaloneProduct.shoot_plan_item_id === shootPlanItemId) {
+      await openConceptDevProductStandalone(shootPlanItemId);
+    } else {
+      await loadConceptDevWeek();
+    }
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 // State-aware so the card tells the creator what clicking it will actually
@@ -4651,7 +4746,13 @@ function renderConceptDevList() {
   }
 
   const data = state.conceptDev.data;
-  if (!data || !data.confirmed) {
+  // Promotion New Concepts ride along in `products` regardless of this
+  // week's own confirmation state (see conceptDevelopment.js's GET / --
+  // their development timing is independent of the Shoot Plan ceremony),
+  // so the "not confirmed" wall only applies when there's truly nothing to
+  // show -- a confirmed-but-empty week and an unconfirmed week carrying
+  // only pending Promotion concepts both fall through to the normal list.
+  if (!data || (!data.confirmed && !data.products.length)) {
     state.conceptDev.view = 'list';
     list.innerHTML = `<div class="attention-empty">Shoot Plan for Week ${conceptDevWeekNumber()} hasn't been confirmed yet — nothing to prepare. <button type="button" class="link-btn" onclick="switchTab('planning')">Go to Planning &rarr;</button></div>`;
     return;
@@ -6659,7 +6760,9 @@ function renderTuesdayReviewList() {
   renderTuesdayReviewSummary();
   const list = document.getElementById('tr-list');
   const data = state.tuesdayReview.data;
-  if (!data || !data.confirmed) {
+  // Same reasoning as renderConceptDevList: a Promotion New Concept can be
+  // ready for review well before its own week's Shoot Plan is confirmed.
+  if (!data || (!data.confirmed && !data.products.length)) {
     list.innerHTML = `<div class="attention-empty">Shoot Plan for Week ${tuesdayReviewWeekNumber()} hasn't been confirmed yet — nothing to review.</div>`;
     return;
   }
@@ -7295,24 +7398,36 @@ function refreshCurrentShootingView() {
   else loadShootingHistory();
 }
 
-// Owner filter -- populated from content_creators (see the brief: "Do not
-// hard-code these names"), shared client-side across Week/Today, no
-// refetch needed on change since both views already have the full week's
-// data in hand.
+// Filming-person filter -- sourced from CONCEPT_ASSIGNEES (Mark/Shez/Til),
+// the app's one small "real production people" roster, NOT
+// state.contentCreators (every app user who can run Shoot Plan intake --
+// Brendan, Lucy, Max, Sheridan, Steve, etc.). Showing the full user list
+// here was the "All Owners" problem the brief called out; "All" still
+// covers anyone outside this roster, it's just not given its own button.
+// Rendered as buttons (not a <select>) into the .person-filter containers,
+// shared client-side across Week/Today, no refetch needed on change since
+// both views already have the full week's data in hand.
 function populateShootingOwnerFilters() {
-  const optionsHtml = `<option value="all">All Owners</option>` +
-    state.contentCreators.map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join('');
+  const names = ['all', ...CONCEPT_ASSIGNEES];
+  const buttonsHtml = names.map((name) => {
+    const label = name === 'all' ? 'All' : escapeHtml(name);
+    const active = state.shooting.ownerFilter === name ? ' person-filter-btn-active' : '';
+    return `<button type="button" class="person-filter-btn${active}" data-value="${escapeHtml(name)}" onclick="setShootingOwnerFilter('${escapeHtml(name)}')">${label}</button>`;
+  }).join('');
   ['shoot-week-owner-filter', 'shoot-today-owner-filter'].forEach((id) => {
     const el = document.getElementById(id);
     if (!el) return;
-    el.innerHTML = optionsHtml;
-    el.value = state.shooting.ownerFilter;
+    el.innerHTML = buttonsHtml;
   });
 }
 
 function setShootingOwnerFilter(value) {
   state.shooting.ownerFilter = value;
-  document.querySelectorAll('.shoot-owner-filter').forEach((el) => { el.value = value; });
+  document.querySelectorAll('#shoot-week-owner-filter, #shoot-today-owner-filter').forEach((container) => {
+    container.querySelectorAll('.person-filter-btn').forEach((btn) => {
+      btn.classList.toggle('person-filter-btn-active', btn.dataset.value === value);
+    });
+  });
   if (state.shooting.view === 'week') renderShootingWeekView();
   else if (state.shooting.view === 'today') renderShootingTodayView();
 }
@@ -7434,6 +7549,59 @@ async function unmarkShootingShot(scheduleId) {
   }
 }
 
+// Scheduled -> In Progress (see the Scheduling brief, item 7) -- and its
+// undo. Never touches ready_for_editing -- only markShootingShot does, so
+// starting a shoot can never leak the concept into Editing.
+async function startShooting(scheduleId) {
+  try {
+    await api(`/shooting/${scheduleId}/start`, { method: 'POST' });
+    toast('Marked as In Progress');
+    refreshCurrentShootingView();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function unstartShooting(scheduleId) {
+  try {
+    await api(`/shooting/${scheduleId}/unstart`, { method: 'POST' });
+    toast('Reverted to Scheduled');
+    refreshCurrentShootingView();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// "Shot" for a static/photo concept, "Filmed" for video -- same format-aware
+// labelling convention Upcoming Drops' own progress checkboxes already use
+// (see conceptProgressStageLabel), reused here rather than a second mapping.
+function shootingProductionLabel(format) {
+  return format === 'static' ? 'Shot' : 'Filmed';
+}
+
+// The obvious, explicit production-status control the brief calls for --
+// three labelled segments (Scheduled / In Progress / Shot·Filmed), not a
+// single passive-looking badge someone has to discover is clickable.
+// Deliberately linear: only the segment immediately after the current one
+// (advance) or the current one itself, if there's somewhere to undo back to
+// (revert), is ever clickable -- matches exactly the two small transitions
+// each backend endpoint supports (start/unstart, mark-shot/unmark-shot), no
+// arbitrary jumping between states.
+function shootingStatusControlHtml(item) {
+  const stages = ['scheduled', 'in_progress', 'shot'];
+  const labels = { scheduled: 'Scheduled', in_progress: 'In Progress', shot: shootingProductionLabel(item.format) };
+  const currentIndex = stages.indexOf(item.status);
+  return `<div class="shoot-status-control" onclick="event.stopPropagation()">${stages.map((stage, i) => {
+    const isCurrent = i === currentIndex;
+    const isNext = i === currentIndex + 1;
+    let onclick = null;
+    if (isNext) onclick = stage === 'in_progress' ? `startShooting(${item.id})` : `markShootingShot(${item.id})`;
+    else if (isCurrent && i > 0) onclick = stage === 'in_progress' ? `unstartShooting(${item.id})` : `unmarkShootingShot(${item.id})`;
+    const title = isNext ? `Mark as ${labels[stage]}` : (onclick ? `Undo -- revert to ${labels[stages[i - 1]]}` : '');
+    return `<button type="button" class="shoot-status-segment${isCurrent ? ' shoot-status-segment-active' : ''}" ${onclick ? `onclick="${onclick}"` : 'disabled'} title="${title}">${labels[stage]}</button>`;
+  }).join('')}</div>`;
+}
+
 // Week grid card -- compact by design (per the brief: "Do NOT display the
 // entire Concept description..."). Shot cards stay visible and undraggable
 // (see the backend's status != 'shot' guard) so the calendar always shows
@@ -7448,12 +7616,8 @@ async function unmarkShootingShot(scheduleId) {
 // concept actually sits in the Shooting workflow.
 function shootingCardHtml(item, isUnscheduled = false) {
   const isShot = item.status === 'shot';
-  const metaParts = [item.owner, item.location].filter(Boolean);
   const carriedBadge = item.carried_over ? `<span class="shoot-carried-badge">From W${isoWeekNumber(parseDateStr(item.original_week_start))}</span>` : '';
-  const plannedLabel = isUnscheduled ? 'Needs Scheduling' : 'Scheduled';
-  const statusHtml = isShot
-    ? `<button type="button" class="shoot-status-pill shoot-status-pill-shot shoot-status-pill-toggle" onclick="event.stopPropagation(); unmarkShootingShot(${item.id})" title="Undo -- mark as not Shot">&check; Shot</button>`
-    : `<button type="button" class="shoot-status-pill shoot-status-pill-toggle" onclick="event.stopPropagation(); markShootingShot(${item.id})" title="Mark as Shot">&#9675; ${plannedLabel}</button>`;
+  const statusHtml = shootingStatusControlHtml(item);
   const menuHtml = isShot ? '' : `
         <div class="shoot-card-menu" onclick="event.stopPropagation()">
           <button type="button" class="shoot-card-menu-btn" onclick="toggleShootCardMenu(${item.id})" aria-label="Move concept">&bull;&bull;&bull;</button>
@@ -7470,10 +7634,17 @@ function shootingCardHtml(item, isUnscheduled = false) {
   // (see the Drop -> Shooting brief, item 8).
   const dropBadge = item.source === 'drop' && item.drop_name
     ? `<span class="shoot-card-drop-badge">${escapeHtml(item.drop_name)}</span>` : '';
+  // Filming person -- deliberately its own labelled line (see the
+  // Scheduling brief, item 6: "the person's name is visually buried"),
+  // never lumped into the same meta line as Location the way "Owner" used
+  // to be.
+  const filmingHtml = item.owner ? `<div class="shoot-card-filming">Filming: <strong>${escapeHtml(item.owner)}</strong></div>` : '';
+  const metaParts = [item.location].filter(Boolean);
   return `
     <div class="shoot-card ${isShot ? 'shoot-card-shot' : ''}" ${isShot ? '' : 'draggable="true"'} ondragstart="onShootCardDragStart(event, ${item.id})" onclick="openShootingBrief(${item.id})">
       <div class="shoot-card-name">${dragHandle}${escapeHtml(item.concept_name)}</div>
       <div class="shoot-card-product">${escapeHtml(item.product_name || '—')}${dropBadge}</div>
+      ${filmingHtml}
       ${metaParts.length ? `<div class="shoot-card-meta">${escapeHtml(metaParts.join(' · '))}</div>` : ''}
       <div class="shoot-card-footer">
         ${statusHtml}
@@ -7588,18 +7759,19 @@ function shootingTodayItemHtml(item) {
   const metaParts = [item.location].filter(Boolean);
   const dropBadge = item.source === 'drop' && item.drop_name
     ? `<span class="shoot-card-drop-badge">${escapeHtml(item.drop_name)}</span>` : '';
+  const filmingHtml = item.owner ? `<div class="shoot-card-filming">Filming: <strong>${escapeHtml(item.owner)}</strong></div>` : '';
   return `
     <div class="shoot-today-item ${isShot ? 'shoot-card-shot' : ''}">
       <div class="shoot-today-item-main">
         <div class="shoot-card-name">${escapeHtml(item.concept_name)}</div>
         <div class="shoot-card-product">${escapeHtml(item.product_name || '—')}${dropBadge}</div>
+        ${filmingHtml}
         ${metaParts.length ? `<div class="shoot-card-meta">${escapeHtml(metaParts.join(' · '))}</div>` : ''}
         ${hookPreview ? `<div class="shoot-today-hook">&ldquo;${escapeHtml(hookPreview)}&rdquo;</div>` : ''}
       </div>
       <div class="shoot-today-item-actions">
-        <span class="shoot-card-status ${isShot ? 'shoot-card-status-shot' : ''}">${isShot ? '&check; Shot' : 'Planned'}</span>
+        ${shootingStatusControlHtml(item)}
         <button type="button" class="link-btn" onclick="openShootingBrief(${item.id})">View Shoot Brief &rarr;</button>
-        ${isShot ? '' : `<button type="button" class="btn btn-primary btn-sm" onclick="markShootingShot(${item.id})">&check; Mark as Shot</button>`}
       </div>
     </div>`;
 }
@@ -7846,7 +8018,7 @@ function renderShootingBrief(brief) {
     brief.product_name,
     CONCEPT_DEV_SOURCE_LABELS[brief.source] || brief.source,
     brief.drop_name ? `Drop: ${brief.drop_name}` : null,
-    brief.owner ? `Owner: ${brief.owner}` : null,
+    brief.owner ? `Filming: ${brief.owner}` : null,
     skuInfo,
   ].filter(Boolean).join(' &middot; ');
   document.getElementById('shoot-brief-context').innerHTML = `
@@ -8339,6 +8511,29 @@ async function loadEditingWeek({ resetFilter } = {}) {
   }
 }
 
+// Week/Today/History switcher, same pattern as Shooting's setShootingView --
+// always refetches whatever view is now active. The week-nav only makes
+// sense in Week view (Today always shows the real current week regardless
+// of week-nav position; History has its own past weeks), and the shared
+// person/workflow filters (see editingActiveConcepts) don't apply to
+// History's aggregated per-week numbers, so both are hidden there.
+function setEditingView(view) {
+  state.editing.view = view;
+  document.querySelectorAll('#editing-subnav .shoot-subnav-btn').forEach((b) => b.classList.toggle('active', b.dataset.editingView === view));
+  document.querySelectorAll('#editing-view-week, #editing-view-today, #editing-view-history').forEach((p) => p.classList.toggle('active', p.id === `editing-view-${view}`));
+  document.getElementById('editing-week-nav').style.display = view === 'week' ? '' : 'none';
+  document.getElementById('editing-controls-row').style.display = view === 'history' ? 'none' : '';
+  document.getElementById('editing-summary').style.display = view === 'history' ? 'none' : '';
+  document.getElementById('editing-filters').style.display = view === 'history' ? 'none' : '';
+  refreshCurrentEditingView({ resetFilter: true });
+}
+
+function refreshCurrentEditingView(opts) {
+  if (state.editing.view === 'today') return loadEditingToday(opts);
+  if (state.editing.view === 'history') return loadEditingHistory();
+  return loadEditingWeek(opts);
+}
+
 function changeEditingWeek(delta) {
   state.editing.weekOffset += delta;
   onEditingWeekChanged();
@@ -8455,26 +8650,33 @@ const EDITING_FILTERS = [
 // first real reader of editing_owner (see G's investigation): an
 // assignment made once in Upcoming Drops/Promotion intake now surfaces the
 // right person's queue here with nothing re-entered. Sourced from
-// CONCEPT_ASSIGNEES, NOT state.contentCreators (Shooting's owner filter's
-// list) -- editing_owner is written only through the "Editing" select in
-// Upcoming Drops/Promotion intake (index.html) and updateConceptEditingOwner
-// above, both of which already only ever offer Mark/Shez/Til (the same
-// fixed roster concept_assignee uses), a different, smaller list of people
-// than content_creators (who's filming, a Shooting-only concern -- see F).
-// Populating this from content_creators would silently make any concept
-// whose editing_owner is Shez or Til unreachable by its own filter option
-// (present only in "All Editors"), since those names aren't guaranteed to
-// exist in content_creators at all.
+// CONCEPT_ASSIGNEES (same compact roster Shooting's Filming filter now
+// uses too) -- editing_owner is written only through the "Editing" select
+// in Upcoming Drops/Promotion intake (index.html) and
+// updateConceptEditingOwner above, both of which already only ever offer
+// Mark/Shez/Til. Populating this from state.contentCreators (every app
+// user who can run Shoot Plan intake) would silently show editors who can
+// never actually be an editing_owner, and would risk the reverse too if
+// Mark/Shez/Til aren't all present in content_creators.
 function populateEditingEditorFilter() {
   const el = document.getElementById('editing-editor-filter');
   if (!el) return;
-  el.innerHTML = `<option value="all">All Editors</option>` +
-    CONCEPT_ASSIGNEES.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
-  el.value = state.editing.editorFilter;
+  const names = ['all', ...CONCEPT_ASSIGNEES];
+  el.innerHTML = names.map((name) => {
+    const label = name === 'all' ? 'All' : escapeHtml(name);
+    const active = state.editing.editorFilter === name ? ' person-filter-btn-active' : '';
+    return `<button type="button" class="person-filter-btn${active}" data-value="${escapeHtml(name)}" onclick="setEditingEditorFilter('${escapeHtml(name)}')">${label}</button>`;
+  }).join('');
 }
 
 function setEditingEditorFilter(value) {
   state.editing.editorFilter = value;
+  const el = document.getElementById('editing-editor-filter');
+  if (el) {
+    el.querySelectorAll('.person-filter-btn').forEach((btn) => {
+      btn.classList.toggle('person-filter-btn-active', btn.dataset.value === value);
+    });
+  }
   // Same reset-on-change reasoning as loadEditingWeek's own resetFilter --
   // switching editor can leave the current workflow-state tab pointing at
   // now-empty work, so it re-picks via the same editingDefaultFilter rule
@@ -8483,13 +8685,25 @@ function setEditingEditorFilter(value) {
   renderEditingList();
 }
 
+// Whichever view is currently active supplies the working concept list --
+// Week reads state.editing.data (the week-nav-browsed week), Today reads
+// its own separately-fetched state.editing.todayData (always the REAL
+// current week, independent of week-nav position, same as Shooting's
+// todayData). Routing every downstream computation through this one
+// function is what makes the shared summary/filter-tab bar above the
+// subnav automatically reflect whichever of Week/Today is showing.
+function editingActiveConcepts() {
+  const source = state.editing.view === 'today' ? state.editing.todayData : state.editing.data;
+  return (source && source.concepts) || [];
+}
+
 // The set of Concepts the editor filter currently allows -- every other
 // computation (filter-tab counts, the default-tab pick, the visible list)
 // reads through this one helper so "All Editors" (the default) is
 // mathematically identical to no filter at all, and nothing computes off
-// state.editing.data.concepts directly and forgets it.
+// the active concept list directly and forgets it.
 function editingVisibleConcepts() {
-  const concepts = (state.editing.data && state.editing.data.concepts) || [];
+  const concepts = editingActiveConcepts();
   if (state.editing.editorFilter === 'all') return concepts;
   return concepts.filter((c) => c.editing_owner === state.editing.editorFilter);
 }
@@ -8573,7 +8787,6 @@ function editingConceptCardHtml(concept) {
   const status = editingConceptStatus(concept);
   const { required, complete } = editingConceptCompletion(concept);
   const isReady = status === 'ready_for_approval';
-  const editor = editingConceptEditorLabel(concept);
   const pct = required > 0 ? Math.round((complete / required) * 100) : 0;
   const thumb = concept.image_url
     ? `<img class="high-stock-thumb" src="${concept.image_url}" alt="">`
@@ -8588,35 +8801,309 @@ function editingConceptCardHtml(concept) {
       <span class="cd-concept-status-pill ${EDITING_STATUS_CLASS[status]}">${isReady ? '&check; ' : ''}${EDITING_STATUS_LABELS[status]}</span>
       <div class="editing-concept-progress ${isReady ? 'editing-concept-progress-ready' : ''}">${complete} of ${required} Final Edit${required === 1 ? '' : 's'}</div>
       <div class="editing-card-progress-track"><div class="editing-card-progress-fill ${isReady ? 'ready' : ''}" style="width:${pct}%;"></div></div>
-      ${editor ? `<div class="cd-card-meta">Editor: ${escapeHtml(editor)}</div>` : ''}
+      ${concept.editing_owner ? `<div class="cd-card-meta">Editing: <strong>${escapeHtml(concept.editing_owner)}</strong></div>` : ''}
       <div class="cd-card-action">${editingConceptCtaLabel(status, complete)} &rarr;</div>
     </div>`;
 }
 
-// A status filter narrows to matching Concepts, same "Concept is the unit"
-// principle as everywhere else in this revision.
+// Renders whichever calendar view is currently active -- Week (day-grouped
+// calendar) or Today -- on top of the same shared summary/filter-tab bar,
+// same dispatch pattern as Shooting's refreshCurrentShootingView. History
+// has its own separate load/render pair (loadEditingHistory/
+// renderEditingHistoryView) since it doesn't share these per-Concept
+// filters at all.
 function renderEditingList() {
   renderEditingSummary();
   renderEditingFilters();
-  const concepts = editingVisibleConcepts();
-  const filter = state.editing.filter;
-  const shown = filter === 'all' ? concepts : concepts.filter((c) => editingConceptStatus(c) === filter);
-
-  document.getElementById('editing-empty').style.display = concepts.length ? 'none' : '';
-  document.getElementById('editing-list').innerHTML = shown.map(editingConceptCardHtml).join('');
+  if (state.editing.view === 'today') renderEditingTodayView();
+  else renderEditingWeekView();
 }
 
+// Searches both concept lists (Week's browsed-week data and Today's own
+// current-week data) rather than just whichever is currently active -- a
+// concept opened from Today must still be found if the user had earlier
+// browsed Week to a different week (and vice versa), since both views share
+// the same modal/action code.
 function editingFindConcept(creativeAssetId) {
-  const concepts = (state.editing.data && state.editing.data.concepts) || [];
-  return concepts.find((c) => c.creative_asset_id === creativeAssetId);
+  const weekConcepts = (state.editing.data && state.editing.data.concepts) || [];
+  const todayConcepts = (state.editing.todayData && state.editing.todayData.concepts) || [];
+  return weekConcepts.find((c) => c.creative_asset_id === creativeAssetId) || todayConcepts.find((c) => c.creative_asset_id === creativeAssetId);
 }
 
 function editingFindFinalEdit(finalEditId) {
-  for (const concept of (state.editing.data && state.editing.data.concepts) || []) {
+  const weekConcepts = (state.editing.data && state.editing.data.concepts) || [];
+  const todayConcepts = (state.editing.todayData && state.editing.todayData.concepts) || [];
+  for (const concept of [...weekConcepts, ...todayConcepts]) {
     const found = concept.final_edits.find((fe) => fe.id === finalEditId);
     if (found) return { finalEdit: found, concept };
   }
   return null;
+}
+
+// ── Editing calendar (Week/Today/History) ──────────────
+// Reuses Shooting's own SHOOT_DAY_KEYS/LABELS (the weekday domain is the
+// same) and its .shoot-day-column/.shoot-card/.shoot-card-menu/
+// .shoot-unscheduled CSS wholesale -- this is a second calendar of the same
+// shape, not a new visual language (item 8: "using existing Shooting UX
+// patterns, not an unrelated interface").
+function editingDayHeaderLabel(day) {
+  const monday = mondayOfWeek(state.editing.weekOffset);
+  const d = new Date(monday);
+  d.setDate(monday.getDate() + SHOOT_DAY_KEYS.indexOf(day));
+  const month = d.toLocaleDateString('en-AU', { month: 'short' }).toUpperCase().slice(0, 3);
+  return `${SHOOT_DAY_SHORT_LABELS[day]} ${d.getDate()} ${month}`;
+}
+
+function editingIsCurrentDay(day) {
+  return state.editing.weekOffset === 0 && day === shootingTodayInfo().dayKey;
+}
+
+// Per-day "X/Y Ready" -- Ready for Approval is Editing's own equivalent of
+// Shooting's "Shot" (the concept has nothing left to do on this day), so
+// this mirrors shootingDayHeaderHtml exactly, just counting a different
+// status.
+function editingDayHeaderHtml(day, items, isToday) {
+  const label = `<span class="shoot-day-date-group"><span class="shoot-day-date">${editingDayHeaderLabel(day)}</span>${isToday ? '<span class="shoot-day-today-badge">Today</span>' : ''}</span>`;
+  if (!items.length) return `<div class="shoot-day-header-top">${label}</div>`;
+  const readyCount = items.filter((c) => editingConceptStatus(c) === 'ready_for_approval').length;
+  const total = items.length;
+  const complete = readyCount === total;
+  const pct = Math.round((readyCount / total) * 100);
+  return `
+    <div class="shoot-day-header-top">
+      ${label}
+      <span class="shoot-day-progress-count${complete ? ' shoot-day-progress-complete' : ''}">${complete ? '&check; ' : ''}${readyCount}/${total} Ready</span>
+    </div>
+    <div class="shoot-day-progress-bar"><div class="shoot-day-progress-fill${complete ? ' shoot-day-progress-fill-complete' : ''}" style="width:${pct}%"></div></div>`;
+}
+
+// Every card's accessible alternative to drag-and-drop, same convention as
+// shootingMoveMenuItemsHtml -- item 12 asks for the same rescheduling
+// (Unscheduled<->weekday, weekday<->weekday, this week->future week) with
+// an explicit Move action alongside drag/drop, not instead of it. Never
+// locked by workflow state (item 9: calendar and workflow progress are
+// independent) -- a Ready for Approval concept can still be moved, unlike
+// Shooting's Shot cards which lock in place.
+function editingMoveMenuItemsHtml(concept) {
+  const dayItems = SHOOT_DAY_KEYS
+    .filter((day) => day !== concept.editing_day)
+    .map((day) => `<button type="button" class="shoot-card-menu-item" onclick="moveEditingCard(${concept.shoot_schedule_id}, '${day}', '${concept.editing_week_start}'); closeAllEditingCardMenus();">${SHOOT_DAY_LABELS[day]}</button>`)
+    .join('');
+  const unscheduledItem = concept.editing_day
+    ? `<button type="button" class="shoot-card-menu-item" onclick="moveEditingCard(${concept.shoot_schedule_id}, 'unscheduled', '${concept.editing_week_start}'); closeAllEditingCardMenus();">Unscheduled</button>`
+    : '';
+  const carryItem = `<button type="button" class="shoot-card-menu-item shoot-card-menu-item-carry" onclick="moveEditingCard(${concept.shoot_schedule_id}, 'carry_next_week', '${concept.editing_week_start}'); closeAllEditingCardMenus();">Carry to next week &rarr;</button>`;
+  return `<div class="shoot-card-menu-label">Move to</div>${dayItems}${unscheduledItem}${carryItem}`;
+}
+
+function toggleEditingCardMenu(scheduleId) {
+  const dropdown = document.getElementById(`editing-card-menu-${scheduleId}`);
+  if (!dropdown) return;
+  const isOpen = dropdown.classList.contains('open');
+  closeAllEditingCardMenus();
+  if (!isOpen) dropdown.classList.add('open');
+}
+
+function closeAllEditingCardMenus() {
+  document.querySelectorAll('#editing-week-grid .shoot-card-menu-dropdown.open, #editing-unscheduled .shoot-card-menu-dropdown.open').forEach((el) => el.classList.remove('open'));
+}
+
+document.addEventListener('click', (e) => {
+  if (e.target.closest('.shoot-card-menu')) return;
+  closeAllEditingCardMenus();
+});
+
+// One reschedule action for every way an Editing card moves (menu item or
+// drag/drop) -- mirrors moveShootingCard exactly, just against the Editing
+// calendar's own PATCH /editing/schedule/:id (see routes/editing.js), which
+// never touches editing_owner or any workflow-state field.
+async function moveEditingCard(scheduleId, value, currentWeekStart) {
+  try {
+    const body = value === 'unscheduled' ? { editing_day: null }
+      : value === 'carry_next_week' ? { editing_day: null, editing_week_start: nextWeekStartFrom(currentWeekStart) }
+      : { editing_day: value };
+    await api(`/editing/schedule/${scheduleId}`, { method: 'PATCH', body: JSON.stringify(body) });
+    toast(value === 'carry_next_week' ? 'Carried to next week' : 'Moved');
+    await refreshCurrentEditingView();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function onEditingCardDragStart(e, scheduleId) {
+  state.editing.dragScheduleId = scheduleId;
+  e.dataTransfer.setData('text/plain', String(scheduleId));
+  e.dataTransfer.effectAllowed = 'move';
+}
+
+function onEditingColumnDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  e.currentTarget.classList.add('drag-over');
+}
+
+function onEditingColumnDragLeave(e) {
+  e.currentTarget.classList.remove('drag-over');
+}
+
+function onEditingColumnDrop(e, day) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  const scheduleId = state.editing.dragScheduleId || Number(e.dataTransfer.getData('text/plain'));
+  state.editing.dragScheduleId = null;
+  if (!scheduleId) return;
+  moveEditingCard(scheduleId, day || 'unscheduled', null);
+}
+
+// Compact calendar card for Week's Unscheduled strip/day columns -- reuses
+// Shooting's .shoot-card shape (item 11: "Editing: Mark" gets its own
+// labelled line, same as Shooting's "Filming: Mark", never lumped into a
+// meta line) rather than the roomier .cd-card grid (that stays for Today,
+// where columns aren't narrow).
+function editingDayCardHtml(concept, isUnscheduled = false) {
+  const status = editingConceptStatus(concept);
+  const { required, complete } = editingConceptCompletion(concept);
+  const isReady = status === 'ready_for_approval';
+  const carriedBadge = concept.carried_over
+    ? `<span class="shoot-carried-badge">From W${isoWeekNumber(parseDateStr(concept.editing_original_week_start))}</span>` : '';
+  const dragHandle = isUnscheduled ? '<span class="shoot-card-drag-handle" title="Drag onto a day to schedule">⠿</span>' : '';
+  const editingHtml = concept.editing_owner ? `<div class="shoot-card-filming">Editing: <strong>${escapeHtml(concept.editing_owner)}</strong></div>` : '';
+  return `
+    <div class="shoot-card ${isReady ? 'shoot-card-shot' : ''}" draggable="true" ondragstart="onEditingCardDragStart(event, ${concept.shoot_schedule_id})" onclick="openEditingConcept(${concept.creative_asset_id})">
+      <div class="shoot-card-name">${dragHandle}${escapeHtml(concept.concept_name)}</div>
+      <div class="shoot-card-product">${escapeHtml(concept.product_name || '—')}</div>
+      ${editingHtml}
+      <div class="shoot-card-footer">
+        <span class="cd-concept-status-pill ${EDITING_STATUS_CLASS[status]}">${isReady ? '&check; ' : ''}${EDITING_STATUS_LABELS[status]}</span>
+        <span class="shoot-day-progress-count">${complete}/${required}</span>
+        ${carriedBadge}
+      </div>
+      <div class="shoot-card-actions">
+        <button type="button" class="link-btn" onclick="event.stopPropagation(); openEditingConcept(${concept.creative_asset_id})">${editingConceptCtaLabel(status, complete)} &rarr;</button>
+        <div class="shoot-card-menu" onclick="event.stopPropagation()">
+          <button type="button" class="shoot-card-menu-btn" onclick="toggleEditingCardMenu(${concept.shoot_schedule_id})" aria-label="Move concept">&bull;&bull;&bull;</button>
+          <div class="shoot-card-menu-dropdown" id="editing-card-menu-${concept.shoot_schedule_id}">${editingMoveMenuItemsHtml(concept)}</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+// Unscheduled + Mon-Fri, built from editingVisibleConcepts (editor filter)
+// further narrowed by the workflow-state tab -- both filters apply to the
+// calendar exactly as they did to the old flat list, they just also now
+// decide which day bucket a card counts toward.
+function renderEditingWeekView() {
+  const concepts = editingVisibleConcepts();
+  const filter = state.editing.filter;
+  const filtered = filter === 'all' ? concepts : concepts.filter((c) => editingConceptStatus(c) === filter);
+
+  const unscheduled = filtered.filter((c) => !c.editing_day);
+  const dayItems = {};
+  SHOOT_DAY_KEYS.forEach((day) => {
+    dayItems[day] = filtered.filter((c) => c.editing_day === day);
+  });
+
+  const unscheduledEl = document.getElementById('editing-unscheduled');
+  unscheduledEl.classList.toggle('shoot-unscheduled-compact', unscheduled.length === 0);
+  unscheduledEl.classList.toggle('shoot-unscheduled-active', unscheduled.length > 0);
+  unscheduledEl.innerHTML = unscheduled.length ? `
+    <div class="shoot-unscheduled-header">Unscheduled <span class="shoot-unscheduled-count">${unscheduled.length}</span><span class="shoot-unscheduled-hint">Needs scheduling</span><span class="shoot-unscheduled-drag-hint">Drag concepts onto a day to schedule</span></div>
+    <div class="shoot-unscheduled-list">${unscheduled.map((c) => editingDayCardHtml(c, true)).join('')}</div>`
+    : `<div class="shoot-unscheduled-header">Unscheduled <span class="shoot-unscheduled-count">0</span></div>`;
+
+  document.getElementById('editing-week-grid').innerHTML = SHOOT_DAY_KEYS.map((day) => {
+    const items = dayItems[day];
+    const isToday = editingIsCurrentDay(day);
+    return `
+      <div class="shoot-day-column${isToday ? ' shoot-day-column-today' : ''}" ondragover="onEditingColumnDragOver(event)" ondragleave="onEditingColumnDragLeave(event)" ondrop="onEditingColumnDrop(event, '${day}')">
+        <div class="shoot-day-header">${editingDayHeaderHtml(day, items, isToday)}</div>
+        <div class="shoot-day-cards">
+          ${items.length ? items.map((c) => editingDayCardHtml(c)).join('') : '<div class="shoot-day-empty">—</div>'}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// Today always shows the REAL current weekday's Editing queue, independent
+// of whatever week Week view happens to be browsing -- same reasoning as
+// shootingTodayInfo/loadShootingToday. Reuses the roomier editingConceptCardHtml
+// (.cd-card grid) rather than the compact day-card, since Today isn't
+// squeezed into a 5-column grid.
+async function loadEditingToday({ resetFilter } = {}) {
+  try {
+    state.editing.todayData = await api(`/editing?week_start=${isoDateStr(mondayOfWeek(0))}`);
+    if (resetFilter) state.editing.filter = editingDefaultFilter(editingComputeSummary());
+    renderEditingList();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function renderEditingTodayView() {
+  const { date, dayKey } = shootingTodayInfo();
+  const dayLabel = date.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' });
+  document.getElementById('editing-today-title').textContent = `Today — ${dayLabel.toUpperCase()}`;
+
+  const list = document.getElementById('editing-today-list');
+  if (!dayKey) {
+    list.innerHTML = '<div class="attention-empty">No editing is scheduled on weekends.</div>';
+    return;
+  }
+  const concepts = editingVisibleConcepts();
+  const filter = state.editing.filter;
+  const filtered = (filter === 'all' ? concepts : concepts.filter((c) => editingConceptStatus(c) === filter))
+    .filter((c) => c.editing_day === dayKey);
+  list.innerHTML = filtered.length ? filtered.map(editingConceptCardHtml).join('') : '<div class="attention-empty">Nothing scheduled for editing today.</div>';
+}
+
+async function loadEditingHistory() {
+  try {
+    state.editing.historyData = await api('/editing/history');
+    renderEditingHistoryView();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// Same Not Completed/Carried Over bucketing convention as
+// shootingHistoryStatusLabel, just against Editing's own "submitted" marker.
+function editingHistoryStatusLabel(w) {
+  const parts = [];
+  if (w.not_completed > 0 || w.carried_over === 0) parts.push(`${w.not_completed} Not Completed`);
+  if (w.carried_over > 0) parts.push(`${w.carried_over} Carried Over`);
+  return parts.join(' · ');
+}
+
+function renderEditingHistoryView() {
+  const weeks = (state.editing.historyData && state.editing.historyData.weeks) || [];
+  const list = document.getElementById('editing-history-list');
+  if (!weeks.length) {
+    list.innerHTML = '<div class="attention-empty">No Editing history yet.</div>';
+    return;
+  }
+  list.innerHTML = weeks.map((w) => {
+    const monday = parseDateStr(w.week_start);
+    const completionRate = w.planned > 0 ? Math.round((w.submitted / w.planned) * 100) : 0;
+    return `
+      <div class="shoot-history-row">
+        <div class="shoot-history-row-main">
+          <div class="shoot-history-week-name">Week ${isoWeekNumber(monday)}</div>
+          <div class="shoot-history-range">${formatWeekRange(monday)}</div>
+          <div class="shoot-history-stats">${w.planned} Planned · ${w.submitted} Submitted · ${editingHistoryStatusLabel(w)}</div>
+        </div>
+        <div class="shoot-history-row-side">
+          <div class="shoot-history-rate">${completionRate}% completed</div>
+          <button type="button" class="link-btn" onclick="jumpToEditingWeekFromHistory('${w.week_start}')">View Week &rarr;</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function jumpToEditingWeekFromHistory(weekStartStr) {
+  const targetMonday = parseDateStr(weekStartStr);
+  const diffWeeks = Math.round((targetMonday - mondayOfWeek(0)) / (7 * 86400000));
+  state.editing.weekOffset = diffWeeks;
+  setEditingView('week');
 }
 
 // The Concept workspace: "Open Concept -> Complete each Hook edit -> N/N
@@ -8772,7 +9259,7 @@ async function editingAddRequirement(index) {
       method: 'POST',
       body: JSON.stringify({ assets: [{ asset_name: req.label, variation_text: req.hookText, format: editingDefaultFormat() }] }),
     });
-    await loadEditingWeek();
+    await refreshCurrentEditingView();
     openFinalEditModal(created[0].id);
   } catch (e) {
     toast(e.message, true);
@@ -8817,7 +9304,7 @@ async function saveEditingCustomAssetRow(index) {
       body: JSON.stringify({ assets: [{ asset_name: row.name.trim(), format: row.format || editingDefaultFormat() }] }),
     });
     state.editing.createRows.splice(index, 1);
-    await loadEditingWeek();
+    await refreshCurrentEditingView();
     renderEditingConceptModal();
   } catch (e) {
     toast(e.message, true);
@@ -8922,7 +9409,7 @@ async function saveFinalEdit() {
   try {
     await api(`/editing/final-edits/${state.editing.activeFinalEditId}`, { method: 'PATCH', body: JSON.stringify(payload) });
     toast('Saved');
-    await loadEditingWeek();
+    await refreshCurrentEditingView();
     closeModal('final-edit-modal');
     openEditingConcept(conceptAssetId);
   } catch (e) {
@@ -8942,7 +9429,7 @@ async function deleteFinalEditFlow(finalEditId) {
   try {
     await api(`/editing/final-edits/${finalEditId}`, { method: 'DELETE' });
     toast('Final Edit deleted');
-    await loadEditingWeek();
+    await refreshCurrentEditingView();
     openEditingConcept(conceptAssetId);
   } catch (e) {
     toast(e.message, true);
@@ -8964,7 +9451,7 @@ async function submitEditingConceptReady() {
   try {
     await api(`/editing/concepts/${conceptAssetId}/ready-for-approval`, { method: 'POST' });
     toast('Sent for Approval');
-    await loadEditingWeek();
+    await refreshCurrentEditingView();
     renderEditingConceptModal();
   } catch (e) {
     toast(e.message, true);

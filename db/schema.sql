@@ -1425,3 +1425,34 @@ UPDATE concept_types SET format = 'video' WHERE format IS NULL AND name ILIKE '%
 -- this column, so it's purely additive.
 ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS concept_origin VARCHAR(20)
   CHECK (concept_origin IN ('new', 'existing'));
+
+-- Shooting's production status was too binary (Scheduled -> Shot in one
+-- hidden click) -- see the Shoot Week/Scheduling brief, item 7. Adds
+-- 'in_progress' as a genuine middle state between 'scheduled' and 'shot',
+-- reusing this SAME existing shoot_schedule.status column/domain rather
+-- than a new field -- the brief's own instruction to prefer existing
+-- canonical state over schema expansion. 'in_progress' deliberately never
+-- sets ready_for_editing (see shooting.js's /:id/start route) -- only
+-- reaching 'shot' does, so a concept mid-shoot can never leak into Editing.
+ALTER TABLE shoot_schedule DROP CONSTRAINT IF EXISTS shoot_schedule_status_check;
+ALTER TABLE shoot_schedule ADD CONSTRAINT shoot_schedule_status_check
+  CHECK (status IN ('unscheduled', 'scheduled', 'in_progress', 'shot'));
+
+-- Editing was only ever a flat queue for the week -- see the Shoot Week/
+-- Scheduling brief, item 8: it needs its own weekly calendar (Unscheduled +
+-- Mon-Fri), separate from the shoot's own scheduled_week_start/scheduled_day
+-- (a Concept shouldn't be assumed to be edited on the day it was filmed).
+-- Reuses this SAME shoot_schedule row (already the one canonical row per
+-- Concept's production lifecycle) rather than a new table, mirroring the
+-- exact original_week_start/scheduled_week_start/scheduled_day shape
+-- Shooting already has for its own calendar. Both stay NULL until the
+-- Concept is actually marked Shot (see shooting.js's /:id/mark-shot, which
+-- now also sets editing_original_week_start/editing_week_start to the
+-- current week -- "enters Editing as Unscheduled", item 8) and are cleared
+-- back to NULL by /:id/unmark-shot, so a Concept that's no longer
+-- ready_for_editing leaves no stale calendar placement behind.
+ALTER TABLE shoot_schedule ADD COLUMN IF NOT EXISTS editing_original_week_start DATE;
+ALTER TABLE shoot_schedule ADD COLUMN IF NOT EXISTS editing_week_start DATE;
+ALTER TABLE shoot_schedule ADD COLUMN IF NOT EXISTS editing_day VARCHAR(10)
+  CHECK (editing_day IN ('monday', 'tuesday', 'wednesday', 'thursday', 'friday'));
+CREATE INDEX IF NOT EXISTS idx_shoot_schedule_editing_week ON shoot_schedule(editing_week_start);

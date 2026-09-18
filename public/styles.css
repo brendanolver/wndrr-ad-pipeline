@@ -407,6 +407,24 @@ main{flex:1;min-width:0;padding:20px 24px;}
 #promotions-list .drop-card-name{line-height:17px;}
 #promotions-list .drop-card-header{min-height:34px;}
 
+/* Restrained visual polish pass (see the Shoot Week/Scheduling brief, item
+   14) -- title/countdown/Ready hierarchy, obvious clickability, and a
+   Next Priority line that reads as a real callout rather than an
+   afterthought. Still the same .drop-card shell/layout, no redesign. */
+#promotions-list .drop-card-name{font-size:16px;}
+#promotions-list .drop-card{transition:border-color 0.12s, box-shadow 0.12s;}
+#promotions-list .drop-card:hover{border-color:var(--teal);box-shadow:var(--shadow);}
+#promotions-list .drop-card-date strong{color:var(--text-secondary);font-weight:700;}
+#promotions-list .drop-card-pct strong{color:var(--text);font-weight:800;}
+#promotions-list .drop-card-urgent{font-size:12px;color:var(--text-secondary);background:var(--surface2);border-top:none;border-radius:var(--r);padding:7px 9px;margin-top:10px;}
+#promotions-list .drop-card-urgent strong{color:var(--text);}
+/* The "N upcoming promotions / Mark as Reviewed" row read as visually
+   disconnected from the cards above it (a plain border-top with no other
+   relationship to the grid) -- tightening the gap and softening the
+   divider integrates it as the section's own closing line rather than an
+   unrelated strip, without inventing a new row/workflow. */
+#promotions-list-view .planning-step-footer{margin-top:14px;padding-top:12px;border-top-color:var(--surface2);}
+
 /* ── DROP MODAL: date quickpicks + auto-populated style checklist ── */
 .quickpick-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:-6px;}
 .quickpick-chip{background:var(--purple-light);color:var(--purple);border:1px solid transparent;border-radius:var(--r-pill);padding:5px 11px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;}
@@ -1648,7 +1666,16 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .shoot-panel{display:none;}
 .shoot-panel.active{display:block;}
 
-.shoot-owner-filter{background:white;border:1px solid var(--border);border-radius:var(--r);padding:6px 10px;font-family:inherit;font-size:12.5px;font-weight:600;color:var(--text-secondary);cursor:pointer;}
+/* Compact "All | Mark | Shez" person filter -- Shooting's Filming filter
+   and Editing's editor filter both use this, in place of a <select> full
+   of every app user (see the brief: "do NOT show every app user merely
+   because they exist"). */
+.person-filter{display:inline-flex;border:1px solid var(--border);border-radius:var(--r-pill);overflow:hidden;}
+.person-filter-btn{background:white;border:none;padding:6px 12px;font-family:inherit;font-size:12.5px;font-weight:600;color:var(--text-secondary);cursor:pointer;}
+.person-filter-btn:hover{background:var(--surface2);}
+.person-filter-btn + .person-filter-btn{border-left:1px solid var(--border);}
+.person-filter-btn-active{background:var(--teal);color:white;}
+.person-filter-btn-active:hover{background:var(--teal);}
 
 /* Planned/Shot/Remaining -- a compact summary line, not KPI cards (see the
    brief: "the calendar is the main interface"). Each number is bolded up a
@@ -1748,25 +1775,25 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .shoot-card-name{font-weight:700;font-size:12.5px;}
 .shoot-card-product{font-size:11.5px;color:var(--text-secondary);}
 .shoot-card-drop-badge{display:inline-block;margin-left:6px;font-size:10px;font-weight:700;color:var(--purple);background:var(--purple-light);border-radius:var(--r-pill);padding:1px 7px;}
+.shoot-card-filming{font-size:11px;color:var(--text-secondary);}
+.shoot-card-filming strong{color:var(--text-primary);}
 .shoot-card-meta{font-size:11px;color:var(--text-muted);}
 .shoot-card-footer{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
 .shoot-card-status{font-size:10.5px;font-weight:700;color:var(--text-muted);}
 .shoot-card-status-shot{color:var(--green);}
 .shoot-carried-badge{font-size:10px;font-weight:700;color:var(--amber);background:var(--amber-light);border-radius:var(--r-pill);padding:1px 7px;}
 
-/* Week card status as a compact pill (not the plain text Today's list still
-   uses -- see shootingTodayItemHtml, deliberately untouched) so a stack of
-   cards in one day scans instantly by shape/colour, not just by reading
-   each one. Still just a small tinted badge, never a large coloured block. */
-.shoot-status-pill{display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:700;color:var(--text-secondary);background:var(--border);border-radius:var(--r-pill);padding:2px 8px;}
-.shoot-status-pill-shot{color:var(--green);background:var(--green-light);}
-/* Planned pill doubles as a "mark as Shot" toggle -- the hollow circle
-   already reads as an unchecked box, so this is a small affordance change
-   (border/background reset off the <button>, a hover state) rather than a
-   whole new checkbox control. Stays a quiet grey pill; only turns green
-   once the card is actually marked Shot (see shootingCardHtml). */
-.shoot-status-pill-toggle{border:none;font-family:inherit;cursor:pointer;}
-.shoot-status-pill-toggle:hover{background:var(--teal-light);color:var(--teal-dark);}
+/* Production-status control (Scheduled / In Progress / Shot·Filmed) -- a
+   segmented control, not a single passive badge, so it's obviously
+   interactive (see the Scheduling brief, item 7). Both Week cards and
+   Today's list use this same control now. */
+.shoot-status-control{display:inline-flex;border-radius:var(--r-pill);overflow:hidden;border:1px solid var(--border);}
+.shoot-status-segment{font-family:inherit;font-size:10px;font-weight:700;color:var(--text-muted);background:var(--surface);border:none;padding:3px 8px;cursor:not-allowed;}
+.shoot-status-segment:not(:disabled){cursor:pointer;color:var(--text-secondary);}
+.shoot-status-segment:not(:disabled):hover{background:var(--teal-light);color:var(--teal-dark);}
+.shoot-status-segment-active{background:var(--border);color:var(--text-primary);}
+.shoot-status-segment-active:not(:disabled){background:var(--green-light);color:var(--green);}
+.shoot-status-segment + .shoot-status-segment{border-left:1px solid var(--border);}
 
 /* Card footer: "View Brief →" is the one primary, always-visible action;
    moving days lives behind a quiet "•••" overflow menu instead of a
