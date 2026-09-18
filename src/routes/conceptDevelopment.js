@@ -67,27 +67,39 @@ router.get('/', async (req, res, next) => {
     // away from when they're actually developed. Concept Development answers
     // "what needs developing", not "what are we filming this week", so every
     // Promotion concept still short of a Tuesday Review decision is pulled
-    // in here unconditionally -- regardless of this week's confirmation
-    // state and regardless of its own Shoot Week -- and naturally drops off
-    // the instant it's approved or killed, same as any other concept.
-    // Excludes anything already picked up by the week-gated query above so
-    // a Promotion item whose Shoot Week does happen to match the requested
-    // week is never listed twice.
+    // in unconditionally -- regardless of THIS week's confirmation state and
+    // regardless of its own Shoot Week -- and naturally drops off the instant
+    // it's approved or killed, same as any other concept.
+    //
+    // Only merged in when resolvedWeekStart is the REAL current week (not
+    // whatever week the week-nav happens to be browsing) -- found via a live
+    // test pass: without this guard, a pending Promotion concept showed up
+    // on every single week ever queried (including unrelated past/future
+    // weeks nobody asked about), since the query itself carries no week
+    // filter at all. "Appear in Concept Development immediately" means
+    // immediately on open (today's week), not permanently glued to every
+    // week in the calendar.
     const includedItemIds = new Set(items.map((i) => i.id));
-    const pendingPromoResult = await pool.query(
-      `SELECT DISTINCT spi.*, p.id AS promotion_id, p.name AS promotion_name, p.notes AS promotion_notes, ps.name AS promotion_stage_name
-       FROM shoot_plan_items spi
-       JOIN creative_assets ca ON ca.shoot_plan_item_id = spi.id
-       LEFT JOIN promotion_stages ps ON ps.id = spi.promotion_stage_id
-       LEFT JOIN promotions p ON p.id = ps.promotion_id
-       WHERE spi.source = 'promotion'
-         AND ca.concept_dev_status IN ('not_started', 'in_development', 'ready_for_review', 'changes_required')
-       ORDER BY spi.created_at ASC`
+    const isCurrentWeekResult = await pool.query(
+      `SELECT $1::date = date_trunc('week', now())::date AS is_current`,
+      [resolvedWeekStart]
     );
-    for (const row of pendingPromoResult.rows) {
-      if (!includedItemIds.has(row.id)) {
-        items.push(row);
-        includedItemIds.add(row.id);
+    if (isCurrentWeekResult.rows[0].is_current) {
+      const pendingPromoResult = await pool.query(
+        `SELECT DISTINCT spi.*, p.id AS promotion_id, p.name AS promotion_name, p.notes AS promotion_notes, ps.name AS promotion_stage_name
+         FROM shoot_plan_items spi
+         JOIN creative_assets ca ON ca.shoot_plan_item_id = spi.id
+         LEFT JOIN promotion_stages ps ON ps.id = spi.promotion_stage_id
+         LEFT JOIN promotions p ON p.id = ps.promotion_id
+         WHERE spi.source = 'promotion'
+           AND ca.concept_dev_status IN ('not_started', 'in_development', 'ready_for_review', 'changes_required')
+         ORDER BY spi.created_at ASC`
+      );
+      for (const row of pendingPromoResult.rows) {
+        if (!includedItemIds.has(row.id)) {
+          items.push(row);
+          includedItemIds.add(row.id);
+        }
       }
     }
 
