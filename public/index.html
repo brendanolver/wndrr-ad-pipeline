@@ -415,7 +415,7 @@
           <span id="promotion-stage-view-urgency" class="drop-card-status"></span>
         </div>
         <div id="promotion-stage-view-summary" class="drop-view-summary"></div>
-        <button class="btn btn-primary" id="promotion-stage-view-shoot-btn">+ Shoot This Week</button>
+        <button class="btn btn-primary" id="promotion-stage-view-shoot-btn">+ Add Concept</button>
 
         <div class="planning-section-header">
           <h2>What We Have</h2>
@@ -492,7 +492,7 @@
             <button type="button" class="btn btn-ghost btn-sm" id="shoot-this-week-btn" onclick="goToCurrentShootingWeek()" style="display:none;">This Week</button>
             <div class="planning-week-picker" id="shoot-week-picker" style="display:none;"></div>
           </div>
-          <select class="shoot-owner-filter" id="shoot-week-owner-filter" onchange="setShootingOwnerFilter(this.value)"></select>
+          <div class="person-filter" id="shoot-week-owner-filter"></div>
         </div>
         <div class="shoot-summary-line" id="shoot-week-summary"></div>
         <div class="shoot-week-progress-bar" id="shoot-week-progress-bar"><div class="shoot-week-progress-fill" id="shoot-week-progress-fill"></div></div>
@@ -505,7 +505,7 @@
       <div class="shoot-panel" id="shoot-view-today">
         <div class="planning-header">
           <h2 class="shoot-today-title" id="shoot-today-title"></h2>
-          <select class="shoot-owner-filter" id="shoot-today-owner-filter" onchange="setShootingOwnerFilter(this.value)"></select>
+          <div class="person-filter" id="shoot-today-owner-filter"></div>
         </div>
         <div class="shoot-summary-line" id="shoot-today-summary"></div>
         <div class="shoot-today-list" id="shoot-today-list"></div>
@@ -658,11 +658,28 @@
          (the actual ads). Reads shoot_schedule rows with ready_for_editing
          (see routes/editing.js) -- a Concept appears here automatically the
          moment Shooting marks it Shot, nothing recreated by hand. Grouped by
-         Concept, never one flat list of assets -- see the brief. -->
+         Concept, never one flat list of assets -- see the brief.
+         Week/Today/History mirrors Shooting's own subnav (see the Shoot
+         Week/Scheduling brief, item 8) -- Editing gets its OWN weekly
+         calendar (editing_week_start/editing_day on shoot_schedule),
+         separate from the shoot's own scheduled_week_start/scheduled_day, so
+         a Concept isn't assumed to be edited the day it was filmed; it
+         enters here as Unscheduled and the editor places it on a day. The
+         workflow-state filter tabs (All/To Edit/Editing/Ready for Approval)
+         and the person filter stay a SEPARATE dimension from the calendar
+         (item 9: calendar = when, workflow state = how far through) -- both
+         apply across whichever of Week/Today is showing (see
+         editingActiveConcepts in app.js), just hidden for History. -->
     <section id="tab-editing" class="tab-panel">
       <h1 class="tr-page-title">Editing</h1>
-      <div class="planning-header">
-        <div class="planning-week-nav">
+      <div class="shoot-subnav" id="editing-subnav">
+        <button type="button" class="shoot-subnav-btn active" data-editing-view="week" onclick="setEditingView('week')">Week</button>
+        <button type="button" class="shoot-subnav-btn" data-editing-view="today" onclick="setEditingView('today')">Today</button>
+        <button type="button" class="shoot-subnav-btn" data-editing-view="history" onclick="setEditingView('history')">History</button>
+      </div>
+
+      <div class="planning-header" id="editing-controls-row">
+        <div class="planning-week-nav" id="editing-week-nav">
           <button type="button" class="week-nav-btn" id="editing-week-prev" onclick="changeEditingWeek(-1)" aria-label="Previous week">&lsaquo;</button>
           <button type="button" class="planning-week-label-btn" id="editing-week-label" onclick="toggleEditingWeekPicker()"></button>
           <button type="button" class="week-nav-btn" id="editing-week-next" onclick="changeEditingWeek(1)" aria-label="Next week">&rsaquo;</button>
@@ -671,15 +688,31 @@
         </div>
         <!-- Separate from the workflow-state tabs below (All/To Edit/Editing/
              Ready for Approval) -- this narrows WHICH person's queue is shown,
-             same pattern/markup as Shooting's owner filter, reading
-             editing_owner (see G's investigation: this is the first real
-             consumer of that column). -->
-        <select class="shoot-owner-filter" id="editing-editor-filter" onchange="setEditingEditorFilter(this.value)"></select>
+             same compact person-filter pattern as Shooting's Filming filter,
+             reading editing_owner (see G's investigation: this is the first
+             real consumer of that column). -->
+        <div class="person-filter" id="editing-editor-filter"></div>
       </div>
       <div class="shoot-summary-line" id="editing-summary"></div>
       <div class="filter-tabs" id="editing-filters"></div>
-      <div id="editing-list" class="cd-product-grid"></div>
-      <div id="editing-empty" class="hint" style="display:none;padding:18px 0;text-align:center;">Nothing shot yet this week.</div>
+
+      <!-- WEEK VIEW -->
+      <div class="shoot-panel active" id="editing-view-week">
+        <div class="shoot-unscheduled" id="editing-unscheduled" ondragover="onEditingColumnDragOver(event)" ondragleave="onEditingColumnDragLeave(event)" ondrop="onEditingColumnDrop(event, null)"></div>
+        <div class="shoot-week-grid" id="editing-week-grid"></div>
+      </div>
+
+      <!-- TODAY VIEW -->
+      <div class="shoot-panel" id="editing-view-today">
+        <h2 class="shoot-today-title" id="editing-today-title"></h2>
+        <div id="editing-today-list" class="cd-product-grid"></div>
+      </div>
+
+      <!-- HISTORY VIEW -->
+      <div class="shoot-panel" id="editing-view-history">
+        <h2 class="shoot-today-title">Editing History</h2>
+        <div class="shoot-history-list" id="editing-history-list"></div>
+      </div>
     </section>
 
     <!-- The Concept workspace -- the primary unit of work in Editing now
@@ -2371,7 +2404,7 @@
 <div id="promotion-shoot-modal" class="modal-backdrop">
   <div class="modal">
     <div class="modal-header">
-      <h3 id="promotion-shoot-modal-title">Shoot This Week</h3>
+      <h3 id="promotion-shoot-modal-title">Add Concept</h3>
       <button class="modal-close" onclick="closeModal('promotion-shoot-modal')">&times;</button>
     </div>
     <div class="modal-body">
@@ -2379,6 +2412,16 @@
         <div><span class="admin-note">Promotion</span><br><strong id="promotion-shoot-context-promotion"></strong></div>
         <div><span class="admin-note">Campaign Stage</span><br><strong id="promotion-shoot-context-stage"></strong></div>
       </div>
+      <!-- Shoot Week -- when this concept is actually planned to be filmed,
+           independent of the week it's being planned/developed in right now
+           (see the Shoot Week brief: a concept planned this week may not be
+           filmed for several weeks). Reuses shoot_plan_items.week_start, the
+           same field Core/High Stock/Drop already use for their own Shoot
+           Plan week -- not a second scheduling system. Defaults to the
+           current week; always editable later via editPromotionConceptShootWeek. -->
+      <label>Shoot Week
+        <select id="promotion-shoot-week"></select>
+      </label>
       <!-- Format leads (D1) -- it determines which Concept Types are even
            valid (conceptTypesForFormat in app.js), so picking it first,
            before Concept Type, means the dropdown below is never shown

@@ -1,6 +1,6 @@
 const express = require('express');
 const { pool } = require('../db');
-const { FINAL_EDIT_FORMATS, STATUSES } = require('../lib/statuses');
+const { FINAL_EDIT_FORMATS, STATUSES, SHOOT_DAYS } = require('../lib/statuses');
 
 const router = express.Router();
 
@@ -55,18 +55,38 @@ function dateStr(d) {
 // concept actually reached Editing. Selecting it here is what lets the new
 // per-editor filter (see setEditingEditorFilter in app.js) work off the
 // same assignment made at planning time, with nothing re-entered.
+// editing_week_start/editing_day/editing_original_week_start (see the Shoot
+// Week/Scheduling brief, item 8): Editing's OWN weekly calendar, separate
+// from the shoot's own scheduled_week_start/scheduled_day -- a Concept is
+// filtered into this week by WHEN IT'S BEING EDITED, not when it was
+// filmed, so it can carry across weeks independently of Shooting.
 const CONCEPT_SELECT = `
   SELECT
     ss.id AS shoot_schedule_id, ss.scheduled_week_start, ss.shot_at,
+    ss.editing_original_week_start, ss.editing_week_start, ss.editing_day,
     ca.id AS creative_asset_id, ca.concept_name, ca.format AS concept_format,
     ca.hook_variations, ca.location, ca.editing_submitted_at, ca.editing_owner,
     spi.product_name, spi.image_url, spi.creator AS owner
   FROM shoot_schedule ss
   JOIN creative_assets ca ON ca.id = ss.creative_asset_id
   LEFT JOIN shoot_plan_items spi ON spi.id = ca.shoot_plan_item_id
-  WHERE ss.ready_for_editing = true AND ss.scheduled_week_start = $1
+  WHERE ss.ready_for_editing = true AND ss.editing_week_start = $1
   ORDER BY ca.concept_name ASC
 `;
+
+// Self-healing-on-read, same pattern as shooting.js's backfillApprovedConcepts
+// and conceptDevelopment.js's generateOrTopUpPlan: any row that was already
+// Shot before editing_week_start existed (or before mark-shot started setting
+// it) gets placed into Editing's calendar now, as Unscheduled in whatever
+// week its shoot was scheduled for -- nothing to migrate by hand.
+async function backfillEditingCalendar() {
+  await pool.query(
+    `UPDATE shoot_schedule SET
+       editing_original_week_start = COALESCE(scheduled_week_start, date_trunc('week', now())::date),
+       editing_week_start = COALESCE(scheduled_week_start, date_trunc('week', now())::date)
+     WHERE ready_for_editing = true AND editing_week_start IS NULL`
+  );
+}
 
 // Same Hook-Variation-to-Final-Edit matching the client uses (see app.js's
 // editingConceptRequirements) -- required to independently validate a
@@ -104,6 +124,7 @@ router.get('/', async (req, res, next) => {
     if (weekStart !== undefined && !WEEK_RE.test(weekStart)) {
       return res.status(400).json({ error: 'week_start must be YYYY-MM-DD' });
     }
+    await backfillEditingCalendar();
     const resolvedWeekResult = await pool.query(`SELECT ${WEEK_START_SQL} AS week_start`, [weekStart || null]);
     const resolvedWeekStart = resolvedWeekResult.rows[0].week_start;
 
@@ -139,6 +160,10 @@ router.get('/', async (req, res, next) => {
       editing_owner: c.editing_owner,
       shot_at: c.shot_at,
       editing_submitted_at: c.editing_submitted_at,
+      editing_original_week_start: dateStr(c.editing_original_week_start),
+      editing_week_start: dateStr(c.editing_week_start),
+      editing_day: c.editing_day,
+      carried_over: dateStr(c.editing_original_week_start) !== dateStr(c.editing_week_start),
       final_edits: editsByConcept.get(c.creative_asset_id) || [],
     }));
 
@@ -351,6 +376,81 @@ router.delete('/final-edits/:id', async (req, res, next) => {
     const result = await pool.query('DELETE FROM final_edits WHERE id = $1 RETURNING id', [req.params.id]);
     if (!result.rows.length) return res.status(404).json({ error: 'Final edit not found' });
     res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Editing's own reschedule endpoint, mirroring shooting.js's PATCH /:id --
+// the weekday "Move to..." menu, drag-and-drop, and Carry to next week all
+// call this one route (see the Scheduling brief, item 12: "same as
+// Shooting"). editing_day null means Unscheduled; editing_week_start
+// omitted keeps the current editing week. Scoped to ready_for_editing = true
+// rows only -- a Concept still in Shooting has nothing to reschedule here.
+// Unlike Shooting's PATCH /:id, there's no status to preserve/reset: the
+// workflow state (To Edit/Editing/Ready for Approval) is derived entirely
+// from final_edits + editing_submitted_at, which this route never touches
+// -- calendar placement and workflow progress are genuinely independent
+// dimensions (see item 9), so moving a Concept's edit day can never
+// accidentally undo or advance its progress.
+router.patch('/schedule/:id', async (req, res, next) => {
+  try {
+    const { editing_day, editing_week_start } = req.body || {};
+    if (editing_day !== null && editing_day !== undefined && !SHOOT_DAYS.includes(editing_day)) {
+      return res.status(400).json({ error: `editing_day must be one of: ${SHOOT_DAYS.join(', ')}, or null` });
+    }
+    if (editing_week_start !== undefined && editing_week_start !== null && !WEEK_RE.test(editing_week_start)) {
+      return res.status(400).json({ error: 'editing_week_start must be YYYY-MM-DD' });
+    }
+    const nextDay = editing_day === undefined ? null : editing_day;
+    const result = await pool.query(
+      `UPDATE shoot_schedule SET
+         editing_day = $1::varchar,
+         editing_week_start = COALESCE($2::date, editing_week_start),
+         updated_at = now()
+       WHERE id = $3 AND ready_for_editing = true
+       RETURNING *`,
+      [nextDay, editing_week_start || null, req.params.id]
+    );
+    if (!result.rows.length) {
+      const existsResult = await pool.query('SELECT id, ready_for_editing FROM shoot_schedule WHERE id = $1', [req.params.id]);
+      if (!existsResult.rows.length) return res.status(404).json({ error: 'Shoot schedule entry not found' });
+      return res.status(409).json({ error: 'This Concept is not yet ready for Editing' });
+    }
+    const row = result.rows[0];
+    res.json({
+      ...row,
+      original_week_start: dateStr(row.original_week_start),
+      scheduled_week_start: dateStr(row.scheduled_week_start),
+      editing_original_week_start: dateStr(row.editing_original_week_start),
+      editing_week_start: dateStr(row.editing_week_start),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Editing's own History, one row per week that has ever had a Concept enter
+// Editing -- same bucketing reasoning as shooting.js's GET /history.
+// "Submitted" (Ready for Approval) is Editing's completion marker, the
+// equivalent of Shooting's "shot".
+router.get('/history', async (req, res, next) => {
+  try {
+    await backfillEditingCalendar();
+    const result = await pool.query(
+      `SELECT
+         ss.editing_original_week_start AS week_start,
+         COUNT(*)::int AS planned,
+         COUNT(*) FILTER (WHERE ca.editing_submitted_at IS NOT NULL AND ss.editing_week_start = ss.editing_original_week_start)::int AS submitted,
+         COUNT(*) FILTER (WHERE ss.editing_week_start != ss.editing_original_week_start)::int AS carried_over,
+         COUNT(*) FILTER (WHERE ca.editing_submitted_at IS NULL AND ss.editing_week_start = ss.editing_original_week_start)::int AS not_completed
+       FROM shoot_schedule ss
+       JOIN creative_assets ca ON ca.id = ss.creative_asset_id
+       WHERE ss.ready_for_editing = true
+       GROUP BY ss.editing_original_week_start
+       ORDER BY ss.editing_original_week_start DESC`
+    );
+    res.json({ weeks: result.rows.map((w) => ({ ...w, week_start: dateStr(w.week_start) })) });
   } catch (err) {
     next(err);
   }

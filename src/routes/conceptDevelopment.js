@@ -9,6 +9,18 @@ const router = express.Router();
 const WEEK_RE = /^\d{4}-\d{2}-\d{2}$/;
 const WEEK_START_SQL = `COALESCE($1::date, date_trunc('week', now())::date)`;
 
+// Same local-date-safety reasoning as shooting.js/editing.js's own dateStr --
+// node-pg parses a DATE column from local Y/M/D fields, so reading those same
+// fields back out (rather than toISOString(), which is UTC) never shifts the
+// date the frontend displays.
+function dateStr(d) {
+  if (!d) return null;
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 // The content creator's workspace for turning a CONFIRMED weekly Shoot Plan
 // into concepts ready for the Tuesday review meeting. Deliberately reads
 // only -- product/colourways/owner/source/initial idea all come straight
@@ -31,22 +43,68 @@ router.get('/', async (req, res, next) => {
     const resolvedWeekResult = await pool.query(`SELECT ${WEEK_START_SQL} AS week_start`, [weekStart || null]);
     const resolvedWeekStart = resolvedWeekResult.rows[0].week_start;
 
-    if (!confirmation) {
-      return res.json({ week_start: resolvedWeekStart, confirmed: false, confirmed_at: null, products: [] });
+    // Core/High Stock/Drop items stay fully gated behind THIS week's own
+    // Shoot Plan confirmation, unchanged -- Concept Dev only opens up once
+    // Monday Planning has actually handed the week off.
+    let items = [];
+    if (confirmation) {
+      const itemsResult = await pool.query(
+        `SELECT spi.*, p.id AS promotion_id, p.name AS promotion_name, p.notes AS promotion_notes, ps.name AS promotion_stage_name
+         FROM shoot_plan_items spi
+         LEFT JOIN promotion_stages ps ON ps.id = spi.promotion_stage_id
+         LEFT JOIN promotions p ON p.id = ps.promotion_id
+         WHERE spi.week_start = $1
+         ORDER BY spi.created_at ASC`,
+        [resolvedWeekStart]
+      );
+      items = itemsResult.rows;
     }
 
-    const itemsResult = await pool.query(
-      `SELECT spi.*, p.id AS promotion_id, p.name AS promotion_name, p.notes AS promotion_notes, ps.name AS promotion_stage_name
-       FROM shoot_plan_items spi
-       LEFT JOIN promotion_stages ps ON ps.id = spi.promotion_stage_id
-       LEFT JOIN promotions p ON p.id = ps.promotion_id
-       WHERE spi.week_start = $1
-       ORDER BY spi.created_at ASC`,
+    // Promotion New Concepts: unlike Core/High Stock/Drop, these aren't
+    // produced by Monday Planning's weekly ceremony at all -- they're added
+    // ad hoc, straight from a Campaign Stage, whenever the team plans one,
+    // and their own Shoot Week (shoot_plan_items.week_start) may be weeks
+    // away from when they're actually developed. Concept Development answers
+    // "what needs developing", not "what are we filming this week", so every
+    // Promotion concept still short of a Tuesday Review decision is pulled
+    // in unconditionally -- regardless of THIS week's confirmation state and
+    // regardless of its own Shoot Week -- and naturally drops off the instant
+    // it's approved or killed, same as any other concept.
+    //
+    // Only merged in when resolvedWeekStart is the REAL current week (not
+    // whatever week the week-nav happens to be browsing) -- found via a live
+    // test pass: without this guard, a pending Promotion concept showed up
+    // on every single week ever queried (including unrelated past/future
+    // weeks nobody asked about), since the query itself carries no week
+    // filter at all. "Appear in Concept Development immediately" means
+    // immediately on open (today's week), not permanently glued to every
+    // week in the calendar.
+    const includedItemIds = new Set(items.map((i) => i.id));
+    const isCurrentWeekResult = await pool.query(
+      `SELECT $1::date = date_trunc('week', now())::date AS is_current`,
       [resolvedWeekStart]
     );
-    const items = itemsResult.rows;
+    if (isCurrentWeekResult.rows[0].is_current) {
+      const pendingPromoResult = await pool.query(
+        `SELECT DISTINCT spi.*, p.id AS promotion_id, p.name AS promotion_name, p.notes AS promotion_notes, ps.name AS promotion_stage_name
+         FROM shoot_plan_items spi
+         JOIN creative_assets ca ON ca.shoot_plan_item_id = spi.id
+         LEFT JOIN promotion_stages ps ON ps.id = spi.promotion_stage_id
+         LEFT JOIN promotions p ON p.id = ps.promotion_id
+         WHERE spi.source = 'promotion'
+           AND ca.concept_dev_status IN ('not_started', 'in_development', 'ready_for_review', 'changes_required')
+         ORDER BY spi.created_at ASC`
+      );
+      for (const row of pendingPromoResult.rows) {
+        if (!includedItemIds.has(row.id)) {
+          items.push(row);
+          includedItemIds.add(row.id);
+        }
+      }
+    }
+
     if (!items.length) {
-      return res.json({ week_start: resolvedWeekStart, confirmed: true, confirmed_at: confirmation.confirmed_at, products: [] });
+      return res.json({ week_start: resolvedWeekStart, confirmed: !!confirmation, confirmed_at: confirmation ? confirmation.confirmed_at : null, products: [] });
     }
 
     const stylesResult = await pool.query(
@@ -134,6 +192,10 @@ router.get('/', async (req, res, next) => {
       promotion_name: i.promotion_name,
       promotion_notes: i.promotion_notes,
       promotion_stage_name: i.promotion_stage_name,
+      // The concept's own planned Shoot Week (see shootPlan.js/shoot-week
+      // brief) -- distinct from resolvedWeekStart, which is just which
+      // week's Concept Dev/Tuesday Review view this response is for.
+      shoot_week: dateStr(i.week_start),
       drop_plan_id: dropPlanIdByItem.get(i.id) || null,
       proven_coverage_count: provenCoverageByItem.get(i.id) || 0,
       colourways: (stylesByItem.get(i.id) || []).map((s) => ({
@@ -145,7 +207,7 @@ router.get('/', async (req, res, next) => {
       concepts: conceptsByItem.get(i.id) || [],
     }));
 
-    res.json({ week_start: resolvedWeekStart, confirmed: true, confirmed_at: confirmation.confirmed_at, products });
+    res.json({ week_start: resolvedWeekStart, confirmed: !!confirmation, confirmed_at: confirmation ? confirmation.confirmed_at : null, products });
   } catch (err) {
     next(err);
   }
@@ -251,6 +313,7 @@ router.get('/item/:shootPlanItemId', async (req, res, next) => {
       promotion_name: item.promotion_name,
       promotion_notes: item.promotion_notes,
       promotion_stage_name: item.promotion_stage_name,
+      shoot_week: dateStr(item.week_start),
       drop_plan_id: dropPlanId,
       proven_coverage_count: provenCoverageCount,
       colourways,

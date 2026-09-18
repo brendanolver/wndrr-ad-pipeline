@@ -11,6 +11,15 @@ const STOCK_STATUSES = ['in_office', 'needs_to_be_brought_in'];
 const SOURCES = ['core', 'high_stock', 'drop', 'promotion'];
 const WEEK_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+// Same local-date-safety reasoning as shooting.js/editing.js's own dateStr.
+function dateStr(d) {
+  if (!d) return null;
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 router.get('/', async (req, res, next) => {
   try {
     const weekStart = req.query.week_start;
@@ -282,6 +291,46 @@ router.delete('/:itemId/styles/:styleId', async (req, res, next) => {
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Shoot plan colourway not found' });
     res.status(204).send();
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Lets a Promotion concept's planned Shoot Week be changed after creation
+// (see the Shoot Week brief, section 1: "production plans change") --
+// scoped to items that haven't reached Shooting yet (no shoot_schedule row
+// on the linked asset). Once a concept is approved and has a real schedule
+// entry, moving it is Shooting's own job (drag/move to another week) --
+// this field is only the pre-approval plan, not a second scheduling system.
+router.patch('/:id/week', async (req, res, next) => {
+  try {
+    const { week_start } = req.body || {};
+    if (!WEEK_RE.test(week_start || '')) {
+      return res.status(400).json({ error: 'week_start must be YYYY-MM-DD' });
+    }
+    const itemResult = await pool.query(
+      `SELECT spi.id, spi.asset_id
+       FROM shoot_plan_items spi
+       WHERE spi.id = $1`,
+      [req.params.id]
+    );
+    if (!itemResult.rows.length) return res.status(404).json({ error: 'Shoot plan item not found' });
+    const { asset_id: assetId } = itemResult.rows[0];
+
+    if (assetId) {
+      const scheduleResult = await pool.query('SELECT id FROM shoot_schedule WHERE creative_asset_id = $1', [assetId]);
+      if (scheduleResult.rows.length) {
+        return res.status(409).json({
+          error: 'This concept already has a Shooting schedule entry -- reschedule it from Shooting instead of editing its planned Shoot Week here.',
+        });
+      }
+    }
+
+    const result = await pool.query(
+      `UPDATE shoot_plan_items SET week_start = $1 WHERE id = $2 RETURNING *`,
+      [week_start, req.params.id]
+    );
+    res.json({ ...result.rows[0], week_start: dateStr(result.rows[0].week_start) });
   } catch (err) {
     next(err);
   }
