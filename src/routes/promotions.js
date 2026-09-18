@@ -217,9 +217,18 @@ router.get('/:id', async (req, res, next) => {
     const stages = stagesByPromotion.get(promotion.id) || [];
 
     const stageIds = stages.map((s) => s.id);
+    // ca.concept_name/concept_type/concept_assignee -- a Promotion item's
+    // real identity and assignment live on its creative_assets row, not on
+    // shoot_plan_items (spi.product_name/creator are the Core/High-Stock-era
+    // "what product, which content creator" fields; a Promotion item has no
+    // product, and spi.creator is Filming -- who's shooting it, see F --
+    // never the concept-development Assigned To). Selecting these so the
+    // stage card can show what the concept actually is (see C1) instead of
+    // a person's name repeated on every row.
     const itemsResult = stageIds.length
       ? await pool.query(
-          `SELECT spi.*, ca.status AS asset_status FROM shoot_plan_items spi
+          `SELECT spi.*, ca.status AS asset_status, ca.concept_name, ca.concept_type, ca.concept_assignee
+           FROM shoot_plan_items spi
            LEFT JOIN creative_assets ca ON ca.id = spi.asset_id
            WHERE spi.promotion_stage_id = ANY($1::int[]) ORDER BY spi.created_at ASC`,
           [stageIds]
@@ -234,6 +243,9 @@ router.get('/:id', async (req, res, next) => {
         product_code: row.product_code,
         product_name: row.product_name,
         creator: row.creator,
+        concept_name: row.concept_name,
+        concept_type: row.concept_type,
+        concept_assignee: row.concept_assignee,
         asset_status: row.asset_status,
         asset_status_label: row.asset_status ? (STATUS_LABELS[row.asset_status] || row.asset_status) : null,
         created_at: row.created_at,

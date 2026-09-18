@@ -365,6 +365,18 @@ CREATE TABLE IF NOT EXISTS content_creators (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_content_creators_one_default ON content_creators(is_default) WHERE is_default;
 INSERT INTO content_creators (name, is_default) VALUES ('Mark', true) ON CONFLICT (name) DO NOTHING;
 
+-- Shez is a real filming person (already the second name in
+-- CONCEPT_ASSIGNEES, app.js -- the concept_assignee/editing_owner roster)
+-- but src/db.js's SEED_USERS only creates login accounts, and therefore
+-- auto-links content_creators, for the six named team accounts -- Shez
+-- doesn't have one. Without this row, Shez can never appear in Shooting's
+-- owner filter, Core/Promotion's Filming picker, or any other UI driven off
+-- content_creators, even though everywhere else in the app already treats
+-- Shez as a real assignable person. No user_id: this doesn't create a login,
+-- only the same plain named-creator row Settings' "+ Add Content Creator"
+-- already supports for anyone without an account.
+INSERT INTO content_creators (name) VALUES ('Shez') ON CONFLICT (name) DO NOTHING;
+
 -- Per-creator default sample size, by garment shape -- replaces the
 -- hardcoded CONTENT_CREATOR_SIZE_DEFAULTS object app.js used to key off
 -- creator name. A colourway's own resolved size list still decides what's

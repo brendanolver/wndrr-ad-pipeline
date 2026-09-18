@@ -101,7 +101,7 @@ let state = {
   // know what they're writing to; createRows is the "+ Add Another Asset"
   // custom rows in the Create Final Edits flow, reset each time that modal
   // opens.
-  editing: { weekOffset: 0, data: null, filter: 'all', activeConceptAssetId: null, activeFinalEditId: null, createRows: [] },
+  editing: { weekOffset: 0, data: null, filter: 'all', editorFilter: 'all', activeConceptAssetId: null, activeFinalEditId: null, createRows: [] },
 };
 let dashboardWeekOffset = 0;
 
@@ -380,6 +380,7 @@ async function loadAll() {
     populateShootingOwnerFilters();
     renderShootingWeekHeader();
     renderShootingWeekView();
+    populateEditingEditorFilter();
     renderEditingWeekHeader();
     renderEditingList();
   } catch (e) {
@@ -1661,6 +1662,21 @@ function conceptProgressChecksHtml(assetId, status, format) {
 // Reuses the exact same PATCH /creative-assets/:id/status endpoint
 // toggleConceptDone (Board's own drag-and-drop) already writes to, so Board
 // and this row always agree on where a concept actually sits.
+// Unlike updateConceptAssignee/updateConceptEditingOwner (which only ever
+// touch Required Concepts rows, since who's assigned never changes how
+// many creatives are covered), a status change here CAN move the product's
+// own coverage count -- current_coverage only counts 'uploaded_live'
+// assets (see coverage.js), so completing/un-completing a concept changes
+// the exact number the product summary ("0/10 creatives", "10 more
+// required") is built from. loadProductPlan()+renderRequiredConcepts()
+// alone never touched that summary at all (#product-view-overview), which
+// is why a fully-completed concept used to visually dim/strike through
+// while the product summary above it silently stayed at 0/10 (see A3).
+// loadProductView() already re-fetches the drop and recomputes that
+// summary from the same current_coverage/creative_target the rest of the
+// app reads (Planning's Drops row, the Drop detail page) -- reusing it
+// here is the same "one canonical refresh path" saveAsset/deleteAsset
+// already rely on via refreshProductViewIfOpen(), not a second counter.
 async function toggleConceptProgressStage(assetId, stageKey, checked) {
   const stage = CONCEPT_PROGRESS_STAGES.find((s) => s.key === stageKey);
   if (!stage) return;
@@ -1670,8 +1686,7 @@ async function toggleConceptProgressStage(assetId, stageKey, checked) {
       method: 'PATCH',
       body: JSON.stringify({ status: nextStatus }),
     });
-    const data = await loadProductPlan(state.currentDropId, state.currentProduct.product_code);
-    renderRequiredConcepts(data);
+    await loadProductView(state.currentDropId, state.currentProduct.product_code);
     refreshDropsRow();
   } catch (e) {
     toast(e.message, true);
@@ -3017,6 +3032,16 @@ function populateShootPlanCreatorSelect() {
   sel.value = defaultEntry ? defaultEntry.name : DEFAULT_CREATOR;
 }
 
+// Promotion intake's own version of the above -- same content_creators
+// list/default logic, a separate select since it lives in a different
+// modal (see F's "Filming" field).
+function populatePromotionShootFilmingSelect() {
+  const sel = document.getElementById('promotion-shoot-filming');
+  sel.innerHTML = state.contentCreators.map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join('');
+  const defaultEntry = state.contentCreators.find((c) => c.is_default) || state.contentCreators[0];
+  sel.value = defaultEntry ? defaultEntry.name : DEFAULT_CREATOR;
+}
+
 // Sizes only matter when something has to be picked and brought in -- if
 // it's already in the office, hide the size controls entirely (colourway
 // checkboxes stay, since which colours are being shot is still recorded).
@@ -3127,18 +3152,31 @@ async function removeShootPlanItem(id) {
 // in promotions.js) -- distinct from 'on_track' (nothing left to do) so it
 // never reads as either "handled" or "urgent".
 function promotionUrgencyColor(u) { return u === 'at_risk' ? 'red' : u === 'needs_attention' ? 'amber' : u === 'future' ? 'grey' : 'green'; }
-// 'Upcoming', not 'Planned' -- this is a derived display label for the
-// 'future' urgency state (outside the ~60-day action window; see B1's
-// stageUrgency in promotions.js), not a persisted status, and "Planned"
-// wrongly implied creative had actually been planned for it. Every
-// consumer of this one function (landing cards, overview, Campaign Stage
-// badges, stage detail) picks up the wording change together. Board's own
-// 'planned' workflow status, Core's "Planned" concepts, and Shoot This
-// Week's Planned/Shot pills are unrelated real statuses and are untouched.
-function promotionUrgencyLabel(u) { return u === 'at_risk' ? 'At Risk' : u === 'needs_attention' ? 'Needs Attention' : u === 'future' ? 'Upcoming' : 'On Track'; }
+// A label for 'at_risk'/'needs_attention'/'on_track' only -- 'future' has
+// no label because it gets no badge at all (see promotionUrgencyBadgeHtml
+// below). Kept as a separate function anyway, rather than folding the
+// blank case in here, since promotionUrgencyLabel is also used directly
+// for on_track/needs_attention/at_risk text in a couple of places that
+// never see 'future' to begin with.
+function promotionUrgencyLabel(u) { return u === 'at_risk' ? 'At Risk' : u === 'needs_attention' ? 'Needs Attention' : 'On Track'; }
 // .drop-card-status's classes are named on/needs/at- rather than matching
 // the raw color keywords the other status pills use directly as classes.
-function dropCardStatusClass(color) { return color === 'green' ? 'on-track' : color === 'amber' ? 'needs-attention' : color === 'grey' ? 'planned' : 'at-risk'; }
+function dropCardStatusClass(color) { return color === 'green' ? 'on-track' : color === 'amber' ? 'needs-attention' : 'at-risk'; }
+// A far-future promotion/stage (outside the ~60-day action window; see B1's
+// stageUrgency in promotions.js) gets NO badge at all, not a "Planned"/
+// "Upcoming" label -- the record existing isn't the same as anything being
+// organised yet, and a real future "genuinely planned" state is explicitly
+// out of scope for this pass (see B1's spec). Every consumer of urgency
+// badges (landing cards, overview, Campaign Stage cards, stage detail)
+// goes through this one helper so "no badge for future" only has to be
+// true in one place. The reserved header/card height that already exists
+// for alignment (e.g. #promotions-list .drop-card-header{min-height:34px})
+// keeps the layout steady with an empty badge area, same as before.
+function promotionUrgencyBadgeHtml(urgency) {
+  if (urgency === 'future') return '';
+  const color = promotionUrgencyColor(urgency);
+  return `<div class="drop-card-status ${dropCardStatusClass(color)}">${promotionUrgencyLabel(urgency)}</div>`;
+}
 
 function promotionCardHtml(p) {
   const color = promotionUrgencyColor(p.status);
@@ -3148,7 +3186,7 @@ function promotionCardHtml(p) {
     <div class="drop-card" data-promotion-id="${p.id}">
       <div class="drop-card-header">
         <div class="drop-card-name">${escapeHtml(p.name)}</div>
-        <div class="drop-card-status ${dropCardStatusClass(color)}">${promotionUrgencyLabel(p.status)}</div>
+        ${promotionUrgencyBadgeHtml(p.status)}
       </div>
       <div class="drop-card-date">${dateRange} · ${p.days_until_launch >= 0 ? p.days_until_launch + ' days to launch' : 'Launched'}</div>
       <div class="drop-card-pct">${p.summary.total_ready} / ${p.summary.total_required} Ready${pct !== null ? ' — ' + pct + '%' : ''}</div>
@@ -3273,7 +3311,7 @@ function promotionOverviewHtml(p) {
           <div class="promo-overview-label">PROMOTION OVERVIEW</div>
           <div class="promo-overview-dates">${dateRange}</div>
         </div>
-        <div class="drop-card-status ${dropCardStatusClass(color)}">${promotionUrgencyLabel(p.status)}</div>
+        ${promotionUrgencyBadgeHtml(p.status)}
       </div>
       <div class="promo-overview-pct-row">
         <div class="promo-overview-pct">${pct !== null ? pct + '%' : '—'}</div>
@@ -3321,11 +3359,20 @@ function promotionStageGapLabel(s) {
   return `${icon} ${s.still_required} still required`;
 }
 
+// Primary identifier is the concept itself (concept_name, +Concept Type in
+// the secondary line), not spi.product_name (a Promotion item has no
+// product, so this was empty) or spi.creator (always the silently-defaulted
+// Content Creator from savePromotionShootItem, not the real Assigned To --
+// see C1's investigation). concept_assignee is the actual Assigned To.
 function promotionStageItemRowHtml(item) {
+  const title = item.concept_name || item.product_name || 'Untitled concept';
+  const metaParts = [item.concept_type, item.concept_assignee || 'Unassigned', item.asset_status_label || '—'].filter(Boolean);
   return `
     <div class="promotion-stage-item-row">
-      <span class="promotion-stage-item-name">${escapeHtml(item.product_name)}</span>
-      <span class="admin-note">${escapeHtml(item.creator)} · ${escapeHtml(item.asset_status_label || '—')}</span>
+      <div class="promotion-stage-item-info">
+        <div class="promotion-stage-item-name">${escapeHtml(title)}</div>
+        <div class="promotion-stage-item-meta">${escapeHtml(metaParts.join(' · '))}</div>
+      </div>
       <button type="button" class="btn btn-ghost btn-sm" onclick="removeShootPlanItem(${item.id})">Remove</button>
     </div>`;
 }
@@ -3349,7 +3396,7 @@ function promotionStageCardHtml(stage, index, total) {
           <button type="button" class="btn btn-ghost btn-sm" ${index === total - 1 ? 'disabled' : ''} onclick="movePromotionStage(${stage.id}, 1)" title="Move down">&darr;</button>
           <button type="button" class="btn btn-ghost btn-sm" onclick="deletePromotionStage(${stage.id})" title="Delete stage">&times;</button>
         </div>
-        <div class="promotion-stage-urgency-badge ${color}">${promotionUrgencyLabel(stage.urgency)}</div>
+        ${stage.urgency === 'future' ? '' : `<div class="promotion-stage-urgency-badge ${color}">${promotionUrgencyLabel(stage.urgency)}</div>`}
         <div class="promotion-stage-due-row">
           <span>${dueLabel}</span>
           <input type="date" class="promotion-stage-due-input" value="${stage.due_date ? stage.due_date.slice(0, 10) : ''}" onchange="savePromotionStageDueDate(${stage.id}, this.value)">
@@ -3534,10 +3581,15 @@ async function renderPromotionStageDetailView() {
   if (!stage) return;
 
   document.getElementById('promotion-stage-view-title').textContent = stage.name;
-  const color = promotionUrgencyColor(stage.urgency);
   const urgencyEl = document.getElementById('promotion-stage-view-urgency');
-  urgencyEl.textContent = promotionUrgencyLabel(stage.urgency);
-  urgencyEl.className = `drop-card-status ${dropCardStatusClass(color)}`;
+  if (stage.urgency === 'future') {
+    urgencyEl.style.display = 'none';
+  } else {
+    const color = promotionUrgencyColor(stage.urgency);
+    urgencyEl.textContent = promotionUrgencyLabel(stage.urgency);
+    urgencyEl.className = `drop-card-status ${dropCardStatusClass(color)}`;
+    urgencyEl.style.display = '';
+  }
 
   const dueLabel = stage.due_date ? formatDate(stage.due_date) : 'Not set';
   document.getElementById('promotion-stage-view-summary').innerHTML = `
@@ -3653,6 +3705,11 @@ function shootThisWeekForPromotionStage(stageId) {
   document.getElementById('promotion-shoot-editing-owner').value = '';
   document.getElementById('promotion-shoot-concept-name').value = '';
   document.getElementById('promotion-shoot-format').value = 'video';
+  // Same dropdown/default-selection logic as Core's own
+  // populateShootPlanCreatorSelect -- kept as its own small function since
+  // the two modals' selects have different ids, not because the logic
+  // differs.
+  populatePromotionShootFilmingSelect();
   fillConceptDevSelectWithOther('promotion-shoot-concept-type-select', 'promotion-shoot-concept-type-custom', conceptTypesForFormat('video'), '');
   promotionShootConceptOrigin = null;
   renderPromotionShootConceptOrigin();
@@ -3759,10 +3816,13 @@ async function savePromotionShootItem() {
   // No product is picked here at all -- the concept-first flow (see the
   // file-header comment above) never requires one; product_code/product_name
   // are simply omitted, leaving shoot_plan_item_styles empty ("No products
-  // required"). Sample status and creator aren't asked for either; shoot-
-  // plan.js still needs a creator on every item, so a sensible silent
-  // default goes in rather than weakening that shared endpoint.
+  // required"). Sample status isn't asked for. Filming (creator) now IS a
+  // real choice (see F's "Filming" field) -- shoot-plan.js still needs a
+  // creator on every item, so this falls back to the same silent default
+  // only if the select is somehow empty (e.g. no content_creators exist).
+  const filmingSelect = document.getElementById('promotion-shoot-filming').value;
   const defaultCreator = state.contentCreators.find((c) => c.is_default) || state.contentCreators[0];
+  const filming = filmingSelect || (defaultCreator ? defaultCreator.name : DEFAULT_CREATOR);
 
   // "Other / New Type" persists to concept_types immediately, same
   // reasoning as saveConceptDevModal -- it becomes reusable right away,
@@ -3782,7 +3842,7 @@ async function savePromotionShootItem() {
         concept_type: conceptType || null,
         concept_assignee: conceptAssignee,
         editing_owner: editingOwner,
-        creator: defaultCreator ? defaultCreator.name : DEFAULT_CREATOR,
+        creator: filming,
         format,
         source: 'promotion',
         promotion_stage_id: promotionShootContext.stageId,
@@ -6232,6 +6292,9 @@ function openPromotionConceptDevModal(concept, product, openedFromStageView = fa
 
   applyPromotionConceptDevFormat(promoConceptDevModalFormat);
   updatePromotionConceptDevFooterButtons(concept ? concept.concept_dev_status : null);
+  // Only an existing concept has anything to delete -- create mode (concept
+  // === null) hides it, same as Core's own cd-modal-delete-btn (see E1).
+  document.getElementById('promo-modal-delete-btn').style.display = concept ? '' : 'none';
   fillPromotionConceptDevModalFields(concept);
   openModal('promo-concept-dev-modal');
 
@@ -6336,6 +6399,33 @@ async function savePromotionConceptDevModal(targetStatus) {
     // page's card list in place instead of the (hidden) Concept Dev tab, so
     // the concept just saved never looks stale. Never navigates the user
     // away -- same refresh call savePromotionShootItem already uses.
+    if (promoConceptDevOpenedFromStageView) {
+      await refreshCurrentPromotion();
+      if (document.getElementById('planning-promotion-stage-view').style.display !== 'none') {
+        renderPromotionStageDetailView();
+      }
+    } else {
+      refreshConceptDevAfterChange();
+    }
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// Delete Concept (see E1) -- calls the Promotion-specific DELETE endpoint
+// (conceptDevelopment.js), which removes both the creative_asset and its
+// linked shoot_plan_item in one transaction, so the stage's Planned/Still
+// Required numbers are correct the moment this returns (no separate
+// recompute needed here -- refreshCurrentPromotion() re-fetches them from
+// the same summarizeStage/summarizePromotion logic every other Promotion
+// view already uses).
+async function deletePromotionConceptDevConcept() {
+  if (!promoConceptDevModalConceptId) return;
+  if (!(await confirmDialog('Delete this concept? This will remove it from the promotion.'))) return;
+  try {
+    await api(`/concept-development/concepts/${promoConceptDevModalConceptId}`, { method: 'DELETE' });
+    closeModal('promo-concept-dev-modal');
+    toast('Concept deleted');
     if (promoConceptDevOpenedFromStageView) {
       await refreshCurrentPromotion();
       if (document.getElementById('planning-promotion-stage-view').style.display !== 'none') {
@@ -8352,12 +8442,55 @@ const EDITING_FILTERS = [
   { value: 'ready_for_approval', label: 'Ready for Approval' },
 ];
 
+// Editor filter -- separate from the workflow-state tabs below, and the
+// first real reader of editing_owner (see G's investigation): an
+// assignment made once in Upcoming Drops/Promotion intake now surfaces the
+// right person's queue here with nothing re-entered. Sourced from
+// CONCEPT_ASSIGNEES, NOT state.contentCreators (Shooting's owner filter's
+// list) -- editing_owner is written only through the "Editing" select in
+// Upcoming Drops/Promotion intake (index.html) and updateConceptEditingOwner
+// above, both of which already only ever offer Mark/Shez/Til (the same
+// fixed roster concept_assignee uses), a different, smaller list of people
+// than content_creators (who's filming, a Shooting-only concern -- see F).
+// Populating this from content_creators would silently make any concept
+// whose editing_owner is Shez or Til unreachable by its own filter option
+// (present only in "All Editors"), since those names aren't guaranteed to
+// exist in content_creators at all.
+function populateEditingEditorFilter() {
+  const el = document.getElementById('editing-editor-filter');
+  if (!el) return;
+  el.innerHTML = `<option value="all">All Editors</option>` +
+    CONCEPT_ASSIGNEES.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
+  el.value = state.editing.editorFilter;
+}
+
+function setEditingEditorFilter(value) {
+  state.editing.editorFilter = value;
+  // Same reset-on-change reasoning as loadEditingWeek's own resetFilter --
+  // switching editor can leave the current workflow-state tab pointing at
+  // now-empty work, so it re-picks via the same editingDefaultFilter rule
+  // rather than silently showing "Editing" with 0 cards.
+  state.editing.filter = editingDefaultFilter(editingComputeSummary());
+  renderEditingList();
+}
+
+// The set of Concepts the editor filter currently allows -- every other
+// computation (filter-tab counts, the default-tab pick, the visible list)
+// reads through this one helper so "All Editors" (the default) is
+// mathematically identical to no filter at all, and nothing computes off
+// state.editing.data.concepts directly and forgets it.
+function editingVisibleConcepts() {
+  const concepts = (state.editing.data && state.editing.data.concepts) || [];
+  if (state.editing.editorFilter === 'all') return concepts;
+  return concepts.filter((c) => c.editing_owner === state.editing.editorFilter);
+}
+
 // Aggregates across the whole week's Concepts -- backs both the filter-tab
 // counts and the summary line, computed once per render from the same
 // per-Concept helpers the cards themselves use (item 8: filters count
 // Concepts now, not individual Final Edits).
 function editingComputeSummary() {
-  const concepts = (state.editing.data && state.editing.data.concepts) || [];
+  const concepts = editingVisibleConcepts();
   let toEdit = 0, editingCount = 0, ready = 0, totalRequired = 0, totalComplete = 0;
   for (const c of concepts) {
     const { required, complete } = editingConceptCompletion(c);
@@ -8456,7 +8589,7 @@ function editingConceptCardHtml(concept) {
 function renderEditingList() {
   renderEditingSummary();
   renderEditingFilters();
-  const concepts = (state.editing.data && state.editing.data.concepts) || [];
+  const concepts = editingVisibleConcepts();
   const filter = state.editing.filter;
   const shown = filter === 'all' ? concepts : concepts.filter((c) => editingConceptStatus(c) === filter);
 

@@ -1,7 +1,7 @@
 const express = require('express');
 const { pool } = require('../db');
 const { insertCreativeAsset } = require('../lib/assets');
-const { CONCEPT_DEV_STATUSES, TUESDAY_REVIEW_DECISIONS, FORMATS, CONCEPT_ORIGINS } = require('../lib/statuses');
+const { CONCEPT_DEV_STATUSES, TUESDAY_REVIEW_DECISIONS, FORMATS, CONCEPT_ORIGINS, STATUSES } = require('../lib/statuses');
 const { generateOrTopUpPlan } = require('./dropProductPlans');
 
 const router = express.Router();
@@ -436,6 +436,66 @@ router.patch('/concepts/:id', async (req, res, next) => {
   } catch (err) {
     if (err.code === '23503') return res.status(400).json({ error: 'That Customer Avatar no longer exists' });
     next(err);
+  }
+});
+
+// "Delete Concept" for Promotion Concept Development (see E1's dependency
+// investigation). The generic DELETE /creative-assets/:id (what Core's own
+// Concept Dev delete already uses) is NOT reused here: it only removes the
+// creative_assets row -- status_history/shoot_schedule/final_edits cascade
+// correctly (ON DELETE CASCADE), but shoot_plan_items.asset_id merely goes
+// to NULL (ON DELETE SET NULL), leaving that row behind. A Promotion
+// stage's Planned/Ready counts are computed from shoot_plan_items rows
+// existing (see promotions.js's fetchStagesWithCoverage: a LEFT JOIN to
+// creative_assets, so a NULL-asset row still falls into "planned"), so
+// that orphan would keep counting forever with nothing left to show for
+// it. This endpoint removes both rows in one transaction instead.
+//
+// Scoped to a concept that actually has a Promotion-linked shoot_plan_item
+// -- Core/High Stock concepts (no promotion_stage_id) fall through to a
+// 400 and keep using the existing Concept Dev delete path unchanged; nothing
+// here touches DELETE /creative-assets/:id or Core's own delete button.
+//
+// Refuses to delete a concept whose canonical status has already reached
+// qc/uploaded_live -- at that point real, finished Final Edit work exists
+// (see final_edits' cascade above), and destroying it isn't the same
+// "remove a mistaken concept" action this button is for; the smallest safe
+// behaviour there is to say no rather than silently discard it.
+router.delete('/concepts/:id', async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const assetResult = await client.query('SELECT id, status FROM creative_assets WHERE id = $1 FOR UPDATE', [req.params.id]);
+    if (!assetResult.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Concept not found' });
+    }
+    const asset = assetResult.rows[0];
+    if (STATUSES.indexOf(asset.status) >= STATUSES.indexOf('qc')) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: 'This concept already has finished editing work (qc or later) and can\'t be deleted here -- use Board to manage it instead.',
+      });
+    }
+
+    const itemResult = await client.query(
+      `SELECT id FROM shoot_plan_items WHERE asset_id = $1 AND promotion_stage_id IS NOT NULL`,
+      [req.params.id]
+    );
+    if (!itemResult.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'This concept is not a Promotion concept' });
+    }
+
+    await client.query('DELETE FROM shoot_plan_items WHERE id = $1', [itemResult.rows[0].id]);
+    await client.query('DELETE FROM creative_assets WHERE id = $1', [req.params.id]);
+    await client.query('COMMIT');
+    res.status(204).send();
+  } catch (err) {
+    await client.query('ROLLBACK');
+    next(err);
+  } finally {
+    client.release();
   }
 });
 
