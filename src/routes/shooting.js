@@ -1,6 +1,7 @@
 const express = require('express');
 const { pool } = require('../db');
-const { SHOOT_DAYS } = require('../lib/statuses');
+const { SHOOT_DAYS, STATUSES } = require('../lib/statuses');
+const { assertCanEnterFilming, RuleViolationError } = require('../lib/rules');
 
 const router = express.Router();
 
@@ -26,12 +27,20 @@ function dateStr(d) {
 // Brief is actually opened (GET /:id/brief below). hook_variations is the
 // one exception: small enough to include here, and Today's worklist needs
 // a Primary Hook preview without a second round trip per card.
+// drop_name: resolved only for source = 'drop' cards, via the one colourway
+// ensureDropProductionLinkage links onto the shoot_plan_item (see
+// dropProductPlans.js) -- lets Mark/Shez see which Drop a card belongs to
+// without a second Drop-only Shooting view (see the Drop -> Shooting brief,
+// item 8: "carry clear Drop context... do not invent a second page").
 const SUMMARY_SELECT = `
   SELECT
     ss.id, ss.creative_asset_id, ss.status, ss.original_week_start,
     ss.scheduled_week_start, ss.scheduled_day, ss.shot_at, ss.ready_for_editing,
     ca.concept_name, ca.location, ca.hook_variations,
-    spi.product_name, spi.image_url, spi.creator AS owner, spi.source
+    spi.product_name, spi.image_url, spi.creator AS owner, spi.source,
+    (SELECT d.name FROM shoot_plan_item_styles spis
+       JOIN styles sty ON sty.id = spis.style_id JOIN drops d ON d.id = sty.drop_id
+       WHERE spis.shoot_plan_item_id = spi.id LIMIT 1) AS drop_name
   FROM shoot_schedule ss
   JOIN creative_assets ca ON ca.id = ss.creative_asset_id
   LEFT JOIN shoot_plan_items spi ON spi.id = ca.shoot_plan_item_id
@@ -136,15 +145,18 @@ router.get('/:id/brief', async (req, res, next) => {
     const brief = result.rows[0];
 
     let colourways = [];
+    let dropName = null;
     if (brief.shoot_plan_item_id) {
       const stylesResult = await pool.query(
-        `SELECT s.style_code, spis.colour_label, spis.size
+        `SELECT s.style_code, spis.colour_label, spis.size, d.name AS drop_name
          FROM shoot_plan_item_styles spis
          JOIN styles s ON s.id = spis.style_id
+         LEFT JOIN drops d ON d.id = s.drop_id
          WHERE spis.shoot_plan_item_id = $1`,
         [brief.shoot_plan_item_id]
       );
-      colourways = stylesResult.rows;
+      colourways = stylesResult.rows.map(({ drop_name, ...rest }) => rest);
+      dropName = stylesResult.rows.find((r) => r.drop_name)?.drop_name || null;
     }
 
     let avatarName = null;
@@ -159,6 +171,7 @@ router.get('/:id/brief', async (req, res, next) => {
       original_week_start: dateStr(brief.original_week_start),
       scheduled_week_start: dateStr(brief.scheduled_week_start),
       colourways,
+      drop_name: dropName,
       avatar_name: avatarName,
     });
   } catch (err) {
@@ -206,12 +219,80 @@ router.patch('/:id', async (req, res, next) => {
   }
 });
 
+// Drop -> Shooting -> Editing progress sync (see the brief, item 9): the
+// SAME canonical creative_assets.status Upcoming Drops' Filmed/Edited/
+// Uploaded checkboxes already read and write (see app.js's
+// CONCEPT_PROGRESS_STAGES) -- no parallel state. Scoped to Drop-sourced
+// concepts only (asset.shoot_plan_item.source = 'drop') so Core/Promotion's
+// canonical status, which nothing in Shooting/Editing has ever auto-advanced
+// before this, is completely unaffected -- this only closes the gap for the
+// one source that has no other way to reach 'filming'/'qc'. Only ever moves
+// status FORWARD; a human can still always correct it via Upcoming Drops'
+// own checkboxes. Reuses assertCanEnterFilming (the same New-Drop-style
+// gate the generic PATCH /creative-assets/:id/status enforces) so this
+// sync path can never silently bypass that business rule for a
+// non-deliberate-trial New/Test Drop concept -- if the rule would block it,
+// the shoot_schedule/mark-shot action itself still succeeds (the physical
+// shoot already happened), it just leaves the canonical status, and
+// therefore the Filmed checkbox, unmoved until that's resolved.
+async function syncDropStatusForward(client, creativeAssetId, atLeastStatus) {
+  const result = await client.query(
+    `SELECT ca.status, ca.concept_classification, ca.is_deliberate_trial, s.tier AS style_tier
+     FROM creative_assets ca
+     LEFT JOIN styles s ON s.id = ca.style_id
+     LEFT JOIN shoot_plan_items spi ON spi.id = ca.shoot_plan_item_id
+     WHERE ca.id = $1 AND spi.source = 'drop'`,
+    [creativeAssetId]
+  );
+  if (!result.rows.length) return;
+  const asset = result.rows[0];
+  if (STATUSES.indexOf(asset.status) >= STATUSES.indexOf(atLeastStatus)) return;
+  try {
+    if (atLeastStatus === 'filming') {
+      assertCanEnterFilming({
+        styleTier: asset.style_tier,
+        conceptClassification: asset.concept_classification,
+        isDeliberateTrial: asset.is_deliberate_trial,
+      });
+    }
+  } catch (err) {
+    if (err instanceof RuleViolationError) return;
+    throw err;
+  }
+  await client.query(`UPDATE creative_assets SET status = $1, updated_at = now() WHERE id = $2`, [atLeastStatus, creativeAssetId]);
+  await client.query(
+    `INSERT INTO status_history (creative_asset_id, from_status, to_status, changed_by) VALUES ($1, $2, $3, $4)`,
+    [creativeAssetId, asset.status, atLeastStatus, 'Shooting']
+  );
+}
+
+// Mirror of syncDropStatusForward for unmark-shot -- only reverts when
+// status is still EXACTLY the stage mark-shot itself advanced it to, so
+// undoing an accidental click can never clobber progress made since (e.g.
+// Editing has already moved it on to 'qc').
+async function syncDropStatusRevert(client, creativeAssetId, fromStatus, toStatus) {
+  const result = await client.query(
+    `SELECT ca.status FROM creative_assets ca
+     LEFT JOIN shoot_plan_items spi ON spi.id = ca.shoot_plan_item_id
+     WHERE ca.id = $1 AND spi.source = 'drop'`,
+    [creativeAssetId]
+  );
+  if (!result.rows.length || result.rows[0].status !== fromStatus) return;
+  await client.query(`UPDATE creative_assets SET status = $1, updated_at = now() WHERE id = $2`, [toStatus, creativeAssetId]);
+  await client.query(
+    `INSERT INTO status_history (creative_asset_id, from_status, to_status, changed_by) VALUES ($1, $2, $3, $4)`,
+    [creativeAssetId, fromStatus, toStatus, 'Shooting']
+  );
+}
+
 // The one production action Shooting has -- must already be Scheduled to a
 // day (shooting happens on a specific day). Sets Ready for Editing so the
 // next stage can pick it up later; nothing about Editing is built here.
 router.post('/:id/mark-shot', async (req, res, next) => {
+  const client = await pool.connect();
   try {
-    const result = await pool.query(
+    await client.query('BEGIN');
+    const result = await client.query(
       `UPDATE shoot_schedule SET
          status = 'shot',
          shot_at = now(),
@@ -222,14 +303,20 @@ router.post('/:id/mark-shot', async (req, res, next) => {
       [req.params.id]
     );
     if (!result.rows.length) {
-      const existsResult = await pool.query('SELECT id, status FROM shoot_schedule WHERE id = $1', [req.params.id]);
+      const existsResult = await client.query('SELECT id, status FROM shoot_schedule WHERE id = $1', [req.params.id]);
+      await client.query('ROLLBACK');
       if (!existsResult.rows.length) return res.status(404).json({ error: 'Shoot schedule entry not found' });
       return res.status(409).json({ error: `Only a Scheduled Concept can be marked Shot (this one is ${existsResult.rows[0].status})` });
     }
     const row = result.rows[0];
+    await syncDropStatusForward(client, row.creative_asset_id, 'filming');
+    await client.query('COMMIT');
     res.json({ ...row, original_week_start: dateStr(row.original_week_start), scheduled_week_start: dateStr(row.scheduled_week_start) });
   } catch (err) {
+    await client.query('ROLLBACK');
     next(err);
+  } finally {
+    client.release();
   }
 });
 
@@ -238,8 +325,10 @@ router.post('/:id/mark-shot', async (req, res, next) => {
 // pre-Shot state and returns the Concept to Scheduled (draggable/movable
 // again), rather than leaving it stuck as a permanent Shot record.
 router.post('/:id/unmark-shot', async (req, res, next) => {
+  const client = await pool.connect();
   try {
-    const result = await pool.query(
+    await client.query('BEGIN');
+    const result = await client.query(
       `UPDATE shoot_schedule SET
          status = 'scheduled',
          shot_at = NULL,
@@ -250,14 +339,20 @@ router.post('/:id/unmark-shot', async (req, res, next) => {
       [req.params.id]
     );
     if (!result.rows.length) {
-      const existsResult = await pool.query('SELECT id, status FROM shoot_schedule WHERE id = $1', [req.params.id]);
+      const existsResult = await client.query('SELECT id, status FROM shoot_schedule WHERE id = $1', [req.params.id]);
+      await client.query('ROLLBACK');
       if (!existsResult.rows.length) return res.status(404).json({ error: 'Shoot schedule entry not found' });
       return res.status(409).json({ error: `Only a Shot Concept can be unmarked (this one is ${existsResult.rows[0].status})` });
     }
     const row = result.rows[0];
+    await syncDropStatusRevert(client, row.creative_asset_id, 'filming', 'concept_script');
+    await client.query('COMMIT');
     res.json({ ...row, original_week_start: dateStr(row.original_week_start), scheduled_week_start: dateStr(row.scheduled_week_start) });
   } catch (err) {
+    await client.query('ROLLBACK');
     next(err);
+  } finally {
+    client.release();
   }
 });
 
