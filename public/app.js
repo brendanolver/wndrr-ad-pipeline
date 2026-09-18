@@ -7464,10 +7464,16 @@ function shootingCardHtml(item, isUnscheduled = false) {
   // surfacing is specifically "this one still needs to be dragged onto a
   // day", not that dragging exists at all.
   const dragHandle = isUnscheduled && !isShot ? '<span class="shoot-card-drag-handle" title="Drag onto a day to schedule">⠿</span>' : '';
+  // Drop context badge -- source/drop_name only ever populate for a Drop
+  // Required Concept's card (see shooting.js's SUMMARY_SELECT), so Mark/Shez
+  // can tell what they're shooting without a second Drop-only Shooting page
+  // (see the Drop -> Shooting brief, item 8).
+  const dropBadge = item.source === 'drop' && item.drop_name
+    ? `<span class="shoot-card-drop-badge">${escapeHtml(item.drop_name)}</span>` : '';
   return `
     <div class="shoot-card ${isShot ? 'shoot-card-shot' : ''}" ${isShot ? '' : 'draggable="true"'} ondragstart="onShootCardDragStart(event, ${item.id})" onclick="openShootingBrief(${item.id})">
       <div class="shoot-card-name">${dragHandle}${escapeHtml(item.concept_name)}</div>
-      <div class="shoot-card-product">${escapeHtml(item.product_name || '—')}</div>
+      <div class="shoot-card-product">${escapeHtml(item.product_name || '—')}${dropBadge}</div>
       ${metaParts.length ? `<div class="shoot-card-meta">${escapeHtml(metaParts.join(' · '))}</div>` : ''}
       <div class="shoot-card-footer">
         ${statusHtml}
@@ -7580,11 +7586,13 @@ function shootingTodayItemHtml(item) {
   const isShot = item.status === 'shot';
   const hookPreview = shootingHookPreview(item);
   const metaParts = [item.location].filter(Boolean);
+  const dropBadge = item.source === 'drop' && item.drop_name
+    ? `<span class="shoot-card-drop-badge">${escapeHtml(item.drop_name)}</span>` : '';
   return `
     <div class="shoot-today-item ${isShot ? 'shoot-card-shot' : ''}">
       <div class="shoot-today-item-main">
         <div class="shoot-card-name">${escapeHtml(item.concept_name)}</div>
-        <div class="shoot-card-product">${escapeHtml(item.product_name || '—')}</div>
+        <div class="shoot-card-product">${escapeHtml(item.product_name || '—')}${dropBadge}</div>
         ${metaParts.length ? `<div class="shoot-card-meta">${escapeHtml(metaParts.join(' · '))}</div>` : ''}
         ${hookPreview ? `<div class="shoot-today-hook">&ldquo;${escapeHtml(hookPreview)}&rdquo;</div>` : ''}
       </div>
@@ -7837,6 +7845,7 @@ function renderShootingBrief(brief) {
   const contextLine = [
     brief.product_name,
     CONCEPT_DEV_SOURCE_LABELS[brief.source] || brief.source,
+    brief.drop_name ? `Drop: ${brief.drop_name}` : null,
     brief.owner ? `Owner: ${brief.owner}` : null,
     skuInfo,
   ].filter(Boolean).join(' &middot; ');

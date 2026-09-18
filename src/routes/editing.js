@@ -1,8 +1,31 @@
 const express = require('express');
 const { pool } = require('../db');
-const { FINAL_EDIT_FORMATS } = require('../lib/statuses');
+const { FINAL_EDIT_FORMATS, STATUSES } = require('../lib/statuses');
 
 const router = express.Router();
+
+// Drop -> Shooting -> Editing progress sync (see the Drop brief, item 9) --
+// same reasoning/scoping as shooting.js's syncDropStatusForward: only ever
+// advances the canonical creative_assets.status forward, only for
+// Drop-sourced concepts, so Core/Promotion's status (never auto-advanced by
+// Editing before this) is unaffected. No business-rule gate applies here --
+// assertCanEnterFilming only guards entry into 'filming', not 'qc'.
+async function syncDropStatusForward(client, creativeAssetId, atLeastStatus) {
+  const result = await client.query(
+    `SELECT ca.status FROM creative_assets ca
+     LEFT JOIN shoot_plan_items spi ON spi.id = ca.shoot_plan_item_id
+     WHERE ca.id = $1 AND spi.source = 'drop'`,
+    [creativeAssetId]
+  );
+  if (!result.rows.length) return;
+  const currentStatus = result.rows[0].status;
+  if (STATUSES.indexOf(currentStatus) >= STATUSES.indexOf(atLeastStatus)) return;
+  await client.query(`UPDATE creative_assets SET status = $1, updated_at = now() WHERE id = $2`, [atLeastStatus, creativeAssetId]);
+  await client.query(
+    `INSERT INTO status_history (creative_asset_id, from_status, to_status, changed_by) VALUES ($1, $2, $3, $4)`,
+    [creativeAssetId, currentStatus, atLeastStatus, 'Editing']
+  );
+}
 
 const WEEK_RE = /^\d{4}-\d{2}-\d{2}$/;
 const WEEK_START_SQL = `COALESCE($1::date, date_trunc('week', now())::date)`;
@@ -272,26 +295,40 @@ router.patch('/final-edits/:id', async (req, res, next) => {
 // the client's own completion count. Idempotent: re-calling once already
 // submitted just returns the existing state rather than erroring.
 router.post('/concepts/:creativeAssetId/ready-for-approval', async (req, res, next) => {
+  const client = await pool.connect();
   try {
-    const conceptResult = await pool.query('SELECT * FROM creative_assets WHERE id = $1', [req.params.creativeAssetId]);
-    if (!conceptResult.rows.length) return res.status(404).json({ error: 'Concept not found' });
+    const conceptResult = await client.query('SELECT * FROM creative_assets WHERE id = $1', [req.params.creativeAssetId]);
+    if (!conceptResult.rows.length) {
+      client.release();
+      return res.status(404).json({ error: 'Concept not found' });
+    }
     const concept = conceptResult.rows[0];
-    if (concept.editing_submitted_at) return res.json(concept);
+    if (concept.editing_submitted_at) {
+      client.release();
+      return res.json(concept);
+    }
 
-    const editsResult = await pool.query('SELECT * FROM final_edits WHERE creative_asset_id = $1', [req.params.creativeAssetId]);
+    const editsResult = await client.query('SELECT * FROM final_edits WHERE creative_asset_id = $1', [req.params.creativeAssetId]);
     const { required, complete } = conceptCompletion(concept.hook_variations, editsResult.rows);
     if (required === 0 || complete < required) {
+      client.release();
       return res.status(400).json({ error: 'Complete all Final Edits before sending for approval' });
     }
 
-    const result = await pool.query(
+    await client.query('BEGIN');
+    const result = await client.query(
       `UPDATE creative_assets SET editing_submitted_at = now(), editing_submitted_by_user_id = $1, updated_at = now()
        WHERE id = $2 RETURNING *`,
       [req.user.id, req.params.creativeAssetId]
     );
+    await syncDropStatusForward(client, Number(req.params.creativeAssetId), 'qc');
+    await client.query('COMMIT');
     res.json(result.rows[0]);
   } catch (err) {
+    await client.query('ROLLBACK');
     next(err);
+  } finally {
+    client.release();
   }
 });
 
