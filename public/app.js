@@ -3050,9 +3050,8 @@ function populateShootPlanCreatorSelect() {
 // modal (see F's "Filming" field).
 function populatePromotionShootFilmingSelect() {
   const sel = document.getElementById('promotion-shoot-filming');
-  sel.innerHTML = state.contentCreators.map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join('');
-  const defaultEntry = state.contentCreators.find((c) => c.is_default) || state.contentCreators[0];
-  sel.value = defaultEntry ? defaultEntry.name : DEFAULT_CREATOR;
+  sel.innerHTML = CONCEPT_ASSIGNEES.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
+  sel.value = CONCEPT_ASSIGNEES[0];
 }
 
 // Shoot Week options for Promotion intake (see the Shoot Week brief) -- "This
@@ -3747,7 +3746,6 @@ function shootThisWeekForPromotionStage(stageId) {
   document.getElementById('promotion-shoot-modal-title').textContent = 'Add Concept';
   document.getElementById('promotion-shoot-context-promotion').textContent = promotion.name;
   document.getElementById('promotion-shoot-context-stage').textContent = stage.name;
-  document.getElementById('promotion-shoot-assignee').value = '';
   document.getElementById('promotion-shoot-editing-owner').value = '';
   document.getElementById('promotion-shoot-concept-name').value = '';
   document.getElementById('promotion-shoot-format').value = 'video';
@@ -3760,8 +3758,135 @@ function shootThisWeekForPromotionStage(stageId) {
   fillConceptDevSelectWithOther('promotion-shoot-concept-type-select', 'promotion-shoot-concept-type-custom', conceptTypesForFormat('video'), '');
   promotionShootConceptOrigin = null;
   renderPromotionShootConceptOrigin();
+  resetPromotionShootBrief();
   updatePromotionShootOriginVisibility();
+  updatePromotionShootConceptTypeVisibility();
+  updatePromotionShootBriefVisibility();
+  updatePromotionShootFooterButton();
   openModal('promotion-shoot-modal');
+}
+
+// Existing Concept's lightweight execution-brief fields, staged locally
+// (not persisted) until Save -- same reasoning as the modal-open reset
+// everywhere else in this file (e.g. shoot-plan-modal's own defaults):
+// reopening this modal for a fresh concept must never carry over the last
+// concept's brief.
+let promotionShootAltHooks = [];
+let promotionShootReferences = [];
+let promotionShootBriefStyles = [];
+
+function resetPromotionShootBrief() {
+  promotionShootAltHooks = [];
+  promotionShootReferences = [];
+  promotionShootBriefStyles = [];
+  document.getElementById('promotion-shoot-hook-primary').value = '';
+  document.getElementById('promotion-shoot-execution').value = '';
+  document.getElementById('promotion-shoot-script').value = '';
+  document.getElementById('promotion-shoot-location').value = '';
+  document.getElementById('promotion-shoot-style-search').value = '';
+  document.getElementById('promotion-shoot-style-results').style.display = 'none';
+  document.getElementById('promotion-shoot-reference-url').value = '';
+  document.getElementById('promotion-shoot-script-field').style.display = 'none';
+  document.getElementById('promotion-shoot-script-toggle-wrap').style.display = '';
+  renderPromotionShootAltHooks();
+  renderPromotionShootReferences();
+  renderPromotionShootBriefStyleChips();
+}
+
+function togglePromotionShootScript() {
+  document.getElementById('promotion-shoot-script-toggle-wrap').style.display = 'none';
+  document.getElementById('promotion-shoot-script-field').style.display = '';
+}
+
+function addPromotionShootAltHook() {
+  promotionShootAltHooks.push('');
+  renderPromotionShootAltHooks();
+}
+
+function updatePromotionShootAltHook(idx, value) {
+  promotionShootAltHooks[idx] = value;
+}
+
+function removePromotionShootAltHook(idx) {
+  promotionShootAltHooks.splice(idx, 1);
+  renderPromotionShootAltHooks();
+}
+
+function renderPromotionShootAltHooks() {
+  const el = document.getElementById('promotion-shoot-hooks-alt-list');
+  if (!el) return;
+  el.innerHTML = promotionShootAltHooks.map((text, idx) => `
+    <div class="promo-shoot-alt-hook-row">
+      <input type="text" value="${escapeHtml(text)}" placeholder="Alternative hook" oninput="updatePromotionShootAltHook(${idx}, this.value)">
+      <button type="button" class="cd-style-chip-remove" onclick="removePromotionShootAltHook(${idx})" title="Remove">&times;</button>
+    </div>`).join('');
+}
+
+function addPromotionShootReference() {
+  const input = document.getElementById('promotion-shoot-reference-url');
+  const url = input.value.trim();
+  if (!url) return;
+  promotionShootReferences.push({ url, note: '' });
+  input.value = '';
+  renderPromotionShootReferences();
+}
+
+function removePromotionShootReference(idx) {
+  promotionShootReferences.splice(idx, 1);
+  renderPromotionShootReferences();
+}
+
+function renderPromotionShootReferences() {
+  const el = document.getElementById('promotion-shoot-reference-list');
+  if (!el) return;
+  el.innerHTML = promotionShootReferences.map((r, idx) => `
+    <div class="promo-shoot-reference-row">
+      <a href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(truncateText(r.url, 50))}</a>
+      <button type="button" class="cd-style-chip-remove" onclick="removePromotionShootReference(${idx})" title="Remove">&times;</button>
+    </div>`).join('');
+}
+
+function removePromotionShootBriefStyle(styleId) {
+  promotionShootBriefStyles = promotionShootBriefStyles.filter((s) => s.style_id !== styleId);
+  renderPromotionShootBriefStyleChips();
+}
+
+function renderPromotionShootBriefStyleChips() {
+  const el = document.getElementById('promotion-shoot-style-chips');
+  if (!el) return;
+  el.innerHTML = promotionShootBriefStyles.map((s) => `
+    <span class="cd-style-chip">${escapeHtml(s.style_code)}${s.name ? ` <span class="cd-style-chip-code">${escapeHtml(s.name)}</span>` : ''}
+      <button type="button" class="cd-style-chip-remove" onclick="removePromotionShootBriefStyle(${s.style_id})" title="Remove">&times;</button>
+    </span>`).join('');
+}
+
+// Whether the current Format/Concept Approach combination is the Existing
+// Concept bypass -- the one branch point every visibility toggle and the
+// save handler itself all key off, kept in one place so they can never
+// disagree with each other.
+function isPromotionShootExistingBrief() {
+  const format = document.getElementById('promotion-shoot-format').value;
+  return format === 'video' && promotionShootConceptOrigin === 'existing';
+}
+
+// Concept Type: hidden for Video + New Concept (still needs developing --
+// asking for a Concept Type before the idea itself is even shaped is
+// premature; it can be chosen later in Concept Development). Shown for
+// Video + Existing Concept (selecting an established execution) and for
+// Static (no New/Existing distinction applies there at all -- unchanged
+// from before this pass).
+function updatePromotionShootConceptTypeVisibility() {
+  const format = document.getElementById('promotion-shoot-format').value;
+  const show = format !== 'video' || promotionShootConceptOrigin === 'existing';
+  document.getElementById('promotion-shoot-concept-type-wrap').style.display = show ? '' : 'none';
+}
+
+function updatePromotionShootBriefVisibility() {
+  document.getElementById('promotion-shoot-brief-wrap').style.display = isPromotionShootExistingBrief() ? '' : 'none';
+}
+
+function updatePromotionShootFooterButton() {
+  document.getElementById('promotion-shoot-save-btn').textContent = isPromotionShootExistingBrief() ? 'Add to Shoot Plan →' : 'Develop Promotion Concept →';
 }
 
 // Re-filters the Concept Type dropdown when Format changes, keeping
@@ -3778,6 +3903,9 @@ function onPromotionShootFormatChange() {
   if (format !== 'video') promotionShootConceptOrigin = null;
   renderPromotionShootConceptOrigin();
   updatePromotionShootOriginVisibility();
+  updatePromotionShootConceptTypeVisibility();
+  updatePromotionShootBriefVisibility();
+  updatePromotionShootFooterButton();
 }
 
 function updatePromotionShootOriginVisibility() {
@@ -3788,6 +3916,9 @@ function updatePromotionShootOriginVisibility() {
 function selectPromotionShootConceptOrigin(origin) {
   promotionShootConceptOrigin = origin;
   renderPromotionShootConceptOrigin();
+  updatePromotionShootConceptTypeVisibility();
+  updatePromotionShootBriefVisibility();
+  updatePromotionShootFooterButton();
 }
 
 function renderPromotionShootConceptOrigin() {
@@ -3832,16 +3963,22 @@ function renderStyleSearchResults(inputId, resultsId, onSelect) {
   });
 }
 
+// Existing Concept's execution-brief Styles/Products search -- multi-select,
+// staged in promotionShootBriefStyles (not persisted) until Save, since the
+// shoot_plan_item this needs to attach to doesn't exist yet while the modal
+// is still open. Persisted via the same POST /shoot-plan/:id/styles Concept
+// Development's own picker already uses, once savePromotionShootItem has an
+// item id to attach them to.
 function filterPromotionShootStyles() {
   renderStyleSearchResults('promotion-shoot-style-search', 'promotion-shoot-style-results', selectPromotionShootStyle);
 }
 
 function selectPromotionShootStyle(styleId) {
   const style = state.styles.find((s) => s.id === styleId);
-  if (!style) return;
-  promotionShootContext.styleId = styleId;
-  document.getElementById('promotion-shoot-style-id').value = styleId;
-  document.getElementById('promotion-shoot-style-search').value = `${style.style_code} — ${style.name}`;
+  if (!style || promotionShootBriefStyles.some((s) => s.style_id === styleId)) return;
+  promotionShootBriefStyles.push({ style_id: styleId, style_code: style.style_code, name: style.name });
+  renderPromotionShootBriefStyleChips();
+  document.getElementById('promotion-shoot-style-search').value = '';
   document.getElementById('promotion-shoot-style-results').style.display = 'none';
 }
 
@@ -3850,7 +3987,6 @@ async function savePromotionShootItem() {
   const conceptName = document.getElementById('promotion-shoot-concept-name').value.trim();
   if (!conceptName) return toast('Concept Name / Idea is required', true);
   const conceptType = conceptDevSelectWithOtherValue('promotion-shoot-concept-type-select', 'promotion-shoot-concept-type-custom');
-  const conceptAssignee = document.getElementById('promotion-shoot-assignee').value || null;
   const editingOwner = document.getElementById('promotion-shoot-editing-owner').value || null;
   const format = document.getElementById('promotion-shoot-format').value;
   // Concept Approach is a required choice for Video only -- Static always
@@ -3859,17 +3995,16 @@ async function savePromotionShootItem() {
     return toast('Choose New Concept or Existing Concept', true);
   }
   const conceptOrigin = format === 'video' ? promotionShootConceptOrigin : null;
+  const isExistingBrief = isPromotionShootExistingBrief();
 
   // No product is picked here at all -- the concept-first flow (see the
   // file-header comment above) never requires one; product_code/product_name
   // are simply omitted, leaving shoot_plan_item_styles empty ("No products
-  // required"). Sample status isn't asked for. Filming (creator) now IS a
-  // real choice (see F's "Filming" field) -- shoot-plan.js still needs a
-  // creator on every item, so this falls back to the same silent default
-  // only if the select is somehow empty (e.g. no content_creators exist).
-  const filmingSelect = document.getElementById('promotion-shoot-filming').value;
-  const defaultCreator = state.contentCreators.find((c) => c.is_default) || state.contentCreators[0];
-  const filming = filmingSelect || (defaultCreator ? defaultCreator.name : DEFAULT_CREATOR);
+  // required") unless the Existing Concept brief's own Styles/Products
+  // search below adds some. Sample status isn't asked for. Filming
+  // (creator) is a real, required choice sourced from CONCEPT_ASSIGNEES
+  // (see populatePromotionShootFilmingSelect), never silently defaulted.
+  const filming = document.getElementById('promotion-shoot-filming').value || CONCEPT_ASSIGNEES[0];
 
   // "Other / New Type" persists to concept_types immediately, same
   // reasoning as saveConceptDevModal -- it becomes reusable right away,
@@ -3887,7 +4022,7 @@ async function savePromotionShootItem() {
       body: JSON.stringify({
         concept_name: conceptName,
         concept_type: conceptType || null,
-        concept_assignee: conceptAssignee,
+        concept_assignee: null,
         editing_owner: editingOwner,
         creator: filming,
         format,
@@ -3900,19 +4035,60 @@ async function savePromotionShootItem() {
     // endpoint is shared with Core/High Stock/Drop) -- persist it with an
     // immediate follow-up PATCH, same create-then-PATCH pattern
     // savePromotionConceptDevModal's own create path already uses.
-    if (conceptOrigin) {
+    //
+    // Existing Concept goes further in that same PATCH: concept_dev_status
+    // is set straight to 'approved' plus the execution-brief fields, which
+    // (see conceptDevelopment.js's ensureShootScheduleForApprovedConcept)
+    // creates the concept's shoot_schedule row server-side in the same
+    // request -- bypassing Concept Development/Tuesday Review entirely and
+    // landing it Unscheduled in Shooting's selected Shoot Week. Styles
+    // staged in the brief are attached afterward via the same
+    // POST /shoot-plan/:id/styles Concept Development's own picker uses.
+    if (isExistingBrief) {
+      const hookVariations = [];
+      const primaryHook = document.getElementById('promotion-shoot-hook-primary').value.trim();
+      if (primaryHook) hookVariations.push({ text: primaryHook });
+      promotionShootAltHooks.forEach((text) => {
+        const trimmed = (text || '').trim();
+        if (trimmed) hookVariations.push({ text: trimmed });
+      });
+      const execution = document.getElementById('promotion-shoot-execution').value.trim();
+      const scriptNotes = document.getElementById('promotion-shoot-script').value.trim();
+      const location = document.getElementById('promotion-shoot-location').value.trim();
+      await api(`/concept-development/concepts/${item.asset_id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          concept_origin: 'existing',
+          concept_dev_status: 'approved',
+          hook_variations: hookVariations,
+          execution: execution || null,
+          script_notes: scriptNotes || null,
+          location: location || null,
+          reference_items: promotionShootReferences,
+        }),
+      });
+      for (const s of promotionShootBriefStyles) {
+        try {
+          await api(`/shoot-plan/${item.id}/styles`, {
+            method: 'POST',
+            body: JSON.stringify({ style_id: s.style_id, colour_label: null, size: null }),
+          });
+        } catch (e) { /* non-fatal -- concept is already scheduled either way */ }
+      }
+    } else if (conceptOrigin) {
       await api(`/concept-development/concepts/${item.asset_id}`, {
         method: 'PATCH',
         body: JSON.stringify({ concept_origin: conceptOrigin }),
       });
     }
     closeModal('promotion-shoot-modal');
-    toast('Added to Concept Development');
+    toast(isExistingBrief ? 'Added to Shoot Plan' : 'Added to Concept Development');
     await refreshCurrentPromotion();
     if (document.getElementById('planning-promotion-stage-view').style.display !== 'none') {
       renderPromotionStageDetailView();
     }
     await loadAll();
+    if (isExistingBrief) return;
     // One click = one concept = one item = one asset -- straight into the
     // exact concept just created, per the brief ("After creation, take the
     // user into the existing Concept Development workspace for that exact
@@ -3920,6 +4096,8 @@ async function savePromotionShootItem() {
     // Concept" already uses (the promotion stage's own campaign week may
     // not be the currently-viewed Concept Dev week, and the week's own
     // Shoot Plan confirmation must never be implied by adding one concept).
+    // Existing Concept skips this entirely -- it already bypassed Concept
+    // Development, so there's no workspace to open.
     switchTab('concept-dev');
     await openConceptDevProductStandalone(item.id);
     const seedConcept = conceptDevStandaloneProduct && conceptDevStandaloneProduct.concepts[0];
@@ -7402,15 +7580,18 @@ function refreshCurrentShootingView() {
 // the app's one small "real production people" roster, NOT
 // state.contentCreators (every app user who can run Shoot Plan intake --
 // Brendan, Lucy, Max, Sheridan, Steve, etc.). Showing the full user list
-// here was the "All Owners" problem the brief called out; "All" still
-// covers anyone outside this roster, it's just not given its own button.
-// Rendered as buttons (not a <select>) into the .person-filter containers,
-// shared client-side across Week/Today, no refetch needed on change since
-// both views already have the full week's data in hand.
+// here was the "All Owners" problem the brief called out. "Other" is its
+// own explicit bucket (rather than folding into "All") so historical/
+// outside-roster work (e.g. an older Sami assignment) stays reachable and
+// visible instead of only ever showing up mixed into the unfiltered "All"
+// view -- see isOtherFilmingPerson/shootingOwnerMatches below. Rendered as
+// buttons (not a <select>) into the .person-filter containers, shared
+// client-side across Week/Today, no refetch needed on change since both
+// views already have the full week's data in hand.
 function populateShootingOwnerFilters() {
-  const names = ['all', ...CONCEPT_ASSIGNEES];
+  const names = ['all', ...CONCEPT_ASSIGNEES, 'other'];
   const buttonsHtml = names.map((name) => {
-    const label = name === 'all' ? 'All' : escapeHtml(name);
+    const label = name === 'all' ? 'All' : name === 'other' ? 'Other' : escapeHtml(name);
     const active = state.shooting.ownerFilter === name ? ' person-filter-btn-active' : '';
     return `<button type="button" class="person-filter-btn${active}" data-value="${escapeHtml(name)}" onclick="setShootingOwnerFilter('${escapeHtml(name)}')">${label}</button>`;
   }).join('');
@@ -7419,6 +7600,13 @@ function populateShootingOwnerFilters() {
     if (!el) return;
     el.innerHTML = buttonsHtml;
   });
+}
+
+// True for anyone outside the Mark/Shez/Til operational roster -- including
+// nobody assigned at all. Shared by Shooting's "Other" filter and Editing's
+// (see editingVisibleConcepts) so both buckets mean the same thing.
+function isOutsideConceptAssigneeRoster(name) {
+  return !name || !CONCEPT_ASSIGNEES.includes(name);
 }
 
 function setShootingOwnerFilter(value) {
@@ -7433,7 +7621,9 @@ function setShootingOwnerFilter(value) {
 }
 
 function shootingOwnerMatches(item) {
-  return state.shooting.ownerFilter === 'all' || item.owner === state.shooting.ownerFilter;
+  if (state.shooting.ownerFilter === 'all') return true;
+  if (state.shooting.ownerFilter === 'other') return isOutsideConceptAssigneeRoster(item.owner);
+  return item.owner === state.shooting.ownerFilter;
 }
 
 function shootingHookPreview(item) {
@@ -8661,9 +8851,9 @@ const EDITING_FILTERS = [
 function populateEditingEditorFilter() {
   const el = document.getElementById('editing-editor-filter');
   if (!el) return;
-  const names = ['all', ...CONCEPT_ASSIGNEES];
+  const names = ['all', ...CONCEPT_ASSIGNEES, 'other'];
   el.innerHTML = names.map((name) => {
-    const label = name === 'all' ? 'All' : escapeHtml(name);
+    const label = name === 'all' ? 'All' : name === 'other' ? 'Other' : escapeHtml(name);
     const active = state.editing.editorFilter === name ? ' person-filter-btn-active' : '';
     return `<button type="button" class="person-filter-btn${active}" data-value="${escapeHtml(name)}" onclick="setEditingEditorFilter('${escapeHtml(name)}')">${label}</button>`;
   }).join('');
@@ -8705,6 +8895,7 @@ function editingActiveConcepts() {
 function editingVisibleConcepts() {
   const concepts = editingActiveConcepts();
   if (state.editing.editorFilter === 'all') return concepts;
+  if (state.editing.editorFilter === 'other') return concepts.filter((c) => isOutsideConceptAssigneeRoster(c.editing_owner));
   return concepts.filter((c) => c.editing_owner === state.editing.editorFilter);
 }
 

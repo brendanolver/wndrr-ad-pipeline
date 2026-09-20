@@ -21,6 +21,32 @@ function dateStr(d) {
   return `${y}-${m}-${day}`;
 }
 
+// Shared by both the Tuesday Review approve decision and the Promotion
+// Existing Concept bypass (an "Add to Shoot Plan" save sets
+// concept_dev_status straight to 'approved', skipping Concept Dev/Tuesday
+// Review entirely) -- either path reaching 'approved' must produce exactly
+// one shoot_schedule row, on the concept's own planned Shoot Week
+// (shoot_plan_items.week_start), never a second/duplicate one. ON CONFLICT
+// DO NOTHING keeps this idempotent no matter how many times 'approved' is
+// (re)written.
+async function ensureShootScheduleForApprovedConcept(asset) {
+  let weekStart = null;
+  if (asset.shoot_plan_item_id) {
+    const spiResult = await pool.query('SELECT week_start FROM shoot_plan_items WHERE id = $1', [asset.shoot_plan_item_id]);
+    weekStart = spiResult.rows[0] ? spiResult.rows[0].week_start : null;
+  }
+  if (!weekStart) {
+    const fallbackResult = await pool.query(`SELECT date_trunc('week', now())::date AS week_start`);
+    weekStart = fallbackResult.rows[0].week_start;
+  }
+  await pool.query(
+    `INSERT INTO shoot_schedule (creative_asset_id, status, original_week_start, scheduled_week_start)
+     VALUES ($1, 'unscheduled', $2, $2)
+     ON CONFLICT (creative_asset_id) DO NOTHING`,
+    [asset.id, weekStart]
+  );
+}
+
 // The content creator's workspace for turning a CONFIRMED weekly Shoot Plan
 // into concepts ready for the Tuesday review meeting. Deliberately reads
 // only -- product/colourways/owner/source/initial idea all come straight
@@ -122,11 +148,16 @@ router.get('/', async (req, res, next) => {
 
     // Core/High Stock/Promotion concepts: every creative_assets row already
     // scoped to this item via shoot_plan_item_id (the seed concept plus any
-    // the creator has added on this page since).
+    // the creator has added on this page since). Promotion Existing Concepts
+    // (concept_origin = 'existing') are excluded here -- they bypass Concept
+    // Development/Tuesday Review entirely (see savePromotionShootItem's
+    // "Add to Shoot Plan" path and ensureShootScheduleForApprovedConcept
+    // above), so they must never resurface here even if their own Shoot Week
+    // later happens to match a confirmed week.
     const nonDropItemIds = items.filter((i) => i.source !== 'drop').map((i) => i.id);
     const conceptsResult = nonDropItemIds.length
       ? await pool.query(
-          `SELECT * FROM creative_assets WHERE shoot_plan_item_id = ANY($1::int[]) ORDER BY created_at ASC`,
+          `SELECT * FROM creative_assets WHERE shoot_plan_item_id = ANY($1::int[]) AND concept_origin IS DISTINCT FROM 'existing' ORDER BY created_at ASC`,
           [nonDropItemIds]
         )
       : { rows: [] };
@@ -294,7 +325,7 @@ router.get('/item/:shootPlanItemId', async (req, res, next) => {
       }
     } else {
       const conceptsResult = await pool.query(
-        `SELECT * FROM creative_assets WHERE shoot_plan_item_id = $1 ORDER BY created_at ASC`,
+        `SELECT * FROM creative_assets WHERE shoot_plan_item_id = $1 AND concept_origin IS DISTINCT FROM 'existing' ORDER BY created_at ASC`,
         [itemId]
       );
       concepts = conceptsResult.rows.map((row) => ({ ...row, name_locked: false }));
@@ -507,6 +538,13 @@ router.patch('/concepts/:id', async (req, res, next) => {
       ]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Concept not found' });
+    // Promotion Existing Concept ("Add to Shoot Plan") sets concept_dev_status
+    // straight to 'approved' through this route rather than the Tuesday
+    // Review decision route below -- same "approved must have a shoot_schedule
+    // row" invariant applies regardless of which path got it there.
+    if (result.rows[0].concept_dev_status === 'approved') {
+      await ensureShootScheduleForApprovedConcept(result.rows[0]);
+    }
     res.json(result.rows[0]);
   } catch (err) {
     if (err.code === '23503') return res.status(400).json({ error: 'That Customer Avatar no longer exists' });
@@ -647,21 +685,7 @@ router.patch('/concepts/:id/review', async (req, res, next) => {
     // that becomes possible) can never duplicate or reset its schedule.
     const asset = result.rows[0];
     if (decision === 'approved') {
-      let weekStart = null;
-      if (asset.shoot_plan_item_id) {
-        const spiResult = await pool.query('SELECT week_start FROM shoot_plan_items WHERE id = $1', [asset.shoot_plan_item_id]);
-        weekStart = spiResult.rows[0] ? spiResult.rows[0].week_start : null;
-      }
-      if (!weekStart) {
-        const fallbackResult = await pool.query(`SELECT date_trunc('week', now())::date AS week_start`);
-        weekStart = fallbackResult.rows[0].week_start;
-      }
-      await pool.query(
-        `INSERT INTO shoot_schedule (creative_asset_id, status, original_week_start, scheduled_week_start)
-         VALUES ($1, 'unscheduled', $2, $2)
-         ON CONFLICT (creative_asset_id) DO NOTHING`,
-        [asset.id, weekStart]
-      );
+      await ensureShootScheduleForApprovedConcept(asset);
     }
 
     res.json(asset);

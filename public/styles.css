@@ -1157,6 +1157,16 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .cd-style-chip-remove{background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:14px;line-height:1;padding:0 2px;}
 .cd-style-chip-remove:hover{color:var(--red);}
 
+/* Promotion intake's Existing Concept execution brief -- compact
+   alternative-hook rows and pasted-reference rows, same visual language as
+   the style chips above rather than a new pattern. */
+.promo-shoot-alt-hook-row{display:flex;align-items:center;gap:6px;margin-bottom:6px;}
+.promo-shoot-alt-hook-row input{flex:1;}
+.promo-shoot-reference-row{display:flex;align-items:center;justify-content:space-between;gap:6px;font-size:12.5px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;margin-bottom:6px;}
+.promo-shoot-reference-row a{color:var(--teal-dark);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.promo-shoot-reference-add-row{display:flex;gap:6px;margin-bottom:8px;}
+.promo-shoot-reference-add-row input{flex:1;}
+
 /* Required-field indicators: a subtle grey asterisk on the label (never
    red by default) and a quiet legend at the bottom of the form -- per the
    brief, this must never read as an aggressive validation UI.

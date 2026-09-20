@@ -5,6 +5,22 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>WNDRR — Ad Creative Pipeline</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>">
+<!-- Preconnect so the Inter webfont request starts immediately alongside
+     the page itself, rather than only after styles.css's @import is parsed.
+     This is the fix for the "first click on a Filming/Assigned To dropdown
+     opens then immediately closes" report (see Issue 9): with
+     font-display:swap and no preconnect, Inter can still be swapping in
+     (fallback sans-serif -> Inter has different glyph widths, reshuffling
+     row/column layout a frame after first paint) right as a user's first
+     click on a freshly-loaded page lands -- Safari in particular treats that
+     kind of post-click layout shift as a reason to close a native select
+     popup it just opened. Narrowing the race window is the standard fix;
+     it doesn't touch app JS because no re-render or focus-stealing bug was
+     found there (confirmed via Playwright: the select node, its focus and
+     the normal mousedown/focus/click event order are all unaffected by a
+     first click). -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
 </head>
@@ -2395,12 +2411,17 @@
      product-first: a promotion's creative need is often the message/format
      itself (sitewide sale messaging, a countdown graphic) with no single
      product behind it, so this never asks the user to pick a product to
-     start. Collects Concept Type + Assigned To + Concept Name/Idea + Format,
-     then creates the standard shoot_plan_items + creative_assets pair via
-     POST /shoot-plan (source: 'promotion') -- one click, one concept, one
-     item, one asset -- and opens straight into Concept Development for it.
-     Styles Needed (optional products/colourways) is added afterwards, inside
-     Concept Development itself, not here. -->
+     start. Two distinct routes off one modal (see Concept Approach below):
+     New Concept creates the shoot_plan_items + creative_assets pair via
+     POST /shoot-plan (source: 'promotion') and opens straight into Concept
+     Development / Tuesday Review, same as before. Existing Concept does the
+     same create, then immediately PATCHes concept_origin='existing' +
+     concept_dev_status='approved' + the execution brief fields below --
+     bypassing Concept Development/Tuesday Review entirely and landing
+     straight in Shooting's selected Shoot Week, Unscheduled (see
+     ensureShootScheduleForApprovedConcept in conceptDevelopment.js). No
+     Assigned To here -- that field belongs to Concept Development's own
+     workspace, not this intake. -->
 <div id="promotion-shoot-modal" class="modal-backdrop">
   <div class="modal">
     <div class="modal-header">
@@ -2412,25 +2433,19 @@
         <div><span class="admin-note">Promotion</span><br><strong id="promotion-shoot-context-promotion"></strong></div>
         <div><span class="admin-note">Campaign Stage</span><br><strong id="promotion-shoot-context-stage"></strong></div>
       </div>
-      <!-- Shoot Week -- when this concept is actually planned to be filmed,
-           independent of the week it's being planned/developed in right now
-           (see the Shoot Week brief: a concept planned this week may not be
-           filmed for several weeks). Reuses shoot_plan_items.week_start, the
-           same field Core/High Stock/Drop already use for their own Shoot
-           Plan week -- not a second scheduling system. Defaults to the
-           current week; always editable later via editPromotionConceptShootWeek. -->
-      <label>Shoot Week
-        <select id="promotion-shoot-week"></select>
-      </label>
-      <!-- Format leads (D1) -- it determines which Concept Types are even
-           valid (conceptTypesForFormat in app.js), so picking it first,
-           before Concept Type, means the dropdown below is never shown
-           with an option the current Format can't actually use. -->
+      <!-- Format leads -- it determines which Concept Types are even valid
+           (conceptTypesForFormat in app.js) and whether Concept Approach
+           even applies (Video only), so picking it first means nothing
+           below is ever shown with an option/section the current Format
+           can't actually use. -->
       <label>Format
         <select id="promotion-shoot-format" onchange="onPromotionShootFormatChange()">
           <option value="video">Video</option>
           <option value="static">Static</option>
         </select>
+      </label>
+      <label>Concept Name / Idea
+        <input type="text" id="promotion-shoot-concept-name" placeholder="e.g. Black Friday Price Shock">
       </label>
 
       <!-- Concept Approach: Video only -- New vs Existing Concept (see
@@ -2438,8 +2453,11 @@
            always saves concept_origin = NULL, so this whole block stays
            hidden for Static -- see onPromotionShootFormatChange in app.js.
            Two compact selectable chips, not a dropdown, per the brief.
-           Kept directly under Format since it's the immediate follow-up
-           decision once Video is chosen. -->
+           New Concept never asks for Concept Type here (still needs
+           developing -- Concept Type can be chosen later in Concept
+           Development if useful); Existing Concept does, plus the compact
+           execution brief below, since it's an already-understood execution
+           being scheduled straight into production. -->
       <div id="promotion-shoot-origin-wrap" style="display:none;">
         <span class="cd-field-label">Concept Approach</span>
         <div class="promo-shoot-origin-toggle">
@@ -2449,17 +2467,22 @@
         <div class="hint" id="promotion-shoot-origin-hint"></div>
       </div>
 
-      <label>Concept Type
-        <select id="promotion-shoot-concept-type-select" onchange="onConceptDevSelectWithOtherChange('promotion-shoot-concept-type-select','promotion-shoot-concept-type-custom')"></select>
-        <input type="text" id="promotion-shoot-concept-type-custom" placeholder="New concept type…" style="display:none;margin-top:6px;">
-      </label>
-      <label>Assigned To
-        <select id="promotion-shoot-assignee">
-          <option value="">Unassigned</option>
-          <option value="Mark">Mark</option>
-          <option value="Shez">Shez</option>
-          <option value="Til">Til</option>
-        </select>
+      <div id="promotion-shoot-concept-type-wrap">
+        <label>Concept Type
+          <select id="promotion-shoot-concept-type-select" onchange="onConceptDevSelectWithOtherChange('promotion-shoot-concept-type-select','promotion-shoot-concept-type-custom')"></select>
+          <input type="text" id="promotion-shoot-concept-type-custom" placeholder="New concept type…" style="display:none;margin-top:6px;">
+        </label>
+      </div>
+      <!-- Filming -- who's shooting this, backed by shoot_plan_items.creator
+           (the SAME field Core's own Shoot This Week modal already sets via
+           #shoot-plan-creator, and the field Shooting's Filming filter reads
+           as "owner"). Sourced from CONCEPT_ASSIGNEES (Mark/Shez/Til), the
+           same small operational roster Shooting/Editing's own person
+           filters use -- not state.contentCreators (every app user who can
+           run Shoot Plan intake), which would let this silently offer people
+           who can never actually be a Filming assignment. -->
+      <label>Filming
+        <select id="promotion-shoot-filming"></select>
       </label>
       <!-- Editing -- who's responsible for editing this creative, reusing
            creative_assets.editing_owner (see PATCH /creative-assets/:id/
@@ -2475,25 +2498,68 @@
           <option value="Til">Til</option>
         </select>
       </label>
-      <!-- Filming -- who's shooting this, backed by shoot_plan_items.creator
-           (the SAME field Core's own Shoot This Week modal already sets via
-           #shoot-plan-creator, and the field Shooting's Week/Today/owner
-           filter already reads as "owner" -- see the F investigation).
-           Previously this was never asked here and silently defaulted to
-           whichever content_creators row is_default, so every Promotion
-           concept looked identically "assigned" to Shooting regardless of
-           who was actually meant to film it. Distinct from Assigned To
-           (concept development) and Editing (post-production). -->
-      <label>Filming
-        <select id="promotion-shoot-filming"></select>
+      <!-- Shoot Week -- when this concept is actually planned to be filmed,
+           independent of the week it's being planned/developed in right now
+           (see the Shoot Week brief: a concept planned this week may not be
+           filmed for several weeks). Reuses shoot_plan_items.week_start, the
+           same field Core/High Stock/Drop already use for their own Shoot
+           Plan week -- not a second scheduling system. Defaults to the
+           current week; always editable later via editPromotionConceptShootWeek. -->
+      <label>Shoot Week
+        <select id="promotion-shoot-week"></select>
       </label>
-      <label>Concept Name / Idea
-        <input type="text" id="promotion-shoot-concept-name" placeholder="e.g. Black Friday Price Shock">
-      </label>
+
+      <!-- Existing Concept's lightweight execution brief -- NOT a copy of
+           the full Concept Development workspace, just enough to schedule
+           an already-understood execution straight into Shooting. Every
+           field here reuses the exact same creative_assets columns/JSON
+           shapes Concept Development's own modal writes
+           (hook_variations/execution/reference_items/script_notes/location),
+           via the same PATCH /concept-development/concepts/:id -- this is
+           a smaller UI over the same record, not a second data model. -->
+      <div id="promotion-shoot-brief-wrap" style="display:none;">
+        <div class="cd-modal-section-title">Execution Brief</div>
+        <label>Primary Hook
+          <input type="text" id="promotion-shoot-hook-primary" placeholder="What earns attention in the first few seconds?">
+        </label>
+        <div id="promotion-shoot-hooks-alt-list"></div>
+        <button type="button" class="link-btn" onclick="addPromotionShootAltHook()">+ Add Alternative Hook</button>
+
+        <label>What to Shoot
+          <textarea id="promotion-shoot-execution" rows="3" placeholder="List the footage that must be captured."></textarea>
+        </label>
+
+        <label>Styles / Products <span class="hint">(optional)</span></label>
+        <div id="promotion-shoot-style-chips" class="cd-modal-styles-list"></div>
+        <div class="promo-shoot-search">
+          <input type="text" id="promotion-shoot-style-search" placeholder="Search SKU or product name to add…" autocomplete="off" oninput="filterPromotionShootStyles()" onfocus="filterPromotionShootStyles()">
+          <div id="promotion-shoot-style-results" class="promo-shoot-search-results" style="display:none;"></div>
+        </div>
+
+        <label>References <span class="hint">(optional)</span></label>
+        <div id="promotion-shoot-reference-list"></div>
+        <div class="promo-shoot-reference-add-row">
+          <input type="text" id="promotion-shoot-reference-url" placeholder="Paste a link">
+          <button type="button" class="btn btn-sm btn-ghost" onclick="addPromotionShootReference()">+ Add</button>
+        </div>
+
+        <div id="promotion-shoot-script-toggle-wrap">
+          <button type="button" class="link-btn" onclick="togglePromotionShootScript()">+ Add Script / Talking Points <span class="hint">(optional)</span></button>
+        </div>
+        <div id="promotion-shoot-script-field" style="display:none;">
+          <label>Script / Talking Points
+            <textarea id="promotion-shoot-script" rows="4"></textarea>
+          </label>
+        </div>
+
+        <label>Shoot Setup / Location <span class="hint">(optional)</span>
+          <input type="text" id="promotion-shoot-location" placeholder="e.g. Studio, Store, Outdoor">
+        </label>
+      </div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('promotion-shoot-modal')">Cancel</button>
-      <button class="btn btn-primary" onclick="savePromotionShootItem()">Develop Promotion Concept &rarr;</button>
+      <button class="btn btn-primary" id="promotion-shoot-save-btn" onclick="savePromotionShootItem()">Develop Promotion Concept &rarr;</button>
     </div>
   </div>
 </div>
