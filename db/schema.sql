@@ -1456,3 +1456,24 @@ ALTER TABLE shoot_schedule ADD COLUMN IF NOT EXISTS editing_week_start DATE;
 ALTER TABLE shoot_schedule ADD COLUMN IF NOT EXISTS editing_day VARCHAR(10)
   CHECK (editing_day IN ('monday', 'tuesday', 'wednesday', 'thursday', 'friday'));
 CREATE INDEX IF NOT EXISTS idx_shoot_schedule_editing_week ON shoot_schedule(editing_week_start);
+
+-- Final Approval: a genuine stage after Editing submits a Concept (see the
+-- Editing-simplification/Final-Approval brief, item 11) -- reusing
+-- editing_submitted_at as "awaiting a decision" (unchanged meaning) plus a
+-- small decision record here, same shape as Tuesday Review's own
+-- reviewed_at/review_feedback pair on the Concept Development side. Request
+-- Changes clears editing_submitted_at (the Concept reappears in Editing's
+-- normal queue, same final_edits row intact -- never a duplicate) and
+-- records feedback; Approve stamps who/when and advances the Concept's
+-- canonical `status` into the existing 'qc' Kanban stage if it hasn't
+-- already reached it (see src/routes/finalApproval.js) -- the natural
+-- holding stage for "approved, not yet uploaded" that already existed in
+-- STATUSES, reused rather than inventing a new one. A future Ad Template /
+-- Meta-preparation stage has a place to build from here (Kanban's own
+-- qc -> uploaded_live progression); it is NOT built in this pass.
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS final_approval_status VARCHAR(20) NOT NULL DEFAULT 'pending'
+  CHECK (final_approval_status IN ('pending', 'approved', 'changes_required'));
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS final_approval_feedback TEXT;
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS final_approved_at TIMESTAMPTZ;
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS final_approved_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_creative_assets_final_approval_status ON creative_assets(final_approval_status);

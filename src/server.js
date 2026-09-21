@@ -38,6 +38,7 @@ const shootingRoutes = require('./routes/shooting');
 const referenceLibraryRoutes = require('./routes/referenceLibrary');
 const userRoutes = require('./routes/users');
 const editingRoutes = require('./routes/editing');
+const finalApprovalRoutes = require('./routes/finalApproval');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -75,6 +76,7 @@ app.use('/api/customer-avatars', requireAuth, customerAvatarRoutes);
 app.use('/api/reference-library', requireAuth, referenceLibraryRoutes);
 app.use('/api/users', requireAuth, userRoutes);
 app.use('/api/editing', requireAuth, editingRoutes);
+app.use('/api/final-approval', requireAuth, finalApprovalRoutes);
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
 

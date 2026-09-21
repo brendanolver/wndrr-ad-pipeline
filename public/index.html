@@ -58,6 +58,7 @@
       <button class="tab-btn" data-tab="tuesday-review"><span class="sidebar-nav-icon">🗳</span>Tuesday Review</button>
       <button class="tab-btn" data-tab="shooting"><span class="sidebar-nav-icon">🎬</span>Shooting</button>
       <button class="tab-btn" data-tab="editing"><span class="sidebar-nav-icon">✂️</span>Editing</button>
+      <button class="tab-btn" data-tab="final-approval"><span class="sidebar-nav-icon">✅</span>Final Approval</button>
       <button class="tab-btn" data-tab="board"><span class="sidebar-nav-icon">▤</span>Board</button>
       <button class="tab-btn" data-tab="admin"><span class="sidebar-nav-icon">🏷</span>Styles &amp; Categories</button>
       <button class="tab-btn" data-tab="reference-library"><span class="sidebar-nav-icon">📚</span>Reference Library</button>
@@ -392,6 +393,7 @@
           <h2>Promotions</h2>
           <button type="button" class="btn btn-ghost btn-sm" id="new-promotion-btn">+ New Promotion</button>
         </div>
+        <div id="promotions-summary-line" class="promo-summary-line"></div>
         <div id="promotions-list" class="drops-row"></div>
 
         <div class="planning-step-footer">
@@ -731,6 +733,45 @@
       </div>
     </section>
 
+    <!-- Final Approval: the stage after Editing (see Issue 11/12). Queue is
+         every Concept Editing has submitted a Final Edit for
+         (editing_submitted_at set) and not yet approved -- a Concept sent
+         back with Request Changes drops out of this queue (see
+         finalApproval.js) until it's resubmitted. This is deliberately the
+         last built stage: Approve advances the Concept only as far as the
+         existing 'qc' Kanban status, the natural place a future Ad
+         Template/Meta-prep stage would build from -- no Meta automation
+         here yet. -->
+    <section id="tab-final-approval" class="tab-panel">
+      <h1 class="tr-page-title">Final Approval</h1>
+      <div class="shoot-summary-line" id="final-approval-summary"></div>
+      <div id="final-approval-list" class="cd-product-grid"></div>
+    </section>
+
+    <div id="final-approval-modal" class="modal-backdrop">
+      <div class="modal" style="max-width:480px;">
+        <div class="modal-header">
+          <div>
+            <h3 id="final-approval-modal-title"></h3>
+            <div class="hint" id="final-approval-modal-subtitle"></div>
+          </div>
+          <button class="modal-close" onclick="closeModal('final-approval-modal')">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div id="final-approval-modal-body"></div>
+          <div id="final-approval-feedback-section" style="display:none;margin-top:14px;">
+            <label>Feedback for the editor</label>
+            <textarea id="final-approval-feedback-input" rows="3" placeholder="What needs to change before this can be approved?"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer" id="final-approval-modal-footer">
+          <button class="btn btn-ghost" id="final-approval-close-btn" onclick="closeModal('final-approval-modal')">Close</button>
+          <button class="btn btn-ghost" id="final-approval-request-changes-btn" onclick="toggleFinalApprovalFeedback()">Request Changes</button>
+          <button class="btn btn-primary" id="final-approval-approve-btn" onclick="submitFinalApprovalApprove()">Approve &rarr;</button>
+        </div>
+      </div>
+    </div>
+
     <!-- The Concept workspace -- the primary unit of work in Editing now
          (see the workflow-revision brief). A completion checklist of every
          required Hook/Final Edit, "View Shoot Brief" for full context, and
@@ -751,18 +792,17 @@
           </div>
           <button class="modal-close" onclick="closeModal('editing-concept-modal')">&times;</button>
         </div>
+        <!-- Editing happens externally (CapCut) -- this workspace is just the
+             handoff: one Final Edit per Concept (editor/format/link/notes,
+             see #final-edit-modal, untouched by this simplification), not a
+             checklist of individually-matched hook variations. See
+             renderEditingConceptModal in app.js. -->
         <div class="modal-body">
-          <div>
-            <div class="editing-req-heading">Final Edits <span class="editing-req-heading-count" id="editing-req-heading-count"></span></div>
-            <div class="editing-card-progress-track" style="margin-top:6px;"><div class="editing-card-progress-fill" id="editing-req-progress-fill"></div></div>
-          </div>
-          <div id="editing-concept-requirements" class="editing-req-list"></div>
-          <div id="editing-create-custom-rows"></div>
-          <button type="button" class="link-btn editing-add-variation-btn" id="editing-add-another-btn" onclick="addEditingCustomAssetRow()">+ Add variation</button>
+          <div id="editing-final-edit-summary" class="editing-final-edit-summary"></div>
         </div>
         <div class="modal-footer editing-concept-footer">
           <span class="editing-concept-footer-status" id="editing-concept-footer-status"></span>
-          <button class="btn btn-primary" id="editing-concept-ready-btn" onclick="submitEditingConceptReady()" disabled>Ready for Approval &rarr;</button>
+          <button class="btn btn-primary" id="editing-concept-ready-btn" onclick="submitEditingConceptReady()" disabled>Mark as Edited &rarr;</button>
           <button class="btn btn-ghost" id="editing-concept-close-btn" onclick="closeModal('editing-concept-modal')" style="display:none;">Close</button>
         </div>
       </div>
@@ -2423,7 +2463,7 @@
      Assigned To here -- that field belongs to Concept Development's own
      workspace, not this intake. -->
 <div id="promotion-shoot-modal" class="modal-backdrop">
-  <div class="modal">
+  <div class="modal cd-modal-workspace">
     <div class="modal-header">
       <h3 id="promotion-shoot-modal-title">Add Concept</h3>
       <button class="modal-close" onclick="closeModal('promotion-shoot-modal')">&times;</button>
@@ -2437,16 +2477,21 @@
            (conceptTypesForFormat in app.js) and whether Concept Approach
            even applies (Video only), so picking it first means nothing
            below is ever shown with an option/section the current Format
-           can't actually use. -->
-      <label>Format
-        <select id="promotion-shoot-format" onchange="onPromotionShootFormatChange()">
-          <option value="video">Video</option>
-          <option value="static">Static</option>
-        </select>
-      </label>
-      <label>Concept Name / Idea
-        <input type="text" id="promotion-shoot-concept-name" placeholder="e.g. Black Friday Price Shock">
-      </label>
+           can't actually use. Paired side-by-side with Concept Name now
+           that the modal is wide enough (see .cd-modal-workspace above) --
+           same logical order as before, just using the extra horizontal
+           room instead of two full-width rows. -->
+      <div class="promo-shoot-2col">
+        <label>Format
+          <select id="promotion-shoot-format" onchange="onPromotionShootFormatChange()">
+            <option value="video">Video</option>
+            <option value="static">Static</option>
+          </select>
+        </label>
+        <label>Concept Name / Idea
+          <input type="text" id="promotion-shoot-concept-name" placeholder="e.g. Black Friday Price Shock">
+        </label>
+      </div>
 
       <!-- Concept Approach: Video only -- New vs Existing Concept (see
            schema.sql's comment on creative_assets.concept_origin). Static
@@ -2473,31 +2518,35 @@
           <input type="text" id="promotion-shoot-concept-type-custom" placeholder="New concept type…" style="display:none;margin-top:6px;">
         </label>
       </div>
-      <!-- Filming -- who's shooting this, backed by shoot_plan_items.creator
-           (the SAME field Core's own Shoot This Week modal already sets via
-           #shoot-plan-creator, and the field Shooting's Filming filter reads
-           as "owner"). Sourced from CONCEPT_ASSIGNEES (Mark/Shez/Til), the
-           same small operational roster Shooting/Editing's own person
-           filters use -- not state.contentCreators (every app user who can
-           run Shoot Plan intake), which would let this silently offer people
-           who can never actually be a Filming assignment. -->
-      <label>Filming
-        <select id="promotion-shoot-filming"></select>
-      </label>
-      <!-- Editing -- who's responsible for editing this creative, reusing
-           creative_assets.editing_owner (see PATCH /creative-assets/:id/
-           assignee): a stable one-time assignment made here at planning
-           time, well before the concept naturally reaches the Editing
-           Kanban stage, where Board already reads this same column as the
-           card's current owner. Deliberately not a new field. -->
-      <label>Editing
-        <select id="promotion-shoot-editing-owner">
-          <option value="">Unassigned</option>
-          <option value="Mark">Mark</option>
-          <option value="Shez">Shez</option>
-          <option value="Til">Til</option>
-        </select>
-      </label>
+      <!-- Filming/Editing paired side-by-side -- both short person-selects,
+           same natural pairing the Required Concepts row already uses. -->
+      <div class="promo-shoot-2col">
+        <!-- Filming -- who's shooting this, backed by shoot_plan_items.creator
+             (the SAME field Core's own Shoot This Week modal already sets via
+             #shoot-plan-creator, and the field Shooting's Filming filter reads
+             as "owner"). Sourced from CONCEPT_ASSIGNEES (Mark/Shez/Til), the
+             same small operational roster Shooting/Editing's own person
+             filters use -- not state.contentCreators (every app user who can
+             run Shoot Plan intake), which would let this silently offer people
+             who can never actually be a Filming assignment. -->
+        <label>Filming
+          <select id="promotion-shoot-filming"></select>
+        </label>
+        <!-- Editing -- who's responsible for editing this creative, reusing
+             creative_assets.editing_owner (see PATCH /creative-assets/:id/
+             assignee): a stable one-time assignment made here at planning
+             time, well before the concept naturally reaches the Editing
+             Kanban stage, where Board already reads this same column as the
+             card's current owner. Deliberately not a new field. -->
+        <label>Editing
+          <select id="promotion-shoot-editing-owner">
+            <option value="">Unassigned</option>
+            <option value="Mark">Mark</option>
+            <option value="Shez">Shez</option>
+            <option value="Til">Til</option>
+          </select>
+        </label>
+      </div>
       <!-- Shoot Week -- when this concept is actually planned to be filmed,
            independent of the week it's being planned/developed in right now
            (see the Shoot Week brief: a concept planned this week may not be
