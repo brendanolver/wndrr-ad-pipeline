@@ -28,6 +28,31 @@ function summarize(coverage) {
   return { productCount: coverage.length, styleCount, green, amber, red, totalCovered, totalTarget, overallPct };
 }
 
+// A generic-only "Untitled" card is a bad landing-page result on its own
+// (see Issue 2) -- but the fix must stay purely a DISPLAY fallback: drops.name
+// itself is never written here, so a real custom name a user sets later is
+// never at risk of being seen as "already set" from a fallback string, and
+// the fallback recomputes live as more drops land in the same month rather
+// than freezing at generation time. Deterministic from data the drop
+// already carries (its launch month + its position among that month's
+// other still-unnamed drops) -- no randomness, no invented list.
+function computeDropDisplayNames(allDropRows) {
+  const unnamedByMonth = new Map(); // 'YYYY-MM' -> [{id, launch_date}]
+  for (const d of allDropRows) {
+    if (d.name) continue;
+    const key = new Date(d.launch_date).toISOString().slice(0, 7);
+    if (!unnamedByMonth.has(key)) unnamedByMonth.set(key, []);
+    unnamedByMonth.get(key).push(d);
+  }
+  const displayNames = new Map();
+  for (const list of unnamedByMonth.values()) {
+    list.sort((a, b) => new Date(a.launch_date) - new Date(b.launch_date) || a.id - b.id);
+    const monthName = new Date(list[0].launch_date).toLocaleDateString('en-US', { month: 'long', timeZone: 'UTC' });
+    list.forEach((d, i) => displayNames.set(d.id, `${monthName} Drop ${i + 1}`));
+  }
+  return displayNames;
+}
+
 function sortByUrgency(coverage) {
   return [...coverage].sort((a, b) => {
     const gapDiff = (b.creative_gap ?? -1) - (a.creative_gap ?? -1);
@@ -53,6 +78,7 @@ router.get('/', async (req, res, next) => {
     }
 
     const assetCounts = await getCompletedAssetCounts(stylesResult.rows.map((s) => s.id));
+    const displayNames = computeDropDisplayNames(dropsResult.rows);
 
     const drops = dropsResult.rows.map((drop) => {
       const styleRows = excludeAdExcludedStyles(stylesByDrop.get(drop.id) || [], am.amDetails);
@@ -62,6 +88,7 @@ router.get('/', async (req, res, next) => {
       const daysUntilLaunch = Math.ceil((new Date(drop.launch_date) - new Date()) / 86400000);
       return {
         ...drop,
+        display_name: drop.name || displayNames.get(drop.id) || null,
         days_until_launch: daysUntilLaunch,
         summary: summarize(coverage),
         most_urgent: coverage.slice(0, 3),
@@ -241,8 +268,15 @@ router.get('/:id', async (req, res, next) => {
     );
     const daysUntilLaunch = Math.ceil((new Date(drop.launch_date) - new Date()) / 86400000);
 
+    // Same month-position numbering as the landing list (GET /) -- needs
+    // every OTHER unnamed drop's id/launch_date too, so this one drop's
+    // fallback lands on the same number it shows on the landing page.
+    const allDropsResult = await pool.query('SELECT id, name, launch_date FROM drops');
+    const displayNames = computeDropDisplayNames(allDropsResult.rows);
+
     res.json({
       ...drop,
+      display_name: drop.name || displayNames.get(drop.id) || null,
       days_until_launch: daysUntilLaunch,
       summary: summarize(coverage),
       coverage,

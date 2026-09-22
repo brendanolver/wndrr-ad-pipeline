@@ -232,6 +232,37 @@ ALTER TABLE proven_winners ADD COLUMN IF NOT EXISTS default_format VARCHAR(10) N
 ALTER TABLE proven_winners ADD COLUMN IF NOT EXISTS default_classification VARCHAR(20) NOT NULL DEFAULT 'tested_proven'
   CHECK (default_classification IN ('tested_proven', 'new_experimental'));
 
+-- Starter seed: proven_winners is Settings-owned admin data that was never
+-- seeded by a migration -- production's real list was entered by hand
+-- through Settings at some point before this table's schema even existed
+-- here. That's WHY a fresh/PR-test database's Drop product pages show "No
+-- required concepts yet" instead of auto-populating (generateOrTopUpPlan
+-- in dropProductPlans.js already reads straight from this table -- it's
+-- the correct source of truth, just empty). This is not a new invented
+-- list: it's the exact vocabulary concept_types' own one-time seed further
+-- below already copied from proven_winners' production contents at the
+-- time it ran ("Flatlay Photo, POV from iPhone, Try on/Flatlay Video,
+-- Ecom Photo, Green Screen Video", etc.) -- restoring the table those
+-- comments already assumed existed. Guarded the same way: fires only the
+-- first time this runs against a database where proven_winners is still
+-- empty, so it's a pure no-op against production (which already has these
+-- rows under their own ids) and never overwrites a later rename/reorder/
+-- deactivate/addition made through Settings.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM proven_winners) THEN
+    INSERT INTO proven_winners (name, rank, default_format, default_classification) VALUES
+      ('Flatlay Photo', 1, 'static', 'tested_proven'),
+      ('POV from iPhone', 2, 'video', 'tested_proven'),
+      ('Try on/Flatlay Video', 3, 'video', 'tested_proven'),
+      ('Ecom Photo', 4, 'static', 'tested_proven'),
+      ('Green Screen Video', 5, 'video', 'tested_proven'),
+      ('Flatlay Video', 6, 'video', 'tested_proven'),
+      ('Product Close Up', 7, 'video', 'tested_proven'),
+      ('Rug Try On', 8, 'video', 'tested_proven');
+  END IF;
+END $$;
+
 -- A "product" has no table of its own -- it's a derived grouping computed by
 -- deriveProductCode/buildCoverage on every request (coverage.js). This table
 -- is the stable anchor a generated concept plan snapshots against, keyed on

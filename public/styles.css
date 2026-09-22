@@ -408,44 +408,44 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .drop-card-status.needs-attention{background:var(--amber-light);color:var(--amber);}
 .drop-card-status.at-risk{background:var(--red-light);color:var(--red);}
 .drop-card-review-link-btn{font-size:12px;font-weight:600;color:var(--teal-dark);background:none;border:none;padding:0;cursor:pointer;font-family:inherit;display:block;}
-/* Promotions landing cards only (scoped via #promotions-list so Drops'
-   shared .drop-card classes are untouched): reserves a consistent
-   two-line title height so the date/progress/next-priority rows below
-   start at the same vertical position whether a promotion's name wraps
-   to one line (e.g. "Boxing Day 2026") or two (e.g. "Birthday Sale
-   2027") -- an explicit line-height keeps the two-line reservation
-   pixel-exact instead of depending on the browser's own "normal" metric. */
-#promotions-list .drop-card-name{line-height:17px;}
-#promotions-list .drop-card-header{min-height:34px;}
+/* Promotions landing page, round 2 (Issue 3): a "Current Focus" hero for
+   the one promotion actually needing attention, then everything else as
+   quiet "Coming Up" cards -- replaces the flat equal-weight card grid the
+   first pass left in place. Same underlying p.stages/p.summary data as
+   before, just a different shape for it (see promotionCurrentFocusHtml/
+   promotionComingUpCardHtml in app.js). Restrained: one emoji eyebrow, no
+   gradients, no imagery -- the dominance comes from size/weight/space, not
+   decoration. */
+.promo-focus-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:22px 26px;margin-bottom:22px;box-shadow:var(--shadow);cursor:pointer;transition:box-shadow 0.12s;}
+.promo-focus-card:hover{box-shadow:0 6px 20px rgba(0,0,0,0.12);}
+.promo-focus-eyebrow{font-size:11.5px;font-weight:800;letter-spacing:0.06em;text-transform:uppercase;color:var(--teal-dark);margin-bottom:8px;}
+.promo-focus-header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+.promo-focus-name{font-size:24px;font-weight:800;color:var(--text);}
+.promo-focus-meta{font-size:13.5px;color:var(--text-muted);margin:6px 0 14px;}
+.promo-focus-ready{font-size:16px;color:var(--text-secondary);font-weight:600;}
+.promo-focus-ready strong{color:var(--text);font-weight:800;font-size:19px;}
+.promo-focus-progress{height:10px;margin:10px 0 18px;}
+.promo-focus-stages{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:18px;}
+.promo-focus-stage{background:var(--surface2);border-radius:var(--r);padding:10px 12px;}
+.promo-focus-stage-name{font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.promo-focus-stage-count{font-size:16px;font-weight:800;color:var(--text);margin-top:2px;}
+.promo-focus-cta{font-size:14px;}
 
-/* Restrained visual polish pass (see the Shoot Week/Scheduling brief, item
-   14) -- title/countdown/Ready hierarchy, obvious clickability, and a
-   Next Priority line that reads as a real callout rather than an
-   afterthought. Still the same .drop-card shell/layout, no redesign. */
-#promotions-list .drop-card-name{font-size:16px;}
-#promotions-list .drop-card{transition:border-color 0.12s, box-shadow 0.12s;}
-#promotions-list .drop-card:hover{border-color:var(--teal);box-shadow:var(--shadow);}
-#promotions-list .drop-card-date strong{color:var(--text-secondary);font-weight:700;}
-#promotions-list .drop-card-pct strong{color:var(--text);font-weight:800;}
-#promotions-list .drop-card-urgent{font-size:12px;color:var(--text-secondary);background:var(--surface2);border-top:none;border-radius:var(--r);padding:7px 9px;margin-top:10px;}
-#promotions-list .drop-card-urgent strong{color:var(--text);}
+.promo-section-heading{font-size:12.5px;font-weight:800;letter-spacing:0.05em;text-transform:uppercase;color:var(--text-muted);margin-bottom:2px;}
+.promo-section-subheading{font-size:12.5px;color:var(--text-muted);margin-bottom:12px;}
+.promo-coming-up-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-bottom:8px;}
+.promo-coming-up-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:13px 15px;cursor:pointer;transition:border-color 0.12s, box-shadow 0.12s;}
+.promo-coming-up-card:hover{border-color:var(--teal);box-shadow:var(--shadow-xs);}
+.promo-coming-up-name{font-size:13.5px;font-weight:700;color:var(--text);}
+.promo-coming-up-meta{font-size:11.5px;color:var(--text-muted);margin:3px 0 6px;}
+.promo-coming-up-pct{font-size:11.5px;color:var(--text-secondary);font-weight:600;}
+
 /* The "N upcoming promotions / Mark as Reviewed" row read as visually
    disconnected from the cards above it (a plain border-top with no other
    relationship to the grid) -- tightening the gap and softening the
    divider integrates it as the section's own closing line rather than an
    unrelated strip, without inventing a new row/workflow. */
-#promotions-list-view .planning-step-footer{margin-top:14px;padding-top:12px;border-top-color:var(--surface2);}
-/* Summary context line (Issue 3): a single row of "at a glance" counts
-   above the card grid -- the page previously jumped straight from the
-   header into cards with no read on the whole set before scanning each
-   one individually. Plain text + colour, same tokens each card's own
-   badge already uses, no new component. */
-.promo-summary-line{font-size:12.5px;font-weight:600;color:var(--text-secondary);margin:-4px 0 14px;}
-.promo-summary-line:empty{display:none;}
-.promo-summary-sep{color:var(--text-muted);font-weight:400;}
-.promo-summary-red{color:var(--red);}
-.promo-summary-amber{color:var(--amber);}
-.promo-summary-green{color:var(--green);}
+#promotions-list-view .planning-step-footer{margin-top:22px;padding-top:12px;border-top-color:var(--surface2);}
 
 /* ── DROP MODAL: date quickpicks + auto-populated style checklist ── */
 .quickpick-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:-6px;}

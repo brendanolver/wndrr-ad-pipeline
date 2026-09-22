@@ -393,8 +393,22 @@
           <h2>Promotions</h2>
           <button type="button" class="btn btn-ghost btn-sm" id="new-promotion-btn">+ New Promotion</button>
         </div>
-        <div id="promotions-summary-line" class="promo-summary-line"></div>
-        <div id="promotions-list" class="drops-row"></div>
+
+        <!-- The one promotion currently requiring/receiving attention, as a
+             dominant hero -- everything else on this page is deliberately
+             quieter (see promotionsComingUpCardHtml below). Built from the
+             SAME p.stages/p.summary data every existing card already
+             computes (promotions.js's summarizePromotion/summarizeStage),
+             not a new endpoint. -->
+        <div id="promotions-current-focus"></div>
+
+        <div id="promotions-coming-up-section">
+          <div class="promo-section-heading">Coming Up</div>
+          <div class="promo-section-subheading">Future campaigns to prepare for</div>
+          <div id="promotions-coming-up-list" class="promo-coming-up-grid"></div>
+        </div>
+
+        <div id="promotions-empty-state" class="attention-empty" style="display:none;">No upcoming promotions yet — add one to start planning creative coverage.</div>
 
         <div class="planning-step-footer">
           <span id="promotions-step-footer-count">0 upcoming promotions</span>

@@ -676,6 +676,14 @@ function renderPlanningShootSummary() {
 // step flow -- see handleHashRoute below for the redirect that keeps old
 // links working.
 function parseDropsHash() {
+  // renderDropsRoute() (below) runs on EVERY loadAll() refresh regardless
+  // of which tab is actually active (see its own comment) -- without this
+  // guard, a hash belonging to a different tab entirely (e.g. "#promotions/5"
+  // while saving a Promotion concept) falls through the replace() as a
+  // no-op and gets misread as dropId = Number("#promotions") = NaN,
+  // firing a spurious GET /api/drops/NaN. Caught via live QA on the
+  // Promotion New Concept flow (Issue 4), not specific to it.
+  if (!window.location.hash.startsWith('#drops')) return { view: 'list' };
   const parts = window.location.hash.replace(/^#drops\/?/, '').split('/').filter(Boolean);
   if (parts[0] && parts[1] === 'product' && parts[2]) {
     return { view: 'product', dropId: Number(parts[0]), productCode: decodeURIComponent(parts[2]) };
@@ -717,6 +725,9 @@ function renderDropsRoute() {
 // Was #planning/promotion/... before Promotions moved out of Planning's
 // step flow -- see handleHashRoute below for the redirect.
 function parsePromotionsHash() {
+  // Same guard as parseDropsHash above, same reason -- renderPromotionsRoute
+  // also runs on every loadAll() refresh regardless of active tab.
+  if (!window.location.hash.startsWith('#promotions')) return { view: 'list' };
   const parts = window.location.hash.replace(/^#promotions\/?/, '').split('/').filter(Boolean);
   if (parts[0] && parts[1] === 'stage' && parts[2]) {
     return { view: 'promotion-stage', promotionId: Number(parts[0]), stageId: Number(parts[2]) };
@@ -1055,7 +1066,7 @@ function dropCardHtml(d) {
   return `
     <div class="drop-card" data-drop-id="${d.id}">
       <div class="drop-card-header">
-        <div class="drop-card-name ${d.name ? '' : 'untitled'}" data-drop-id="${d.id}" title="Click to rename">${d.name ? escapeHtml(d.name) : 'Untitled'}</div>
+        <div class="drop-card-name ${d.name ? '' : 'untitled'}" data-drop-id="${d.id}" title="Click to rename">${escapeHtml(d.display_name || d.name || 'Untitled')}</div>
         <button type="button" class="drop-card-edit-btn" data-drop-id="${d.id}" title="Edit launch date / notes">Edit</button>
       </div>
       <div class="drop-card-date">${formatDate(d.launch_date)} · ${d.days_until_launch >= 0 ? d.days_until_launch + ' days to launch' : 'Launched'}</div>
@@ -1190,7 +1201,7 @@ function startInlineDropRename(nameEl) {
   input.type = 'text';
   input.className = 'drop-card-name-input';
   input.value = original;
-  input.placeholder = 'Untitled';
+  input.placeholder = (drop && drop.display_name) || 'Untitled';
   nameEl.appendChild(input);
   input.focus();
   input.select();
@@ -1203,9 +1214,13 @@ function startInlineDropRename(nameEl) {
     const newValue = input.value.trim();
     if (save && newValue !== original) {
       try {
-        const updated = await api(`/drops/${dropId}`, { method: 'PUT', body: JSON.stringify({ name: newValue }) });
-        const idx = state.drops.findIndex((d) => d.id === dropId);
-        if (idx !== -1) state.drops[idx] = { ...state.drops[idx], name: updated.name };
+        // A full refetch (not a local patch) so a cleared name picks up its
+        // recomputed month-position fallback -- and so every OTHER unnamed
+        // drop in the same month re-numbers correctly too, same as the
+        // server already does for a fresh page load.
+        await api(`/drops/${dropId}`, { method: 'PUT', body: JSON.stringify({ name: newValue }) });
+        await refreshDropsRow();
+        return;
       } catch (e) {
         toast(e.message, true);
       }
@@ -1235,7 +1250,7 @@ async function loadDropView(dropId) {
     const drop = await api(`/drops/${dropId}`);
     state.currentDrop = drop;
     const titleEl = document.getElementById('drop-view-title');
-    titleEl.textContent = drop.name || 'Untitled';
+    titleEl.textContent = drop.display_name || drop.name || 'Untitled';
     titleEl.classList.toggle('untitled', !drop.name);
     document.getElementById('drop-view-edit-btn').onclick = () => openDropModal(drop);
     const amNote = document.getElementById('drop-view-am-note');
@@ -1844,6 +1859,7 @@ function openDropModal(drop) {
   document.getElementById('drop-modal-title').textContent = drop ? 'Edit Drop' : 'New Drop';
   document.getElementById('drop-id').value = drop ? drop.id : '';
   document.getElementById('drop-name').value = (drop && drop.name) || '';
+  document.getElementById('drop-name').placeholder = (drop && drop.display_name) || 'e.g. Kingswood Cargo Short';
   document.getElementById('drop-launch-date').value = drop ? drop.launch_date.slice(0, 10) : '';
   document.getElementById('drop-notes').value = (drop && drop.notes) || '';
   document.getElementById('drop-date-note').textContent = '';
@@ -1923,7 +1939,7 @@ function renderStylesTable() {
 
 function populateStyleDropSelect(selectedId) {
   const sel = document.getElementById('style-drop-id');
-  sel.innerHTML = '<option value="">— none —</option>' + state.drops.map((d) => `<option value="${d.id}" ${d.id === selectedId ? 'selected' : ''}>${escapeHtml(d.name || 'Untitled')}</option>`).join('');
+  sel.innerHTML = '<option value="">— none —</option>' + state.drops.map((d) => `<option value="${d.id}" ${d.id === selectedId ? 'selected' : ''}>${escapeHtml(d.display_name || d.name || 'Untitled')}</option>`).join('');
 }
 
 function openStyleModal(style) {
@@ -3230,74 +3246,108 @@ function promotionUrgencyBadgeHtml(urgency) {
   return `<div class="drop-card-status ${dropCardStatusClass(color)}">${promotionUrgencyLabel(urgency)}</div>`;
 }
 
-function promotionCardHtml(p) {
-  const color = promotionUrgencyColor(p.status);
-  const dateRange = p.end_date ? `${formatDate(p.start_date)} – ${formatDate(p.end_date)}` : formatDate(p.start_date);
-  const pct = p.summary.overall_pct;
-  // Restrained readability pass (see the Shoot Week/Scheduling brief, item
-  // 14): the countdown and Ready fraction are the two numbers someone
-  // scans for first, so they get bolded up rather than sitting at the same
-  // weight as the surrounding label text -- no new layout, just hierarchy.
-  const countdownHtml = p.days_until_launch >= 0 ? `<strong>${p.days_until_launch}</strong> days to launch` : 'Launched';
+// Current Focus (Issue 3): the promotion actually needing attention right
+// now, not just the chronologically-nearest one -- first upcoming
+// promotion whose status isn't the neutral 'future' state (same rank
+// promotions.js already computes: worst-stage urgency, see summarizePromotion),
+// falling back to the nearest-launching one if every upcoming promotion is
+// still comfortably far off. Already-sorted-by-start_date input (API order),
+// so the fallback is naturally "soonest" too.
+function promotionsPickCurrentFocus(allUpcoming) {
+  if (!allUpcoming.length) return null;
+  return allUpcoming.find((p) => p.status !== 'future') || allUpcoming[0];
+}
+
+// One stage's Ready/Target as a compact tile -- same numbers the detail
+// page's own Campaign Stage cards show (ca.status via READY_STATUSES,
+// summarizeStage in promotions.js), just condensed to fit four across the
+// hero instead of a full stage card each.
+function promotionFocusStageHtml(stage) {
   return `
-    <div class="drop-card" data-promotion-id="${p.id}">
-      <div class="drop-card-header">
-        <div class="drop-card-name">${escapeHtml(p.name)}</div>
-        ${promotionUrgencyBadgeHtml(p.status)}
-      </div>
-      <div class="drop-card-date">${dateRange} · ${countdownHtml}</div>
-      <div class="drop-card-pct"><strong>${p.summary.total_ready} / ${p.summary.total_required}</strong> Ready${pct !== null ? ' — ' + pct + '%' : ''}</div>
-      ${pct !== null ? `<div class="coverage-progress-track"><div class="coverage-progress-fill ${color}" style="width:${Math.min(100, pct)}%;"></div></div>` : ''}
-      ${p.most_urgent_stage ? `<div class="drop-card-urgent">Next priority: <strong>${escapeHtml(p.most_urgent_stage.name)}</strong> — ${p.most_urgent_stage.still_required} missing</div>` : ''}
+    <div class="promo-focus-stage">
+      <div class="promo-focus-stage-name">${escapeHtml(stage.name)}</div>
+      <div class="promo-focus-stage-count">${stage.ready} / ${stage.target}</div>
     </div>`;
 }
 
-function wirePromotionCardRow(row) {
-  row.querySelectorAll('.drop-card').forEach((card) => {
-    card.addEventListener('click', () => { window.location.hash = `#promotions/${card.dataset.promotionId}`; });
+function promotionCurrentFocusHtml(p) {
+  const color = promotionUrgencyColor(p.status);
+  const dateRange = p.end_date ? `${formatDate(p.start_date)} – ${formatDate(p.end_date)}` : formatDate(p.start_date);
+  const pct = p.summary.overall_pct;
+  const countdownHtml = p.days_until_launch >= 0 ? `${p.days_until_launch} days to launch` : 'Launched';
+  return `
+    <div class="promo-focus-card" data-promotion-id="${p.id}">
+      <div class="promo-focus-eyebrow">🔥 Current Focus</div>
+      <div class="promo-focus-header">
+        <div class="promo-focus-name">${escapeHtml(p.name)}</div>
+        ${promotionUrgencyBadgeHtml(p.status)}
+      </div>
+      <div class="promo-focus-meta">${dateRange} · ${countdownHtml}</div>
+      <div class="promo-focus-ready"><strong>${p.summary.total_ready} / ${p.summary.total_required}</strong> creatives ready${pct !== null ? ` — ${pct}%` : ''}</div>
+      ${pct !== null ? `<div class="coverage-progress-track promo-focus-progress"><div class="coverage-progress-fill ${color}" style="width:${Math.min(100, pct)}%;"></div></div>` : ''}
+      ${p.stages.length ? `<div class="promo-focus-stages">${p.stages.map(promotionFocusStageHtml).join('')}</div>` : ''}
+      <button type="button" class="btn btn-primary promo-focus-cta" data-promotion-id="${p.id}">Continue Planning &rarr;</button>
+    </div>`;
+}
+
+// Everything else on the rolling major-sales calendar (a promotion counts
+// as "active/upcoming" until its own end date passes, not its start date --
+// see days_until_end in promotions.js) -- deliberately quiet: no progress
+// bar, no stage breakdown, just enough to recognise it and jump in.
+function promotionComingUpCardHtml(p) {
+  const dateRange = p.end_date ? `${formatDate(p.start_date)} – ${formatDate(p.end_date)}` : formatDate(p.start_date);
+  const countdownHtml = p.days_until_launch >= 0 ? `${p.days_until_launch}d to launch` : 'Launched';
+  const pct = p.summary.overall_pct;
+  return `
+    <div class="promo-coming-up-card" data-promotion-id="${p.id}">
+      <div class="promo-coming-up-name">${escapeHtml(p.name)}</div>
+      <div class="promo-coming-up-meta">${dateRange} · ${countdownHtml}</div>
+      ${pct !== null ? `<div class="promo-coming-up-pct">${p.summary.total_ready}/${p.summary.total_required} ready — ${pct}%</div>` : ''}
+    </div>`;
+}
+
+function wirePromotionsClicks(container) {
+  container.querySelectorAll('[data-promotion-id]').forEach((el) => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      window.location.hash = `#promotions/${el.dataset.promotionId}`;
+    });
   });
 }
 
-// Rolling major-sales calendar: a promotion counts as "active/upcoming"
-// until its own end date passes (not its start date -- a sale that has
-// already launched but hasn't finished yet still belongs here), and the
-// landing view only ever shows the next four chronologically -- a
-// historic sale never accumulates on this screen, it just stops
-// qualifying the moment days_until_end goes negative. Already sorted
-// chronologically by the API (ORDER BY start_date ASC in promotions.js),
-// so no client-side re-sort is needed here.
-// Restrained summary context above the card grid (Issue 3): a one-line
-// read of the SAME urgency breakdown the cards below already show
-// individually, computed across every upcoming promotion (not just the 4
-// cards rendered) so it doesn't understate a problem sitting just off
-// the visible row. No new data -- state.promotions is already loaded in
-// full, this just counts by the same promotionUrgencyColor buckets each
-// card's own badge already uses.
-function renderPromotionsSummaryLine(allUpcoming) {
-  const el = document.getElementById('promotions-summary-line');
-  if (!el) return;
-  if (!allUpcoming.length) { el.innerHTML = ''; return; }
-  const atRisk = allUpcoming.filter((p) => p.status === 'at_risk').length;
-  const needsAttention = allUpcoming.filter((p) => p.status === 'needs_attention').length;
-  const parts = [`${allUpcoming.length} upcoming`];
-  if (atRisk) parts.push(`<span class="promo-summary-red">${atRisk} at risk</span>`);
-  if (needsAttention) parts.push(`<span class="promo-summary-amber">${needsAttention} needs attention</span>`);
-  if (!atRisk && !needsAttention) parts.push('<span class="promo-summary-green">all on track</span>');
-  el.innerHTML = parts.join(' <span class="promo-summary-sep">·</span> ');
-}
-
 function renderPromotionsRow() {
-  const list = document.getElementById('promotions-list');
-  if (!list) return; // guards a load race before index.html's panel exists
-  const allUpcoming = state.promotions.filter((p) => p.days_until_end === null || p.days_until_end >= 0);
-  const upcoming = allUpcoming.slice(0, 4);
-  renderPromotionsSummaryLine(allUpcoming);
-  list.innerHTML = upcoming.length
-    ? upcoming.map(promotionCardHtml).join('')
-    : '<div class="attention-empty">No upcoming promotions yet — add one to start planning creative coverage.</div>';
-  wirePromotionCardRow(list);
+  const focusEl = document.getElementById('promotions-current-focus');
+  if (!focusEl) return; // guards a load race before index.html's panel exists
+  const comingUpSection = document.getElementById('promotions-coming-up-section');
+  const comingUpList = document.getElementById('promotions-coming-up-list');
+  const emptyEl = document.getElementById('promotions-empty-state');
 
-  document.getElementById('promotions-step-footer-count').textContent = `${upcoming.length} upcoming promotion${upcoming.length === 1 ? '' : 's'}`;
+  const allUpcoming = state.promotions.filter((p) => p.days_until_end === null || p.days_until_end >= 0);
+
+  if (!allUpcoming.length) {
+    focusEl.innerHTML = '';
+    comingUpSection.style.display = 'none';
+    emptyEl.style.display = '';
+    document.getElementById('promotions-step-footer-count').textContent = '0 upcoming promotions';
+    return;
+  }
+  emptyEl.style.display = 'none';
+
+  const focus = promotionsPickCurrentFocus(allUpcoming);
+  const rest = allUpcoming.filter((p) => p.id !== focus.id);
+
+  focusEl.innerHTML = promotionCurrentFocusHtml(focus);
+  wirePromotionsClicks(focusEl);
+
+  if (rest.length) {
+    comingUpSection.style.display = '';
+    comingUpList.innerHTML = rest.map(promotionComingUpCardHtml).join('');
+    wirePromotionsClicks(comingUpList);
+  } else {
+    comingUpSection.style.display = 'none';
+  }
+
+  document.getElementById('promotions-step-footer-count').textContent = `${allUpcoming.length} upcoming promotion${allUpcoming.length === 1 ? '' : 's'}`;
 }
 
 document.getElementById('new-promotion-btn').addEventListener('click', () => openPromotionModal(null));
@@ -4121,19 +4171,19 @@ async function savePromotionShootItem() {
     }
     await loadAll();
     if (isExistingBrief) return;
-    // One click = one concept = one item = one asset -- straight into the
-    // exact concept just created, per the brief ("After creation, take the
-    // user into the existing Concept Development workspace for that exact
-    // concept"). Same standalone-item pattern Brief Builder's "Start
-    // Concept" already uses (the promotion stage's own campaign week may
-    // not be the currently-viewed Concept Dev week, and the week's own
-    // Shoot Plan confirmation must never be implied by adding one concept).
-    // Existing Concept skips this entirely -- it already bypassed Concept
-    // Development, so there's no workspace to open.
-    switchTab('concept-dev');
-    await openConceptDevProductStandalone(item.id);
-    const seedConcept = conceptDevStandaloneProduct && conceptDevStandaloneProduct.concepts[0];
-    if (seedConcept) openConceptDevModal(seedConcept.id);
+    // New Concept (Issue 4): continue straight into the SAME inline
+    // Concept Development workspace every other Promotion concept already
+    // uses (openPromotionConceptDevModal, reached from "+ Add Concept" on
+    // a Promotion product's workspace) -- no tab switch, no separate page,
+    // same modal family the user was just filling out. One GET for the
+    // standalone product shape (the exact shape that modal always expects,
+    // identical to what openAddConceptModal's own promotion branch already
+    // fetches) -- not a second data model or a duplicate concept: the
+    // asset already exists from the POST /shoot-plan call above, so it's
+    // passed in (edit mode), never re-created.
+    const product = await api(`/concept-development/item/${item.id}`);
+    const seedConcept = product.concepts && product.concepts[0];
+    if (seedConcept) openPromotionConceptDevModal(seedConcept, product);
   } catch (e) {
     toast(e.message, true);
   }
@@ -6573,7 +6623,7 @@ function updatePromotionConceptDevFooterButtons(status) {
     draftBtn.style.display = '';
     changesBtn.style.display = 'none';
     submitBtn.style.display = '';
-    submitBtn.textContent = 'Ready for Review →';
+    submitBtn.textContent = 'Save & Send to Review →';
   }
 }
 
@@ -8867,6 +8917,72 @@ function editingConceptEditorLabel(concept) {
 const EDITING_STATUS_LABELS = { to_edit: 'To Edit', editing: 'In Progress', ready_for_approval: 'Edited' };
 const EDITING_STATUS_CLASS = { to_edit: 'editing-status-to-edit', editing: 'editing-status-editing', ready_for_approval: 'editing-status-ready' };
 
+// The same segmented production-status control Shooting cards already use
+// (shootingStatusControlHtml, reusing its exact .shoot-status-control/
+// .shoot-status-segment CSS -- Issue 6 asks for "the SAME visual
+// interaction pattern", not a lookalike). Only the segment immediately
+// after the current one is ever clickable (advance), same linear-only
+// rule as Shooting -- but unlike Shooting's plain status flip, advancing
+// here does real work (creating the Final Edit, or submitting to Final
+// Approval), so there's no revert segment: undoing "To Edit -> In
+// Progress" is the existing "Remove Final Edit" action inside the
+// workspace, and undoing "In Progress -> Edited" is deliberately NOT a
+// raw revert here -- once submitted, Final Approval owns the concept (see
+// renderEditingConceptModal's submitted-lock), and the only way back is
+// its own Request Changes, which is a decision with feedback attached,
+// not a silent undo button on a card.
+function editingStatusControlHtml(concept) {
+  const stages = ['to_edit', 'editing', 'ready_for_approval'];
+  const status = editingConceptStatus(concept);
+  const currentIndex = stages.indexOf(status);
+  return `<div class="shoot-status-control" onclick="event.stopPropagation()">${stages.map((stage, i) => {
+    const isCurrent = i === currentIndex;
+    const isNext = i === currentIndex + 1;
+    const onclick = isNext
+      ? (stage === 'editing' ? `advanceEditingToInProgress(${concept.creative_asset_id})` : `advanceEditingToEdited(${concept.creative_asset_id})`)
+      : null;
+    const title = isNext ? `Mark as ${EDITING_STATUS_LABELS[stage]}` : '';
+    return `<button type="button" class="shoot-status-segment${isCurrent ? ' shoot-status-segment-active' : ''}" ${onclick ? `onclick="${onclick}"` : 'disabled'} title="${title}">${EDITING_STATUS_LABELS[stage]}</button>`;
+  }).join('')}</div>`;
+}
+
+// Card-level equivalent of startEditingFinalEdit (inside the Concept
+// workspace modal) -- same creation call, just addressed by
+// creativeAssetId directly rather than state.editing.activeConceptAssetId,
+// so the segmented control's "In Progress" segment works from any card
+// without first opening the workspace. Still finishes by opening the Final
+// Edit modal -- there's nothing to actually DO in "In Progress" besides
+// paste the link back, so skipping straight to that is the same one
+// continuous motion as before.
+async function advanceEditingToInProgress(conceptAssetId) {
+  const concept = editingFindConcept(conceptAssetId);
+  if (!concept) return;
+  const format = FINAL_EDIT_FORMATS.includes(concept.concept_format) ? concept.concept_format : 'video';
+  try {
+    const created = await api(`/editing/concepts/${conceptAssetId}/final-edits`, {
+      method: 'POST',
+      body: JSON.stringify({ assets: [{ asset_name: 'Final Edit', format }] }),
+    });
+    await refreshCurrentEditingView();
+    openFinalEditModal(created[0].id);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// Card-level equivalent of submitEditingConceptReady -- same endpoint,
+// same server-side link-required validation (the error toasts exactly as
+// it would from inside the workspace if the link is still missing).
+async function advanceEditingToEdited(conceptAssetId) {
+  try {
+    await api(`/editing/concepts/${conceptAssetId}/ready-for-approval`, { method: 'POST' });
+    toast('Marked as Edited');
+    await refreshCurrentEditingView();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
 const EDITING_FILTERS = [
   { value: 'all', label: 'All' },
   { value: 'to_edit', label: 'To Edit' },
@@ -9023,7 +9139,7 @@ function editingConceptCardHtml(concept) {
         <div class="editing-concept-product">${escapeHtml(concept.product_name || '—')}</div>
       </div>
       <div class="editing-concept-name">${escapeHtml(concept.concept_name)}</div>
-      <span class="cd-concept-status-pill ${EDITING_STATUS_CLASS[status]}">${isReady ? '&check; ' : ''}${EDITING_STATUS_LABELS[status]}</span>
+      ${editingStatusControlHtml(concept)}
       ${concept.editing_owner ? `<div class="cd-card-meta">Editing: <strong>${escapeHtml(concept.editing_owner)}</strong></div>` : ''}
       <div class="cd-card-action">${editingConceptCtaLabel(status)} &rarr;</div>
     </div>`;
@@ -9199,7 +9315,7 @@ function editingDayCardHtml(concept, isUnscheduled = false) {
       <div class="shoot-card-product">${escapeHtml(concept.product_name || '—')}</div>
       ${editingHtml}
       <div class="shoot-card-footer">
-        <span class="cd-concept-status-pill ${EDITING_STATUS_CLASS[status]}">${isReady ? '&check; ' : ''}${EDITING_STATUS_LABELS[status]}</span>
+        ${editingStatusControlHtml(concept)}
         ${carriedBadge}
       </div>
       <div class="shoot-card-actions">
