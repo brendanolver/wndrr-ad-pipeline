@@ -99,7 +99,7 @@ let state = {
   // (Concepts already nested with their Final Edits); activeConceptAssetId/
   // activeFinalEditId track which modal is currently open so save handlers
   // know what they're writing to.
-  editing: { view: 'week', weekOffset: 0, data: null, todayData: null, historyData: null, dragScheduleId: null, filter: 'all', editorFilter: 'all', activeConceptAssetId: null, activeFinalEditId: null },
+  editing: { view: 'week', weekOffset: 0, data: null, todayData: null, historyData: null, dragScheduleId: null, filter: 'all', editorFilter: 'all', activeConceptAssetId: null, activeFinalEditId: null, finalEditSubmitMode: false },
   // Final Approval -- a flat queue (no week-nav, no filters), same "one
   // shared source of truth on the server" pattern as Editing: data is
   // GET /final-approval's rows as-is. activeCreativeAssetId tracks which
@@ -1063,10 +1063,17 @@ function dropCardProductsHtml(products) {
 
 function dropCardHtml(d) {
   const pct = d.summary.overallPct;
+  // Hierarchy fix: the muted/italic treatment is for a genuinely nameless
+  // drop only (no manual name AND no fallback could be computed, which in
+  // practice never happens once every drop has a launch_date) -- a drop
+  // showing its "{Month} Drop {N}" fallback display_name is still a real,
+  // useful title and must read exactly as strong as a manually-set one.
+  const displayName = d.display_name || d.name || 'Untitled';
+  const isPlaceholder = displayName === 'Untitled';
   return `
     <div class="drop-card" data-drop-id="${d.id}">
       <div class="drop-card-header">
-        <div class="drop-card-name ${d.name ? '' : 'untitled'}" data-drop-id="${d.id}" title="Click to rename">${escapeHtml(d.display_name || d.name || 'Untitled')}</div>
+        <div class="drop-card-name ${isPlaceholder ? 'untitled' : ''}" data-drop-id="${d.id}" title="Click to rename">${escapeHtml(displayName)}</div>
         <button type="button" class="drop-card-edit-btn" data-drop-id="${d.id}" title="Edit launch date / notes">Edit</button>
       </div>
       <div class="drop-card-date">${formatDate(d.launch_date)} · ${d.days_until_launch >= 0 ? d.days_until_launch + ' days to launch' : 'Launched'}</div>
@@ -1111,7 +1118,7 @@ function renderDropsByMonth(drops) {
   }
   return groups.map((g) => `
     <div class="drops-month-group">
-      <div class="drops-month-heading">${g.label}</div>
+      <div class="drops-month-heading">${g.label} <span class="drops-month-count">&middot; ${g.drops.length} drop${g.drops.length === 1 ? '' : 's'}</span></div>
       <div class="drops-row">${g.drops.map(dropCardHtml).join('')}</div>
     </div>`).join('');
 }
@@ -3246,6 +3253,50 @@ function promotionUrgencyBadgeHtml(urgency) {
   return `<div class="drop-card-status ${dropCardStatusClass(color)}">${promotionUrgencyLabel(urgency)}</div>`;
 }
 
+// Recurring-series grouping (round 7, item 2): production promotion names
+// follow a "{Series Name} {Year}" convention (Black Friday 2026/2027, Boxing
+// Day 2026/2027, ...) -- stripping a trailing 4-digit year gives a stable
+// series key with no new schema/column needed. A promotion with no trailing
+// year is its own one-promotion "series" and is unaffected. Purely a
+// display grouping: every record (including future years) stays in the
+// database and the API response untouched -- see promotionsFilterToEarliestPerSeries.
+function promotionSeriesKey(name) {
+  return (name || '').trim().replace(/\s+\d{4}$/, '').trim().toLowerCase() || name;
+}
+
+// Keeps only the earliest (soonest-starting) not-yet-past promotion per
+// series -- e.g. while Black Friday 2026 is upcoming, Black Friday 2027 is
+// hidden from Coming Up/Current Focus; the moment 2026 moves into Past
+// Promotions (see promotionsSplitPastUpcoming), 2027 becomes the series'
+// earliest remaining record and starts appearing on its own. Input is
+// already sorted by start_date ASC (API order), so "first seen per key"
+// is already "earliest per key".
+function promotionsFilterToEarliestPerSeries(promotions) {
+  const seen = new Set();
+  const result = [];
+  for (const p of promotions) {
+    const key = promotionSeriesKey(p.name);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(p);
+  }
+  return result;
+}
+
+// A promotion is "past" once its own end_date has passed (see days_until_end
+// in promotions.js -- a promotion with no end_date is never past). Nothing
+// is deleted or hidden from the API; this is purely which section of the
+// landing page a record renders in (round 7, item 3).
+function promotionsSplitPastUpcoming(promotions) {
+  const upcoming = [];
+  const past = [];
+  for (const p of promotions) {
+    if (p.days_until_end !== null && p.days_until_end < 0) past.push(p);
+    else upcoming.push(p);
+  }
+  return { upcoming, past };
+}
+
 // Current Focus (Issue 3): the promotion actually needing attention right
 // now, not just the chronologically-nearest one -- first upcoming
 // promotion whose status isn't the neutral 'future' state (same rank
@@ -3306,6 +3357,20 @@ function promotionComingUpCardHtml(p) {
     </div>`;
 }
 
+// Quiet archive treatment (round 7, item 3) -- same data shape as the
+// Coming Up card, deliberately without even the ready% line, so a long
+// history list never competes visually with Current Focus/Coming Up above
+// it. Still fully clickable through to the same Promotion detail page --
+// stages/concepts/final creative are all still there to reference.
+function promotionPastCardHtml(p) {
+  const dateRange = p.end_date ? `${formatDate(p.start_date)} – ${formatDate(p.end_date)}` : formatDate(p.start_date);
+  return `
+    <div class="promo-past-card" data-promotion-id="${p.id}">
+      <div class="promo-past-name">${escapeHtml(p.name)}</div>
+      <div class="promo-past-meta">${dateRange}</div>
+    </div>`;
+}
+
 function wirePromotionsClicks(container) {
   container.querySelectorAll('[data-promotion-id]').forEach((el) => {
     el.addEventListener('click', (e) => {
@@ -3315,26 +3380,53 @@ function wirePromotionsClicks(container) {
   });
 }
 
+// Collapsed by default (see index.html's promo-past-toggle) -- this just
+// flips the disclosure state; renderPromotionsRow doesn't need to re-run
+// since the archive list is already rendered, only hidden.
+function togglePastPromotions() {
+  const body = document.getElementById('promotions-past-body');
+  const toggle = document.getElementById('promotions-past-toggle');
+  const isOpen = body.style.display !== 'none';
+  body.style.display = isOpen ? 'none' : '';
+  toggle.classList.toggle('open', !isOpen);
+}
+
 function renderPromotionsRow() {
   const focusEl = document.getElementById('promotions-current-focus');
   if (!focusEl) return; // guards a load race before index.html's panel exists
   const comingUpSection = document.getElementById('promotions-coming-up-section');
   const comingUpList = document.getElementById('promotions-coming-up-list');
   const emptyEl = document.getElementById('promotions-empty-state');
+  const pastSection = document.getElementById('promotions-past-section');
+  const pastList = document.getElementById('promotions-past-list');
+  const pastCount = document.getElementById('promotions-past-count');
 
-  const allUpcoming = state.promotions.filter((p) => p.days_until_end === null || p.days_until_end >= 0);
+  // Every stored promotion still comes back from the API (see
+  // promotionsSplitPastUpcoming/promotionsFilterToEarliestPerSeries above) --
+  // nothing here ever deletes or hides a record from the database, only
+  // which section of the landing page it renders in.
+  const { upcoming, past } = promotionsSplitPastUpcoming(state.promotions);
+  const eligible = promotionsFilterToEarliestPerSeries(upcoming);
 
-  if (!allUpcoming.length) {
+  if (past.length) {
+    pastSection.style.display = '';
+    pastCount.textContent = `${past.length} past promotion${past.length === 1 ? '' : 's'}`;
+    pastList.innerHTML = past.map(promotionPastCardHtml).join('');
+    wirePromotionsClicks(pastList);
+  } else {
+    pastSection.style.display = 'none';
+  }
+
+  if (!eligible.length) {
     focusEl.innerHTML = '';
     comingUpSection.style.display = 'none';
     emptyEl.style.display = '';
-    document.getElementById('promotions-step-footer-count').textContent = '0 upcoming promotions';
     return;
   }
   emptyEl.style.display = 'none';
 
-  const focus = promotionsPickCurrentFocus(allUpcoming);
-  const rest = allUpcoming.filter((p) => p.id !== focus.id);
+  const focus = promotionsPickCurrentFocus(eligible);
+  const rest = eligible.filter((p) => p.id !== focus.id);
 
   focusEl.innerHTML = promotionCurrentFocusHtml(focus);
   wirePromotionsClicks(focusEl);
@@ -3346,8 +3438,6 @@ function renderPromotionsRow() {
   } else {
     comingUpSection.style.display = 'none';
   }
-
-  document.getElementById('promotions-step-footer-count').textContent = `${allUpcoming.length} upcoming promotion${allUpcoming.length === 1 ? '' : 's'}`;
 }
 
 document.getElementById('new-promotion-btn').addEventListener('click', () => openPromotionModal(null));
@@ -3491,6 +3581,25 @@ function promotionStageGapLabel(s) {
 // product, so this was empty) or spi.creator (always the silently-defaulted
 // Content Creator from savePromotionShootItem, not the real Assigned To --
 // see C1's investigation). concept_assignee is the actual Assigned To.
+// Final Creative (round 7, item 4): surfaces the SAME final_edits row the
+// Editing -> Final Approval workflow already owns (see promotions.js's
+// LATERAL join) -- read-only here, no second upload, no media hosting.
+// External links (CapCut exports, Drive/Frame.io shares, ...) can't be
+// safely embedded as an <img>/<video> without risking a broken tile or
+// leaking a referrer to an arbitrary host, so this is deliberately the
+// "clean block" fallback the spec calls out rather than attempting a
+// preview -- a plain, unambiguous "this concept has a finished cut" signal
+// that stays visible once the Promotion moves into Past Promotions too,
+// since it's driven by the same read that already renders on the live page.
+function promotionStageItemFinalCreativeHtml(item) {
+  if (!item.final_edit_link) return '';
+  return `
+    <div class="promotion-stage-item-final-creative">
+      <span class="promotion-stage-item-final-badge">&check; Final Creative</span>
+      <a href="${escapeHtml(item.final_edit_link)}" target="_blank" rel="noopener" class="link-btn" onclick="event.stopPropagation()">View Final Creative &rarr;</a>
+    </div>`;
+}
+
 function promotionStageItemRowHtml(item) {
   const title = item.concept_name || item.product_name || 'Untitled concept';
   const metaParts = [item.concept_type, item.concept_assignee || 'Unassigned', item.asset_status_label || '—'].filter(Boolean);
@@ -3499,6 +3608,7 @@ function promotionStageItemRowHtml(item) {
       <div class="promotion-stage-item-info">
         <div class="promotion-stage-item-name">${escapeHtml(title)}</div>
         <div class="promotion-stage-item-meta">${escapeHtml(metaParts.join(' · '))}</div>
+        ${promotionStageItemFinalCreativeHtml(item)}
       </div>
       <button type="button" class="btn btn-ghost btn-sm" onclick="removeShootPlanItem(${item.id})">Remove</button>
     </div>`;
@@ -3870,9 +3980,32 @@ function resetPromotionShootBrief() {
   document.getElementById('promotion-shoot-reference-url').value = '';
   document.getElementById('promotion-shoot-script-field').style.display = 'none';
   document.getElementById('promotion-shoot-script-toggle-wrap').style.display = '';
+  document.getElementById('promotion-shoot-idea').value = '';
+  populatePromotionShootAvatarSelect(null);
+  document.getElementById('promotion-shoot-avatar-select').value = '';
+  document.getElementById('promotion-shoot-avatar-custom-desc').value = '';
+  document.getElementById('promotion-shoot-avatar-custom-wrap').style.display = 'none';
   renderPromotionShootAltHooks();
   renderPromotionShootReferences();
   renderPromotionShootBriefStyleChips();
+}
+
+// New Concept's "Who's It For?" select (round 7, item 5) -- same options/
+// pattern as the full modal's renderPromotionConceptDevAvatarOptions, just
+// targeting this modal's own ids so the two never fight over one element.
+function populatePromotionShootAvatarSelect(selectedAvatarId) {
+  const select = document.getElementById('promotion-shoot-avatar-select');
+  const options = state.customerAvatars.filter((a) => a.enabled || a.id === selectedAvatarId);
+  select.innerHTML = [
+    '<option value="">Select an avatar…</option>',
+    ...options.map((a) => `<option value="${a.id}">${escapeHtml(a.name)}${a.enabled ? '' : ' (disabled)'}</option>`),
+    '<option value="__other__">+ Other / New Avatar</option>',
+  ].join('');
+}
+
+function onPromotionShootAvatarChange() {
+  const select = document.getElementById('promotion-shoot-avatar-select');
+  document.getElementById('promotion-shoot-avatar-custom-wrap').style.display = select.value === '__other__' ? '' : 'none';
 }
 
 function togglePromotionShootScript() {
@@ -3951,6 +4084,17 @@ function isPromotionShootExistingBrief() {
   return format === 'video' && promotionShootConceptOrigin === 'existing';
 }
 
+// New Concept's full inline flow (round 7, item 5) -- the ONE Add Concept
+// modal expands to include the same Concept Development fields (Idea,
+// Avatar, Hook, What to Shoot, Script, References, Shoot Setup) instead of
+// opening a second "Develop Promotion Concept" modal. Video-only, same as
+// Existing (Static keeps its pre-existing, unchanged behaviour -- see
+// savePromotionShootItem).
+function isPromotionShootNewConceptFlow() {
+  const format = document.getElementById('promotion-shoot-format').value;
+  return format === 'video' && promotionShootConceptOrigin === 'new';
+}
+
 // Concept Type: hidden for Video + New Concept (still needs developing --
 // asking for a Concept Type before the idea itself is even shaped is
 // premature; it can be chosen later in Concept Development). Shown for
@@ -3964,11 +4108,22 @@ function updatePromotionShootConceptTypeVisibility() {
 }
 
 function updatePromotionShootBriefVisibility() {
-  document.getElementById('promotion-shoot-brief-wrap').style.display = isPromotionShootExistingBrief() ? '' : 'none';
+  const isExisting = isPromotionShootExistingBrief();
+  const isNew = isPromotionShootNewConceptFlow();
+  document.getElementById('promotion-shoot-idea-wrap').style.display = isNew ? '' : 'none';
+  document.getElementById('promotion-shoot-avatar-wrap').style.display = isNew ? '' : 'none';
+  document.getElementById('promotion-shoot-brief-wrap').style.display = (isExisting || isNew) ? '' : 'none';
+  // Styles/Products is Existing-only (see index.html's comment on
+  // #promotion-shoot-style-section) -- not part of the New Concept field
+  // list in this round's brief.
+  document.getElementById('promotion-shoot-style-section').style.display = isExisting ? '' : 'none';
 }
 
 function updatePromotionShootFooterButton() {
-  document.getElementById('promotion-shoot-save-btn').textContent = isPromotionShootExistingBrief() ? 'Add to Shoot Plan →' : 'Develop Promotion Concept →';
+  const btn = document.getElementById('promotion-shoot-save-btn');
+  if (isPromotionShootExistingBrief()) btn.textContent = 'Add to Shoot Plan →';
+  else if (isPromotionShootNewConceptFlow()) btn.textContent = 'Save & Send to Tuesday Review →';
+  else btn.textContent = 'Develop Promotion Concept →';
 }
 
 // Re-filters the Concept Type dropdown when Format changes, keeping
@@ -4078,6 +4233,7 @@ async function savePromotionShootItem() {
   }
   const conceptOrigin = format === 'video' ? promotionShootConceptOrigin : null;
   const isExistingBrief = isPromotionShootExistingBrief();
+  const isNewConceptFlow = isPromotionShootNewConceptFlow();
 
   // No product is picked here at all -- the concept-first flow (see the
   // file-header comment above) never requires one; product_code/product_name
@@ -4157,30 +4313,59 @@ async function savePromotionShootItem() {
           });
         } catch (e) { /* non-fatal -- concept is already scheduled either way */ }
       }
-    } else if (conceptOrigin) {
+    } else if (isNewConceptFlow) {
+      // New Concept (round 7, item 5): the whole inline Concept Development
+      // form saves in this SAME PATCH, in this SAME modal -- no second
+      // "Develop Promotion Concept" modal, no navigation. concept_dev_status
+      // goes straight to 'ready_for_review' so it appears in Tuesday Review
+      // immediately (Shoot Week gates when it's filmed once approved, never
+      // whether it's visible for review -- see conceptDevelopment.js's GET /,
+      // already correct/unchanged). Same fields/endpoint the full Concept
+      // Development modal's own savePromotionConceptDevModal writes.
+      const hookVariations = [];
+      const primaryHook = document.getElementById('promotion-shoot-hook-primary').value.trim();
+      if (primaryHook) hookVariations.push({ text: primaryHook });
+      promotionShootAltHooks.forEach((text) => {
+        const trimmed = (text || '').trim();
+        if (trimmed) hookVariations.push({ text: trimmed });
+      });
+      const idea = document.getElementById('promotion-shoot-idea').value.trim();
+      const avatarSelect = document.getElementById('promotion-shoot-avatar-select');
+      const isOtherAvatar = avatarSelect.value === '__other__';
+      const customerAvatarId = avatarSelect.value && !isOtherAvatar ? Number(avatarSelect.value) : null;
+      const customAvatarDescription = isOtherAvatar ? document.getElementById('promotion-shoot-avatar-custom-desc').value.trim() : '';
+      const execution = document.getElementById('promotion-shoot-execution').value.trim();
+      const scriptNotes = document.getElementById('promotion-shoot-script').value.trim();
+      const location = document.getElementById('promotion-shoot-location').value.trim();
       await api(`/concept-development/concepts/${item.asset_id}`, {
         method: 'PATCH',
-        body: JSON.stringify({ concept_origin: conceptOrigin }),
+        body: JSON.stringify({
+          concept_origin: 'new',
+          concept_dev_status: 'ready_for_review',
+          angle: idea || null,
+          customer_avatar_id: customerAvatarId,
+          custom_avatar_description: customAvatarDescription,
+          hook_variations: hookVariations,
+          execution: execution || null,
+          script_notes: scriptNotes || null,
+          location: location || null,
+          reference_items: promotionShootReferences,
+        }),
       });
     }
     closeModal('promotion-shoot-modal');
-    toast(isExistingBrief ? 'Added to Shoot Plan' : 'Added to Concept Development');
+    toast(isExistingBrief ? 'Added to Shoot Plan' : (isNewConceptFlow ? 'Sent to Tuesday Review' : 'Added to Concept Development'));
     await refreshCurrentPromotion();
     if (document.getElementById('planning-promotion-stage-view').style.display !== 'none') {
       renderPromotionStageDetailView();
     }
     await loadAll();
-    if (isExistingBrief) return;
-    // New Concept (Issue 4): continue straight into the SAME inline
-    // Concept Development workspace every other Promotion concept already
-    // uses (openPromotionConceptDevModal, reached from "+ Add Concept" on
-    // a Promotion product's workspace) -- no tab switch, no separate page,
-    // same modal family the user was just filling out. One GET for the
-    // standalone product shape (the exact shape that modal always expects,
-    // identical to what openAddConceptModal's own promotion branch already
-    // fetches) -- not a second data model or a duplicate concept: the
-    // asset already exists from the POST /shoot-plan call above, so it's
-    // passed in (edit mode), never re-created.
+    // Existing Concept and New Concept (round 7, item 5) both finish
+    // entirely inline, in this one modal -- neither ever opens a second
+    // modal. Only Static (no Concept Approach toggle at all, unchanged from
+    // before this round) still continues into the full Concept Development
+    // workspace below, since this brief gives no inline field set for it.
+    if (isExistingBrief || isNewConceptFlow) return;
     const product = await api(`/concept-development/item/${item.id}`);
     const seedConcept = product.concepts && product.concepts[0];
     if (seedConcept) openPromotionConceptDevModal(seedConcept, product);
@@ -8970,17 +9155,21 @@ async function advanceEditingToInProgress(conceptAssetId) {
   }
 }
 
-// Card-level equivalent of submitEditingConceptReady -- same endpoint,
-// same server-side link-required validation (the error toasts exactly as
-// it would from inside the workspace if the link is still missing).
-async function advanceEditingToEdited(conceptAssetId) {
-  try {
-    await api(`/editing/concepts/${conceptAssetId}/ready-for-approval`, { method: 'POST' });
-    toast('Marked as Edited');
-    await refreshCurrentEditingView();
-  } catch (e) {
-    toast(e.message, true);
-  }
+// Clicking "Edited" must never silently advance the status -- the whole
+// point of this segment is that Final Approval can't be reached without a
+// real Final Edit link attached. So instead of calling ready-for-approval
+// directly, this opens the SAME Final Edit modal used by "In Progress" (the
+// concept's existing final_edits row -- "In Progress" already guarantees
+// one exists, see editingConceptStatus), flagged into submit mode so the
+// modal's own footer becomes "Submit for Approval ->" (see
+// submitFinalEditAndAdvance). Cancel/close/backdrop-click on that modal are
+// all plain closeModal() with no side effect, so the concept simply stays
+// In Progress until the form is actually submitted.
+function advanceEditingToEdited(conceptAssetId) {
+  const concept = editingFindConcept(conceptAssetId);
+  const finalEdit = concept && editingConceptFinalEdit(concept);
+  if (!finalEdit) return;
+  openFinalEditModal(finalEdit.id, { submitMode: true });
 }
 
 const EDITING_FILTERS = [
@@ -9565,11 +9754,16 @@ function populateFinalEditEditorSelect() {
     state.contentCreators.map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join('');
 }
 
-function openFinalEditModal(finalEditId) {
+function openFinalEditModal(finalEditId, options) {
   const found = editingFindFinalEdit(finalEditId);
   if (!found) return;
   const { finalEdit, concept } = found;
   state.editing.activeFinalEditId = finalEditId;
+  // Set on every open (not just cleared on close) so whichever path got us
+  // here -- the workspace's "Edit Details", "In Progress" segment, or the
+  // "Edited" segment's submit-mode open -- always leaves the footer in the
+  // right state, with no stale flag surviving from a previous open.
+  state.editing.finalEditSubmitMode = !!(options && options.submitMode);
   // Always opened from inside the Concept workspace now -- close it so the
   // two full-screen overlays never stack.
   closeModal('editing-concept-modal');
@@ -9618,10 +9812,14 @@ function updateFinalEditModalFooter() {
   const found = editingFindFinalEdit(state.editing.activeFinalEditId);
   if (!found) return;
   const submitted = !!found.concept.editing_submitted_at;
+  const submitMode = state.editing.finalEditSubmitMode;
 
   document.getElementById('final-edit-ready-badge').style.display = submitted ? '' : 'none';
   document.getElementById('final-edit-cancel-btn').style.display = submitted ? 'none' : '';
-  document.getElementById('final-edit-save-btn').style.display = submitted ? 'none' : '';
+  const saveBtn = document.getElementById('final-edit-save-btn');
+  saveBtn.style.display = submitted ? 'none' : '';
+  saveBtn.textContent = submitMode ? 'Submit for Approval →' : 'Save Final Edit';
+  saveBtn.onclick = submitMode ? submitFinalEditAndAdvance : saveFinalEdit;
   document.getElementById('final-edit-close-btn').style.display = submitted ? '' : 'none';
 
   document.getElementById('final-edit-link-input').disabled = submitted;
@@ -9660,6 +9858,39 @@ async function saveFinalEdit() {
     await refreshCurrentEditingView();
     closeModal('final-edit-modal');
     openEditingConcept(conceptAssetId);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// The "Edited" segment's actual submit action (see advanceEditingToEdited):
+// saves whatever's in the form, THEN -- only on that save succeeding --
+// calls ready-for-approval, which itself re-validates a link is present
+// server-side. Either call failing leaves the concept exactly where it was
+// (In Progress, same final_edits row, nothing duplicated) with the modal
+// still open so the error is visible and the link can be fixed in place.
+async function submitFinalEditAndAdvance() {
+  const found = editingFindFinalEdit(state.editing.activeFinalEditId);
+  if (!found) return;
+  const conceptAssetId = found.concept.creative_asset_id;
+
+  const payload = {
+    final_edit_link: document.getElementById('final-edit-link-input').value.trim(),
+    editor: document.getElementById('final-edit-editor').value || null,
+    editor_notes: document.getElementById('final-edit-notes').value.trim(),
+  };
+  if (!payload.final_edit_link) {
+    toast('Add the Final Edit link before submitting for approval', true);
+    return;
+  }
+
+  try {
+    await api(`/editing/final-edits/${state.editing.activeFinalEditId}`, { method: 'PATCH', body: JSON.stringify(payload) });
+    await api(`/editing/concepts/${conceptAssetId}/ready-for-approval`, { method: 'POST' });
+    toast('Marked as Edited — sent for Approval');
+    state.editing.finalEditSubmitMode = false;
+    await refreshCurrentEditingView();
+    closeModal('final-edit-modal');
   } catch (e) {
     toast(e.message, true);
   }

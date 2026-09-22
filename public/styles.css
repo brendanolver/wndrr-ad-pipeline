@@ -363,9 +363,9 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .drop-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:16px 18px;cursor:pointer;box-shadow:var(--shadow-xs);}
 .drop-card.selected{border-color:var(--teal);box-shadow:0 0 0 2px var(--teal-light);}
 .drop-card-header{display:flex;align-items:center;justify-content:space-between;gap:8px;}
-.drop-card-name{font-size:15px;font-weight:700;cursor:text;}
+.drop-card-name{font-size:17px;font-weight:800;color:var(--text);letter-spacing:-0.01em;cursor:text;}
 .drop-card-name.untitled{color:var(--text-muted);font-style:italic;font-weight:600;}
-.drop-card-name-input{width:100%;font-size:15px;font-weight:700;font-family:inherit;border:1px solid var(--teal);border-radius:4px;padding:2px 4px;margin:-3px -5px;}
+.drop-card-name-input{width:100%;font-size:17px;font-weight:800;font-family:inherit;border:1px solid var(--teal);border-radius:4px;padding:2px 4px;margin:-3px -5px;}
 .drop-card-edit-btn{background:none;border:1px solid var(--border);border-radius:var(--r);color:var(--text-muted);font-size:11.5px;padding:3px 9px;cursor:pointer;flex-shrink:0;}
 .drop-card-edit-btn:hover{background:var(--surface2);color:var(--text-secondary);}
 .drop-card-date{font-size:12.5px;color:var(--text-muted);margin:3px 0 11px;}
@@ -381,9 +381,15 @@ main{flex:1;min-width:0;padding:20px 24px;}
    progress (.drop-card-counts/.drop-card-pct, unchanged above) moves into
    .drop-card-secondary below the products so it reads as secondary, not
    the headline. */
-.drops-month-group{margin-bottom:22px;}
+.drops-month-group{margin-bottom:34px;}
+.drops-month-group:not(:first-child){margin-top:6px;}
 .drops-month-group:last-child{margin-bottom:0;}
-.drops-month-heading{font-size:12.5px;font-weight:800;letter-spacing:0.05em;color:var(--text-muted);margin-bottom:10px;}
+/* Stronger section hierarchy (round 7, item 1): larger/darker/bolder than
+   the previous pale 12.5px muted label, with a subtle rule underneath to
+   separate the heading from the cards below rather than relying on
+   whitespace alone -- restrained (a border, not a background block). */
+.drops-month-heading{font-size:18px;font-weight:800;letter-spacing:-0.01em;color:var(--text);margin-bottom:14px;padding-bottom:8px;border-bottom:1px solid var(--border);}
+.drops-month-count{font-size:12.5px;font-weight:700;letter-spacing:0;color:var(--text-muted);text-transform:none;}
 /* Compact 2-column product tile grid, replacing the old cramped single-
    column text list. Fixed-height thumbnails (rather than aspect-ratio)
    keep every tile's height identical regardless of column width, so
@@ -436,6 +442,21 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .promo-coming-up-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-bottom:8px;}
 .promo-coming-up-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:13px 15px;cursor:pointer;transition:border-color 0.12s, box-shadow 0.12s;}
 .promo-coming-up-card:hover{border-color:var(--teal);box-shadow:var(--shadow-xs);}
+
+/* Past Promotions archive (round 7, item 3): collapsed-by-default disclosure
+   at the bottom of the landing page -- deliberately the quietest treatment
+   on the page (no border/shadow at rest, muted text) so a long history list
+   never competes with Current Focus/Coming Up above it. */
+.promo-past-toggle{display:flex;align-items:center;gap:7px;background:none;border:none;border-top:1px solid var(--border);width:100%;padding:16px 0 10px;margin-top:8px;font-size:13px;font-weight:700;color:var(--text-secondary);cursor:pointer;font-family:inherit;text-align:left;}
+.promo-past-toggle:hover{color:var(--text);}
+.promo-past-toggle-arrow{display:inline-block;font-size:11px;color:var(--text-muted);transition:transform 0.12s;}
+.promo-past-toggle.open .promo-past-toggle-arrow{transform:rotate(90deg);}
+.promo-past-count{color:var(--text-muted);font-weight:600;}
+.promo-past-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:9px;padding-top:6px;}
+.promo-past-card{padding:10px 12px;cursor:pointer;border-radius:var(--r);transition:background-color 0.12s;}
+.promo-past-card:hover{background:var(--surface2);}
+.promo-past-name{font-size:13px;font-weight:600;color:var(--text-secondary);}
+.promo-past-meta{font-size:11.5px;color:var(--text-muted);margin-top:2px;}
 .promo-coming-up-name{font-size:13.5px;font-weight:700;color:var(--text);}
 .promo-coming-up-meta{font-size:11.5px;color:var(--text-muted);margin:3px 0 6px;}
 .promo-coming-up-pct{font-size:11.5px;color:var(--text-secondary);font-weight:600;}
@@ -527,6 +548,14 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .promotion-stage-item-info{min-width:0;flex:1;}
 .promotion-stage-item-name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .promotion-stage-item-meta{font-size:11px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+/* Final Creative (round 7, item 4): a quiet confirmation line, not another
+   status pill -- reads as "here's the finished thing", distinct from the
+   workflow meta above it. Stays visible once the item's own status text
+   already reads Approved/Live, and equally once the whole Promotion moves
+   into Past Promotions, since both render from this same row. */
+.promotion-stage-item-final-creative{display:flex;align-items:center;gap:8px;margin-top:4px;}
+.promotion-stage-item-final-badge{font-size:11px;font-weight:700;color:var(--green);}
+.promotion-stage-item-final-creative .link-btn{font-size:11px;}
 .promotion-stage-urgency-badge{display:inline-block;padding:2px 8px;border-radius:var(--r-pill);font-size:11px;font-weight:700;margin-bottom:8px;}
 .promotion-stage-urgency-badge.green{background:var(--green-light);color:var(--green);}
 .promotion-stage-urgency-badge.amber{background:var(--amber-light);color:var(--amber);}

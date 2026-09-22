@@ -410,10 +410,18 @@
 
         <div id="promotions-empty-state" class="attention-empty" style="display:none;">No upcoming promotions yet — add one to start planning creative coverage.</div>
 
-        <div class="planning-step-footer">
-          <span id="promotions-step-footer-count">0 upcoming promotions</span>
-          <div class="planning-step-footer-actions">
-            <button type="button" class="planning-review-btn" id="promotions-review-btn" onclick="toggleWeeklyProgress('promotions_reviewed')">&#10003; Mark as Reviewed</button>
+        <!-- Past Promotions archive (round 7, item 3): collapsed by default,
+             quiet treatment -- historical reference only, replaces the old
+             "X upcoming promotions / Mark as Reviewed" strip (see
+             renderPromotionsRow/togglePastPromotions in app.js). Every past
+             record stays fully clickable through to its own detail page. -->
+        <div id="promotions-past-section" style="display:none;">
+          <button type="button" class="promo-past-toggle" id="promotions-past-toggle" onclick="togglePastPromotions()">
+            <span class="promo-past-toggle-arrow">&#9656;</span> Past Promotions
+            <span id="promotions-past-count" class="promo-past-count"></span>
+          </button>
+          <div id="promotions-past-body" style="display:none;">
+            <div id="promotions-past-list" class="promo-past-grid"></div>
           </div>
         </div>
       </div>
@@ -2572,16 +2580,43 @@
         <select id="promotion-shoot-week"></select>
       </label>
 
-      <!-- Existing Concept's lightweight execution brief -- NOT a copy of
-           the full Concept Development workspace, just enough to schedule
-           an already-understood execution straight into Shooting. Every
-           field here reuses the exact same creative_assets columns/JSON
-           shapes Concept Development's own modal writes
+      <!-- New Concept's inline Concept Development fields (round 7, item 5):
+           the SAME concept fields/PATCH endpoint the full Concept
+           Development modal writes (angle/customer_avatar_id/
+           custom_avatar_description below this point; hook_variations/
+           execution/reference_items/script_notes/location shared with the
+           Execution Brief further down) -- this is a UI consolidation into
+           the ONE Add Concept modal, not a second Concept Development
+           implementation or data model. Shown for New Concept only; the
+           user never sees a second modal or leaves this page. -->
+      <div id="promotion-shoot-idea-wrap" style="display:none;">
+        <label><span class="cd-field-label">The Idea</span>
+          <textarea id="promotion-shoot-idea" rows="2"></textarea>
+        </label>
+      </div>
+      <div id="promotion-shoot-avatar-wrap" style="display:none;">
+        <div class="cd-modal-section-title">Who's It For? <span class="hint">(optional)</span></div>
+        <label><span class="cd-field-label">Customer Avatar</span>
+          <select id="promotion-shoot-avatar-select" onchange="onPromotionShootAvatarChange()"></select>
+        </label>
+        <div id="promotion-shoot-avatar-custom-wrap" style="display:none;">
+          <label>Who are you targeting?
+            <textarea id="promotion-shoot-avatar-custom-desc" rows="3" placeholder="Describe the specific person, mindset or customer behaviour you're targeting."></textarea>
+          </label>
+        </div>
+      </div>
+
+      <!-- Shared by New Concept (full inline flow) and Existing Concept
+           (lightweight execution brief) -- NOT a copy of the full Concept
+           Development workspace, just enough to either develop a new idea
+           or schedule an already-understood execution straight into
+           Shooting. Every field here reuses the exact same creative_assets
+           columns/JSON shapes Concept Development's own modal writes
            (hook_variations/execution/reference_items/script_notes/location),
            via the same PATCH /concept-development/concepts/:id -- this is
            a smaller UI over the same record, not a second data model. -->
       <div id="promotion-shoot-brief-wrap" style="display:none;">
-        <div class="cd-modal-section-title">Execution Brief</div>
+        <div class="cd-modal-section-title">The Hook</div>
         <label>Primary Hook
           <input type="text" id="promotion-shoot-hook-primary" placeholder="What earns attention in the first few seconds?">
         </label>
@@ -2592,11 +2627,18 @@
           <textarea id="promotion-shoot-execution" rows="3" placeholder="List the footage that must be captured."></textarea>
         </label>
 
-        <label>Styles / Products <span class="hint">(optional)</span></label>
-        <div id="promotion-shoot-style-chips" class="cd-modal-styles-list"></div>
-        <div class="promo-shoot-search">
-          <input type="text" id="promotion-shoot-style-search" placeholder="Search SKU or product name to add…" autocomplete="off" oninput="filterPromotionShootStyles()" onfocus="filterPromotionShootStyles()">
-          <div id="promotion-shoot-style-results" class="promo-shoot-search-results" style="display:none;"></div>
+        <!-- Existing Concept only -- not part of the New Concept inline
+             field list (round 7, item 5's brief lists Idea/Avatar/Hook/What
+             to Shoot/Script/References/Shoot Setup only), so this stays
+             scoped to isPromotionShootExistingBrief() via
+             updatePromotionShootBriefVisibility. -->
+        <div id="promotion-shoot-style-section">
+          <label>Styles / Products <span class="hint">(optional)</span></label>
+          <div id="promotion-shoot-style-chips" class="cd-modal-styles-list"></div>
+          <div class="promo-shoot-search">
+            <input type="text" id="promotion-shoot-style-search" placeholder="Search SKU or product name to add…" autocomplete="off" oninput="filterPromotionShootStyles()" onfocus="filterPromotionShootStyles()">
+            <div id="promotion-shoot-style-results" class="promo-shoot-search-results" style="display:none;"></div>
+          </div>
         </div>
 
         <label>References <span class="hint">(optional)</span></label>
