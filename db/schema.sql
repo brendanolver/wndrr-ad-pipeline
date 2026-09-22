@@ -854,6 +854,28 @@ UPDATE promotions SET start_date = '2027-07-14', end_date = '2027-07-28', update
 WHERE name = 'EOFY Winter Sale 2027' AND start_date = '2027-07-12' AND end_date = '2027-08-01';
 
 -- ---------------------------------------------------------------------------
+-- Round 10: real names for eight already-existing Upcoming Drops, taken
+-- from the original WNDRR app (not invented/generic) -- the isolated PR
+-- database only ever had these drops' auto-created rows, never their real
+-- names. Matched by launch_date (the only stable identifier available here)
+-- and guarded by "name IS NULL" so this only ever fills in a genuinely
+-- still-unnamed drop -- a name anyone has since set by hand (via the Edit
+-- Drop modal's Drop Name field) always wins and is never overwritten, and
+-- this can never re-fire once a row is named. Touches drops.name only --
+-- launch_date, products, product plans, and concepts are all untouched.
+-- Deliberately eight individual statements, not a generic naming rule: this
+-- is a one-time data correction for known real names, not new fallback
+-- logic, and it never creates a drop that doesn't already exist.
+UPDATE drops SET name = 'Spring Capsule Drop', updated_at = now() WHERE launch_date = '2026-09-24' AND name IS NULL;
+UPDATE drops SET name = 'October Drop 1', updated_at = now() WHERE launch_date = '2026-10-01' AND name IS NULL;
+UPDATE drops SET name = 'Soho 1/4 Zip New Colours', updated_at = now() WHERE launch_date = '2026-10-08' AND name IS NULL;
+UPDATE drops SET name = 'October Drop 2', updated_at = now() WHERE launch_date = '2026-10-15' AND name IS NULL;
+UPDATE drops SET name = 'November Drop 1', updated_at = now() WHERE launch_date = '2026-10-22' AND name IS NULL;
+UPDATE drops SET name = 'November Drop 2', updated_at = now() WHERE launch_date = '2026-10-29' AND name IS NULL;
+UPDATE drops SET name = 'Black Friday Drop', updated_at = now() WHERE launch_date = '2026-11-11' AND name IS NULL;
+UPDATE drops SET name = 'December Drop', updated_at = now() WHERE launch_date = '2026-11-19' AND name IS NULL;
+
+-- ---------------------------------------------------------------------------
 -- Default Shoot Sizes (Settings -> Default Shoot Sizes): pre-fills each
 -- selected colourway's size when the "Shoot This Week" modal opens, keyed
 -- by garment type (top vs bottom) and, for bottoms, alpha vs waist sizing
