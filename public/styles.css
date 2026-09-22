@@ -1434,6 +1434,7 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .editing-concept-card:not(.editing-concept-card-ready).person-accent-til{border-left-color:var(--person-til);}
 .editing-concept-card:not(.editing-concept-card-ready).person-accent-other{border-left-color:var(--person-other);}
 .editing-status-to-edit{background:var(--amber-light);color:var(--amber);}
+.editing-status-scheduled{background:var(--teal-light);color:var(--teal-dark);}
 .editing-status-editing{background:var(--blue-light);color:var(--blue);}
 .editing-status-ready{background:var(--green-light);color:var(--green);}
 .editing-ready-badge{font-size:11px;font-weight:700;letter-spacing:0.3px;color:var(--green);margin-bottom:10px;}

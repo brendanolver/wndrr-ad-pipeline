@@ -9003,20 +9003,26 @@ function editingConceptFinalEdit(concept) {
   return edits.length ? edits[0] : null;
 }
 
-// Three plain states, no completion fraction: To Edit (nothing started),
-// In Progress (editing_started_at is set -- editor working in CapCut, link
-// may not be pasted back yet), Edited (the Concept has actually been
-// submitted -- see submitEditingConceptReady, which requires the link
-// first). Round 8: keyed off the explicit editing_started_at signal (set
-// only by the "In Progress"/"Start Editing" action, cleared if that Final
-// Edit is later removed as a mistake -- see editing.js), not off "a
-// final_edits row happens to exist", so a Concept freshly Shot into Editing
-// always starts at To Edit until someone actually clicks In Progress, and
-// scheduling/rescheduling (which never touches editing_started_at) can
-// never change this.
+// Four plain states, no completion fraction: To Edit (nothing started,
+// Unscheduled), Scheduled (round 9 -- placed onto a calendar day, but
+// editing hasn't actually started yet), In Progress (editing_started_at is
+// set -- editor working in CapCut, link may not be pasted back yet), Edited
+// (the Concept has actually been submitted -- see submitEditingConceptReady,
+// which requires the link first). Round 8 keyed the started/not-started
+// split off the explicit editing_started_at signal rather than "a
+// final_edits row happens to exist"; round 9 adds Scheduled the same
+// deliberate way -- derived from editing_day (already the exact "has this
+// been placed on a calendar day" signal PATCH /editing/schedule/:id sets/
+// clears, see routes/editing.js), not a new column, since that field is
+// already reliable and genuinely independent of editing_started_at. Once
+// editing_started_at is set it always wins over editing_day, so moving an
+// In Progress concept to a different day -- or back to Unscheduled --
+// never regresses it to Scheduled or To Edit (see editingStatusControlHtml
+// and moveEditingCard, which still never touches either field).
 function editingConceptStatus(concept) {
   if (concept.editing_submitted_at) return 'ready_for_approval';
-  return concept.editing_started_at ? 'editing' : 'to_edit';
+  if (concept.editing_started_at) return 'editing';
+  return concept.editing_day ? 'scheduled' : 'to_edit';
 }
 
 // The Final Edit workspace's default Editor suggestion -- the planning-time
@@ -9026,34 +9032,37 @@ function editingConceptEditorLabel(concept) {
   return concept.editing_owner || null;
 }
 
-const EDITING_STATUS_LABELS = { to_edit: 'To Edit', editing: 'In Progress', ready_for_approval: 'Edited' };
-const EDITING_STATUS_CLASS = { to_edit: 'editing-status-to-edit', editing: 'editing-status-editing', ready_for_approval: 'editing-status-ready' };
+const EDITING_STATUS_LABELS = { to_edit: 'To Edit', scheduled: 'Scheduled', editing: 'In Progress', ready_for_approval: 'Edited' };
+const EDITING_STATUS_CLASS = { to_edit: 'editing-status-to-edit', scheduled: 'editing-status-scheduled', editing: 'editing-status-editing', ready_for_approval: 'editing-status-ready' };
 
 // The same segmented production-status control Shooting cards already use
 // (shootingStatusControlHtml, reusing its exact .shoot-status-control/
 // .shoot-status-segment CSS -- Issue 6 asks for "the SAME visual
-// interaction pattern", not a lookalike). Only the segment immediately
-// after the current one is ever clickable (advance), same linear-only
-// rule as Shooting -- but unlike Shooting's plain status flip, advancing
-// here does real work (creating the Final Edit, or submitting to Final
-// Approval), so there's no revert segment: undoing "To Edit -> In
-// Progress" is the existing "Remove Final Edit" action inside the
-// workspace, and undoing "In Progress -> Edited" is deliberately NOT a
-// raw revert here -- once submitted, Final Approval owns the concept (see
-// renderEditingConceptModal's submitted-lock), and the only way back is
-// its own Request Changes, which is a decision with feedback attached,
+// interaction pattern", not a lookalike). Round 9: Scheduled is a passive,
+// calendar-derived stage -- it only ever changes by dragging a card onto a
+// day (or back to Unscheduled), never by clicking this control, so unlike
+// the other three stages it's never itself a click target. The two real
+// actions stay exactly as before: from To Edit OR Scheduled, clicking
+// "In Progress" starts editing (creating the Final Edit); from In Progress,
+// clicking "Edited" opens the submit flow. There's no revert segment:
+// undoing "-> In Progress" is the existing "Remove Final Edit" action
+// inside the workspace, and undoing "In Progress -> Edited" is deliberately
+// NOT a raw revert here -- once submitted, Final Approval owns the concept
+// (see renderEditingConceptModal's submitted-lock), and the only way back
+// is its own Request Changes, which is a decision with feedback attached,
 // not a silent undo button on a card.
 function editingStatusControlHtml(concept) {
-  const stages = ['to_edit', 'editing', 'ready_for_approval'];
+  const stages = ['to_edit', 'scheduled', 'editing', 'ready_for_approval'];
   const status = editingConceptStatus(concept);
-  const currentIndex = stages.indexOf(status);
-  return `<div class="shoot-status-control" onclick="event.stopPropagation()">${stages.map((stage, i) => {
-    const isCurrent = i === currentIndex;
-    const isNext = i === currentIndex + 1;
-    const onclick = isNext
-      ? (stage === 'editing' ? `advanceEditingToInProgress(${concept.creative_asset_id})` : `advanceEditingToEdited(${concept.creative_asset_id})`)
-      : null;
-    const title = isNext ? `Mark as ${EDITING_STATUS_LABELS[stage]}` : '';
+  return `<div class="shoot-status-control" onclick="event.stopPropagation()">${stages.map((stage) => {
+    const isCurrent = stage === status;
+    let onclick = null;
+    if (stage === 'editing' && (status === 'to_edit' || status === 'scheduled')) {
+      onclick = `advanceEditingToInProgress(${concept.creative_asset_id})`;
+    } else if (stage === 'ready_for_approval' && status === 'editing') {
+      onclick = `advanceEditingToEdited(${concept.creative_asset_id})`;
+    }
+    const title = onclick ? `Mark as ${EDITING_STATUS_LABELS[stage]}` : '';
     return `<button type="button" class="shoot-status-segment${isCurrent ? ' shoot-status-segment-active' : ''}" ${onclick ? `onclick="${onclick}"` : 'disabled'} title="${title}">${EDITING_STATUS_LABELS[stage]}</button>`;
   }).join('')}</div>`;
 }
@@ -9102,6 +9111,7 @@ function advanceEditingToEdited(conceptAssetId) {
 const EDITING_FILTERS = [
   { value: 'all', label: 'All' },
   { value: 'to_edit', label: 'To Edit' },
+  { value: 'scheduled', label: 'Scheduled' },
   { value: 'editing', label: 'In Progress' },
   { value: 'ready_for_approval', label: 'Edited' },
 ];
@@ -9175,14 +9185,15 @@ function editingVisibleConcepts() {
 // Concepts now, not individual Final Edits).
 function editingComputeSummary() {
   const concepts = editingVisibleConcepts();
-  let toEdit = 0, editingCount = 0, ready = 0;
+  let toEdit = 0, scheduled = 0, editingCount = 0, ready = 0;
   for (const c of concepts) {
     const status = editingConceptStatus(c);
     if (status === 'to_edit') toEdit += 1;
+    else if (status === 'scheduled') scheduled += 1;
     else if (status === 'editing') editingCount += 1;
     else ready += 1;
   }
-  return { concepts: concepts.length, to_edit: toEdit, editing: editingCount, ready_for_approval: ready };
+  return { concepts: concepts.length, to_edit: toEdit, scheduled, editing: editingCount, ready_for_approval: ready };
 }
 
 // Picks the most-actionable filter tab for a fresh arrival (see
@@ -9194,6 +9205,7 @@ function editingComputeSummary() {
 function editingDefaultFilter(summary) {
   if (summary.editing > 0) return 'editing';
   if (summary.to_edit > 0) return 'to_edit';
+  if (summary.scheduled > 0) return 'scheduled';
   return 'all';
 }
 
@@ -9203,7 +9215,7 @@ function editingDefaultFilter(summary) {
 // miss on a quick scan.
 function renderEditingFilters() {
   const s = editingComputeSummary();
-  const counts = { all: s.concepts, to_edit: s.to_edit, editing: s.editing, ready_for_approval: s.ready_for_approval };
+  const counts = { all: s.concepts, to_edit: s.to_edit, scheduled: s.scheduled, editing: s.editing, ready_for_approval: s.ready_for_approval };
   document.getElementById('editing-filters').innerHTML = EDITING_FILTERS.map((f) => {
     const attention = f.value === 'ready_for_approval' && counts[f.value] > 0;
     return `
@@ -9222,7 +9234,7 @@ function setEditingFilter(filter) {
 // own card/workspace, not up here.
 function renderEditingSummary() {
   const s = editingComputeSummary();
-  const parts = [`${s.concepts} Concept${s.concepts === 1 ? '' : 's'}`, `${s.to_edit} To Edit`, `${s.editing} In Progress`];
+  const parts = [`${s.concepts} Concept${s.concepts === 1 ? '' : 's'}`, `${s.to_edit} To Edit`, `${s.scheduled} Scheduled`, `${s.editing} In Progress`];
   if (s.ready_for_approval > 0) parts.push(`${s.ready_for_approval} Edited`);
   document.getElementById('editing-summary').textContent = parts.join(' · ');
 }
@@ -9256,7 +9268,7 @@ function editingConceptCardHtml(concept) {
       </div>
       <div class="editing-concept-name">${escapeHtml(concept.concept_name)}</div>
       ${editingStatusControlHtml(concept)}
-      ${concept.editing_owner ? `<div class="cd-card-meta">Editing: <strong>${escapeHtml(concept.editing_owner)}</strong></div>` : ''}
+      <div class="cd-card-meta">Editing: <strong>${concept.editing_owner ? escapeHtml(concept.editing_owner) : 'Unassigned'}</strong></div>
       <div class="cd-card-action">${editingConceptCtaLabel(status)} &rarr;</div>
     </div>`;
 }
@@ -9421,7 +9433,7 @@ function editingDayCardHtml(concept, isUnscheduled = false) {
   const carriedBadge = concept.carried_over
     ? `<span class="shoot-carried-badge">From W${isoWeekNumber(parseDateStr(concept.editing_original_week_start))}</span>` : '';
   const dragHandle = isUnscheduled ? '<span class="shoot-card-drag-handle" title="Drag onto a day to schedule">⠿</span>' : '';
-  const editingHtml = concept.editing_owner ? `<div class="shoot-card-filming">Editing: <strong>${escapeHtml(concept.editing_owner)}</strong></div>` : '';
+  const editingHtml = `<div class="shoot-card-filming">Editing: <strong>${concept.editing_owner ? escapeHtml(concept.editing_owner) : 'Unassigned'}</strong></div>`;
   // Same person-accent convention as Shooting/Editing's grid card -- see
   // personAccentKey.
   const personKey = personAccentKey(concept.editing_owner);
@@ -9598,6 +9610,10 @@ function renderEditingConceptModal() {
   const status = editingConceptStatus(concept);
   const isReady = status === 'ready_for_approval';
 
+  fillConceptDevSelectWithOther('editing-concept-editor-select', 'editing-concept-editor-custom', CONCEPT_ASSIGNEES, concept.editing_owner, 'Unassigned');
+  document.getElementById('editing-concept-editor-select').disabled = submitted;
+  document.getElementById('editing-concept-editor-custom').disabled = submitted;
+
   document.getElementById('editing-concept-modal-title').textContent = concept.concept_name;
   document.getElementById('editing-concept-modal-subtitle').textContent = concept.product_name || '';
   const statusPill = document.getElementById('editing-concept-modal-status-pill');
@@ -9650,6 +9666,29 @@ function renderEditingConceptModal() {
   readyBtn.style.display = submitted ? 'none' : '';
   readyBtn.disabled = !hasLink;
   document.getElementById('editing-concept-close-btn').style.display = submitted ? '' : 'none';
+}
+
+// Round 9: save-on-change for the Editing modal's own Editing-owner select
+// -- same canonical PATCH /creative-assets/:id/assignee endpoint (editing_owner
+// only, concept_assignee left untouched) every other Editing assignment
+// control already writes to, so this is a second entry point onto the same
+// field, not a new assignment system. Locked while submitted, same reasoning
+// as everything else in this modal once a Concept has gone to Final Approval.
+async function saveEditingConceptEditor() {
+  const concept = editingFindConcept(state.editing.activeConceptAssetId);
+  if (!concept || concept.editing_submitted_at) return;
+  const value = conceptDevSelectWithOtherValue('editing-concept-editor-select', 'editing-concept-editor-custom');
+  if (value === (concept.editing_owner || '')) return;
+  try {
+    await api(`/creative-assets/${concept.creative_asset_id}/assignee`, {
+      method: 'PATCH',
+      body: JSON.stringify({ editing_owner: value || null }),
+    });
+    await refreshCurrentEditingView();
+    renderEditingConceptModal();
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 function editingDefaultFormat() {

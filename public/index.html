@@ -820,6 +820,20 @@
              checklist of individually-matched hook variations. See
              renderEditingConceptModal in app.js. -->
         <div class="modal-body">
+          <!-- Round 9: the one place a Concept's editing_owner can be
+               assigned/reassigned once it's already in Editing -- a concept
+               reaching here can arrive genuinely Unassigned (never touched
+               upstream in Upcoming Drops/Promotion intake). Reuses the
+               SAME canonical field/endpoint (PATCH /creative-assets/:id/
+               assignee, editing_owner only) every other Editing select
+               already writes to -- no source-specific assignment system.
+               Same select+custom pattern as Concept Type/Talent
+               (onConceptDevSelectWithOtherChange) so a name outside
+               Mark/Shez/Til can be entered as "Other". -->
+          <label class="editing-concept-editor-field">Editing
+            <select id="editing-concept-editor-select" onchange="onConceptDevSelectWithOtherChange('editing-concept-editor-select','editing-concept-editor-custom'); saveEditingConceptEditor();"></select>
+            <input type="text" id="editing-concept-editor-custom" placeholder="Editor name…" style="display:none;margin-top:6px;" onblur="saveEditingConceptEditor()">
+          </label>
           <div id="editing-final-edit-summary" class="editing-final-edit-summary"></div>
         </div>
         <div class="modal-footer editing-concept-footer">

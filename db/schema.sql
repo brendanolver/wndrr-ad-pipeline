@@ -830,6 +830,30 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
+-- Round 9: correct the four confirmed occurrences' dates to WNDRR's real
+-- Yearly Cadence source of truth (the week-number generator above is an
+-- approximation until each occurrence is actually confirmed). Guarded by
+-- the OLD, generator-computed dates so this fires exactly once per
+-- promotion -- once corrected, the WHERE clause no longer matches, so this
+-- can never re-fire and clobber a date someone has since edited by hand via
+-- the Edit Promotion modal (same "never destructively touch real progress"
+-- pattern as the Black Friday 2026 notes-clear above). Deliberately does
+-- NOT touch any other occurrence (e.g. Black Friday 2027, Boxing Day 2027)
+-- -- only these four are confirmed; the rest stay on the week-based
+-- approximation until they're confirmed too.
+UPDATE promotions SET start_date = '2026-11-11', end_date = '2026-11-30', updated_at = now()
+WHERE name = 'Black Friday 2026' AND start_date = '2026-11-12' AND end_date = '2026-12-01';
+
+UPDATE promotions SET start_date = '2026-12-24', end_date = '2026-12-29', updated_at = now()
+WHERE name = 'Boxing Day 2026' AND start_date = '2026-12-21' AND end_date = '2027-01-03';
+
+UPDATE promotions SET start_date = '2027-03-24', end_date = '2027-04-04', updated_at = now()
+WHERE name = 'Birthday Sale 2027' AND start_date = '2027-03-22' AND end_date = '2027-04-04';
+
+UPDATE promotions SET start_date = '2027-07-14', end_date = '2027-07-28', updated_at = now()
+WHERE name = 'EOFY Winter Sale 2027' AND start_date = '2027-07-12' AND end_date = '2027-08-01';
+
+-- ---------------------------------------------------------------------------
 -- Default Shoot Sizes (Settings -> Default Shoot Sizes): pre-fills each
 -- selected colourway's size when the "Shoot This Week" modal opens, keyed
 -- by garment type (top vs bottom) and, for bottoms, alpha vs waist sizing
