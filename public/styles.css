@@ -1070,6 +1070,15 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .cd-filter-btn:hover{background:var(--border);}
 .cd-filter-btn.active{background:var(--teal);border-color:var(--teal);color:white;}
 .promo-shoot-origin-toggle{display:flex;gap:8px;margin-top:6px;}
+/* Round 8's small Add Concept chooser -- two equal cards, nothing else, so
+   the first thing "+ Add Concept" shows is never a giant form. */
+.promo-chooser-modal{max-width:420px;}
+.promo-chooser-options{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px;}
+.promo-chooser-card{display:flex;flex-direction:column;gap:4px;text-align:left;background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-lg);padding:14px;cursor:pointer;font-family:inherit;}
+.promo-chooser-card:hover{border-color:var(--teal);background:var(--border);}
+.promo-chooser-card-title{font-size:13.5px;font-weight:700;color:var(--text);}
+.promo-chooser-card-desc{font-size:11.5px;color:var(--text-secondary);}
+@media (max-width:640px){.promo-chooser-options{grid-template-columns:1fr;}}
 /* Promotion intake's widened modal (.cd-modal-workspace) -- pairs related
    short fields (Format/Concept Name, Filming/Editing) side by side instead
    of stacking every field full-width now that there's room, per the brief:

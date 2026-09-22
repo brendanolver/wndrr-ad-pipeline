@@ -65,7 +65,7 @@ const CONCEPT_SELECT = `
     ss.id AS shoot_schedule_id, ss.scheduled_week_start, ss.shot_at,
     ss.editing_original_week_start, ss.editing_week_start, ss.editing_day,
     ca.id AS creative_asset_id, ca.concept_name, ca.format AS concept_format,
-    ca.hook_variations, ca.location, ca.editing_submitted_at, ca.editing_owner,
+    ca.hook_variations, ca.location, ca.editing_submitted_at, ca.editing_started_at, ca.editing_owner,
     ca.final_approval_status, ca.final_approval_feedback,
     spi.product_name, spi.image_url, spi.creator AS owner
   FROM shoot_schedule ss
@@ -148,6 +148,7 @@ router.get('/', async (req, res, next) => {
       editing_owner: c.editing_owner,
       shot_at: c.shot_at,
       editing_submitted_at: c.editing_submitted_at,
+      editing_started_at: c.editing_started_at,
       final_approval_status: c.final_approval_status,
       final_approval_feedback: c.final_approval_feedback,
       editing_original_week_start: dateStr(c.editing_original_week_start),
@@ -210,6 +211,13 @@ router.post('/concepts/:creativeAssetId/final-edits', async (req, res, next) => 
       );
       created.push(result.rows[0]);
     }
+    // This action IS "started editing" -- see the Round 8 comment on the
+    // column in schema.sql. COALESCE so a second batch of Final Edits on an
+    // already-started Concept doesn't push the timestamp forward.
+    await client.query(
+      `UPDATE creative_assets SET editing_started_at = COALESCE(editing_started_at, now()), updated_at = now() WHERE id = $1`,
+      [req.params.creativeAssetId]
+    );
     await client.query('COMMIT');
     res.status(201).json(created);
   } catch (err) {
@@ -354,22 +362,43 @@ router.post('/concepts/:creativeAssetId/ready-for-approval', async (req, res, ne
 // started, just cleanup for a mistake made seconds ago. Locked once the
 // Concept has been submitted, same as the PATCH route above.
 router.delete('/final-edits/:id', async (req, res, next) => {
+  const client = await pool.connect();
   try {
-    const existingResult = await pool.query(
-      `SELECT fe.id, ca.editing_submitted_at FROM final_edits fe
+    const existingResult = await client.query(
+      `SELECT fe.id, fe.creative_asset_id, ca.editing_submitted_at FROM final_edits fe
        JOIN creative_assets ca ON ca.id = fe.creative_asset_id
        WHERE fe.id = $1`,
       [req.params.id]
     );
-    if (!existingResult.rows.length) return res.status(404).json({ error: 'Final edit not found' });
+    if (!existingResult.rows.length) { client.release(); return res.status(404).json({ error: 'Final edit not found' }); }
     if (existingResult.rows[0].editing_submitted_at) {
+      client.release();
       return res.status(400).json({ error: 'Concept already submitted for approval -- changes are locked' });
     }
-    const result = await pool.query('DELETE FROM final_edits WHERE id = $1 RETURNING id', [req.params.id]);
-    if (!result.rows.length) return res.status(404).json({ error: 'Final edit not found' });
+    const creativeAssetId = existingResult.rows[0].creative_asset_id;
+
+    await client.query('BEGIN');
+    const result = await client.query('DELETE FROM final_edits WHERE id = $1 RETURNING id', [req.params.id]);
+    if (!result.rows.length) {
+      await client.query('ROLLBACK');
+      client.release();
+      return res.status(404).json({ error: 'Final edit not found' });
+    }
+    // If that was the Concept's last remaining Final Edit, undo the
+    // "started editing" signal too -- otherwise removing an accidental
+    // Final Edit would leave the card stuck showing In Progress with
+    // nothing actually attached (see the Round 8 comment on the column).
+    const remaining = await client.query('SELECT id FROM final_edits WHERE creative_asset_id = $1 LIMIT 1', [creativeAssetId]);
+    if (!remaining.rows.length) {
+      await client.query('UPDATE creative_assets SET editing_started_at = NULL, updated_at = now() WHERE id = $1', [creativeAssetId]);
+    }
+    await client.query('COMMIT');
     res.status(204).end();
   } catch (err) {
+    await client.query('ROLLBACK');
     next(err);
+  } finally {
+    client.release();
   }
 });
 

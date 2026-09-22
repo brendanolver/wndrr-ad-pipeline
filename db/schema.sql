@@ -1312,6 +1312,19 @@ CREATE INDEX IF NOT EXISTS idx_final_edits_status ON final_edits(status);
 ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS editing_submitted_at TIMESTAMPTZ;
 ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS editing_submitted_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
 
+-- Round 8: explicit "an editor has actually clicked In Progress" signal.
+-- Previously the client inferred In Progress from "a final_edits row
+-- exists", which is only true because the same user action creates the row
+-- -- but keying status off a side effect is fragile, and live QA reported a
+-- Concept showing In Progress before anyone had started it. This column is
+-- the one thing that action does that means "started": set only by POST
+-- /editing/concepts/:id/final-edits (advanceEditingToInProgress/
+-- startEditingFinalEdit), cleared by DELETE /editing/final-edits/:id only
+-- when that was the Concept's last remaining Final Edit (see editing.js).
+-- Scheduling/rescheduling (PATCH /editing/schedule/:id) never touches this,
+-- same as it never touches editing_submitted_at.
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS editing_started_at TIMESTAMPTZ;
+
 -- Who is responsible for developing/handling this concept (Upcoming Drops'
 -- Required Concepts list) -- deliberately separate from strategy_owner/
 -- filming_owner/editing_owner/qc_owner above, which are the OLD Kanban

@@ -2469,21 +2469,52 @@
   </div>
 </div>
 
+<!-- Round 8: the first thing "+ Add Concept" shows -- a small, simple
+     choice, nothing else. New Concept goes on to the full canonical Concept
+     Development experience (via #promotion-shoot-modal's context-only intake,
+     then #promo-concept-dev-modal); Existing Concept goes on to the existing
+     lightweight execution-brief intake. See openPromotionAddConceptChooser/
+     choosePromotionAddConceptOrigin in app.js. -->
+<div id="promo-add-concept-chooser-modal" class="modal-backdrop">
+  <div class="modal promo-chooser-modal">
+    <div class="modal-header">
+      <h3>Add Concept</h3>
+      <button class="modal-close" onclick="closeModal('promo-add-concept-chooser-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="hint">What are you adding?</div>
+      <div class="promo-chooser-options">
+        <button type="button" class="promo-chooser-card" onclick="choosePromotionAddConceptOrigin('new')">
+          <span class="promo-chooser-card-title">New Concept</span>
+          <span class="promo-chooser-card-desc">Develop a new creative idea</span>
+        </button>
+        <button type="button" class="promo-chooser-card" onclick="choosePromotionAddConceptOrigin('existing')">
+          <span class="promo-chooser-card-title">Existing Concept</span>
+          <span class="promo-chooser-card-desc">Use a proven concept again</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Cover a Promotion Campaign Stage requirement -- concept-first, not
      product-first: a promotion's creative need is often the message/format
      itself (sitewide sale messaging, a countdown graphic) with no single
      product behind it, so this never asks the user to pick a product to
-     start. Two distinct routes off one modal (see Concept Approach below):
-     New Concept creates the shoot_plan_items + creative_assets pair via
-     POST /shoot-plan (source: 'promotion') and opens straight into Concept
-     Development / Tuesday Review, same as before. Existing Concept does the
-     same create, then immediately PATCHes concept_origin='existing' +
-     concept_dev_status='approved' + the execution brief fields below --
-     bypassing Concept Development/Tuesday Review entirely and landing
-     straight in Shooting's selected Shoot Week, Unscheduled (see
-     ensureShootScheduleForApprovedConcept in conceptDevelopment.js). No
-     Assigned To here -- that field belongs to Concept Development's own
-     workspace, not this intake. -->
+     start. Concept Approach (New/Existing) is decided by the chooser modal
+     above before this ever opens (see openPromotionAddConceptChooser in
+     app.js). New Concept: this is just a context-only intake (Format/
+     Concept Name/Filming/Editing/Shoot Week) -- creates the shoot_plan_items
+     + creative_assets pair via POST /shoot-plan (source: 'promotion'), then
+     opens straight into the full Concept Development modal
+     (#promo-concept-dev-modal), the SAME one normal Concept Development
+     uses. Existing Concept does the same create, then immediately PATCHes
+     concept_origin='existing' + concept_dev_status='approved' + the
+     execution brief fields below -- bypassing Concept Development/Tuesday
+     Review entirely and landing straight in Shooting's selected Shoot Week,
+     Unscheduled (see ensureShootScheduleForApprovedConcept in
+     conceptDevelopment.js). No Assigned To here -- that field belongs to
+     Concept Development's own workspace, not this intake. -->
 <div id="promotion-shoot-modal" class="modal-backdrop">
   <div class="modal cd-modal-workspace">
     <div class="modal-header">
@@ -2515,24 +2546,10 @@
         </label>
       </div>
 
-      <!-- Concept Approach: Video only -- New vs Existing Concept (see
-           schema.sql's comment on creative_assets.concept_origin). Static
-           always saves concept_origin = NULL, so this whole block stays
-           hidden for Static -- see onPromotionShootFormatChange in app.js.
-           Two compact selectable chips, not a dropdown, per the brief.
-           New Concept never asks for Concept Type here (still needs
-           developing -- Concept Type can be chosen later in Concept
-           Development if useful); Existing Concept does, plus the compact
-           execution brief below, since it's an already-understood execution
-           being scheduled straight into production. -->
-      <div id="promotion-shoot-origin-wrap" style="display:none;">
-        <span class="cd-field-label">Concept Approach</span>
-        <div class="promo-shoot-origin-toggle">
-          <button type="button" class="cd-filter-btn" id="promotion-shoot-origin-new-btn" onclick="selectPromotionShootConceptOrigin('new')">New Concept</button>
-          <button type="button" class="cd-filter-btn" id="promotion-shoot-origin-existing-btn" onclick="selectPromotionShootConceptOrigin('existing')">Existing Concept</button>
-        </div>
-        <div class="hint" id="promotion-shoot-origin-hint"></div>
-      </div>
+      <!-- Concept Approach (New vs Existing) is decided up front by the
+           small chooser modal (#promo-add-concept-chooser-modal, round 8)
+           before this modal ever opens -- see openPromotionAddConceptChooser
+           in app.js. No in-modal toggle here any more. -->
 
       <div id="promotion-shoot-concept-type-wrap">
         <label>Concept Type
@@ -2580,41 +2597,18 @@
         <select id="promotion-shoot-week"></select>
       </label>
 
-      <!-- New Concept's inline Concept Development fields (round 7, item 5):
-           the SAME concept fields/PATCH endpoint the full Concept
-           Development modal writes (angle/customer_avatar_id/
-           custom_avatar_description below this point; hook_variations/
-           execution/reference_items/script_notes/location shared with the
-           Execution Brief further down) -- this is a UI consolidation into
-           the ONE Add Concept modal, not a second Concept Development
-           implementation or data model. Shown for New Concept only; the
-           user never sees a second modal or leaves this page. -->
-      <div id="promotion-shoot-idea-wrap" style="display:none;">
-        <label><span class="cd-field-label">The Idea</span>
-          <textarea id="promotion-shoot-idea" rows="2"></textarea>
-        </label>
-      </div>
-      <div id="promotion-shoot-avatar-wrap" style="display:none;">
-        <div class="cd-modal-section-title">Who's It For? <span class="hint">(optional)</span></div>
-        <label><span class="cd-field-label">Customer Avatar</span>
-          <select id="promotion-shoot-avatar-select" onchange="onPromotionShootAvatarChange()"></select>
-        </label>
-        <div id="promotion-shoot-avatar-custom-wrap" style="display:none;">
-          <label>Who are you targeting?
-            <textarea id="promotion-shoot-avatar-custom-desc" rows="3" placeholder="Describe the specific person, mindset or customer behaviour you're targeting."></textarea>
-          </label>
-        </div>
-      </div>
-
-      <!-- Shared by New Concept (full inline flow) and Existing Concept
-           (lightweight execution brief) -- NOT a copy of the full Concept
-           Development workspace, just enough to either develop a new idea
-           or schedule an already-understood execution straight into
-           Shooting. Every field here reuses the exact same creative_assets
-           columns/JSON shapes Concept Development's own modal writes
-           (hook_variations/execution/reference_items/script_notes/location),
-           via the same PATCH /concept-development/concepts/:id -- this is
-           a smaller UI over the same record, not a second data model. -->
+      <!-- Existing Concept's lightweight execution brief only (round 8: New
+           Concept no longer has an inline field set here at all -- it goes
+           straight into the SAME full Concept Development modal
+           (#promo-concept-dev-modal) normal Concept Development uses, via
+           openPromotionConceptDevModal, once this context-only step is
+           saved -- see savePromotionShootItem). Every field here reuses the
+           exact same creative_assets columns/JSON shapes Concept
+           Development's own modal writes (hook_variations/execution/
+           reference_items/script_notes/location), via the same PATCH
+           /concept-development/concepts/:id -- this is a smaller UI over
+           the same record for an already-understood execution, not a
+           second data model. -->
       <div id="promotion-shoot-brief-wrap" style="display:none;">
         <div class="cd-modal-section-title">The Hook</div>
         <label>Primary Hook

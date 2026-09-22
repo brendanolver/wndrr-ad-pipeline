@@ -3649,7 +3649,7 @@ function promotionStageCardHtml(stage, index, total) {
           <input type="number" min="0" class="promotion-stage-count-input" value="${stage.target}" onchange="savePromotionStageCount(${stage.id}, this.value)">
         </label>
         ${items.length ? `<div class="promotion-stage-item-list">${items.map(promotionStageItemRowHtml).join('')}</div>` : ''}
-        <button type="button" class="btn btn-primary btn-sm coverage-card-shoot-btn" onclick="shootThisWeekForPromotionStage(${stage.id})">+ Add Concept</button>
+        <button type="button" class="btn btn-primary btn-sm coverage-card-shoot-btn" onclick="openPromotionAddConceptChooser(${stage.id})">+ Add Concept</button>
       </div>
     </div>`;
 }
@@ -3836,7 +3836,7 @@ async function renderPromotionStageDetailView() {
     <div><strong>${stage.still_required}</strong><br>Still Required</div>
     <div><strong>${dueLabel}</strong><br>Due date</div>
   `;
-  document.getElementById('promotion-stage-view-shoot-btn').onclick = () => shootThisWeekForPromotionStage(stage.id);
+  document.getElementById('promotion-stage-view-shoot-btn').onclick = () => openPromotionAddConceptChooser(stage.id);
 
   const items = stage.items || [];
   const grid = document.getElementById('promotion-stage-view-items');
@@ -3930,12 +3930,36 @@ function nextConceptTypeValueForFormat(currentValue, format) {
   return (!isKnownType || validTypes.includes(currentValue)) ? currentValue : '';
 }
 
-function shootThisWeekForPromotionStage(stageId) {
+// Round 8: "+ Add Concept" opens this small chooser first -- New Concept vs
+// Existing Concept, nothing else -- before any form appears at all. Only
+// once a card is picked does shootThisWeekForPromotionStage open the actual
+// intake modal, already knowing which of the two flows it's collecting for.
+let promotionAddConceptChooserStageId = null;
+
+function openPromotionAddConceptChooser(stageId) {
+  promotionAddConceptChooserStageId = stageId;
+  openModal('promo-add-concept-chooser-modal');
+}
+
+function choosePromotionAddConceptOrigin(origin) {
+  const stageId = promotionAddConceptChooserStageId;
+  closeModal('promo-add-concept-chooser-modal');
+  if (stageId == null) return;
+  shootThisWeekForPromotionStage(stageId, origin);
+}
+
+// origin ('new'/'existing') is decided up front by the chooser above (round
+// 8) -- this modal no longer asks the question itself, it just collects
+// whatever each path still needs. New Concept: Format/Concept Name/Filming/
+// Editing/Shoot Week only, then straight into the full canonical Concept
+// Development modal (see savePromotionShootItem). Existing Concept: the
+// same context plus the lightweight execution brief further down.
+function shootThisWeekForPromotionStage(stageId, origin) {
   const promotion = state.currentPromotion;
   const stage = ((promotion && promotion.stages) || []).find((s) => s.id === stageId);
   if (!stage) return;
   promotionShootContext = { stageId };
-  document.getElementById('promotion-shoot-modal-title').textContent = 'Add Concept';
+  document.getElementById('promotion-shoot-modal-title').textContent = origin === 'existing' ? 'Existing Concept' : 'New Concept';
   document.getElementById('promotion-shoot-context-promotion').textContent = promotion.name;
   document.getElementById('promotion-shoot-context-stage').textContent = stage.name;
   document.getElementById('promotion-shoot-editing-owner').value = '';
@@ -3948,10 +3972,8 @@ function shootThisWeekForPromotionStage(stageId) {
   populatePromotionShootFilmingSelect();
   populatePromotionShootWeekSelect();
   fillConceptDevSelectWithOther('promotion-shoot-concept-type-select', 'promotion-shoot-concept-type-custom', conceptTypesForFormat('video'), '');
-  promotionShootConceptOrigin = null;
-  renderPromotionShootConceptOrigin();
+  promotionShootConceptOrigin = origin === 'existing' ? 'existing' : 'new';
   resetPromotionShootBrief();
-  updatePromotionShootOriginVisibility();
   updatePromotionShootConceptTypeVisibility();
   updatePromotionShootBriefVisibility();
   updatePromotionShootFooterButton();
@@ -3980,32 +4002,9 @@ function resetPromotionShootBrief() {
   document.getElementById('promotion-shoot-reference-url').value = '';
   document.getElementById('promotion-shoot-script-field').style.display = 'none';
   document.getElementById('promotion-shoot-script-toggle-wrap').style.display = '';
-  document.getElementById('promotion-shoot-idea').value = '';
-  populatePromotionShootAvatarSelect(null);
-  document.getElementById('promotion-shoot-avatar-select').value = '';
-  document.getElementById('promotion-shoot-avatar-custom-desc').value = '';
-  document.getElementById('promotion-shoot-avatar-custom-wrap').style.display = 'none';
   renderPromotionShootAltHooks();
   renderPromotionShootReferences();
   renderPromotionShootBriefStyleChips();
-}
-
-// New Concept's "Who's It For?" select (round 7, item 5) -- same options/
-// pattern as the full modal's renderPromotionConceptDevAvatarOptions, just
-// targeting this modal's own ids so the two never fight over one element.
-function populatePromotionShootAvatarSelect(selectedAvatarId) {
-  const select = document.getElementById('promotion-shoot-avatar-select');
-  const options = state.customerAvatars.filter((a) => a.enabled || a.id === selectedAvatarId);
-  select.innerHTML = [
-    '<option value="">Select an avatar…</option>',
-    ...options.map((a) => `<option value="${a.id}">${escapeHtml(a.name)}${a.enabled ? '' : ' (disabled)'}</option>`),
-    '<option value="__other__">+ Other / New Avatar</option>',
-  ].join('');
-}
-
-function onPromotionShootAvatarChange() {
-  const select = document.getElementById('promotion-shoot-avatar-select');
-  document.getElementById('promotion-shoot-avatar-custom-wrap').style.display = select.value === '__other__' ? '' : 'none';
 }
 
 function togglePromotionShootScript() {
@@ -4078,21 +4077,11 @@ function renderPromotionShootBriefStyleChips() {
 // Whether the current Format/Concept Approach combination is the Existing
 // Concept bypass -- the one branch point every visibility toggle and the
 // save handler itself all key off, kept in one place so they can never
-// disagree with each other.
+// disagree with each other. Concept Approach is decided by the chooser
+// modal (round 8) before this modal ever opens, not by an in-modal toggle.
 function isPromotionShootExistingBrief() {
   const format = document.getElementById('promotion-shoot-format').value;
   return format === 'video' && promotionShootConceptOrigin === 'existing';
-}
-
-// New Concept's full inline flow (round 7, item 5) -- the ONE Add Concept
-// modal expands to include the same Concept Development fields (Idea,
-// Avatar, Hook, What to Shoot, Script, References, Shoot Setup) instead of
-// opening a second "Develop Promotion Concept" modal. Video-only, same as
-// Existing (Static keeps its pre-existing, unchanged behaviour -- see
-// savePromotionShootItem).
-function isPromotionShootNewConceptFlow() {
-  const format = document.getElementById('promotion-shoot-format').value;
-  return format === 'video' && promotionShootConceptOrigin === 'new';
 }
 
 // Concept Type: hidden for Video + New Concept (still needs developing --
@@ -4107,23 +4096,22 @@ function updatePromotionShootConceptTypeVisibility() {
   document.getElementById('promotion-shoot-concept-type-wrap').style.display = show ? '' : 'none';
 }
 
+// Round 8: the execution brief (Hook/What to Shoot/Styles/References/
+// Script/Shoot Setup) is Existing Concept only again -- New Concept has no
+// inline field set here at all any more, it goes straight into the full
+// canonical Concept Development modal instead (see savePromotionShootItem).
 function updatePromotionShootBriefVisibility() {
   const isExisting = isPromotionShootExistingBrief();
-  const isNew = isPromotionShootNewConceptFlow();
-  document.getElementById('promotion-shoot-idea-wrap').style.display = isNew ? '' : 'none';
-  document.getElementById('promotion-shoot-avatar-wrap').style.display = isNew ? '' : 'none';
-  document.getElementById('promotion-shoot-brief-wrap').style.display = (isExisting || isNew) ? '' : 'none';
-  // Styles/Products is Existing-only (see index.html's comment on
-  // #promotion-shoot-style-section) -- not part of the New Concept field
-  // list in this round's brief.
+  document.getElementById('promotion-shoot-brief-wrap').style.display = isExisting ? '' : 'none';
   document.getElementById('promotion-shoot-style-section').style.display = isExisting ? '' : 'none';
 }
 
+// New Concept and Static both continue into the full Concept Development
+// modal (see savePromotionShootItem's fallback) -- same CTA either way,
+// this is just a context-collection step before that modal opens.
 function updatePromotionShootFooterButton() {
   const btn = document.getElementById('promotion-shoot-save-btn');
-  if (isPromotionShootExistingBrief()) btn.textContent = 'Add to Shoot Plan →';
-  else if (isPromotionShootNewConceptFlow()) btn.textContent = 'Save & Send to Tuesday Review →';
-  else btn.textContent = 'Develop Promotion Concept →';
+  btn.textContent = isPromotionShootExistingBrief() ? 'Add to Shoot Plan →' : 'Develop Promotion Concept →';
 }
 
 // Re-filters the Concept Type dropdown when Format changes, keeping
@@ -4138,37 +4126,9 @@ function onPromotionShootFormatChange() {
   const nextValue = nextConceptTypeValueForFormat(currentValue, format);
   fillConceptDevSelectWithOther('promotion-shoot-concept-type-select', 'promotion-shoot-concept-type-custom', conceptTypesForFormat(format), nextValue);
   if (format !== 'video') promotionShootConceptOrigin = null;
-  renderPromotionShootConceptOrigin();
-  updatePromotionShootOriginVisibility();
   updatePromotionShootConceptTypeVisibility();
   updatePromotionShootBriefVisibility();
   updatePromotionShootFooterButton();
-}
-
-function updatePromotionShootOriginVisibility() {
-  const format = document.getElementById('promotion-shoot-format').value;
-  document.getElementById('promotion-shoot-origin-wrap').style.display = format === 'video' ? '' : 'none';
-}
-
-function selectPromotionShootConceptOrigin(origin) {
-  promotionShootConceptOrigin = origin;
-  renderPromotionShootConceptOrigin();
-  updatePromotionShootConceptTypeVisibility();
-  updatePromotionShootBriefVisibility();
-  updatePromotionShootFooterButton();
-}
-
-function renderPromotionShootConceptOrigin() {
-  document.getElementById('promotion-shoot-origin-new-btn').classList.toggle('active', promotionShootConceptOrigin === 'new');
-  document.getElementById('promotion-shoot-origin-existing-btn').classList.toggle('active', promotionShootConceptOrigin === 'existing');
-  const hint = document.getElementById('promotion-shoot-origin-hint');
-  if (promotionShootConceptOrigin === 'new') {
-    hint.textContent = 'A genuinely new idea -- the full development flow (Idea, Audience, Hook, Talent, What to Shoot).';
-  } else if (promotionShootConceptOrigin === 'existing') {
-    hint.textContent = 'An established concept the team already understands -- a quicker execution brief.';
-  } else {
-    hint.textContent = '';
-  }
 }
 
 // Searchable product/style picker -- SKU or name, partial, case-insensitive
@@ -4231,9 +4191,7 @@ async function savePromotionShootItem() {
   if (format === 'video' && !promotionShootConceptOrigin) {
     return toast('Choose New Concept or Existing Concept', true);
   }
-  const conceptOrigin = format === 'video' ? promotionShootConceptOrigin : null;
   const isExistingBrief = isPromotionShootExistingBrief();
-  const isNewConceptFlow = isPromotionShootNewConceptFlow();
 
   // No product is picked here at all -- the concept-first flow (see the
   // file-header comment above) never requires one; product_code/product_name
@@ -4313,59 +4271,21 @@ async function savePromotionShootItem() {
           });
         } catch (e) { /* non-fatal -- concept is already scheduled either way */ }
       }
-    } else if (isNewConceptFlow) {
-      // New Concept (round 7, item 5): the whole inline Concept Development
-      // form saves in this SAME PATCH, in this SAME modal -- no second
-      // "Develop Promotion Concept" modal, no navigation. concept_dev_status
-      // goes straight to 'ready_for_review' so it appears in Tuesday Review
-      // immediately (Shoot Week gates when it's filmed once approved, never
-      // whether it's visible for review -- see conceptDevelopment.js's GET /,
-      // already correct/unchanged). Same fields/endpoint the full Concept
-      // Development modal's own savePromotionConceptDevModal writes.
-      const hookVariations = [];
-      const primaryHook = document.getElementById('promotion-shoot-hook-primary').value.trim();
-      if (primaryHook) hookVariations.push({ text: primaryHook });
-      promotionShootAltHooks.forEach((text) => {
-        const trimmed = (text || '').trim();
-        if (trimmed) hookVariations.push({ text: trimmed });
-      });
-      const idea = document.getElementById('promotion-shoot-idea').value.trim();
-      const avatarSelect = document.getElementById('promotion-shoot-avatar-select');
-      const isOtherAvatar = avatarSelect.value === '__other__';
-      const customerAvatarId = avatarSelect.value && !isOtherAvatar ? Number(avatarSelect.value) : null;
-      const customAvatarDescription = isOtherAvatar ? document.getElementById('promotion-shoot-avatar-custom-desc').value.trim() : '';
-      const execution = document.getElementById('promotion-shoot-execution').value.trim();
-      const scriptNotes = document.getElementById('promotion-shoot-script').value.trim();
-      const location = document.getElementById('promotion-shoot-location').value.trim();
-      await api(`/concept-development/concepts/${item.asset_id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          concept_origin: 'new',
-          concept_dev_status: 'ready_for_review',
-          angle: idea || null,
-          customer_avatar_id: customerAvatarId,
-          custom_avatar_description: customAvatarDescription,
-          hook_variations: hookVariations,
-          execution: execution || null,
-          script_notes: scriptNotes || null,
-          location: location || null,
-          reference_items: promotionShootReferences,
-        }),
-      });
     }
     closeModal('promotion-shoot-modal');
-    toast(isExistingBrief ? 'Added to Shoot Plan' : (isNewConceptFlow ? 'Sent to Tuesday Review' : 'Added to Concept Development'));
+    toast(isExistingBrief ? 'Added to Shoot Plan' : 'Added to Concept Development');
     await refreshCurrentPromotion();
     if (document.getElementById('planning-promotion-stage-view').style.display !== 'none') {
       renderPromotionStageDetailView();
     }
     await loadAll();
-    // Existing Concept and New Concept (round 7, item 5) both finish
-    // entirely inline, in this one modal -- neither ever opens a second
-    // modal. Only Static (no Concept Approach toggle at all, unchanged from
-    // before this round) still continues into the full Concept Development
-    // workspace below, since this brief gives no inline field set for it.
-    if (isExistingBrief || isNewConceptFlow) return;
+    // Existing Concept finishes entirely inline, in this one modal -- it
+    // never opens a second modal. Everything else (New Concept, round 8;
+    // Static, unchanged from before) continues into the SAME full canonical
+    // Concept Development modal normal Concept Development uses -- this
+    // modal was only ever collecting the context (Format/Name/Filming/
+    // Editing/Shoot Week) that modal doesn't itself ask for.
+    if (isExistingBrief) return;
     const product = await api(`/concept-development/item/${item.id}`);
     const seedConcept = product.concepts && product.concepts[0];
     if (seedConcept) openPromotionConceptDevModal(seedConcept, product);
@@ -6808,7 +6728,7 @@ function updatePromotionConceptDevFooterButtons(status) {
     draftBtn.style.display = '';
     changesBtn.style.display = 'none';
     submitBtn.style.display = '';
-    submitBtn.textContent = 'Save & Send to Review →';
+    submitBtn.textContent = 'Save & Send to Tuesday Review →';
   }
 }
 
@@ -9084,12 +9004,19 @@ function editingConceptFinalEdit(concept) {
 }
 
 // Three plain states, no completion fraction: To Edit (nothing started),
-// In Progress (a Final Edit exists -- editor working in CapCut, link may
-// not be pasted back yet), Edited (the Concept has actually been submitted
-// -- see submitEditingConceptReady, which requires the link first).
+// In Progress (editing_started_at is set -- editor working in CapCut, link
+// may not be pasted back yet), Edited (the Concept has actually been
+// submitted -- see submitEditingConceptReady, which requires the link
+// first). Round 8: keyed off the explicit editing_started_at signal (set
+// only by the "In Progress"/"Start Editing" action, cleared if that Final
+// Edit is later removed as a mistake -- see editing.js), not off "a
+// final_edits row happens to exist", so a Concept freshly Shot into Editing
+// always starts at To Edit until someone actually clicks In Progress, and
+// scheduling/rescheduling (which never touches editing_started_at) can
+// never change this.
 function editingConceptStatus(concept) {
   if (concept.editing_submitted_at) return 'ready_for_approval';
-  return editingConceptFinalEdit(concept) ? 'editing' : 'to_edit';
+  return concept.editing_started_at ? 'editing' : 'to_edit';
 }
 
 // The Final Edit workspace's default Editor suggestion -- the planning-time
