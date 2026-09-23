@@ -1567,3 +1567,60 @@ ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS final_approval_feedback TEX
 ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS final_approved_at TIMESTAMPTZ;
 ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS final_approved_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_creative_assets_final_approval_status ON creative_assets(final_approval_status);
+
+-- ---------------------------------------------------------------------------
+-- Round 11: per-user module (sidebar tab) access, kept deliberately separate
+-- from `role` (see the brief: "Role and module visibility should be
+-- separate" -- role stays a default/category label only, still admin/
+-- marketing/creative/viewer/lead/member, never itself checked for access).
+-- Widened additively -- 'lead'/'member' are new values alongside the four
+-- that already exist, nothing already stored changes meaning.
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
+ALTER TABLE users ADD CONSTRAINT users_role_check
+  CHECK (role IN ('admin', 'marketing', 'creative', 'viewer', 'lead', 'member'));
+
+-- Deny-list, not an allow-list -- this is the safe-default choice the brief
+-- explicitly calls for (item 15): a user with zero rows here (every existing
+-- account, and every brand-new one, until someone deliberately restricts
+-- them) has full access to every module, so this migration can never lock
+-- an existing account out of the app it could already fully use. module_key
+-- matches index.html's tab-btn data-tab values 1:1 (dashboard, planning,
+-- concept-dev, tuesday-review, shooting, editing, final-approval, board,
+-- admin [Styles & Categories], reference-library, drops, promotions,
+-- settings) so the frontend needs no second mapping table, and is a plain
+-- VARCHAR rather than an FK to a modules table -- there's nothing else a
+-- "modules" row would ever need to carry.
+CREATE TABLE IF NOT EXISTS user_module_restrictions (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  module_key VARCHAR(50) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, module_key)
+);
+
+-- One-time role correction for the five pre-existing seed accounts named in
+-- the Round 11 brief's initial access matrix -- guarded by the OLD role
+-- value ('creative', what seedUsersAndBackfill originally gave every
+-- non-Brendan seed user), so this can only ever fire once per account and
+-- can never clobber a role an admin has since changed by hand through the
+-- new Settings user-management UI.
+UPDATE users SET role = 'admin', updated_at = now() WHERE email = 'max@kohindustries.com' AND role = 'creative';
+UPDATE users SET role = 'admin', updated_at = now() WHERE email = 'lucy@kohindustries.com' AND role = 'creative';
+UPDATE users SET role = 'lead', updated_at = now() WHERE email = 'steve@kohindustries.com' AND role = 'creative';
+UPDATE users SET role = 'lead', updated_at = now() WHERE email = 'sheridan@kohindustries.com' AND role = 'creative';
+UPDATE users SET role = 'member', updated_at = now() WHERE email = 'mark@kohindustries.com' AND role = 'creative';
+
+-- One-time restriction seed for Mark (the one named user in the initial
+-- matrix who already existed before this round -- Tllestio/Ronit are brand
+-- new accounts and get theirs seeded directly at creation time in
+-- src/db.js's seedUsersAndBackfill instead, which needs no such guard since
+-- it only ever runs once per account, at insert). Guarded by "Mark
+-- currently has zero restriction rows" rather than a plain ON CONFLICT DO
+-- NOTHING per-row insert, so that guard -- like the role correction above --
+-- can only ever fire once: if an admin later removes even one of these
+-- three via the Settings UI, this can never re-add it on a future deploy.
+INSERT INTO user_module_restrictions (user_id, module_key)
+SELECT u.id, m.module_key
+FROM users u
+CROSS JOIN (VALUES ('planning'), ('board'), ('admin')) AS m(module_key)
+WHERE u.email = 'mark@kohindustries.com'
+  AND NOT EXISTS (SELECT 1 FROM user_module_restrictions r WHERE r.user_id = u.id);

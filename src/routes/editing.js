@@ -186,6 +186,34 @@ router.post('/concepts/:creativeAssetId/start', async (req, res, next) => {
   }
 });
 
+// Round 11: undoes /start -- the segmented control's backward click from
+// In Progress (mirrors Shooting's /unstart). Clears ONLY editing_started_at;
+// editing_owner, editing_day, and the Concept's final_edits row (if one
+// already exists from a prior Edited click) are all left exactly as they
+// are, so this is a plain status-only revert, never a data-destroying one.
+// Guarded by editing_submitted_at IS NULL so a Concept already sitting in
+// Final Approval can never be silently pulled back to In Progress from a
+// stale card -- Request Changes is still the one supported way back once
+// submitted (see the Round 10 Final Approval flow), not this route.
+router.post('/concepts/:creativeAssetId/unstart', async (req, res, next) => {
+  try {
+    const result = await pool.query(
+      `UPDATE creative_assets SET editing_started_at = NULL, updated_at = now()
+       WHERE id = $1 AND editing_submitted_at IS NULL
+       RETURNING id, editing_started_at`,
+      [req.params.creativeAssetId]
+    );
+    if (!result.rows.length) {
+      const existsResult = await pool.query('SELECT id, editing_submitted_at FROM creative_assets WHERE id = $1', [req.params.creativeAssetId]);
+      if (!existsResult.rows.length) return res.status(404).json({ error: 'Concept not found' });
+      return res.status(409).json({ error: 'This Concept has already been submitted for Final Approval and can no longer be reverted from here.' });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Bulk-create Final Edits for one Concept -- covers both the multi-select
 // "Create Final Edits" gesture and a single Hook checklist row's "Add Final
 // Edit" (a one-item array). Never auto-creates from hook_variations on its

@@ -14,21 +14,38 @@ const pool = new Pool({
   ssl: useSsl ? { rejectUnauthorized: false } : false,
 });
 
-// The six real team accounts this app is seeded with (see schema.sql's
-// Users & Auth comment for why this lives in JS, not schema.sql: hashing
-// needs Node's crypto, not plain SQL). Runs on every boot, guarded to only
-// ever insert a user once (by email) -- adding a real invite/admin flow is
+// The real team accounts this app is seeded with (see schema.sql's Users &
+// Auth comment for why this lives in JS, not schema.sql: hashing needs
+// Node's crypto, not plain SQL). Runs on every boot, guarded to only ever
+// insert a user once (by email) -- adding a real invite/admin flow is
 // explicitly out of scope for V1, so this is the only way new accounts get
 // created right now. Initial password is today's shared APP_PASSWORD, so
 // nobody's access changes the moment this ships; anyone can be given a real
 // distinct password later via a direct DB update (no reset flow yet).
+// Round 11 added Angus/Jake/Tllestio/Ronit (the four named users who didn't
+// already exist) with the roles/restrictions the brief's initial access
+// matrix calls for; the five who already existed (Max/Steve/Sheridan/Mark/
+// Lucy) have their role correction and Mark's module restrictions handled
+// as one-time guarded migrations in schema.sql instead, since this array is
+// only ever consulted for a brand-new insert, never to update an existing
+// row -- these entries are kept in sync with that same target state purely
+// so a from-scratch environment seeds correctly without relying on the
+// schema.sql guard's "old role was creative" condition ever having applied.
+// restrictedModules (optional): module_key values seeded into
+// user_module_restrictions the moment this account is first created --
+// never re-applied afterward (see the loop below), so an admin's later
+// edit in Settings is never overwritten by a future redeploy.
 const SEED_USERS = [
   { name: 'Brendan', email: 'brendan@kohindustries.com', role: 'admin' },
-  { name: 'Max', email: 'max@kohindustries.com', role: 'creative' },
-  { name: 'Steve', email: 'steve@kohindustries.com', role: 'creative' },
-  { name: 'Sheridan', email: 'sheridan@kohindustries.com', role: 'creative' },
-  { name: 'Mark', email: 'mark@kohindustries.com', role: 'creative' },
-  { name: 'Lucy', email: 'lucy@kohindustries.com', role: 'creative' },
+  { name: 'Max', email: 'max@kohindustries.com', role: 'admin' },
+  { name: 'Steve', email: 'steve@kohindustries.com', role: 'lead' },
+  { name: 'Sheridan', email: 'sheridan@kohindustries.com', role: 'lead' },
+  { name: 'Mark', email: 'mark@kohindustries.com', role: 'member', restrictedModules: ['planning', 'board', 'admin'] },
+  { name: 'Lucy', email: 'lucy@kohindustries.com', role: 'admin' },
+  { name: 'Angus', email: 'angus@kohindustries.com', role: 'lead' },
+  { name: 'Jake', email: 'jake@kohindustries.com', role: 'lead' },
+  { name: 'Tllestio', email: 'tllestio@kohindustries.com', role: 'member', restrictedModules: ['planning', 'board', 'admin'] },
+  { name: 'Ronit', email: 'ronit@kohindustries.com', role: 'member', restrictedModules: ['planning', 'board', 'admin'] },
 ];
 
 async function seedUsersAndBackfill() {
@@ -38,10 +55,18 @@ async function seedUsersAndBackfill() {
   for (const u of SEED_USERS) {
     const existing = await pool.query('SELECT id FROM users WHERE email = $1', [u.email]);
     if (existing.rows.length) continue;
-    await pool.query(
-      'INSERT INTO users (name, email, password_hash, role) VALUES ($1, $2, $3, $4)',
+    const inserted = await pool.query(
+      'INSERT INTO users (name, email, password_hash, role) VALUES ($1, $2, $3, $4) RETURNING id',
       [u.name, u.email, hashPassword(appPassword), u.role]
     );
+    // Only reached for a row that didn't exist a moment ago -- safe to seed
+    // unconditionally, this can never re-fire for this account again.
+    for (const moduleKey of u.restrictedModules || []) {
+      await pool.query(
+        'INSERT INTO user_module_restrictions (user_id, module_key) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+        [inserted.rows[0].id, moduleKey]
+      );
+    }
   }
 
   // Link (or create) each seed user's content_creators row -- see

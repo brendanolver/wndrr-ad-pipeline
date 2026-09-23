@@ -4,6 +4,7 @@ const express = require('express');
 const cookieParser = require('cookie-parser');
 const { runMigrations } = require('./db');
 const { requireAuth } = require('./auth');
+const { requireModuleAccess } = require('./lib/permissions');
 const { warmAmCache } = require('./lib/apparelmagic');
 const { warmPipelineCache } = require('./lib/reportPipeline');
 const { warmMetaAdsCache } = require('./lib/metaAds');
@@ -46,37 +47,48 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 app.use(cookieParser());
 
+// Round 11 module-route protection: applied only where a route mount is
+// unambiguously and exclusively one sidebar module's own backing API (see
+// the Round 11 brief, item 12 and permissions.js's requireModuleAccess
+// comment). Several mounts below are deliberately left ungated because
+// they're shared across multiple modules with different access (e.g.
+// creative-assets is read by Board/Concept Dev/Shooting/Editing alike;
+// concept-development backs BOTH Concept Dev and Tuesday Review, which can
+// have different access) -- gating those by a single module key would risk
+// breaking a page a user IS allowed into. That gap is reported explicitly
+// rather than silently presented as covered -- see the Round 11 report's
+// "route/API protection" section.
 app.use('/api/auth', authRoutes);
-app.use('/api/styles', requireAuth, styleRoutes);
-app.use('/api/categories', requireAuth, categoryRoutes);
+app.use('/api/styles', requireAuth, requireModuleAccess('admin'), styleRoutes);
+app.use('/api/categories', requireAuth, requireModuleAccess('admin'), categoryRoutes);
 app.use('/api/creative-assets', requireAuth, creativeAssetRoutes);
-app.use('/api/board', requireAuth, boardRoutes);
-app.use('/api/dashboard', requireAuth, dashboardRoutes);
-app.use('/api/drops', requireAuth, dropRoutes);
-app.use('/api/creative-target-rules', requireAuth, creativeTargetRuleRoutes);
-app.use('/api/debug', requireAuth, debugRoutes);
+app.use('/api/board', requireAuth, requireModuleAccess('board'), boardRoutes);
+app.use('/api/dashboard', requireAuth, requireModuleAccess('dashboard'), dashboardRoutes);
+app.use('/api/drops', requireAuth, requireModuleAccess('drops'), dropRoutes);
+app.use('/api/creative-target-rules', requireAuth, requireModuleAccess('planning'), creativeTargetRuleRoutes);
+app.use('/api/debug', requireAuth, requireModuleAccess('planning'), debugRoutes);
 app.use('/api/proven-winners', requireAuth, provenWinnerRoutes);
 app.use('/api/drop-product-plans', requireAuth, dropProductPlanRoutes);
 app.use('/api/concept-development', requireAuth, conceptDevelopmentRoutes);
 app.use('/api/concept-types', requireAuth, conceptTypeRoutes);
-app.use('/api/shooting', requireAuth, shootingRoutes);
-app.use('/api/planning-settings', requireAuth, planningSettingsRoutes);
-app.use('/api/core-products', requireAuth, coreProductRoutes);
-app.use('/api/shoot-plan', requireAuth, shootPlanRoutes);
+app.use('/api/shooting', requireAuth, requireModuleAccess('shooting'), shootingRoutes);
+app.use('/api/planning-settings', requireAuth, requireModuleAccess('planning'), planningSettingsRoutes);
+app.use('/api/core-products', requireAuth, requireModuleAccess('planning'), coreProductRoutes);
+app.use('/api/shoot-plan', requireAuth, requireModuleAccess('planning'), shootPlanRoutes);
 app.use('/api/content-creators', requireAuth, contentCreatorRoutes);
-app.use('/api/high-stock-products', requireAuth, highStockProductRoutes);
-app.use('/api/promotions', requireAuth, promotionRoutes);
-app.use('/api/weekly-shoot-plan-confirmation', requireAuth, weeklyShootPlanConfirmationRoutes);
-app.use('/api/weekly-planning-progress', requireAuth, weeklyPlanningProgressRoutes);
-app.use('/api/sales-cadence', requireAuth, salesCadenceRoutes);
+app.use('/api/high-stock-products', requireAuth, requireModuleAccess('planning'), highStockProductRoutes);
+app.use('/api/promotions', requireAuth, requireModuleAccess('promotions'), promotionRoutes);
+app.use('/api/weekly-shoot-plan-confirmation', requireAuth, requireModuleAccess('planning'), weeklyShootPlanConfirmationRoutes);
+app.use('/api/weekly-planning-progress', requireAuth, requireModuleAccess('planning'), weeklyPlanningProgressRoutes);
+app.use('/api/sales-cadence', requireAuth, requireModuleAccess('planning'), salesCadenceRoutes);
 app.use('/api/meta-product-mappings', requireAuth, metaProductMappingRoutes);
 app.use('/api/creative-resources', requireAuth, creativeResourceRoutes);
 app.use('/api/creative-toolkit', requireAuth, creativeToolkitRoutes);
 app.use('/api/customer-avatars', requireAuth, customerAvatarRoutes);
-app.use('/api/reference-library', requireAuth, referenceLibraryRoutes);
+app.use('/api/reference-library', requireAuth, requireModuleAccess('reference-library'), referenceLibraryRoutes);
 app.use('/api/users', requireAuth, userRoutes);
-app.use('/api/editing', requireAuth, editingRoutes);
-app.use('/api/final-approval', requireAuth, finalApprovalRoutes);
+app.use('/api/editing', requireAuth, requireModuleAccess('editing'), editingRoutes);
+app.use('/api/final-approval', requireAuth, requireModuleAccess('final-approval'), finalApprovalRoutes);
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
 

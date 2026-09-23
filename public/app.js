@@ -18,6 +18,8 @@ const CONCEPT_ASSIGNEES = ['Mark', 'Shez', 'Til'];
 
 let state = {
   currentUser: null,
+  restrictedModules: [],
+  usersAccess: null,
   styles: [], categories: [], board: null, dashboard: null, drops: [], provenWinners: [],
   coreProducts: [], planningSettings: null, coreView: 'priority', coreAllProductsOpen: false,
   coreExpandedCategories: new Set(), coreExpandedProducts: new Set(),
@@ -134,9 +136,10 @@ async function login() {
   const password = document.getElementById('pw-input').value;
   const errEl = document.getElementById('pw-error');
   try {
-    const { user } = await api('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
+    const { user, restricted_modules } = await api('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
     errEl.classList.remove('show');
     state.currentUser = user;
+    state.restrictedModules = restricted_modules || [];
     showApp();
   } catch (e) {
     errEl.classList.add('show');
@@ -163,10 +166,32 @@ function renderSidebarUser() {
     : '';
 }
 
+// Round 11: hides every sidebar item (and, for a group whose entire
+// contents are hidden, the group header too) the current user's
+// restricted_modules covers -- see schema.sql's user_module_restrictions
+// (deny-list: absence of a row means visible, so an empty array here, true
+// for every account today, hides nothing). This is the navigation half of
+// module access; requireModuleAccess in server.js is the route/API half --
+// see the Round 11 report for which module routes that actually covers.
+function applySidebarModuleAccess() {
+  const restricted = new Set(state.restrictedModules || []);
+  document.querySelectorAll('.tab-btn[data-tab]').forEach((btn) => {
+    btn.style.display = restricted.has(btn.dataset.tab) ? 'none' : '';
+  });
+  document.querySelectorAll('.sidebar-group').forEach((group) => {
+    const items = group.querySelectorAll('.tab-btn[data-tab]');
+    const allHidden = items.length > 0 && Array.from(items).every((btn) => restricted.has(btn.dataset.tab));
+    group.style.display = allHidden ? 'none' : '';
+  });
+  const usersTabBtn = document.getElementById('settings-users-tab-btn');
+  if (usersTabBtn) usersTabBtn.style.display = state.currentUser && state.currentUser.role === 'admin' ? '' : 'none';
+}
+
 function showApp() {
   document.getElementById('password-screen').style.display = 'none';
   document.getElementById('app').style.display = 'flex';
   renderSidebarUser();
+  applySidebarModuleAccess();
   loadAll();
   // Opens straight into the right sidebar tab for a deep link present at
   // load time (e.g. #drops/5, or a pre-restructure #planning/drop/5) --
@@ -177,9 +202,10 @@ function showApp() {
 
 async function checkSession() {
   try {
-    const { authenticated, user } = await api('/auth/session');
+    const { authenticated, user, restricted_modules } = await api('/auth/session');
     if (authenticated) {
       state.currentUser = user;
+      state.restrictedModules = restricted_modules || [];
       showApp();
     } else {
       showPasswordScreen();
@@ -200,9 +226,50 @@ function toast(message, isError = false) {
 }
 
 // ── Tabs ─────────────────────────────────────────────
+// Round 11 sidebar restructure: which collapsible group (if any) each
+// grouped tab lives under -- Dashboard/Planning/Upcoming Drops/Promotions/
+// Settings stay standalone top-level items, never in a group (see the
+// sidebar brief: "Promotions/Upcoming Drops should remain standalone").
+const SIDEBAR_GROUP_TABS = {
+  'create-review': ['concept-dev', 'tuesday-review'],
+  production: ['shooting', 'editing', 'final-approval'],
+  library: ['board', 'admin', 'reference-library'],
+};
+
+function toggleSidebarGroup(name) {
+  const group = document.querySelector(`.sidebar-group[data-group="${name}"]`);
+  if (!group) return;
+  const expanded = group.classList.toggle('expanded');
+  const toggleBtn = group.querySelector('.sidebar-group-toggle');
+  if (toggleBtn) toggleBtn.setAttribute('aria-expanded', String(expanded));
+}
+
+// Auto-expand (never auto-collapse another group -- a user who deliberately
+// opened Library while browsing Production shouldn't have it yanked shut)
+// whichever group contains the tab just switched to, so its own nav item is
+// never hidden behind a collapsed header on direct navigation.
+function autoExpandSidebarGroupForTab(name) {
+  const groupName = Object.keys(SIDEBAR_GROUP_TABS).find((g) => SIDEBAR_GROUP_TABS[g].includes(name));
+  if (!groupName) return;
+  const group = document.querySelector(`.sidebar-group[data-group="${groupName}"]`);
+  if (!group || group.classList.contains('expanded')) return;
+  group.classList.add('expanded');
+  const toggleBtn = group.querySelector('.sidebar-group-toggle');
+  if (toggleBtn) toggleBtn.setAttribute('aria-expanded', 'true');
+}
+
 function switchTab(name) {
+  // Defense in depth alongside applySidebarModuleAccess hiding the sidebar
+  // button itself -- a restricted user directly manipulating a hash link or
+  // browser history could otherwise still land on a panel their own module
+  // routes will 403 against anyway (see server.js's requireModuleAccess).
+  if ((state.restrictedModules || []).includes(name)) {
+    toast("You don't have access to this module.", true);
+    return;
+  }
   document.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
   document.querySelectorAll('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === `tab-${name}`));
+  autoExpandSidebarGroupForTab(name);
   // Shooting is the direct downstream consumer of an action just taken on
   // Tuesday Review (Approve for Shooting) -- unlike every other tab, it
   // needs a fresh fetch on every visit so a concept approved a moment ago
@@ -246,11 +313,84 @@ document.querySelectorAll('.tab-btn[data-tab]').forEach((btn) => {
 function switchSettingsPanel(name) {
   document.querySelectorAll('.settings-subnav-btn').forEach((b) => b.classList.toggle('active', b.dataset.settingsPanel === name));
   document.querySelectorAll('.settings-panel').forEach((p) => p.classList.toggle('active', p.id === `settings-panel-${name}`));
+  // Round 11: admin-only User Access panel -- loaded lazily on first visit
+  // (same reasoning as every other Settings panel: nothing here is needed
+  // until an admin actually opens this tab), refetched on every visit so a
+  // change made elsewhere (or by another admin) isn't shown stale.
+  if (name === 'users') loadUsersAccessPanel();
 }
 
 document.querySelectorAll('.settings-subnav-btn').forEach((btn) => {
   btn.addEventListener('click', () => switchSettingsPanel(btn.dataset.settingsPanel));
 });
+
+// ── Round 11: User Access (Settings) ──────────────────
+const MODULE_LABELS = {
+  dashboard: 'Dashboard', planning: 'Planning', 'concept-dev': 'Concept Dev',
+  'tuesday-review': 'Tuesday Review', shooting: 'Shooting', editing: 'Editing',
+  'final-approval': 'Final Approval', board: 'Board', admin: 'Styles & Categories',
+  'reference-library': 'Reference Library', drops: 'Upcoming Drops', promotions: 'Promotions',
+  settings: 'Settings',
+};
+const USER_ROLES = ['admin', 'lead', 'member', 'marketing', 'creative', 'viewer'];
+
+async function loadUsersAccessPanel() {
+  const el = document.getElementById('users-access-list');
+  try {
+    state.usersAccess = await api('/users/manage');
+    renderUsersAccessList();
+  } catch (e) {
+    el.innerHTML = `<div class="empty-state">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function renderUsersAccessList() {
+  const el = document.getElementById('users-access-list');
+  const data = state.usersAccess;
+  if (!data) return;
+  el.innerHTML = data.users.map((u) => {
+    const restricted = new Set(u.restricted_modules);
+    const roleOptions = USER_ROLES.map((r) => `<option value="${r}" ${u.role === r ? 'selected' : ''}>${r.charAt(0).toUpperCase() + r.slice(1)}</option>`).join('');
+    const moduleCheckboxes = data.module_keys.map((key) => `
+      <label class="users-access-module">
+        <input type="checkbox" data-user-id="${u.id}" data-module-key="${key}" ${restricted.has(key) ? 'checked' : ''}>
+        ${escapeHtml(MODULE_LABELS[key] || key)}
+      </label>`).join('');
+    return `
+      <div class="users-access-row" id="users-access-row-${u.id}">
+        <div class="users-access-row-top">
+          <div class="users-access-name">${escapeHtml(u.name)}<span class="users-access-email">${escapeHtml(u.email)}</span></div>
+          <select class="users-access-role" data-user-id="${u.id}">${roleOptions}</select>
+          <button type="button" class="btn btn-primary btn-sm" onclick="saveUserAccess(${u.id})">Save</button>
+        </div>
+        <div class="users-access-modules">${moduleCheckboxes}</div>
+      </div>`;
+  }).join('');
+}
+
+async function saveUserAccess(userId) {
+  const roleSelect = document.querySelector(`.users-access-role[data-user-id="${userId}"]`);
+  const checkboxes = document.querySelectorAll(`input[type=checkbox][data-user-id="${userId}"]`);
+  const restrictedModules = Array.from(checkboxes).filter((c) => c.checked).map((c) => c.dataset.moduleKey);
+  try {
+    await api(`/users/${userId}/access`, {
+      method: 'PATCH',
+      body: JSON.stringify({ role: roleSelect.value, restricted_modules: restrictedModules }),
+    });
+    toast('Access updated');
+    // If the admin just edited their OWN access, the sidebar/settings-tab
+    // visibility they're looking at right now needs to reflect it
+    // immediately, not just on next reload.
+    if (state.currentUser && state.currentUser.id === userId) {
+      state.restrictedModules = restrictedModules;
+      state.currentUser.role = roleSelect.value;
+      applySidebarModuleAccess();
+      renderSidebarUser();
+    }
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
 
 // ── Week math (Monday-start ISO weeks, mirrors src/lib/week.js) ──────
 // Client-side port so Planning's week nav doesn't need a round trip just
@@ -7928,7 +8068,17 @@ async function markShootingShot(scheduleId) {
 
 // The reverse of markShootingShot -- for an accidental click, not a second
 // production status. Returns the Concept to Scheduled/draggable.
+// Round 11: Shot/Filmed is the one reversal worth protecting -- completing
+// it may have already made the Concept eligible for Editing (ready_for_editing),
+// so an accidental undo here has a bigger blast radius than Scheduled<->In
+// Progress. A confirm step is all that changes; the actual revert is still
+// the same tested unmark-shot endpoint (back to Scheduled, not a new
+// "in_progress" landing state), which already clears ready_for_editing on
+// the SAME shoot_schedule row -- no new rows, nothing duplicated -- and only
+// rolls the canonical creative_assets.status back if Editing hasn't already
+// moved it past 'filming' (see the backend's syncDropStatusRevert).
 async function unmarkShootingShot(scheduleId) {
+  if (!(await confirmDialog('Move this back to In Progress? This will make it active in Shooting again.', { okLabel: 'Move Back' }))) return;
   try {
     await api(`/shooting/${scheduleId}/unmark-shot`, { method: 'POST' });
     toast('Unmarked as Shot');
@@ -9037,39 +9187,91 @@ const EDITING_STATUS_CLASS = { to_edit: 'editing-status-to-edit', scheduled: 'ed
 
 // The same segmented production-status control Shooting cards already use
 // (shootingStatusControlHtml, reusing its exact .shoot-status-control/
-// .shoot-status-segment CSS -- Issue 6 asks for "the SAME visual
-// interaction pattern", not a lookalike). Round 9: Scheduled is a passive,
-// calendar-derived stage -- it only ever changes by dragging a card onto a
-// day (or back to Unscheduled), never by clicking this control, so unlike
-// the other three stages it's never itself a click target. The two real
-// actions: from To Edit OR Scheduled, clicking "In Progress" is a pure
-// status transition -- sets editing_started_at only, no Final Edit, no
-// modal (see advanceEditingToInProgress); from In Progress, clicking
-// "Edited" is the only normal way to open the Final Edit modal, creating
-// the Concept's one final_edits row on demand if it doesn't already exist
-// (see advanceEditingToEdited). There's no revert segment for "In
-// Progress": once a Final Edit exists its own "Remove Final Edit" action
-// inside the workspace is the closest undo (clearing editing_started_at
-// too if it was the Concept's last one); undoing "In Progress -> Edited" is
-// deliberately NOT a raw revert here -- once submitted, Final Approval owns
-// the concept
-// (see renderEditingConceptModal's submitted-lock), and the only way back
-// is its own Request Changes, which is a decision with feedback attached,
-// not a silent undo button on a card.
+// .shoot-status-segment CSS). Round 9: Scheduled is a passive,
+// calendar-derived stage for FORWARD entry -- it's only ever reached by
+// dragging a card onto a day, never by clicking this control. Round 11
+// makes the two non-final stages ("Scheduled", "To Edit") clickable
+// BACKWARD targets from In Progress, matching Shooting's own reversibility
+// (accidental clicks must be correctable) without changing that forward
+// rule: Scheduled never gains a *forward* click. From In Progress, exactly
+// one of the two earlier segments is ever the live backward target --
+// "Scheduled" when the Concept still has an editing_day (revert clears only
+// editing_started_at, the day/assignment/schedule row are all untouched),
+// "To Edit" when it doesn't (same clear, worded for the Unscheduled case).
+// From Scheduled, "To Edit" is also a live backward target -- clicking it
+// unschedules the Concept via the existing PATCH .../schedule/:id route
+// (least-surprising choice over a "you must drag it off first" error, see
+// revertEditingToToEdit). "Edited" is deliberately never a backward target
+// here at all: once a Final Edit exists, "Remove Final Edit" inside the
+// workspace is the closest undo (which also clears editing_started_at if it
+// was the Concept's last one); once actually submitted, Final Approval owns
+// the Concept and its own Request Changes -- a decision with feedback
+// attached, not a silent card click -- is the only way back (see
+// renderEditingConceptModal's submitted-lock). Both new backward actions
+// are themselves guarded server-side against a submitted Concept, so this
+// never needs to special-case "ready_for_approval" here.
 function editingStatusControlHtml(concept) {
   const stages = ['to_edit', 'scheduled', 'editing', 'ready_for_approval'];
   const status = editingConceptStatus(concept);
+  const hasDay = !!concept.editing_day;
   return `<div class="shoot-status-control" onclick="event.stopPropagation()">${stages.map((stage) => {
     const isCurrent = stage === status;
     let onclick = null;
+    let title = '';
     if (stage === 'editing' && (status === 'to_edit' || status === 'scheduled')) {
       onclick = `advanceEditingToInProgress(${concept.creative_asset_id})`;
+      title = 'Mark as In Progress';
     } else if (stage === 'ready_for_approval' && status === 'editing') {
       onclick = `advanceEditingToEdited(${concept.creative_asset_id})`;
+      title = 'Mark as Edited';
+    } else if (stage === 'scheduled' && status === 'editing' && hasDay) {
+      onclick = `revertEditingToScheduled(${concept.creative_asset_id})`;
+      title = 'Undo -- revert to Scheduled';
+    } else if (stage === 'to_edit' && status === 'editing' && !hasDay) {
+      onclick = `revertEditingToToEdit(${concept.creative_asset_id})`;
+      title = 'Undo -- revert to To Edit';
+    } else if (stage === 'to_edit' && status === 'scheduled') {
+      onclick = `revertEditingToToEdit(${concept.creative_asset_id})`;
+      title = 'Undo -- unschedule back to To Edit';
     }
-    const title = onclick ? `Mark as ${EDITING_STATUS_LABELS[stage]}` : '';
     return `<button type="button" class="shoot-status-segment${isCurrent ? ' shoot-status-segment-active' : ''}" ${onclick ? `onclick="${onclick}"` : 'disabled'} title="${title}">${EDITING_STATUS_LABELS[stage]}</button>`;
   }).join('')}</div>`;
+}
+
+// Round 11 backward action 1: In Progress + still has an editing_day ->
+// Scheduled. Clears ONLY editing_started_at (see POST .../unstart) --
+// editing_day, editing_owner, and any existing final_edits row are all left
+// exactly as they are, so this is a pure status revert, never a data change.
+async function revertEditingToScheduled(conceptAssetId) {
+  try {
+    await api(`/editing/concepts/${conceptAssetId}/unstart`, { method: 'POST' });
+    await refreshCurrentEditingView();
+    toast('Reverted to Scheduled');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// Round 11 backward action 2: covers both "In Progress with no editing_day"
+// (clear editing_started_at, same as revertEditingToScheduled above -- the
+// Concept just lands on To Edit instead of Scheduled because there's no day
+// to revert to) and "Scheduled -> To Edit" (unschedule it). Looks the
+// Concept up fresh to decide which of the two applies, same
+// editingFindConcept pattern every other card action here already uses.
+async function revertEditingToToEdit(conceptAssetId) {
+  const concept = editingFindConcept(conceptAssetId);
+  if (!concept) return;
+  try {
+    if (editingConceptStatus(concept) === 'editing') {
+      await api(`/editing/concepts/${conceptAssetId}/unstart`, { method: 'POST' });
+    } else {
+      await api(`/editing/schedule/${concept.shoot_schedule_id}`, { method: 'PATCH', body: JSON.stringify({ editing_day: null }) });
+    }
+    await refreshCurrentEditingView();
+    toast('Reverted to To Edit');
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 // Card-level "In Progress" segment -- a pure status transition (fixes the

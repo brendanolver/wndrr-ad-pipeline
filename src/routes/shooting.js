@@ -391,10 +391,28 @@ router.post('/:id/mark-shot', async (req, res, next) => {
 // production status. Clears shot_at/ready_for_editing back to their
 // pre-Shot state and returns the Concept to Scheduled (draggable/movable
 // again), rather than leaving it stuck as a permanent Shot record.
+// Round 11: refuses once Editing has already submitted this Concept for
+// Final Approval -- pulling ready_for_editing back to false at that point
+// would silently strand an already-submitted Concept (still sitting in the
+// Final Approval queue, which reads creative_assets directly and doesn't
+// depend on ready_for_editing) while Shooting quietly disagreed about
+// whether it was ever shot. Request Changes is the one supported way back
+// from Final Approval (see finalApproval.js) -- this is deliberately not a
+// second undo-approval path.
 router.post('/:id/unmark-shot', async (req, res, next) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const lockResult = await client.query(
+      `SELECT ca.editing_submitted_at FROM shoot_schedule ss
+       JOIN creative_assets ca ON ca.id = ss.creative_asset_id
+       WHERE ss.id = $1 AND ss.status = 'shot' FOR UPDATE OF ss`,
+      [req.params.id]
+    );
+    if (lockResult.rows.length && lockResult.rows[0].editing_submitted_at) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'This Concept has already been submitted to Final Approval and can no longer be reverted from Shooting -- use Request Changes in Final Approval instead.' });
+    }
     const result = await client.query(
       `UPDATE shoot_schedule SET
          status = 'scheduled',

@@ -49,22 +49,51 @@
         <div class="logo-text">WNDRR<span>Ad Creative Pipeline</span></div>
       </div>
     </div>
-    <nav class="sidebar-nav">
+    <nav class="sidebar-nav" id="sidebar-nav">
       <button class="tab-btn active" data-tab="dashboard"><span class="sidebar-nav-icon">⌂</span>Dashboard</button>
       <button class="tab-btn" data-tab="planning"><span class="sidebar-nav-icon">🗓</span>Planning</button>
+
+      <div class="sidebar-group" data-group="create-review">
+        <button type="button" class="sidebar-group-toggle" onclick="toggleSidebarGroup('create-review')" aria-expanded="false" aria-controls="sidebar-group-items-create-review">
+          <span class="sidebar-group-label">Create &amp; Review</span>
+          <span class="sidebar-group-chevron">▾</span>
+        </button>
+        <div class="sidebar-group-items" id="sidebar-group-items-create-review">
+          <button class="tab-btn" data-tab="concept-dev"><span class="sidebar-nav-icon">💡</span>Concept Dev</button>
+          <button class="tab-btn" data-tab="tuesday-review"><span class="sidebar-nav-icon">🗳</span>Tuesday Review</button>
+        </div>
+      </div>
+
+      <div class="sidebar-group" data-group="production">
+        <button type="button" class="sidebar-group-toggle" onclick="toggleSidebarGroup('production')" aria-expanded="false" aria-controls="sidebar-group-items-production">
+          <span class="sidebar-group-label">Production</span>
+          <span class="sidebar-group-chevron">▾</span>
+        </button>
+        <div class="sidebar-group-items" id="sidebar-group-items-production">
+          <button class="tab-btn" data-tab="shooting"><span class="sidebar-nav-icon">🎬</span>Shooting</button>
+          <button class="tab-btn" data-tab="editing"><span class="sidebar-nav-icon">✂️</span>Editing</button>
+          <button class="tab-btn" data-tab="final-approval"><span class="sidebar-nav-icon">✅</span>Final Approval</button>
+        </div>
+      </div>
+
+      <div class="sidebar-group" data-group="library">
+        <button type="button" class="sidebar-group-toggle" onclick="toggleSidebarGroup('library')" aria-expanded="false" aria-controls="sidebar-group-items-library">
+          <span class="sidebar-group-label">Library</span>
+          <span class="sidebar-group-chevron">▾</span>
+        </button>
+        <div class="sidebar-group-items" id="sidebar-group-items-library">
+          <button class="tab-btn" data-tab="board"><span class="sidebar-nav-icon">▤</span>Board</button>
+          <button class="tab-btn" data-tab="admin"><span class="sidebar-nav-icon">🏷</span>Styles &amp; Categories</button>
+          <button class="tab-btn" data-tab="reference-library"><span class="sidebar-nav-icon">📚</span>Reference Library</button>
+        </div>
+      </div>
+
+      <div class="sidebar-spacer"></div>
       <button class="tab-btn" data-tab="drops"><span class="sidebar-nav-icon">📦</span>Upcoming Drops</button>
       <button class="tab-btn" data-tab="promotions"><span class="sidebar-nav-icon">📢</span>Promotions</button>
-      <button class="tab-btn" data-tab="concept-dev"><span class="sidebar-nav-icon">💡</span>Concept Dev</button>
-      <button class="tab-btn" data-tab="tuesday-review"><span class="sidebar-nav-icon">🗳</span>Tuesday Review</button>
-      <button class="tab-btn" data-tab="shooting"><span class="sidebar-nav-icon">🎬</span>Shooting</button>
-      <button class="tab-btn" data-tab="editing"><span class="sidebar-nav-icon">✂️</span>Editing</button>
-      <button class="tab-btn" data-tab="final-approval"><span class="sidebar-nav-icon">✅</span>Final Approval</button>
-      <button class="tab-btn" data-tab="board"><span class="sidebar-nav-icon">▤</span>Board</button>
-      <button class="tab-btn" data-tab="admin"><span class="sidebar-nav-icon">🏷</span>Styles &amp; Categories</button>
-      <button class="tab-btn" data-tab="reference-library"><span class="sidebar-nav-icon">📚</span>Reference Library</button>
-      <button class="tab-btn" data-tab="settings"><span class="sidebar-nav-icon">⚙</span>Settings</button>
     </nav>
     <div class="sidebar-footer">
+      <button class="tab-btn" data-tab="settings"><span class="sidebar-nav-icon">⚙</span>Settings</button>
       <div class="sidebar-user" id="sidebar-user"></div>
       <button class="sidebar-signout" onclick="logout()">Sign out</button>
     </div>
@@ -974,6 +1003,7 @@
         <button type="button" class="settings-subnav-btn" data-settings-panel="shoot-prep">Shoot Prep</button>
         <button type="button" class="settings-subnav-btn" data-settings-panel="creative-playbook">Creative Playbook</button>
         <button type="button" class="settings-subnav-btn" data-settings-panel="meta-mapping">Meta Mapping</button>
+        <button type="button" class="settings-subnav-btn" id="settings-users-tab-btn" data-settings-panel="users" style="display:none;">Users</button>
       </div>
 
       <div class="settings-panel active" id="settings-panel-planning">
@@ -1064,6 +1094,25 @@
         </div>
         <div id="mpm-check-result"></div>
         <div id="mpm-list" class="mpm-list"></div>
+      </div>
+
+      <!-- Round 11: admin-only (see applySidebarModuleAccess/showApp in
+           app.js, which shows the "Users" sub-tab button above only when
+           state.currentUser.role === 'admin' -- the GET/PATCH endpoints
+           this calls are also independently admin-gated server-side, so
+           this hiding is a convenience, not the actual enforcement). One
+           row per active user: role select + a checkbox per module the
+           brief's initial access matrix calls "Everything EXCEPT ...",
+           unchecked = allowed (module_key NOT in restricted_modules),
+           checked = restricted -- matches the deny-list schema.sql/
+           permissions.js both already use, so nothing here needs a second
+           "allow all" default to reason about. -->
+      <div class="settings-panel" id="settings-panel-users">
+        <div class="planning-section-header">
+          <h2>User Access</h2>
+          <span class="admin-note">Role is a default/category label only. Module access below is what actually controls the sidebar -- unchecked means that user can see it, checked means it's hidden for them.</span>
+        </div>
+        <div id="users-access-list" class="users-access-list"></div>
       </div>
     </section>
   </main>
