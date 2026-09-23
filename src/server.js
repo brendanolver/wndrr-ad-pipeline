@@ -3,7 +3,7 @@ const path = require('path');
 const express = require('express');
 const cookieParser = require('cookie-parser');
 const { runMigrations } = require('./db');
-const { requireAuth } = require('./auth');
+const { requireAuth, requireIntegrationToken } = require('./auth');
 const { warmAmCache } = require('./lib/apparelmagic');
 const { warmPipelineCache } = require('./lib/reportPipeline');
 const { warmMetaAdsCache } = require('./lib/metaAds');
@@ -38,6 +38,7 @@ const shootingRoutes = require('./routes/shooting');
 const referenceLibraryRoutes = require('./routes/referenceLibrary');
 const userRoutes = require('./routes/users');
 const editingRoutes = require('./routes/editing');
+const integrationRoutes = require('./routes/integrations');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -75,6 +76,9 @@ app.use('/api/customer-avatars', requireAuth, customerAvatarRoutes);
 app.use('/api/reference-library', requireAuth, referenceLibraryRoutes);
 app.use('/api/users', requireAuth, userRoutes);
 app.use('/api/editing', requireAuth, editingRoutes);
+// Machine-to-machine, not session-gated -- see auth.js's requireIntegrationToken
+// doc comment. Currently only TUESDAY's Marketing > Drops tab reads this.
+app.use('/api/integrations', requireIntegrationToken, integrationRoutes);
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
 

@@ -82,4 +82,29 @@ async function requireAuth(req, res, next) {
   }
 }
 
-module.exports = { COOKIE_NAME, issueToken, verifyToken, checkCredentials, requireAuth };
+// Gates machine-to-machine routes (Authorization: Bearer <token>) for other
+// internal apps reading this app's data directly -- e.g. TUESDAY's Marketing
+// > Drops tab reading /api/integrations/drops. Deliberately separate from
+// requireAuth: there's no per-user identity or cookie here, just one shared
+// static token, same shape as this app's own outbound PIPELINE_TOKEN calls
+// to demandplanning (see lib/reportPipeline.js). Fails closed if the env var
+// itself isn't set -- unlike AM/Meta Ads/Pipeline, which gracefully disable
+// when unconfigured, an unset integration token must never mean "let anyone
+// in" for a route serving another app's data.
+function requireIntegrationToken(req, res, next) {
+  const expected = process.env.TUESDAY_INTEGRATION_TOKEN;
+  if (!expected) return res.status(503).json({ error: 'Integration token is not configured' });
+
+  const header = req.get('authorization') || '';
+  const [scheme, token] = header.split(' ');
+  if (scheme !== 'Bearer' || !token) return res.status(401).json({ error: 'Not authenticated' });
+
+  const tokenBuf = Buffer.from(token);
+  const expectedBuf = Buffer.from(expected);
+  if (tokenBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(tokenBuf, expectedBuf)) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+  next();
+}
+
+module.exports = { COOKIE_NAME, issueToken, verifyToken, checkCredentials, requireAuth, requireIntegrationToken };
