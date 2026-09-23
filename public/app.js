@@ -343,14 +343,24 @@ const MODULE_LABELS = {
 // this UI didn't itself set -- this dropdown just never offers them.
 const USER_ROLES = ['admin', 'lead', 'member'];
 const ROLE_LABELS = { admin: 'Admin', lead: 'Lead', member: 'Member' };
+// Short column headers for the Module Access matrix (13 modules across is
+// too wide for the full MODULE_LABELS text) -- title attribute on each <th>
+// carries the full name for anyone who hovers.
+const MODULE_SHORT_LABELS = {
+  dashboard: 'Dash', planning: 'Plan', 'concept-dev': 'CD', 'tuesday-review': 'TR',
+  shooting: 'Shoot', editing: 'Edit', 'final-approval': 'FA', board: 'Board',
+  admin: 'Styles', 'reference-library': 'RefLib', drops: 'Drops', promotions: 'Promo',
+  settings: 'Sett.',
+};
 
 async function loadUsersAccessPanel() {
   const el = document.getElementById('users-access-list');
   try {
     state.usersAccess = await api('/users/manage');
     renderUsersAccessList();
+    renderUsersAccessMatrix();
   } catch (e) {
-    el.innerHTML = `<tr><td colspan="5" class="empty-state">${escapeHtml(e.message)}</td></tr>`;
+    el.innerHTML = `<tr><td colspan="6" class="empty-state">${escapeHtml(e.message)}</td></tr>`;
   }
 }
 
@@ -363,15 +373,69 @@ function renderUsersAccessList() {
     const accessChip = restrictedCount === 0
       ? `<span class="users-access-chip users-access-chip-full">Full Access</span>`
       : `<span class="users-access-chip users-access-chip-restricted">Restricted &middot; ${restrictedCount} module${restrictedCount === 1 ? '' : 's'}</span>`;
+    const passwordChip = u.has_password
+      ? `<span class="users-access-chip users-access-chip-password-set">Set</span>`
+      : `<span class="users-access-chip users-access-chip-password-needed">Needs Setup</span>`;
     return `
       <tr>
         <td>${escapeHtml(u.name)}</td>
         <td class="users-access-email">${escapeHtml(u.email)}</td>
         <td>${ROLE_LABELS[u.role] || escapeHtml(u.role)}</td>
         <td>${accessChip}</td>
+        <td>${passwordChip}</td>
         <td><button type="button" class="link-btn" onclick="openUserAccessModal(${u.id})">Edit</button></td>
       </tr>`;
   }).join('');
+}
+
+// The Module Access matrix -- users down the left, modules across the top,
+// same positive framing as the Edit modal's checkbox list (checked = can
+// access) but scannable across everyone at once, per the Round 13 brief.
+// Edits here save immediately per checkbox (toggleMatrixAccess below)
+// rather than needing an explicit Save, since there's no natural place for
+// one row's Save button in a matrix this wide.
+function renderUsersAccessMatrix() {
+  const el = document.getElementById('users-matrix-table');
+  const data = state.usersAccess;
+  if (!data) return;
+  const headerCells = data.module_keys.map((key) => `<th title="${escapeHtml(MODULE_LABELS[key] || key)}">${escapeHtml(MODULE_SHORT_LABELS[key] || key)}</th>`).join('');
+  const rows = data.users.map((u) => {
+    const restricted = new Set(u.restricted_modules);
+    const cells = data.module_keys.map((key) => `
+      <td><input type="checkbox" data-module-key="${key}" ${restricted.has(key) ? '' : 'checked'} onchange="toggleMatrixAccess(${u.id})"></td>`).join('');
+    return `<tr data-matrix-user-id="${u.id}"><td class="users-matrix-name">${escapeHtml(u.name)}</td>${cells}</tr>`;
+  }).join('');
+  el.innerHTML = `<thead><tr><th></th>${headerCells}</tr></thead><tbody>${rows}</tbody>`;
+}
+
+// Reads the row's own checkbox states directly (rather than trusting
+// state.usersAccess, which could be stale if the admin clicks two boxes
+// before the first save round-trips) so a fast run of clicks can never lose
+// one of them -- what's on screen for that row is always exactly what gets
+// sent. Same PATCH the Edit modal's Save button uses, role omitted so it's
+// never touched from here.
+async function toggleMatrixAccess(userId) {
+  const row = document.querySelector(`tr[data-matrix-user-id="${userId}"]`);
+  if (!row) return;
+  const checkboxes = row.querySelectorAll('input[type=checkbox]');
+  const restrictedModules = Array.from(checkboxes).filter((c) => !c.checked).map((c) => c.dataset.moduleKey);
+  try {
+    await api(`/users/${userId}/access`, {
+      method: 'PATCH',
+      body: JSON.stringify({ restricted_modules: restrictedModules }),
+    });
+    const u = state.usersAccess.users.find((x) => x.id === userId);
+    if (u) u.restricted_modules = restrictedModules;
+    renderUsersAccessList(); // refresh the Access chip in the main table; leaves the matrix's own checkboxes untouched
+    if (state.currentUser && state.currentUser.id === userId) {
+      state.restrictedModules = restrictedModules;
+      applySidebarModuleAccess();
+    }
+    toast('Access updated');
+  } catch (e) {
+    toast(e.message, true);
+    await loadUsersAccessPanel(); // resync with the server's actual state after a failed save
+  }
 }
 
 // Opens with the module list framed POSITIVELY -- checked means this
@@ -390,12 +454,47 @@ function openUserAccessModal(userId) {
   document.getElementById('user-access-modal-name').textContent = u.name;
   document.getElementById('user-access-modal-email').textContent = u.email;
   document.getElementById('user-access-role').value = USER_ROLES.includes(u.role) ? u.role : 'member';
+  document.getElementById('user-access-password-status').textContent = u.has_password ? 'Set' : 'Needs Setup';
+  document.getElementById('user-access-password-reveal').style.display = 'none';
+  document.getElementById('user-access-new-password').value = '';
   document.getElementById('user-access-modules').innerHTML = data.module_keys.map((key) => `
     <label class="user-access-module">
       <input type="checkbox" data-module-key="${key}" ${restricted.has(key) ? '' : 'checked'}>
       ${escapeHtml(MODULE_LABELS[key] || key)}
     </label>`).join('');
   openModal('user-access-modal');
+}
+
+// Reveals/hides the new-password input inside the Edit User modal -- kept
+// collapsed by default so the modal doesn't invite an accidental reset;
+// the actual password is never fetched or displayed, only this empty input.
+function toggleUserAccessPasswordReset() {
+  const el = document.getElementById('user-access-password-reveal');
+  const showing = el.style.display !== 'none';
+  el.style.display = showing ? 'none' : 'flex';
+  if (!showing) document.getElementById('user-access-new-password').focus();
+}
+
+// Separate PATCH from saveUserAccessModal below (role/module access) --
+// a password reset is a distinct, higher-stakes action, submitted
+// immediately on its own rather than bundled into the next Save click,
+// so it can't be accidentally sent (or skipped) by editing something else.
+async function submitUserAccessPasswordReset() {
+  const userId = Number(document.getElementById('user-access-id').value);
+  const input = document.getElementById('user-access-new-password');
+  const newPassword = input.value;
+  if (!newPassword || newPassword.length < 4) {
+    toast('Password must be at least 4 characters', true);
+    return;
+  }
+  try {
+    await api(`/users/${userId}/password`, { method: 'PATCH', body: JSON.stringify({ new_password: newPassword }) });
+    input.value = '';
+    document.getElementById('user-access-password-reveal').style.display = 'none';
+    toast('Password updated');
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 async function saveUserAccessModal() {

@@ -702,6 +702,8 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .users-access-chip{display:inline-block;font-size:11px;font-weight:600;padding:3px 9px;border-radius:var(--r-pill);}
 .users-access-chip-full{background:var(--green-light);color:var(--green);}
 .users-access-chip-restricted{background:var(--amber-light);color:var(--amber);}
+.users-access-chip-password-set{background:var(--blue-light);color:var(--blue);}
+.users-access-chip-password-needed{background:var(--amber-light);color:var(--amber);}
 
 /* Edit User modal -- the positive "checked = can access" checkbox grid
    that gets inverted to/from the deny-list restricted_modules on open/save
@@ -712,6 +714,28 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .user-access-modules-header{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-muted);margin-top:14px;}
 .user-access-modules{display:flex;flex-wrap:wrap;gap:8px 16px;padding-top:8px;}
 .user-access-module{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text-secondary);cursor:pointer;}
+
+/* Round 13: Edit User modal's Password block -- never shows or round-trips
+   the actual password (see PATCH /users/:id/password), just a status word
+   and a collapsed reset action (see toggleUserAccessPasswordReset). */
+.user-access-password-block{border-top:1px solid var(--border);border-bottom:1px solid var(--border);padding:10px 0;margin:2px 0;}
+.user-access-password-row{display:flex;align-items:center;justify-content:space-between;font-size:12.5px;color:var(--text-secondary);}
+.user-access-password-reveal{display:flex;gap:8px;margin-top:8px;}
+.user-access-password-reveal input{flex:1;font-family:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r);}
+
+/* Round 13: Module Access matrix below the main Users table -- users down
+   the left, modules across the top, same positive "checked = can access"
+   framing as the Edit modal but scannable across everyone at once. Small
+   compact cells + horizontal scroll wrapper since 13 module columns don't
+   fit a 220px-sidebar-offset content area at once on most screens. */
+.users-matrix-section{margin-top:26px;}
+.users-matrix-scroll{overflow-x:auto;background:var(--surface);border-radius:var(--r-lg);box-shadow:var(--shadow-xs);}
+.users-matrix-table{border-collapse:collapse;white-space:nowrap;}
+.users-matrix-table th,.users-matrix-table td{padding:7px 9px;text-align:center;border-bottom:1px solid var(--border);}
+.users-matrix-table thead th{font-size:10px;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);background:var(--surface2);font-weight:700;}
+.users-matrix-table tbody tr:last-child td{border-bottom:none;}
+.users-matrix-table input[type=checkbox]{width:14px;height:14px;cursor:pointer;}
+.users-matrix-name{text-align:left;font-size:12.5px;font-weight:600;white-space:nowrap;position:sticky;left:0;background:var(--surface);}
 .cc-size-input{width:110px;font-family:inherit;font-size:12.5px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--r);}
 .cc-add-row{display:flex;gap:8px;margin-bottom:14px;}
 .cc-add-row input{flex:1;font-family:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r);}

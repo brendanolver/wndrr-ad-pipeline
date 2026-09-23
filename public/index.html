@@ -1096,21 +1096,26 @@
         <div id="mpm-list" class="mpm-list"></div>
       </div>
 
-      <!-- Round 12: admin-only (see applySidebarModuleAccess/showApp in
-           app.js, which shows the "Users" sub-tab button above only when
-           state.currentUser.role === 'admin' -- the GET/PATCH endpoints
-           this calls are also independently admin-gated server-side, so
-           this hiding is a convenience, not the actual enforcement). A
-           scannable table (Name/Email/Role/Access/Edit) replaces Round 11's
-           wide per-user card with 13 raw checkboxes -- the Access column
-           shows a compact summary ("Full Access" / "Restricted · N
-           modules"), editing happens in #user-access-modal below. That
-           modal presents module access POSITIVELY (checked = can access)
-           even though the server/schema still store a deny-list
-           (user_module_restrictions) -- see renderUserAccessModal/
-           saveUserAccessModal in app.js, which is the one place that
-           inverts between the two: nothing else in the app needs to know
-           the storage is a deny-list. -->
+      <!-- Round 12 (and its Round 13 cleanup pass): admin-only (see
+           applySidebarModuleAccess/showApp in app.js, which shows the
+           "Users" sub-tab button above only when state.currentUser.role
+           === 'admin' -- the GET/PATCH endpoints this calls are also
+           independently admin-gated server-side, so this hiding is a
+           convenience, not the actual enforcement). A scannable table
+           (Name/Email/Role/Access/Password/Edit) replaces Round 11's wide
+           per-user card with 13 raw checkboxes -- the Access column shows a
+           compact summary ("Full Access" / "Restricted · N modules"), the
+           Password column shows a status chip only (never the password
+           itself). Per-user editing (role, password reset) happens in
+           #user-access-modal below; the separate Module Access matrix
+           further down gives a second, at-a-glance-across-everyone view of
+           the exact same access data, edited inline. Both surfaces present
+           module access POSITIVELY (checked = can access) even though the
+           server/schema still store a deny-list (user_module_restrictions)
+           -- see openUserAccessModal/saveUserAccessModal and
+           toggleMatrixAccess in app.js, the only places that invert between
+           the two; nothing else in the app needs to know the storage is a
+           deny-list. -->
       <div class="settings-panel" id="settings-panel-users">
         <div class="planning-section-header">
           <h2>User Access</h2>
@@ -1118,10 +1123,20 @@
         </div>
         <table class="users-access-table">
           <thead>
-            <tr><th>Name</th><th>Email</th><th>Role</th><th>Access</th><th></th></tr>
+            <tr><th>Name</th><th>Email</th><th>Role</th><th>Access</th><th>Password</th><th></th></tr>
           </thead>
           <tbody id="users-access-list"></tbody>
         </table>
+
+        <div class="users-matrix-section">
+          <div class="planning-section-header">
+            <h2>Module Access</h2>
+            <span class="admin-note">Checked = this person can access that module. Unchecked = hidden from their sidebar (and blocked at the API where currently protected). Changes save immediately.</span>
+          </div>
+          <div class="users-matrix-scroll">
+            <table class="users-matrix-table" id="users-matrix-table"></table>
+          </div>
+        </div>
       </div>
     </section>
   </main>
@@ -1129,12 +1144,16 @@
 
 <div id="toast" class="toast"></div>
 
-<!-- Round 12: Settings -> Users "Edit User" modal -- Module Access here is
-     presented POSITIVELY (checked = can access), the opposite of the
-     underlying deny-list storage; renderUserAccessModal/saveUserAccessModal
-     in app.js do the one inversion this needs. Name/Email are read-only
-     context (no rename/re-email flow exists yet), Role and Module Access
-     are the two editable fields. -->
+<!-- Round 12 (Round 13 cleanup adds the Password block): Settings -> Users
+     "Edit User" modal -- Module Access here is presented POSITIVELY
+     (checked = can access), the opposite of the underlying deny-list
+     storage; openUserAccessModal/saveUserAccessModal in app.js do the one
+     inversion this needs. Name/Email are read-only context (no rename/
+     re-email flow exists yet); Role, Password and Module Access are the
+     editable fields. The Password block never shows or round-trips the
+     actual password -- "Reset Password" reveals a plain new-password input
+     that's submitted straight to PATCH /users/:id/password (hashed
+     server-side); nothing here can read an existing password back. -->
 <div id="user-access-modal" class="modal-backdrop">
   <div class="modal">
     <div class="modal-header">
@@ -1154,6 +1173,18 @@
           <option value="member">Member</option>
         </select>
       </label>
+
+      <div class="user-access-password-block">
+        <div class="user-access-password-row">
+          <span>Password: <strong id="user-access-password-status">Set</strong></span>
+          <button type="button" class="link-btn" onclick="toggleUserAccessPasswordReset()">Reset Password</button>
+        </div>
+        <div id="user-access-password-reveal" class="user-access-password-reveal" style="display:none">
+          <input type="password" id="user-access-new-password" placeholder="New password" autocomplete="new-password">
+          <button type="button" class="btn btn-secondary" onclick="submitUserAccessPasswordReset()">Set Password</button>
+        </div>
+      </div>
+
       <div class="user-access-modules-header">Module Access</div>
       <div class="hint">Checked = this person can access it. Unchecked = hidden from their sidebar (and blocked at the API where currently protected).</div>
       <div id="user-access-modules" class="user-access-modules"></div>

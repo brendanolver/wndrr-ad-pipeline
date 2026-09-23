@@ -1,6 +1,7 @@
 const express = require('express');
 const { pool } = require('../db');
 const { ALL_MODULE_KEYS, requireAdmin } = require('../lib/permissions');
+const { hashPassword } = require('../lib/passwordHash');
 
 const router = express.Router();
 
@@ -39,7 +40,13 @@ router.get('/manage', requireAdmin, async (req, res, next) => {
     }
     res.json({
       module_keys: ALL_MODULE_KEYS,
-      users: usersResult.rows.map((u) => ({ ...u, restricted_modules: restrictedByUser.get(u.id) || [] })),
+      // has_password is always true today (users.password_hash is NOT NULL,
+      // every account is seeded with one) -- returned explicitly anyway so
+      // the Settings table's Password column has a real field to read
+      // rather than hardcoding "Set", and so a future invite flow that
+      // creates a passwordless account has somewhere to report "Needs
+      // Setup" without a frontend change.
+      users: usersResult.rows.map((u) => ({ ...u, restricted_modules: restrictedByUser.get(u.id) || [], has_password: true })),
     });
   } catch (err) {
     next(err);
@@ -91,6 +98,30 @@ router.patch('/:id/access', requireAdmin, async (req, res, next) => {
     next(err);
   } finally {
     client.release();
+  }
+});
+
+// Admin-settable password reset -- lets an admin give someone a new
+// password without ever reading their old one back (no route anywhere
+// returns password_hash). Uses the same hashPassword() every login already
+// verifies against (src/lib/passwordHash.js), so this changes who can SET a
+// password, not how login itself checks one -- src/auth.js and the
+// /api/auth/login flow are untouched. Admin-only, same guard as the routes
+// above.
+router.patch('/:id/password', requireAdmin, async (req, res, next) => {
+  try {
+    const { new_password } = req.body || {};
+    if (typeof new_password !== 'string' || new_password.length < 4) {
+      return res.status(400).json({ error: 'Password must be at least 4 characters' });
+    }
+    const result = await pool.query(
+      'UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2 RETURNING id',
+      [hashPassword(new_password), req.params.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'User not found' });
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
   }
 });
 
