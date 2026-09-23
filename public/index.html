@@ -53,8 +53,14 @@
       <button class="tab-btn active" data-tab="dashboard"><span class="sidebar-nav-icon">⌂</span>Dashboard</button>
       <button class="tab-btn" data-tab="planning"><span class="sidebar-nav-icon">🗓</span>Planning</button>
 
-      <div class="sidebar-group" data-group="create-review">
-        <button type="button" class="sidebar-group-toggle" onclick="toggleSidebarGroup('create-review')" aria-expanded="false" aria-controls="sidebar-group-items-create-review">
+      <!-- Production-readiness follow-up (item 1): Create & Review and
+           Production start EXPANDED on a fresh session (the `expanded` class
+           + aria-expanded="true" below), unlike Library which stays
+           collapsed until its own tab is visited. toggleSidebarGroup still
+           works unchanged either way -- this only changes the starting
+           class, not the toggle mechanism. -->
+      <div class="sidebar-group expanded" data-group="create-review">
+        <button type="button" class="sidebar-group-toggle" onclick="toggleSidebarGroup('create-review')" aria-expanded="true" aria-controls="sidebar-group-items-create-review">
           <span class="sidebar-group-label">Create &amp; Review</span>
           <span class="sidebar-group-chevron">▾</span>
         </button>
@@ -64,8 +70,8 @@
         </div>
       </div>
 
-      <div class="sidebar-group" data-group="production">
-        <button type="button" class="sidebar-group-toggle" onclick="toggleSidebarGroup('production')" aria-expanded="false" aria-controls="sidebar-group-items-production">
+      <div class="sidebar-group expanded" data-group="production">
+        <button type="button" class="sidebar-group-toggle" onclick="toggleSidebarGroup('production')" aria-expanded="true" aria-controls="sidebar-group-items-production">
           <span class="sidebar-group-label">Production</span>
           <span class="sidebar-group-chevron">▾</span>
         </button>
