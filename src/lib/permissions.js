@@ -62,4 +62,30 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-module.exports = { hasPermission, ALL_MODULE_KEYS, getRestrictedModules, canAccessModule, requireModuleAccess, requireAdmin };
+// For a route genuinely shared by several modules (e.g. creative-assets,
+// read/written from Board, Concept Dev, Shooting, Editing, Final Approval,
+// Drops and Promotions alike) -- a single requireModuleAccess(key) would
+// block a user from a route they still legitimately need for a DIFFERENT
+// module they do have access to. This instead only blocks a user who has
+// access to NONE of the given modules, so anyone with a genuine reason to
+// be here (any one of them) still gets through, while someone restricted
+// from every consuming module can no longer reach the shared data via a
+// direct API call just because the route itself isn't single-module-owned.
+function requireAnyModuleAccess(...moduleKeys) {
+  return async (req, res, next) => {
+    try {
+      if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
+      for (const key of moduleKeys) {
+        if (await canAccessModule(req.user.id, key)) return next();
+      }
+      return res.status(403).json({ error: 'You do not have access to this module.' });
+    } catch (err) {
+      next(err);
+    }
+  };
+}
+
+module.exports = {
+  hasPermission, ALL_MODULE_KEYS, getRestrictedModules, canAccessModule,
+  requireModuleAccess, requireAnyModuleAccess, requireAdmin,
+};

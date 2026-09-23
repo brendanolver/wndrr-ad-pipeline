@@ -124,10 +124,31 @@ async function api(path, opts = {}) {
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `Request failed (${res.status})`);
+    const err = new Error(body.error || `Request failed (${res.status})`);
+    err.status = res.status; // lets a caller distinguish "you're not allowed" (403) from a real failure
+    throw err;
   }
   if (res.status === 204) return null;
   return res.json();
+}
+
+// For a module-gated route inside loadAll()'s big initial Promise.all: a
+// 403 there is an ordinary, expected outcome for a restricted user (e.g.
+// Mark loading the app) -- not a real error -- so it resolves to `fallback`
+// instead of rejecting. Any other failure (500, network) still rejects and
+// surfaces the same way api() always has, since that IS still worth
+// stopping on. Production-readiness audit fix: before this, a single
+// blocked module inside that one big Promise.all aborted the ENTIRE
+// initial load for a restricted user -- every tab, not just the one they
+// don't have access to (confirmed live: Mark's first load failed outright
+// once Round 11 started gating /api/board, /api/planning-settings, etc.).
+async function apiAllowedOr(path, fallback) {
+  try {
+    return await api(path);
+  } catch (e) {
+    if (e.status === 403) return fallback;
+    throw e;
+  }
 }
 
 // ── Auth ─────────────────────────────────────────────
@@ -578,22 +599,29 @@ function conceptDevWeekNumber() {
 async function loadAll() {
   try {
     const weekStart = planningWeekStart();
+    // The routes below marked apiAllowedOr are module-gated (Planning/
+    // Board/Styles & Categories) -- a restricted user's 403 on any ONE of
+    // them is an expected, normal outcome of viewing the app at all (this
+    // Promise.all runs on every login, before the user has chosen a tab),
+    // not a real failure, so it resolves to a safe empty fallback instead
+    // of rejecting the whole batch. Without this, one blocked module used
+    // to abort loadAll() entirely -- see apiAllowedOr's comment.
     const [board, styles, categories, dashboard, dropsRes, provenWinners, coreRes, planningSettings, shootPlan, contentCreators, highStockRes, promotions, weeklyConfirmation, weeklyPlanningProgress, salesCadence, metaProductMappings, metaProductFamilies, conceptDev, creativeResources, customerAvatars, tuesdayReview, shootingWeek, editingWeek, conceptDevLocations, conceptTypes] = await Promise.all([
-      api('/board'),
-      api('/styles'),
-      api('/categories'),
+      apiAllowedOr('/board', null),
+      apiAllowedOr('/styles', []),
+      apiAllowedOr('/categories', []),
       api(`/dashboard?weekOffset=${dashboardWeekOffset}`),
       api('/drops'),
-      api('/proven-winners'),
-      api('/core-products'),
-      api('/planning-settings'),
-      api(`/shoot-plan?week_start=${weekStart}`),
+      apiAllowedOr('/proven-winners', []),
+      apiAllowedOr('/core-products', { products: [], weekly_target: 0, weekly_planned: 0, weekly_remaining: 0 }),
+      apiAllowedOr('/planning-settings', null),
+      apiAllowedOr(`/shoot-plan?week_start=${weekStart}`, []),
       api('/content-creators'),
-      api('/high-stock-products'),
+      apiAllowedOr('/high-stock-products', { products: [] }),
       api('/promotions'),
-      api(`/weekly-shoot-plan-confirmation?week_start=${weekStart}`),
-      api(`/weekly-planning-progress?week_start=${weekStart}`),
-      api('/sales-cadence'),
+      apiAllowedOr(`/weekly-shoot-plan-confirmation?week_start=${weekStart}`, null),
+      apiAllowedOr(`/weekly-planning-progress?week_start=${weekStart}`, { core_reviewed: false, high_stock_reviewed: false, drops_reviewed: false, promotions_reviewed: false }),
+      apiAllowedOr('/sales-cadence', null),
       api('/meta-product-mappings'),
       api('/meta-product-mappings/product-families'),
       api(`/concept-development?week_start=${conceptDevWeekStart()}`),
@@ -634,36 +662,28 @@ async function loadAll() {
     state.editing.data = editingWeek;
     state.conceptDevLocations = conceptDevLocations;
     state.conceptTypes = conceptTypes;
-    renderBoard();
-    renderMissingAd();
-    renderStylesTable();
-    renderCategoriesTable();
-    populateStyleSelect();
-    populateCategorySelect();
-    renderDashboard();
-    renderPlanning();
-    renderProvenWinners();
-    renderCreativeResourcesSettings();
-    renderCustomerAvatarsSettings();
-    renderCoreProducts();
-    renderPlanningSettingsForm();
-    renderContentCreators();
-    renderMetaProductMappings();
-    renderHighStockProducts();
-    renderPromotionsRow();
-    renderDropsRoute();
-    renderPromotionsRoute();
-    renderPlanningShootSummary();
-    renderConceptDevWeekHeader();
-    renderConceptDevList();
-    renderTuesdayReviewWeekHeader();
-    renderTuesdayReviewList();
-    populateShootingOwnerFilters();
-    renderShootingWeekHeader();
-    renderShootingWeekView();
-    populateEditingEditorFilter();
-    renderEditingWeekHeader();
-    renderEditingList();
+    // Each render step runs independently -- a module a restricted user
+    // can't see (e.g. Board/Core/Planning Settings for Mark, now resolved
+    // to an empty/null fallback above) can make ITS OWN render step a
+    // no-op or throw on incompatible data, but that must never stop every
+    // render AFTER it in this list from running too. Before this, all ~24
+    // of these shared one try/catch, so one incompatible shape anywhere in
+    // the list silently blanked every tab that comes after it, including
+    // ones the user IS allowed to use (Concept Dev, Shooting, Editing...).
+    [
+      renderBoard, renderMissingAd, renderStylesTable, renderCategoriesTable, populateStyleSelect, populateCategorySelect,
+      renderDashboard, renderPlanning, renderProvenWinners, renderCreativeResourcesSettings, renderCustomerAvatarsSettings,
+      renderCoreProducts, renderPlanningSettingsForm, renderContentCreators, renderMetaProductMappings, renderHighStockProducts,
+      renderPromotionsRow, renderDropsRoute, renderPromotionsRoute, renderPlanningShootSummary, renderConceptDevWeekHeader,
+      renderConceptDevList, renderTuesdayReviewWeekHeader, renderTuesdayReviewList, populateShootingOwnerFilters,
+      renderShootingWeekHeader, renderShootingWeekView, populateEditingEditorFilter, renderEditingWeekHeader, renderEditingList,
+    ].forEach((renderStep) => {
+      try {
+        renderStep();
+      } catch (e) {
+        console.error(`loadAll: ${renderStep.name} failed`, e);
+      }
+    });
   } catch (e) {
     toast(e.message, true);
   }
@@ -710,6 +730,10 @@ function daysLabel(days) {
 }
 
 function renderBoard() {
+  // state.board is null when this account doesn't have Board access (see
+  // apiAllowedOr in loadAll()) -- the Board tab itself is already hidden
+  // for them, so there's nothing to render.
+  if (!state.board) return;
   const boardEl = document.getElementById('board');
   boardEl.innerHTML = '';
   state.board.columns.forEach((col) => {
@@ -754,6 +778,7 @@ function renderCard(card) {
 }
 
 function renderMissingAd() {
+  if (!state.board) return; // no Board access -- see renderBoard's same guard
   const panel = document.getElementById('missing-ad-panel');
   const list = document.getElementById('missing-ad-list');
   const count = document.getElementById('missing-ad-count');
