@@ -86,16 +86,20 @@ router.get('/', async (req, res, next) => {
       items = itemsResult.rows;
     }
 
-    // Promotion New Concepts: unlike Core/High Stock/Drop, these aren't
-    // produced by Monday Planning's weekly ceremony at all -- they're added
-    // ad hoc, straight from a Campaign Stage, whenever the team plans one,
-    // and their own Shoot Week (shoot_plan_items.week_start) may be weeks
-    // away from when they're actually developed. Concept Development answers
-    // "what needs developing", not "what are we filming this week", so every
-    // Promotion concept still short of a Tuesday Review decision is pulled
-    // in unconditionally -- regardless of THIS week's confirmation state and
-    // regardless of its own Shoot Week -- and naturally drops off the instant
-    // it's approved or killed, same as any other concept.
+    // Promotion New Concepts, and (production follow-up pass, item 2)
+    // manually/ad-hoc-started concepts (source = 'manual', created via
+    // Concept Development's own "+ New Concept" button): unlike Core/High
+    // Stock/Drop, neither is produced by Monday Planning's weekly ceremony
+    // at all -- they're added whenever the team plans/starts one, and a
+    // Promotion concept's own Shoot Week (shoot_plan_items.week_start) may
+    // be weeks away from when it's actually developed, while a manual
+    // concept may have no meaningful week at all. Concept Development
+    // answers "what needs developing", not "what are we filming this week",
+    // so every concept of either source still short of a Tuesday Review
+    // decision is pulled in unconditionally -- regardless of THIS week's
+    // confirmation state and regardless of its own Shoot Week -- and
+    // naturally drops off the instant it's approved or killed, same as any
+    // other concept.
     //
     // Only merged in when resolvedWeekStart is the REAL current week (not
     // whatever week the week-nav happens to be browsing) -- found via a live
@@ -117,7 +121,7 @@ router.get('/', async (req, res, next) => {
          JOIN creative_assets ca ON ca.shoot_plan_item_id = spi.id
          LEFT JOIN promotion_stages ps ON ps.id = spi.promotion_stage_id
          LEFT JOIN promotions p ON p.id = ps.promotion_id
-         WHERE spi.source = 'promotion'
+         WHERE spi.source IN ('promotion', 'manual')
            AND ca.concept_dev_status IN ('not_started', 'in_development', 'ready_for_review', 'changes_required')
          ORDER BY spi.created_at ASC`
       );

@@ -14,7 +14,7 @@ const { computeCoreProducts } = require('../routes/coreProducts');
 const { computeHighStockProducts } = require('../routes/highStockProducts');
 const { generateOrTopUpPlan } = require('../routes/dropProductPlans');
 
-const SOURCE_LABELS = { core: 'Core', high_stock: 'High Stock', drop: 'Upcoming Drop', promotion: 'Promotion' };
+const SOURCE_LABELS = { core: 'Core', high_stock: 'High Stock', drop: 'Upcoming Drop', promotion: 'Promotion', manual: 'Ad-hoc' };
 const PATHWAY_LABELS = { core: 'Develop New Concepts', high_stock: 'Creative Refresh', drop: 'Proven Concepts Assigned', promotion: 'Cover Requirement' };
 
 function titleCase(s) {
