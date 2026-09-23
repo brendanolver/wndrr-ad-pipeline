@@ -163,6 +163,75 @@ async function generateOrTopUpPlan(dropId, productCode) {
   }
 }
 
+// Connects an already-existing Drop Required Concept asset (a Proven or
+// manually-added slot's fulfilled_by_asset_id) to the SAME canonical
+// production architecture Core/High Stock/Promotion concepts already use --
+// a shoot_plan_items row (so Shooting has a Filming person/product context
+// to key off) plus a shoot_schedule row (Shooting's only gateway) -- without
+// ever routing through Concept Development or Tuesday Review. See the
+// Drop -> Shooting -> Editing brief: proven concepts are already
+// tested/understood, so there's no "who's developing this" phase to
+// preserve for this source; assigning a filming person on the Required
+// Concept row IS the production go-ahead.
+//
+// Deliberately never touches concept_dev_status -- that field drives
+// Concept Dev/Tuesday Review's own review-approved counting (see
+// coreProducts.js's weekly_planned, which counts new_experimental assets
+// with concept_dev_status='approved') and setting it here would silently
+// inflate that unrelated counter for manually-added ('new_experimental')
+// Required Concept slots. shoot_schedule's existence is a free-standing
+// gateway into Shooting on its own -- nothing requires concept_dev_status
+// to grant it -- so this only ever touches shoot_plan_items/shoot_schedule.
+//
+// Idempotent and safe to call on every "Assigned To" save: if this asset
+// already has a shoot_plan_item, only that item's creator is updated (never
+// a duplicate item); if it doesn't, exactly one is created and linked; the
+// shoot_schedule insert is an ON CONFLICT (creative_asset_id) DO NOTHING,
+// the same pattern conceptDevelopment.js's Tuesday Review approval and
+// shooting.js's backfillApprovedConcepts already use.
+async function ensureDropProductionLinkage(client, { assetId, styleId, styleCode, shootPlanItemId, filmingPerson }) {
+  let itemId = shootPlanItemId;
+
+  if (itemId) {
+    // Only ever update a shoot_plan_item THIS function itself would have
+    // created (source = 'drop') -- an asset that already has a Core/High
+    // Stock/Promotion shoot_plan_item (from the normal weekly Shoot Plan
+    // handoff) keeps that item's real Filming field untouched; concept
+    // assignment here is never allowed to silently overwrite it.
+    const itemResult = await client.query('SELECT source FROM shoot_plan_items WHERE id = $1', [itemId]);
+    if (itemResult.rows[0] && itemResult.rows[0].source === 'drop') {
+      await client.query('UPDATE shoot_plan_items SET creator = $1 WHERE id = $2', [filmingPerson, itemId]);
+    } else {
+      itemId = null;
+    }
+  }
+
+  if (!itemId) {
+    const productCode = deriveProductCode(styleCode);
+    const am = await fetchAmData();
+    const details = am.amDetails ? am.amDetails.get(styleCode) : null;
+    const itemResult = await client.query(
+      `INSERT INTO shoot_plan_items (product_code, product_name, stock_status, creator, source, image_url, week_start, asset_id)
+       VALUES ($1, $2, 'needs_to_be_brought_in', $3, 'drop', $4, date_trunc('week', now())::date, $5) RETURNING id`,
+      [productCode, details ? details.productName : null, filmingPerson, details ? details.imageUrl : null, assetId]
+    );
+    itemId = itemResult.rows[0].id;
+    await client.query('UPDATE creative_assets SET shoot_plan_item_id = $1 WHERE id = $2', [itemId, assetId]);
+    await client.query(
+      `INSERT INTO shoot_plan_item_styles (shoot_plan_item_id, style_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+      [itemId, styleId]
+    );
+  }
+
+  await client.query(
+    `INSERT INTO shoot_schedule (creative_asset_id, status, original_week_start, scheduled_week_start)
+     SELECT $1, 'unscheduled', COALESCE(week_start, date_trunc('week', now())::date), COALESCE(week_start, date_trunc('week', now())::date)
+     FROM shoot_plan_items WHERE id = $2
+     ON CONFLICT (creative_asset_id) DO NOTHING`,
+    [assetId, itemId]
+  );
+}
+
 router.post('/', async (req, res, next) => {
   try {
     const { drop_id, product_code } = req.body || {};
@@ -335,4 +404,4 @@ router.delete('/:id/slots/:slotId/fulfill', async (req, res, next) => {
   }
 });
 
-module.exports = { router, generateOrTopUpPlan };
+module.exports = { router, generateOrTopUpPlan, ensureDropProductionLinkage };

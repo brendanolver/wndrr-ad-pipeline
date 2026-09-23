@@ -100,11 +100,21 @@ router.get('/', async (req, res, next) => {
       // this drop product -- shown on the card/workspace so the distinction
       // from genuinely new concepts (below) is explicit rather than implied.
       provenCoverageByItem.set(item.id, result.slots.filter((s) => s.source === 'proven').length);
+      // The NOT EXISTS guard below additionally excludes any 'new' slot
+      // asset that already has a shoot_schedule row -- once a Drop concept
+      // (proven OR manually-added) has been given Shooting production
+      // linkage (see creativeAssets.js's PATCH /:id/assignee and
+      // ensureDropProductionLinkage), it's production work now, not a
+      // Concept Dev/Tuesday Review candidate, regardless of which week's
+      // shoot plan happens to be confirmed. shoot_schedule's existence is
+      // the same single gateway Shooting itself keys off, reused here
+      // rather than adding a second "is this routed to production" flag.
       const slotAssetsResult = await pool.query(
         `SELECT ca.*
          FROM drop_product_plan_slots dpps
          JOIN creative_assets ca ON ca.id = dpps.fulfilled_by_asset_id
          WHERE dpps.plan_id = $1 AND dpps.source = 'new'
+           AND NOT EXISTS (SELECT 1 FROM shoot_schedule ss WHERE ss.creative_asset_id = ca.id)
          ORDER BY dpps.slot_rank ASC`,
         [result.plan.id]
       );
@@ -207,11 +217,13 @@ router.get('/item/:shootPlanItemId', async (req, res, next) => {
         if (!result.notFound && result.plan) {
           dropPlanId = result.plan.id;
           provenCoverageCount = result.slots.filter((s) => s.source === 'proven').length;
+          // Same shoot_schedule exclusion as GET / above -- see its comment.
           const slotAssetsResult = await pool.query(
             `SELECT ca.*
              FROM drop_product_plan_slots dpps
              JOIN creative_assets ca ON ca.id = dpps.fulfilled_by_asset_id
              WHERE dpps.plan_id = $1 AND dpps.source = 'new'
+               AND NOT EXISTS (SELECT 1 FROM shoot_schedule ss WHERE ss.creative_asset_id = ca.id)
              ORDER BY dpps.slot_rank ASC`,
             [result.plan.id]
           );

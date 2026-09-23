@@ -4,6 +4,7 @@ const { STATUSES, CONCEPT_CLASSIFICATIONS, FORMATS, CONCEPT_ASSIGNEES } = requir
 const { assertCanEnterFilming, RuleViolationError } = require('../lib/rules');
 const { deriveProductCode } = require('../lib/apparelmagic');
 const { insertCreativeAsset } = require('../lib/assets');
+const { ensureDropProductionLinkage } = require('./dropProductPlans');
 
 const router = express.Router();
 
@@ -272,29 +273,72 @@ router.patch('/:id/status', async (req, res, next) => {
 // this" value for concept_assignee (the Unassigned option), not "leave
 // alone", so presence in the body (not nullness) is what decides whether a
 // field gets touched.
+// Assigning "Assigned To" on a Drop-sourced asset doubles as the Drop ->
+// Shooting production trigger (see ensureDropProductionLinkage's own
+// comment) -- only fires when a real person was just set (never on clearing
+// to Unassigned) and only for an asset whose style actually belongs to a
+// Drop (s.drop_id IS NOT NULL). Core/High Stock/Promotion assets, whose
+// "Assigned To" keeps its original concept-development-responsibility
+// meaning, are completely unaffected -- concept_assignee's own value and
+// every other consumer of it (Promotion Campaign Stage rows, Required
+// Concepts display) are untouched.
 router.patch('/:id/assignee', async (req, res, next) => {
+  const client = await pool.connect();
   try {
     const body = req.body || {};
     const hasAssignee = Object.prototype.hasOwnProperty.call(body, 'concept_assignee');
     const hasEditingOwner = Object.prototype.hasOwnProperty.call(body, 'editing_owner');
     const { concept_assignee, editing_owner } = body;
     if (hasAssignee && concept_assignee !== null && !CONCEPT_ASSIGNEES.includes(concept_assignee)) {
+      client.release();
       return res.status(400).json({ error: `concept_assignee must be one of: ${CONCEPT_ASSIGNEES.join(', ')}, or null` });
     }
 
-    const current = await pool.query('SELECT concept_assignee, editing_owner FROM creative_assets WHERE id = $1', [req.params.id]);
-    if (!current.rows.length) return res.status(404).json({ error: 'Creative asset not found' });
+    await client.query('BEGIN');
+    const current = await client.query(
+      `SELECT ca.concept_assignee, ca.editing_owner, ca.style_id, ca.shoot_plan_item_id, s.drop_id, s.style_code
+       FROM creative_assets ca LEFT JOIN styles s ON s.id = ca.style_id
+       WHERE ca.id = $1 FOR UPDATE OF ca`,
+      [req.params.id]
+    );
+    if (!current.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Creative asset not found' });
+    }
+    const row = current.rows[0];
 
-    const nextAssignee = hasAssignee ? concept_assignee : current.rows[0].concept_assignee;
-    const nextEditingOwner = hasEditingOwner ? (editing_owner || null) : current.rows[0].editing_owner;
+    const nextAssignee = hasAssignee ? concept_assignee : row.concept_assignee;
+    const nextEditingOwner = hasEditingOwner ? (editing_owner || null) : row.editing_owner;
 
-    const result = await pool.query(
+    const result = await client.query(
       `UPDATE creative_assets SET concept_assignee = $1, editing_owner = $2, updated_at = now() WHERE id = $3 RETURNING *`,
       [nextAssignee, nextEditingOwner, req.params.id]
     );
-    res.json(result.rows[0]);
+
+    let responseRow = result.rows[0];
+    if (hasAssignee && nextAssignee && row.drop_id) {
+      await ensureDropProductionLinkage(client, {
+        assetId: Number(req.params.id),
+        styleId: row.style_id,
+        styleCode: row.style_code,
+        shootPlanItemId: row.shoot_plan_item_id,
+        filmingPerson: nextAssignee,
+      });
+      // ensureDropProductionLinkage may have just set shoot_plan_item_id --
+      // re-fetch so the response (and any frontend state built from it)
+      // reflects the production linkage that was just created, not the
+      // pre-linkage snapshot from the UPDATE above.
+      const refetched = await client.query('SELECT * FROM creative_assets WHERE id = $1', [req.params.id]);
+      responseRow = refetched.rows[0];
+    }
+
+    await client.query('COMMIT');
+    res.json(responseRow);
   } catch (err) {
+    await client.query('ROLLBACK');
     next(err);
+  } finally {
+    client.release();
   }
 });
 
