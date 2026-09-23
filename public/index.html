@@ -5,6 +5,22 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>WNDRR — Ad Creative Pipeline</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>">
+<!-- Preconnect so the Inter webfont request starts immediately alongside
+     the page itself, rather than only after styles.css's @import is parsed.
+     This is the fix for the "first click on a Filming/Assigned To dropdown
+     opens then immediately closes" report (see Issue 9): with
+     font-display:swap and no preconnect, Inter can still be swapping in
+     (fallback sans-serif -> Inter has different glyph widths, reshuffling
+     row/column layout a frame after first paint) right as a user's first
+     click on a freshly-loaded page lands -- Safari in particular treats that
+     kind of post-click layout shift as a reason to close a native select
+     popup it just opened. Narrowing the race window is the standard fix;
+     it doesn't touch app JS because no re-render or focus-stealing bug was
+     found there (confirmed via Playwright: the select node, its focus and
+     the normal mousedown/focus/click event order are all unaffected by a
+     first click). -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
 </head>
@@ -33,21 +49,51 @@
         <div class="logo-text">WNDRR<span>Ad Creative Pipeline</span></div>
       </div>
     </div>
-    <nav class="sidebar-nav">
+    <nav class="sidebar-nav" id="sidebar-nav">
       <button class="tab-btn active" data-tab="dashboard"><span class="sidebar-nav-icon">⌂</span>Dashboard</button>
       <button class="tab-btn" data-tab="planning"><span class="sidebar-nav-icon">🗓</span>Planning</button>
+
+      <div class="sidebar-group" data-group="create-review">
+        <button type="button" class="sidebar-group-toggle" onclick="toggleSidebarGroup('create-review')" aria-expanded="false" aria-controls="sidebar-group-items-create-review">
+          <span class="sidebar-group-label">Create &amp; Review</span>
+          <span class="sidebar-group-chevron">▾</span>
+        </button>
+        <div class="sidebar-group-items" id="sidebar-group-items-create-review">
+          <button class="tab-btn" data-tab="concept-dev"><span class="sidebar-nav-icon">💡</span>Concept Dev</button>
+          <button class="tab-btn" data-tab="tuesday-review"><span class="sidebar-nav-icon">🗳</span>Tuesday Review</button>
+        </div>
+      </div>
+
+      <div class="sidebar-group" data-group="production">
+        <button type="button" class="sidebar-group-toggle" onclick="toggleSidebarGroup('production')" aria-expanded="false" aria-controls="sidebar-group-items-production">
+          <span class="sidebar-group-label">Production</span>
+          <span class="sidebar-group-chevron">▾</span>
+        </button>
+        <div class="sidebar-group-items" id="sidebar-group-items-production">
+          <button class="tab-btn" data-tab="shooting"><span class="sidebar-nav-icon">🎬</span>Shooting</button>
+          <button class="tab-btn" data-tab="editing"><span class="sidebar-nav-icon">✂️</span>Editing</button>
+          <button class="tab-btn" data-tab="final-approval"><span class="sidebar-nav-icon">✅</span>Final Approval</button>
+        </div>
+      </div>
+
+      <div class="sidebar-group" data-group="library">
+        <button type="button" class="sidebar-group-toggle" onclick="toggleSidebarGroup('library')" aria-expanded="false" aria-controls="sidebar-group-items-library">
+          <span class="sidebar-group-label">Library</span>
+          <span class="sidebar-group-chevron">▾</span>
+        </button>
+        <div class="sidebar-group-items" id="sidebar-group-items-library">
+          <button class="tab-btn" data-tab="board"><span class="sidebar-nav-icon">▤</span>Board</button>
+          <button class="tab-btn" data-tab="admin"><span class="sidebar-nav-icon">🏷</span>Styles &amp; Categories</button>
+          <button class="tab-btn" data-tab="reference-library"><span class="sidebar-nav-icon">📚</span>Reference Library</button>
+        </div>
+      </div>
+
+      <div class="sidebar-spacer"></div>
       <button class="tab-btn" data-tab="drops"><span class="sidebar-nav-icon">📦</span>Upcoming Drops</button>
       <button class="tab-btn" data-tab="promotions"><span class="sidebar-nav-icon">📢</span>Promotions</button>
-      <button class="tab-btn" data-tab="concept-dev"><span class="sidebar-nav-icon">💡</span>Concept Dev</button>
-      <button class="tab-btn" data-tab="tuesday-review"><span class="sidebar-nav-icon">🗳</span>Tuesday Review</button>
-      <button class="tab-btn" data-tab="shooting"><span class="sidebar-nav-icon">🎬</span>Shooting</button>
-      <button class="tab-btn" data-tab="editing"><span class="sidebar-nav-icon">✂️</span>Editing</button>
-      <button class="tab-btn" data-tab="board"><span class="sidebar-nav-icon">▤</span>Board</button>
-      <button class="tab-btn" data-tab="admin"><span class="sidebar-nav-icon">🏷</span>Styles &amp; Categories</button>
-      <button class="tab-btn" data-tab="reference-library"><span class="sidebar-nav-icon">📚</span>Reference Library</button>
-      <button class="tab-btn" data-tab="settings"><span class="sidebar-nav-icon">⚙</span>Settings</button>
     </nav>
     <div class="sidebar-footer">
+      <button class="tab-btn" data-tab="settings"><span class="sidebar-nav-icon">⚙</span>Settings</button>
       <div class="sidebar-user" id="sidebar-user"></div>
       <button class="sidebar-signout" onclick="logout()">Sign out</button>
     </div>
@@ -376,12 +422,35 @@
           <h2>Promotions</h2>
           <button type="button" class="btn btn-ghost btn-sm" id="new-promotion-btn">+ New Promotion</button>
         </div>
-        <div id="promotions-list" class="drops-row"></div>
 
-        <div class="planning-step-footer">
-          <span id="promotions-step-footer-count">0 upcoming promotions</span>
-          <div class="planning-step-footer-actions">
-            <button type="button" class="planning-review-btn" id="promotions-review-btn" onclick="toggleWeeklyProgress('promotions_reviewed')">&#10003; Mark as Reviewed</button>
+        <!-- The one promotion currently requiring/receiving attention, as a
+             dominant hero -- everything else on this page is deliberately
+             quieter (see promotionsComingUpCardHtml below). Built from the
+             SAME p.stages/p.summary data every existing card already
+             computes (promotions.js's summarizePromotion/summarizeStage),
+             not a new endpoint. -->
+        <div id="promotions-current-focus"></div>
+
+        <div id="promotions-coming-up-section">
+          <div class="promo-section-heading">Coming Up</div>
+          <div class="promo-section-subheading">Future campaigns to prepare for</div>
+          <div id="promotions-coming-up-list" class="promo-coming-up-grid"></div>
+        </div>
+
+        <div id="promotions-empty-state" class="attention-empty" style="display:none;">No upcoming promotions yet — add one to start planning creative coverage.</div>
+
+        <!-- Past Promotions archive (round 7, item 3): collapsed by default,
+             quiet treatment -- historical reference only, replaces the old
+             "X upcoming promotions / Mark as Reviewed" strip (see
+             renderPromotionsRow/togglePastPromotions in app.js). Every past
+             record stays fully clickable through to its own detail page. -->
+        <div id="promotions-past-section" style="display:none;">
+          <button type="button" class="promo-past-toggle" id="promotions-past-toggle" onclick="togglePastPromotions()">
+            <span class="promo-past-toggle-arrow">&#9656;</span> Past Promotions
+            <span id="promotions-past-count" class="promo-past-count"></span>
+          </button>
+          <div id="promotions-past-body" style="display:none;">
+            <div id="promotions-past-list" class="promo-past-grid"></div>
           </div>
         </div>
       </div>
@@ -415,7 +484,7 @@
           <span id="promotion-stage-view-urgency" class="drop-card-status"></span>
         </div>
         <div id="promotion-stage-view-summary" class="drop-view-summary"></div>
-        <button class="btn btn-primary" id="promotion-stage-view-shoot-btn">+ Shoot This Week</button>
+        <button class="btn btn-primary" id="promotion-stage-view-shoot-btn">+ Add Concept</button>
 
         <div class="planning-section-header">
           <h2>What We Have</h2>
@@ -492,7 +561,7 @@
             <button type="button" class="btn btn-ghost btn-sm" id="shoot-this-week-btn" onclick="goToCurrentShootingWeek()" style="display:none;">This Week</button>
             <div class="planning-week-picker" id="shoot-week-picker" style="display:none;"></div>
           </div>
-          <select class="shoot-owner-filter" id="shoot-week-owner-filter" onchange="setShootingOwnerFilter(this.value)"></select>
+          <div class="person-filter" id="shoot-week-owner-filter"></div>
         </div>
         <div class="shoot-summary-line" id="shoot-week-summary"></div>
         <div class="shoot-week-progress-bar" id="shoot-week-progress-bar"><div class="shoot-week-progress-fill" id="shoot-week-progress-fill"></div></div>
@@ -505,7 +574,7 @@
       <div class="shoot-panel" id="shoot-view-today">
         <div class="planning-header">
           <h2 class="shoot-today-title" id="shoot-today-title"></h2>
-          <select class="shoot-owner-filter" id="shoot-today-owner-filter" onchange="setShootingOwnerFilter(this.value)"></select>
+          <div class="person-filter" id="shoot-today-owner-filter"></div>
         </div>
         <div class="shoot-summary-line" id="shoot-today-summary"></div>
         <div class="shoot-today-list" id="shoot-today-list"></div>
@@ -658,29 +727,101 @@
          (the actual ads). Reads shoot_schedule rows with ready_for_editing
          (see routes/editing.js) -- a Concept appears here automatically the
          moment Shooting marks it Shot, nothing recreated by hand. Grouped by
-         Concept, never one flat list of assets -- see the brief. -->
+         Concept, never one flat list of assets -- see the brief.
+         Week/Today/History mirrors Shooting's own subnav (see the Shoot
+         Week/Scheduling brief, item 8) -- Editing gets its OWN weekly
+         calendar (editing_week_start/editing_day on shoot_schedule),
+         separate from the shoot's own scheduled_week_start/scheduled_day, so
+         a Concept isn't assumed to be edited the day it was filmed; it
+         enters here as Unscheduled and the editor places it on a day.
+         Round 12: there's no separate workflow-state filter any more -- the
+         calendar always shows every Concept for the week regardless of
+         status (changing a card's status via its own segmented control used
+         to make it vanish from whichever filter tab was active, which read
+         as a bug). The person filter is the one remaining filter dimension,
+         applying across whichever of Week/Today is showing (see
+         editingActiveConcepts in app.js), hidden for History. -->
     <section id="tab-editing" class="tab-panel">
       <h1 class="tr-page-title">Editing</h1>
-      <div class="planning-header">
-        <div class="planning-week-nav">
+      <div class="shoot-subnav" id="editing-subnav">
+        <button type="button" class="shoot-subnav-btn active" data-editing-view="week" onclick="setEditingView('week')">Week</button>
+        <button type="button" class="shoot-subnav-btn" data-editing-view="today" onclick="setEditingView('today')">Today</button>
+        <button type="button" class="shoot-subnav-btn" data-editing-view="history" onclick="setEditingView('history')">History</button>
+      </div>
+
+      <div class="planning-header" id="editing-controls-row">
+        <div class="planning-week-nav" id="editing-week-nav">
           <button type="button" class="week-nav-btn" id="editing-week-prev" onclick="changeEditingWeek(-1)" aria-label="Previous week">&lsaquo;</button>
           <button type="button" class="planning-week-label-btn" id="editing-week-label" onclick="toggleEditingWeekPicker()"></button>
           <button type="button" class="week-nav-btn" id="editing-week-next" onclick="changeEditingWeek(1)" aria-label="Next week">&rsaquo;</button>
           <button type="button" class="btn btn-ghost btn-sm" id="editing-this-week-btn" onclick="goToCurrentEditingWeek()" style="display:none;">This Week</button>
           <div class="planning-week-picker" id="editing-week-picker" style="display:none;"></div>
         </div>
-        <!-- Separate from the workflow-state tabs below (All/To Edit/Editing/
-             Ready for Approval) -- this narrows WHICH person's queue is shown,
-             same pattern/markup as Shooting's owner filter, reading
+        <!-- Narrows WHICH person's queue is shown, same compact
+             person-filter pattern as Shooting's Filming filter, reading
              editing_owner (see G's investigation: this is the first real
              consumer of that column). -->
-        <select class="shoot-owner-filter" id="editing-editor-filter" onchange="setEditingEditorFilter(this.value)"></select>
+        <div class="person-filter" id="editing-editor-filter"></div>
       </div>
       <div class="shoot-summary-line" id="editing-summary"></div>
-      <div class="filter-tabs" id="editing-filters"></div>
-      <div id="editing-list" class="cd-product-grid"></div>
-      <div id="editing-empty" class="hint" style="display:none;padding:18px 0;text-align:center;">Nothing shot yet this week.</div>
+
+      <!-- WEEK VIEW -->
+      <div class="shoot-panel active" id="editing-view-week">
+        <div class="shoot-unscheduled" id="editing-unscheduled" ondragover="onEditingColumnDragOver(event)" ondragleave="onEditingColumnDragLeave(event)" ondrop="onEditingColumnDrop(event, null)"></div>
+        <div class="shoot-week-grid" id="editing-week-grid"></div>
+      </div>
+
+      <!-- TODAY VIEW -->
+      <div class="shoot-panel" id="editing-view-today">
+        <h2 class="shoot-today-title" id="editing-today-title"></h2>
+        <div id="editing-today-list" class="cd-product-grid"></div>
+      </div>
+
+      <!-- HISTORY VIEW -->
+      <div class="shoot-panel" id="editing-view-history">
+        <h2 class="shoot-today-title">Editing History</h2>
+        <div class="shoot-history-list" id="editing-history-list"></div>
+      </div>
     </section>
+
+    <!-- Final Approval: the stage after Editing (see Issue 11/12). Queue is
+         every Concept Editing has submitted a Final Edit for
+         (editing_submitted_at set) and not yet approved -- a Concept sent
+         back with Request Changes drops out of this queue (see
+         finalApproval.js) until it's resubmitted. This is deliberately the
+         last built stage: Approve advances the Concept only as far as the
+         existing 'qc' Kanban status, the natural place a future Ad
+         Template/Meta-prep stage would build from -- no Meta automation
+         here yet. -->
+    <section id="tab-final-approval" class="tab-panel">
+      <h1 class="tr-page-title">Final Approval</h1>
+      <div class="shoot-summary-line" id="final-approval-summary"></div>
+      <div id="final-approval-list" class="cd-product-grid"></div>
+    </section>
+
+    <div id="final-approval-modal" class="modal-backdrop">
+      <div class="modal" style="max-width:480px;">
+        <div class="modal-header">
+          <div>
+            <h3 id="final-approval-modal-title"></h3>
+            <div class="hint" id="final-approval-modal-subtitle"></div>
+          </div>
+          <button class="modal-close" onclick="closeModal('final-approval-modal')">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div id="final-approval-modal-body"></div>
+          <div id="final-approval-feedback-section" style="display:none;margin-top:14px;">
+            <label>Feedback for the editor</label>
+            <textarea id="final-approval-feedback-input" rows="3" placeholder="What needs to change before this can be approved?"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer" id="final-approval-modal-footer">
+          <button class="btn btn-ghost" id="final-approval-close-btn" onclick="closeModal('final-approval-modal')">Close</button>
+          <button class="btn btn-ghost" id="final-approval-request-changes-btn" onclick="toggleFinalApprovalFeedback()">Request Changes</button>
+          <button class="btn btn-primary" id="final-approval-approve-btn" onclick="submitFinalApprovalApprove()">Approve &rarr;</button>
+        </div>
+      </div>
+    </div>
 
     <!-- The Concept workspace -- the primary unit of work in Editing now
          (see the workflow-revision brief). A completion checklist of every
@@ -702,18 +843,31 @@
           </div>
           <button class="modal-close" onclick="closeModal('editing-concept-modal')">&times;</button>
         </div>
+        <!-- Editing happens externally (CapCut) -- this workspace is just the
+             handoff: one Final Edit per Concept (editor/format/link/notes,
+             see #final-edit-modal, untouched by this simplification), not a
+             checklist of individually-matched hook variations. See
+             renderEditingConceptModal in app.js. -->
         <div class="modal-body">
-          <div>
-            <div class="editing-req-heading">Final Edits <span class="editing-req-heading-count" id="editing-req-heading-count"></span></div>
-            <div class="editing-card-progress-track" style="margin-top:6px;"><div class="editing-card-progress-fill" id="editing-req-progress-fill"></div></div>
-          </div>
-          <div id="editing-concept-requirements" class="editing-req-list"></div>
-          <div id="editing-create-custom-rows"></div>
-          <button type="button" class="link-btn editing-add-variation-btn" id="editing-add-another-btn" onclick="addEditingCustomAssetRow()">+ Add variation</button>
+          <!-- Round 9: the one place a Concept's editing_owner can be
+               assigned/reassigned once it's already in Editing -- a concept
+               reaching here can arrive genuinely Unassigned (never touched
+               upstream in Upcoming Drops/Promotion intake). Reuses the
+               SAME canonical field/endpoint (PATCH /creative-assets/:id/
+               assignee, editing_owner only) every other Editing select
+               already writes to -- no source-specific assignment system.
+               Same select+custom pattern as Concept Type/Talent
+               (onConceptDevSelectWithOtherChange) so a name outside
+               Mark/Shez/Til can be entered as "Other". -->
+          <label class="editing-concept-editor-field">Editing
+            <select id="editing-concept-editor-select" onchange="onConceptDevSelectWithOtherChange('editing-concept-editor-select','editing-concept-editor-custom'); saveEditingConceptEditor();"></select>
+            <input type="text" id="editing-concept-editor-custom" placeholder="Editor name…" style="display:none;margin-top:6px;" onblur="saveEditingConceptEditor()">
+          </label>
+          <div id="editing-final-edit-summary" class="editing-final-edit-summary"></div>
         </div>
         <div class="modal-footer editing-concept-footer">
           <span class="editing-concept-footer-status" id="editing-concept-footer-status"></span>
-          <button class="btn btn-primary" id="editing-concept-ready-btn" onclick="submitEditingConceptReady()" disabled>Ready for Approval &rarr;</button>
+          <button class="btn btn-primary" id="editing-concept-ready-btn" onclick="submitEditingConceptReady()" disabled>Mark as Edited &rarr;</button>
           <button class="btn btn-ghost" id="editing-concept-close-btn" onclick="closeModal('editing-concept-modal')" style="display:none;">Close</button>
         </div>
       </div>
@@ -849,6 +1003,7 @@
         <button type="button" class="settings-subnav-btn" data-settings-panel="shoot-prep">Shoot Prep</button>
         <button type="button" class="settings-subnav-btn" data-settings-panel="creative-playbook">Creative Playbook</button>
         <button type="button" class="settings-subnav-btn" data-settings-panel="meta-mapping">Meta Mapping</button>
+        <button type="button" class="settings-subnav-btn" id="settings-users-tab-btn" data-settings-panel="users" style="display:none;">Users</button>
       </div>
 
       <div class="settings-panel active" id="settings-panel-planning">
@@ -940,11 +1095,106 @@
         <div id="mpm-check-result"></div>
         <div id="mpm-list" class="mpm-list"></div>
       </div>
+
+      <!-- Round 12 (and its Round 13 cleanup pass): admin-only (see
+           applySidebarModuleAccess/showApp in app.js, which shows the
+           "Users" sub-tab button above only when state.currentUser.role
+           === 'admin' -- the GET/PATCH endpoints this calls are also
+           independently admin-gated server-side, so this hiding is a
+           convenience, not the actual enforcement). A scannable table
+           (Name/Email/Role/Access/Password/Edit) replaces Round 11's wide
+           per-user card with 13 raw checkboxes -- the Access column shows a
+           compact summary ("Full Access" / "Restricted · N modules"), the
+           Password column shows a status chip only (never the password
+           itself). Per-user editing (role, password reset) happens in
+           #user-access-modal below; the separate Module Access matrix
+           further down gives a second, at-a-glance-across-everyone view of
+           the exact same access data, edited inline. Both surfaces present
+           module access POSITIVELY (checked = can access) even though the
+           server/schema still store a deny-list (user_module_restrictions)
+           -- see openUserAccessModal/saveUserAccessModal and
+           toggleMatrixAccess in app.js, the only places that invert between
+           the two; nothing else in the app needs to know the storage is a
+           deny-list. -->
+      <div class="settings-panel" id="settings-panel-users">
+        <div class="planning-section-header">
+          <h2>User Access</h2>
+          <span class="admin-note">Role is a default/category label only. Module access is what actually controls the sidebar and API for each person.</span>
+        </div>
+        <table class="users-access-table">
+          <thead>
+            <tr><th>Name</th><th>Email</th><th>Role</th><th>Access</th><th>Password</th><th></th></tr>
+          </thead>
+          <tbody id="users-access-list"></tbody>
+        </table>
+
+        <div class="users-matrix-section">
+          <div class="planning-section-header">
+            <h2>Module Access</h2>
+            <span class="admin-note">Checked = this person can access that module. Unchecked = hidden from their sidebar (and blocked at the API where currently protected). Changes save immediately.</span>
+          </div>
+          <div class="users-matrix-scroll">
+            <table class="users-matrix-table" id="users-matrix-table"></table>
+          </div>
+        </div>
+      </div>
     </section>
   </main>
 </div>
 
 <div id="toast" class="toast"></div>
+
+<!-- Round 12 (Round 13 cleanup adds the Password block): Settings -> Users
+     "Edit User" modal -- Module Access here is presented POSITIVELY
+     (checked = can access), the opposite of the underlying deny-list
+     storage; openUserAccessModal/saveUserAccessModal in app.js do the one
+     inversion this needs. Name/Email are read-only context (no rename/
+     re-email flow exists yet); Role, Password and Module Access are the
+     editable fields. The Password block never shows or round-trips the
+     actual password -- "Reset Password" reveals a plain new-password input
+     that's submitted straight to PATCH /users/:id/password (hashed
+     server-side); nothing here can read an existing password back. -->
+<div id="user-access-modal" class="modal-backdrop">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="user-access-modal-title">Edit User</h3>
+      <button class="modal-close" onclick="closeModal('user-access-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="user-access-id">
+      <div class="user-access-modal-identity">
+        <div class="user-access-modal-name" id="user-access-modal-name"></div>
+        <div class="user-access-modal-email" id="user-access-modal-email"></div>
+      </div>
+      <label>Role
+        <select id="user-access-role">
+          <option value="admin">Admin</option>
+          <option value="lead">Lead</option>
+          <option value="member">Member</option>
+        </select>
+      </label>
+
+      <div class="user-access-password-block">
+        <div class="user-access-password-row">
+          <span>Password: <strong id="user-access-password-status">Set</strong></span>
+          <button type="button" class="link-btn" onclick="toggleUserAccessPasswordReset()">Reset Password</button>
+        </div>
+        <div id="user-access-password-reveal" class="user-access-password-reveal" style="display:none">
+          <input type="password" id="user-access-new-password" placeholder="New password" autocomplete="new-password">
+          <button type="button" class="btn btn-secondary" onclick="submitUserAccessPasswordReset()">Set Password</button>
+        </div>
+      </div>
+
+      <div class="user-access-modules-header">Module Access</div>
+      <div class="hint">Checked = this person can access it. Unchecked = hidden from their sidebar (and blocked at the API where currently protected).</div>
+      <div id="user-access-modules" class="user-access-modules"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('user-access-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveUserAccessModal()">Save</button>
+    </div>
+  </div>
+</div>
 
 <!-- Creative asset modal -->
 <div id="asset-modal" class="modal-backdrop">
@@ -2358,20 +2608,56 @@
   </div>
 </div>
 
+<!-- Round 8: the first thing "+ Add Concept" shows -- a small, simple
+     choice, nothing else. New Concept goes on to the full canonical Concept
+     Development experience (via #promotion-shoot-modal's context-only intake,
+     then #promo-concept-dev-modal); Existing Concept goes on to the existing
+     lightweight execution-brief intake. See openPromotionAddConceptChooser/
+     choosePromotionAddConceptOrigin in app.js. -->
+<div id="promo-add-concept-chooser-modal" class="modal-backdrop">
+  <div class="modal promo-chooser-modal">
+    <div class="modal-header">
+      <h3>Add Concept</h3>
+      <button class="modal-close" onclick="closeModal('promo-add-concept-chooser-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="hint">What are you adding?</div>
+      <div class="promo-chooser-options">
+        <button type="button" class="promo-chooser-card" onclick="choosePromotionAddConceptOrigin('new')">
+          <span class="promo-chooser-card-title">New Concept</span>
+          <span class="promo-chooser-card-desc">Develop a new creative idea</span>
+        </button>
+        <button type="button" class="promo-chooser-card" onclick="choosePromotionAddConceptOrigin('existing')">
+          <span class="promo-chooser-card-title">Existing Concept</span>
+          <span class="promo-chooser-card-desc">Use a proven concept again</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Cover a Promotion Campaign Stage requirement -- concept-first, not
      product-first: a promotion's creative need is often the message/format
      itself (sitewide sale messaging, a countdown graphic) with no single
      product behind it, so this never asks the user to pick a product to
-     start. Collects Concept Type + Assigned To + Concept Name/Idea + Format,
-     then creates the standard shoot_plan_items + creative_assets pair via
-     POST /shoot-plan (source: 'promotion') -- one click, one concept, one
-     item, one asset -- and opens straight into Concept Development for it.
-     Styles Needed (optional products/colourways) is added afterwards, inside
-     Concept Development itself, not here. -->
+     start. Concept Approach (New/Existing) is decided by the chooser modal
+     above before this ever opens (see openPromotionAddConceptChooser in
+     app.js). New Concept: this is just a context-only intake (Format/
+     Concept Name/Filming/Editing/Shoot Week) -- creates the shoot_plan_items
+     + creative_assets pair via POST /shoot-plan (source: 'promotion'), then
+     opens straight into the full Concept Development modal
+     (#promo-concept-dev-modal), the SAME one normal Concept Development
+     uses. Existing Concept does the same create, then immediately PATCHes
+     concept_origin='existing' + concept_dev_status='approved' + the
+     execution brief fields below -- bypassing Concept Development/Tuesday
+     Review entirely and landing straight in Shooting's selected Shoot Week,
+     Unscheduled (see ensureShootScheduleForApprovedConcept in
+     conceptDevelopment.js). No Assigned To here -- that field belongs to
+     Concept Development's own workspace, not this intake. -->
 <div id="promotion-shoot-modal" class="modal-backdrop">
-  <div class="modal">
+  <div class="modal cd-modal-workspace">
     <div class="modal-header">
-      <h3 id="promotion-shoot-modal-title">Shoot This Week</h3>
+      <h3 id="promotion-shoot-modal-title">Add Concept</h3>
       <button class="modal-close" onclick="closeModal('promotion-shoot-modal')">&times;</button>
     </div>
     <div class="modal-body">
@@ -2379,78 +2665,139 @@
         <div><span class="admin-note">Promotion</span><br><strong id="promotion-shoot-context-promotion"></strong></div>
         <div><span class="admin-note">Campaign Stage</span><br><strong id="promotion-shoot-context-stage"></strong></div>
       </div>
-      <!-- Format leads (D1) -- it determines which Concept Types are even
-           valid (conceptTypesForFormat in app.js), so picking it first,
-           before Concept Type, means the dropdown below is never shown
-           with an option the current Format can't actually use. -->
-      <label>Format
-        <select id="promotion-shoot-format" onchange="onPromotionShootFormatChange()">
-          <option value="video">Video</option>
-          <option value="static">Static</option>
-        </select>
-      </label>
-
-      <!-- Concept Approach: Video only -- New vs Existing Concept (see
-           schema.sql's comment on creative_assets.concept_origin). Static
-           always saves concept_origin = NULL, so this whole block stays
-           hidden for Static -- see onPromotionShootFormatChange in app.js.
-           Two compact selectable chips, not a dropdown, per the brief.
-           Kept directly under Format since it's the immediate follow-up
-           decision once Video is chosen. -->
-      <div id="promotion-shoot-origin-wrap" style="display:none;">
-        <span class="cd-field-label">Concept Approach</span>
-        <div class="promo-shoot-origin-toggle">
-          <button type="button" class="cd-filter-btn" id="promotion-shoot-origin-new-btn" onclick="selectPromotionShootConceptOrigin('new')">New Concept</button>
-          <button type="button" class="cd-filter-btn" id="promotion-shoot-origin-existing-btn" onclick="selectPromotionShootConceptOrigin('existing')">Existing Concept</button>
-        </div>
-        <div class="hint" id="promotion-shoot-origin-hint"></div>
+      <!-- Format leads -- it determines which Concept Types are even valid
+           (conceptTypesForFormat in app.js) and whether Concept Approach
+           even applies (Video only), so picking it first means nothing
+           below is ever shown with an option/section the current Format
+           can't actually use. Paired side-by-side with Concept Name now
+           that the modal is wide enough (see .cd-modal-workspace above) --
+           same logical order as before, just using the extra horizontal
+           room instead of two full-width rows. -->
+      <div class="promo-shoot-2col">
+        <label>Format
+          <select id="promotion-shoot-format" onchange="onPromotionShootFormatChange()">
+            <option value="video">Video</option>
+            <option value="static">Static</option>
+          </select>
+        </label>
+        <label>Concept Name / Idea
+          <input type="text" id="promotion-shoot-concept-name" placeholder="e.g. Black Friday Price Shock">
+        </label>
       </div>
 
-      <label>Concept Type
-        <select id="promotion-shoot-concept-type-select" onchange="onConceptDevSelectWithOtherChange('promotion-shoot-concept-type-select','promotion-shoot-concept-type-custom')"></select>
-        <input type="text" id="promotion-shoot-concept-type-custom" placeholder="New concept type…" style="display:none;margin-top:6px;">
+      <!-- Concept Approach (New vs Existing) is decided up front by the
+           small chooser modal (#promo-add-concept-chooser-modal, round 8)
+           before this modal ever opens -- see openPromotionAddConceptChooser
+           in app.js. No in-modal toggle here any more. -->
+
+      <div id="promotion-shoot-concept-type-wrap">
+        <label>Concept Type
+          <select id="promotion-shoot-concept-type-select" onchange="onConceptDevSelectWithOtherChange('promotion-shoot-concept-type-select','promotion-shoot-concept-type-custom')"></select>
+          <input type="text" id="promotion-shoot-concept-type-custom" placeholder="New concept type…" style="display:none;margin-top:6px;">
+        </label>
+      </div>
+      <!-- Filming/Editing paired side-by-side -- both short person-selects,
+           same natural pairing the Required Concepts row already uses. -->
+      <div class="promo-shoot-2col">
+        <!-- Filming -- who's shooting this, backed by shoot_plan_items.creator
+             (the SAME field Core's own Shoot This Week modal already sets via
+             #shoot-plan-creator, and the field Shooting's Filming filter reads
+             as "owner"). Sourced from CONCEPT_ASSIGNEES (Mark/Shez/Til), the
+             same small operational roster Shooting/Editing's own person
+             filters use -- not state.contentCreators (every app user who can
+             run Shoot Plan intake), which would let this silently offer people
+             who can never actually be a Filming assignment. -->
+        <label>Filming
+          <select id="promotion-shoot-filming"></select>
+        </label>
+        <!-- Editing -- who's responsible for editing this creative, reusing
+             creative_assets.editing_owner (see PATCH /creative-assets/:id/
+             assignee): a stable one-time assignment made here at planning
+             time, well before the concept naturally reaches the Editing
+             Kanban stage, where Board already reads this same column as the
+             card's current owner. Deliberately not a new field. -->
+        <label>Editing
+          <select id="promotion-shoot-editing-owner">
+            <option value="">Unassigned</option>
+            <option value="Mark">Mark</option>
+            <option value="Shez">Shez</option>
+            <option value="Til">Til</option>
+          </select>
+        </label>
+      </div>
+      <!-- Shoot Week -- when this concept is actually planned to be filmed,
+           independent of the week it's being planned/developed in right now
+           (see the Shoot Week brief: a concept planned this week may not be
+           filmed for several weeks). Reuses shoot_plan_items.week_start, the
+           same field Core/High Stock/Drop already use for their own Shoot
+           Plan week -- not a second scheduling system. Defaults to the
+           current week; always editable later via editPromotionConceptShootWeek. -->
+      <label>Shoot Week
+        <select id="promotion-shoot-week"></select>
       </label>
-      <label>Assigned To
-        <select id="promotion-shoot-assignee">
-          <option value="">Unassigned</option>
-          <option value="Mark">Mark</option>
-          <option value="Shez">Shez</option>
-          <option value="Til">Til</option>
-        </select>
-      </label>
-      <!-- Editing -- who's responsible for editing this creative, reusing
-           creative_assets.editing_owner (see PATCH /creative-assets/:id/
-           assignee): a stable one-time assignment made here at planning
-           time, well before the concept naturally reaches the Editing
-           Kanban stage, where Board already reads this same column as the
-           card's current owner. Deliberately not a new field. -->
-      <label>Editing
-        <select id="promotion-shoot-editing-owner">
-          <option value="">Unassigned</option>
-          <option value="Mark">Mark</option>
-          <option value="Shez">Shez</option>
-          <option value="Til">Til</option>
-        </select>
-      </label>
-      <!-- Filming -- who's shooting this, backed by shoot_plan_items.creator
-           (the SAME field Core's own Shoot This Week modal already sets via
-           #shoot-plan-creator, and the field Shooting's Week/Today/owner
-           filter already reads as "owner" -- see the F investigation).
-           Previously this was never asked here and silently defaulted to
-           whichever content_creators row is_default, so every Promotion
-           concept looked identically "assigned" to Shooting regardless of
-           who was actually meant to film it. Distinct from Assigned To
-           (concept development) and Editing (post-production). -->
-      <label>Filming
-        <select id="promotion-shoot-filming"></select>
-      </label>
-      <label>Concept Name / Idea
-        <input type="text" id="promotion-shoot-concept-name" placeholder="e.g. Black Friday Price Shock">
-      </label>
+
+      <!-- Existing Concept's lightweight execution brief only (round 8: New
+           Concept no longer has an inline field set here at all -- it goes
+           straight into the SAME full Concept Development modal
+           (#promo-concept-dev-modal) normal Concept Development uses, via
+           openPromotionConceptDevModal, once this context-only step is
+           saved -- see savePromotionShootItem). Every field here reuses the
+           exact same creative_assets columns/JSON shapes Concept
+           Development's own modal writes (hook_variations/execution/
+           reference_items/script_notes/location), via the same PATCH
+           /concept-development/concepts/:id -- this is a smaller UI over
+           the same record for an already-understood execution, not a
+           second data model. -->
+      <div id="promotion-shoot-brief-wrap" style="display:none;">
+        <div class="cd-modal-section-title">The Hook</div>
+        <label>Primary Hook
+          <input type="text" id="promotion-shoot-hook-primary" placeholder="What earns attention in the first few seconds?">
+        </label>
+        <div id="promotion-shoot-hooks-alt-list"></div>
+        <button type="button" class="link-btn" onclick="addPromotionShootAltHook()">+ Add Alternative Hook</button>
+
+        <label>What to Shoot
+          <textarea id="promotion-shoot-execution" rows="3" placeholder="List the footage that must be captured."></textarea>
+        </label>
+
+        <!-- Existing Concept only -- not part of the New Concept inline
+             field list (round 7, item 5's brief lists Idea/Avatar/Hook/What
+             to Shoot/Script/References/Shoot Setup only), so this stays
+             scoped to isPromotionShootExistingBrief() via
+             updatePromotionShootBriefVisibility. -->
+        <div id="promotion-shoot-style-section">
+          <label>Styles / Products <span class="hint">(optional)</span></label>
+          <div id="promotion-shoot-style-chips" class="cd-modal-styles-list"></div>
+          <div class="promo-shoot-search">
+            <input type="text" id="promotion-shoot-style-search" placeholder="Search SKU or product name to add…" autocomplete="off" oninput="filterPromotionShootStyles()" onfocus="filterPromotionShootStyles()">
+            <div id="promotion-shoot-style-results" class="promo-shoot-search-results" style="display:none;"></div>
+          </div>
+        </div>
+
+        <label>References <span class="hint">(optional)</span></label>
+        <div id="promotion-shoot-reference-list"></div>
+        <div class="promo-shoot-reference-add-row">
+          <input type="text" id="promotion-shoot-reference-url" placeholder="Paste a link">
+          <button type="button" class="btn btn-sm btn-ghost" onclick="addPromotionShootReference()">+ Add</button>
+        </div>
+
+        <div id="promotion-shoot-script-toggle-wrap">
+          <button type="button" class="link-btn" onclick="togglePromotionShootScript()">+ Add Script / Talking Points <span class="hint">(optional)</span></button>
+        </div>
+        <div id="promotion-shoot-script-field" style="display:none;">
+          <label>Script / Talking Points
+            <textarea id="promotion-shoot-script" rows="4"></textarea>
+          </label>
+        </div>
+
+        <label>Shoot Setup / Location <span class="hint">(optional)</span>
+          <input type="text" id="promotion-shoot-location" placeholder="e.g. Studio, Store, Outdoor">
+        </label>
+      </div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('promotion-shoot-modal')">Cancel</button>
-      <button class="btn btn-primary" onclick="savePromotionShootItem()">Develop Promotion Concept &rarr;</button>
+      <button class="btn btn-primary" id="promotion-shoot-save-btn" onclick="savePromotionShootItem()">Develop Promotion Concept &rarr;</button>
     </div>
   </div>
 </div>

@@ -225,11 +225,22 @@ router.get('/:id', async (req, res, next) => {
     // never the concept-development Assigned To). Selecting these so the
     // stage card can show what the concept actually is (see C1) instead of
     // a person's name repeated on every row.
+    // final_edit_link/final_edit_format (round 7, item 4): the SAME Final
+    // Edit the Editing -> Final Approval workflow already created/owns --
+    // read-only here, never written from this route. A LATERAL join keyed
+    // to the most recent final_edits row per concept (rather than a plain
+    // JOIN) so this can never duplicate an item row even if that per-concept
+    // invariant were ever violated; in practice there's exactly one.
     const itemsResult = stageIds.length
       ? await pool.query(
-          `SELECT spi.*, ca.status AS asset_status, ca.concept_name, ca.concept_type, ca.concept_assignee
+          `SELECT spi.*, ca.status AS asset_status, ca.concept_name, ca.concept_type, ca.concept_assignee,
+                  fe.final_edit_link, fe.format AS final_edit_format
            FROM shoot_plan_items spi
            LEFT JOIN creative_assets ca ON ca.id = spi.asset_id
+           LEFT JOIN LATERAL (
+             SELECT final_edit_link, format FROM final_edits
+             WHERE creative_asset_id = ca.id ORDER BY id DESC LIMIT 1
+           ) fe ON true
            WHERE spi.promotion_stage_id = ANY($1::int[]) ORDER BY spi.created_at ASC`,
           [stageIds]
         )
@@ -248,6 +259,8 @@ router.get('/:id', async (req, res, next) => {
         concept_assignee: row.concept_assignee,
         asset_status: row.asset_status,
         asset_status_label: row.asset_status ? (STATUS_LABELS[row.asset_status] || row.asset_status) : null,
+        final_edit_link: row.final_edit_link || null,
+        final_edit_format: row.final_edit_format || null,
         created_at: row.created_at,
       });
     }

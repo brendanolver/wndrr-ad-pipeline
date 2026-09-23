@@ -232,6 +232,37 @@ ALTER TABLE proven_winners ADD COLUMN IF NOT EXISTS default_format VARCHAR(10) N
 ALTER TABLE proven_winners ADD COLUMN IF NOT EXISTS default_classification VARCHAR(20) NOT NULL DEFAULT 'tested_proven'
   CHECK (default_classification IN ('tested_proven', 'new_experimental'));
 
+-- Starter seed: proven_winners is Settings-owned admin data that was never
+-- seeded by a migration -- production's real list was entered by hand
+-- through Settings at some point before this table's schema even existed
+-- here. That's WHY a fresh/PR-test database's Drop product pages show "No
+-- required concepts yet" instead of auto-populating (generateOrTopUpPlan
+-- in dropProductPlans.js already reads straight from this table -- it's
+-- the correct source of truth, just empty). This is not a new invented
+-- list: it's the exact vocabulary concept_types' own one-time seed further
+-- below already copied from proven_winners' production contents at the
+-- time it ran ("Flatlay Photo, POV from iPhone, Try on/Flatlay Video,
+-- Ecom Photo, Green Screen Video", etc.) -- restoring the table those
+-- comments already assumed existed. Guarded the same way: fires only the
+-- first time this runs against a database where proven_winners is still
+-- empty, so it's a pure no-op against production (which already has these
+-- rows under their own ids) and never overwrites a later rename/reorder/
+-- deactivate/addition made through Settings.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM proven_winners) THEN
+    INSERT INTO proven_winners (name, rank, default_format, default_classification) VALUES
+      ('Flatlay Photo', 1, 'static', 'tested_proven'),
+      ('POV from iPhone', 2, 'video', 'tested_proven'),
+      ('Try on/Flatlay Video', 3, 'video', 'tested_proven'),
+      ('Ecom Photo', 4, 'static', 'tested_proven'),
+      ('Green Screen Video', 5, 'video', 'tested_proven'),
+      ('Flatlay Video', 6, 'video', 'tested_proven'),
+      ('Product Close Up', 7, 'video', 'tested_proven'),
+      ('Rug Try On', 8, 'video', 'tested_proven');
+  END IF;
+END $$;
+
 -- A "product" has no table of its own -- it's a derived grouping computed by
 -- deriveProductCode/buildCoverage on every request (coverage.js). This table
 -- is the stable anchor a generated concept plan snapshots against, keyed on
@@ -799,6 +830,52 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
+-- Round 9: correct the four confirmed occurrences' dates to WNDRR's real
+-- Yearly Cadence source of truth (the week-number generator above is an
+-- approximation until each occurrence is actually confirmed). Guarded by
+-- the OLD, generator-computed dates so this fires exactly once per
+-- promotion -- once corrected, the WHERE clause no longer matches, so this
+-- can never re-fire and clobber a date someone has since edited by hand via
+-- the Edit Promotion modal (same "never destructively touch real progress"
+-- pattern as the Black Friday 2026 notes-clear above). Deliberately does
+-- NOT touch any other occurrence (e.g. Black Friday 2027, Boxing Day 2027)
+-- -- only these four are confirmed; the rest stay on the week-based
+-- approximation until they're confirmed too.
+UPDATE promotions SET start_date = '2026-11-11', end_date = '2026-11-30', updated_at = now()
+WHERE name = 'Black Friday 2026' AND start_date = '2026-11-12' AND end_date = '2026-12-01';
+
+UPDATE promotions SET start_date = '2026-12-24', end_date = '2026-12-29', updated_at = now()
+WHERE name = 'Boxing Day 2026' AND start_date = '2026-12-21' AND end_date = '2027-01-03';
+
+UPDATE promotions SET start_date = '2027-03-24', end_date = '2027-04-04', updated_at = now()
+WHERE name = 'Birthday Sale 2027' AND start_date = '2027-03-22' AND end_date = '2027-04-04';
+
+UPDATE promotions SET start_date = '2027-07-14', end_date = '2027-07-28', updated_at = now()
+WHERE name = 'EOFY Winter Sale 2027' AND start_date = '2027-07-12' AND end_date = '2027-08-01';
+
+-- ---------------------------------------------------------------------------
+-- Round 10: real names for eight already-existing Upcoming Drops, taken
+-- from the original WNDRR app (not invented/generic) -- the isolated PR
+-- database only ever had these drops' auto-created rows, never their real
+-- names. Matched by launch_date (the only stable identifier available here)
+-- and guarded by "name IS NULL" so this only ever fills in a genuinely
+-- still-unnamed drop -- a name anyone has since set by hand (via the Edit
+-- Drop modal's Drop Name field) always wins and is never overwritten, and
+-- this can never re-fire once a row is named. Touches drops.name only --
+-- launch_date, products, product plans, and concepts are all untouched.
+-- Deliberately eight individual statements, not a generic naming rule: this
+-- is a one-time data correction for known real names, not new fallback
+-- logic, and it never creates a drop that doesn't already exist.
+UPDATE drops SET name = 'Spring Capsule Drop', updated_at = now() WHERE launch_date = '2026-09-24' AND name IS NULL;
+UPDATE drops SET name = 'October Drop 1', updated_at = now() WHERE launch_date = '2026-10-01' AND name IS NULL;
+UPDATE drops SET name = 'Soho 1/4 Zip New Colours', updated_at = now() WHERE launch_date = '2026-10-08' AND name IS NULL;
+UPDATE drops SET name = 'October Drop 2', updated_at = now() WHERE launch_date = '2026-10-15' AND name IS NULL;
+UPDATE drops SET name = 'November Drop 1', updated_at = now() WHERE launch_date = '2026-10-22' AND name IS NULL;
+UPDATE drops SET name = 'November Drop 2', updated_at = now() WHERE launch_date = '2026-10-29' AND name IS NULL;
+UPDATE drops SET name = 'Black Friday Drop', updated_at = now() WHERE launch_date = '2026-11-11' AND name IS NULL;
+UPDATE drops SET name = 'December Drop', updated_at = now() WHERE launch_date = '2026-11-19' AND name IS NULL;
+
+-- ---------------------------------------------------------------------------
 -- Default Shoot Sizes (Settings -> Default Shoot Sizes): pre-fills each
 -- selected colourway's size when the "Shoot This Week" modal opens, keyed
 -- by garment type (top vs bottom) and, for bottoms, alpha vs waist sizing
@@ -1281,6 +1358,19 @@ CREATE INDEX IF NOT EXISTS idx_final_edits_status ON final_edits(status);
 ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS editing_submitted_at TIMESTAMPTZ;
 ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS editing_submitted_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
 
+-- Round 8: explicit "an editor has actually clicked In Progress" signal.
+-- Previously the client inferred In Progress from "a final_edits row
+-- exists", which is only true because the same user action creates the row
+-- -- but keying status off a side effect is fragile, and live QA reported a
+-- Concept showing In Progress before anyone had started it. This column is
+-- the one thing that action does that means "started": set only by POST
+-- /editing/concepts/:id/final-edits (advanceEditingToInProgress/
+-- startEditingFinalEdit), cleared by DELETE /editing/final-edits/:id only
+-- when that was the Concept's last remaining Final Edit (see editing.js).
+-- Scheduling/rescheduling (PATCH /editing/schedule/:id) never touches this,
+-- same as it never touches editing_submitted_at.
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS editing_started_at TIMESTAMPTZ;
+
 -- Who is responsible for developing/handling this concept (Upcoming Drops'
 -- Required Concepts list) -- deliberately separate from strategy_owner/
 -- filming_owner/editing_owner/qc_owner above, which are the OLD Kanban
@@ -1425,3 +1515,112 @@ UPDATE concept_types SET format = 'video' WHERE format IS NULL AND name ILIKE '%
 -- this column, so it's purely additive.
 ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS concept_origin VARCHAR(20)
   CHECK (concept_origin IN ('new', 'existing'));
+
+-- Shooting's production status was too binary (Scheduled -> Shot in one
+-- hidden click) -- see the Shoot Week/Scheduling brief, item 7. Adds
+-- 'in_progress' as a genuine middle state between 'scheduled' and 'shot',
+-- reusing this SAME existing shoot_schedule.status column/domain rather
+-- than a new field -- the brief's own instruction to prefer existing
+-- canonical state over schema expansion. 'in_progress' deliberately never
+-- sets ready_for_editing (see shooting.js's /:id/start route) -- only
+-- reaching 'shot' does, so a concept mid-shoot can never leak into Editing.
+ALTER TABLE shoot_schedule DROP CONSTRAINT IF EXISTS shoot_schedule_status_check;
+ALTER TABLE shoot_schedule ADD CONSTRAINT shoot_schedule_status_check
+  CHECK (status IN ('unscheduled', 'scheduled', 'in_progress', 'shot'));
+
+-- Editing was only ever a flat queue for the week -- see the Shoot Week/
+-- Scheduling brief, item 8: it needs its own weekly calendar (Unscheduled +
+-- Mon-Fri), separate from the shoot's own scheduled_week_start/scheduled_day
+-- (a Concept shouldn't be assumed to be edited on the day it was filmed).
+-- Reuses this SAME shoot_schedule row (already the one canonical row per
+-- Concept's production lifecycle) rather than a new table, mirroring the
+-- exact original_week_start/scheduled_week_start/scheduled_day shape
+-- Shooting already has for its own calendar. Both stay NULL until the
+-- Concept is actually marked Shot (see shooting.js's /:id/mark-shot, which
+-- now also sets editing_original_week_start/editing_week_start to the
+-- current week -- "enters Editing as Unscheduled", item 8) and are cleared
+-- back to NULL by /:id/unmark-shot, so a Concept that's no longer
+-- ready_for_editing leaves no stale calendar placement behind.
+ALTER TABLE shoot_schedule ADD COLUMN IF NOT EXISTS editing_original_week_start DATE;
+ALTER TABLE shoot_schedule ADD COLUMN IF NOT EXISTS editing_week_start DATE;
+ALTER TABLE shoot_schedule ADD COLUMN IF NOT EXISTS editing_day VARCHAR(10)
+  CHECK (editing_day IN ('monday', 'tuesday', 'wednesday', 'thursday', 'friday'));
+CREATE INDEX IF NOT EXISTS idx_shoot_schedule_editing_week ON shoot_schedule(editing_week_start);
+
+-- Final Approval: a genuine stage after Editing submits a Concept (see the
+-- Editing-simplification/Final-Approval brief, item 11) -- reusing
+-- editing_submitted_at as "awaiting a decision" (unchanged meaning) plus a
+-- small decision record here, same shape as Tuesday Review's own
+-- reviewed_at/review_feedback pair on the Concept Development side. Request
+-- Changes clears editing_submitted_at (the Concept reappears in Editing's
+-- normal queue, same final_edits row intact -- never a duplicate) and
+-- records feedback; Approve stamps who/when and advances the Concept's
+-- canonical `status` into the existing 'qc' Kanban stage if it hasn't
+-- already reached it (see src/routes/finalApproval.js) -- the natural
+-- holding stage for "approved, not yet uploaded" that already existed in
+-- STATUSES, reused rather than inventing a new one. A future Ad Template /
+-- Meta-preparation stage has a place to build from here (Kanban's own
+-- qc -> uploaded_live progression); it is NOT built in this pass.
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS final_approval_status VARCHAR(20) NOT NULL DEFAULT 'pending'
+  CHECK (final_approval_status IN ('pending', 'approved', 'changes_required'));
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS final_approval_feedback TEXT;
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS final_approved_at TIMESTAMPTZ;
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS final_approved_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_creative_assets_final_approval_status ON creative_assets(final_approval_status);
+
+-- ---------------------------------------------------------------------------
+-- Round 11: per-user module (sidebar tab) access, kept deliberately separate
+-- from `role` (see the brief: "Role and module visibility should be
+-- separate" -- role stays a default/category label only, still admin/
+-- marketing/creative/viewer/lead/member, never itself checked for access).
+-- Widened additively -- 'lead'/'member' are new values alongside the four
+-- that already exist, nothing already stored changes meaning.
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
+ALTER TABLE users ADD CONSTRAINT users_role_check
+  CHECK (role IN ('admin', 'marketing', 'creative', 'viewer', 'lead', 'member'));
+
+-- Deny-list, not an allow-list -- this is the safe-default choice the brief
+-- explicitly calls for (item 15): a user with zero rows here (every existing
+-- account, and every brand-new one, until someone deliberately restricts
+-- them) has full access to every module, so this migration can never lock
+-- an existing account out of the app it could already fully use. module_key
+-- matches index.html's tab-btn data-tab values 1:1 (dashboard, planning,
+-- concept-dev, tuesday-review, shooting, editing, final-approval, board,
+-- admin [Styles & Categories], reference-library, drops, promotions,
+-- settings) so the frontend needs no second mapping table, and is a plain
+-- VARCHAR rather than an FK to a modules table -- there's nothing else a
+-- "modules" row would ever need to carry.
+CREATE TABLE IF NOT EXISTS user_module_restrictions (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  module_key VARCHAR(50) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, module_key)
+);
+
+-- One-time role correction for the five pre-existing seed accounts named in
+-- the Round 11 brief's initial access matrix -- guarded by the OLD role
+-- value ('creative', what seedUsersAndBackfill originally gave every
+-- non-Brendan seed user), so this can only ever fire once per account and
+-- can never clobber a role an admin has since changed by hand through the
+-- new Settings user-management UI.
+UPDATE users SET role = 'admin', updated_at = now() WHERE email = 'max@kohindustries.com' AND role = 'creative';
+UPDATE users SET role = 'admin', updated_at = now() WHERE email = 'lucy@kohindustries.com' AND role = 'creative';
+UPDATE users SET role = 'lead', updated_at = now() WHERE email = 'steve@kohindustries.com' AND role = 'creative';
+UPDATE users SET role = 'lead', updated_at = now() WHERE email = 'sheridan@kohindustries.com' AND role = 'creative';
+UPDATE users SET role = 'member', updated_at = now() WHERE email = 'mark@kohindustries.com' AND role = 'creative';
+
+-- One-time restriction seed for Mark (the one named user in the initial
+-- matrix who already existed before this round -- Tllestio/Ronit are brand
+-- new accounts and get theirs seeded directly at creation time in
+-- src/db.js's seedUsersAndBackfill instead, which needs no such guard since
+-- it only ever runs once per account, at insert). Guarded by "Mark
+-- currently has zero restriction rows" rather than a plain ON CONFLICT DO
+-- NOTHING per-row insert, so that guard -- like the role correction above --
+-- can only ever fire once: if an admin later removes even one of these
+-- three via the Settings UI, this can never re-add it on a future deploy.
+INSERT INTO user_module_restrictions (user_id, module_key)
+SELECT u.id, m.module_key
+FROM users u
+CROSS JOIN (VALUES ('planning'), ('board'), ('admin')) AS m(module_key)
+WHERE u.email = 'mark@kohindustries.com'
+  AND NOT EXISTS (SELECT 1 FROM user_module_restrictions r WHERE r.user_id = u.id);

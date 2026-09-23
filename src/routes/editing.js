@@ -1,6 +1,6 @@
 const express = require('express');
 const { pool } = require('../db');
-const { FINAL_EDIT_FORMATS, STATUSES } = require('../lib/statuses');
+const { FINAL_EDIT_FORMATS, STATUSES, SHOOT_DAYS } = require('../lib/statuses');
 
 const router = express.Router();
 
@@ -55,39 +55,47 @@ function dateStr(d) {
 // concept actually reached Editing. Selecting it here is what lets the new
 // per-editor filter (see setEditingEditorFilter in app.js) work off the
 // same assignment made at planning time, with nothing re-entered.
+// editing_week_start/editing_day/editing_original_week_start (see the Shoot
+// Week/Scheduling brief, item 8): Editing's OWN weekly calendar, separate
+// from the shoot's own scheduled_week_start/scheduled_day -- a Concept is
+// filtered into this week by WHEN IT'S BEING EDITED, not when it was
+// filmed, so it can carry across weeks independently of Shooting.
 const CONCEPT_SELECT = `
   SELECT
     ss.id AS shoot_schedule_id, ss.scheduled_week_start, ss.shot_at,
+    ss.editing_original_week_start, ss.editing_week_start, ss.editing_day,
     ca.id AS creative_asset_id, ca.concept_name, ca.format AS concept_format,
-    ca.hook_variations, ca.location, ca.editing_submitted_at, ca.editing_owner,
+    ca.hook_variations, ca.location, ca.editing_submitted_at, ca.editing_started_at, ca.editing_owner,
+    ca.final_approval_status, ca.final_approval_feedback,
     spi.product_name, spi.image_url, spi.creator AS owner
   FROM shoot_schedule ss
   JOIN creative_assets ca ON ca.id = ss.creative_asset_id
   LEFT JOIN shoot_plan_items spi ON spi.id = ca.shoot_plan_item_id
-  WHERE ss.ready_for_editing = true AND ss.scheduled_week_start = $1
+  WHERE ss.ready_for_editing = true AND ss.editing_week_start = $1
   ORDER BY ca.concept_name ASC
 `;
 
-// Same Hook-Variation-to-Final-Edit matching the client uses (see app.js's
-// editingConceptRequirements) -- required to independently validate a
-// Ready for Approval submission server-side rather than trusting the
-// client's own completion count.
-function conceptCompletion(hookVariations, finalEdits) {
-  const hookTexts = (Array.isArray(hookVariations) ? hookVariations : [])
-    .filter((h) => h && h.text && h.text.trim())
-    .map((h) => h.text.trim());
-  const used = new Set();
-  let complete = 0;
-  for (const text of hookTexts) {
-    const match = finalEdits.find((fe) => !used.has(fe.id) && (fe.variation_text || '').trim() === text);
-    if (match) {
-      used.add(match.id);
-      if (match.final_edit_link) complete += 1;
-    }
-  }
-  const customEdits = finalEdits.filter((fe) => !used.has(fe.id));
-  complete += customEdits.filter((fe) => fe.final_edit_link).length;
-  return { required: hookTexts.length + customEdits.length, complete };
+// Self-healing-on-read, same pattern as shooting.js's backfillApprovedConcepts
+// and conceptDevelopment.js's generateOrTopUpPlan: any row that was already
+// Shot before editing_week_start existed (or before mark-shot started setting
+// it) gets placed into Editing's calendar now, as Unscheduled in whatever
+// week its shoot was scheduled for -- nothing to migrate by hand.
+async function backfillEditingCalendar() {
+  await pool.query(
+    `UPDATE shoot_schedule SET
+       editing_original_week_start = COALESCE(scheduled_week_start, date_trunc('week', now())::date),
+       editing_week_start = COALESCE(scheduled_week_start, date_trunc('week', now())::date)
+     WHERE ready_for_editing = true AND editing_week_start IS NULL`
+  );
+}
+
+// Editing is a handoff, not a checklist (see the Editing-simplification
+// brief, item 9): ready-for-approval no longer requires every Hook
+// Variation to have its own individually-matched, linked Final Edit --
+// just that a Final Edit exists with a link pasted back, same low bar the
+// client's own editingConceptStatus applies.
+function conceptHasLinkedFinalEdit(finalEdits) {
+  return finalEdits.some((fe) => fe.final_edit_link);
 }
 
 // Editing's landing page: every Shot Concept for the week, each with its
@@ -104,6 +112,7 @@ router.get('/', async (req, res, next) => {
     if (weekStart !== undefined && !WEEK_RE.test(weekStart)) {
       return res.status(400).json({ error: 'week_start must be YYYY-MM-DD' });
     }
+    await backfillEditingCalendar();
     const resolvedWeekResult = await pool.query(`SELECT ${WEEK_START_SQL} AS week_start`, [weekStart || null]);
     const resolvedWeekStart = resolvedWeekResult.rows[0].week_start;
 
@@ -139,10 +148,67 @@ router.get('/', async (req, res, next) => {
       editing_owner: c.editing_owner,
       shot_at: c.shot_at,
       editing_submitted_at: c.editing_submitted_at,
+      editing_started_at: c.editing_started_at,
+      final_approval_status: c.final_approval_status,
+      final_approval_feedback: c.final_approval_feedback,
+      editing_original_week_start: dateStr(c.editing_original_week_start),
+      editing_week_start: dateStr(c.editing_week_start),
+      editing_day: c.editing_day,
+      carried_over: dateStr(c.editing_original_week_start) !== dateStr(c.editing_week_start),
       final_edits: editsByConcept.get(c.creative_asset_id) || [],
     }));
 
     res.json({ week_start: dateStr(resolvedWeekStart), concepts: shaped });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Card-level "In Progress" -- a pure status transition, nothing else. Fixes
+// the live-QA bug where clicking "In Progress" opened the Final Edit modal:
+// that action used to piggyback on POST .../final-edits (below), which both
+// creates a final_edits row and sets this same flag as a side effect. This
+// route sets ONLY editing_started_at, so starting editing never creates a
+// final_edits row, never opens any modal, and never touches
+// editing_submitted_at/Final Approval. COALESCE keeps it idempotent -- a
+// second click, or one after a Final Edit already exists (which also sets
+// this column), never pushes the timestamp forward.
+router.post('/concepts/:creativeAssetId/start', async (req, res, next) => {
+  try {
+    const result = await pool.query(
+      `UPDATE creative_assets SET editing_started_at = COALESCE(editing_started_at, now()), updated_at = now() WHERE id = $1 RETURNING id, editing_started_at`,
+      [req.params.creativeAssetId]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Concept not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Round 11: undoes /start -- the segmented control's backward click from
+// In Progress (mirrors Shooting's /unstart). Clears ONLY editing_started_at;
+// editing_owner, editing_day, and the Concept's final_edits row (if one
+// already exists from a prior Edited click) are all left exactly as they
+// are, so this is a plain status-only revert, never a data-destroying one.
+// Guarded by editing_submitted_at IS NULL so a Concept already sitting in
+// Final Approval can never be silently pulled back to In Progress from a
+// stale card -- Request Changes is still the one supported way back once
+// submitted (see the Round 10 Final Approval flow), not this route.
+router.post('/concepts/:creativeAssetId/unstart', async (req, res, next) => {
+  try {
+    const result = await pool.query(
+      `UPDATE creative_assets SET editing_started_at = NULL, updated_at = now()
+       WHERE id = $1 AND editing_submitted_at IS NULL
+       RETURNING id, editing_started_at`,
+      [req.params.creativeAssetId]
+    );
+    if (!result.rows.length) {
+      const existsResult = await pool.query('SELECT id, editing_submitted_at FROM creative_assets WHERE id = $1', [req.params.creativeAssetId]);
+      if (!existsResult.rows.length) return res.status(404).json({ error: 'Concept not found' });
+      return res.status(409).json({ error: 'This Concept has already been submitted for Final Approval and can no longer be reverted from here.' });
+    }
+    res.json(result.rows[0]);
   } catch (err) {
     next(err);
   }
@@ -195,6 +261,13 @@ router.post('/concepts/:creativeAssetId/final-edits', async (req, res, next) => 
       );
       created.push(result.rows[0]);
     }
+    // This action IS "started editing" -- see the Round 8 comment on the
+    // column in schema.sql. COALESCE so a second batch of Final Edits on an
+    // already-started Concept doesn't push the timestamp forward.
+    await client.query(
+      `UPDATE creative_assets SET editing_started_at = COALESCE(editing_started_at, now()), updated_at = now() WHERE id = $1`,
+      [req.params.creativeAssetId]
+    );
     await client.query('COMMIT');
     res.status(201).json(created);
   } catch (err) {
@@ -287,13 +360,11 @@ router.patch('/final-edits/:id', async (req, res, next) => {
   }
 });
 
-// Concept-level submission to Final Approval -- the important workflow
-// change (see the brief, item 6/11): the Concept and its complete set of
-// Final Edits move together as one unit, not one Final Edit at a time.
-// Requires every Hook Variation to have a matching, linked Final Edit (plus
-// any custom/manual ones added) -- re-validated here rather than trusting
-// the client's own completion count. Idempotent: re-calling once already
-// submitted just returns the existing state rather than erroring.
+// Concept-level submission to Final Approval (see the Editing-simplification
+// brief, item 9/11): just needs its one Final Edit's link pasted back --
+// re-validated here rather than trusting the client's own state. Idempotent:
+// re-calling once already submitted just returns the existing state rather
+// than erroring.
 router.post('/concepts/:creativeAssetId/ready-for-approval', async (req, res, next) => {
   const client = await pool.connect();
   try {
@@ -309,15 +380,19 @@ router.post('/concepts/:creativeAssetId/ready-for-approval', async (req, res, ne
     }
 
     const editsResult = await client.query('SELECT * FROM final_edits WHERE creative_asset_id = $1', [req.params.creativeAssetId]);
-    const { required, complete } = conceptCompletion(concept.hook_variations, editsResult.rows);
-    if (required === 0 || complete < required) {
+    if (!conceptHasLinkedFinalEdit(editsResult.rows)) {
       client.release();
-      return res.status(400).json({ error: 'Complete all Final Edits before sending for approval' });
+      return res.status(400).json({ error: 'Add the Final Edit link before sending for approval' });
     }
 
     await client.query('BEGIN');
+    // Resubmitting after Request Changes resets final_approval_status back
+    // to 'pending' -- a fresh look, same Concept/final_edits row, not a new
+    // Final Approval queue entry.
     const result = await client.query(
-      `UPDATE creative_assets SET editing_submitted_at = now(), editing_submitted_by_user_id = $1, updated_at = now()
+      `UPDATE creative_assets SET
+         editing_submitted_at = now(), editing_submitted_by_user_id = $1,
+         final_approval_status = 'pending', updated_at = now()
        WHERE id = $2 RETURNING *`,
       [req.user.id, req.params.creativeAssetId]
     );
@@ -337,20 +412,116 @@ router.post('/concepts/:creativeAssetId/ready-for-approval', async (req, res, ne
 // started, just cleanup for a mistake made seconds ago. Locked once the
 // Concept has been submitted, same as the PATCH route above.
 router.delete('/final-edits/:id', async (req, res, next) => {
+  const client = await pool.connect();
   try {
-    const existingResult = await pool.query(
-      `SELECT fe.id, ca.editing_submitted_at FROM final_edits fe
+    const existingResult = await client.query(
+      `SELECT fe.id, fe.creative_asset_id, ca.editing_submitted_at FROM final_edits fe
        JOIN creative_assets ca ON ca.id = fe.creative_asset_id
        WHERE fe.id = $1`,
       [req.params.id]
     );
-    if (!existingResult.rows.length) return res.status(404).json({ error: 'Final edit not found' });
+    if (!existingResult.rows.length) { client.release(); return res.status(404).json({ error: 'Final edit not found' }); }
     if (existingResult.rows[0].editing_submitted_at) {
+      client.release();
       return res.status(400).json({ error: 'Concept already submitted for approval -- changes are locked' });
     }
-    const result = await pool.query('DELETE FROM final_edits WHERE id = $1 RETURNING id', [req.params.id]);
-    if (!result.rows.length) return res.status(404).json({ error: 'Final edit not found' });
+    const creativeAssetId = existingResult.rows[0].creative_asset_id;
+
+    await client.query('BEGIN');
+    const result = await client.query('DELETE FROM final_edits WHERE id = $1 RETURNING id', [req.params.id]);
+    if (!result.rows.length) {
+      await client.query('ROLLBACK');
+      client.release();
+      return res.status(404).json({ error: 'Final edit not found' });
+    }
+    // If that was the Concept's last remaining Final Edit, undo the
+    // "started editing" signal too -- otherwise removing an accidental
+    // Final Edit would leave the card stuck showing In Progress with
+    // nothing actually attached (see the Round 8 comment on the column).
+    const remaining = await client.query('SELECT id FROM final_edits WHERE creative_asset_id = $1 LIMIT 1', [creativeAssetId]);
+    if (!remaining.rows.length) {
+      await client.query('UPDATE creative_assets SET editing_started_at = NULL, updated_at = now() WHERE id = $1', [creativeAssetId]);
+    }
+    await client.query('COMMIT');
     res.status(204).end();
+  } catch (err) {
+    await client.query('ROLLBACK');
+    next(err);
+  } finally {
+    client.release();
+  }
+});
+
+// Editing's own reschedule endpoint, mirroring shooting.js's PATCH /:id --
+// the weekday "Move to..." menu, drag-and-drop, and Carry to next week all
+// call this one route (see the Scheduling brief, item 12: "same as
+// Shooting"). editing_day null means Unscheduled; editing_week_start
+// omitted keeps the current editing week. Scoped to ready_for_editing = true
+// rows only -- a Concept still in Shooting has nothing to reschedule here.
+// Unlike Shooting's PATCH /:id, there's no status to preserve/reset: the
+// workflow state (To Edit/Editing/Ready for Approval) is derived entirely
+// from final_edits + editing_submitted_at, which this route never touches
+// -- calendar placement and workflow progress are genuinely independent
+// dimensions (see item 9), so moving a Concept's edit day can never
+// accidentally undo or advance its progress.
+router.patch('/schedule/:id', async (req, res, next) => {
+  try {
+    const { editing_day, editing_week_start } = req.body || {};
+    if (editing_day !== null && editing_day !== undefined && !SHOOT_DAYS.includes(editing_day)) {
+      return res.status(400).json({ error: `editing_day must be one of: ${SHOOT_DAYS.join(', ')}, or null` });
+    }
+    if (editing_week_start !== undefined && editing_week_start !== null && !WEEK_RE.test(editing_week_start)) {
+      return res.status(400).json({ error: 'editing_week_start must be YYYY-MM-DD' });
+    }
+    const nextDay = editing_day === undefined ? null : editing_day;
+    const result = await pool.query(
+      `UPDATE shoot_schedule SET
+         editing_day = $1::varchar,
+         editing_week_start = COALESCE($2::date, editing_week_start),
+         updated_at = now()
+       WHERE id = $3 AND ready_for_editing = true
+       RETURNING *`,
+      [nextDay, editing_week_start || null, req.params.id]
+    );
+    if (!result.rows.length) {
+      const existsResult = await pool.query('SELECT id, ready_for_editing FROM shoot_schedule WHERE id = $1', [req.params.id]);
+      if (!existsResult.rows.length) return res.status(404).json({ error: 'Shoot schedule entry not found' });
+      return res.status(409).json({ error: 'This Concept is not yet ready for Editing' });
+    }
+    const row = result.rows[0];
+    res.json({
+      ...row,
+      original_week_start: dateStr(row.original_week_start),
+      scheduled_week_start: dateStr(row.scheduled_week_start),
+      editing_original_week_start: dateStr(row.editing_original_week_start),
+      editing_week_start: dateStr(row.editing_week_start),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Editing's own History, one row per week that has ever had a Concept enter
+// Editing -- same bucketing reasoning as shooting.js's GET /history.
+// "Submitted" (Ready for Approval) is Editing's completion marker, the
+// equivalent of Shooting's "shot".
+router.get('/history', async (req, res, next) => {
+  try {
+    await backfillEditingCalendar();
+    const result = await pool.query(
+      `SELECT
+         ss.editing_original_week_start AS week_start,
+         COUNT(*)::int AS planned,
+         COUNT(*) FILTER (WHERE ca.editing_submitted_at IS NOT NULL AND ss.editing_week_start = ss.editing_original_week_start)::int AS submitted,
+         COUNT(*) FILTER (WHERE ss.editing_week_start != ss.editing_original_week_start)::int AS carried_over,
+         COUNT(*) FILTER (WHERE ca.editing_submitted_at IS NULL AND ss.editing_week_start = ss.editing_original_week_start)::int AS not_completed
+       FROM shoot_schedule ss
+       JOIN creative_assets ca ON ca.id = ss.creative_asset_id
+       WHERE ss.ready_for_editing = true
+       GROUP BY ss.editing_original_week_start
+       ORDER BY ss.editing_original_week_start DESC`
+    );
+    res.json({ weeks: result.rows.map((w) => ({ ...w, week_start: dateStr(w.week_start) })) });
   } catch (err) {
     next(err);
   }

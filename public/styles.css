@@ -26,6 +26,17 @@
   --blue-light: #dbeafe;
   --orange: #ea580c;
   --orange-light: #fff0e8;
+  /* One colour per Filming/Editing person, reused everywhere an assignment
+     is surfaced (Shooting cards' left-edge accent + person pill today,
+     Editing next) -- a single source of truth so Mark/Shez/Til/Other never
+     drift to different colours in different views. Deliberately distinct
+     from the status palette above (teal/green/red/amber already mean
+     approved/killed/warning) so a person accent is never mistaken for a
+     status signal. */
+  --person-mark: var(--blue);
+  --person-shez: var(--purple);
+  --person-til: var(--orange);
+  --person-other: #6b7280;
   --shadow: 0 4px 12px rgba(0,0,0,0.08);
   --shadow-xs: 0 1px 2px rgba(0,0,0,0.05);
   --r: 6px;
@@ -69,11 +80,31 @@ body{font-family:'Inter',sans-serif;font-size:13px;background:var(--bg);color:va
 .btn.sidebar-quick-action{width:100%;margin-bottom:18px;background:var(--teal);color:white;}
 .btn.sidebar-quick-action:hover{background:var(--teal-dark);}
 .sidebar-nav{display:flex;flex-direction:column;gap:2px;flex:1;}
-.sidebar-nav .tab-btn{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:none;border:none;padding:9px 10px;border-radius:var(--r);font-family:inherit;font-size:13px;font-weight:500;color:rgba(255,255,255,0.65);cursor:pointer;}
-.sidebar-nav .tab-btn:hover{background:rgba(255,255,255,0.07);color:white;}
-.sidebar-nav .tab-btn.active{background:var(--teal);color:white;font-weight:600;}
+.sidebar-nav .tab-btn,.sidebar-footer .tab-btn{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:none;border:none;padding:9px 10px;border-radius:var(--r);font-family:inherit;font-size:13px;font-weight:500;color:rgba(255,255,255,0.65);cursor:pointer;}
+.sidebar-nav .tab-btn:hover,.sidebar-footer .tab-btn:hover{background:rgba(255,255,255,0.07);color:white;}
+.sidebar-nav .tab-btn.active,.sidebar-footer .tab-btn.active{background:var(--teal);color:white;font-weight:600;}
 .sidebar-nav-icon{font-size:14px;width:16px;text-align:center;flex-shrink:0;}
-.sidebar-footer{margin-top:auto;padding-top:14px;border-top:1px solid rgba(255,255,255,0.12);}
+.sidebar-footer{margin-top:auto;padding-top:14px;border-top:1px solid rgba(255,255,255,0.12);display:flex;flex-direction:column;gap:2px;}
+.sidebar-footer .sidebar-user{margin-top:8px;}
+
+/* Collapsible sidebar groups (Create & Review / Production / Library) --
+   same .tab-btn look for the leaf items (nested one level, via
+   .sidebar-group-items). Collapsed by default; toggleSidebarGroup (app.js)
+   adds .expanded, which is also what auto-expand-on-active-page uses so a
+   direct link/reload into a grouped tab never hides its own nav item.
+   Round 12: the header itself reads as real navigation, not filler text --
+   brighter/larger/heavier than before (was 11px @ 38% white, easy to miss
+   entirely) -- while staying visually distinct from a clickable page (no
+   icon slot, uppercase+tracking, disabled-cursor feel absent since it IS
+   clickable) so it can't be mistaken for a normal tab-btn either. */
+.sidebar-group{display:flex;flex-direction:column;margin-top:6px;}
+.sidebar-group-toggle{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;text-align:left;background:none;border:none;padding:8px 10px;border-radius:var(--r);font-family:inherit;font-size:12px;font-weight:800;letter-spacing:0.04em;text-transform:uppercase;color:rgba(255,255,255,0.62);cursor:pointer;}
+.sidebar-group-toggle:hover{color:white;background:rgba(255,255,255,0.05);}
+.sidebar-group-chevron{font-size:10px;color:rgba(255,255,255,0.45);transition:transform 0.15s ease;}
+.sidebar-group.expanded .sidebar-group-chevron{transform:rotate(180deg);}
+.sidebar-group-items{display:none;flex-direction:column;gap:2px;padding-left:4px;}
+.sidebar-group.expanded .sidebar-group-items{display:flex;}
+.sidebar-spacer{height:10px;}
 .sidebar-signout{width:100%;text-align:left;background:none;border:none;padding:8px 10px;font-family:inherit;font-size:12.5px;font-weight:500;color:rgba(255,255,255,0.5);cursor:pointer;}
 .sidebar-signout:hover{color:white;}
 .sidebar-user{padding:0 10px 6px;font-size:12px;color:rgba(255,255,255,0.75);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -352,9 +383,9 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .drop-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:16px 18px;cursor:pointer;box-shadow:var(--shadow-xs);}
 .drop-card.selected{border-color:var(--teal);box-shadow:0 0 0 2px var(--teal-light);}
 .drop-card-header{display:flex;align-items:center;justify-content:space-between;gap:8px;}
-.drop-card-name{font-size:15px;font-weight:700;cursor:text;}
+.drop-card-name{font-size:17px;font-weight:800;color:var(--text);letter-spacing:-0.01em;cursor:text;}
 .drop-card-name.untitled{color:var(--text-muted);font-style:italic;font-weight:600;}
-.drop-card-name-input{width:100%;font-size:15px;font-weight:700;font-family:inherit;border:1px solid var(--teal);border-radius:4px;padding:2px 4px;margin:-3px -5px;}
+.drop-card-name-input{width:100%;font-size:17px;font-weight:800;font-family:inherit;border:1px solid var(--teal);border-radius:4px;padding:2px 4px;margin:-3px -5px;}
 .drop-card-edit-btn{background:none;border:1px solid var(--border);border-radius:var(--r);color:var(--text-muted);font-size:11.5px;padding:3px 9px;cursor:pointer;flex-shrink:0;}
 .drop-card-edit-btn:hover{background:var(--surface2);color:var(--text-secondary);}
 .drop-card-date{font-size:12.5px;color:var(--text-muted);margin:3px 0 11px;}
@@ -370,9 +401,15 @@ main{flex:1;min-width:0;padding:20px 24px;}
    progress (.drop-card-counts/.drop-card-pct, unchanged above) moves into
    .drop-card-secondary below the products so it reads as secondary, not
    the headline. */
-.drops-month-group{margin-bottom:22px;}
+.drops-month-group{margin-bottom:34px;}
+.drops-month-group:not(:first-child){margin-top:6px;}
 .drops-month-group:last-child{margin-bottom:0;}
-.drops-month-heading{font-size:12.5px;font-weight:800;letter-spacing:0.05em;color:var(--text-muted);margin-bottom:10px;}
+/* Stronger section hierarchy (round 7, item 1): larger/darker/bolder than
+   the previous pale 12.5px muted label, with a subtle rule underneath to
+   separate the heading from the cards below rather than relying on
+   whitespace alone -- restrained (a border, not a background block). */
+.drops-month-heading{font-size:18px;font-weight:800;letter-spacing:-0.01em;color:var(--text);margin-bottom:14px;padding-bottom:8px;border-bottom:1px solid var(--border);}
+.drops-month-count{font-size:12.5px;font-weight:700;letter-spacing:0;color:var(--text-muted);text-transform:none;}
 /* Compact 2-column product tile grid, replacing the old cramped single-
    column text list. Fixed-height thumbnails (rather than aspect-ratio)
    keep every tile's height identical regardless of column width, so
@@ -397,15 +434,59 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .drop-card-status.needs-attention{background:var(--amber-light);color:var(--amber);}
 .drop-card-status.at-risk{background:var(--red-light);color:var(--red);}
 .drop-card-review-link-btn{font-size:12px;font-weight:600;color:var(--teal-dark);background:none;border:none;padding:0;cursor:pointer;font-family:inherit;display:block;}
-/* Promotions landing cards only (scoped via #promotions-list so Drops'
-   shared .drop-card classes are untouched): reserves a consistent
-   two-line title height so the date/progress/next-priority rows below
-   start at the same vertical position whether a promotion's name wraps
-   to one line (e.g. "Boxing Day 2026") or two (e.g. "Birthday Sale
-   2027") -- an explicit line-height keeps the two-line reservation
-   pixel-exact instead of depending on the browser's own "normal" metric. */
-#promotions-list .drop-card-name{line-height:17px;}
-#promotions-list .drop-card-header{min-height:34px;}
+/* Promotions landing page, round 2 (Issue 3): a "Current Focus" hero for
+   the one promotion actually needing attention, then everything else as
+   quiet "Coming Up" cards -- replaces the flat equal-weight card grid the
+   first pass left in place. Same underlying p.stages/p.summary data as
+   before, just a different shape for it (see promotionCurrentFocusHtml/
+   promotionComingUpCardHtml in app.js). Restrained: one emoji eyebrow, no
+   gradients, no imagery -- the dominance comes from size/weight/space, not
+   decoration. */
+.promo-focus-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:22px 26px;margin-bottom:22px;box-shadow:var(--shadow);cursor:pointer;transition:box-shadow 0.12s;}
+.promo-focus-card:hover{box-shadow:0 6px 20px rgba(0,0,0,0.12);}
+.promo-focus-eyebrow{font-size:11.5px;font-weight:800;letter-spacing:0.06em;text-transform:uppercase;color:var(--teal-dark);margin-bottom:8px;}
+.promo-focus-header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+.promo-focus-name{font-size:24px;font-weight:800;color:var(--text);}
+.promo-focus-meta{font-size:13.5px;color:var(--text-muted);margin:6px 0 14px;}
+.promo-focus-ready{font-size:16px;color:var(--text-secondary);font-weight:600;}
+.promo-focus-ready strong{color:var(--text);font-weight:800;font-size:19px;}
+.promo-focus-progress{height:10px;margin:10px 0 18px;}
+.promo-focus-stages{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:18px;}
+.promo-focus-stage{background:var(--surface2);border-radius:var(--r);padding:10px 12px;}
+.promo-focus-stage-name{font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.promo-focus-stage-count{font-size:16px;font-weight:800;color:var(--text);margin-top:2px;}
+.promo-focus-cta{font-size:14px;}
+
+.promo-section-heading{font-size:12.5px;font-weight:800;letter-spacing:0.05em;text-transform:uppercase;color:var(--text-muted);margin-bottom:2px;}
+.promo-section-subheading{font-size:12.5px;color:var(--text-muted);margin-bottom:12px;}
+.promo-coming-up-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-bottom:8px;}
+.promo-coming-up-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:13px 15px;cursor:pointer;transition:border-color 0.12s, box-shadow 0.12s;}
+.promo-coming-up-card:hover{border-color:var(--teal);box-shadow:var(--shadow-xs);}
+
+/* Past Promotions archive (round 7, item 3): collapsed-by-default disclosure
+   at the bottom of the landing page -- deliberately the quietest treatment
+   on the page (no border/shadow at rest, muted text) so a long history list
+   never competes with Current Focus/Coming Up above it. */
+.promo-past-toggle{display:flex;align-items:center;gap:7px;background:none;border:none;border-top:1px solid var(--border);width:100%;padding:16px 0 10px;margin-top:8px;font-size:13px;font-weight:700;color:var(--text-secondary);cursor:pointer;font-family:inherit;text-align:left;}
+.promo-past-toggle:hover{color:var(--text);}
+.promo-past-toggle-arrow{display:inline-block;font-size:11px;color:var(--text-muted);transition:transform 0.12s;}
+.promo-past-toggle.open .promo-past-toggle-arrow{transform:rotate(90deg);}
+.promo-past-count{color:var(--text-muted);font-weight:600;}
+.promo-past-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:9px;padding-top:6px;}
+.promo-past-card{padding:10px 12px;cursor:pointer;border-radius:var(--r);transition:background-color 0.12s;}
+.promo-past-card:hover{background:var(--surface2);}
+.promo-past-name{font-size:13px;font-weight:600;color:var(--text-secondary);}
+.promo-past-meta{font-size:11.5px;color:var(--text-muted);margin-top:2px;}
+.promo-coming-up-name{font-size:13.5px;font-weight:700;color:var(--text);}
+.promo-coming-up-meta{font-size:11.5px;color:var(--text-muted);margin:3px 0 6px;}
+.promo-coming-up-pct{font-size:11.5px;color:var(--text-secondary);font-weight:600;}
+
+/* The "N upcoming promotions / Mark as Reviewed" row read as visually
+   disconnected from the cards above it (a plain border-top with no other
+   relationship to the grid) -- tightening the gap and softening the
+   divider integrates it as the section's own closing line rather than an
+   unrelated strip, without inventing a new row/workflow. */
+#promotions-list-view .planning-step-footer{margin-top:22px;padding-top:12px;border-top-color:var(--surface2);}
 
 /* ── DROP MODAL: date quickpicks + auto-populated style checklist ── */
 .quickpick-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:-6px;}
@@ -487,6 +568,14 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .promotion-stage-item-info{min-width:0;flex:1;}
 .promotion-stage-item-name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .promotion-stage-item-meta{font-size:11px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+/* Final Creative (round 7, item 4): a quiet confirmation line, not another
+   status pill -- reads as "here's the finished thing", distinct from the
+   workflow meta above it. Stays visible once the item's own status text
+   already reads Approved/Live, and equally once the whole Promotion moves
+   into Past Promotions, since both render from this same row. */
+.promotion-stage-item-final-creative{display:flex;align-items:center;gap:8px;margin-top:4px;}
+.promotion-stage-item-final-badge{font-size:11px;font-weight:700;color:var(--green);}
+.promotion-stage-item-final-creative .link-btn{font-size:11px;}
 .promotion-stage-urgency-badge{display:inline-block;padding:2px 8px;border-radius:var(--r-pill);font-size:11px;font-weight:700;margin-bottom:8px;}
 .promotion-stage-urgency-badge.green{background:var(--green-light);color:var(--green);}
 .promotion-stage-urgency-badge.amber{background:var(--amber-light);color:var(--amber);}
@@ -599,6 +688,54 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .cc-row-sizes label{display:flex;flex-direction:column;gap:4px;font-size:10.5px;font-weight:600;color:var(--text-secondary);}
 .cc-sizes-summary{font-size:12.5px;color:var(--text-secondary);}
 .cc-sizes-summary.hint{color:var(--text-muted);}
+
+/* Round 12: Settings -> Users access, redesigned from Round 11's always-open
+   13-checkbox cards into a scannable table (Name/Email/Role/Access/Edit),
+   following the same .admin-table convention used elsewhere in this app
+   rather than inventing a new table style. Full checkbox grid now only
+   appears inside the Edit modal (.user-access-modules below). */
+.users-access-table{width:100%;border-collapse:collapse;background:var(--surface);border-radius:var(--r-lg);overflow:hidden;box-shadow:var(--shadow-xs);}
+.users-access-table th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-muted);padding:8px 10px;background:var(--surface2);border-bottom:1px solid var(--border);}
+.users-access-table td{padding:9px 10px;font-size:12.5px;border-bottom:1px solid var(--border);vertical-align:middle;}
+.users-access-table tr:last-child td{border-bottom:none;}
+.users-access-email{color:var(--text-muted);}
+.users-access-chip{display:inline-block;font-size:11px;font-weight:600;padding:3px 9px;border-radius:var(--r-pill);}
+.users-access-chip-full{background:var(--green-light);color:var(--green);}
+.users-access-chip-restricted{background:var(--amber-light);color:var(--amber);}
+.users-access-chip-password-set{background:var(--blue-light);color:var(--blue);}
+.users-access-chip-password-needed{background:var(--amber-light);color:var(--amber);}
+
+/* Edit User modal -- the positive "checked = can access" checkbox grid
+   that gets inverted to/from the deny-list restricted_modules on open/save
+   (see openUserAccessModal/saveUserAccessModal in app.js). */
+.user-access-modal-identity{margin-bottom:12px;}
+.user-access-modal-name{font-size:14px;font-weight:700;}
+.user-access-modal-email{font-size:12px;color:var(--text-muted);}
+.user-access-modules-header{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-muted);margin-top:14px;}
+.user-access-modules{display:flex;flex-wrap:wrap;gap:8px 16px;padding-top:8px;}
+.user-access-module{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text-secondary);cursor:pointer;}
+
+/* Round 13: Edit User modal's Password block -- never shows or round-trips
+   the actual password (see PATCH /users/:id/password), just a status word
+   and a collapsed reset action (see toggleUserAccessPasswordReset). */
+.user-access-password-block{border-top:1px solid var(--border);border-bottom:1px solid var(--border);padding:10px 0;margin:2px 0;}
+.user-access-password-row{display:flex;align-items:center;justify-content:space-between;font-size:12.5px;color:var(--text-secondary);}
+.user-access-password-reveal{display:flex;gap:8px;margin-top:8px;}
+.user-access-password-reveal input{flex:1;font-family:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r);}
+
+/* Round 13: Module Access matrix below the main Users table -- users down
+   the left, modules across the top, same positive "checked = can access"
+   framing as the Edit modal but scannable across everyone at once. Small
+   compact cells + horizontal scroll wrapper since 13 module columns don't
+   fit a 220px-sidebar-offset content area at once on most screens. */
+.users-matrix-section{margin-top:26px;}
+.users-matrix-scroll{overflow-x:auto;background:var(--surface);border-radius:var(--r-lg);box-shadow:var(--shadow-xs);}
+.users-matrix-table{border-collapse:collapse;white-space:nowrap;}
+.users-matrix-table th,.users-matrix-table td{padding:7px 9px;text-align:center;border-bottom:1px solid var(--border);}
+.users-matrix-table thead th{font-size:10px;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);background:var(--surface2);font-weight:700;}
+.users-matrix-table tbody tr:last-child td{border-bottom:none;}
+.users-matrix-table input[type=checkbox]{width:14px;height:14px;cursor:pointer;}
+.users-matrix-name{text-align:left;font-size:12.5px;font-weight:600;white-space:nowrap;position:sticky;left:0;background:var(--surface);}
 .cc-size-input{width:110px;font-family:inherit;font-size:12.5px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--r);}
 .cc-add-row{display:flex;gap:8px;margin-bottom:14px;}
 .cc-add-row input{flex:1;font-family:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r);}
@@ -1001,6 +1138,21 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .cd-filter-btn:hover{background:var(--border);}
 .cd-filter-btn.active{background:var(--teal);border-color:var(--teal);color:white;}
 .promo-shoot-origin-toggle{display:flex;gap:8px;margin-top:6px;}
+/* Round 8's small Add Concept chooser -- two equal cards, nothing else, so
+   the first thing "+ Add Concept" shows is never a giant form. */
+.promo-chooser-modal{max-width:420px;}
+.promo-chooser-options{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px;}
+.promo-chooser-card{display:flex;flex-direction:column;gap:4px;text-align:left;background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-lg);padding:14px;cursor:pointer;font-family:inherit;}
+.promo-chooser-card:hover{border-color:var(--teal);background:var(--border);}
+.promo-chooser-card-title{font-size:13.5px;font-weight:700;color:var(--text);}
+.promo-chooser-card-desc{font-size:11.5px;color:var(--text-secondary);}
+@media (max-width:640px){.promo-chooser-options{grid-template-columns:1fr;}}
+/* Promotion intake's widened modal (.cd-modal-workspace) -- pairs related
+   short fields (Format/Concept Name, Filming/Editing) side by side instead
+   of stacking every field full-width now that there's room, per the brief:
+   use the extra space intelligently rather than just stretching everything. */
+.promo-shoot-2col{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+@media (max-width:640px){.promo-shoot-2col{grid-template-columns:1fr;}}
 .cd-product-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
 @media (max-width:1100px){.cd-product-grid{grid-template-columns:repeat(2,1fr);}}
 @media (max-width:700px){.cd-product-grid{grid-template-columns:1fr;}}
@@ -1138,6 +1290,16 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .cd-style-chip-code{font-weight:400;color:var(--text-muted);}
 .cd-style-chip-remove{background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:14px;line-height:1;padding:0 2px;}
 .cd-style-chip-remove:hover{color:var(--red);}
+
+/* Promotion intake's Existing Concept execution brief -- compact
+   alternative-hook rows and pasted-reference rows, same visual language as
+   the style chips above rather than a new pattern. */
+.promo-shoot-alt-hook-row{display:flex;align-items:center;gap:6px;margin-bottom:6px;}
+.promo-shoot-alt-hook-row input{flex:1;}
+.promo-shoot-reference-row{display:flex;align-items:center;justify-content:space-between;gap:6px;font-size:12.5px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;margin-bottom:6px;}
+.promo-shoot-reference-row a{color:var(--teal-dark);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.promo-shoot-reference-add-row{display:flex;gap:6px;margin-bottom:8px;}
+.promo-shoot-reference-add-row input{flex:1;}
 
 /* Required-field indicators: a subtle grey asterisk on the label (never
    red by default) and a quiet legend at the bottom of the form -- per the
@@ -1331,7 +1493,16 @@ main{flex:1;min-width:0;padding:20px 24px;}
    card (item 7) -- so a scan of the landing page singles out "finished,
    waiting for review" without shouting. */
 .editing-concept-card-ready{border-left-color:var(--green);}
+/* Same per-Editor colour accent as Shooting's Filming cards (see
+   personAccentKey in app.js and :root's --person-* tokens) -- consistent
+   identification anywhere an assignment is surfaced. Edited (green) always
+   wins over the person accent, same priority as Shooting's Shot cards. */
+.editing-concept-card:not(.editing-concept-card-ready).person-accent-mark{border-left-color:var(--person-mark);}
+.editing-concept-card:not(.editing-concept-card-ready).person-accent-shez{border-left-color:var(--person-shez);}
+.editing-concept-card:not(.editing-concept-card-ready).person-accent-til{border-left-color:var(--person-til);}
+.editing-concept-card:not(.editing-concept-card-ready).person-accent-other{border-left-color:var(--person-other);}
 .editing-status-to-edit{background:var(--amber-light);color:var(--amber);}
+.editing-status-scheduled{background:var(--teal-light);color:var(--teal-dark);}
 .editing-status-editing{background:var(--blue-light);color:var(--blue);}
 .editing-status-ready{background:var(--green-light);color:var(--green);}
 .editing-ready-badge{font-size:11px;font-weight:700;letter-spacing:0.3px;color:var(--green);margin-bottom:10px;}
@@ -1358,42 +1529,20 @@ main{flex:1;min-width:0;padding:20px 24px;}
    glance. A checkbox reflects whether a Final Edit is attached, never one
    the user ticks by hand. Slightly roomier than a plain table row so each
    entry reads as a creative output, not a database record (item 1). */
-.editing-req-heading{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);display:flex;align-items:center;gap:8px;}
-.editing-req-heading-count{font-size:10.5px;font-weight:700;letter-spacing:0.2px;color:var(--teal-dark);background:var(--teal-light);border-radius:var(--r-pill);padding:2px 8px;text-transform:none;}
-.editing-req-heading-count-done{color:var(--green);background:var(--green-light);}
-.editing-req-list{display:flex;flex-direction:column;gap:6px;}
-.editing-req-row{display:flex;align-items:flex-start;gap:10px;width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--r);padding:10px 12px;}
-/* Row background/border stays the same complete or not (item 5) -- the
-   green check-circle alone is enough at this level; stronger positive
-   treatment is reserved for the whole Concept (the header pill/footer). */
-.editing-req-check{width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;border:2px solid var(--border);color:transparent;font-size:11px;font-weight:900;line-height:1;}
-.editing-req-row-complete .editing-req-check{border-color:var(--green);background:var(--green);color:white;}
-.editing-req-main{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1;}
-.editing-req-label{font-size:12.5px;font-weight:600;}
-.editing-req-hook{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:11.5px;font-style:italic;color:var(--text-muted);}
-.editing-req-action{display:flex;align-items:center;gap:2px;flex-shrink:0;white-space:nowrap;padding-top:1px;}
-
-/* One primary action per row (item 4) -- a completed row's Replace/Delete
-   move into this small overflow menu instead of sitting permanently beside
-   View Final Edit, same "•••" pattern as Reference Library's card menu
-   (.ref-card-menu). */
-.editing-req-menu{position:relative;}
-.editing-req-menu-btn{background:none;border:none;font-family:inherit;font-size:13px;font-weight:700;letter-spacing:1px;color:var(--text-muted);cursor:pointer;padding:2px 7px;border-radius:var(--r);line-height:1.4;}
-.editing-req-menu-btn:hover{background:var(--border);color:var(--text-secondary);}
-.editing-req-menu-dropdown{display:none;position:absolute;right:0;top:100%;margin-top:4px;background:white;border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--shadow);min-width:150px;padding:4px;z-index:20;}
-.editing-req-menu-dropdown.show{display:flex;flex-direction:column;}
-.editing-req-menu-item{background:none;border:none;font-family:inherit;font-size:12px;font-weight:600;color:var(--text);text-align:left;padding:6px 8px;border-radius:var(--r);cursor:pointer;white-space:nowrap;}
-.editing-req-menu-item:hover{background:var(--surface2);}
-.editing-req-menu-item-danger{color:var(--red);}
-
-/* A secondary, exception-only action (item 6) -- visually quieter than the
-   required checklist above it. */
-.editing-add-variation-btn{font-size:11.5px;font-weight:600;color:var(--text-muted);}
-.editing-add-variation-btn:hover{color:var(--teal-dark);}
-
-.editing-custom-row{display:flex;align-items:center;gap:8px;margin-top:6px;}
-.editing-custom-row-input{flex:1;font-family:inherit;font-size:12.5px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--r);}
-.editing-custom-row-format{font-family:inherit;font-size:12.5px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--r);}
+/* Editing is a handoff, not a checklist (see the Editing-simplification
+   brief, item 9): one Final Edit per Concept, shown as a plain summary --
+   Editor, the link (or "no link yet"), and any notes -- not a per-Hook
+   checklist with its own completion count. */
+.editing-final-edit-empty{font-size:12.5px;color:var(--text-muted);margin-bottom:8px;}
+.editing-final-edit-row{display:flex;flex-direction:column;gap:6px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--r);padding:10px 12px;margin-bottom:8px;}
+.editing-final-edit-field{font-size:12.5px;}
+.editing-final-edit-field-label{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);margin-right:6px;}
+.editing-final-edit-notes{font-size:12px;color:var(--text-secondary);white-space:pre-wrap;}
+.editing-final-edit-remove{font-size:11.5px;font-weight:600;color:var(--red);margin-left:12px;}
+.editing-final-edit-remove:hover{text-decoration:underline;}
+.editing-changes-required-banner{background:#FFF4E5;border:1px solid var(--amber);border-radius:var(--r);padding:10px 12px;margin-bottom:10px;}
+.editing-changes-required-title{font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:#B45309;margin-bottom:4px;}
+.editing-changes-required-feedback{font-size:12.5px;color:var(--text-primary);white-space:pre-wrap;}
 /* Plain quoted read-only text, not an input-styled box -- the Hook's
    Opening is already known and never re-entered here, so it shouldn't look
    editable (Add Final Edit modal, item 1). */
@@ -1648,7 +1797,16 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .shoot-panel{display:none;}
 .shoot-panel.active{display:block;}
 
-.shoot-owner-filter{background:white;border:1px solid var(--border);border-radius:var(--r);padding:6px 10px;font-family:inherit;font-size:12.5px;font-weight:600;color:var(--text-secondary);cursor:pointer;}
+/* Compact "All | Mark | Shez" person filter -- Shooting's Filming filter
+   and Editing's editor filter both use this, in place of a <select> full
+   of every app user (see the brief: "do NOT show every app user merely
+   because they exist"). */
+.person-filter{display:inline-flex;border:1px solid var(--border);border-radius:var(--r-pill);overflow:hidden;}
+.person-filter-btn{background:white;border:none;padding:6px 12px;font-family:inherit;font-size:12.5px;font-weight:600;color:var(--text-secondary);cursor:pointer;}
+.person-filter-btn:hover{background:var(--surface2);}
+.person-filter-btn + .person-filter-btn{border-left:1px solid var(--border);}
+.person-filter-btn-active{background:var(--teal);color:white;}
+.person-filter-btn-active:hover{background:var(--teal);}
 
 /* Planned/Shot/Remaining -- a compact summary line, not KPI cards (see the
    brief: "the calendar is the main interface"). Each number is bolded up a
@@ -1748,25 +1906,42 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .shoot-card-name{font-weight:700;font-size:12.5px;}
 .shoot-card-product{font-size:11.5px;color:var(--text-secondary);}
 .shoot-card-drop-badge{display:inline-block;margin-left:6px;font-size:10px;font-weight:700;color:var(--purple);background:var(--purple-light);border-radius:var(--r-pill);padding:1px 7px;}
+.shoot-card-filming{font-size:11px;color:var(--text-secondary);}
+.shoot-card-filming strong{color:var(--text-primary);}
 .shoot-card-meta{font-size:11px;color:var(--text-muted);}
+/* Per-Filming-person left-edge accent + name pill -- a scanning aid for the
+   "All" person filter (see personAccentKey in app.js, the single place a
+   name maps to a colour, reused wherever an assignment is shown). The card
+   body itself stays white; the written "Filming: Name" label is still the
+   actual source of truth, this is purely supplementary -- never colour
+   alone. Scoped with :not(.shoot-card-shot) so a completed card's green
+   "Shot" border always wins over the person accent, same visual priority
+   as before this existed. */
+.shoot-card:not(.shoot-card-shot).person-accent-mark{border-left-color:var(--person-mark);}
+.shoot-card:not(.shoot-card-shot).person-accent-shez{border-left-color:var(--person-shez);}
+.shoot-card:not(.shoot-card-shot).person-accent-til{border-left-color:var(--person-til);}
+.shoot-card:not(.shoot-card-shot).person-accent-other{border-left-color:var(--person-other);}
+.shoot-card-person-pill{display:inline-block;font-size:9.5px;font-weight:700;color:white;border-radius:var(--r-pill);padding:1px 6px;margin-left:6px;vertical-align:middle;}
+.shoot-card-person-pill.person-accent-mark{background:var(--person-mark);}
+.shoot-card-person-pill.person-accent-shez{background:var(--person-shez);}
+.shoot-card-person-pill.person-accent-til{background:var(--person-til);}
+.shoot-card-person-pill.person-accent-other{background:var(--person-other);}
 .shoot-card-footer{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
 .shoot-card-status{font-size:10.5px;font-weight:700;color:var(--text-muted);}
 .shoot-card-status-shot{color:var(--green);}
 .shoot-carried-badge{font-size:10px;font-weight:700;color:var(--amber);background:var(--amber-light);border-radius:var(--r-pill);padding:1px 7px;}
 
-/* Week card status as a compact pill (not the plain text Today's list still
-   uses -- see shootingTodayItemHtml, deliberately untouched) so a stack of
-   cards in one day scans instantly by shape/colour, not just by reading
-   each one. Still just a small tinted badge, never a large coloured block. */
-.shoot-status-pill{display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:700;color:var(--text-secondary);background:var(--border);border-radius:var(--r-pill);padding:2px 8px;}
-.shoot-status-pill-shot{color:var(--green);background:var(--green-light);}
-/* Planned pill doubles as a "mark as Shot" toggle -- the hollow circle
-   already reads as an unchecked box, so this is a small affordance change
-   (border/background reset off the <button>, a hover state) rather than a
-   whole new checkbox control. Stays a quiet grey pill; only turns green
-   once the card is actually marked Shot (see shootingCardHtml). */
-.shoot-status-pill-toggle{border:none;font-family:inherit;cursor:pointer;}
-.shoot-status-pill-toggle:hover{background:var(--teal-light);color:var(--teal-dark);}
+/* Production-status control (Scheduled / In Progress / Shot·Filmed) -- a
+   segmented control, not a single passive badge, so it's obviously
+   interactive (see the Scheduling brief, item 7). Both Week cards and
+   Today's list use this same control now. */
+.shoot-status-control{display:inline-flex;border-radius:var(--r-pill);overflow:hidden;border:1px solid var(--border);}
+.shoot-status-segment{font-family:inherit;font-size:10px;font-weight:700;color:var(--text-muted);background:var(--surface);border:none;padding:3px 8px;cursor:not-allowed;}
+.shoot-status-segment:not(:disabled){cursor:pointer;color:var(--text-secondary);}
+.shoot-status-segment:not(:disabled):hover{background:var(--teal-light);color:var(--teal-dark);}
+.shoot-status-segment-active{background:var(--border);color:var(--text-primary);}
+.shoot-status-segment-active:not(:disabled){background:var(--green-light);color:var(--green);}
+.shoot-status-segment + .shoot-status-segment{border-left:1px solid var(--border);}
 
 /* Card footer: "View Brief →" is the one primary, always-visible action;
    moving days lives behind a quiet "•••" overflow menu instead of a

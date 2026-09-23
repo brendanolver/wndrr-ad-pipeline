@@ -1,6 +1,7 @@
 const express = require('express');
 const { COOKIE_NAME, issueToken, verifyToken, checkCredentials } = require('../auth');
 const { pool } = require('../db');
+const { getRestrictedModules } = require('../lib/permissions');
 
 const router = express.Router();
 
@@ -17,7 +18,12 @@ router.post('/login', async (req, res, next) => {
       secure: process.env.NODE_ENV === 'production',
       maxAge: 30 * 24 * 60 * 60 * 1000,
     });
-    res.json({ ok: true, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
+    const restrictedModules = await getRestrictedModules(user.id);
+    res.json({
+      ok: true,
+      user: { id: user.id, name: user.name, email: user.email, role: user.role },
+      restricted_modules: restrictedModules,
+    });
   } catch (err) {
     next(err);
   }
@@ -42,10 +48,16 @@ router.get('/session', async (req, res, next) => {
     if (!user || !user.active) return res.json({ authenticated: false });
 
     const permsResult = await pool.query('SELECT permission_key FROM role_permissions WHERE role = $1', [user.role]);
+    // Round 11: restricted_modules is what the sidebar actually hides itself
+    // by (see app.js's applySidebarModuleAccess) -- an empty array (every
+    // existing account today) means full visibility, the deliberate safe
+    // default (see schema.sql's user_module_restrictions comment).
+    const restrictedModules = await getRestrictedModules(user.id);
     res.json({
       authenticated: true,
       user: { id: user.id, name: user.name, email: user.email, role: user.role },
       permissions: permsResult.rows.map((r) => r.permission_key),
+      restricted_modules: restrictedModules,
     });
   } catch (err) {
     next(err);

@@ -18,6 +18,8 @@ const CONCEPT_ASSIGNEES = ['Mark', 'Shez', 'Til'];
 
 let state = {
   currentUser: null,
+  restrictedModules: [],
+  usersAccess: null,
   styles: [], categories: [], board: null, dashboard: null, drops: [], provenWinners: [],
   coreProducts: [], planningSettings: null, coreView: 'priority', coreAllProductsOpen: false,
   coreExpandedCategories: new Set(), coreExpandedProducts: new Set(),
@@ -98,10 +100,14 @@ let state = {
   // tuesdayReview/shooting above. data is Week's own GET /editing response
   // (Concepts already nested with their Final Edits); activeConceptAssetId/
   // activeFinalEditId track which modal is currently open so save handlers
-  // know what they're writing to; createRows is the "+ Add Another Asset"
-  // custom rows in the Create Final Edits flow, reset each time that modal
-  // opens.
-  editing: { weekOffset: 0, data: null, filter: 'all', editorFilter: 'all', activeConceptAssetId: null, activeFinalEditId: null, createRows: [] },
+  // know what they're writing to.
+  editing: { view: 'week', weekOffset: 0, data: null, todayData: null, historyData: null, dragScheduleId: null, editorFilter: 'all', activeConceptAssetId: null, activeFinalEditId: null, finalEditSubmitMode: false },
+  // Final Approval -- a flat queue (no week-nav, no filters), same "one
+  // shared source of truth on the server" pattern as Editing: data is
+  // GET /final-approval's rows as-is. activeCreativeAssetId tracks which
+  // review modal is open; showFeedbackForm toggles the inline Request
+  // Changes textarea within it.
+  finalApproval: { data: [], activeCreativeAssetId: null, showFeedbackForm: false },
 };
 let dashboardWeekOffset = 0;
 
@@ -118,10 +124,31 @@ async function api(path, opts = {}) {
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `Request failed (${res.status})`);
+    const err = new Error(body.error || `Request failed (${res.status})`);
+    err.status = res.status; // lets a caller distinguish "you're not allowed" (403) from a real failure
+    throw err;
   }
   if (res.status === 204) return null;
   return res.json();
+}
+
+// For a module-gated route inside loadAll()'s big initial Promise.all: a
+// 403 there is an ordinary, expected outcome for a restricted user (e.g.
+// Mark loading the app) -- not a real error -- so it resolves to `fallback`
+// instead of rejecting. Any other failure (500, network) still rejects and
+// surfaces the same way api() always has, since that IS still worth
+// stopping on. Production-readiness audit fix: before this, a single
+// blocked module inside that one big Promise.all aborted the ENTIRE
+// initial load for a restricted user -- every tab, not just the one they
+// don't have access to (confirmed live: Mark's first load failed outright
+// once Round 11 started gating /api/board, /api/planning-settings, etc.).
+async function apiAllowedOr(path, fallback) {
+  try {
+    return await api(path);
+  } catch (e) {
+    if (e.status === 403) return fallback;
+    throw e;
+  }
 }
 
 // ── Auth ─────────────────────────────────────────────
@@ -130,9 +157,10 @@ async function login() {
   const password = document.getElementById('pw-input').value;
   const errEl = document.getElementById('pw-error');
   try {
-    const { user } = await api('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
+    const { user, restricted_modules } = await api('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
     errEl.classList.remove('show');
     state.currentUser = user;
+    state.restrictedModules = restricted_modules || [];
     showApp();
   } catch (e) {
     errEl.classList.add('show');
@@ -159,10 +187,32 @@ function renderSidebarUser() {
     : '';
 }
 
+// Round 11: hides every sidebar item (and, for a group whose entire
+// contents are hidden, the group header too) the current user's
+// restricted_modules covers -- see schema.sql's user_module_restrictions
+// (deny-list: absence of a row means visible, so an empty array here, true
+// for every account today, hides nothing). This is the navigation half of
+// module access; requireModuleAccess in server.js is the route/API half --
+// see the Round 11 report for which module routes that actually covers.
+function applySidebarModuleAccess() {
+  const restricted = new Set(state.restrictedModules || []);
+  document.querySelectorAll('.tab-btn[data-tab]').forEach((btn) => {
+    btn.style.display = restricted.has(btn.dataset.tab) ? 'none' : '';
+  });
+  document.querySelectorAll('.sidebar-group').forEach((group) => {
+    const items = group.querySelectorAll('.tab-btn[data-tab]');
+    const allHidden = items.length > 0 && Array.from(items).every((btn) => restricted.has(btn.dataset.tab));
+    group.style.display = allHidden ? 'none' : '';
+  });
+  const usersTabBtn = document.getElementById('settings-users-tab-btn');
+  if (usersTabBtn) usersTabBtn.style.display = state.currentUser && state.currentUser.role === 'admin' ? '' : 'none';
+}
+
 function showApp() {
   document.getElementById('password-screen').style.display = 'none';
   document.getElementById('app').style.display = 'flex';
   renderSidebarUser();
+  applySidebarModuleAccess();
   loadAll();
   // Opens straight into the right sidebar tab for a deep link present at
   // load time (e.g. #drops/5, or a pre-restructure #planning/drop/5) --
@@ -173,9 +223,10 @@ function showApp() {
 
 async function checkSession() {
   try {
-    const { authenticated, user } = await api('/auth/session');
+    const { authenticated, user, restricted_modules } = await api('/auth/session');
     if (authenticated) {
       state.currentUser = user;
+      state.restrictedModules = restricted_modules || [];
       showApp();
     } else {
       showPasswordScreen();
@@ -196,9 +247,50 @@ function toast(message, isError = false) {
 }
 
 // ── Tabs ─────────────────────────────────────────────
+// Round 11 sidebar restructure: which collapsible group (if any) each
+// grouped tab lives under -- Dashboard/Planning/Upcoming Drops/Promotions/
+// Settings stay standalone top-level items, never in a group (see the
+// sidebar brief: "Promotions/Upcoming Drops should remain standalone").
+const SIDEBAR_GROUP_TABS = {
+  'create-review': ['concept-dev', 'tuesday-review'],
+  production: ['shooting', 'editing', 'final-approval'],
+  library: ['board', 'admin', 'reference-library'],
+};
+
+function toggleSidebarGroup(name) {
+  const group = document.querySelector(`.sidebar-group[data-group="${name}"]`);
+  if (!group) return;
+  const expanded = group.classList.toggle('expanded');
+  const toggleBtn = group.querySelector('.sidebar-group-toggle');
+  if (toggleBtn) toggleBtn.setAttribute('aria-expanded', String(expanded));
+}
+
+// Auto-expand (never auto-collapse another group -- a user who deliberately
+// opened Library while browsing Production shouldn't have it yanked shut)
+// whichever group contains the tab just switched to, so its own nav item is
+// never hidden behind a collapsed header on direct navigation.
+function autoExpandSidebarGroupForTab(name) {
+  const groupName = Object.keys(SIDEBAR_GROUP_TABS).find((g) => SIDEBAR_GROUP_TABS[g].includes(name));
+  if (!groupName) return;
+  const group = document.querySelector(`.sidebar-group[data-group="${groupName}"]`);
+  if (!group || group.classList.contains('expanded')) return;
+  group.classList.add('expanded');
+  const toggleBtn = group.querySelector('.sidebar-group-toggle');
+  if (toggleBtn) toggleBtn.setAttribute('aria-expanded', 'true');
+}
+
 function switchTab(name) {
+  // Defense in depth alongside applySidebarModuleAccess hiding the sidebar
+  // button itself -- a restricted user directly manipulating a hash link or
+  // browser history could otherwise still land on a panel their own module
+  // routes will 403 against anyway (see server.js's requireModuleAccess).
+  if ((state.restrictedModules || []).includes(name)) {
+    toast("You don't have access to this module.", true);
+    return;
+  }
   document.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
   document.querySelectorAll('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === `tab-${name}`));
+  autoExpandSidebarGroupForTab(name);
   // Shooting is the direct downstream consumer of an action just taken on
   // Tuesday Review (Approve for Shooting) -- unlike every other tab, it
   // needs a fresh fetch on every visit so a concept approved a moment ago
@@ -207,10 +299,11 @@ function switchTab(name) {
   if (name === 'reference-library') loadReferenceLibraryPage();
   // Same reasoning as Shooting above -- Editing is the direct downstream
   // consumer of Shooting's Mark as Shot action, so it needs a fresh fetch
-  // on every visit too. resetFilter: true -- arriving at Editing with no
-  // filter explicitly requested should open on whatever's most actionable
-  // (see loadEditingWeek/editingDefaultFilter), not always land on All.
-  if (name === 'editing') loadEditingWeek({ resetFilter: true });
+  // on every visit too.
+  if (name === 'editing') refreshCurrentEditingView();
+  // Final Approval is the direct downstream consumer of Editing's Mark as
+  // Edited action, so it needs a fresh fetch on every visit too.
+  if (name === 'final-approval') loadFinalApproval();
   // Upcoming Drops/Promotions are hash-routed within their own tab (list vs
   // drop/product or promotion/stage sub-views -- see renderDropsRoute/
   // renderPromotionsRoute). Arriving here via a plain sidebar click (not a
@@ -239,11 +332,220 @@ document.querySelectorAll('.tab-btn[data-tab]').forEach((btn) => {
 function switchSettingsPanel(name) {
   document.querySelectorAll('.settings-subnav-btn').forEach((b) => b.classList.toggle('active', b.dataset.settingsPanel === name));
   document.querySelectorAll('.settings-panel').forEach((p) => p.classList.toggle('active', p.id === `settings-panel-${name}`));
+  // Round 11: admin-only User Access panel -- loaded lazily on first visit
+  // (same reasoning as every other Settings panel: nothing here is needed
+  // until an admin actually opens this tab), refetched on every visit so a
+  // change made elsewhere (or by another admin) isn't shown stale.
+  if (name === 'users') loadUsersAccessPanel();
 }
 
 document.querySelectorAll('.settings-subnav-btn').forEach((btn) => {
   btn.addEventListener('click', () => switchSettingsPanel(btn.dataset.settingsPanel));
 });
+
+// ── User Access (Settings) ────────────────────────────
+// Round 12 redesign: a scannable table (was a wide card per user with 13
+// raw checkboxes always on screen) -- Edit opens #user-access-modal, the
+// one place that still shows the full module list, now framed positively
+// ("can access" instead of "is restricted", see saveUserAccessModal's one
+// inversion back to the deny-list the server actually stores).
+const MODULE_LABELS = {
+  dashboard: 'Dashboard', planning: 'Planning', 'concept-dev': 'Concept Dev',
+  'tuesday-review': 'Tuesday Review', shooting: 'Shooting', editing: 'Editing',
+  'final-approval': 'Final Approval', board: 'Board', admin: 'Styles & Categories',
+  'reference-library': 'Reference Library', drops: 'Upcoming Drops', promotions: 'Promotions',
+  settings: 'Settings',
+};
+// Only the three roles the brief actually wants offered going forward --
+// every current account already holds one of these three (see the Round 11
+// role migration in schema.sql), so this is never missing an option for a
+// real row. The server's own PATCH validation still accepts the legacy
+// marketing/creative/viewer values too, purely so it never rejects a role
+// this UI didn't itself set -- this dropdown just never offers them.
+const USER_ROLES = ['admin', 'lead', 'member'];
+const ROLE_LABELS = { admin: 'Admin', lead: 'Lead', member: 'Member' };
+// Short column headers for the Module Access matrix (13 modules across is
+// too wide for the full MODULE_LABELS text) -- title attribute on each <th>
+// carries the full name for anyone who hovers.
+const MODULE_SHORT_LABELS = {
+  dashboard: 'Dash', planning: 'Plan', 'concept-dev': 'CD', 'tuesday-review': 'TR',
+  shooting: 'Shoot', editing: 'Edit', 'final-approval': 'FA', board: 'Board',
+  admin: 'Styles', 'reference-library': 'RefLib', drops: 'Drops', promotions: 'Promo',
+  settings: 'Sett.',
+};
+
+async function loadUsersAccessPanel() {
+  const el = document.getElementById('users-access-list');
+  try {
+    state.usersAccess = await api('/users/manage');
+    renderUsersAccessList();
+    renderUsersAccessMatrix();
+  } catch (e) {
+    el.innerHTML = `<tr><td colspan="6" class="empty-state">${escapeHtml(e.message)}</td></tr>`;
+  }
+}
+
+function renderUsersAccessList() {
+  const el = document.getElementById('users-access-list');
+  const data = state.usersAccess;
+  if (!data) return;
+  el.innerHTML = data.users.map((u) => {
+    const restrictedCount = u.restricted_modules.length;
+    const accessChip = restrictedCount === 0
+      ? `<span class="users-access-chip users-access-chip-full">Full Access</span>`
+      : `<span class="users-access-chip users-access-chip-restricted">Restricted &middot; ${restrictedCount} module${restrictedCount === 1 ? '' : 's'}</span>`;
+    const passwordChip = u.has_password
+      ? `<span class="users-access-chip users-access-chip-password-set">Set</span>`
+      : `<span class="users-access-chip users-access-chip-password-needed">Needs Setup</span>`;
+    return `
+      <tr>
+        <td>${escapeHtml(u.name)}</td>
+        <td class="users-access-email">${escapeHtml(u.email)}</td>
+        <td>${ROLE_LABELS[u.role] || escapeHtml(u.role)}</td>
+        <td>${accessChip}</td>
+        <td>${passwordChip}</td>
+        <td><button type="button" class="link-btn" onclick="openUserAccessModal(${u.id})">Edit</button></td>
+      </tr>`;
+  }).join('');
+}
+
+// The Module Access matrix -- users down the left, modules across the top,
+// same positive framing as the Edit modal's checkbox list (checked = can
+// access) but scannable across everyone at once, per the Round 13 brief.
+// Edits here save immediately per checkbox (toggleMatrixAccess below)
+// rather than needing an explicit Save, since there's no natural place for
+// one row's Save button in a matrix this wide.
+function renderUsersAccessMatrix() {
+  const el = document.getElementById('users-matrix-table');
+  const data = state.usersAccess;
+  if (!data) return;
+  const headerCells = data.module_keys.map((key) => `<th title="${escapeHtml(MODULE_LABELS[key] || key)}">${escapeHtml(MODULE_SHORT_LABELS[key] || key)}</th>`).join('');
+  const rows = data.users.map((u) => {
+    const restricted = new Set(u.restricted_modules);
+    const cells = data.module_keys.map((key) => `
+      <td><input type="checkbox" data-module-key="${key}" ${restricted.has(key) ? '' : 'checked'} onchange="toggleMatrixAccess(${u.id})"></td>`).join('');
+    return `<tr data-matrix-user-id="${u.id}"><td class="users-matrix-name">${escapeHtml(u.name)}</td>${cells}</tr>`;
+  }).join('');
+  el.innerHTML = `<thead><tr><th></th>${headerCells}</tr></thead><tbody>${rows}</tbody>`;
+}
+
+// Reads the row's own checkbox states directly (rather than trusting
+// state.usersAccess, which could be stale if the admin clicks two boxes
+// before the first save round-trips) so a fast run of clicks can never lose
+// one of them -- what's on screen for that row is always exactly what gets
+// sent. Same PATCH the Edit modal's Save button uses, role omitted so it's
+// never touched from here.
+async function toggleMatrixAccess(userId) {
+  const row = document.querySelector(`tr[data-matrix-user-id="${userId}"]`);
+  if (!row) return;
+  const checkboxes = row.querySelectorAll('input[type=checkbox]');
+  const restrictedModules = Array.from(checkboxes).filter((c) => !c.checked).map((c) => c.dataset.moduleKey);
+  try {
+    await api(`/users/${userId}/access`, {
+      method: 'PATCH',
+      body: JSON.stringify({ restricted_modules: restrictedModules }),
+    });
+    const u = state.usersAccess.users.find((x) => x.id === userId);
+    if (u) u.restricted_modules = restrictedModules;
+    renderUsersAccessList(); // refresh the Access chip in the main table; leaves the matrix's own checkboxes untouched
+    if (state.currentUser && state.currentUser.id === userId) {
+      state.restrictedModules = restrictedModules;
+      applySidebarModuleAccess();
+    }
+    toast('Access updated');
+  } catch (e) {
+    toast(e.message, true);
+    await loadUsersAccessPanel(); // resync with the server's actual state after a failed save
+  }
+}
+
+// Opens with the module list framed POSITIVELY -- checked means this
+// person CAN access it, the inverse of restricted_modules (what the server
+// actually stores, see schema.sql's user_module_restrictions). This
+// function does the one translation; saveUserAccessModal below does it in
+// reverse on the way back out, so nothing else in the app ever has to
+// reason about the deny-list.
+function openUserAccessModal(userId) {
+  const data = state.usersAccess;
+  const u = data && data.users.find((x) => x.id === userId);
+  if (!u) return;
+  const restricted = new Set(u.restricted_modules);
+  document.getElementById('user-access-id').value = u.id;
+  document.getElementById('user-access-modal-title').textContent = `Edit User — ${u.name}`;
+  document.getElementById('user-access-modal-name').textContent = u.name;
+  document.getElementById('user-access-modal-email').textContent = u.email;
+  document.getElementById('user-access-role').value = USER_ROLES.includes(u.role) ? u.role : 'member';
+  document.getElementById('user-access-password-status').textContent = u.has_password ? 'Set' : 'Needs Setup';
+  document.getElementById('user-access-password-reveal').style.display = 'none';
+  document.getElementById('user-access-new-password').value = '';
+  document.getElementById('user-access-modules').innerHTML = data.module_keys.map((key) => `
+    <label class="user-access-module">
+      <input type="checkbox" data-module-key="${key}" ${restricted.has(key) ? '' : 'checked'}>
+      ${escapeHtml(MODULE_LABELS[key] || key)}
+    </label>`).join('');
+  openModal('user-access-modal');
+}
+
+// Reveals/hides the new-password input inside the Edit User modal -- kept
+// collapsed by default so the modal doesn't invite an accidental reset;
+// the actual password is never fetched or displayed, only this empty input.
+function toggleUserAccessPasswordReset() {
+  const el = document.getElementById('user-access-password-reveal');
+  const showing = el.style.display !== 'none';
+  el.style.display = showing ? 'none' : 'flex';
+  if (!showing) document.getElementById('user-access-new-password').focus();
+}
+
+// Separate PATCH from saveUserAccessModal below (role/module access) --
+// a password reset is a distinct, higher-stakes action, submitted
+// immediately on its own rather than bundled into the next Save click,
+// so it can't be accidentally sent (or skipped) by editing something else.
+async function submitUserAccessPasswordReset() {
+  const userId = Number(document.getElementById('user-access-id').value);
+  const input = document.getElementById('user-access-new-password');
+  const newPassword = input.value;
+  if (!newPassword || newPassword.length < 4) {
+    toast('Password must be at least 4 characters', true);
+    return;
+  }
+  try {
+    await api(`/users/${userId}/password`, { method: 'PATCH', body: JSON.stringify({ new_password: newPassword }) });
+    input.value = '';
+    document.getElementById('user-access-password-reveal').style.display = 'none';
+    toast('Password updated');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function saveUserAccessModal() {
+  const userId = Number(document.getElementById('user-access-id').value);
+  const role = document.getElementById('user-access-role').value;
+  const checkboxes = document.querySelectorAll('#user-access-modules input[type=checkbox]');
+  // Invert back to the deny-list the server stores: unchecked ("cannot
+  // access") is what actually gets sent as a restriction.
+  const restrictedModules = Array.from(checkboxes).filter((c) => !c.checked).map((c) => c.dataset.moduleKey);
+  try {
+    await api(`/users/${userId}/access`, {
+      method: 'PATCH',
+      body: JSON.stringify({ role, restricted_modules: restrictedModules }),
+    });
+    closeModal('user-access-modal');
+    toast('Access updated');
+    await loadUsersAccessPanel();
+    // If the admin just edited their OWN access, the sidebar/settings-tab
+    // visibility they're looking at right now needs to reflect it
+    // immediately, not just on next reload.
+    if (state.currentUser && state.currentUser.id === userId) {
+      state.restrictedModules = restrictedModules;
+      state.currentUser.role = role;
+      applySidebarModuleAccess();
+      renderSidebarUser();
+    }
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
 
 // ── Week math (Monday-start ISO weeks, mirrors src/lib/week.js) ──────
 // Client-side port so Planning's week nav doesn't need a round trip just
@@ -297,22 +599,29 @@ function conceptDevWeekNumber() {
 async function loadAll() {
   try {
     const weekStart = planningWeekStart();
+    // The routes below marked apiAllowedOr are module-gated (Planning/
+    // Board/Styles & Categories) -- a restricted user's 403 on any ONE of
+    // them is an expected, normal outcome of viewing the app at all (this
+    // Promise.all runs on every login, before the user has chosen a tab),
+    // not a real failure, so it resolves to a safe empty fallback instead
+    // of rejecting the whole batch. Without this, one blocked module used
+    // to abort loadAll() entirely -- see apiAllowedOr's comment.
     const [board, styles, categories, dashboard, dropsRes, provenWinners, coreRes, planningSettings, shootPlan, contentCreators, highStockRes, promotions, weeklyConfirmation, weeklyPlanningProgress, salesCadence, metaProductMappings, metaProductFamilies, conceptDev, creativeResources, customerAvatars, tuesdayReview, shootingWeek, editingWeek, conceptDevLocations, conceptTypes] = await Promise.all([
-      api('/board'),
-      api('/styles'),
-      api('/categories'),
+      apiAllowedOr('/board', null),
+      apiAllowedOr('/styles', []),
+      apiAllowedOr('/categories', []),
       api(`/dashboard?weekOffset=${dashboardWeekOffset}`),
       api('/drops'),
-      api('/proven-winners'),
-      api('/core-products'),
-      api('/planning-settings'),
-      api(`/shoot-plan?week_start=${weekStart}`),
+      apiAllowedOr('/proven-winners', []),
+      apiAllowedOr('/core-products', { products: [], weekly_target: 0, weekly_planned: 0, weekly_remaining: 0 }),
+      apiAllowedOr('/planning-settings', null),
+      apiAllowedOr(`/shoot-plan?week_start=${weekStart}`, []),
       api('/content-creators'),
-      api('/high-stock-products'),
+      apiAllowedOr('/high-stock-products', { products: [] }),
       api('/promotions'),
-      api(`/weekly-shoot-plan-confirmation?week_start=${weekStart}`),
-      api(`/weekly-planning-progress?week_start=${weekStart}`),
-      api('/sales-cadence'),
+      apiAllowedOr(`/weekly-shoot-plan-confirmation?week_start=${weekStart}`, null),
+      apiAllowedOr(`/weekly-planning-progress?week_start=${weekStart}`, { core_reviewed: false, high_stock_reviewed: false, drops_reviewed: false, promotions_reviewed: false }),
+      apiAllowedOr('/sales-cadence', null),
       api('/meta-product-mappings'),
       api('/meta-product-mappings/product-families'),
       api(`/concept-development?week_start=${conceptDevWeekStart()}`),
@@ -353,36 +662,28 @@ async function loadAll() {
     state.editing.data = editingWeek;
     state.conceptDevLocations = conceptDevLocations;
     state.conceptTypes = conceptTypes;
-    renderBoard();
-    renderMissingAd();
-    renderStylesTable();
-    renderCategoriesTable();
-    populateStyleSelect();
-    populateCategorySelect();
-    renderDashboard();
-    renderPlanning();
-    renderProvenWinners();
-    renderCreativeResourcesSettings();
-    renderCustomerAvatarsSettings();
-    renderCoreProducts();
-    renderPlanningSettingsForm();
-    renderContentCreators();
-    renderMetaProductMappings();
-    renderHighStockProducts();
-    renderPromotionsRow();
-    renderDropsRoute();
-    renderPromotionsRoute();
-    renderPlanningShootSummary();
-    renderConceptDevWeekHeader();
-    renderConceptDevList();
-    renderTuesdayReviewWeekHeader();
-    renderTuesdayReviewList();
-    populateShootingOwnerFilters();
-    renderShootingWeekHeader();
-    renderShootingWeekView();
-    populateEditingEditorFilter();
-    renderEditingWeekHeader();
-    renderEditingList();
+    // Each render step runs independently -- a module a restricted user
+    // can't see (e.g. Board/Core/Planning Settings for Mark, now resolved
+    // to an empty/null fallback above) can make ITS OWN render step a
+    // no-op or throw on incompatible data, but that must never stop every
+    // render AFTER it in this list from running too. Before this, all ~24
+    // of these shared one try/catch, so one incompatible shape anywhere in
+    // the list silently blanked every tab that comes after it, including
+    // ones the user IS allowed to use (Concept Dev, Shooting, Editing...).
+    [
+      renderBoard, renderMissingAd, renderStylesTable, renderCategoriesTable, populateStyleSelect, populateCategorySelect,
+      renderDashboard, renderPlanning, renderProvenWinners, renderCreativeResourcesSettings, renderCustomerAvatarsSettings,
+      renderCoreProducts, renderPlanningSettingsForm, renderContentCreators, renderMetaProductMappings, renderHighStockProducts,
+      renderPromotionsRow, renderDropsRoute, renderPromotionsRoute, renderPlanningShootSummary, renderConceptDevWeekHeader,
+      renderConceptDevList, renderTuesdayReviewWeekHeader, renderTuesdayReviewList, populateShootingOwnerFilters,
+      renderShootingWeekHeader, renderShootingWeekView, populateEditingEditorFilter, renderEditingWeekHeader, renderEditingList,
+    ].forEach((renderStep) => {
+      try {
+        renderStep();
+      } catch (e) {
+        console.error(`loadAll: ${renderStep.name} failed`, e);
+      }
+    });
   } catch (e) {
     toast(e.message, true);
   }
@@ -429,6 +730,10 @@ function daysLabel(days) {
 }
 
 function renderBoard() {
+  // state.board is null when this account doesn't have Board access (see
+  // apiAllowedOr in loadAll()) -- the Board tab itself is already hidden
+  // for them, so there's nothing to render.
+  if (!state.board) return;
   const boardEl = document.getElementById('board');
   boardEl.innerHTML = '';
   state.board.columns.forEach((col) => {
@@ -473,6 +778,7 @@ function renderCard(card) {
 }
 
 function renderMissingAd() {
+  if (!state.board) return; // no Board access -- see renderBoard's same guard
   const panel = document.getElementById('missing-ad-panel');
   const list = document.getElementById('missing-ad-list');
   const count = document.getElementById('missing-ad-count');
@@ -604,8 +910,21 @@ document.getElementById('action-brief-builder').addEventListener('click', () => 
 
 // ── Planning ─────────────────────────────────────────
 
+// Human-readable everywhere a date is displayed (Upcoming Drops' launch
+// date/Creative Due, Promotions' date ranges/stage due dates) -- see the
+// Shoot Week/Scheduling brief, item 13: raw ISO ("2026-09-24") mixed with
+// already-readable dates ("Mon 21 Sep") in the same header. Display only --
+// every caller still stores/sends the underlying YYYY-MM-DD string
+// unchanged; this never feeds a date input or a comparison, only text.
 function formatDate(value) {
-  return value ? String(value).slice(0, 10) : null;
+  if (!value) return null;
+  const dateOnly = String(value).slice(0, 10);
+  const [y, m, d] = dateOnly.split('-').map(Number);
+  if (!y || !m || !d) return dateOnly;
+  const date = new Date(y, m - 1, d);
+  const weekday = date.toLocaleDateString('en-AU', { weekday: 'short' });
+  const month = date.toLocaleDateString('en-AU', { month: 'short' });
+  return `${weekday} ${d} ${month}`;
 }
 
 function renderPlanning() {
@@ -656,6 +975,14 @@ function renderPlanningShootSummary() {
 // step flow -- see handleHashRoute below for the redirect that keeps old
 // links working.
 function parseDropsHash() {
+  // renderDropsRoute() (below) runs on EVERY loadAll() refresh regardless
+  // of which tab is actually active (see its own comment) -- without this
+  // guard, a hash belonging to a different tab entirely (e.g. "#promotions/5"
+  // while saving a Promotion concept) falls through the replace() as a
+  // no-op and gets misread as dropId = Number("#promotions") = NaN,
+  // firing a spurious GET /api/drops/NaN. Caught via live QA on the
+  // Promotion New Concept flow (Issue 4), not specific to it.
+  if (!window.location.hash.startsWith('#drops')) return { view: 'list' };
   const parts = window.location.hash.replace(/^#drops\/?/, '').split('/').filter(Boolean);
   if (parts[0] && parts[1] === 'product' && parts[2]) {
     return { view: 'product', dropId: Number(parts[0]), productCode: decodeURIComponent(parts[2]) };
@@ -697,6 +1024,9 @@ function renderDropsRoute() {
 // Was #planning/promotion/... before Promotions moved out of Planning's
 // step flow -- see handleHashRoute below for the redirect.
 function parsePromotionsHash() {
+  // Same guard as parseDropsHash above, same reason -- renderPromotionsRoute
+  // also runs on every loadAll() refresh regardless of active tab.
+  if (!window.location.hash.startsWith('#promotions')) return { view: 'list' };
   const parts = window.location.hash.replace(/^#promotions\/?/, '').split('/').filter(Boolean);
   if (parts[0] && parts[1] === 'stage' && parts[2]) {
     return { view: 'promotion-stage', promotionId: Number(parts[0]), stageId: Number(parts[2]) };
@@ -1032,10 +1362,17 @@ function dropCardProductsHtml(products) {
 
 function dropCardHtml(d) {
   const pct = d.summary.overallPct;
+  // Hierarchy fix: the muted/italic treatment is for a genuinely nameless
+  // drop only (no manual name AND no fallback could be computed, which in
+  // practice never happens once every drop has a launch_date) -- a drop
+  // showing its "{Month} Drop {N}" fallback display_name is still a real,
+  // useful title and must read exactly as strong as a manually-set one.
+  const displayName = d.display_name || d.name || 'Untitled';
+  const isPlaceholder = displayName === 'Untitled';
   return `
     <div class="drop-card" data-drop-id="${d.id}">
       <div class="drop-card-header">
-        <div class="drop-card-name ${d.name ? '' : 'untitled'}" data-drop-id="${d.id}" title="Click to rename">${d.name ? escapeHtml(d.name) : 'Untitled'}</div>
+        <div class="drop-card-name ${isPlaceholder ? 'untitled' : ''}" data-drop-id="${d.id}" title="Click to rename">${escapeHtml(displayName)}</div>
         <button type="button" class="drop-card-edit-btn" data-drop-id="${d.id}" title="Edit launch date / notes">Edit</button>
       </div>
       <div class="drop-card-date">${formatDate(d.launch_date)} · ${d.days_until_launch >= 0 ? d.days_until_launch + ' days to launch' : 'Launched'}</div>
@@ -1080,7 +1417,7 @@ function renderDropsByMonth(drops) {
   }
   return groups.map((g) => `
     <div class="drops-month-group">
-      <div class="drops-month-heading">${g.label}</div>
+      <div class="drops-month-heading">${g.label} <span class="drops-month-count">&middot; ${g.drops.length} drop${g.drops.length === 1 ? '' : 's'}</span></div>
       <div class="drops-row">${g.drops.map(dropCardHtml).join('')}</div>
     </div>`).join('');
 }
@@ -1170,7 +1507,7 @@ function startInlineDropRename(nameEl) {
   input.type = 'text';
   input.className = 'drop-card-name-input';
   input.value = original;
-  input.placeholder = 'Untitled';
+  input.placeholder = (drop && drop.display_name) || 'Untitled';
   nameEl.appendChild(input);
   input.focus();
   input.select();
@@ -1183,9 +1520,13 @@ function startInlineDropRename(nameEl) {
     const newValue = input.value.trim();
     if (save && newValue !== original) {
       try {
-        const updated = await api(`/drops/${dropId}`, { method: 'PUT', body: JSON.stringify({ name: newValue }) });
-        const idx = state.drops.findIndex((d) => d.id === dropId);
-        if (idx !== -1) state.drops[idx] = { ...state.drops[idx], name: updated.name };
+        // A full refetch (not a local patch) so a cleared name picks up its
+        // recomputed month-position fallback -- and so every OTHER unnamed
+        // drop in the same month re-numbers correctly too, same as the
+        // server already does for a fresh page load.
+        await api(`/drops/${dropId}`, { method: 'PUT', body: JSON.stringify({ name: newValue }) });
+        await refreshDropsRow();
+        return;
       } catch (e) {
         toast(e.message, true);
       }
@@ -1215,7 +1556,7 @@ async function loadDropView(dropId) {
     const drop = await api(`/drops/${dropId}`);
     state.currentDrop = drop;
     const titleEl = document.getElementById('drop-view-title');
-    titleEl.textContent = drop.name || 'Untitled';
+    titleEl.textContent = drop.display_name || drop.name || 'Untitled';
     titleEl.classList.toggle('untitled', !drop.name);
     document.getElementById('drop-view-edit-btn').onclick = () => openDropModal(drop);
     const amNote = document.getElementById('drop-view-am-note');
@@ -1824,6 +2165,7 @@ function openDropModal(drop) {
   document.getElementById('drop-modal-title').textContent = drop ? 'Edit Drop' : 'New Drop';
   document.getElementById('drop-id').value = drop ? drop.id : '';
   document.getElementById('drop-name').value = (drop && drop.name) || '';
+  document.getElementById('drop-name').placeholder = (drop && drop.display_name) || 'e.g. Kingswood Cargo Short';
   document.getElementById('drop-launch-date').value = drop ? drop.launch_date.slice(0, 10) : '';
   document.getElementById('drop-notes').value = (drop && drop.notes) || '';
   document.getElementById('drop-date-note').textContent = '';
@@ -1903,7 +2245,7 @@ function renderStylesTable() {
 
 function populateStyleDropSelect(selectedId) {
   const sel = document.getElementById('style-drop-id');
-  sel.innerHTML = '<option value="">— none —</option>' + state.drops.map((d) => `<option value="${d.id}" ${d.id === selectedId ? 'selected' : ''}>${escapeHtml(d.name || 'Untitled')}</option>`).join('');
+  sel.innerHTML = '<option value="">— none —</option>' + state.drops.map((d) => `<option value="${d.id}" ${d.id === selectedId ? 'selected' : ''}>${escapeHtml(d.display_name || d.name || 'Untitled')}</option>`).join('');
 }
 
 function openStyleModal(style) {
@@ -3037,9 +3379,41 @@ function populateShootPlanCreatorSelect() {
 // modal (see F's "Filming" field).
 function populatePromotionShootFilmingSelect() {
   const sel = document.getElementById('promotion-shoot-filming');
-  sel.innerHTML = state.contentCreators.map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join('');
-  const defaultEntry = state.contentCreators.find((c) => c.is_default) || state.contentCreators[0];
-  sel.value = defaultEntry ? defaultEntry.name : DEFAULT_CREATOR;
+  sel.innerHTML = CONCEPT_ASSIGNEES.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
+  sel.value = CONCEPT_ASSIGNEES[0];
+}
+
+// Shoot Week options for Promotion intake (see the Shoot Week brief) -- "This
+// Week"/"Next Week" for the two closest, then "W/C Mon DD Mon" for a dozen
+// weeks further out, reusing the same mondayOfWeek/isoDateStr/formatWeekRange
+// helpers every other week-nav in the app already builds its own picker from
+// (Shooting/Planning/Tuesday Review), not a new date-math implementation.
+// Defaults to the current week -- creating a concept never silently commits
+// to a future week the team hasn't actually chosen.
+function populatePromotionShootWeekOptions() {
+  const options = [];
+  for (let offset = 0; offset <= 12; offset++) {
+    const monday = mondayOfWeek(offset);
+    const value = isoDateStr(monday);
+    // Same isoWeekNumber() every other week-nav in the app already computes
+    // its own "Week N" label from (Shooting/Planning/Tuesday Review/Concept
+    // Dev) -- WK NN here is that same number, just formatted for a compact
+    // dropdown option rather than a page heading.
+    const wk = `WK ${isoWeekNumber(monday)}`;
+    let label;
+    if (offset === 0) label = `This Week — ${wk}`;
+    else if (offset === 1) label = `Next Week — ${wk}`;
+    else label = `${wk} — W/C ${monday.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' })}`;
+    options.push({ value, label });
+  }
+  return options;
+}
+
+function populatePromotionShootWeekSelect(selectedValue) {
+  const sel = document.getElementById('promotion-shoot-week');
+  const options = populatePromotionShootWeekOptions();
+  sel.innerHTML = options.map((o) => `<option value="${o.value}">${escapeHtml(o.label)}</option>`).join('');
+  sel.value = selectedValue || isoDateStr(mondayOfWeek(0));
 }
 
 // Sizes only matter when something has to be picked and brought in -- if
@@ -3178,49 +3552,191 @@ function promotionUrgencyBadgeHtml(urgency) {
   return `<div class="drop-card-status ${dropCardStatusClass(color)}">${promotionUrgencyLabel(urgency)}</div>`;
 }
 
-function promotionCardHtml(p) {
-  const color = promotionUrgencyColor(p.status);
-  const dateRange = p.end_date ? `${formatDate(p.start_date)} – ${formatDate(p.end_date)}` : formatDate(p.start_date);
-  const pct = p.summary.overall_pct;
+// Recurring-series grouping (round 7, item 2): production promotion names
+// follow a "{Series Name} {Year}" convention (Black Friday 2026/2027, Boxing
+// Day 2026/2027, ...) -- stripping a trailing 4-digit year gives a stable
+// series key with no new schema/column needed. A promotion with no trailing
+// year is its own one-promotion "series" and is unaffected. Purely a
+// display grouping: every record (including future years) stays in the
+// database and the API response untouched -- see promotionsFilterToEarliestPerSeries.
+function promotionSeriesKey(name) {
+  return (name || '').trim().replace(/\s+\d{4}$/, '').trim().toLowerCase() || name;
+}
+
+// Keeps only the earliest (soonest-starting) not-yet-past promotion per
+// series -- e.g. while Black Friday 2026 is upcoming, Black Friday 2027 is
+// hidden from Coming Up/Current Focus; the moment 2026 moves into Past
+// Promotions (see promotionsSplitPastUpcoming), 2027 becomes the series'
+// earliest remaining record and starts appearing on its own. Input is
+// already sorted by start_date ASC (API order), so "first seen per key"
+// is already "earliest per key".
+function promotionsFilterToEarliestPerSeries(promotions) {
+  const seen = new Set();
+  const result = [];
+  for (const p of promotions) {
+    const key = promotionSeriesKey(p.name);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(p);
+  }
+  return result;
+}
+
+// A promotion is "past" once its own end_date has passed (see days_until_end
+// in promotions.js -- a promotion with no end_date is never past). Nothing
+// is deleted or hidden from the API; this is purely which section of the
+// landing page a record renders in (round 7, item 3).
+function promotionsSplitPastUpcoming(promotions) {
+  const upcoming = [];
+  const past = [];
+  for (const p of promotions) {
+    if (p.days_until_end !== null && p.days_until_end < 0) past.push(p);
+    else upcoming.push(p);
+  }
+  return { upcoming, past };
+}
+
+// Current Focus (Issue 3): the promotion actually needing attention right
+// now, not just the chronologically-nearest one -- first upcoming
+// promotion whose status isn't the neutral 'future' state (same rank
+// promotions.js already computes: worst-stage urgency, see summarizePromotion),
+// falling back to the nearest-launching one if every upcoming promotion is
+// still comfortably far off. Already-sorted-by-start_date input (API order),
+// so the fallback is naturally "soonest" too.
+function promotionsPickCurrentFocus(allUpcoming) {
+  if (!allUpcoming.length) return null;
+  return allUpcoming.find((p) => p.status !== 'future') || allUpcoming[0];
+}
+
+// One stage's Ready/Target as a compact tile -- same numbers the detail
+// page's own Campaign Stage cards show (ca.status via READY_STATUSES,
+// summarizeStage in promotions.js), just condensed to fit four across the
+// hero instead of a full stage card each.
+function promotionFocusStageHtml(stage) {
   return `
-    <div class="drop-card" data-promotion-id="${p.id}">
-      <div class="drop-card-header">
-        <div class="drop-card-name">${escapeHtml(p.name)}</div>
-        ${promotionUrgencyBadgeHtml(p.status)}
-      </div>
-      <div class="drop-card-date">${dateRange} · ${p.days_until_launch >= 0 ? p.days_until_launch + ' days to launch' : 'Launched'}</div>
-      <div class="drop-card-pct">${p.summary.total_ready} / ${p.summary.total_required} Ready${pct !== null ? ' — ' + pct + '%' : ''}</div>
-      ${pct !== null ? `<div class="coverage-progress-track"><div class="coverage-progress-fill ${color}" style="width:${Math.min(100, pct)}%;"></div></div>` : ''}
-      ${p.most_urgent_stage ? `<div class="drop-card-urgent">Next priority: ${escapeHtml(p.most_urgent_stage.name)} — ${p.most_urgent_stage.still_required} missing</div>` : ''}
+    <div class="promo-focus-stage">
+      <div class="promo-focus-stage-name">${escapeHtml(stage.name)}</div>
+      <div class="promo-focus-stage-count">${stage.ready} / ${stage.target}</div>
     </div>`;
 }
 
-function wirePromotionCardRow(row) {
-  row.querySelectorAll('.drop-card').forEach((card) => {
-    card.addEventListener('click', () => { window.location.hash = `#promotions/${card.dataset.promotionId}`; });
+function promotionCurrentFocusHtml(p) {
+  const color = promotionUrgencyColor(p.status);
+  const dateRange = p.end_date ? `${formatDate(p.start_date)} – ${formatDate(p.end_date)}` : formatDate(p.start_date);
+  const pct = p.summary.overall_pct;
+  const countdownHtml = p.days_until_launch >= 0 ? `${p.days_until_launch} days to launch` : 'Launched';
+  return `
+    <div class="promo-focus-card" data-promotion-id="${p.id}">
+      <div class="promo-focus-eyebrow">🔥 Current Focus</div>
+      <div class="promo-focus-header">
+        <div class="promo-focus-name">${escapeHtml(p.name)}</div>
+        ${promotionUrgencyBadgeHtml(p.status)}
+      </div>
+      <div class="promo-focus-meta">${dateRange} · ${countdownHtml}</div>
+      <div class="promo-focus-ready"><strong>${p.summary.total_ready} / ${p.summary.total_required}</strong> creatives ready${pct !== null ? ` — ${pct}%` : ''}</div>
+      ${pct !== null ? `<div class="coverage-progress-track promo-focus-progress"><div class="coverage-progress-fill ${color}" style="width:${Math.min(100, pct)}%;"></div></div>` : ''}
+      ${p.stages.length ? `<div class="promo-focus-stages">${p.stages.map(promotionFocusStageHtml).join('')}</div>` : ''}
+      <button type="button" class="btn btn-primary promo-focus-cta" data-promotion-id="${p.id}">Continue Planning &rarr;</button>
+    </div>`;
+}
+
+// Everything else on the rolling major-sales calendar (a promotion counts
+// as "active/upcoming" until its own end date passes, not its start date --
+// see days_until_end in promotions.js) -- deliberately quiet: no progress
+// bar, no stage breakdown, just enough to recognise it and jump in.
+function promotionComingUpCardHtml(p) {
+  const dateRange = p.end_date ? `${formatDate(p.start_date)} – ${formatDate(p.end_date)}` : formatDate(p.start_date);
+  const countdownHtml = p.days_until_launch >= 0 ? `${p.days_until_launch}d to launch` : 'Launched';
+  const pct = p.summary.overall_pct;
+  return `
+    <div class="promo-coming-up-card" data-promotion-id="${p.id}">
+      <div class="promo-coming-up-name">${escapeHtml(p.name)}</div>
+      <div class="promo-coming-up-meta">${dateRange} · ${countdownHtml}</div>
+      ${pct !== null ? `<div class="promo-coming-up-pct">${p.summary.total_ready}/${p.summary.total_required} ready — ${pct}%</div>` : ''}
+    </div>`;
+}
+
+// Quiet archive treatment (round 7, item 3) -- same data shape as the
+// Coming Up card, deliberately without even the ready% line, so a long
+// history list never competes visually with Current Focus/Coming Up above
+// it. Still fully clickable through to the same Promotion detail page --
+// stages/concepts/final creative are all still there to reference.
+function promotionPastCardHtml(p) {
+  const dateRange = p.end_date ? `${formatDate(p.start_date)} – ${formatDate(p.end_date)}` : formatDate(p.start_date);
+  return `
+    <div class="promo-past-card" data-promotion-id="${p.id}">
+      <div class="promo-past-name">${escapeHtml(p.name)}</div>
+      <div class="promo-past-meta">${dateRange}</div>
+    </div>`;
+}
+
+function wirePromotionsClicks(container) {
+  container.querySelectorAll('[data-promotion-id]').forEach((el) => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      window.location.hash = `#promotions/${el.dataset.promotionId}`;
+    });
   });
 }
 
-// Rolling major-sales calendar: a promotion counts as "active/upcoming"
-// until its own end date passes (not its start date -- a sale that has
-// already launched but hasn't finished yet still belongs here), and the
-// landing view only ever shows the next four chronologically -- a
-// historic sale never accumulates on this screen, it just stops
-// qualifying the moment days_until_end goes negative. Already sorted
-// chronologically by the API (ORDER BY start_date ASC in promotions.js),
-// so no client-side re-sort is needed here.
-function renderPromotionsRow() {
-  const list = document.getElementById('promotions-list');
-  if (!list) return; // guards a load race before index.html's panel exists
-  const upcoming = state.promotions
-    .filter((p) => p.days_until_end === null || p.days_until_end >= 0)
-    .slice(0, 4);
-  list.innerHTML = upcoming.length
-    ? upcoming.map(promotionCardHtml).join('')
-    : '<div class="attention-empty">No upcoming promotions yet — add one to start planning creative coverage.</div>';
-  wirePromotionCardRow(list);
+// Collapsed by default (see index.html's promo-past-toggle) -- this just
+// flips the disclosure state; renderPromotionsRow doesn't need to re-run
+// since the archive list is already rendered, only hidden.
+function togglePastPromotions() {
+  const body = document.getElementById('promotions-past-body');
+  const toggle = document.getElementById('promotions-past-toggle');
+  const isOpen = body.style.display !== 'none';
+  body.style.display = isOpen ? 'none' : '';
+  toggle.classList.toggle('open', !isOpen);
+}
 
-  document.getElementById('promotions-step-footer-count').textContent = `${upcoming.length} upcoming promotion${upcoming.length === 1 ? '' : 's'}`;
+function renderPromotionsRow() {
+  const focusEl = document.getElementById('promotions-current-focus');
+  if (!focusEl) return; // guards a load race before index.html's panel exists
+  const comingUpSection = document.getElementById('promotions-coming-up-section');
+  const comingUpList = document.getElementById('promotions-coming-up-list');
+  const emptyEl = document.getElementById('promotions-empty-state');
+  const pastSection = document.getElementById('promotions-past-section');
+  const pastList = document.getElementById('promotions-past-list');
+  const pastCount = document.getElementById('promotions-past-count');
+
+  // Every stored promotion still comes back from the API (see
+  // promotionsSplitPastUpcoming/promotionsFilterToEarliestPerSeries above) --
+  // nothing here ever deletes or hides a record from the database, only
+  // which section of the landing page it renders in.
+  const { upcoming, past } = promotionsSplitPastUpcoming(state.promotions);
+  const eligible = promotionsFilterToEarliestPerSeries(upcoming);
+
+  if (past.length) {
+    pastSection.style.display = '';
+    pastCount.textContent = `${past.length} past promotion${past.length === 1 ? '' : 's'}`;
+    pastList.innerHTML = past.map(promotionPastCardHtml).join('');
+    wirePromotionsClicks(pastList);
+  } else {
+    pastSection.style.display = 'none';
+  }
+
+  if (!eligible.length) {
+    focusEl.innerHTML = '';
+    comingUpSection.style.display = 'none';
+    emptyEl.style.display = '';
+    return;
+  }
+  emptyEl.style.display = 'none';
+
+  const focus = promotionsPickCurrentFocus(eligible);
+  const rest = eligible.filter((p) => p.id !== focus.id);
+
+  focusEl.innerHTML = promotionCurrentFocusHtml(focus);
+  wirePromotionsClicks(focusEl);
+
+  if (rest.length) {
+    comingUpSection.style.display = '';
+    comingUpList.innerHTML = rest.map(promotionComingUpCardHtml).join('');
+    wirePromotionsClicks(comingUpList);
+  } else {
+    comingUpSection.style.display = 'none';
+  }
 }
 
 document.getElementById('new-promotion-btn').addEventListener('click', () => openPromotionModal(null));
@@ -3364,6 +3880,25 @@ function promotionStageGapLabel(s) {
 // product, so this was empty) or spi.creator (always the silently-defaulted
 // Content Creator from savePromotionShootItem, not the real Assigned To --
 // see C1's investigation). concept_assignee is the actual Assigned To.
+// Final Creative (round 7, item 4): surfaces the SAME final_edits row the
+// Editing -> Final Approval workflow already owns (see promotions.js's
+// LATERAL join) -- read-only here, no second upload, no media hosting.
+// External links (CapCut exports, Drive/Frame.io shares, ...) can't be
+// safely embedded as an <img>/<video> without risking a broken tile or
+// leaking a referrer to an arbitrary host, so this is deliberately the
+// "clean block" fallback the spec calls out rather than attempting a
+// preview -- a plain, unambiguous "this concept has a finished cut" signal
+// that stays visible once the Promotion moves into Past Promotions too,
+// since it's driven by the same read that already renders on the live page.
+function promotionStageItemFinalCreativeHtml(item) {
+  if (!item.final_edit_link) return '';
+  return `
+    <div class="promotion-stage-item-final-creative">
+      <span class="promotion-stage-item-final-badge">&check; Final Creative</span>
+      <a href="${escapeHtml(item.final_edit_link)}" target="_blank" rel="noopener" class="link-btn" onclick="event.stopPropagation()">View Final Creative &rarr;</a>
+    </div>`;
+}
+
 function promotionStageItemRowHtml(item) {
   const title = item.concept_name || item.product_name || 'Untitled concept';
   const metaParts = [item.concept_type, item.concept_assignee || 'Unassigned', item.asset_status_label || '—'].filter(Boolean);
@@ -3372,6 +3907,7 @@ function promotionStageItemRowHtml(item) {
       <div class="promotion-stage-item-info">
         <div class="promotion-stage-item-name">${escapeHtml(title)}</div>
         <div class="promotion-stage-item-meta">${escapeHtml(metaParts.join(' · '))}</div>
+        ${promotionStageItemFinalCreativeHtml(item)}
       </div>
       <button type="button" class="btn btn-ghost btn-sm" onclick="removeShootPlanItem(${item.id})">Remove</button>
     </div>`;
@@ -3412,7 +3948,7 @@ function promotionStageCardHtml(stage, index, total) {
           <input type="number" min="0" class="promotion-stage-count-input" value="${stage.target}" onchange="savePromotionStageCount(${stage.id}, this.value)">
         </label>
         ${items.length ? `<div class="promotion-stage-item-list">${items.map(promotionStageItemRowHtml).join('')}</div>` : ''}
-        <button type="button" class="btn btn-primary btn-sm coverage-card-shoot-btn" onclick="shootThisWeekForPromotionStage(${stage.id})">+ Shoot This Week</button>
+        <button type="button" class="btn btn-primary btn-sm coverage-card-shoot-btn" onclick="openPromotionAddConceptChooser(${stage.id})">+ Add Concept</button>
       </div>
     </div>`;
 }
@@ -3599,12 +4135,12 @@ async function renderPromotionStageDetailView() {
     <div><strong>${stage.still_required}</strong><br>Still Required</div>
     <div><strong>${dueLabel}</strong><br>Due date</div>
   `;
-  document.getElementById('promotion-stage-view-shoot-btn').onclick = () => shootThisWeekForPromotionStage(stage.id);
+  document.getElementById('promotion-stage-view-shoot-btn').onclick = () => openPromotionAddConceptChooser(stage.id);
 
   const items = stage.items || [];
   const grid = document.getElementById('promotion-stage-view-items');
   if (!items.length) {
-    grid.innerHTML = '<div class="attention-empty">Nothing shot for this stage yet — click "+ Shoot This Week" to send the first requirement into Concept Development.</div>';
+    grid.innerHTML = '<div class="attention-empty">Nothing planned for this stage yet — click "+ Add Concept" to send the first requirement into Concept Development.</div>';
     return;
   }
 
@@ -3693,15 +4229,38 @@ function nextConceptTypeValueForFormat(currentValue, format) {
   return (!isKnownType || validTypes.includes(currentValue)) ? currentValue : '';
 }
 
-function shootThisWeekForPromotionStage(stageId) {
+// Round 8: "+ Add Concept" opens this small chooser first -- New Concept vs
+// Existing Concept, nothing else -- before any form appears at all. Only
+// once a card is picked does shootThisWeekForPromotionStage open the actual
+// intake modal, already knowing which of the two flows it's collecting for.
+let promotionAddConceptChooserStageId = null;
+
+function openPromotionAddConceptChooser(stageId) {
+  promotionAddConceptChooserStageId = stageId;
+  openModal('promo-add-concept-chooser-modal');
+}
+
+function choosePromotionAddConceptOrigin(origin) {
+  const stageId = promotionAddConceptChooserStageId;
+  closeModal('promo-add-concept-chooser-modal');
+  if (stageId == null) return;
+  shootThisWeekForPromotionStage(stageId, origin);
+}
+
+// origin ('new'/'existing') is decided up front by the chooser above (round
+// 8) -- this modal no longer asks the question itself, it just collects
+// whatever each path still needs. New Concept: Format/Concept Name/Filming/
+// Editing/Shoot Week only, then straight into the full canonical Concept
+// Development modal (see savePromotionShootItem). Existing Concept: the
+// same context plus the lightweight execution brief further down.
+function shootThisWeekForPromotionStage(stageId, origin) {
   const promotion = state.currentPromotion;
   const stage = ((promotion && promotion.stages) || []).find((s) => s.id === stageId);
   if (!stage) return;
   promotionShootContext = { stageId };
-  document.getElementById('promotion-shoot-modal-title').textContent = 'Shoot This Week';
+  document.getElementById('promotion-shoot-modal-title').textContent = origin === 'existing' ? 'Existing Concept' : 'New Concept';
   document.getElementById('promotion-shoot-context-promotion').textContent = promotion.name;
   document.getElementById('promotion-shoot-context-stage').textContent = stage.name;
-  document.getElementById('promotion-shoot-assignee').value = '';
   document.getElementById('promotion-shoot-editing-owner').value = '';
   document.getElementById('promotion-shoot-concept-name').value = '';
   document.getElementById('promotion-shoot-format').value = 'video';
@@ -3710,11 +4269,148 @@ function shootThisWeekForPromotionStage(stageId) {
   // the two modals' selects have different ids, not because the logic
   // differs.
   populatePromotionShootFilmingSelect();
+  populatePromotionShootWeekSelect();
   fillConceptDevSelectWithOther('promotion-shoot-concept-type-select', 'promotion-shoot-concept-type-custom', conceptTypesForFormat('video'), '');
-  promotionShootConceptOrigin = null;
-  renderPromotionShootConceptOrigin();
-  updatePromotionShootOriginVisibility();
+  promotionShootConceptOrigin = origin === 'existing' ? 'existing' : 'new';
+  resetPromotionShootBrief();
+  updatePromotionShootConceptTypeVisibility();
+  updatePromotionShootBriefVisibility();
+  updatePromotionShootFooterButton();
   openModal('promotion-shoot-modal');
+}
+
+// Existing Concept's lightweight execution-brief fields, staged locally
+// (not persisted) until Save -- same reasoning as the modal-open reset
+// everywhere else in this file (e.g. shoot-plan-modal's own defaults):
+// reopening this modal for a fresh concept must never carry over the last
+// concept's brief.
+let promotionShootAltHooks = [];
+let promotionShootReferences = [];
+let promotionShootBriefStyles = [];
+
+function resetPromotionShootBrief() {
+  promotionShootAltHooks = [];
+  promotionShootReferences = [];
+  promotionShootBriefStyles = [];
+  document.getElementById('promotion-shoot-hook-primary').value = '';
+  document.getElementById('promotion-shoot-execution').value = '';
+  document.getElementById('promotion-shoot-script').value = '';
+  document.getElementById('promotion-shoot-location').value = '';
+  document.getElementById('promotion-shoot-style-search').value = '';
+  document.getElementById('promotion-shoot-style-results').style.display = 'none';
+  document.getElementById('promotion-shoot-reference-url').value = '';
+  document.getElementById('promotion-shoot-script-field').style.display = 'none';
+  document.getElementById('promotion-shoot-script-toggle-wrap').style.display = '';
+  renderPromotionShootAltHooks();
+  renderPromotionShootReferences();
+  renderPromotionShootBriefStyleChips();
+}
+
+function togglePromotionShootScript() {
+  document.getElementById('promotion-shoot-script-toggle-wrap').style.display = 'none';
+  document.getElementById('promotion-shoot-script-field').style.display = '';
+}
+
+function addPromotionShootAltHook() {
+  promotionShootAltHooks.push('');
+  renderPromotionShootAltHooks();
+}
+
+function updatePromotionShootAltHook(idx, value) {
+  promotionShootAltHooks[idx] = value;
+}
+
+function removePromotionShootAltHook(idx) {
+  promotionShootAltHooks.splice(idx, 1);
+  renderPromotionShootAltHooks();
+}
+
+function renderPromotionShootAltHooks() {
+  const el = document.getElementById('promotion-shoot-hooks-alt-list');
+  if (!el) return;
+  el.innerHTML = promotionShootAltHooks.map((text, idx) => `
+    <div class="promo-shoot-alt-hook-row">
+      <input type="text" value="${escapeHtml(text)}" placeholder="Alternative hook" oninput="updatePromotionShootAltHook(${idx}, this.value)">
+      <button type="button" class="cd-style-chip-remove" onclick="removePromotionShootAltHook(${idx})" title="Remove">&times;</button>
+    </div>`).join('');
+}
+
+function addPromotionShootReference() {
+  const input = document.getElementById('promotion-shoot-reference-url');
+  const url = input.value.trim();
+  if (!url) return;
+  promotionShootReferences.push({ url, note: '' });
+  input.value = '';
+  renderPromotionShootReferences();
+}
+
+function removePromotionShootReference(idx) {
+  promotionShootReferences.splice(idx, 1);
+  renderPromotionShootReferences();
+}
+
+function renderPromotionShootReferences() {
+  const el = document.getElementById('promotion-shoot-reference-list');
+  if (!el) return;
+  el.innerHTML = promotionShootReferences.map((r, idx) => `
+    <div class="promo-shoot-reference-row">
+      <a href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(truncateText(r.url, 50))}</a>
+      <button type="button" class="cd-style-chip-remove" onclick="removePromotionShootReference(${idx})" title="Remove">&times;</button>
+    </div>`).join('');
+}
+
+function removePromotionShootBriefStyle(styleId) {
+  promotionShootBriefStyles = promotionShootBriefStyles.filter((s) => s.style_id !== styleId);
+  renderPromotionShootBriefStyleChips();
+}
+
+function renderPromotionShootBriefStyleChips() {
+  const el = document.getElementById('promotion-shoot-style-chips');
+  if (!el) return;
+  el.innerHTML = promotionShootBriefStyles.map((s) => `
+    <span class="cd-style-chip">${escapeHtml(s.style_code)}${s.name ? ` <span class="cd-style-chip-code">${escapeHtml(s.name)}</span>` : ''}
+      <button type="button" class="cd-style-chip-remove" onclick="removePromotionShootBriefStyle(${s.style_id})" title="Remove">&times;</button>
+    </span>`).join('');
+}
+
+// Whether the current Format/Concept Approach combination is the Existing
+// Concept bypass -- the one branch point every visibility toggle and the
+// save handler itself all key off, kept in one place so they can never
+// disagree with each other. Concept Approach is decided by the chooser
+// modal (round 8) before this modal ever opens, not by an in-modal toggle.
+function isPromotionShootExistingBrief() {
+  const format = document.getElementById('promotion-shoot-format').value;
+  return format === 'video' && promotionShootConceptOrigin === 'existing';
+}
+
+// Concept Type: hidden for Video + New Concept (still needs developing --
+// asking for a Concept Type before the idea itself is even shaped is
+// premature; it can be chosen later in Concept Development). Shown for
+// Video + Existing Concept (selecting an established execution) and for
+// Static (no New/Existing distinction applies there at all -- unchanged
+// from before this pass).
+function updatePromotionShootConceptTypeVisibility() {
+  const format = document.getElementById('promotion-shoot-format').value;
+  const show = format !== 'video' || promotionShootConceptOrigin === 'existing';
+  document.getElementById('promotion-shoot-concept-type-wrap').style.display = show ? '' : 'none';
+}
+
+// Round 8: the execution brief (Hook/What to Shoot/Styles/References/
+// Script/Shoot Setup) is Existing Concept only again -- New Concept has no
+// inline field set here at all any more, it goes straight into the full
+// canonical Concept Development modal instead (see savePromotionShootItem).
+function updatePromotionShootBriefVisibility() {
+  const isExisting = isPromotionShootExistingBrief();
+  document.getElementById('promotion-shoot-brief-wrap').style.display = isExisting ? '' : 'none';
+  document.getElementById('promotion-shoot-style-section').style.display = isExisting ? '' : 'none';
+}
+
+// New Concept and Static both continue into the full Concept Development
+// modal (see savePromotionShootItem's fallback) -- same CTA either way,
+// this is just a context-collection step before that modal opens.
+function updatePromotionShootFooterButton() {
+  const btn = document.getElementById('promotion-shoot-save-btn');
+  btn.textContent = isPromotionShootExistingBrief() ? 'Add to Shoot Plan →' : 'Develop Promotion Concept →';
 }
 
 // Re-filters the Concept Type dropdown when Format changes, keeping
@@ -3729,31 +4425,9 @@ function onPromotionShootFormatChange() {
   const nextValue = nextConceptTypeValueForFormat(currentValue, format);
   fillConceptDevSelectWithOther('promotion-shoot-concept-type-select', 'promotion-shoot-concept-type-custom', conceptTypesForFormat(format), nextValue);
   if (format !== 'video') promotionShootConceptOrigin = null;
-  renderPromotionShootConceptOrigin();
-  updatePromotionShootOriginVisibility();
-}
-
-function updatePromotionShootOriginVisibility() {
-  const format = document.getElementById('promotion-shoot-format').value;
-  document.getElementById('promotion-shoot-origin-wrap').style.display = format === 'video' ? '' : 'none';
-}
-
-function selectPromotionShootConceptOrigin(origin) {
-  promotionShootConceptOrigin = origin;
-  renderPromotionShootConceptOrigin();
-}
-
-function renderPromotionShootConceptOrigin() {
-  document.getElementById('promotion-shoot-origin-new-btn').classList.toggle('active', promotionShootConceptOrigin === 'new');
-  document.getElementById('promotion-shoot-origin-existing-btn').classList.toggle('active', promotionShootConceptOrigin === 'existing');
-  const hint = document.getElementById('promotion-shoot-origin-hint');
-  if (promotionShootConceptOrigin === 'new') {
-    hint.textContent = 'A genuinely new idea -- the full development flow (Idea, Audience, Hook, Talent, What to Shoot).';
-  } else if (promotionShootConceptOrigin === 'existing') {
-    hint.textContent = 'An established concept the team already understands -- a quicker execution brief.';
-  } else {
-    hint.textContent = '';
-  }
+  updatePromotionShootConceptTypeVisibility();
+  updatePromotionShootBriefVisibility();
+  updatePromotionShootFooterButton();
 }
 
 // Searchable product/style picker -- SKU or name, partial, case-insensitive
@@ -3785,16 +4459,22 @@ function renderStyleSearchResults(inputId, resultsId, onSelect) {
   });
 }
 
+// Existing Concept's execution-brief Styles/Products search -- multi-select,
+// staged in promotionShootBriefStyles (not persisted) until Save, since the
+// shoot_plan_item this needs to attach to doesn't exist yet while the modal
+// is still open. Persisted via the same POST /shoot-plan/:id/styles Concept
+// Development's own picker already uses, once savePromotionShootItem has an
+// item id to attach them to.
 function filterPromotionShootStyles() {
   renderStyleSearchResults('promotion-shoot-style-search', 'promotion-shoot-style-results', selectPromotionShootStyle);
 }
 
 function selectPromotionShootStyle(styleId) {
   const style = state.styles.find((s) => s.id === styleId);
-  if (!style) return;
-  promotionShootContext.styleId = styleId;
-  document.getElementById('promotion-shoot-style-id').value = styleId;
-  document.getElementById('promotion-shoot-style-search').value = `${style.style_code} — ${style.name}`;
+  if (!style || promotionShootBriefStyles.some((s) => s.style_id === styleId)) return;
+  promotionShootBriefStyles.push({ style_id: styleId, style_code: style.style_code, name: style.name });
+  renderPromotionShootBriefStyleChips();
+  document.getElementById('promotion-shoot-style-search').value = '';
   document.getElementById('promotion-shoot-style-results').style.display = 'none';
 }
 
@@ -3803,7 +4483,6 @@ async function savePromotionShootItem() {
   const conceptName = document.getElementById('promotion-shoot-concept-name').value.trim();
   if (!conceptName) return toast('Concept Name / Idea is required', true);
   const conceptType = conceptDevSelectWithOtherValue('promotion-shoot-concept-type-select', 'promotion-shoot-concept-type-custom');
-  const conceptAssignee = document.getElementById('promotion-shoot-assignee').value || null;
   const editingOwner = document.getElementById('promotion-shoot-editing-owner').value || null;
   const format = document.getElementById('promotion-shoot-format').value;
   // Concept Approach is a required choice for Video only -- Static always
@@ -3811,18 +4490,16 @@ async function savePromotionShootItem() {
   if (format === 'video' && !promotionShootConceptOrigin) {
     return toast('Choose New Concept or Existing Concept', true);
   }
-  const conceptOrigin = format === 'video' ? promotionShootConceptOrigin : null;
+  const isExistingBrief = isPromotionShootExistingBrief();
 
   // No product is picked here at all -- the concept-first flow (see the
   // file-header comment above) never requires one; product_code/product_name
   // are simply omitted, leaving shoot_plan_item_styles empty ("No products
-  // required"). Sample status isn't asked for. Filming (creator) now IS a
-  // real choice (see F's "Filming" field) -- shoot-plan.js still needs a
-  // creator on every item, so this falls back to the same silent default
-  // only if the select is somehow empty (e.g. no content_creators exist).
-  const filmingSelect = document.getElementById('promotion-shoot-filming').value;
-  const defaultCreator = state.contentCreators.find((c) => c.is_default) || state.contentCreators[0];
-  const filming = filmingSelect || (defaultCreator ? defaultCreator.name : DEFAULT_CREATOR);
+  // required") unless the Existing Concept brief's own Styles/Products
+  // search below adds some. Sample status isn't asked for. Filming
+  // (creator) is a real, required choice sourced from CONCEPT_ASSIGNEES
+  // (see populatePromotionShootFilmingSelect), never silently defaulted.
+  const filming = document.getElementById('promotion-shoot-filming').value || CONCEPT_ASSIGNEES[0];
 
   // "Other / New Type" persists to concept_types immediately, same
   // reasoning as saveConceptDevModal -- it becomes reusable right away,
@@ -3840,43 +4517,77 @@ async function savePromotionShootItem() {
       body: JSON.stringify({
         concept_name: conceptName,
         concept_type: conceptType || null,
-        concept_assignee: conceptAssignee,
+        concept_assignee: null,
         editing_owner: editingOwner,
         creator: filming,
         format,
         source: 'promotion',
         promotion_stage_id: promotionShootContext.stageId,
-        week_start: planningWeekStart(),
+        week_start: document.getElementById('promotion-shoot-week').value,
       }),
     });
     // Concept Approach isn't part of POST /shoot-plan's payload (that
     // endpoint is shared with Core/High Stock/Drop) -- persist it with an
     // immediate follow-up PATCH, same create-then-PATCH pattern
     // savePromotionConceptDevModal's own create path already uses.
-    if (conceptOrigin) {
+    //
+    // Existing Concept goes further in that same PATCH: concept_dev_status
+    // is set straight to 'approved' plus the execution-brief fields, which
+    // (see conceptDevelopment.js's ensureShootScheduleForApprovedConcept)
+    // creates the concept's shoot_schedule row server-side in the same
+    // request -- bypassing Concept Development/Tuesday Review entirely and
+    // landing it Unscheduled in Shooting's selected Shoot Week. Styles
+    // staged in the brief are attached afterward via the same
+    // POST /shoot-plan/:id/styles Concept Development's own picker uses.
+    if (isExistingBrief) {
+      const hookVariations = [];
+      const primaryHook = document.getElementById('promotion-shoot-hook-primary').value.trim();
+      if (primaryHook) hookVariations.push({ text: primaryHook });
+      promotionShootAltHooks.forEach((text) => {
+        const trimmed = (text || '').trim();
+        if (trimmed) hookVariations.push({ text: trimmed });
+      });
+      const execution = document.getElementById('promotion-shoot-execution').value.trim();
+      const scriptNotes = document.getElementById('promotion-shoot-script').value.trim();
+      const location = document.getElementById('promotion-shoot-location').value.trim();
       await api(`/concept-development/concepts/${item.asset_id}`, {
         method: 'PATCH',
-        body: JSON.stringify({ concept_origin: conceptOrigin }),
+        body: JSON.stringify({
+          concept_origin: 'existing',
+          concept_dev_status: 'approved',
+          hook_variations: hookVariations,
+          execution: execution || null,
+          script_notes: scriptNotes || null,
+          location: location || null,
+          reference_items: promotionShootReferences,
+        }),
       });
+      for (const s of promotionShootBriefStyles) {
+        try {
+          await api(`/shoot-plan/${item.id}/styles`, {
+            method: 'POST',
+            body: JSON.stringify({ style_id: s.style_id, colour_label: null, size: null }),
+          });
+        } catch (e) { /* non-fatal -- concept is already scheduled either way */ }
+      }
     }
     closeModal('promotion-shoot-modal');
-    toast('Added to Concept Development');
+    toast(isExistingBrief ? 'Added to Shoot Plan' : 'Added to Concept Development');
     await refreshCurrentPromotion();
     if (document.getElementById('planning-promotion-stage-view').style.display !== 'none') {
       renderPromotionStageDetailView();
     }
     await loadAll();
-    // One click = one concept = one item = one asset -- straight into the
-    // exact concept just created, per the brief ("After creation, take the
-    // user into the existing Concept Development workspace for that exact
-    // concept"). Same standalone-item pattern Brief Builder's "Start
-    // Concept" already uses (the promotion stage's own campaign week may
-    // not be the currently-viewed Concept Dev week, and the week's own
-    // Shoot Plan confirmation must never be implied by adding one concept).
-    switchTab('concept-dev');
-    await openConceptDevProductStandalone(item.id);
-    const seedConcept = conceptDevStandaloneProduct && conceptDevStandaloneProduct.concepts[0];
-    if (seedConcept) openConceptDevModal(seedConcept.id);
+    // Existing Concept finishes entirely inline, in this one modal -- it
+    // never opens a second modal. Everything else (New Concept, round 8;
+    // Static, unchanged from before) continues into the SAME full canonical
+    // Concept Development modal normal Concept Development uses -- this
+    // modal was only ever collecting the context (Format/Name/Filming/
+    // Editing/Shoot Week) that modal doesn't itself ask for.
+    if (isExistingBrief) return;
+    const product = await api(`/concept-development/item/${item.id}`);
+    const seedConcept = product.concepts && product.concepts[0];
+    if (seedConcept) openPromotionConceptDevModal(seedConcept, product);
   } catch (e) {
     toast(e.message, true);
   }
@@ -4537,6 +5248,15 @@ function conceptDevWorkspaceHeaderHtml(product) {
   const promoOrigin = product.source === 'promotion' && product.promotion_name
     ? `<div class="cd-workspace-promo-origin">Promotion: <strong>${escapeHtml(product.promotion_name)}</strong> — ${escapeHtml(product.promotion_stage_name || '')}</div>`
     : '';
+  // Shoot Week -- Promotion only (see the Shoot Week brief, section 2:
+  // "Promotion Concept Dev cards should retain useful context... planned
+  // Shoot Week"). Editable in place until Tuesday Review approves it (the
+  // PATCH itself 409s once a shoot_schedule row exists, at which point
+  // Shooting's own move/reschedule is the correct place to change it) --
+  // see editConceptDevShootWeek.
+  const shootWeekHtml = product.source === 'promotion'
+    ? `<span id="cd-shoot-week-display-${product.shoot_plan_item_id}">Shoot Week: ${escapeHtml(conceptDevShootWeekLabel(product.shoot_week))} <button type="button" class="link-btn" onclick="editConceptDevShootWeek(${product.shoot_plan_item_id}, '${product.shoot_week}')">Change</button></span>`
+    : '';
   return `
     <div class="cd-workspace-header">
       ${thumb}
@@ -4551,11 +5271,50 @@ function conceptDevWorkspaceHeaderHtml(product) {
           <span>Owner: ${escapeHtml(product.creator || '—')}</span>
           <span>&middot;</span>
           <span>${count} New Concept${count === 1 ? '' : 's'}</span>
+          ${shootWeekHtml ? `<span>&middot;</span>${shootWeekHtml}` : ''}
         </div>
         <div class="shoot-plan-style-chips">${chips}</div>
         ${product.initial_idea ? `<div class="shoot-plan-idea">💡 ${escapeHtml(product.initial_idea)}</div>` : ''}
       </div>
     </div>`;
+}
+
+// "This Week" / "Next Week" / "W/C Mon DD Mon" -- same labelling as the
+// intake modal's Shoot Week select (populatePromotionShootWeekOptions),
+// computed fresh here since the product payload only carries the raw date.
+function conceptDevShootWeekLabel(weekStartStr) {
+  if (!weekStartStr) return '—';
+  const monday = mondayOfWeek(0);
+  const thisWeek = isoDateStr(monday);
+  const nextWeek = isoDateStr(mondayOfWeek(1));
+  if (weekStartStr === thisWeek) return 'This Week';
+  if (weekStartStr === nextWeek) return 'Next Week';
+  const [y, m, d] = weekStartStr.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  return `W/C ${date.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' })}`;
+}
+
+async function editConceptDevShootWeek(shootPlanItemId, currentValue) {
+  const display = document.getElementById(`cd-shoot-week-display-${shootPlanItemId}`);
+  if (!display) return;
+  const options = populatePromotionShootWeekOptions();
+  display.innerHTML = `<select onchange="saveConceptDevShootWeek(${shootPlanItemId}, this.value)">${
+    options.map((o) => `<option value="${o.value}" ${o.value === currentValue ? 'selected' : ''}>${escapeHtml(o.label)}</option>`).join('')
+  }</select>`;
+}
+
+async function saveConceptDevShootWeek(shootPlanItemId, weekStart) {
+  try {
+    await api(`/shoot-plan/${shootPlanItemId}/week`, { method: 'PATCH', body: JSON.stringify({ week_start: weekStart }) });
+    toast('Shoot Week updated');
+    if (conceptDevStandaloneProduct && conceptDevStandaloneProduct.shoot_plan_item_id === shootPlanItemId) {
+      await openConceptDevProductStandalone(shootPlanItemId);
+    } else {
+      await loadConceptDevWeek();
+    }
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 // State-aware so the card tells the creator what clicking it will actually
@@ -4651,7 +5410,13 @@ function renderConceptDevList() {
   }
 
   const data = state.conceptDev.data;
-  if (!data || !data.confirmed) {
+  // Promotion New Concepts ride along in `products` regardless of this
+  // week's own confirmation state (see conceptDevelopment.js's GET / --
+  // their development timing is independent of the Shoot Plan ceremony),
+  // so the "not confirmed" wall only applies when there's truly nothing to
+  // show -- a confirmed-but-empty week and an unconfirmed week carrying
+  // only pending Promotion concepts both fall through to the normal list.
+  if (!data || (!data.confirmed && !data.products.length)) {
     state.conceptDev.view = 'list';
     list.innerHTML = `<div class="attention-empty">Shoot Plan for Week ${conceptDevWeekNumber()} hasn't been confirmed yet — nothing to prepare. <button type="button" class="link-btn" onclick="switchTab('planning')">Go to Planning &rarr;</button></div>`;
     return;
@@ -6262,7 +7027,7 @@ function updatePromotionConceptDevFooterButtons(status) {
     draftBtn.style.display = '';
     changesBtn.style.display = 'none';
     submitBtn.style.display = '';
-    submitBtn.textContent = 'Ready for Review →';
+    submitBtn.textContent = 'Save & Send to Tuesday Review →';
   }
 }
 
@@ -6659,7 +7424,9 @@ function renderTuesdayReviewList() {
   renderTuesdayReviewSummary();
   const list = document.getElementById('tr-list');
   const data = state.tuesdayReview.data;
-  if (!data || !data.confirmed) {
+  // Same reasoning as renderConceptDevList: a Promotion New Concept can be
+  // ready for review well before its own week's Shoot Plan is confirmed.
+  if (!data || (!data.confirmed && !data.products.length)) {
     list.innerHTML = `<div class="attention-empty">Shoot Plan for Week ${tuesdayReviewWeekNumber()} hasn't been confirmed yet — nothing to review.</div>`;
     return;
   }
@@ -7295,30 +8062,66 @@ function refreshCurrentShootingView() {
   else loadShootingHistory();
 }
 
-// Owner filter -- populated from content_creators (see the brief: "Do not
-// hard-code these names"), shared client-side across Week/Today, no
-// refetch needed on change since both views already have the full week's
-// data in hand.
+// Filming-person filter -- sourced from CONCEPT_ASSIGNEES (Mark/Shez/Til),
+// the app's one small "real production people" roster, NOT
+// state.contentCreators (every app user who can run Shoot Plan intake --
+// Brendan, Lucy, Max, Sheridan, Steve, etc.). Showing the full user list
+// here was the "All Owners" problem the brief called out. "Other" is its
+// own explicit bucket (rather than folding into "All") so historical/
+// outside-roster work (e.g. an older Sami assignment) stays reachable and
+// visible instead of only ever showing up mixed into the unfiltered "All"
+// view -- see isOtherFilmingPerson/shootingOwnerMatches below. Rendered as
+// buttons (not a <select>) into the .person-filter containers, shared
+// client-side across Week/Today, no refetch needed on change since both
+// views already have the full week's data in hand.
 function populateShootingOwnerFilters() {
-  const optionsHtml = `<option value="all">All Owners</option>` +
-    state.contentCreators.map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join('');
+  const names = ['all', ...CONCEPT_ASSIGNEES, 'other'];
+  const buttonsHtml = names.map((name) => {
+    const label = name === 'all' ? 'All' : name === 'other' ? 'Other' : escapeHtml(name);
+    const active = state.shooting.ownerFilter === name ? ' person-filter-btn-active' : '';
+    return `<button type="button" class="person-filter-btn${active}" data-value="${escapeHtml(name)}" onclick="setShootingOwnerFilter('${escapeHtml(name)}')">${label}</button>`;
+  }).join('');
   ['shoot-week-owner-filter', 'shoot-today-owner-filter'].forEach((id) => {
     const el = document.getElementById(id);
     if (!el) return;
-    el.innerHTML = optionsHtml;
-    el.value = state.shooting.ownerFilter;
+    el.innerHTML = buttonsHtml;
   });
+}
+
+// True for anyone outside the Mark/Shez/Til operational roster -- including
+// nobody assigned at all. Shared by Shooting's "Other" filter and Editing's
+// (see editingVisibleConcepts) so both buckets mean the same thing.
+function isOutsideConceptAssigneeRoster(name) {
+  return !name || !CONCEPT_ASSIGNEES.includes(name);
+}
+
+// The one place a person name maps to a colour-accent key -- backs the
+// person-accent-* CSS classes (see :root's --person-mark/shez/til/other in
+// styles.css). Shared by every card that surfaces a Filming/Editing
+// assignment so the same person always gets the same colour, never a
+// per-view remap. No accent for "nobody assigned" -- an unassigned card
+// stays visually neutral (the default card border), not falsely bucketed
+// into "Other".
+function personAccentKey(name) {
+  if (!name) return '';
+  return CONCEPT_ASSIGNEES.includes(name) ? name.toLowerCase() : 'other';
 }
 
 function setShootingOwnerFilter(value) {
   state.shooting.ownerFilter = value;
-  document.querySelectorAll('.shoot-owner-filter').forEach((el) => { el.value = value; });
+  document.querySelectorAll('#shoot-week-owner-filter, #shoot-today-owner-filter').forEach((container) => {
+    container.querySelectorAll('.person-filter-btn').forEach((btn) => {
+      btn.classList.toggle('person-filter-btn-active', btn.dataset.value === value);
+    });
+  });
   if (state.shooting.view === 'week') renderShootingWeekView();
   else if (state.shooting.view === 'today') renderShootingTodayView();
 }
 
 function shootingOwnerMatches(item) {
-  return state.shooting.ownerFilter === 'all' || item.owner === state.shooting.ownerFilter;
+  if (state.shooting.ownerFilter === 'all') return true;
+  if (state.shooting.ownerFilter === 'other') return isOutsideConceptAssigneeRoster(item.owner);
+  return item.owner === state.shooting.ownerFilter;
 }
 
 function shootingHookPreview(item) {
@@ -7424,7 +8227,17 @@ async function markShootingShot(scheduleId) {
 
 // The reverse of markShootingShot -- for an accidental click, not a second
 // production status. Returns the Concept to Scheduled/draggable.
+// Round 11: Shot/Filmed is the one reversal worth protecting -- completing
+// it may have already made the Concept eligible for Editing (ready_for_editing),
+// so an accidental undo here has a bigger blast radius than Scheduled<->In
+// Progress. A confirm step is all that changes; the actual revert is still
+// the same tested unmark-shot endpoint (back to Scheduled, not a new
+// "in_progress" landing state), which already clears ready_for_editing on
+// the SAME shoot_schedule row -- no new rows, nothing duplicated -- and only
+// rolls the canonical creative_assets.status back if Editing hasn't already
+// moved it past 'filming' (see the backend's syncDropStatusRevert).
 async function unmarkShootingShot(scheduleId) {
+  if (!(await confirmDialog('Move this back to In Progress? This will make it active in Shooting again.', { okLabel: 'Move Back' }))) return;
   try {
     await api(`/shooting/${scheduleId}/unmark-shot`, { method: 'POST' });
     toast('Unmarked as Shot');
@@ -7432,6 +8245,59 @@ async function unmarkShootingShot(scheduleId) {
   } catch (e) {
     toast(e.message, true);
   }
+}
+
+// Scheduled -> In Progress (see the Scheduling brief, item 7) -- and its
+// undo. Never touches ready_for_editing -- only markShootingShot does, so
+// starting a shoot can never leak the concept into Editing.
+async function startShooting(scheduleId) {
+  try {
+    await api(`/shooting/${scheduleId}/start`, { method: 'POST' });
+    toast('Marked as In Progress');
+    refreshCurrentShootingView();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function unstartShooting(scheduleId) {
+  try {
+    await api(`/shooting/${scheduleId}/unstart`, { method: 'POST' });
+    toast('Reverted to Scheduled');
+    refreshCurrentShootingView();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// "Shot" for a static/photo concept, "Filmed" for video -- same format-aware
+// labelling convention Upcoming Drops' own progress checkboxes already use
+// (see conceptProgressStageLabel), reused here rather than a second mapping.
+function shootingProductionLabel(format) {
+  return format === 'static' ? 'Shot' : 'Filmed';
+}
+
+// The obvious, explicit production-status control the brief calls for --
+// three labelled segments (Scheduled / In Progress / Shot·Filmed), not a
+// single passive-looking badge someone has to discover is clickable.
+// Deliberately linear: only the segment immediately after the current one
+// (advance) or the current one itself, if there's somewhere to undo back to
+// (revert), is ever clickable -- matches exactly the two small transitions
+// each backend endpoint supports (start/unstart, mark-shot/unmark-shot), no
+// arbitrary jumping between states.
+function shootingStatusControlHtml(item) {
+  const stages = ['scheduled', 'in_progress', 'shot'];
+  const labels = { scheduled: 'Scheduled', in_progress: 'In Progress', shot: shootingProductionLabel(item.format) };
+  const currentIndex = stages.indexOf(item.status);
+  return `<div class="shoot-status-control" onclick="event.stopPropagation()">${stages.map((stage, i) => {
+    const isCurrent = i === currentIndex;
+    const isNext = i === currentIndex + 1;
+    let onclick = null;
+    if (isNext) onclick = stage === 'in_progress' ? `startShooting(${item.id})` : `markShootingShot(${item.id})`;
+    else if (isCurrent && i > 0) onclick = stage === 'in_progress' ? `unstartShooting(${item.id})` : `unmarkShootingShot(${item.id})`;
+    const title = isNext ? `Mark as ${labels[stage]}` : (onclick ? `Undo -- revert to ${labels[stages[i - 1]]}` : '');
+    return `<button type="button" class="shoot-status-segment${isCurrent ? ' shoot-status-segment-active' : ''}" ${onclick ? `onclick="${onclick}"` : 'disabled'} title="${title}">${labels[stage]}</button>`;
+  }).join('')}</div>`;
 }
 
 // Week grid card -- compact by design (per the brief: "Do NOT display the
@@ -7448,12 +8314,8 @@ async function unmarkShootingShot(scheduleId) {
 // concept actually sits in the Shooting workflow.
 function shootingCardHtml(item, isUnscheduled = false) {
   const isShot = item.status === 'shot';
-  const metaParts = [item.owner, item.location].filter(Boolean);
   const carriedBadge = item.carried_over ? `<span class="shoot-carried-badge">From W${isoWeekNumber(parseDateStr(item.original_week_start))}</span>` : '';
-  const plannedLabel = isUnscheduled ? 'Needs Scheduling' : 'Scheduled';
-  const statusHtml = isShot
-    ? `<button type="button" class="shoot-status-pill shoot-status-pill-shot shoot-status-pill-toggle" onclick="event.stopPropagation(); unmarkShootingShot(${item.id})" title="Undo -- mark as not Shot">&check; Shot</button>`
-    : `<button type="button" class="shoot-status-pill shoot-status-pill-toggle" onclick="event.stopPropagation(); markShootingShot(${item.id})" title="Mark as Shot">&#9675; ${plannedLabel}</button>`;
+  const statusHtml = shootingStatusControlHtml(item);
   const menuHtml = isShot ? '' : `
         <div class="shoot-card-menu" onclick="event.stopPropagation()">
           <button type="button" class="shoot-card-menu-btn" onclick="toggleShootCardMenu(${item.id})" aria-label="Move concept">&bull;&bull;&bull;</button>
@@ -7470,10 +8332,27 @@ function shootingCardHtml(item, isUnscheduled = false) {
   // (see the Drop -> Shooting brief, item 8).
   const dropBadge = item.source === 'drop' && item.drop_name
     ? `<span class="shoot-card-drop-badge">${escapeHtml(item.drop_name)}</span>` : '';
+  // Filming person -- deliberately its own labelled line (see the
+  // Scheduling brief, item 6: "the person's name is visually buried"),
+  // never lumped into the same meta line as Location the way "Owner" used
+  // to be. The person-accent-* class on the card (left-edge colour) and the
+  // small pill next to the name are purely supplementary scanning aids for
+  // the All view -- the written "Filming: Name" label stays as the actual
+  // source of truth, never colour alone (see personAccentKey).
+  const personKey = personAccentKey(item.owner);
+  // The pill is redundant noise once a single person is already the active
+  // filter (every visible card is already theirs) -- it only earns its
+  // place in the "All" view, where distinguishing cards at a glance is the
+  // actual problem being solved. The left-edge accent stays in every view
+  // regardless -- it's subtle enough not to add noise on its own.
+  const personPill = item.owner && state.shooting.ownerFilter === 'all' ? `<span class="shoot-card-person-pill person-accent-${personKey}">${escapeHtml(item.owner)}</span>` : '';
+  const filmingHtml = item.owner ? `<div class="shoot-card-filming">Filming: <strong>${escapeHtml(item.owner)}</strong></div>` : '';
+  const metaParts = [item.location].filter(Boolean);
   return `
-    <div class="shoot-card ${isShot ? 'shoot-card-shot' : ''}" ${isShot ? '' : 'draggable="true"'} ondragstart="onShootCardDragStart(event, ${item.id})" onclick="openShootingBrief(${item.id})">
-      <div class="shoot-card-name">${dragHandle}${escapeHtml(item.concept_name)}</div>
+    <div class="shoot-card ${personKey ? `person-accent-${personKey}` : ''} ${isShot ? 'shoot-card-shot' : ''}" ${isShot ? '' : 'draggable="true"'} ondragstart="onShootCardDragStart(event, ${item.id})" onclick="openShootingBrief(${item.id})">
+      <div class="shoot-card-name">${dragHandle}${escapeHtml(item.concept_name)}${personPill}</div>
       <div class="shoot-card-product">${escapeHtml(item.product_name || '—')}${dropBadge}</div>
+      ${filmingHtml}
       ${metaParts.length ? `<div class="shoot-card-meta">${escapeHtml(metaParts.join(' · '))}</div>` : ''}
       <div class="shoot-card-footer">
         ${statusHtml}
@@ -7588,18 +8467,19 @@ function shootingTodayItemHtml(item) {
   const metaParts = [item.location].filter(Boolean);
   const dropBadge = item.source === 'drop' && item.drop_name
     ? `<span class="shoot-card-drop-badge">${escapeHtml(item.drop_name)}</span>` : '';
+  const filmingHtml = item.owner ? `<div class="shoot-card-filming">Filming: <strong>${escapeHtml(item.owner)}</strong></div>` : '';
   return `
     <div class="shoot-today-item ${isShot ? 'shoot-card-shot' : ''}">
       <div class="shoot-today-item-main">
         <div class="shoot-card-name">${escapeHtml(item.concept_name)}</div>
         <div class="shoot-card-product">${escapeHtml(item.product_name || '—')}${dropBadge}</div>
+        ${filmingHtml}
         ${metaParts.length ? `<div class="shoot-card-meta">${escapeHtml(metaParts.join(' · '))}</div>` : ''}
         ${hookPreview ? `<div class="shoot-today-hook">&ldquo;${escapeHtml(hookPreview)}&rdquo;</div>` : ''}
       </div>
       <div class="shoot-today-item-actions">
-        <span class="shoot-card-status ${isShot ? 'shoot-card-status-shot' : ''}">${isShot ? '&check; Shot' : 'Planned'}</span>
+        ${shootingStatusControlHtml(item)}
         <button type="button" class="link-btn" onclick="openShootingBrief(${item.id})">View Shoot Brief &rarr;</button>
-        ${isShot ? '' : `<button type="button" class="btn btn-primary btn-sm" onclick="markShootingShot(${item.id})">&check; Mark as Shot</button>`}
       </div>
     </div>`;
 }
@@ -7846,7 +8726,7 @@ function renderShootingBrief(brief) {
     brief.product_name,
     CONCEPT_DEV_SOURCE_LABELS[brief.source] || brief.source,
     brief.drop_name ? `Drop: ${brief.drop_name}` : null,
-    brief.owner ? `Owner: ${brief.owner}` : null,
+    brief.owner ? `Filming: ${brief.owner}` : null,
     skuInfo,
   ].filter(Boolean).join(' &middot; ');
   document.getElementById('shoot-brief-context').innerHTML = `
@@ -8322,21 +9202,36 @@ function editingWeekNumber() {
   return isoWeekNumber(mondayOfWeek(state.editing.weekOffset));
 }
 
-// resetFilter picks the most-actionable filter tab fresh from this fetch's
-// counts (see editingDefaultFilter) -- used only when the user is arriving
-// at a view with no filter explicitly requested (opening Editing, changing
-// week). Background reloads triggered by an action within the current view
-// (saving/deleting a Final Edit, submitting for approval, etc.) omit it, so
-// they never yank the user off a filter they picked themselves mid-session.
-async function loadEditingWeek({ resetFilter } = {}) {
+async function loadEditingWeek() {
   try {
     state.editing.data = await api(`/editing?week_start=${editingWeekStart()}`);
-    if (resetFilter) state.editing.filter = editingDefaultFilter(editingComputeSummary());
     renderEditingWeekHeader();
     renderEditingList();
   } catch (e) {
     toast(e.message, true);
   }
+}
+
+// Week/Today/History switcher, same pattern as Shooting's setShootingView --
+// always refetches whatever view is now active. The week-nav only makes
+// sense in Week view (Today always shows the real current week regardless
+// of week-nav position; History has its own past weeks), and the shared
+// person filter (see editingActiveConcepts) doesn't apply to History's
+// aggregated per-week numbers, so both are hidden there.
+function setEditingView(view) {
+  state.editing.view = view;
+  document.querySelectorAll('#editing-subnav .shoot-subnav-btn').forEach((b) => b.classList.toggle('active', b.dataset.editingView === view));
+  document.querySelectorAll('#editing-view-week, #editing-view-today, #editing-view-history').forEach((p) => p.classList.toggle('active', p.id === `editing-view-${view}`));
+  document.getElementById('editing-week-nav').style.display = view === 'week' ? '' : 'none';
+  document.getElementById('editing-controls-row').style.display = view === 'history' ? 'none' : '';
+  document.getElementById('editing-summary').style.display = view === 'history' ? 'none' : '';
+  refreshCurrentEditingView();
+}
+
+function refreshCurrentEditingView() {
+  if (state.editing.view === 'today') return loadEditingToday();
+  if (state.editing.view === 'history') return loadEditingHistory();
+  return loadEditingWeek();
 }
 
 function changeEditingWeek(delta) {
@@ -8356,7 +9251,7 @@ function jumpToEditingWeek(offset) {
 
 function onEditingWeekChanged() {
   closeEditingWeekPicker();
-  loadEditingWeek({ resetFilter: true });
+  loadEditingWeek();
 }
 
 function toggleEditingWeekPicker() {
@@ -8397,151 +9292,264 @@ function renderEditingWeekHeader() {
 
 const FINAL_EDIT_FORMATS = ['video', 'static', 'carousel'];
 
-// Concept-level requirements checklist -- the single source of truth for
-// every completion fraction shown anywhere (landing card, filters, summary,
-// workspace checklist), so none of them can drift from each other (see the
-// workflow-revision brief: "The Concept should be the primary workflow
-// unit"). One entry per planned Hook Variation, matched to its Final Edit by
-// exact text (same principle the old Create Final Edits suggestions used --
-// never assume a Hook was filmed just because it was planned), plus any
-// custom/manual Final Edits that don't match a Hook at all (item 9/10).
-function editingConceptRequirements(concept) {
-  const hooks = (Array.isArray(concept.hook_variations) ? concept.hook_variations : [])
-    .filter((h) => h && h.text && h.text.trim())
-    .map((h, i) => ({ label: i === 0 ? 'Primary Hook' : `Alternative Hook ${String(i).padStart(2, '0')}`, text: h.text.trim() }));
-  const finalEdits = concept.final_edits || [];
-  const used = new Set();
-  const hookItems = hooks.map((h) => {
-    const match = finalEdits.find((fe) => !used.has(fe.id) && (fe.variation_text || '').trim() === h.text);
-    if (match) used.add(match.id);
-    return { type: 'hook', label: h.label, hookText: h.text, finalEdit: match || null };
-  });
-  const customItems = finalEdits.filter((fe) => !used.has(fe.id)).map((fe) => ({ type: 'custom', label: fe.asset_name, hookText: null, finalEdit: fe }));
-  return [...hookItems, ...customItems];
+// Editing happens externally (CapCut) -- WNDRR isn't pretending to be an
+// editing app, just tracking the handoff. One Final Edit per Concept now
+// (editor/format/link/notes -- see #final-edit-modal, unchanged by this
+// simplification), not a checklist of individually-matched Hook Variations.
+// A Concept can technically still carry more than one final_edits row (nothing
+// deletes older ones), but the simplified workflow only ever creates/reads
+// the first -- see editingConceptFinalEdit.
+function editingConceptFinalEdit(concept) {
+  const edits = concept.final_edits || [];
+  return edits.length ? edits[0] : null;
 }
 
-function editingConceptCompletion(concept) {
-  const requirements = editingConceptRequirements(concept);
-  const complete = requirements.filter((r) => r.finalEdit && r.finalEdit.final_edit_link).length;
-  return { requirements, required: requirements.length, complete };
-}
-
-// Ready for Approval is DERIVED from submission + completion, never chosen
-// by hand (item 2): to_edit while nothing's complete, editing once at least
-// one Final Edit is done, ready_for_approval only once the Concept has
-// actually been submitted (reaching 100% just enables the button -- see
-// submitEditingConceptReady).
+// Four plain states, no completion fraction: To Edit (nothing started,
+// Unscheduled), Scheduled (round 9 -- placed onto a calendar day, but
+// editing hasn't actually started yet), In Progress (editing_started_at is
+// set -- editor working in CapCut, link may not be pasted back yet), Edited
+// (the Concept has actually been submitted -- see submitEditingConceptReady,
+// which requires the link first). Round 8 keyed the started/not-started
+// split off the explicit editing_started_at signal rather than "a
+// final_edits row happens to exist"; round 9 adds Scheduled the same
+// deliberate way -- derived from editing_day (already the exact "has this
+// been placed on a calendar day" signal PATCH /editing/schedule/:id sets/
+// clears, see routes/editing.js), not a new column, since that field is
+// already reliable and genuinely independent of editing_started_at. Once
+// editing_started_at is set it always wins over editing_day, so moving an
+// In Progress concept to a different day -- or back to Unscheduled --
+// never regresses it to Scheduled or To Edit (see editingStatusControlHtml
+// and moveEditingCard, which still never touches either field).
 function editingConceptStatus(concept) {
   if (concept.editing_submitted_at) return 'ready_for_approval';
-  return editingConceptCompletion(concept).complete === 0 ? 'to_edit' : 'editing';
+  if (concept.editing_started_at) return 'editing';
+  return concept.editing_day ? 'scheduled' : 'to_edit';
 }
 
+// The Final Edit workspace's default Editor suggestion -- the planning-time
+// Editing assignment (Upcoming Drops/Promotion intake), available from the
+// moment a Concept reaches Editing, before any Final Edit even exists yet.
 function editingConceptEditorLabel(concept) {
-  const editors = new Set((concept.final_edits || []).map((fe) => fe.editor).filter(Boolean));
-  return editors.size === 1 ? [...editors][0] : null;
+  return concept.editing_owner || null;
 }
 
-const EDITING_STATUS_LABELS = { to_edit: 'To Edit', editing: 'Editing', ready_for_approval: 'Ready for Approval' };
-const EDITING_STATUS_CLASS = { to_edit: 'editing-status-to-edit', editing: 'editing-status-editing', ready_for_approval: 'editing-status-ready' };
+const EDITING_STATUS_LABELS = { to_edit: 'To Edit', scheduled: 'Scheduled', editing: 'In Progress', ready_for_approval: 'Edited' };
+const EDITING_STATUS_CLASS = { to_edit: 'editing-status-to-edit', scheduled: 'editing-status-scheduled', editing: 'editing-status-editing', ready_for_approval: 'editing-status-ready' };
 
-const EDITING_FILTERS = [
-  { value: 'all', label: 'All' },
-  { value: 'to_edit', label: 'To Edit' },
-  { value: 'editing', label: 'Editing' },
-  { value: 'ready_for_approval', label: 'Ready for Approval' },
-];
+// The same segmented production-status control Shooting cards already use
+// (shootingStatusControlHtml, reusing its exact .shoot-status-control/
+// .shoot-status-segment CSS). Round 9: Scheduled is a passive,
+// calendar-derived stage for FORWARD entry -- it's only ever reached by
+// dragging a card onto a day, never by clicking this control. Round 11
+// makes the two non-final stages ("Scheduled", "To Edit") clickable
+// BACKWARD targets from In Progress, matching Shooting's own reversibility
+// (accidental clicks must be correctable) without changing that forward
+// rule: Scheduled never gains a *forward* click. From In Progress, exactly
+// one of the two earlier segments is ever the live backward target --
+// "Scheduled" when the Concept still has an editing_day (revert clears only
+// editing_started_at, the day/assignment/schedule row are all untouched),
+// "To Edit" when it doesn't (same clear, worded for the Unscheduled case).
+// From Scheduled, "To Edit" is also a live backward target -- clicking it
+// unschedules the Concept via the existing PATCH .../schedule/:id route
+// (least-surprising choice over a "you must drag it off first" error, see
+// revertEditingToToEdit). "Edited" is deliberately never a backward target
+// here at all: once a Final Edit exists, "Remove Final Edit" inside the
+// workspace is the closest undo (which also clears editing_started_at if it
+// was the Concept's last one); once actually submitted, Final Approval owns
+// the Concept and its own Request Changes -- a decision with feedback
+// attached, not a silent card click -- is the only way back (see
+// renderEditingConceptModal's submitted-lock). Both new backward actions
+// are themselves guarded server-side against a submitted Concept, so this
+// never needs to special-case "ready_for_approval" here.
+function editingStatusControlHtml(concept) {
+  const stages = ['to_edit', 'scheduled', 'editing', 'ready_for_approval'];
+  const status = editingConceptStatus(concept);
+  const hasDay = !!concept.editing_day;
+  return `<div class="shoot-status-control" onclick="event.stopPropagation()">${stages.map((stage) => {
+    const isCurrent = stage === status;
+    let onclick = null;
+    let title = '';
+    if (stage === 'editing' && (status === 'to_edit' || status === 'scheduled')) {
+      onclick = `advanceEditingToInProgress(${concept.creative_asset_id})`;
+      title = 'Mark as In Progress';
+    } else if (stage === 'ready_for_approval' && status === 'editing') {
+      onclick = `advanceEditingToEdited(${concept.creative_asset_id})`;
+      title = 'Mark as Edited';
+    } else if (stage === 'scheduled' && status === 'editing' && hasDay) {
+      onclick = `revertEditingToScheduled(${concept.creative_asset_id})`;
+      title = 'Undo -- revert to Scheduled';
+    } else if (stage === 'to_edit' && status === 'editing' && !hasDay) {
+      onclick = `revertEditingToToEdit(${concept.creative_asset_id})`;
+      title = 'Undo -- revert to To Edit';
+    } else if (stage === 'to_edit' && status === 'scheduled') {
+      onclick = `revertEditingToToEdit(${concept.creative_asset_id})`;
+      title = 'Undo -- unschedule back to To Edit';
+    }
+    return `<button type="button" class="shoot-status-segment${isCurrent ? ' shoot-status-segment-active' : ''}" ${onclick ? `onclick="${onclick}"` : 'disabled'} title="${title}">${EDITING_STATUS_LABELS[stage]}</button>`;
+  }).join('')}</div>`;
+}
 
-// Editor filter -- separate from the workflow-state tabs below, and the
+// Round 11 backward action 1: In Progress + still has an editing_day ->
+// Scheduled. Clears ONLY editing_started_at (see POST .../unstart) --
+// editing_day, editing_owner, and any existing final_edits row are all left
+// exactly as they are, so this is a pure status revert, never a data change.
+async function revertEditingToScheduled(conceptAssetId) {
+  try {
+    await api(`/editing/concepts/${conceptAssetId}/unstart`, { method: 'POST' });
+    await refreshCurrentEditingView();
+    toast('Reverted to Scheduled');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// Round 11 backward action 2: covers both "In Progress with no editing_day"
+// (clear editing_started_at, same as revertEditingToScheduled above -- the
+// Concept just lands on To Edit instead of Scheduled because there's no day
+// to revert to) and "Scheduled -> To Edit" (unschedule it). Looks the
+// Concept up fresh to decide which of the two applies, same
+// editingFindConcept pattern every other card action here already uses.
+async function revertEditingToToEdit(conceptAssetId) {
+  const concept = editingFindConcept(conceptAssetId);
+  if (!concept) return;
+  try {
+    if (editingConceptStatus(concept) === 'editing') {
+      await api(`/editing/concepts/${conceptAssetId}/unstart`, { method: 'POST' });
+    } else {
+      await api(`/editing/schedule/${concept.shoot_schedule_id}`, { method: 'PATCH', body: JSON.stringify({ editing_day: null }) });
+    }
+    await refreshCurrentEditingView();
+    toast('Reverted to To Edit');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// Card-level "In Progress" segment -- a pure status transition (fixes the
+// live-QA bug where this used to also create a Final Edit and open its
+// modal, see POST /editing/concepts/:id/start). It's simply "I have started
+// editing this": sets editing_started_at and nothing else -- no final_edits
+// row, no modal, no submission. The card stays put in Editing with "In
+// Progress" selected; the Final Edit modal is now reached only by clicking
+// "Edited" below.
+async function advanceEditingToInProgress(conceptAssetId) {
+  const concept = editingFindConcept(conceptAssetId);
+  if (!concept) return;
+  try {
+    await api(`/editing/concepts/${conceptAssetId}/start`, { method: 'POST' });
+    await refreshCurrentEditingView();
+    toast('Marked as In Progress');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// Clicking "Edited" must never silently advance the status -- the whole
+// point of this segment is that Final Approval can't be reached without a
+// real Final Edit link attached. Since "In Progress" no longer guarantees a
+// final_edits row exists (see advanceEditingToInProgress above), this
+// creates one first if the Concept doesn't already have one -- the same
+// creation call "In Progress" used to make, now made here instead, so
+// there's still ever only one final_edits row per Concept -- then opens the
+// SAME Final Edit modal, flagged into submit mode so the modal's own footer
+// becomes "Submit for Approval ->" (see submitFinalEditAndAdvance).
+// Cancel/close/backdrop-click on that modal are all plain closeModal() with
+// no side effect, so the concept simply stays In Progress until the form is
+// actually submitted.
+async function advanceEditingToEdited(conceptAssetId) {
+  const concept = editingFindConcept(conceptAssetId);
+  if (!concept) return;
+  let finalEdit = editingConceptFinalEdit(concept);
+  if (!finalEdit) {
+    const format = FINAL_EDIT_FORMATS.includes(concept.concept_format) ? concept.concept_format : 'video';
+    try {
+      const created = await api(`/editing/concepts/${conceptAssetId}/final-edits`, {
+        method: 'POST',
+        body: JSON.stringify({ assets: [{ asset_name: 'Final Edit', format }] }),
+      });
+      await refreshCurrentEditingView();
+      finalEdit = created[0];
+    } catch (e) {
+      toast(e.message, true);
+      return;
+    }
+  }
+  openFinalEditModal(finalEdit.id, { submitMode: true });
+}
+
+// Editor filter -- the one remaining filter dimension (see the Round 12
+// brief, item 1: the old workflow-state filter tabs are gone), and the
 // first real reader of editing_owner (see G's investigation): an
 // assignment made once in Upcoming Drops/Promotion intake now surfaces the
 // right person's queue here with nothing re-entered. Sourced from
-// CONCEPT_ASSIGNEES, NOT state.contentCreators (Shooting's owner filter's
-// list) -- editing_owner is written only through the "Editing" select in
-// Upcoming Drops/Promotion intake (index.html) and updateConceptEditingOwner
-// above, both of which already only ever offer Mark/Shez/Til (the same
-// fixed roster concept_assignee uses), a different, smaller list of people
-// than content_creators (who's filming, a Shooting-only concern -- see F).
-// Populating this from content_creators would silently make any concept
-// whose editing_owner is Shez or Til unreachable by its own filter option
-// (present only in "All Editors"), since those names aren't guaranteed to
-// exist in content_creators at all.
+// CONCEPT_ASSIGNEES (same compact roster Shooting's Filming filter now
+// uses too) -- editing_owner is written only through the "Editing" select
+// in Upcoming Drops/Promotion intake (index.html) and
+// updateConceptEditingOwner above, both of which already only ever offer
+// Mark/Shez/Til. Populating this from state.contentCreators (every app
+// user who can run Shoot Plan intake) would silently show editors who can
+// never actually be an editing_owner, and would risk the reverse too if
+// Mark/Shez/Til aren't all present in content_creators.
 function populateEditingEditorFilter() {
   const el = document.getElementById('editing-editor-filter');
   if (!el) return;
-  el.innerHTML = `<option value="all">All Editors</option>` +
-    CONCEPT_ASSIGNEES.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
-  el.value = state.editing.editorFilter;
+  const names = ['all', ...CONCEPT_ASSIGNEES, 'other'];
+  el.innerHTML = names.map((name) => {
+    const label = name === 'all' ? 'All' : name === 'other' ? 'Other' : escapeHtml(name);
+    const active = state.editing.editorFilter === name ? ' person-filter-btn-active' : '';
+    return `<button type="button" class="person-filter-btn${active}" data-value="${escapeHtml(name)}" onclick="setEditingEditorFilter('${escapeHtml(name)}')">${label}</button>`;
+  }).join('');
 }
 
 function setEditingEditorFilter(value) {
   state.editing.editorFilter = value;
-  // Same reset-on-change reasoning as loadEditingWeek's own resetFilter --
-  // switching editor can leave the current workflow-state tab pointing at
-  // now-empty work, so it re-picks via the same editingDefaultFilter rule
-  // rather than silently showing "Editing" with 0 cards.
-  state.editing.filter = editingDefaultFilter(editingComputeSummary());
+  const el = document.getElementById('editing-editor-filter');
+  if (el) {
+    el.querySelectorAll('.person-filter-btn').forEach((btn) => {
+      btn.classList.toggle('person-filter-btn-active', btn.dataset.value === value);
+    });
+  }
   renderEditingList();
+}
+
+// Whichever view is currently active supplies the working concept list --
+// Week reads state.editing.data (the week-nav-browsed week), Today reads
+// its own separately-fetched state.editing.todayData (always the REAL
+// current week, independent of week-nav position, same as Shooting's
+// todayData). Routing every downstream computation through this one
+// function is what makes the shared summary above the subnav automatically
+// reflect whichever of Week/Today is showing.
+function editingActiveConcepts() {
+  const source = state.editing.view === 'today' ? state.editing.todayData : state.editing.data;
+  return (source && source.concepts) || [];
 }
 
 // The set of Concepts the editor filter currently allows -- every other
-// computation (filter-tab counts, the default-tab pick, the visible list)
-// reads through this one helper so "All Editors" (the default) is
-// mathematically identical to no filter at all, and nothing computes off
-// state.editing.data.concepts directly and forgets it.
+// computation (the summary counts, the visible list) reads through this one
+// helper so "All Editors" (the default) is mathematically identical to no
+// filter at all, and nothing computes off the active concept list directly
+// and forgets it.
 function editingVisibleConcepts() {
-  const concepts = (state.editing.data && state.editing.data.concepts) || [];
+  const concepts = editingActiveConcepts();
   if (state.editing.editorFilter === 'all') return concepts;
+  if (state.editing.editorFilter === 'other') return concepts.filter((c) => isOutsideConceptAssigneeRoster(c.editing_owner));
   return concepts.filter((c) => c.editing_owner === state.editing.editorFilter);
 }
 
-// Aggregates across the whole week's Concepts -- backs both the filter-tab
-// counts and the summary line, computed once per render from the same
-// per-Concept helpers the cards themselves use (item 8: filters count
-// Concepts now, not individual Final Edits).
+// Aggregates across the whole week's Concepts -- backs the summary line,
+// computed once per render from the same per-Concept helpers the cards
+// themselves use.
 function editingComputeSummary() {
   const concepts = editingVisibleConcepts();
-  let toEdit = 0, editingCount = 0, ready = 0, totalRequired = 0, totalComplete = 0;
+  let toEdit = 0, scheduled = 0, editingCount = 0, ready = 0;
   for (const c of concepts) {
-    const { required, complete } = editingConceptCompletion(c);
-    totalRequired += required;
-    totalComplete += complete;
     const status = editingConceptStatus(c);
     if (status === 'to_edit') toEdit += 1;
+    else if (status === 'scheduled') scheduled += 1;
     else if (status === 'editing') editingCount += 1;
     else ready += 1;
   }
-  return { concepts: concepts.length, to_edit: toEdit, editing: editingCount, ready_for_approval: ready, final_edits_required: totalRequired, final_edits_complete: totalComplete };
-}
-
-// Picks the most-actionable filter tab for a fresh arrival (see
-// loadEditingWeek's resetFilter): work already underway beats work not yet
-// started, which beats a bare "All" once the week's Editing queue is empty
-// (never leave the user parked on an empty tab -- Ready for Approval stays
-// available but is never the auto-default, since Final Approval is its own
-// dedicated workflow for reviewing those Concepts).
-function editingDefaultFilter(summary) {
-  if (summary.editing > 0) return 'editing';
-  if (summary.to_edit > 0) return 'to_edit';
-  return 'all';
-}
-
-// Counts ride on every tab, same convention as Concept Dev/Tuesday Review's
-// filter-tab-count -- Ready for Approval also gets a subtle attention style
-// when it actually has something waiting, since that's the state easiest to
-// miss on a quick scan.
-function renderEditingFilters() {
-  const s = editingComputeSummary();
-  const counts = { all: s.concepts, to_edit: s.to_edit, editing: s.editing, ready_for_approval: s.ready_for_approval };
-  document.getElementById('editing-filters').innerHTML = EDITING_FILTERS.map((f) => {
-    const attention = f.value === 'ready_for_approval' && counts[f.value] > 0;
-    return `
-    <button type="button" class="filter-tab ${state.editing.filter === f.value ? 'active' : ''} ${attention ? 'filter-tab-attention' : ''}" onclick="setEditingFilter('${f.value}')">${f.label} <span class="filter-tab-count">${counts[f.value]}</span></button>`;
-  }).join('');
-}
-
-function setEditingFilter(filter) {
-  state.editing.filter = filter;
-  renderEditingList();
+  return { concepts: concepts.length, to_edit: toEdit, scheduled, editing: editingCount, ready_for_approval: ready };
 }
 
 // Compact and Concept-first (item 8): concept count, the overall Final Edit
@@ -8550,8 +9558,8 @@ function setEditingFilter(filter) {
 // own card/workspace, not up here.
 function renderEditingSummary() {
   const s = editingComputeSummary();
-  const parts = [`${s.concepts} Concept${s.concepts === 1 ? '' : 's'}`, `${s.final_edits_complete}/${s.final_edits_required} Final Edits`];
-  if (s.ready_for_approval > 0) parts.push(`${s.ready_for_approval} Ready for Approval`);
+  const parts = [`${s.concepts} Concept${s.concepts === 1 ? '' : 's'}`, `${s.to_edit} To Edit`, `${s.scheduled} Scheduled`, `${s.editing} In Progress`];
+  if (s.ready_for_approval > 0) parts.push(`${s.ready_for_approval} Edited`);
   document.getElementById('editing-summary').textContent = parts.join(' · ');
 }
 
@@ -8559,75 +9567,338 @@ function renderEditingSummary() {
 // .cd-product-grid / .high-stock-thumb), not a bespoke card system -- so
 // Editing feels like the same product rather than an admin screen bolted
 // on (see the landing-page brief). Each card is one Concept: product image
-// + name, the Concept name as the strong title, a status pill, the
-// completion fraction with a short in-card progress bar (never the giant
-// full-width one), the single unambiguous editor if there is one, and one
-// contextual CTA. No per-Hook rows here at all -- that detail lives in the
-// Concept workspace, unchanged by this pass.
-function editingConceptCtaLabel(status, complete) {
+// + name, the Concept name as the strong title, a plain status pill (no
+// completion fraction any more -- see the Editing-simplification brief,
+// item 9), the single Editor if one's assigned, and one contextual CTA.
+function editingConceptCtaLabel(status) {
   if (status === 'ready_for_approval') return 'View Editing';
-  return complete === 0 ? 'Start Editing' : 'Open Editing';
+  return status === 'to_edit' ? 'Start Editing' : 'Open Editing';
 }
 
 function editingConceptCardHtml(concept) {
   const status = editingConceptStatus(concept);
-  const { required, complete } = editingConceptCompletion(concept);
   const isReady = status === 'ready_for_approval';
-  const editor = editingConceptEditorLabel(concept);
-  const pct = required > 0 ? Math.round((complete / required) * 100) : 0;
   const thumb = concept.image_url
     ? `<img class="high-stock-thumb" src="${concept.image_url}" alt="">`
     : '<span class="high-stock-thumb high-stock-noimg">🖼</span>';
+  // Same person-accent convention as Shooting (see personAccentKey) --
+  // consistent colour identification anywhere an assignment is surfaced.
+  const personKey = personAccentKey(concept.editing_owner);
   return `
-    <div class="cd-card editing-concept-card ${isReady ? 'editing-concept-card-ready' : ''}" onclick="openEditingConcept(${concept.creative_asset_id})">
+    <div class="cd-card editing-concept-card ${personKey ? `person-accent-${personKey}` : ''} ${isReady ? 'editing-concept-card-ready' : ''}" onclick="openEditingConcept(${concept.creative_asset_id})">
       <div class="cd-card-top">
         ${thumb}
         <div class="editing-concept-product">${escapeHtml(concept.product_name || '—')}</div>
       </div>
       <div class="editing-concept-name">${escapeHtml(concept.concept_name)}</div>
-      <span class="cd-concept-status-pill ${EDITING_STATUS_CLASS[status]}">${isReady ? '&check; ' : ''}${EDITING_STATUS_LABELS[status]}</span>
-      <div class="editing-concept-progress ${isReady ? 'editing-concept-progress-ready' : ''}">${complete} of ${required} Final Edit${required === 1 ? '' : 's'}</div>
-      <div class="editing-card-progress-track"><div class="editing-card-progress-fill ${isReady ? 'ready' : ''}" style="width:${pct}%;"></div></div>
-      ${editor ? `<div class="cd-card-meta">Editor: ${escapeHtml(editor)}</div>` : ''}
-      <div class="cd-card-action">${editingConceptCtaLabel(status, complete)} &rarr;</div>
+      ${editingStatusControlHtml(concept)}
+      <div class="cd-card-meta">Editing: <strong>${concept.editing_owner ? escapeHtml(concept.editing_owner) : 'Unassigned'}</strong></div>
+      <div class="cd-card-action">${editingConceptCtaLabel(status)} &rarr;</div>
     </div>`;
 }
 
-// A status filter narrows to matching Concepts, same "Concept is the unit"
-// principle as everywhere else in this revision.
+// Renders whichever calendar view is currently active -- Week (day-grouped
+// calendar) or Today -- on top of the same shared summary line, same
+// dispatch pattern as Shooting's refreshCurrentShootingView. History has
+// its own separate load/render pair (loadEditingHistory/
+// renderEditingHistoryView) since it doesn't share the person filter at all.
 function renderEditingList() {
   renderEditingSummary();
-  renderEditingFilters();
-  const concepts = editingVisibleConcepts();
-  const filter = state.editing.filter;
-  const shown = filter === 'all' ? concepts : concepts.filter((c) => editingConceptStatus(c) === filter);
-
-  document.getElementById('editing-empty').style.display = concepts.length ? 'none' : '';
-  document.getElementById('editing-list').innerHTML = shown.map(editingConceptCardHtml).join('');
+  if (state.editing.view === 'today') renderEditingTodayView();
+  else renderEditingWeekView();
 }
 
+// Searches both concept lists (Week's browsed-week data and Today's own
+// current-week data) rather than just whichever is currently active -- a
+// concept opened from Today must still be found if the user had earlier
+// browsed Week to a different week (and vice versa), since both views share
+// the same modal/action code.
 function editingFindConcept(creativeAssetId) {
-  const concepts = (state.editing.data && state.editing.data.concepts) || [];
-  return concepts.find((c) => c.creative_asset_id === creativeAssetId);
+  const weekConcepts = (state.editing.data && state.editing.data.concepts) || [];
+  const todayConcepts = (state.editing.todayData && state.editing.todayData.concepts) || [];
+  return weekConcepts.find((c) => c.creative_asset_id === creativeAssetId) || todayConcepts.find((c) => c.creative_asset_id === creativeAssetId);
 }
 
 function editingFindFinalEdit(finalEditId) {
-  for (const concept of (state.editing.data && state.editing.data.concepts) || []) {
+  const weekConcepts = (state.editing.data && state.editing.data.concepts) || [];
+  const todayConcepts = (state.editing.todayData && state.editing.todayData.concepts) || [];
+  for (const concept of [...weekConcepts, ...todayConcepts]) {
     const found = concept.final_edits.find((fe) => fe.id === finalEditId);
     if (found) return { finalEdit: found, concept };
   }
   return null;
 }
 
-// The Concept workspace: "Open Concept -> Complete each Hook edit -> N/N
-// Complete -> Ready for Approval" (item 12). Every row here is one checklist
-// entry from editingConceptRequirements -- a checkbox representing whether a
-// Final Edit is attached, never one the user ticks by hand (item 4).
+// ── Editing calendar (Week/Today/History) ──────────────
+// Reuses Shooting's own SHOOT_DAY_KEYS/LABELS (the weekday domain is the
+// same) and its .shoot-day-column/.shoot-card/.shoot-card-menu/
+// .shoot-unscheduled CSS wholesale -- this is a second calendar of the same
+// shape, not a new visual language (item 8: "using existing Shooting UX
+// patterns, not an unrelated interface").
+function editingDayHeaderLabel(day) {
+  const monday = mondayOfWeek(state.editing.weekOffset);
+  const d = new Date(monday);
+  d.setDate(monday.getDate() + SHOOT_DAY_KEYS.indexOf(day));
+  const month = d.toLocaleDateString('en-AU', { month: 'short' }).toUpperCase().slice(0, 3);
+  return `${SHOOT_DAY_SHORT_LABELS[day]} ${d.getDate()} ${month}`;
+}
+
+function editingIsCurrentDay(day) {
+  return state.editing.weekOffset === 0 && day === shootingTodayInfo().dayKey;
+}
+
+// Per-day "X/Y Ready" -- Ready for Approval is Editing's own equivalent of
+// Shooting's "Shot" (the concept has nothing left to do on this day), so
+// this mirrors shootingDayHeaderHtml exactly, just counting a different
+// status.
+function editingDayHeaderHtml(day, items, isToday) {
+  const label = `<span class="shoot-day-date-group"><span class="shoot-day-date">${editingDayHeaderLabel(day)}</span>${isToday ? '<span class="shoot-day-today-badge">Today</span>' : ''}</span>`;
+  if (!items.length) return `<div class="shoot-day-header-top">${label}</div>`;
+  const readyCount = items.filter((c) => editingConceptStatus(c) === 'ready_for_approval').length;
+  const total = items.length;
+  const complete = readyCount === total;
+  const pct = Math.round((readyCount / total) * 100);
+  return `
+    <div class="shoot-day-header-top">
+      ${label}
+      <span class="shoot-day-progress-count${complete ? ' shoot-day-progress-complete' : ''}">${complete ? '&check; ' : ''}${readyCount}/${total} Ready</span>
+    </div>
+    <div class="shoot-day-progress-bar"><div class="shoot-day-progress-fill${complete ? ' shoot-day-progress-fill-complete' : ''}" style="width:${pct}%"></div></div>`;
+}
+
+// Every card's accessible alternative to drag-and-drop, same convention as
+// shootingMoveMenuItemsHtml -- item 12 asks for the same rescheduling
+// (Unscheduled<->weekday, weekday<->weekday, this week->future week) with
+// an explicit Move action alongside drag/drop, not instead of it. Never
+// locked by workflow state (item 9: calendar and workflow progress are
+// independent) -- a Ready for Approval concept can still be moved, unlike
+// Shooting's Shot cards which lock in place.
+function editingMoveMenuItemsHtml(concept) {
+  const dayItems = SHOOT_DAY_KEYS
+    .filter((day) => day !== concept.editing_day)
+    .map((day) => `<button type="button" class="shoot-card-menu-item" onclick="moveEditingCard(${concept.shoot_schedule_id}, '${day}', '${concept.editing_week_start}'); closeAllEditingCardMenus();">${SHOOT_DAY_LABELS[day]}</button>`)
+    .join('');
+  const unscheduledItem = concept.editing_day
+    ? `<button type="button" class="shoot-card-menu-item" onclick="moveEditingCard(${concept.shoot_schedule_id}, 'unscheduled', '${concept.editing_week_start}'); closeAllEditingCardMenus();">Unscheduled</button>`
+    : '';
+  const carryItem = `<button type="button" class="shoot-card-menu-item shoot-card-menu-item-carry" onclick="moveEditingCard(${concept.shoot_schedule_id}, 'carry_next_week', '${concept.editing_week_start}'); closeAllEditingCardMenus();">Carry to next week &rarr;</button>`;
+  return `<div class="shoot-card-menu-label">Move to</div>${dayItems}${unscheduledItem}${carryItem}`;
+}
+
+function toggleEditingCardMenu(scheduleId) {
+  const dropdown = document.getElementById(`editing-card-menu-${scheduleId}`);
+  if (!dropdown) return;
+  const isOpen = dropdown.classList.contains('open');
+  closeAllEditingCardMenus();
+  if (!isOpen) dropdown.classList.add('open');
+}
+
+function closeAllEditingCardMenus() {
+  document.querySelectorAll('#editing-week-grid .shoot-card-menu-dropdown.open, #editing-unscheduled .shoot-card-menu-dropdown.open').forEach((el) => el.classList.remove('open'));
+}
+
+document.addEventListener('click', (e) => {
+  if (e.target.closest('.shoot-card-menu')) return;
+  closeAllEditingCardMenus();
+});
+
+// One reschedule action for every way an Editing card moves (menu item or
+// drag/drop) -- mirrors moveShootingCard exactly, just against the Editing
+// calendar's own PATCH /editing/schedule/:id (see routes/editing.js), which
+// never touches editing_owner or any workflow-state field.
+async function moveEditingCard(scheduleId, value, currentWeekStart) {
+  try {
+    const body = value === 'unscheduled' ? { editing_day: null }
+      : value === 'carry_next_week' ? { editing_day: null, editing_week_start: nextWeekStartFrom(currentWeekStart) }
+      : { editing_day: value };
+    await api(`/editing/schedule/${scheduleId}`, { method: 'PATCH', body: JSON.stringify(body) });
+    toast(value === 'carry_next_week' ? 'Carried to next week' : 'Moved');
+    await refreshCurrentEditingView();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function onEditingCardDragStart(e, scheduleId) {
+  state.editing.dragScheduleId = scheduleId;
+  e.dataTransfer.setData('text/plain', String(scheduleId));
+  e.dataTransfer.effectAllowed = 'move';
+}
+
+function onEditingColumnDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  e.currentTarget.classList.add('drag-over');
+}
+
+function onEditingColumnDragLeave(e) {
+  e.currentTarget.classList.remove('drag-over');
+}
+
+function onEditingColumnDrop(e, day) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  const scheduleId = state.editing.dragScheduleId || Number(e.dataTransfer.getData('text/plain'));
+  state.editing.dragScheduleId = null;
+  if (!scheduleId) return;
+  moveEditingCard(scheduleId, day || 'unscheduled', null);
+}
+
+// Compact calendar card for Week's Unscheduled strip/day columns -- reuses
+// Shooting's .shoot-card shape (item 11: "Editing: Mark" gets its own
+// labelled line, same as Shooting's "Filming: Mark", never lumped into a
+// meta line) rather than the roomier .cd-card grid (that stays for Today,
+// where columns aren't narrow).
+function editingDayCardHtml(concept, isUnscheduled = false) {
+  const status = editingConceptStatus(concept);
+  const isReady = status === 'ready_for_approval';
+  const carriedBadge = concept.carried_over
+    ? `<span class="shoot-carried-badge">From W${isoWeekNumber(parseDateStr(concept.editing_original_week_start))}</span>` : '';
+  const dragHandle = isUnscheduled ? '<span class="shoot-card-drag-handle" title="Drag onto a day to schedule">⠿</span>' : '';
+  const editingHtml = `<div class="shoot-card-filming">Editing: <strong>${concept.editing_owner ? escapeHtml(concept.editing_owner) : 'Unassigned'}</strong></div>`;
+  // Same person-accent convention as Shooting/Editing's grid card -- see
+  // personAccentKey.
+  const personKey = personAccentKey(concept.editing_owner);
+  return `
+    <div class="shoot-card ${personKey ? `person-accent-${personKey}` : ''} ${isReady ? 'shoot-card-shot' : ''}" draggable="true" ondragstart="onEditingCardDragStart(event, ${concept.shoot_schedule_id})" onclick="openEditingConcept(${concept.creative_asset_id})">
+      <div class="shoot-card-name">${dragHandle}${escapeHtml(concept.concept_name)}</div>
+      <div class="shoot-card-product">${escapeHtml(concept.product_name || '—')}</div>
+      ${editingHtml}
+      <div class="shoot-card-footer">
+        ${editingStatusControlHtml(concept)}
+        ${carriedBadge}
+      </div>
+      <div class="shoot-card-actions">
+        <button type="button" class="link-btn" onclick="event.stopPropagation(); openEditingConcept(${concept.creative_asset_id})">${editingConceptCtaLabel(status)} &rarr;</button>
+        <div class="shoot-card-menu" onclick="event.stopPropagation()">
+          <button type="button" class="shoot-card-menu-btn" onclick="toggleEditingCardMenu(${concept.shoot_schedule_id})" aria-label="Move concept">&bull;&bull;&bull;</button>
+          <div class="shoot-card-menu-dropdown" id="editing-card-menu-${concept.shoot_schedule_id}">${editingMoveMenuItemsHtml(concept)}</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+// Unscheduled + Mon-Fri, built from editingVisibleConcepts (editor filter --
+// the only filter left; see the Round 12 brief, item 1: the old
+// workflow-state filter tabs made a card vanish the moment its own
+// segmented-control click changed its status, which read as a bug rather
+// than a filter. The calendar now always shows every visible Concept for
+// the week regardless of status -- the segmented control on each card is
+// the one source of truth for where it's at).
+function renderEditingWeekView() {
+  const filtered = editingVisibleConcepts();
+
+  const unscheduled = filtered.filter((c) => !c.editing_day);
+  const dayItems = {};
+  SHOOT_DAY_KEYS.forEach((day) => {
+    dayItems[day] = filtered.filter((c) => c.editing_day === day);
+  });
+
+  const unscheduledEl = document.getElementById('editing-unscheduled');
+  unscheduledEl.classList.toggle('shoot-unscheduled-compact', unscheduled.length === 0);
+  unscheduledEl.classList.toggle('shoot-unscheduled-active', unscheduled.length > 0);
+  unscheduledEl.innerHTML = unscheduled.length ? `
+    <div class="shoot-unscheduled-header">Unscheduled <span class="shoot-unscheduled-count">${unscheduled.length}</span><span class="shoot-unscheduled-hint">Needs scheduling</span><span class="shoot-unscheduled-drag-hint">Drag concepts onto a day to schedule</span></div>
+    <div class="shoot-unscheduled-list">${unscheduled.map((c) => editingDayCardHtml(c, true)).join('')}</div>`
+    : `<div class="shoot-unscheduled-header">Unscheduled <span class="shoot-unscheduled-count">0</span></div>`;
+
+  document.getElementById('editing-week-grid').innerHTML = SHOOT_DAY_KEYS.map((day) => {
+    const items = dayItems[day];
+    const isToday = editingIsCurrentDay(day);
+    return `
+      <div class="shoot-day-column${isToday ? ' shoot-day-column-today' : ''}" ondragover="onEditingColumnDragOver(event)" ondragleave="onEditingColumnDragLeave(event)" ondrop="onEditingColumnDrop(event, '${day}')">
+        <div class="shoot-day-header">${editingDayHeaderHtml(day, items, isToday)}</div>
+        <div class="shoot-day-cards">
+          ${items.length ? items.map((c) => editingDayCardHtml(c)).join('') : '<div class="shoot-day-empty">—</div>'}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// Today always shows the REAL current weekday's Editing queue, independent
+// of whatever week Week view happens to be browsing -- same reasoning as
+// shootingTodayInfo/loadShootingToday. Reuses the roomier editingConceptCardHtml
+// (.cd-card grid) rather than the compact day-card, since Today isn't
+// squeezed into a 5-column grid.
+async function loadEditingToday() {
+  try {
+    state.editing.todayData = await api(`/editing?week_start=${isoDateStr(mondayOfWeek(0))}`);
+    renderEditingList();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function renderEditingTodayView() {
+  const { date, dayKey } = shootingTodayInfo();
+  const dayLabel = date.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' });
+  document.getElementById('editing-today-title').textContent = `Today — ${dayLabel.toUpperCase()}`;
+
+  const list = document.getElementById('editing-today-list');
+  if (!dayKey) {
+    list.innerHTML = '<div class="attention-empty">No editing is scheduled on weekends.</div>';
+    return;
+  }
+  const filtered = editingVisibleConcepts().filter((c) => c.editing_day === dayKey);
+  list.innerHTML = filtered.length ? filtered.map(editingConceptCardHtml).join('') : '<div class="attention-empty">Nothing scheduled for editing today.</div>';
+}
+
+async function loadEditingHistory() {
+  try {
+    state.editing.historyData = await api('/editing/history');
+    renderEditingHistoryView();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// Same Not Completed/Carried Over bucketing convention as
+// shootingHistoryStatusLabel, just against Editing's own "submitted" marker.
+function editingHistoryStatusLabel(w) {
+  const parts = [];
+  if (w.not_completed > 0 || w.carried_over === 0) parts.push(`${w.not_completed} Not Completed`);
+  if (w.carried_over > 0) parts.push(`${w.carried_over} Carried Over`);
+  return parts.join(' · ');
+}
+
+function renderEditingHistoryView() {
+  const weeks = (state.editing.historyData && state.editing.historyData.weeks) || [];
+  const list = document.getElementById('editing-history-list');
+  if (!weeks.length) {
+    list.innerHTML = '<div class="attention-empty">No Editing history yet.</div>';
+    return;
+  }
+  list.innerHTML = weeks.map((w) => {
+    const monday = parseDateStr(w.week_start);
+    const completionRate = w.planned > 0 ? Math.round((w.submitted / w.planned) * 100) : 0;
+    return `
+      <div class="shoot-history-row">
+        <div class="shoot-history-row-main">
+          <div class="shoot-history-week-name">Week ${isoWeekNumber(monday)}</div>
+          <div class="shoot-history-range">${formatWeekRange(monday)}</div>
+          <div class="shoot-history-stats">${w.planned} Planned · ${w.submitted} Submitted · ${editingHistoryStatusLabel(w)}</div>
+        </div>
+        <div class="shoot-history-row-side">
+          <div class="shoot-history-rate">${completionRate}% completed</div>
+          <button type="button" class="link-btn" onclick="jumpToEditingWeekFromHistory('${w.week_start}')">View Week &rarr;</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function jumpToEditingWeekFromHistory(weekStartStr) {
+  const targetMonday = parseDateStr(weekStartStr);
+  const diffWeeks = Math.round((targetMonday - mondayOfWeek(0)) / (7 * 86400000));
+  state.editing.weekOffset = diffWeeks;
+  setEditingView('week');
+}
+
+// The Concept workspace: "Open Concept -> Start Editing -> paste the Final
+// Edit link back -> Mark as Edited" -- a plain handoff, not a checklist.
 function openEditingConcept(creativeAssetId) {
   const concept = editingFindConcept(creativeAssetId);
   if (!concept) return;
   state.editing.activeConceptAssetId = creativeAssetId;
-  state.editing.createRows = [];
   renderEditingConceptModal();
   openModal('editing-concept-modal');
 }
@@ -8644,110 +9915,99 @@ function openEditingConceptBrief() {
 // "•••" overflow menu (same pattern as Reference Library's card menu)
 // instead of sitting permanently beside it. An incomplete row keeps its
 // single Add Final Edit -> action, unchanged.
-function editingRequirementRowHtml(req, index, submitted) {
-  const complete = !!(req.finalEdit && req.finalEdit.final_edit_link);
-  let action = '';
-  if (complete) {
-    const feId = req.finalEdit.id;
-    action = `<a href="${escapeHtml(req.finalEdit.final_edit_link)}" target="_blank" rel="noopener" class="link-btn">View Final Edit &rarr;</a>`;
-    if (!submitted) {
-      action += `
-        <div class="editing-req-menu" onclick="event.stopPropagation()">
-          <button type="button" class="editing-req-menu-btn" onclick="toggleEditingReqMenu(${feId}, event)" aria-label="More actions">&bull;&bull;&bull;</button>
-          <div class="editing-req-menu-dropdown" id="editing-req-menu-${feId}">
-            <button type="button" class="editing-req-menu-item" onclick="closeAllEditingReqMenus();openFinalEditModal(${feId})">Replace Final Edit</button>
-            <button type="button" class="editing-req-menu-item editing-req-menu-item-danger" onclick="deleteFinalEditFromMenu(${feId})">Delete Final Edit</button>
-          </div>
-        </div>`;
-    }
-  } else if (!submitted) {
-    action = `<button type="button" class="link-btn" onclick="editingAddRequirement(${index})">Add Final Edit &rarr;</button>`;
-  }
-  return `
-    <div class="editing-req-row ${complete ? 'editing-req-row-complete' : ''}">
-      <span class="editing-req-check">&#10003;</span>
-      <span class="editing-req-main">
-        <span class="editing-req-label">${escapeHtml(req.label)}</span>
-        ${req.hookText ? `<span class="editing-req-hook">&ldquo;${escapeHtml(req.hookText)}&rdquo;</span>` : ''}
-      </span>
-      <span class="editing-req-action">${action}</span>
-    </div>`;
-}
-
-function closeAllEditingReqMenus() {
-  document.querySelectorAll('.editing-req-menu-dropdown.show').forEach((el) => el.classList.remove('show'));
-}
-
-function toggleEditingReqMenu(id, event) {
-  event.stopPropagation();
-  const dropdown = document.getElementById(`editing-req-menu-${id}`);
-  const isOpen = dropdown.classList.contains('show');
-  closeAllEditingReqMenus();
-  if (!isOpen) dropdown.classList.add('show');
-}
-
-document.addEventListener('click', (e) => {
-  if (!e.target.closest('.editing-req-menu')) closeAllEditingReqMenus();
-});
-
+// Editing is a handoff, not a checklist any more (see the Editing-
+// simplification brief, item 9): one Final Edit per Concept, reusing the
+// exact same #final-edit-modal workspace (editor/format/link/notes)
+// untouched -- this function just decides whether to show "nothing started
+// yet", the existing Final Edit's summary, or (once submitted) a locked
+// read-only view.
 function renderEditingConceptModal() {
   const concept = editingFindConcept(state.editing.activeConceptAssetId);
   if (!concept) return;
-  const { requirements, required, complete } = editingConceptCompletion(concept);
-  state.editing.activeRequirements = requirements;
   const submitted = !!concept.editing_submitted_at;
-  const allComplete = required > 0 && complete === required;
+  const finalEdit = editingConceptFinalEdit(concept);
   const status = editingConceptStatus(concept);
   const isReady = status === 'ready_for_approval';
 
+  fillConceptDevSelectWithOther('editing-concept-editor-select', 'editing-concept-editor-custom', CONCEPT_ASSIGNEES, concept.editing_owner, 'Unassigned');
+  document.getElementById('editing-concept-editor-select').disabled = submitted;
+  document.getElementById('editing-concept-editor-custom').disabled = submitted;
+
   document.getElementById('editing-concept-modal-title').textContent = concept.concept_name;
   document.getElementById('editing-concept-modal-subtitle').textContent = concept.product_name || '';
-  // A small status badge in the header (item 1) doubles as the "Ready for
-  // Approval" indicator once submitted -- one status readout instead of a
-  // separate fixed badge element.
   const statusPill = document.getElementById('editing-concept-modal-status-pill');
   statusPill.className = `cd-concept-status-pill ${EDITING_STATUS_CLASS[status]}`;
   statusPill.innerHTML = `${isReady ? '&check; ' : ''}${EDITING_STATUS_LABELS[status]}`;
 
-  // The section heading itself carries the completion count now (item 2)
-  // -- this is the Concept's primary progress indicator, plus a short/
-  // subtle bar beneath it (never a large one) -- so it isn't repeated
-  // again further down (item 4).
-  const countBadge = document.getElementById('editing-req-heading-count');
-  countBadge.textContent = `${complete} OF ${required} COMPLETE`;
-  countBadge.classList.toggle('editing-req-heading-count-done', allComplete);
-  const pct = required > 0 ? Math.round((complete / required) * 100) : 0;
-  const progressFill = document.getElementById('editing-req-progress-fill');
-  progressFill.style.width = `${pct}%`;
-  progressFill.classList.toggle('ready', allComplete);
+  const hasLink = !!(finalEdit && finalEdit.final_edit_link);
+  const summary = document.getElementById('editing-final-edit-summary');
+  // Request Changes from Final Approval clears editing_submitted_at (see
+  // finalApproval.js) so the Concept just reappears in the normal Editing
+  // queue with its SAME final_edits row -- this banner is the only thing
+  // that surfaces WHY it's back, until the next submit resets the status.
+  const changesBanner = concept.final_approval_status === 'changes_required'
+    ? `<div class="editing-changes-required-banner">
+        <div class="editing-changes-required-title">Changes requested at Final Approval</div>
+        <div class="editing-changes-required-feedback">${escapeHtml(concept.final_approval_feedback || '')}</div>
+      </div>`
+    : '';
+  if (!finalEdit) {
+    summary.innerHTML = `
+      ${changesBanner}
+      <div class="editing-final-edit-empty">Editing hasn't started yet.</div>
+      <button type="button" class="btn btn-primary" onclick="startEditingFinalEdit()">Start Editing &rarr;</button>`;
+  } else {
+    summary.innerHTML = `
+      ${changesBanner}
+      <div class="editing-final-edit-row">
+        ${finalEdit.editor ? `<div class="editing-final-edit-field"><span class="editing-final-edit-field-label">Editor</span>${escapeHtml(finalEdit.editor)}</div>` : ''}
+        ${hasLink
+          ? `<a href="${escapeHtml(finalEdit.final_edit_link)}" target="_blank" rel="noopener" class="link-btn">View Final Edit &rarr;</a>`
+          : '<div class="editing-final-edit-empty">No link pasted back yet.</div>'}
+        ${finalEdit.editor_notes ? `<div class="editing-final-edit-notes">${escapeHtml(finalEdit.editor_notes)}</div>` : ''}
+      </div>
+      ${submitted ? '' : `<button type="button" class="link-btn" onclick="openFinalEditModal(${finalEdit.id})">${hasLink ? 'Edit Details' : 'Add Final Edit Link'} &rarr;</button>`}
+      ${submitted ? '' : `<button type="button" class="link-btn editing-final-edit-remove" onclick="deleteFinalEditFlow(${finalEdit.id})">Remove Final Edit</button>`}`;
+  }
 
-  document.getElementById('editing-concept-requirements').innerHTML =
-    requirements.map((r, i) => editingRequirementRowHtml(r, i, submitted)).join('');
-
-  document.getElementById('editing-add-another-btn').style.display = submitted ? 'none' : '';
-  if (submitted) document.getElementById('editing-create-custom-rows').innerHTML = '';
-  else renderEditingCustomAssetRows();
-
-  // The footer is now the one place completion state and Ready for
-  // Approval live together (item 7/8) -- what's missing while incomplete,
-  // a positive confirmation once done, hidden once actually submitted
-  // (the header badge + Close already cover that state).
+  // The footer is where "what's needed before this can move to Final
+  // Approval" lives -- just "paste the link back", nothing else to track.
   const footerStatus = document.getElementById('editing-concept-footer-status');
   if (submitted) {
     footerStatus.style.display = 'none';
   } else {
     footerStatus.style.display = '';
-    footerStatus.classList.toggle('editing-concept-footer-status-done', allComplete);
-    const remaining = required - complete;
-    footerStatus.innerHTML = allComplete
-      ? `&check; All ${required} Final Edit${required === 1 ? '' : 's'} complete`
-      : `${remaining} Final Edit${remaining === 1 ? '' : 's'} remaining`;
+    footerStatus.classList.toggle('editing-concept-footer-status-done', hasLink);
+    footerStatus.innerHTML = hasLink ? '&check; Ready to mark as Edited' : 'Add the Final Edit link before marking as Edited';
   }
 
   const readyBtn = document.getElementById('editing-concept-ready-btn');
   readyBtn.style.display = submitted ? 'none' : '';
-  readyBtn.disabled = !allComplete;
+  readyBtn.disabled = !hasLink;
   document.getElementById('editing-concept-close-btn').style.display = submitted ? '' : 'none';
+}
+
+// Round 9: save-on-change for the Editing modal's own Editing-owner select
+// -- same canonical PATCH /creative-assets/:id/assignee endpoint (editing_owner
+// only, concept_assignee left untouched) every other Editing assignment
+// control already writes to, so this is a second entry point onto the same
+// field, not a new assignment system. Locked while submitted, same reasoning
+// as everything else in this modal once a Concept has gone to Final Approval.
+async function saveEditingConceptEditor() {
+  const concept = editingFindConcept(state.editing.activeConceptAssetId);
+  if (!concept || concept.editing_submitted_at) return;
+  const value = conceptDevSelectWithOtherValue('editing-concept-editor-select', 'editing-concept-editor-custom');
+  if (value === (concept.editing_owner || '')) return;
+  try {
+    await api(`/creative-assets/${concept.creative_asset_id}/assignee`, {
+      method: 'PATCH',
+      body: JSON.stringify({ editing_owner: value || null }),
+    });
+    await refreshCurrentEditingView();
+    renderEditingConceptModal();
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 function editingDefaultFormat() {
@@ -8755,70 +10015,19 @@ function editingDefaultFormat() {
   return (concept && FINAL_EDIT_FORMATS.includes(concept.concept_format)) ? concept.concept_format : 'video';
 }
 
-// A Hook row with no Final Edit yet creates one (single-item array, same
-// endpoint the old bulk "Create Final Edits" step used) and immediately
-// opens its workspace to fill in the link/editor/notes -- one continuous
-// motion, no separate create-then-open steps (item 5). A row that already
-// has a Final Edit just opens it.
-async function editingAddRequirement(index) {
-  const req = (state.editing.activeRequirements || [])[index];
-  if (!req) return;
-  if (req.finalEdit) {
-    openFinalEditModal(req.finalEdit.id);
-    return;
-  }
+// Creates the Concept's one Final Edit and immediately opens its workspace
+// to fill in the link/editor/notes -- one continuous motion, same as
+// before this simplification, just never asking which Hook it's for.
+async function startEditingFinalEdit() {
+  const conceptAssetId = state.editing.activeConceptAssetId;
+  if (conceptAssetId == null) return;
   try {
-    const created = await api(`/editing/concepts/${state.editing.activeConceptAssetId}/final-edits`, {
+    const created = await api(`/editing/concepts/${conceptAssetId}/final-edits`, {
       method: 'POST',
-      body: JSON.stringify({ assets: [{ asset_name: req.label, variation_text: req.hookText, format: editingDefaultFormat() }] }),
+      body: JSON.stringify({ assets: [{ asset_name: 'Final Edit', format: editingDefaultFormat() }] }),
     });
-    await loadEditingWeek();
+    await refreshCurrentEditingView();
     openFinalEditModal(created[0].id);
-  } catch (e) {
-    toast(e.message, true);
-  }
-}
-
-// "+ Add Another Final Edit" (item 9) -- for a variation that wasn't
-// originally planned. Format is asked here, at creation, since a manual row
-// has no Hook to inherit it from (item 6); saved immediately as its own
-// Final Edit, becoming part of the Concept's required count right away.
-function addEditingCustomAssetRow() {
-  state.editing.createRows.push({ name: '', format: editingDefaultFormat() });
-  renderEditingCustomAssetRows();
-  const inputs = document.querySelectorAll('.editing-custom-row-input');
-  if (inputs.length) inputs[inputs.length - 1].focus();
-}
-
-function removeEditingCustomAssetRow(index) {
-  state.editing.createRows.splice(index, 1);
-  renderEditingCustomAssetRows();
-}
-
-function renderEditingCustomAssetRows() {
-  document.getElementById('editing-create-custom-rows').innerHTML = state.editing.createRows.map((row, i) => `
-    <div class="editing-custom-row">
-      <input type="text" class="editing-custom-row-input" placeholder="Final Edit name" value="${escapeHtml(row.name)}"
-        oninput="state.editing.createRows[${i}].name = this.value;">
-      <select class="editing-custom-row-format" onchange="state.editing.createRows[${i}].format = this.value;">
-        ${FINAL_EDIT_FORMATS.map((f) => `<option value="${f}" ${row.format === f ? 'selected' : ''}>${f[0].toUpperCase()}${f.slice(1)}</option>`).join('')}
-      </select>
-      <button type="button" class="link-btn" onclick="saveEditingCustomAssetRow(${i})">Add</button>
-      <button type="button" class="link-btn" onclick="removeEditingCustomAssetRow(${i})">Cancel</button>
-    </div>`).join('');
-}
-
-async function saveEditingCustomAssetRow(index) {
-  const row = state.editing.createRows[index];
-  if (!row || !row.name.trim()) return toast('Enter a name for the Final Edit', true);
-  try {
-    await api(`/editing/concepts/${state.editing.activeConceptAssetId}/final-edits`, {
-      method: 'POST',
-      body: JSON.stringify({ assets: [{ asset_name: row.name.trim(), format: row.format || editingDefaultFormat() }] }),
-    });
-    state.editing.createRows.splice(index, 1);
-    await loadEditingWeek();
-    renderEditingConceptModal();
   } catch (e) {
     toast(e.message, true);
   }
@@ -8830,11 +10039,16 @@ function populateFinalEditEditorSelect() {
     state.contentCreators.map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join('');
 }
 
-function openFinalEditModal(finalEditId) {
+function openFinalEditModal(finalEditId, options) {
   const found = editingFindFinalEdit(finalEditId);
   if (!found) return;
   const { finalEdit, concept } = found;
   state.editing.activeFinalEditId = finalEditId;
+  // Set on every open (not just cleared on close) so whichever path got us
+  // here -- the workspace's "Edit Details", "In Progress" segment, or the
+  // "Edited" segment's submit-mode open -- always leaves the footer in the
+  // right state, with no stale flag surviving from a previous open.
+  state.editing.finalEditSubmitMode = !!(options && options.submitMode);
   // Always opened from inside the Concept workspace now -- close it so the
   // two full-screen overlays never stack.
   closeModal('editing-concept-modal');
@@ -8883,10 +10097,14 @@ function updateFinalEditModalFooter() {
   const found = editingFindFinalEdit(state.editing.activeFinalEditId);
   if (!found) return;
   const submitted = !!found.concept.editing_submitted_at;
+  const submitMode = state.editing.finalEditSubmitMode;
 
   document.getElementById('final-edit-ready-badge').style.display = submitted ? '' : 'none';
   document.getElementById('final-edit-cancel-btn').style.display = submitted ? 'none' : '';
-  document.getElementById('final-edit-save-btn').style.display = submitted ? 'none' : '';
+  const saveBtn = document.getElementById('final-edit-save-btn');
+  saveBtn.style.display = submitted ? 'none' : '';
+  saveBtn.textContent = submitMode ? 'Submit for Approval →' : 'Save Final Edit';
+  saveBtn.onclick = submitMode ? submitFinalEditAndAdvance : saveFinalEdit;
   document.getElementById('final-edit-close-btn').style.display = submitted ? '' : 'none';
 
   document.getElementById('final-edit-link-input').disabled = submitted;
@@ -8922,7 +10140,7 @@ async function saveFinalEdit() {
   try {
     await api(`/editing/final-edits/${state.editing.activeFinalEditId}`, { method: 'PATCH', body: JSON.stringify(payload) });
     toast('Saved');
-    await loadEditingWeek();
+    await refreshCurrentEditingView();
     closeModal('final-edit-modal');
     openEditingConcept(conceptAssetId);
   } catch (e) {
@@ -8930,9 +10148,41 @@ async function saveFinalEdit() {
   }
 }
 
-// Deleting a Final Edit is now exclusively a checklist row "•••" menu
-// action (item 5) -- the Add Final Edit modal never shows Delete, since a
-// brand-new Hook with no Final Edit yet has nothing to delete.
+// The "Edited" segment's actual submit action (see advanceEditingToEdited):
+// saves whatever's in the form, THEN -- only on that save succeeding --
+// calls ready-for-approval, which itself re-validates a link is present
+// server-side. Either call failing leaves the concept exactly where it was
+// (In Progress, same final_edits row, nothing duplicated) with the modal
+// still open so the error is visible and the link can be fixed in place.
+async function submitFinalEditAndAdvance() {
+  const found = editingFindFinalEdit(state.editing.activeFinalEditId);
+  if (!found) return;
+  const conceptAssetId = found.concept.creative_asset_id;
+
+  const payload = {
+    final_edit_link: document.getElementById('final-edit-link-input').value.trim(),
+    editor: document.getElementById('final-edit-editor').value || null,
+    editor_notes: document.getElementById('final-edit-notes').value.trim(),
+  };
+  if (!payload.final_edit_link) {
+    toast('Add the Final Edit link before submitting for approval', true);
+    return;
+  }
+
+  try {
+    await api(`/editing/final-edits/${state.editing.activeFinalEditId}`, { method: 'PATCH', body: JSON.stringify(payload) });
+    await api(`/editing/concepts/${conceptAssetId}/ready-for-approval`, { method: 'POST' });
+    toast('Marked as Edited — sent for Approval');
+    state.editing.finalEditSubmitMode = false;
+    await refreshCurrentEditingView();
+    closeModal('final-edit-modal');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// "Remove Final Edit" in the Concept workspace (see renderEditingConceptModal)
+// -- undoes an accidental Start Editing, or lets an editor start over.
 async function deleteFinalEditFlow(finalEditId) {
   const found = editingFindFinalEdit(finalEditId);
   if (!found) return;
@@ -8942,16 +10192,11 @@ async function deleteFinalEditFlow(finalEditId) {
   try {
     await api(`/editing/final-edits/${finalEditId}`, { method: 'DELETE' });
     toast('Final Edit deleted');
-    await loadEditingWeek();
+    await refreshCurrentEditingView();
     openEditingConcept(conceptAssetId);
   } catch (e) {
     toast(e.message, true);
   }
-}
-
-async function deleteFinalEditFromMenu(finalEditId) {
-  closeAllEditingReqMenus();
-  await deleteFinalEditFlow(finalEditId);
 }
 
 // The important workflow change (item 6): Ready for Approval submits the
@@ -8964,8 +10209,134 @@ async function submitEditingConceptReady() {
   try {
     await api(`/editing/concepts/${conceptAssetId}/ready-for-approval`, { method: 'POST' });
     toast('Sent for Approval');
-    await loadEditingWeek();
+    await refreshCurrentEditingView();
     renderEditingConceptModal();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// ── Final Approval ────────────────────────────────────
+// The stage after Editing (see Issue 11/12): a flat queue of every Concept
+// Editing has submitted (editing_submitted_at set) and not yet approved --
+// no week-nav, no filters, just a queue. Reviewer opens a Concept, checks
+// the Final Edit link + concept/shoot context, and either Approves
+// (advances status toward the existing 'qc' stage) or Request Changes
+// (sends it back into Editing's normal queue with feedback -- same
+// Concept/final_edits row, never duplicated; see finalApproval.js).
+async function loadFinalApproval() {
+  try {
+    const result = await api('/final-approval');
+    state.finalApproval.data = result.concepts || [];
+    renderFinalApprovalList();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function finalApprovalCardHtml(c) {
+  const hasLink = !!c.final_edit_link;
+  return `
+    <div class="cd-card" onclick="openFinalApprovalModal(${c.creative_asset_id})">
+      <div class="cd-card-top"><div class="cd-card-name">${escapeHtml(c.product_name || c.concept_name)}</div></div>
+      <div class="cd-card-meta">${escapeHtml(c.concept_name)}</div>
+      ${c.final_approval_status === 'changes_required' ? '<span class="cd-concept-status-pill editing-status-to-edit">Resubmitted</span>' : ''}
+      ${hasLink ? '' : '<div class="editing-final-edit-empty">No Final Edit link yet</div>'}
+    </div>`;
+}
+
+function renderFinalApprovalList() {
+  const count = state.finalApproval.data.length;
+  document.getElementById('final-approval-summary').textContent =
+    count ? `${count} concept${count === 1 ? '' : 's'} awaiting Final Approval` : 'Nothing awaiting Final Approval';
+
+  const list = document.getElementById('final-approval-list');
+  list.innerHTML = count
+    ? state.finalApproval.data.map(finalApprovalCardHtml).join('')
+    : '<div class="attention-empty">Nothing awaiting Final Approval right now.</div>';
+}
+
+function finalApprovalFindConcept(creativeAssetId) {
+  return state.finalApproval.data.find((c) => c.creative_asset_id === creativeAssetId) || null;
+}
+
+function openFinalApprovalModal(creativeAssetId) {
+  const concept = finalApprovalFindConcept(creativeAssetId);
+  if (!concept) return;
+  state.finalApproval.activeCreativeAssetId = creativeAssetId;
+  state.finalApproval.showFeedbackForm = false;
+  renderFinalApprovalModal();
+  openModal('final-approval-modal');
+}
+
+function openFinalApprovalBrief() {
+  const concept = finalApprovalFindConcept(state.finalApproval.activeCreativeAssetId);
+  if (!concept || !concept.shoot_schedule_id) return;
+  closeModal('final-approval-modal');
+  openShootingBrief(concept.shoot_schedule_id);
+}
+
+function renderFinalApprovalModal() {
+  const concept = finalApprovalFindConcept(state.finalApproval.activeCreativeAssetId);
+  if (!concept) return;
+
+  document.getElementById('final-approval-modal-title').textContent = concept.concept_name;
+  document.getElementById('final-approval-modal-subtitle').textContent = concept.product_name || '';
+
+  const hasLink = !!concept.final_edit_link;
+  document.getElementById('final-approval-modal-body').innerHTML = `
+    <div class="editing-final-edit-row">
+      ${concept.editor ? `<div class="editing-final-edit-field"><span class="editing-final-edit-field-label">Editor</span>${escapeHtml(concept.editor)}</div>` : ''}
+      ${hasLink
+        ? `<a href="${escapeHtml(concept.final_edit_link)}" target="_blank" rel="noopener" class="link-btn">View Final Edit &rarr;</a>`
+        : '<div class="editing-final-edit-empty">No link pasted back yet.</div>'}
+      ${concept.editor_notes ? `<div class="editing-final-edit-notes">${escapeHtml(concept.editor_notes)}</div>` : ''}
+    </div>
+    ${concept.shoot_schedule_id ? `<button type="button" class="link-btn" onclick="openFinalApprovalBrief()">View Shoot Brief &rarr;</button>` : ''}`;
+
+  const showForm = state.finalApproval.showFeedbackForm;
+  const feedbackSection = document.getElementById('final-approval-feedback-section');
+  feedbackSection.style.display = showForm ? '' : 'none';
+  if (!showForm) document.getElementById('final-approval-feedback-input').value = '';
+
+  document.getElementById('final-approval-approve-btn').style.display = showForm ? 'none' : '';
+  document.getElementById('final-approval-close-btn').style.display = showForm ? 'none' : '';
+  const requestBtn = document.getElementById('final-approval-request-changes-btn');
+  requestBtn.textContent = showForm ? 'Send Back' : 'Request Changes';
+  requestBtn.onclick = showForm ? submitFinalApprovalRequestChanges : toggleFinalApprovalFeedback;
+}
+
+function toggleFinalApprovalFeedback() {
+  state.finalApproval.showFeedbackForm = !state.finalApproval.showFeedbackForm;
+  renderFinalApprovalModal();
+}
+
+async function submitFinalApprovalApprove() {
+  const id = state.finalApproval.activeCreativeAssetId;
+  if (id == null) return;
+  try {
+    await api(`/final-approval/concepts/${id}/approve`, { method: 'POST' });
+    toast('Approved');
+    closeModal('final-approval-modal');
+    await loadFinalApproval();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function submitFinalApprovalRequestChanges() {
+  const id = state.finalApproval.activeCreativeAssetId;
+  if (id == null) return;
+  const feedback = document.getElementById('final-approval-feedback-input').value.trim();
+  if (!feedback) {
+    toast('Feedback is required to request changes', true);
+    return;
+  }
+  try {
+    await api(`/final-approval/concepts/${id}/request-changes`, { method: 'POST', body: JSON.stringify({ feedback }) });
+    toast('Sent back to Editing');
+    closeModal('final-approval-modal');
+    await loadFinalApproval();
   } catch (e) {
     toast(e.message, true);
   }

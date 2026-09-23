@@ -36,7 +36,7 @@ const SUMMARY_SELECT = `
   SELECT
     ss.id, ss.creative_asset_id, ss.status, ss.original_week_start,
     ss.scheduled_week_start, ss.scheduled_day, ss.shot_at, ss.ready_for_editing,
-    ca.concept_name, ca.location, ca.hook_variations,
+    ca.concept_name, ca.location, ca.hook_variations, ca.format,
     spi.product_name, spi.image_url, spi.creator AS owner, spi.source,
     (SELECT d.name FROM shoot_plan_item_styles spis
        JOIN styles sty ON sty.id = spis.style_id JOIN drops d ON d.id = sty.drop_id
@@ -195,17 +195,33 @@ router.patch('/:id', async (req, res, next) => {
       return res.status(400).json({ error: 'scheduled_week_start must be YYYY-MM-DD' });
     }
     const nextDay = scheduled_day === undefined ? null : scheduled_day;
-    const nextStatus = nextDay ? 'scheduled' : 'unscheduled';
 
+    // Assignment and schedule are separate (see the Scheduling brief, item
+    // 4): moving a card to another day/week must never change WHO owns it
+    // (that's a plain UPDATE of scheduled_day/scheduled_week_start only,
+    // never touching creative_asset_id/shoot_plan_items.creator) and must
+    // never quietly reset production progress either. Rescheduling onto a
+    // day preserves whatever status the card already had ('scheduled' or
+    // 'in_progress' both stay as they are -- only a card that was still
+    // 'unscheduled' advances to 'scheduled' the first time it gets a day);
+    // rescheduling OFF a day (back to Unscheduled) always resets to
+    // 'unscheduled', since "in progress on no particular day" isn't a real
+    // state. 'shot' is excluded entirely by the WHERE guard below, same as
+    // before -- completed work never becomes outstanding again just because
+    // scheduling data changes.
     const result = await pool.query(
       `UPDATE shoot_schedule SET
          scheduled_day = $1::varchar,
          scheduled_week_start = COALESCE($2::date, scheduled_week_start),
-         status = $3::varchar,
+         status = CASE
+           WHEN $1::varchar IS NULL THEN 'unscheduled'
+           WHEN status = 'unscheduled' THEN 'scheduled'
+           ELSE status
+         END,
          updated_at = now()
-       WHERE id = $4 AND status != 'shot'
+       WHERE id = $3 AND status != 'shot'
        RETURNING *`,
-      [nextDay, scheduled_week_start || null, nextStatus, req.params.id]
+      [nextDay, scheduled_week_start || null, req.params.id]
     );
     if (!result.rows.length) {
       const existsResult = await pool.query('SELECT id, status FROM shoot_schedule WHERE id = $1', [req.params.id]);
@@ -285,9 +301,57 @@ async function syncDropStatusRevert(client, creativeAssetId, fromStatus, toStatu
   );
 }
 
-// The one production action Shooting has -- must already be Scheduled to a
-// day (shooting happens on a specific day). Sets Ready for Editing so the
-// next stage can pick it up later; nothing about Editing is built here.
+// Production status step 1 of 2: Scheduled -> In Progress (see the
+// Scheduling brief, item 7 -- an obvious, explicit control rather than a
+// hidden badge-click). Deliberately does NOT set ready_for_editing -- only
+// reaching 'shot' does, so a concept that's merely started can never leak
+// into Editing.
+router.post('/:id/start', async (req, res, next) => {
+  try {
+    const result = await pool.query(
+      `UPDATE shoot_schedule SET status = 'in_progress', updated_at = now()
+       WHERE id = $1 AND status = 'scheduled'
+       RETURNING *`,
+      [req.params.id]
+    );
+    if (!result.rows.length) {
+      const existsResult = await pool.query('SELECT id, status FROM shoot_schedule WHERE id = $1', [req.params.id]);
+      if (!existsResult.rows.length) return res.status(404).json({ error: 'Shoot schedule entry not found' });
+      return res.status(409).json({ error: `Only a Scheduled Concept can be started (this one is ${existsResult.rows[0].status})` });
+    }
+    const row = result.rows[0];
+    res.json({ ...row, original_week_start: dateStr(row.original_week_start), scheduled_week_start: dateStr(row.scheduled_week_start) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Undoes /start -- back to Scheduled, same "accidentally clicked it"
+// reasoning as unmark-shot below.
+router.post('/:id/unstart', async (req, res, next) => {
+  try {
+    const result = await pool.query(
+      `UPDATE shoot_schedule SET status = 'scheduled', updated_at = now()
+       WHERE id = $1 AND status = 'in_progress'
+       RETURNING *`,
+      [req.params.id]
+    );
+    if (!result.rows.length) {
+      const existsResult = await pool.query('SELECT id, status FROM shoot_schedule WHERE id = $1', [req.params.id]);
+      if (!existsResult.rows.length) return res.status(404).json({ error: 'Shoot schedule entry not found' });
+      return res.status(409).json({ error: `Only an In Progress Concept can be reverted to Scheduled (this one is ${existsResult.rows[0].status})` });
+    }
+    const row = result.rows[0];
+    res.json({ ...row, original_week_start: dateStr(row.original_week_start), scheduled_week_start: dateStr(row.scheduled_week_start) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Production status step 2 of 2 (or a direct jump from Scheduled, for a
+// quick shoot that never needed the In Progress step) -- Scheduled OR In
+// Progress -> Shot. Sets Ready for Editing so the next stage can pick it up
+// later; nothing about Editing is built here.
 router.post('/:id/mark-shot', async (req, res, next) => {
   const client = await pool.connect();
   try {
@@ -297,8 +361,11 @@ router.post('/:id/mark-shot', async (req, res, next) => {
          status = 'shot',
          shot_at = now(),
          ready_for_editing = true,
+         editing_original_week_start = date_trunc('week', now())::date,
+         editing_week_start = date_trunc('week', now())::date,
+         editing_day = NULL,
          updated_at = now()
-       WHERE id = $1 AND status = 'scheduled'
+       WHERE id = $1 AND status IN ('scheduled', 'in_progress')
        RETURNING *`,
       [req.params.id]
     );
@@ -306,7 +373,7 @@ router.post('/:id/mark-shot', async (req, res, next) => {
       const existsResult = await client.query('SELECT id, status FROM shoot_schedule WHERE id = $1', [req.params.id]);
       await client.query('ROLLBACK');
       if (!existsResult.rows.length) return res.status(404).json({ error: 'Shoot schedule entry not found' });
-      return res.status(409).json({ error: `Only a Scheduled Concept can be marked Shot (this one is ${existsResult.rows[0].status})` });
+      return res.status(409).json({ error: `Only a Scheduled or In Progress Concept can be marked Shot (this one is ${existsResult.rows[0].status})` });
     }
     const row = result.rows[0];
     await syncDropStatusForward(client, row.creative_asset_id, 'filming');
@@ -324,15 +391,36 @@ router.post('/:id/mark-shot', async (req, res, next) => {
 // production status. Clears shot_at/ready_for_editing back to their
 // pre-Shot state and returns the Concept to Scheduled (draggable/movable
 // again), rather than leaving it stuck as a permanent Shot record.
+// Round 11: refuses once Editing has already submitted this Concept for
+// Final Approval -- pulling ready_for_editing back to false at that point
+// would silently strand an already-submitted Concept (still sitting in the
+// Final Approval queue, which reads creative_assets directly and doesn't
+// depend on ready_for_editing) while Shooting quietly disagreed about
+// whether it was ever shot. Request Changes is the one supported way back
+// from Final Approval (see finalApproval.js) -- this is deliberately not a
+// second undo-approval path.
 router.post('/:id/unmark-shot', async (req, res, next) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const lockResult = await client.query(
+      `SELECT ca.editing_submitted_at FROM shoot_schedule ss
+       JOIN creative_assets ca ON ca.id = ss.creative_asset_id
+       WHERE ss.id = $1 AND ss.status = 'shot' FOR UPDATE OF ss`,
+      [req.params.id]
+    );
+    if (lockResult.rows.length && lockResult.rows[0].editing_submitted_at) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'This Concept has already been submitted to Final Approval and can no longer be reverted from Shooting -- use Request Changes in Final Approval instead.' });
+    }
     const result = await client.query(
       `UPDATE shoot_schedule SET
          status = 'scheduled',
          shot_at = NULL,
          ready_for_editing = false,
+         editing_original_week_start = NULL,
+         editing_week_start = NULL,
+         editing_day = NULL,
          updated_at = now()
        WHERE id = $1 AND status = 'shot'
        RETURNING *`,
