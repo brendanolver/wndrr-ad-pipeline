@@ -733,12 +733,14 @@
          calendar (editing_week_start/editing_day on shoot_schedule),
          separate from the shoot's own scheduled_week_start/scheduled_day, so
          a Concept isn't assumed to be edited the day it was filmed; it
-         enters here as Unscheduled and the editor places it on a day. The
-         workflow-state filter tabs (All/To Edit/Editing/Ready for Approval)
-         and the person filter stay a SEPARATE dimension from the calendar
-         (item 9: calendar = when, workflow state = how far through) -- both
-         apply across whichever of Week/Today is showing (see
-         editingActiveConcepts in app.js), just hidden for History. -->
+         enters here as Unscheduled and the editor places it on a day.
+         Round 12: there's no separate workflow-state filter any more -- the
+         calendar always shows every Concept for the week regardless of
+         status (changing a card's status via its own segmented control used
+         to make it vanish from whichever filter tab was active, which read
+         as a bug). The person filter is the one remaining filter dimension,
+         applying across whichever of Week/Today is showing (see
+         editingActiveConcepts in app.js), hidden for History. -->
     <section id="tab-editing" class="tab-panel">
       <h1 class="tr-page-title">Editing</h1>
       <div class="shoot-subnav" id="editing-subnav">
@@ -755,15 +757,13 @@
           <button type="button" class="btn btn-ghost btn-sm" id="editing-this-week-btn" onclick="goToCurrentEditingWeek()" style="display:none;">This Week</button>
           <div class="planning-week-picker" id="editing-week-picker" style="display:none;"></div>
         </div>
-        <!-- Separate from the workflow-state tabs below (All/To Edit/Editing/
-             Ready for Approval) -- this narrows WHICH person's queue is shown,
-             same compact person-filter pattern as Shooting's Filming filter,
-             reading editing_owner (see G's investigation: this is the first
-             real consumer of that column). -->
+        <!-- Narrows WHICH person's queue is shown, same compact
+             person-filter pattern as Shooting's Filming filter, reading
+             editing_owner (see G's investigation: this is the first real
+             consumer of that column). -->
         <div class="person-filter" id="editing-editor-filter"></div>
       </div>
       <div class="shoot-summary-line" id="editing-summary"></div>
-      <div class="filter-tabs" id="editing-filters"></div>
 
       <!-- WEEK VIEW -->
       <div class="shoot-panel active" id="editing-view-week">
@@ -1096,29 +1096,74 @@
         <div id="mpm-list" class="mpm-list"></div>
       </div>
 
-      <!-- Round 11: admin-only (see applySidebarModuleAccess/showApp in
+      <!-- Round 12: admin-only (see applySidebarModuleAccess/showApp in
            app.js, which shows the "Users" sub-tab button above only when
            state.currentUser.role === 'admin' -- the GET/PATCH endpoints
            this calls are also independently admin-gated server-side, so
-           this hiding is a convenience, not the actual enforcement). One
-           row per active user: role select + a checkbox per module the
-           brief's initial access matrix calls "Everything EXCEPT ...",
-           unchecked = allowed (module_key NOT in restricted_modules),
-           checked = restricted -- matches the deny-list schema.sql/
-           permissions.js both already use, so nothing here needs a second
-           "allow all" default to reason about. -->
+           this hiding is a convenience, not the actual enforcement). A
+           scannable table (Name/Email/Role/Access/Edit) replaces Round 11's
+           wide per-user card with 13 raw checkboxes -- the Access column
+           shows a compact summary ("Full Access" / "Restricted · N
+           modules"), editing happens in #user-access-modal below. That
+           modal presents module access POSITIVELY (checked = can access)
+           even though the server/schema still store a deny-list
+           (user_module_restrictions) -- see renderUserAccessModal/
+           saveUserAccessModal in app.js, which is the one place that
+           inverts between the two: nothing else in the app needs to know
+           the storage is a deny-list. -->
       <div class="settings-panel" id="settings-panel-users">
         <div class="planning-section-header">
           <h2>User Access</h2>
-          <span class="admin-note">Role is a default/category label only. Module access below is what actually controls the sidebar -- unchecked means that user can see it, checked means it's hidden for them.</span>
+          <span class="admin-note">Role is a default/category label only. Module access is what actually controls the sidebar and API for each person.</span>
         </div>
-        <div id="users-access-list" class="users-access-list"></div>
+        <table class="users-access-table">
+          <thead>
+            <tr><th>Name</th><th>Email</th><th>Role</th><th>Access</th><th></th></tr>
+          </thead>
+          <tbody id="users-access-list"></tbody>
+        </table>
       </div>
     </section>
   </main>
 </div>
 
 <div id="toast" class="toast"></div>
+
+<!-- Round 12: Settings -> Users "Edit User" modal -- Module Access here is
+     presented POSITIVELY (checked = can access), the opposite of the
+     underlying deny-list storage; renderUserAccessModal/saveUserAccessModal
+     in app.js do the one inversion this needs. Name/Email are read-only
+     context (no rename/re-email flow exists yet), Role and Module Access
+     are the two editable fields. -->
+<div id="user-access-modal" class="modal-backdrop">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="user-access-modal-title">Edit User</h3>
+      <button class="modal-close" onclick="closeModal('user-access-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="user-access-id">
+      <div class="user-access-modal-identity">
+        <div class="user-access-modal-name" id="user-access-modal-name"></div>
+        <div class="user-access-modal-email" id="user-access-modal-email"></div>
+      </div>
+      <label>Role
+        <select id="user-access-role">
+          <option value="admin">Admin</option>
+          <option value="lead">Lead</option>
+          <option value="member">Member</option>
+        </select>
+      </label>
+      <div class="user-access-modules-header">Module Access</div>
+      <div class="hint">Checked = this person can access it. Unchecked = hidden from their sidebar (and blocked at the API where currently protected).</div>
+      <div id="user-access-modules" class="user-access-modules"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('user-access-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveUserAccessModal()">Save</button>
+    </div>
+  </div>
+</div>
 
 <!-- Creative asset modal -->
 <div id="asset-modal" class="modal-backdrop">

@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { Pool } = require('pg');
-const { hashPassword } = require('./lib/passwordHash');
+const { hashPassword, verifyPassword } = require('./lib/passwordHash');
 
 if (!process.env.DATABASE_URL) {
   throw new Error('DATABASE_URL is not set. Provision a Postgres instance and set it (Railway does this automatically).');
@@ -35,17 +35,26 @@ const pool = new Pool({
 // user_module_restrictions the moment this account is first created --
 // never re-applied afterward (see the loop below), so an admin's later
 // edit in Settings is never overwritten by a future redeploy.
+// testPassword (Round 12, PR #216 test environment only): each named
+// person's own individual login password, replacing the shared APP_PASSWORD
+// everyone was seeded with up to Round 11. Applied by the self-guarding
+// migration below -- it never touches an account whose password has already
+// been changed away from the shared APP_PASSWORD (by an admin, or by this
+// same migration on a prior boot), so it can never clobber a real password
+// change. This branch (PR #216) never runs against the production database
+// (production deploys from its own separate branch), so this cannot affect
+// production credentials.
 const SEED_USERS = [
-  { name: 'Brendan', email: 'brendan@kohindustries.com', role: 'admin' },
-  { name: 'Max', email: 'max@kohindustries.com', role: 'admin' },
-  { name: 'Steve', email: 'steve@kohindustries.com', role: 'lead' },
-  { name: 'Sheridan', email: 'sheridan@kohindustries.com', role: 'lead' },
-  { name: 'Mark', email: 'mark@kohindustries.com', role: 'member', restrictedModules: ['planning', 'board', 'admin'] },
-  { name: 'Lucy', email: 'lucy@kohindustries.com', role: 'admin' },
-  { name: 'Angus', email: 'angus@kohindustries.com', role: 'lead' },
-  { name: 'Jake', email: 'jake@kohindustries.com', role: 'lead' },
-  { name: 'Tllestio', email: 'tllestio@kohindustries.com', role: 'member', restrictedModules: ['planning', 'board', 'admin'] },
-  { name: 'Ronit', email: 'ronit@kohindustries.com', role: 'member', restrictedModules: ['planning', 'board', 'admin'] },
+  { name: 'Brendan', email: 'brendan@kohindustries.com', role: 'admin', testPassword: '1000' },
+  { name: 'Max', email: 'max@kohindustries.com', role: 'admin', testPassword: '0000' },
+  { name: 'Steve', email: 'steve@kohindustries.com', role: 'lead', testPassword: '1004' },
+  { name: 'Sheridan', email: 'sheridan@kohindustries.com', role: 'lead', testPassword: '1003' },
+  { name: 'Mark', email: 'mark@kohindustries.com', role: 'member', restrictedModules: ['planning', 'board', 'admin'], testPassword: '1005' },
+  { name: 'Lucy', email: 'lucy@kohindustries.com', role: 'admin', testPassword: '1002' },
+  { name: 'Angus', email: 'angus@kohindustries.com', role: 'lead', testPassword: '1008' },
+  { name: 'Jake', email: 'jake@kohindustries.com', role: 'lead', testPassword: '1009' },
+  { name: 'Tllestio', email: 'tllestio@kohindustries.com', role: 'member', restrictedModules: ['planning', 'board', 'admin'], testPassword: '1006' },
+  { name: 'Ronit', email: 'ronit@kohindustries.com', role: 'member', restrictedModules: ['planning', 'board', 'admin'], testPassword: '1007' },
 ];
 
 async function seedUsersAndBackfill() {
@@ -67,6 +76,21 @@ async function seedUsersAndBackfill() {
         [inserted.rows[0].id, moduleKey]
       );
     }
+  }
+
+  // Round 12: give each named person their own individual password, but
+  // only for an account that still has the original shared APP_PASSWORD --
+  // verified by actually checking the hash, not a marker column, so this
+  // can run on every boot and still never overwrite a password an admin (or
+  // this same migration, on a previous boot) already set. See the
+  // SEED_USERS comment above for why this is safe on this branch.
+  for (const u of SEED_USERS) {
+    if (!u.testPassword) continue;
+    const existing = await pool.query('SELECT id, password_hash FROM users WHERE email = $1', [u.email]);
+    if (!existing.rows.length) continue;
+    const row = existing.rows[0];
+    if (!verifyPassword(appPassword, row.password_hash)) continue; // already customized -- leave it alone
+    await pool.query('UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2', [hashPassword(u.testPassword), row.id]);
   }
 
   // Link (or create) each seed user's content_creators row -- see

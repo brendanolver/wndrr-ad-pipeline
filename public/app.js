@@ -101,7 +101,7 @@ let state = {
   // (Concepts already nested with their Final Edits); activeConceptAssetId/
   // activeFinalEditId track which modal is currently open so save handlers
   // know what they're writing to.
-  editing: { view: 'week', weekOffset: 0, data: null, todayData: null, historyData: null, dragScheduleId: null, filter: 'all', editorFilter: 'all', activeConceptAssetId: null, activeFinalEditId: null, finalEditSubmitMode: false },
+  editing: { view: 'week', weekOffset: 0, data: null, todayData: null, historyData: null, dragScheduleId: null, editorFilter: 'all', activeConceptAssetId: null, activeFinalEditId: null, finalEditSubmitMode: false },
   // Final Approval -- a flat queue (no week-nav, no filters), same "one
   // shared source of truth on the server" pattern as Editing: data is
   // GET /final-approval's rows as-is. activeCreativeAssetId tracks which
@@ -278,10 +278,8 @@ function switchTab(name) {
   if (name === 'reference-library') loadReferenceLibraryPage();
   // Same reasoning as Shooting above -- Editing is the direct downstream
   // consumer of Shooting's Mark as Shot action, so it needs a fresh fetch
-  // on every visit too. resetFilter: true -- arriving at Editing with no
-  // filter explicitly requested should open on whatever's most actionable
-  // (see loadEditingWeek/editingDefaultFilter), not always land on All.
-  if (name === 'editing') refreshCurrentEditingView({ resetFilter: true });
+  // on every visit too.
+  if (name === 'editing') refreshCurrentEditingView();
   // Final Approval is the direct downstream consumer of Editing's Mark as
   // Edited action, so it needs a fresh fetch on every visit too.
   if (name === 'final-approval') loadFinalApproval();
@@ -324,7 +322,12 @@ document.querySelectorAll('.settings-subnav-btn').forEach((btn) => {
   btn.addEventListener('click', () => switchSettingsPanel(btn.dataset.settingsPanel));
 });
 
-// ── Round 11: User Access (Settings) ──────────────────
+// ── User Access (Settings) ────────────────────────────
+// Round 12 redesign: a scannable table (was a wide card per user with 13
+// raw checkboxes always on screen) -- Edit opens #user-access-modal, the
+// one place that still shows the full module list, now framed positively
+// ("can access" instead of "is restricted", see saveUserAccessModal's one
+// inversion back to the deny-list the server actually stores).
 const MODULE_LABELS = {
   dashboard: 'Dashboard', planning: 'Planning', 'concept-dev': 'Concept Dev',
   'tuesday-review': 'Tuesday Review', shooting: 'Shooting', editing: 'Editing',
@@ -332,7 +335,14 @@ const MODULE_LABELS = {
   'reference-library': 'Reference Library', drops: 'Upcoming Drops', promotions: 'Promotions',
   settings: 'Settings',
 };
-const USER_ROLES = ['admin', 'lead', 'member', 'marketing', 'creative', 'viewer'];
+// Only the three roles the brief actually wants offered going forward --
+// every current account already holds one of these three (see the Round 11
+// role migration in schema.sql), so this is never missing an option for a
+// real row. The server's own PATCH validation still accepts the legacy
+// marketing/creative/viewer values too, purely so it never rejects a role
+// this UI didn't itself set -- this dropdown just never offers them.
+const USER_ROLES = ['admin', 'lead', 'member'];
+const ROLE_LABELS = { admin: 'Admin', lead: 'Lead', member: 'Member' };
 
 async function loadUsersAccessPanel() {
   const el = document.getElementById('users-access-list');
@@ -340,7 +350,7 @@ async function loadUsersAccessPanel() {
     state.usersAccess = await api('/users/manage');
     renderUsersAccessList();
   } catch (e) {
-    el.innerHTML = `<div class="empty-state">${escapeHtml(e.message)}</div>`;
+    el.innerHTML = `<tr><td colspan="5" class="empty-state">${escapeHtml(e.message)}</td></tr>`;
   }
 }
 
@@ -349,41 +359,66 @@ function renderUsersAccessList() {
   const data = state.usersAccess;
   if (!data) return;
   el.innerHTML = data.users.map((u) => {
-    const restricted = new Set(u.restricted_modules);
-    const roleOptions = USER_ROLES.map((r) => `<option value="${r}" ${u.role === r ? 'selected' : ''}>${r.charAt(0).toUpperCase() + r.slice(1)}</option>`).join('');
-    const moduleCheckboxes = data.module_keys.map((key) => `
-      <label class="users-access-module">
-        <input type="checkbox" data-user-id="${u.id}" data-module-key="${key}" ${restricted.has(key) ? 'checked' : ''}>
-        ${escapeHtml(MODULE_LABELS[key] || key)}
-      </label>`).join('');
+    const restrictedCount = u.restricted_modules.length;
+    const accessChip = restrictedCount === 0
+      ? `<span class="users-access-chip users-access-chip-full">Full Access</span>`
+      : `<span class="users-access-chip users-access-chip-restricted">Restricted &middot; ${restrictedCount} module${restrictedCount === 1 ? '' : 's'}</span>`;
     return `
-      <div class="users-access-row" id="users-access-row-${u.id}">
-        <div class="users-access-row-top">
-          <div class="users-access-name">${escapeHtml(u.name)}<span class="users-access-email">${escapeHtml(u.email)}</span></div>
-          <select class="users-access-role" data-user-id="${u.id}">${roleOptions}</select>
-          <button type="button" class="btn btn-primary btn-sm" onclick="saveUserAccess(${u.id})">Save</button>
-        </div>
-        <div class="users-access-modules">${moduleCheckboxes}</div>
-      </div>`;
+      <tr>
+        <td>${escapeHtml(u.name)}</td>
+        <td class="users-access-email">${escapeHtml(u.email)}</td>
+        <td>${ROLE_LABELS[u.role] || escapeHtml(u.role)}</td>
+        <td>${accessChip}</td>
+        <td><button type="button" class="link-btn" onclick="openUserAccessModal(${u.id})">Edit</button></td>
+      </tr>`;
   }).join('');
 }
 
-async function saveUserAccess(userId) {
-  const roleSelect = document.querySelector(`.users-access-role[data-user-id="${userId}"]`);
-  const checkboxes = document.querySelectorAll(`input[type=checkbox][data-user-id="${userId}"]`);
-  const restrictedModules = Array.from(checkboxes).filter((c) => c.checked).map((c) => c.dataset.moduleKey);
+// Opens with the module list framed POSITIVELY -- checked means this
+// person CAN access it, the inverse of restricted_modules (what the server
+// actually stores, see schema.sql's user_module_restrictions). This
+// function does the one translation; saveUserAccessModal below does it in
+// reverse on the way back out, so nothing else in the app ever has to
+// reason about the deny-list.
+function openUserAccessModal(userId) {
+  const data = state.usersAccess;
+  const u = data && data.users.find((x) => x.id === userId);
+  if (!u) return;
+  const restricted = new Set(u.restricted_modules);
+  document.getElementById('user-access-id').value = u.id;
+  document.getElementById('user-access-modal-title').textContent = `Edit User — ${u.name}`;
+  document.getElementById('user-access-modal-name').textContent = u.name;
+  document.getElementById('user-access-modal-email').textContent = u.email;
+  document.getElementById('user-access-role').value = USER_ROLES.includes(u.role) ? u.role : 'member';
+  document.getElementById('user-access-modules').innerHTML = data.module_keys.map((key) => `
+    <label class="user-access-module">
+      <input type="checkbox" data-module-key="${key}" ${restricted.has(key) ? '' : 'checked'}>
+      ${escapeHtml(MODULE_LABELS[key] || key)}
+    </label>`).join('');
+  openModal('user-access-modal');
+}
+
+async function saveUserAccessModal() {
+  const userId = Number(document.getElementById('user-access-id').value);
+  const role = document.getElementById('user-access-role').value;
+  const checkboxes = document.querySelectorAll('#user-access-modules input[type=checkbox]');
+  // Invert back to the deny-list the server stores: unchecked ("cannot
+  // access") is what actually gets sent as a restriction.
+  const restrictedModules = Array.from(checkboxes).filter((c) => !c.checked).map((c) => c.dataset.moduleKey);
   try {
     await api(`/users/${userId}/access`, {
       method: 'PATCH',
-      body: JSON.stringify({ role: roleSelect.value, restricted_modules: restrictedModules }),
+      body: JSON.stringify({ role, restricted_modules: restrictedModules }),
     });
+    closeModal('user-access-modal');
     toast('Access updated');
+    await loadUsersAccessPanel();
     // If the admin just edited their OWN access, the sidebar/settings-tab
     // visibility they're looking at right now needs to reflect it
     // immediately, not just on next reload.
     if (state.currentUser && state.currentUser.id === userId) {
       state.restrictedModules = restrictedModules;
-      state.currentUser.role = roleSelect.value;
+      state.currentUser.role = role;
       applySidebarModuleAccess();
       renderSidebarUser();
     }
@@ -9043,16 +9078,9 @@ function editingWeekNumber() {
   return isoWeekNumber(mondayOfWeek(state.editing.weekOffset));
 }
 
-// resetFilter picks the most-actionable filter tab fresh from this fetch's
-// counts (see editingDefaultFilter) -- used only when the user is arriving
-// at a view with no filter explicitly requested (opening Editing, changing
-// week). Background reloads triggered by an action within the current view
-// (saving/deleting a Final Edit, submitting for approval, etc.) omit it, so
-// they never yank the user off a filter they picked themselves mid-session.
-async function loadEditingWeek({ resetFilter } = {}) {
+async function loadEditingWeek() {
   try {
     state.editing.data = await api(`/editing?week_start=${editingWeekStart()}`);
-    if (resetFilter) state.editing.filter = editingDefaultFilter(editingComputeSummary());
     renderEditingWeekHeader();
     renderEditingList();
   } catch (e) {
@@ -9064,8 +9092,8 @@ async function loadEditingWeek({ resetFilter } = {}) {
 // always refetches whatever view is now active. The week-nav only makes
 // sense in Week view (Today always shows the real current week regardless
 // of week-nav position; History has its own past weeks), and the shared
-// person/workflow filters (see editingActiveConcepts) don't apply to
-// History's aggregated per-week numbers, so both are hidden there.
+// person filter (see editingActiveConcepts) doesn't apply to History's
+// aggregated per-week numbers, so both are hidden there.
 function setEditingView(view) {
   state.editing.view = view;
   document.querySelectorAll('#editing-subnav .shoot-subnav-btn').forEach((b) => b.classList.toggle('active', b.dataset.editingView === view));
@@ -9073,14 +9101,13 @@ function setEditingView(view) {
   document.getElementById('editing-week-nav').style.display = view === 'week' ? '' : 'none';
   document.getElementById('editing-controls-row').style.display = view === 'history' ? 'none' : '';
   document.getElementById('editing-summary').style.display = view === 'history' ? 'none' : '';
-  document.getElementById('editing-filters').style.display = view === 'history' ? 'none' : '';
-  refreshCurrentEditingView({ resetFilter: true });
+  refreshCurrentEditingView();
 }
 
-function refreshCurrentEditingView(opts) {
-  if (state.editing.view === 'today') return loadEditingToday(opts);
+function refreshCurrentEditingView() {
+  if (state.editing.view === 'today') return loadEditingToday();
   if (state.editing.view === 'history') return loadEditingHistory();
-  return loadEditingWeek(opts);
+  return loadEditingWeek();
 }
 
 function changeEditingWeek(delta) {
@@ -9100,7 +9127,7 @@ function jumpToEditingWeek(offset) {
 
 function onEditingWeekChanged() {
   closeEditingWeekPicker();
-  loadEditingWeek({ resetFilter: true });
+  loadEditingWeek();
 }
 
 function toggleEditingWeekPicker() {
@@ -9326,15 +9353,8 @@ async function advanceEditingToEdited(conceptAssetId) {
   openFinalEditModal(finalEdit.id, { submitMode: true });
 }
 
-const EDITING_FILTERS = [
-  { value: 'all', label: 'All' },
-  { value: 'to_edit', label: 'To Edit' },
-  { value: 'scheduled', label: 'Scheduled' },
-  { value: 'editing', label: 'In Progress' },
-  { value: 'ready_for_approval', label: 'Edited' },
-];
-
-// Editor filter -- separate from the workflow-state tabs below, and the
+// Editor filter -- the one remaining filter dimension (see the Round 12
+// brief, item 1: the old workflow-state filter tabs are gone), and the
 // first real reader of editing_owner (see G's investigation): an
 // assignment made once in Upcoming Drops/Promotion intake now surfaces the
 // right person's queue here with nothing re-entered. Sourced from
@@ -9365,11 +9385,6 @@ function setEditingEditorFilter(value) {
       btn.classList.toggle('person-filter-btn-active', btn.dataset.value === value);
     });
   }
-  // Same reset-on-change reasoning as loadEditingWeek's own resetFilter --
-  // switching editor can leave the current workflow-state tab pointing at
-  // now-empty work, so it re-picks via the same editingDefaultFilter rule
-  // rather than silently showing "Editing" with 0 cards.
-  state.editing.filter = editingDefaultFilter(editingComputeSummary());
   renderEditingList();
 }
 
@@ -9378,18 +9393,18 @@ function setEditingEditorFilter(value) {
 // its own separately-fetched state.editing.todayData (always the REAL
 // current week, independent of week-nav position, same as Shooting's
 // todayData). Routing every downstream computation through this one
-// function is what makes the shared summary/filter-tab bar above the
-// subnav automatically reflect whichever of Week/Today is showing.
+// function is what makes the shared summary above the subnav automatically
+// reflect whichever of Week/Today is showing.
 function editingActiveConcepts() {
   const source = state.editing.view === 'today' ? state.editing.todayData : state.editing.data;
   return (source && source.concepts) || [];
 }
 
 // The set of Concepts the editor filter currently allows -- every other
-// computation (filter-tab counts, the default-tab pick, the visible list)
-// reads through this one helper so "All Editors" (the default) is
-// mathematically identical to no filter at all, and nothing computes off
-// the active concept list directly and forgets it.
+// computation (the summary counts, the visible list) reads through this one
+// helper so "All Editors" (the default) is mathematically identical to no
+// filter at all, and nothing computes off the active concept list directly
+// and forgets it.
 function editingVisibleConcepts() {
   const concepts = editingActiveConcepts();
   if (state.editing.editorFilter === 'all') return concepts;
@@ -9397,10 +9412,9 @@ function editingVisibleConcepts() {
   return concepts.filter((c) => c.editing_owner === state.editing.editorFilter);
 }
 
-// Aggregates across the whole week's Concepts -- backs both the filter-tab
-// counts and the summary line, computed once per render from the same
-// per-Concept helpers the cards themselves use (item 8: filters count
-// Concepts now, not individual Final Edits).
+// Aggregates across the whole week's Concepts -- backs the summary line,
+// computed once per render from the same per-Concept helpers the cards
+// themselves use.
 function editingComputeSummary() {
   const concepts = editingVisibleConcepts();
   let toEdit = 0, scheduled = 0, editingCount = 0, ready = 0;
@@ -9412,38 +9426,6 @@ function editingComputeSummary() {
     else ready += 1;
   }
   return { concepts: concepts.length, to_edit: toEdit, scheduled, editing: editingCount, ready_for_approval: ready };
-}
-
-// Picks the most-actionable filter tab for a fresh arrival (see
-// loadEditingWeek's resetFilter): work already underway beats work not yet
-// started, which beats a bare "All" once the week's Editing queue is empty
-// (never leave the user parked on an empty tab -- Ready for Approval stays
-// available but is never the auto-default, since Final Approval is its own
-// dedicated workflow for reviewing those Concepts).
-function editingDefaultFilter(summary) {
-  if (summary.editing > 0) return 'editing';
-  if (summary.to_edit > 0) return 'to_edit';
-  if (summary.scheduled > 0) return 'scheduled';
-  return 'all';
-}
-
-// Counts ride on every tab, same convention as Concept Dev/Tuesday Review's
-// filter-tab-count -- Ready for Approval also gets a subtle attention style
-// when it actually has something waiting, since that's the state easiest to
-// miss on a quick scan.
-function renderEditingFilters() {
-  const s = editingComputeSummary();
-  const counts = { all: s.concepts, to_edit: s.to_edit, scheduled: s.scheduled, editing: s.editing, ready_for_approval: s.ready_for_approval };
-  document.getElementById('editing-filters').innerHTML = EDITING_FILTERS.map((f) => {
-    const attention = f.value === 'ready_for_approval' && counts[f.value] > 0;
-    return `
-    <button type="button" class="filter-tab ${state.editing.filter === f.value ? 'active' : ''} ${attention ? 'filter-tab-attention' : ''}" onclick="setEditingFilter('${f.value}')">${f.label} <span class="filter-tab-count">${counts[f.value]}</span></button>`;
-  }).join('');
-}
-
-function setEditingFilter(filter) {
-  state.editing.filter = filter;
-  renderEditingList();
 }
 
 // Compact and Concept-first (item 8): concept count, the overall Final Edit
@@ -9492,14 +9474,12 @@ function editingConceptCardHtml(concept) {
 }
 
 // Renders whichever calendar view is currently active -- Week (day-grouped
-// calendar) or Today -- on top of the same shared summary/filter-tab bar,
-// same dispatch pattern as Shooting's refreshCurrentShootingView. History
-// has its own separate load/render pair (loadEditingHistory/
-// renderEditingHistoryView) since it doesn't share these per-Concept
-// filters at all.
+// calendar) or Today -- on top of the same shared summary line, same
+// dispatch pattern as Shooting's refreshCurrentShootingView. History has
+// its own separate load/render pair (loadEditingHistory/
+// renderEditingHistoryView) since it doesn't share the person filter at all.
 function renderEditingList() {
   renderEditingSummary();
-  renderEditingFilters();
   if (state.editing.view === 'today') renderEditingTodayView();
   else renderEditingWeekView();
 }
@@ -9674,14 +9654,15 @@ function editingDayCardHtml(concept, isUnscheduled = false) {
     </div>`;
 }
 
-// Unscheduled + Mon-Fri, built from editingVisibleConcepts (editor filter)
-// further narrowed by the workflow-state tab -- both filters apply to the
-// calendar exactly as they did to the old flat list, they just also now
-// decide which day bucket a card counts toward.
+// Unscheduled + Mon-Fri, built from editingVisibleConcepts (editor filter --
+// the only filter left; see the Round 12 brief, item 1: the old
+// workflow-state filter tabs made a card vanish the moment its own
+// segmented-control click changed its status, which read as a bug rather
+// than a filter. The calendar now always shows every visible Concept for
+// the week regardless of status -- the segmented control on each card is
+// the one source of truth for where it's at).
 function renderEditingWeekView() {
-  const concepts = editingVisibleConcepts();
-  const filter = state.editing.filter;
-  const filtered = filter === 'all' ? concepts : concepts.filter((c) => editingConceptStatus(c) === filter);
+  const filtered = editingVisibleConcepts();
 
   const unscheduled = filtered.filter((c) => !c.editing_day);
   const dayItems = {};
@@ -9715,10 +9696,9 @@ function renderEditingWeekView() {
 // shootingTodayInfo/loadShootingToday. Reuses the roomier editingConceptCardHtml
 // (.cd-card grid) rather than the compact day-card, since Today isn't
 // squeezed into a 5-column grid.
-async function loadEditingToday({ resetFilter } = {}) {
+async function loadEditingToday() {
   try {
     state.editing.todayData = await api(`/editing?week_start=${isoDateStr(mondayOfWeek(0))}`);
-    if (resetFilter) state.editing.filter = editingDefaultFilter(editingComputeSummary());
     renderEditingList();
   } catch (e) {
     toast(e.message, true);
@@ -9735,10 +9715,7 @@ function renderEditingTodayView() {
     list.innerHTML = '<div class="attention-empty">No editing is scheduled on weekends.</div>';
     return;
   }
-  const concepts = editingVisibleConcepts();
-  const filter = state.editing.filter;
-  const filtered = (filter === 'all' ? concepts : concepts.filter((c) => editingConceptStatus(c) === filter))
-    .filter((c) => c.editing_day === dayKey);
+  const filtered = editingVisibleConcepts().filter((c) => c.editing_day === dayKey);
   list.innerHTML = filtered.length ? filtered.map(editingConceptCardHtml).join('') : '<div class="attention-empty">Nothing scheduled for editing today.</div>';
 }
 

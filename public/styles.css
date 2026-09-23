@@ -87,17 +87,20 @@ body{font-family:'Inter',sans-serif;font-size:13px;background:var(--bg);color:va
 .sidebar-footer{margin-top:auto;padding-top:14px;border-top:1px solid rgba(255,255,255,0.12);display:flex;flex-direction:column;gap:2px;}
 .sidebar-footer .sidebar-user{margin-top:8px;}
 
-/* Round 11: collapsible sidebar groups (Create & Review / Production /
-   Library) -- same .tab-btn look for the leaf items (nested one level, via
-   .sidebar-group-items), a distinct smaller/uppercase style for the group
-   header itself so it doesn't get mistaken for a clickable page. Collapsed
-   by default; toggleSidebarGroup (app.js) adds .expanded, which is also
-   what auto-expand-on-active-page uses so a direct link/reload into a
-   grouped tab never hides its own nav item. */
-.sidebar-group{display:flex;flex-direction:column;}
-.sidebar-group-toggle{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;text-align:left;background:none;border:none;padding:9px 10px;border-radius:var(--r);font-family:inherit;font-size:11px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:rgba(255,255,255,0.38);cursor:pointer;}
-.sidebar-group-toggle:hover{color:rgba(255,255,255,0.75);}
-.sidebar-group-chevron{font-size:10px;transition:transform 0.15s ease;}
+/* Collapsible sidebar groups (Create & Review / Production / Library) --
+   same .tab-btn look for the leaf items (nested one level, via
+   .sidebar-group-items). Collapsed by default; toggleSidebarGroup (app.js)
+   adds .expanded, which is also what auto-expand-on-active-page uses so a
+   direct link/reload into a grouped tab never hides its own nav item.
+   Round 12: the header itself reads as real navigation, not filler text --
+   brighter/larger/heavier than before (was 11px @ 38% white, easy to miss
+   entirely) -- while staying visually distinct from a clickable page (no
+   icon slot, uppercase+tracking, disabled-cursor feel absent since it IS
+   clickable) so it can't be mistaken for a normal tab-btn either. */
+.sidebar-group{display:flex;flex-direction:column;margin-top:6px;}
+.sidebar-group-toggle{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;text-align:left;background:none;border:none;padding:8px 10px;border-radius:var(--r);font-family:inherit;font-size:12px;font-weight:800;letter-spacing:0.04em;text-transform:uppercase;color:rgba(255,255,255,0.62);cursor:pointer;}
+.sidebar-group-toggle:hover{color:white;background:rgba(255,255,255,0.05);}
+.sidebar-group-chevron{font-size:10px;color:rgba(255,255,255,0.45);transition:transform 0.15s ease;}
 .sidebar-group.expanded .sidebar-group-chevron{transform:rotate(180deg);}
 .sidebar-group-items{display:none;flex-direction:column;gap:2px;padding-left:4px;}
 .sidebar-group.expanded .sidebar-group-items{display:flex;}
@@ -686,17 +689,29 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .cc-sizes-summary{font-size:12.5px;color:var(--text-secondary);}
 .cc-sizes-summary.hint{color:var(--text-muted);}
 
-/* Round 11: Settings -> Users access matrix -- same card-row language as
-   .cc-row above (Content Creators), not a copy of any other app's own
-   styling per the brief ("retain its own styling"). */
-.users-access-list{display:flex;flex-direction:column;gap:8px;}
-.users-access-row{background:white;border:1px solid var(--border);border-radius:var(--r);padding:10px 12px;display:flex;flex-direction:column;gap:8px;}
-.users-access-row-top{display:flex;align-items:center;gap:10px;}
-.users-access-name{flex:1;font-size:13px;font-weight:600;display:flex;flex-direction:column;gap:1px;}
-.users-access-email{font-size:11px;font-weight:500;color:var(--text-muted);}
-.users-access-role{font-size:12.5px;padding:5px 8px;border:1px solid var(--border);border-radius:var(--r);font-family:inherit;}
-.users-access-modules{display:flex;flex-wrap:wrap;gap:8px 16px;padding-top:8px;border-top:1px solid var(--border);}
-.users-access-module{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text-secondary);cursor:pointer;}
+/* Round 12: Settings -> Users access, redesigned from Round 11's always-open
+   13-checkbox cards into a scannable table (Name/Email/Role/Access/Edit),
+   following the same .admin-table convention used elsewhere in this app
+   rather than inventing a new table style. Full checkbox grid now only
+   appears inside the Edit modal (.user-access-modules below). */
+.users-access-table{width:100%;border-collapse:collapse;background:var(--surface);border-radius:var(--r-lg);overflow:hidden;box-shadow:var(--shadow-xs);}
+.users-access-table th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-muted);padding:8px 10px;background:var(--surface2);border-bottom:1px solid var(--border);}
+.users-access-table td{padding:9px 10px;font-size:12.5px;border-bottom:1px solid var(--border);vertical-align:middle;}
+.users-access-table tr:last-child td{border-bottom:none;}
+.users-access-email{color:var(--text-muted);}
+.users-access-chip{display:inline-block;font-size:11px;font-weight:600;padding:3px 9px;border-radius:var(--r-pill);}
+.users-access-chip-full{background:var(--green-light);color:var(--green);}
+.users-access-chip-restricted{background:var(--amber-light);color:var(--amber);}
+
+/* Edit User modal -- the positive "checked = can access" checkbox grid
+   that gets inverted to/from the deny-list restricted_modules on open/save
+   (see openUserAccessModal/saveUserAccessModal in app.js). */
+.user-access-modal-identity{margin-bottom:12px;}
+.user-access-modal-name{font-size:14px;font-weight:700;}
+.user-access-modal-email{font-size:12px;color:var(--text-muted);}
+.user-access-modules-header{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-muted);margin-top:14px;}
+.user-access-modules{display:flex;flex-wrap:wrap;gap:8px 16px;padding-top:8px;}
+.user-access-module{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text-secondary);cursor:pointer;}
 .cc-size-input{width:110px;font-family:inherit;font-size:12.5px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--r);}
 .cc-add-row{display:flex;gap:8px;margin-bottom:14px;}
 .cc-add-row input{flex:1;font-family:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r);}
