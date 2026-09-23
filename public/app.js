@@ -208,10 +208,36 @@ function applySidebarModuleAccess() {
   if (usersTabBtn) usersTabBtn.style.display = state.currentUser && state.currentUser.role === 'admin' ? '' : 'none';
 }
 
+// Production follow-up pass, round 2: the static index.html already ships
+// Create & Review / Production with the `expanded` class baked in (and
+// Library without it) -- verified correct in isolation, so this is not
+// covering an actual bug in that markup or in toggleSidebarGroup. It exists
+// because showApp() is the one moment "the app has just loaded/signed in"
+// actually happens in this SPA (called from both login() and
+// checkSession()'s session-restore path, and only ever once per page load,
+// never again afterward, so it can never fight a user's own toggle click
+// mid-session) -- asserting the intended default here too means the
+// default no longer depends solely on the served HTML's class attribute
+// surviving whatever sits between deploy and browser (a proxy/CDN cache, an
+// old service worker, etc.), the same way applySidebarModuleAccess right
+// below it already re-asserts visibility here rather than trusting the
+// static markup alone.
+function applySidebarGroupDefaults() {
+  const defaults = { 'create-review': true, production: true, library: false };
+  Object.entries(defaults).forEach(([name, shouldBeExpanded]) => {
+    const group = document.querySelector(`.sidebar-group[data-group="${name}"]`);
+    if (!group) return;
+    group.classList.toggle('expanded', shouldBeExpanded);
+    const toggleBtn = group.querySelector('.sidebar-group-toggle');
+    if (toggleBtn) toggleBtn.setAttribute('aria-expanded', String(shouldBeExpanded));
+  });
+}
+
 function showApp() {
   document.getElementById('password-screen').style.display = 'none';
   document.getElementById('app').style.display = 'flex';
   renderSidebarUser();
+  applySidebarGroupDefaults();
   applySidebarModuleAccess();
   loadAll();
   // Opens straight into the right sidebar tab for a deep link present at
