@@ -9042,12 +9042,17 @@ const EDITING_STATUS_CLASS = { to_edit: 'editing-status-to-edit', scheduled: 'ed
 // calendar-derived stage -- it only ever changes by dragging a card onto a
 // day (or back to Unscheduled), never by clicking this control, so unlike
 // the other three stages it's never itself a click target. The two real
-// actions stay exactly as before: from To Edit OR Scheduled, clicking
-// "In Progress" starts editing (creating the Final Edit); from In Progress,
-// clicking "Edited" opens the submit flow. There's no revert segment:
-// undoing "-> In Progress" is the existing "Remove Final Edit" action
-// inside the workspace, and undoing "In Progress -> Edited" is deliberately
-// NOT a raw revert here -- once submitted, Final Approval owns the concept
+// actions: from To Edit OR Scheduled, clicking "In Progress" is a pure
+// status transition -- sets editing_started_at only, no Final Edit, no
+// modal (see advanceEditingToInProgress); from In Progress, clicking
+// "Edited" is the only normal way to open the Final Edit modal, creating
+// the Concept's one final_edits row on demand if it doesn't already exist
+// (see advanceEditingToEdited). There's no revert segment for "In
+// Progress": once a Final Edit exists its own "Remove Final Edit" action
+// inside the workspace is the closest undo (clearing editing_started_at
+// too if it was the Concept's last one); undoing "In Progress -> Edited" is
+// deliberately NOT a raw revert here -- once submitted, Final Approval owns
+// the concept
 // (see renderEditingConceptModal's submitted-lock), and the only way back
 // is its own Request Changes, which is a decision with feedback attached,
 // not a silent undo button on a card.
@@ -9067,25 +9072,20 @@ function editingStatusControlHtml(concept) {
   }).join('')}</div>`;
 }
 
-// Card-level equivalent of startEditingFinalEdit (inside the Concept
-// workspace modal) -- same creation call, just addressed by
-// creativeAssetId directly rather than state.editing.activeConceptAssetId,
-// so the segmented control's "In Progress" segment works from any card
-// without first opening the workspace. Still finishes by opening the Final
-// Edit modal -- there's nothing to actually DO in "In Progress" besides
-// paste the link back, so skipping straight to that is the same one
-// continuous motion as before.
+// Card-level "In Progress" segment -- a pure status transition (fixes the
+// live-QA bug where this used to also create a Final Edit and open its
+// modal, see POST /editing/concepts/:id/start). It's simply "I have started
+// editing this": sets editing_started_at and nothing else -- no final_edits
+// row, no modal, no submission. The card stays put in Editing with "In
+// Progress" selected; the Final Edit modal is now reached only by clicking
+// "Edited" below.
 async function advanceEditingToInProgress(conceptAssetId) {
   const concept = editingFindConcept(conceptAssetId);
   if (!concept) return;
-  const format = FINAL_EDIT_FORMATS.includes(concept.concept_format) ? concept.concept_format : 'video';
   try {
-    const created = await api(`/editing/concepts/${conceptAssetId}/final-edits`, {
-      method: 'POST',
-      body: JSON.stringify({ assets: [{ asset_name: 'Final Edit', format }] }),
-    });
+    await api(`/editing/concepts/${conceptAssetId}/start`, { method: 'POST' });
     await refreshCurrentEditingView();
-    openFinalEditModal(created[0].id);
+    toast('Marked as In Progress');
   } catch (e) {
     toast(e.message, true);
   }
@@ -9093,18 +9093,34 @@ async function advanceEditingToInProgress(conceptAssetId) {
 
 // Clicking "Edited" must never silently advance the status -- the whole
 // point of this segment is that Final Approval can't be reached without a
-// real Final Edit link attached. So instead of calling ready-for-approval
-// directly, this opens the SAME Final Edit modal used by "In Progress" (the
-// concept's existing final_edits row -- "In Progress" already guarantees
-// one exists, see editingConceptStatus), flagged into submit mode so the
-// modal's own footer becomes "Submit for Approval ->" (see
-// submitFinalEditAndAdvance). Cancel/close/backdrop-click on that modal are
-// all plain closeModal() with no side effect, so the concept simply stays
-// In Progress until the form is actually submitted.
-function advanceEditingToEdited(conceptAssetId) {
+// real Final Edit link attached. Since "In Progress" no longer guarantees a
+// final_edits row exists (see advanceEditingToInProgress above), this
+// creates one first if the Concept doesn't already have one -- the same
+// creation call "In Progress" used to make, now made here instead, so
+// there's still ever only one final_edits row per Concept -- then opens the
+// SAME Final Edit modal, flagged into submit mode so the modal's own footer
+// becomes "Submit for Approval ->" (see submitFinalEditAndAdvance).
+// Cancel/close/backdrop-click on that modal are all plain closeModal() with
+// no side effect, so the concept simply stays In Progress until the form is
+// actually submitted.
+async function advanceEditingToEdited(conceptAssetId) {
   const concept = editingFindConcept(conceptAssetId);
-  const finalEdit = concept && editingConceptFinalEdit(concept);
-  if (!finalEdit) return;
+  if (!concept) return;
+  let finalEdit = editingConceptFinalEdit(concept);
+  if (!finalEdit) {
+    const format = FINAL_EDIT_FORMATS.includes(concept.concept_format) ? concept.concept_format : 'video';
+    try {
+      const created = await api(`/editing/concepts/${conceptAssetId}/final-edits`, {
+        method: 'POST',
+        body: JSON.stringify({ assets: [{ asset_name: 'Final Edit', format }] }),
+      });
+      await refreshCurrentEditingView();
+      finalEdit = created[0];
+    } catch (e) {
+      toast(e.message, true);
+      return;
+    }
+  }
   openFinalEditModal(finalEdit.id, { submitMode: true });
 }
 

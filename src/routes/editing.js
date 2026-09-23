@@ -164,6 +164,28 @@ router.get('/', async (req, res, next) => {
   }
 });
 
+// Card-level "In Progress" -- a pure status transition, nothing else. Fixes
+// the live-QA bug where clicking "In Progress" opened the Final Edit modal:
+// that action used to piggyback on POST .../final-edits (below), which both
+// creates a final_edits row and sets this same flag as a side effect. This
+// route sets ONLY editing_started_at, so starting editing never creates a
+// final_edits row, never opens any modal, and never touches
+// editing_submitted_at/Final Approval. COALESCE keeps it idempotent -- a
+// second click, or one after a Final Edit already exists (which also sets
+// this column), never pushes the timestamp forward.
+router.post('/concepts/:creativeAssetId/start', async (req, res, next) => {
+  try {
+    const result = await pool.query(
+      `UPDATE creative_assets SET editing_started_at = COALESCE(editing_started_at, now()), updated_at = now() WHERE id = $1 RETURNING id, editing_started_at`,
+      [req.params.creativeAssetId]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Concept not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Bulk-create Final Edits for one Concept -- covers both the multi-select
 // "Create Final Edits" gesture and a single Hook checklist row's "Add Final
 // Edit" (a one-item array). Never auto-creates from hook_variations on its
