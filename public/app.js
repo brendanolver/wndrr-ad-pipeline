@@ -9753,11 +9753,10 @@ async function advanceEditingToEdited(conceptAssetId) {
   if (!concept) return;
   let finalEdit = editingConceptFinalEdit(concept);
   if (!finalEdit) {
-    const format = FINAL_EDIT_FORMATS.includes(concept.concept_format) ? concept.concept_format : 'video';
     try {
       const created = await api(`/editing/concepts/${conceptAssetId}/final-edits`, {
         method: 'POST',
-        body: JSON.stringify({ assets: [{ asset_name: 'Final Edit', format }] }),
+        body: JSON.stringify({ assets: finalEditAssetsFromConceptHooks(concept) }),
       });
       await refreshCurrentEditingView();
       finalEdit = created[0];
@@ -10266,17 +10265,27 @@ function renderEditingConceptModal() {
       <div class="editing-final-edit-empty">Editing hasn't started yet.</div>
       <button type="button" class="btn btn-primary" onclick="startEditingFinalEdit()">Start Editing &rarr;</button>`;
   } else {
-    summary.innerHTML = `
-      ${changesBanner}
+    // One row per Final Edit -- a concept with N confirmed Tuesday Review
+    // hooks gets N Final Edits here (see startEditingFinalEdit), each still
+    // independently editable/linkable/removable. A concept with just one
+    // (no recorded hooks, or a single confirmed hook) renders exactly the
+    // same single row this always showed.
+    const allFinalEdits = concept.final_edits || [];
+    const rowsHtml = allFinalEdits.map((fe) => {
+      const feHasLink = !!fe.final_edit_link;
+      return `
       <div class="editing-final-edit-row">
-        ${finalEdit.editor ? `<div class="editing-final-edit-field"><span class="editing-final-edit-field-label">Editor</span>${escapeHtml(finalEdit.editor)}</div>` : ''}
-        ${hasLink
-          ? `<a href="${escapeHtml(finalEdit.final_edit_link)}" target="_blank" rel="noopener" class="link-btn">View Final Edit &rarr;</a>`
+        ${fe.variation_text ? `<div class="editing-final-edit-hook-preview">&ldquo;${escapeHtml(fe.variation_text)}&rdquo;</div>` : ''}
+        ${fe.editor ? `<div class="editing-final-edit-field"><span class="editing-final-edit-field-label">Editor</span>${escapeHtml(fe.editor)}</div>` : ''}
+        ${feHasLink
+          ? `<a href="${escapeHtml(fe.final_edit_link)}" target="_blank" rel="noopener" class="link-btn">View Final Edit &rarr;</a>`
           : '<div class="editing-final-edit-empty">No link pasted back yet.</div>'}
-        ${finalEdit.editor_notes ? `<div class="editing-final-edit-notes">${escapeHtml(finalEdit.editor_notes)}</div>` : ''}
-      </div>
-      ${submitted ? '' : `<button type="button" class="link-btn" onclick="openFinalEditModal(${finalEdit.id})">${hasLink ? 'Edit Details' : 'Add Final Edit Link'} &rarr;</button>`}
-      ${submitted ? '' : `<button type="button" class="link-btn editing-final-edit-remove" onclick="deleteFinalEditFlow(${finalEdit.id})">Remove Final Edit</button>`}`;
+        ${fe.editor_notes ? `<div class="editing-final-edit-notes">${escapeHtml(fe.editor_notes)}</div>` : ''}
+        ${submitted ? '' : `<button type="button" class="link-btn" onclick="openFinalEditModal(${fe.id})">${feHasLink ? 'Edit Details' : 'Add Final Edit Link'} &rarr;</button>`}
+        ${submitted ? '' : `<button type="button" class="link-btn editing-final-edit-remove" onclick="deleteFinalEditFlow(${fe.id})">Remove</button>`}
+      </div>`;
+    }).join('');
+    summary.innerHTML = `${changesBanner}${rowsHtml}`;
   }
 
   // The footer is where "what's needed before this can move to Final
@@ -10327,13 +10336,40 @@ function editingDefaultFormat() {
 // Creates the Concept's one Final Edit and immediately opens its workspace
 // to fill in the link/editor/notes -- one continuous motion, same as
 // before this simplification, just never asking which Hook it's for.
+// One Final Edit per CONFIRMED Tuesday Review hook (see the Ad Setup
+// naming brief, item 2: "1 concept + 1 shoot + N confirmed hooks = N
+// downstream hook variations"). concept.hook_variations is exactly what
+// Tuesday Review approved along with the rest of the concept (see
+// conceptDevelopment.js's PATCH .../review -- approval never touches
+// hook_variations, it's approved as-is), so every entry on it at the
+// moment editing starts is a confirmed hook. Each Final Edit keeps its
+// own variation_text (the full confirmed hook, read-only source of truth
+// -- see openFinalEditModal's opening-text display) so Ad Setup can later
+// derive its own Short Meta Hook per variation without inventing one. A
+// concept with no recorded hooks (legacy data, or a Static concept that
+// never used hook_variations) still gets exactly one blank Final Edit,
+// same as before this change.
+function finalEditAssetsFromConceptHooks(concept) {
+  const hooks = (Array.isArray(concept.hook_variations) ? concept.hook_variations : [])
+    .filter((h) => h && h.text && h.text.trim());
+  const format = editingDefaultFormat();
+  if (!hooks.length) return [{ asset_name: 'Final Edit', format }];
+  return hooks.map((h, i) => ({
+    asset_name: `Hook ${i + 1} — ${h.text.trim().slice(0, 40)}`,
+    format,
+    variation_text: h.text.trim(),
+  }));
+}
+
 async function startEditingFinalEdit() {
   const conceptAssetId = state.editing.activeConceptAssetId;
   if (conceptAssetId == null) return;
+  const concept = editingFindConcept(conceptAssetId);
+  if (!concept) return;
   try {
     const created = await api(`/editing/concepts/${conceptAssetId}/final-edits`, {
       method: 'POST',
-      body: JSON.stringify({ assets: [{ asset_name: 'Final Edit', format: editingDefaultFormat() }] }),
+      body: JSON.stringify({ assets: finalEditAssetsFromConceptHooks(concept) }),
     });
     await refreshCurrentEditingView();
     openFinalEditModal(created[0].id);
@@ -10746,6 +10782,11 @@ function formatDateDDMMClient(dateStr) {
   const d = new Date(dateStr);
   return `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
+// Order: [Sale stage/sequence prefix, if Promotion] Batch, Week, Date,
+// Product Name, Product Category, Short Hook, Media, Ad Type, Creator,
+// Concept, URL Link Page -- must match lib/adSetupNaming.js's
+// buildMetaAdName exactly (server is the source of truth once saved; this
+// is only for the live-typing preview before Save Draft round-trips).
 function buildMetaAdNamePreviewClient(d) {
   const segs = [];
   if (d.ad_category === 'promotion' && d.stage_type && STAGE_TAGS[d.stage_type]) {
@@ -10754,10 +10795,13 @@ function buildMetaAdNamePreviewClient(d) {
   segs.push(d.batch_number ? `#${d.batch_number}` : '#—');
   if (d.week_no) segs.push(d.week_no);
   if (d.ad_date) segs.push(formatDateDDMMClient(d.ad_date));
+  segs.push(d.product_label ? d.product_label.toUpperCase() : '*');
+  segs.push(d.product_type ? d.product_type.toUpperCase() : '*');
   segs.push(d.hook_short || '*');
-  segs.push(d.creator_name || '*');
   segs.push(d.media_type === 'video' ? 'Video' : d.media_type === 'image' ? 'Image' : '*');
   segs.push(d.ad_type === 'carousel' ? 'Carousel' : 'Single');
+  segs.push(d.creator_name ? d.creator_name.toUpperCase() : '*');
+  segs.push(d.concept_label ? d.concept_label.toUpperCase() : '*');
   segs.push(d.url_link_page ? (URL_LINK_PAGE_LABELS[d.url_link_page] || d.url_link_page) : '*');
   return segs.join('_');
 }
@@ -10786,7 +10830,9 @@ function renderAdSetupNamePreview() {
   if (el) el.textContent = buildMetaAdNamePreviewClient({
     ad_category: d.ad_category, stage_type: d.promotion_stage_name ? detectStageTypeClient(d.promotion_stage_name) : null,
     sale_sequence_number: d.sale_sequence_number, batch_number: d.batch_number, week_no: d.week_no, ad_date: d.ad_date,
-    hook_short: d.hook_short, creator_name: d.creator_name, media_type: d.media_type, ad_type: d.ad_type, url_link_page: d.url_link_page,
+    product_label: d.product_label, product_type: d.product_type,
+    hook_short: d.hook_short, creator_name: d.creator_name, concept_label: d.concept_label,
+    media_type: d.media_type, ad_type: d.ad_type, url_link_page: d.url_link_page,
   });
   renderAdSetupReadiness();
 }
@@ -10868,11 +10914,12 @@ function renderAdSetupModal() {
 
     <div class="as-section">
       <div class="as-section-title">Naming</div>
+      <div class="hint" style="margin-bottom:10px;">Product Name/Category here are how this ad is named in Meta only -- editing them never changes the linked WNDRR/ApparelMagic product record.</div>
       <div class="as-grid">
-        <label>Product (Meta label)
+        <label>Product Name
           <input type="text" value="${escapeHtml(d.product_label || '')}" oninput="adSetupSet('product_label', this.value)">
         </label>
-        <label>Product Type
+        <label>Product Category
           <input type="text" value="${escapeHtml(d.product_type || '')}" oninput="adSetupSet('product_type', this.value)">
         </label>
         <label>Hook (short)
@@ -10904,7 +10951,9 @@ function renderAdSetupModal() {
         <span id="as-name-preview-text">${escapeHtml(buildMetaAdNamePreviewClient({
           ad_category: d.ad_category, stage_type: d.promotion_stage_name ? detectStageTypeClient(d.promotion_stage_name) : null,
           sale_sequence_number: d.sale_sequence_number, batch_number: d.batch_number, week_no: d.week_no, ad_date: d.ad_date,
-          hook_short: d.hook_short, creator_name: d.creator_name, media_type: d.media_type, ad_type: d.ad_type, url_link_page: d.url_link_page,
+          product_label: d.product_label, product_type: d.product_type,
+          hook_short: d.hook_short, creator_name: d.creator_name, concept_label: d.concept_label,
+          media_type: d.media_type, ad_type: d.ad_type, url_link_page: d.url_link_page,
         }))}</span>
         <button type="button" class="btn btn-ghost" style="flex-shrink:0;" onclick="copyAdSetupName()">Copy Name</button>
       </div>

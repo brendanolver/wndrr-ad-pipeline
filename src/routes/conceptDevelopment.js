@@ -450,6 +450,24 @@ router.patch('/concepts/:id', async (req, res, next) => {
     if (concept_origin !== undefined && concept_origin !== null && !CONCEPT_ORIGINS.includes(concept_origin)) {
       return res.status(400).json({ error: `concept_origin must be one of: ${CONCEPT_ORIGINS.join(', ')}` });
     }
+    // Review-gate fix: this general edit route is the ONE place besides the
+    // actual Tuesday Review decision route (PATCH /concepts/:id/review
+    // below) that can move a concept to 'approved' -- but until now it did
+    // so unconditionally, for ANY concept, the instant a caller included
+    // concept_dev_status: 'approved' in the body. The only legitimate use
+    // of that is Promotion's "Existing Concept" brief (savePromotionShootItem
+    // in app.js), which always sends concept_origin: 'existing' in the SAME
+    // request -- a real, already-proven concept that's deliberately meant
+    // to skip Concept Development/Tuesday Review. Every other concept
+    // (Core/High Stock/Drop/Promotion New Concept/manual/ad-hoc) must reach
+    // 'approved' only through an actual Tuesday Review decision, so this
+    // now rejects the shortcut for anything that isn't that one documented
+    // case -- closing the gap a manual concept could otherwise slip through
+    // (whether from a stray client call or a future UI bug) straight into
+    // Shooting with no review ever having happened.
+    if (concept_dev_status === 'approved' && concept_origin !== 'existing') {
+      return res.status(400).json({ error: 'concept_dev_status can only be set to approved here for an Existing Concept (concept_origin: existing). Every other concept must go through Tuesday Review.' });
+    }
     if (reference_items !== undefined) {
       const valid = Array.isArray(reference_items) && reference_items.every(
         (r) => r && typeof r === 'object' && typeof r.url === 'string'

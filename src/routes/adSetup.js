@@ -1,7 +1,7 @@
 const express = require('express');
 const { pool } = require('../db');
 const {
-  weekCode, detectAdCategory, detectPromotionStageType, shortenHook, buildMetaAdName,
+  weekCode, detectAdCategory, detectPromotionStageType, splitProductName, shortenHook, buildMetaAdName,
 } = require('../lib/adSetupNaming');
 const { generateCopyDrafts, defaultCta } = require('../lib/adCopyDraft');
 
@@ -17,7 +17,7 @@ async function loadContext(client, finalEditId) {
   const feResult = await client.query(
     `SELECT fe.*, ca.id AS creative_asset_id, ca.concept_name, ca.hook, ca.concept_type,
             ca.avatar_why_care, ca.filming_owner, ca.style_id AS ca_style_id,
-            ca.shoot_plan_item_id
+            ca.shoot_plan_item_id, ca.hook_variations
      FROM final_edits fe
      JOIN creative_assets ca ON ca.id = fe.creative_asset_id
      WHERE fe.id = $1`,
@@ -25,6 +25,20 @@ async function loadContext(client, finalEditId) {
   );
   if (!feResult.rows.length) return null;
   const row = feResult.rows[0];
+  // The CONFIRMED hook this specific Final Edit is cutting -- its own
+  // variation_text when it was created from a Tuesday-Review-confirmed
+  // hook (see finalEditAssetsFromConceptHooks in app.js), falling back to
+  // the concept's first confirmed hook for a still-single, not yet
+  // hook-tagged Final Edit, and only then the legacy single `hook` column
+  // (pre-hook_variations concepts). Never invented here -- if none of
+  // these exist, confirmedHook is null and Ad Setup's Hook fields stay
+  // blank for a human to fill in, rather than fabricating one.
+  const firstConceptHook = (Array.isArray(row.hook_variations) ? row.hook_variations : [])
+    .find((h) => h && h.text && h.text.trim());
+  row.confirmedHook = (row.variation_text && row.variation_text.trim())
+    || (firstConceptHook && firstConceptHook.text.trim())
+    || (row.hook && row.hook.trim())
+    || null;
 
   const spiResult = row.shoot_plan_item_id
     ? await client.query('SELECT * FROM shoot_plan_items WHERE id = $1', [row.shoot_plan_item_id])
@@ -87,19 +101,21 @@ function saleDatesLabel(promotion) {
   return promotion.end_date ? `${fmt(promotion.start_date)}–${fmt(promotion.end_date)}` : fmt(promotion.start_date);
 }
 
-function deriveProductLabel(styles, dropName, promotion) {
-  if (styles.length === 1) return styles[0].name;
-  if (dropName) return dropName;
-  if (promotion) return promotion.name;
-  if (styles.length > 1) return `${styles.length} Products`;
-  return null;
-}
-
-function deriveProductType(styles) {
-  const distinct = [...new Set(styles.map((s) => s.category_name).filter(Boolean))];
-  if (distinct.length === 1) return distinct[0];
-  if (distinct.length > 1) return 'OTHER';
-  return null;
+// Product Name + Product Category (see the brief, item 1). Single product:
+// split the real style name via splitProductName (canonical product/style
+// ID stays exactly as already linked -- this only changes how its name is
+// REPRESENTED for Meta naming, never the underlying record). Multi-product
+// (a Drop/multi-style concept): unchanged from before -- there's no single
+// garment name to split, so Name stays the collective Drop/Promotion label
+// and Category stays the distinct-category union (or OTHER).
+function deriveProductNameAndCategory(styles, dropName, promotion) {
+  if (styles.length === 1) {
+    return splitProductName(styles[0].name, styles[0].category_name);
+  }
+  const name = dropName || (promotion ? promotion.name : null) || (styles.length > 1 ? `${styles.length} Products` : null);
+  const distinctCategories = [...new Set(styles.map((s) => s.category_name).filter(Boolean))];
+  const category = distinctCategories.length === 1 ? distinctCategories[0] : (distinctCategories.length > 1 ? 'OTHER' : null);
+  return { name, category };
 }
 
 function deriveUrlLinkPage(adCategory, styles) {
@@ -110,11 +126,12 @@ function deriveUrlLinkPage(adCategory, styles) {
 }
 
 function copyContextFromLoaded(ctx, adCategory, stageType) {
+  const { name, category } = deriveProductNameAndCategory(ctx.styles, ctx.dropName, ctx.promotion);
   return {
-    hook: ctx.finalEdit.hook,
+    hook: ctx.finalEdit.confirmedHook,
     conceptLabel: ctx.finalEdit.concept_type,
-    productLabel: deriveProductLabel(ctx.styles, ctx.dropName, ctx.promotion),
-    productType: deriveProductType(ctx.styles),
+    productLabel: name,
+    productType: category,
     avatarWhyCare: ctx.finalEdit.avatar_why_care,
     adCategory,
     stageType,
@@ -134,6 +151,7 @@ function buildPrefill(ctx) {
   const mediaType = format === 'video' ? 'video' : format === 'static' ? 'image' : 'image';
   const adType = format === 'carousel' ? 'carousel' : 'single';
   const today = new Date();
+  const { name: productName, category: productCategory } = deriveProductNameAndCategory(ctx.styles, ctx.dropName, ctx.promotion);
   const copyCtx = copyContextFromLoaded(ctx, adCategory, stageType);
   const drafts = generateCopyDrafts(copyCtx);
 
@@ -141,11 +159,15 @@ function buildPrefill(ctx) {
     adCategory,
     weekNo: weekCode(today),
     adDate: today,
-    productLabel: deriveProductLabel(ctx.styles, ctx.dropName, ctx.promotion),
-    productType: deriveProductType(ctx.styles),
-    hookShort: shortenHook(ctx.finalEdit.hook),
+    productLabel: productName,
+    productType: productCategory,
+    hookShort: shortenHook(ctx.finalEdit.confirmedHook, productName, productCategory),
     mediaType,
     adType,
+    // Creator = the real Shooting assignment (filming_owner), never the
+    // editor, never the logged-in user, never a concept owner (see the
+    // brief, item 6). Left null ("n/a", editable) when no Shooting
+    // assignment exists -- never invented.
     creatorName: ctx.finalEdit.filming_owner || null,
     conceptLabel: ctx.finalEdit.concept_type || ctx.finalEdit.concept_name,
     urlLinkPage: deriveUrlLinkPage(adCategory, ctx.styles),
@@ -241,10 +263,13 @@ router.get('/:id', async (req, res, next) => {
       batchNumber: row.batch_number,
       weekNo: row.week_no,
       adDate: row.ad_date,
+      productName: row.product_label,
+      productCategory: row.product_type,
       hookShort: row.hook_short,
       mediaType: row.media_type,
       adType: row.ad_type,
       creatorName: row.creator_name,
+      conceptLabel: row.concept_label,
       urlLinkPage: row.url_link_page,
       adCategory: row.ad_category,
       stageType: row.promotion_stage_name ? detectPromotionStageType(row.promotion_stage_name) : null,
