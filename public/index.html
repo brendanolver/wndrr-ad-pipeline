@@ -802,8 +802,26 @@
          here yet. -->
     <section id="tab-final-approval" class="tab-panel">
       <h1 class="tr-page-title">Final Approval</h1>
-      <div class="shoot-summary-line" id="final-approval-summary"></div>
-      <div id="final-approval-list" class="cd-product-grid"></div>
+      <div class="fa-subtabs">
+        <button type="button" class="fa-subtab active" data-fa-subtab="ready" onclick="switchFinalApprovalSubtab('ready')">Ready for Approval <span class="fa-subtab-count" id="fa-count-ready"></span></button>
+        <button type="button" class="fa-subtab" data-fa-subtab="ad-setup" onclick="switchFinalApprovalSubtab('ad-setup')">Ad Setup <span class="fa-subtab-count" id="fa-count-ad-setup"></span></button>
+        <button type="button" class="fa-subtab" data-fa-subtab="approved" onclick="switchFinalApprovalSubtab('approved')">Approved <span class="fa-subtab-count" id="fa-count-approved"></span></button>
+      </div>
+
+      <div id="fa-panel-ready" class="fa-subtab-panel">
+        <div class="shoot-summary-line" id="final-approval-summary"></div>
+        <div id="final-approval-list" class="cd-product-grid"></div>
+      </div>
+
+      <div id="fa-panel-ad-setup" class="fa-subtab-panel" style="display:none;">
+        <div class="shoot-summary-line" id="ad-setup-summary"></div>
+        <div id="ad-setup-list" class="cd-product-grid"></div>
+      </div>
+
+      <div id="fa-panel-approved" class="fa-subtab-panel" style="display:none;">
+        <div class="shoot-summary-line" id="ad-setup-approved-summary"></div>
+        <div id="ad-setup-approved-list" class="cd-product-grid"></div>
+      </div>
     </section>
 
     <div id="final-approval-modal" class="modal-backdrop">
@@ -825,7 +843,44 @@
         <div class="modal-footer" id="final-approval-modal-footer">
           <button class="btn btn-ghost" id="final-approval-close-btn" onclick="closeModal('final-approval-modal')">Close</button>
           <button class="btn btn-ghost" id="final-approval-request-changes-btn" onclick="toggleFinalApprovalFeedback()">Request Changes</button>
-          <button class="btn btn-primary" id="final-approval-approve-btn" onclick="submitFinalApprovalApprove()">Approve &rarr;</button>
+          <button class="btn btn-primary" id="final-approval-approve-btn" onclick="submitFinalApprovalApprove()">Approve Creative &rarr;</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Ad Setup workspace -- purely structural Meta ad prep (naming,
+         copy drafts, destination). Never calls Meta; "Create in Meta ->"
+         is future work this data model is meant to support, not built
+         here (see the Part C brief). -->
+    <div id="ad-setup-modal" class="modal-backdrop">
+      <div class="modal cd-modal-workspace" style="width:70vw;min-width:720px;max-width:1100px;">
+        <div class="modal-header">
+          <div class="cd-modal-header-title">
+            <h3 id="ad-setup-modal-title">Ad Setup</h3>
+          </div>
+          <button class="modal-close" onclick="closeModal('ad-setup-modal')">&times;</button>
+        </div>
+        <div class="modal-body" id="ad-setup-modal-body"></div>
+        <div class="modal-footer" id="ad-setup-modal-footer">
+          <button class="btn btn-ghost" onclick="closeModal('ad-setup-modal')">Close</button>
+          <button class="btn btn-ghost" id="ad-setup-save-btn" onclick="saveAdSetupDraft()">Save Draft</button>
+          <button class="btn btn-primary" id="ad-setup-approve-btn" onclick="approveAdSetup()">Approve Ad Setup &rarr;</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Approved -- read-only completed-record view. No Meta connection,
+         no folder/library redesign in this pass, just the finished
+         package a future "Create in Meta ->" action would use. -->
+    <div id="ad-setup-approved-modal" class="modal-backdrop">
+      <div class="modal cd-modal-workspace" style="width:60vw;min-width:640px;max-width:900px;">
+        <div class="modal-header">
+          <h3 id="ad-setup-approved-modal-title">Approved</h3>
+          <button class="modal-close" onclick="closeModal('ad-setup-approved-modal')">&times;</button>
+        </div>
+        <div class="modal-body" id="ad-setup-approved-modal-body"></div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" onclick="closeModal('ad-setup-approved-modal')">Close</button>
         </div>
       </div>
     </div>

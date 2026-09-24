@@ -1636,3 +1636,155 @@ WHERE u.email = 'mark@kohindustries.com'
 ALTER TABLE shoot_plan_items DROP CONSTRAINT IF EXISTS shoot_plan_items_source_check;
 ALTER TABLE shoot_plan_items ADD CONSTRAINT shoot_plan_items_source_check
   CHECK (source IN ('core', 'high_stock', 'drop', 'promotion', 'manual'));
+
+-- =====================================================================
+-- Part C: Final Approval -> Ad Setup -> Approved (Meta ad structuring,
+-- no Meta connection). Everything below is additive: new nullable
+-- columns/tables only. Ad Setup progress is tracked with its OWN columns
+-- (ad_setup_approved_at/by), the same "separate column, never widen an
+-- existing CHECK" pattern already used for concept_dev_status and
+-- EDITING_STATUSES -- creative_assets.final_approval_status keeps its
+-- existing 3 values and existing meaning unchanged. "Approve Creative"
+-- (Ready for Approval -> Ad Setup) is still just final_approval_status
+-- turning 'approved', exactly as it already worked; this section only
+-- adds the NEXT step, Ad Setup -> Approved.
+-- =====================================================================
+
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS ad_setup_approved_at TIMESTAMPTZ;
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS ad_setup_approved_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+
+-- Batch numbering: sequential, stable once assigned, admin-correctable
+-- starting point. next_ad_batch_number is read+incremented inside one
+-- transaction when a batch is created (see routes/adSetup.js), so it's
+-- concurrency-safe without a raw SEQUENCE object. Starts at 1; an admin
+-- must correct this to the real current Meta batch number once, via
+-- Settings, before the first live batch is created (there is no way to
+-- know WNDRR's real current Meta batch number from inside this app).
+ALTER TABLE planning_settings ADD COLUMN IF NOT EXISTS next_ad_batch_number INTEGER NOT NULL DEFAULT 1;
+
+CREATE TABLE IF NOT EXISTS ad_batches (
+  id SERIAL PRIMARY KEY,
+  batch_number INTEGER NOT NULL,
+  name VARCHAR(255),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  UNIQUE (batch_number)
+);
+
+-- Copy Set: several creatives that share Product/Hook/offer/Promotion-stage
+-- context can point at the SAME chosen copy instead of each generating its
+-- own -- see ad_setups.copy_set_id. Deliberately minimal (one selected
+-- Primary Text/Headline/CTA per set, no versioning) for this first pass.
+CREATE TABLE IF NOT EXISTS ad_copy_sets (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  primary_text TEXT,
+  headline TEXT,
+  cta VARCHAR(30),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+
+-- Sale sequential ad number: a monotonic counter PER (promotion_stage,
+-- batch), never derived from MAX(existing rows) -- that would let a
+-- deleted row's number get reissued to the next ad created, which the
+-- brief explicitly rules out. Allocated once, atomically, via an
+-- INSERT ... ON CONFLICT DO UPDATE ... RETURNING in routes/adSetup.js.
+CREATE TABLE IF NOT EXISTS ad_sale_sequence_counters (
+  promotion_stage_id INTEGER NOT NULL REFERENCES promotion_stages(id) ON DELETE CASCADE,
+  ad_batch_id INTEGER NOT NULL REFERENCES ad_batches(id) ON DELETE CASCADE,
+  next_number INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (promotion_stage_id, ad_batch_id)
+);
+
+-- The structured Ad Setup record itself. One row per final_edits row (a
+-- concept with several hook-variation final edits gets one Ad Setup each,
+-- since each is a distinct piece of creative that needs its own Meta ad
+-- name) -- UNIQUE(final_edit_id) makes entering Ad Setup for the same
+-- final edit twice an idempotent no-op rather than a duplicate. Always
+-- linked back to creative_asset_id (the canonical concept) and
+-- final_edit_id (the canonical, already-approved final creative) --
+-- neither is ever copied or re-uploaded here.
+CREATE TABLE IF NOT EXISTS ad_setups (
+  id SERIAL PRIMARY KEY,
+  creative_asset_id INTEGER NOT NULL REFERENCES creative_assets(id) ON DELETE CASCADE,
+  final_edit_id INTEGER NOT NULL UNIQUE REFERENCES final_edits(id) ON DELETE CASCADE,
+  ad_batch_id INTEGER REFERENCES ad_batches(id) ON DELETE SET NULL,
+
+  ad_category VARCHAR(20) NOT NULL DEFAULT 'core',
+  ad_category_auto_detected BOOLEAN NOT NULL DEFAULT true,
+
+  -- Meta naming fields (all structured/editable; the generated name string
+  -- is assembled from these, never stored as free text so it can never
+  -- drift out of sync -- see lib/adSetupNaming.js).
+  week_no VARCHAR(20),
+  ad_date DATE,
+  product_label VARCHAR(255),
+  product_type VARCHAR(100),
+  hook_short VARCHAR(160),
+  media_type VARCHAR(10),
+  ad_type VARCHAR(20) NOT NULL DEFAULT 'single',
+  creator_name VARCHAR(255),
+  concept_label VARCHAR(255),
+  url_link_page VARCHAR(20) NOT NULL DEFAULT 'product',
+  destination_url TEXT,
+
+  -- Sale/Promotion-only: which of the promotion's existing 4 stages this
+  -- ad belongs to, plus its assigned sequential number within that
+  -- stage+batch. NULL for every non-Promotion ad category.
+  promotion_stage_id INTEGER REFERENCES promotion_stages(id) ON DELETE SET NULL,
+  sale_sequence_number INTEGER,
+
+  -- Copy: either copy_set_id points at a shared ad_copy_sets row (reused
+  -- copy), or selected_primary_text/selected_headline/cta hold this ad's
+  -- own selection from primary_text_options/headline_options (its
+  -- AI-drafted -- rule/template-based, not a live external AI call --
+  -- starting suggestions, regenerable, never auto-applied without the
+  -- fields above supporting them).
+  copy_set_id INTEGER REFERENCES ad_copy_sets(id) ON DELETE SET NULL,
+  primary_text_options JSONB NOT NULL DEFAULT '[]',
+  headline_options JSONB NOT NULL DEFAULT '[]',
+  selected_primary_text TEXT,
+  selected_headline TEXT,
+  cta VARCHAR(30) NOT NULL DEFAULT 'shop_now',
+
+  status VARCHAR(20) NOT NULL DEFAULT 'draft',
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+
+ALTER TABLE ad_setups DROP CONSTRAINT IF EXISTS ad_setups_ad_category_check;
+ALTER TABLE ad_setups ADD CONSTRAINT ad_setups_ad_category_check
+  CHECK (ad_category IN ('new_drop', 'core', 'promotion', 'organic_first'));
+ALTER TABLE ad_setups DROP CONSTRAINT IF EXISTS ad_setups_media_type_check;
+ALTER TABLE ad_setups ADD CONSTRAINT ad_setups_media_type_check
+  CHECK (media_type IS NULL OR media_type IN ('image', 'video'));
+ALTER TABLE ad_setups DROP CONSTRAINT IF EXISTS ad_setups_ad_type_check;
+ALTER TABLE ad_setups ADD CONSTRAINT ad_setups_ad_type_check
+  CHECK (ad_type IN ('single', 'carousel'));
+ALTER TABLE ad_setups DROP CONSTRAINT IF EXISTS ad_setups_url_link_page_check;
+ALTER TABLE ad_setups ADD CONSTRAINT ad_setups_url_link_page_check
+  CHECK (url_link_page IN ('product', 'category', 'new_arrivals', 'home', 'sale_bundle', 'other'));
+ALTER TABLE ad_setups DROP CONSTRAINT IF EXISTS ad_setups_cta_check;
+ALTER TABLE ad_setups ADD CONSTRAINT ad_setups_cta_check
+  CHECK (cta IN ('shop_now', 'sign_up', 'learn_more', 'shop_the_sale'));
+ALTER TABLE ad_setups DROP CONSTRAINT IF EXISTS ad_setups_status_check;
+ALTER TABLE ad_setups ADD CONSTRAINT ad_setups_status_check
+  CHECK (status IN ('draft', 'approved'));
+
+CREATE INDEX IF NOT EXISTS idx_ad_setups_creative_asset_id ON ad_setups(creative_asset_id);
+CREATE INDEX IF NOT EXISTS idx_ad_setups_status ON ad_setups(status);
+CREATE INDEX IF NOT EXISTS idx_ad_setups_ad_batch_id ON ad_setups(ad_batch_id);
+
+-- Canonical multi-product linkage snapshot for an Ad Setup -- copied in
+-- from shoot_plan_item_styles (the ONLY reliable multi-product source;
+-- creative_assets.style_id is a stale first-colourway-only pointer) at
+-- creation time, never the free-text Meta "Product" label. Future
+-- analysis of an Ad Setup's product(s) must always join through here.
+CREATE TABLE IF NOT EXISTS ad_setup_products (
+  ad_setup_id INTEGER NOT NULL REFERENCES ad_setups(id) ON DELETE CASCADE,
+  style_id INTEGER NOT NULL REFERENCES styles(id) ON DELETE CASCADE,
+  PRIMARY KEY (ad_setup_id, style_id)
+);

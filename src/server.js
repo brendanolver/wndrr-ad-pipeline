@@ -40,6 +40,7 @@ const referenceLibraryRoutes = require('./routes/referenceLibrary');
 const userRoutes = require('./routes/users');
 const editingRoutes = require('./routes/editing');
 const finalApprovalRoutes = require('./routes/finalApproval');
+const adSetupRoutes = require('./routes/adSetup');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -115,6 +116,11 @@ app.use('/api/reference-library', requireAuth, requireModuleAccess('reference-li
 app.use('/api/users', requireAuth, userRoutes);
 app.use('/api/editing', requireAuth, requireModuleAccess('editing'), editingRoutes);
 app.use('/api/final-approval', requireAuth, requireModuleAccess('final-approval'), finalApprovalRoutes);
+// Ad Setup/Approved (see Part C brief) stay inside Final Approval's own
+// existing module key for this first version -- no new permission key,
+// per the brief's explicit preference, since nothing about who's allowed
+// to see Ad Setup differs from who's allowed to see Final Approval today.
+app.use('/api/ad-setup', requireAuth, requireModuleAccess('final-approval'), adSetupRoutes);
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
 

@@ -108,6 +108,11 @@ let state = {
   // review modal is open; showFeedbackForm toggles the inline Request
   // Changes textarea within it.
   finalApproval: { data: [], activeCreativeAssetId: null, showFeedbackForm: false },
+  // Ad Setup (Part C) -- board is GET /ad-setup/board's two lists as-is;
+  // activeSubtab drives which of the 3 Final Approval sub-panels shows.
+  // draft/editingId hold the Ad Setup detail modal's working copy while
+  // it's open (see openAdSetupModal/saveAdSetupDraft).
+  adSetup: { board: { ad_setup: [], approved: [] }, activeSubtab: 'ready', editingId: null, draft: null },
 };
 let dashboardWeekOffset = 0;
 
@@ -328,8 +333,10 @@ function switchTab(name) {
   // on every visit too.
   if (name === 'editing') refreshCurrentEditingView();
   // Final Approval is the direct downstream consumer of Editing's Mark as
-  // Edited action, so it needs a fresh fetch on every visit too.
-  if (name === 'final-approval') loadFinalApproval();
+  // Edited action, so it needs a fresh fetch on every visit too. Loads
+  // whichever of its 3 sub-tabs is currently active (see
+  // switchFinalApprovalSubtab) -- always Ready for Approval the first time.
+  if (name === 'final-approval') loadFinalApprovalActiveSubtab();
   // Upcoming Drops/Promotions are hash-routed within their own tab (list vs
   // drop/product or promotion/stage sub-views -- see renderDropsRoute/
   // renderPromotionsRoute). Arriving here via a plain sidebar click (not a
@@ -10618,9 +10625,14 @@ async function submitFinalApprovalApprove() {
   if (id == null) return;
   try {
     await api(`/final-approval/concepts/${id}/approve`, { method: 'POST' });
-    toast('Approved');
+    // Moves Ready for Approval -> Ad Setup -- never just vanishes: it
+    // reappears in the Ad Setup sub-tab (see finalApproval.js's approve
+    // route, which auto-creates one ad_setups row per Final Edit here).
+    toast('Approved -- now in Ad Setup');
     closeModal('final-approval-modal');
     await loadFinalApproval();
+    await loadAdSetupBoard();
+    switchFinalApprovalSubtab('ad-setup');
   } catch (e) {
     toast(e.message, true);
   }
@@ -10639,6 +10651,469 @@ async function submitFinalApprovalRequestChanges() {
     toast('Sent back to Editing');
     closeModal('final-approval-modal');
     await loadFinalApproval();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// ── Ad Setup (Part C: Final Approval -> Ad Setup -> Approved) ──────────
+// Purely structural Meta ad prep -- naming fields, copy drafts, CTA,
+// destination. Never calls Meta and never publishes anything; the backend
+// (routes/adSetup.js) is explicit that "Create in Meta ->" is future work
+// this data model is meant to support, not built here.
+
+const AD_CATEGORY_LABELS = { new_drop: 'New Drop/Product Launch', core: 'Core', promotion: 'Promotion/Sale', organic_first: 'Organic-first' };
+const URL_LINK_PAGE_LABELS = { product: 'Product', category: 'Category', new_arrivals: 'New Arrivals', home: 'Home Page', sale_bundle: 'Sale/Bundle Page', other: 'Other' };
+const CTA_LABELS = { shop_now: 'Shop Now', sign_up: 'Sign Up', learn_more: 'Learn More', shop_the_sale: 'Shop the Sale' };
+const STAGE_TAGS = { hype: 'HYPE', sale_live: 'LIVE', mid_sale: 'MID SALE', last_chance: 'LAST CHANCE' };
+
+function switchFinalApprovalSubtab(name) {
+  state.adSetup.activeSubtab = name;
+  document.querySelectorAll('.fa-subtab').forEach((el) => el.classList.toggle('active', el.dataset.faSubtab === name));
+  document.getElementById('fa-panel-ready').style.display = name === 'ready' ? '' : 'none';
+  document.getElementById('fa-panel-ad-setup').style.display = name === 'ad-setup' ? '' : 'none';
+  document.getElementById('fa-panel-approved').style.display = name === 'approved' ? '' : 'none';
+  loadFinalApprovalActiveSubtab();
+}
+
+function loadFinalApprovalActiveSubtab() {
+  if (state.adSetup.activeSubtab === 'ready') return loadFinalApproval();
+  return loadAdSetupBoard();
+}
+
+async function loadAdSetupBoard() {
+  try {
+    const result = await api('/ad-setup/board');
+    state.adSetup.board = result;
+    renderAdSetupSubtabCounts();
+    renderAdSetupList();
+    renderAdSetupApprovedList();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function renderAdSetupSubtabCounts() {
+  document.getElementById('fa-count-ready').textContent = state.finalApproval.data.length ? `(${state.finalApproval.data.length})` : '';
+  document.getElementById('fa-count-ad-setup').textContent = state.adSetup.board.ad_setup.length ? `(${state.adSetup.board.ad_setup.length})` : '';
+  document.getElementById('fa-count-approved').textContent = state.adSetup.board.approved.length ? `(${state.adSetup.board.approved.length})` : '';
+}
+
+function adSetupCardHtml(item) {
+  const batch = item.batch_number ? `<div class="as-card-batch">#${item.batch_number}</div>` : '';
+  return `
+    <div class="cd-card" onclick="openAdSetupModal(${item.id})">
+      ${batch}
+      <div class="cd-card-top"><div class="cd-card-name">${escapeHtml(item.product_label || item.concept_name)}</div></div>
+      <div class="cd-card-meta">${escapeHtml(item.concept_name)} &middot; ${escapeHtml(AD_CATEGORY_LABELS[item.ad_category] || item.ad_category)}</div>
+    </div>`;
+}
+
+function renderAdSetupList() {
+  const items = state.adSetup.board.ad_setup;
+  document.getElementById('ad-setup-summary').textContent = items.length
+    ? `${items.length} creative${items.length === 1 ? '' : 's'} in Ad Setup` : 'Nothing in Ad Setup right now.';
+  document.getElementById('ad-setup-list').innerHTML = items.length
+    ? items.map(adSetupCardHtml).join('')
+    : '<div class="attention-empty">Nothing in Ad Setup right now.</div>';
+}
+
+function adSetupApprovedCardHtml(item) {
+  const batch = item.batch_number ? `<div class="as-card-batch">#${item.batch_number}</div>` : '';
+  return `
+    <div class="cd-card" onclick="openAdSetupApprovedModal(${item.id})">
+      ${batch}
+      <div class="cd-card-top"><div class="cd-card-name">${escapeHtml(item.product_label || item.concept_name)}</div></div>
+      <div class="cd-card-meta">${escapeHtml(item.concept_name)}</div>
+    </div>`;
+}
+
+function renderAdSetupApprovedList() {
+  const items = state.adSetup.board.approved;
+  document.getElementById('ad-setup-approved-summary').textContent = items.length
+    ? `${items.length} approved ad${items.length === 1 ? '' : 's'}` : 'Nothing approved yet.';
+  document.getElementById('ad-setup-approved-list').innerHTML = items.length
+    ? items.map(adSetupApprovedCardHtml).join('')
+    : '<div class="attention-empty">Nothing approved yet.</div>';
+}
+
+// Client-side mirror of lib/adSetupNaming.js's buildMetaAdName, so the
+// Generated Meta Ad Name preview updates live as fields are edited without
+// a round trip -- Save Draft still persists through the server, which is
+// the single source of truth once saved.
+function formatDateDDMMClient(dateStr) {
+  if (!dateStr) return null;
+  const d = new Date(dateStr);
+  return `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+function buildMetaAdNamePreviewClient(d) {
+  const segs = [];
+  if (d.ad_category === 'promotion' && d.stage_type && STAGE_TAGS[d.stage_type]) {
+    segs.push(`${STAGE_TAGS[d.stage_type]}${d.sale_sequence_number ? ` ${d.sale_sequence_number}` : ''}`);
+  }
+  segs.push(d.batch_number ? `#${d.batch_number}` : '#—');
+  if (d.week_no) segs.push(d.week_no);
+  if (d.ad_date) segs.push(formatDateDDMMClient(d.ad_date));
+  segs.push(d.hook_short || '*');
+  segs.push(d.creator_name || '*');
+  segs.push(d.media_type === 'video' ? 'Video' : d.media_type === 'image' ? 'Image' : '*');
+  segs.push(d.ad_type === 'carousel' ? 'Carousel' : 'Single');
+  segs.push(d.url_link_page ? (URL_LINK_PAGE_LABELS[d.url_link_page] || d.url_link_page) : '*');
+  return segs.join('_');
+}
+
+async function openAdSetupModal(id) {
+  try {
+    const detail = await api(`/ad-setup/${id}`);
+    state.adSetup.editingId = id;
+    state.adSetup.draft = { ...detail };
+    document.getElementById('ad-setup-modal-title').textContent = detail.concept_name;
+    renderAdSetupModal();
+    openModal('ad-setup-modal');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function adSetupSet(field, value) {
+  state.adSetup.draft[field] = value;
+  renderAdSetupNamePreview();
+}
+
+function renderAdSetupNamePreview() {
+  const d = state.adSetup.draft;
+  const el = document.getElementById('as-name-preview-text');
+  if (el) el.textContent = buildMetaAdNamePreviewClient({
+    ad_category: d.ad_category, stage_type: d.promotion_stage_name ? detectStageTypeClient(d.promotion_stage_name) : null,
+    sale_sequence_number: d.sale_sequence_number, batch_number: d.batch_number, week_no: d.week_no, ad_date: d.ad_date,
+    hook_short: d.hook_short, creator_name: d.creator_name, media_type: d.media_type, ad_type: d.ad_type, url_link_page: d.url_link_page,
+  });
+  renderAdSetupReadiness();
+}
+
+function detectStageTypeClient(stageName) {
+  const n = (stageName || '').toLowerCase();
+  if (n.includes('hype')) return 'hype';
+  if (n.includes('mid')) return 'mid_sale';
+  if (n.includes('last chance') || n.includes('final') || n.includes('ending')) return 'last_chance';
+  if (n.includes('live')) return 'sale_live';
+  return null;
+}
+
+function renderAdSetupReadiness() {
+  const d = state.adSetup.draft;
+  const hasCopy = !!(d.copy_set_id || (d.selected_primary_text && d.selected_headline));
+  const items = [
+    { label: 'Meta Ad Name (Hook)', ready: !!d.hook_short },
+    { label: 'Creative', ready: !!d.final_edit_link },
+    { label: 'Primary Text / Headline', ready: hasCopy },
+    { label: 'CTA', ready: !!d.cta },
+    { label: 'Destination', ready: !!(d.url_link_page && d.destination_url) },
+  ];
+  const el = document.getElementById('as-readiness-list');
+  if (!el) return;
+  el.innerHTML = items.map((it) => `<li class="as-readiness-item ${it.ready ? 'ready' : 'missing'}">${it.ready ? '&#10003;' : '&#9675;'} ${escapeHtml(it.label)}</li>`).join('');
+  const approveBtn = document.getElementById('ad-setup-approve-btn');
+  if (approveBtn) approveBtn.disabled = !items.every((it) => it.ready) || state.adSetup.draft.status === 'approved';
+}
+
+function renderAdSetupModal() {
+  const d = state.adSetup.draft;
+  const originLine = [
+    d.promotion_name ? `Promotion: ${d.promotion_name}${d.promotion_stage_name ? ` (${d.promotion_stage_name})` : ''}` : null,
+  ].filter(Boolean).join(' &middot; ');
+
+  const optionSelect = (field, labelMap, current) => Object.entries(labelMap)
+    .map(([val, label]) => `<option value="${val}" ${val === current ? 'selected' : ''}>${escapeHtml(label)}</option>`).join('');
+
+  const batchOptions = (d.batches || []).map((b) => `<option value="${b.id}" ${b.id === d.ad_batch_id ? 'selected' : ''}>#${b.batch_number} ${escapeHtml(b.name || '')}</option>`).join('');
+
+  const copySetOptions = (d.copy_sets || []).map((cs) => `<option value="${cs.id}" ${cs.id === d.copy_set_id ? 'selected' : ''}>${escapeHtml(cs.name)}</option>`).join('');
+
+  const primaryOptions = (d.primary_text_options || []).map((t, i) => `
+    <div class="as-copy-option ${d.selected_primary_text === t ? 'selected' : ''}" onclick="selectAdSetupCopy('primary', ${i})">
+      <div class="as-copy-option-label">Option ${i + 1}</div>${escapeHtml(t)}
+    </div>`).join('') || '<div class="hint">No drafts yet -- click Regenerate.</div>';
+
+  const headlineOptions = (d.headline_options || []).map((t, i) => `
+    <div class="as-copy-option ${d.selected_headline === t ? 'selected' : ''}" onclick="selectAdSetupCopy('headline', ${i})">
+      <div class="as-copy-option-label">Option ${i + 1}</div>${escapeHtml(t)}
+    </div>`).join('') || '<div class="hint">No drafts yet -- click Regenerate.</div>';
+
+  const usingCopySet = !!d.copy_set_id;
+
+  document.getElementById('ad-setup-modal-body').innerHTML = `
+    <div class="as-section">
+      <div class="as-section-title">Ad Details</div>
+      ${originLine ? `<div class="hint" style="margin-bottom:10px;">${originLine}</div>` : ''}
+      <div class="as-grid">
+        <label>Ad Category
+          <select onchange="adSetupSet('ad_category', this.value)">${optionSelect('ad_category', AD_CATEGORY_LABELS, d.ad_category)}</select>
+        </label>
+        <label>Batch
+          <select onchange="onAdSetupBatchChange(this.value)">
+            <option value="">-- None --</option>
+            ${batchOptions}
+            <option value="__new__">+ New Batch&hellip;</option>
+          </select>
+        </label>
+        <label>Week No.
+          <input type="text" value="${escapeHtml(d.week_no || '')}" oninput="adSetupSet('week_no', this.value)">
+        </label>
+        <label>Date
+          <input type="date" value="${d.ad_date ? String(d.ad_date).slice(0, 10) : ''}" oninput="adSetupSet('ad_date', this.value)">
+        </label>
+      </div>
+    </div>
+
+    <div class="as-section">
+      <div class="as-section-title">Naming</div>
+      <div class="as-grid">
+        <label>Product (Meta label)
+          <input type="text" value="${escapeHtml(d.product_label || '')}" oninput="adSetupSet('product_label', this.value)">
+        </label>
+        <label>Product Type
+          <input type="text" value="${escapeHtml(d.product_type || '')}" oninput="adSetupSet('product_type', this.value)">
+        </label>
+        <label>Hook (short)
+          <input type="text" value="${escapeHtml(d.hook_short || '')}" oninput="adSetupSet('hook_short', this.value)">
+        </label>
+        <label>Media
+          <select onchange="adSetupSet('media_type', this.value)">
+            <option value="video" ${d.media_type === 'video' ? 'selected' : ''}>Video</option>
+            <option value="image" ${d.media_type === 'image' ? 'selected' : ''}>Image</option>
+          </select>
+        </label>
+        <label>Ad Type
+          <select onchange="adSetupSet('ad_type', this.value)">
+            <option value="single" ${d.ad_type === 'single' ? 'selected' : ''}>Single</option>
+            <option value="carousel" ${d.ad_type === 'carousel' ? 'selected' : ''}>Carousel</option>
+          </select>
+        </label>
+        <label>Creator
+          <input type="text" value="${escapeHtml(d.creator_name || '')}" placeholder="n/a" oninput="adSetupSet('creator_name', this.value)">
+        </label>
+        <label>Concept
+          <input type="text" value="${escapeHtml(d.concept_label || '')}" oninput="adSetupSet('concept_label', this.value)">
+        </label>
+        <label>URL Link Page
+          <select onchange="adSetupSet('url_link_page', this.value)">${optionSelect('url_link_page', URL_LINK_PAGE_LABELS, d.url_link_page)}</select>
+        </label>
+      </div>
+      <div class="as-name-preview" style="margin-top:12px;">
+        <span id="as-name-preview-text">${escapeHtml(buildMetaAdNamePreviewClient({
+          ad_category: d.ad_category, stage_type: d.promotion_stage_name ? detectStageTypeClient(d.promotion_stage_name) : null,
+          sale_sequence_number: d.sale_sequence_number, batch_number: d.batch_number, week_no: d.week_no, ad_date: d.ad_date,
+          hook_short: d.hook_short, creator_name: d.creator_name, media_type: d.media_type, ad_type: d.ad_type, url_link_page: d.url_link_page,
+        }))}</span>
+        <button type="button" class="btn btn-ghost" style="flex-shrink:0;" onclick="copyAdSetupName()">Copy Name</button>
+      </div>
+    </div>
+
+    <div class="as-section">
+      <div class="as-section-title">Creative</div>
+      ${d.final_edit_link
+        ? `<a href="${escapeHtml(d.final_edit_link)}" target="_blank" rel="noopener" class="link-btn">View Creative &rarr;</a> <span class="hint">${escapeHtml(d.final_edit_asset_name || '')}</span>`
+        : '<div class="editing-final-edit-empty">No final creative link on record.</div>'}
+    </div>
+
+    <div class="as-section">
+      <div class="as-section-title">Copy</div>
+      <label>Copy Set
+        <select onchange="onAdSetupCopySetChange(this.value)">
+          <option value="">-- Use this ad's own copy --</option>
+          ${copySetOptions}
+        </select>
+      </label>
+      ${usingCopySet
+        ? `<div class="hint" style="margin:8px 0;">Using shared Copy Set: sharing Primary Text/Headline/CTA with every other ad in this set.</div>`
+        : `<div style="display:flex;gap:16px;margin-top:10px;flex-wrap:wrap;">
+             <div style="flex:1;min-width:240px;">
+               <div class="admin-note" style="margin-bottom:6px;">Primary Text</div>
+               ${primaryOptions}
+             </div>
+             <div style="flex:1;min-width:240px;">
+               <div class="admin-note" style="margin-bottom:6px;">Headline</div>
+               ${headlineOptions}
+             </div>
+           </div>
+           <button type="button" class="btn btn-ghost" style="margin-top:8px;" onclick="regenerateAdSetupCopy()">Regenerate</button>
+           <button type="button" class="btn btn-ghost" style="margin-top:8px;" onclick="createAdSetupCopySetFromCurrent()">Save as New Copy Set</button>`}
+      <label style="margin-top:12px;">CTA
+        <select onchange="adSetupSet('cta', this.value)">${optionSelect('cta', CTA_LABELS, d.cta)}</select>
+      </label>
+    </div>
+
+    <div class="as-section">
+      <div class="as-section-title">Destination</div>
+      <div class="as-grid">
+        <label>Destination URL
+          <input type="text" value="${escapeHtml(d.destination_url || '')}" placeholder="https://" oninput="adSetupSet('destination_url', this.value)">
+        </label>
+      </div>
+    </div>
+
+    <div class="as-section">
+      <div class="as-section-title">Final Check</div>
+      <ul class="as-readiness-list" id="as-readiness-list"></ul>
+    </div>
+  `;
+  renderAdSetupReadiness();
+  const approveBtn = document.getElementById('ad-setup-approve-btn');
+  if (approveBtn) approveBtn.style.display = d.status === 'approved' ? 'none' : '';
+  const saveBtn = document.getElementById('ad-setup-save-btn');
+  if (saveBtn) saveBtn.style.display = d.status === 'approved' ? 'none' : '';
+}
+
+function selectAdSetupCopy(kind, index) {
+  const d = state.adSetup.draft;
+  if (kind === 'primary') d.selected_primary_text = d.primary_text_options[index];
+  else d.selected_headline = d.headline_options[index];
+  renderAdSetupModal();
+}
+
+async function regenerateAdSetupCopy() {
+  try {
+    const updated = await api(`/ad-setup/${state.adSetup.editingId}/regenerate-copy`, { method: 'POST' });
+    state.adSetup.draft = { ...state.adSetup.draft, ...updated };
+    toast('Copy drafts regenerated');
+    renderAdSetupModal();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function onAdSetupBatchChange(value) {
+  if (value === '__new__') return createAdSetupBatchAndAssign();
+  try {
+    const updated = await api(`/ad-setup/${state.adSetup.editingId}`, { method: 'PATCH', body: JSON.stringify({ ad_batch_id: value ? Number(value) : null }) });
+    state.adSetup.draft = { ...state.adSetup.draft, ...updated };
+    toast('Batch assigned');
+    renderAdSetupModal();
+    loadAdSetupBoard();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function createAdSetupBatchAndAssign() {
+  const name = prompt('Name for this new batch (optional):', '');
+  try {
+    const batch = await api('/ad-setup/batches', { method: 'POST', body: JSON.stringify({ name: name || undefined }) });
+    const updated = await api(`/ad-setup/${state.adSetup.editingId}`, { method: 'PATCH', body: JSON.stringify({ ad_batch_id: batch.id }) });
+    state.adSetup.draft = { ...state.adSetup.draft, ...updated, batches: [...(state.adSetup.draft.batches || []), batch] };
+    toast(`Batch #${batch.batch_number} created and assigned`);
+    renderAdSetupModal();
+    loadAdSetupBoard();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function onAdSetupCopySetChange(value) {
+  try {
+    const updated = await api(`/ad-setup/${state.adSetup.editingId}`, { method: 'PATCH', body: JSON.stringify({ copy_set_id: value ? Number(value) : null }) });
+    state.adSetup.draft = { ...state.adSetup.draft, ...updated };
+    renderAdSetupModal();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function createAdSetupCopySetFromCurrent() {
+  const d = state.adSetup.draft;
+  if (!d.selected_primary_text || !d.selected_headline) {
+    toast('Select a Primary Text and Headline first', true);
+    return;
+  }
+  const name = prompt('Name this Copy Set (e.g. "CLEAN FIT — HALO SWEAT SET"):', d.product_label || '');
+  if (!name) return;
+  try {
+    const copySet = await api('/ad-setup/copy-sets', { method: 'POST', body: JSON.stringify({ name, primary_text: d.selected_primary_text, headline: d.selected_headline, cta: d.cta }) });
+    const updated = await api(`/ad-setup/${state.adSetup.editingId}`, { method: 'PATCH', body: JSON.stringify({ copy_set_id: copySet.id }) });
+    state.adSetup.draft = { ...state.adSetup.draft, ...updated, copy_sets: [...(state.adSetup.draft.copy_sets || []), copySet] };
+    toast('Copy Set created and applied');
+    renderAdSetupModal();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function copyAdSetupName() {
+  const text = document.getElementById('as-name-preview-text').textContent;
+  navigator.clipboard.writeText(text).then(() => toast('Copied')).catch(() => toast('Could not copy', true));
+}
+
+async function saveAdSetupDraft() {
+  const d = state.adSetup.draft;
+  const fields = [
+    'ad_category', 'week_no', 'ad_date', 'product_label', 'product_type', 'hook_short',
+    'media_type', 'ad_type', 'creator_name', 'concept_label', 'url_link_page', 'destination_url',
+    'selected_primary_text', 'selected_headline', 'cta',
+  ];
+  const body = {};
+  fields.forEach((f) => { body[f] = d[f]; });
+  try {
+    const updated = await api(`/ad-setup/${state.adSetup.editingId}`, { method: 'PATCH', body: JSON.stringify(body) });
+    state.adSetup.draft = { ...state.adSetup.draft, ...updated };
+    toast('Draft saved');
+    loadAdSetupBoard();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function approveAdSetup() {
+  await saveAdSetupDraft();
+  try {
+    await api(`/ad-setup/${state.adSetup.editingId}/approve`, { method: 'POST' });
+    toast('Ad Setup approved');
+    closeModal('ad-setup-modal');
+    await loadAdSetupBoard();
+    switchFinalApprovalSubtab('approved');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function openAdSetupApprovedModal(id) {
+  try {
+    const d = await api(`/ad-setup/${id}`);
+    document.getElementById('ad-setup-approved-modal-title').textContent = d.concept_name;
+    const originLine = [
+      d.promotion_name ? `Promotion: ${d.promotion_name}${d.promotion_stage_name ? ` (${d.promotion_stage_name})` : ''}` : (AD_CATEGORY_LABELS[d.ad_category] || d.ad_category),
+    ].join('');
+    const copyPrimary = d.copy_set_id ? (d.copy_sets.find((cs) => cs.id === d.copy_set_id) || {}).primary_text : d.selected_primary_text;
+    const copyHeadline = d.copy_set_id ? (d.copy_sets.find((cs) => cs.id === d.copy_set_id) || {}).headline : d.selected_headline;
+    document.getElementById('ad-setup-approved-modal-body').innerHTML = `
+      <div class="as-section">
+        ${d.batch_number ? `<div class="as-card-batch">#${d.batch_number}</div>` : ''}
+        <div class="hint">${escapeHtml(originLine)}</div>
+      </div>
+      <div class="as-section">
+        <div class="as-section-title">Final Creative</div>
+        ${d.final_edit_link ? `<a href="${escapeHtml(d.final_edit_link)}" target="_blank" rel="noopener" class="link-btn">View Creative &rarr;</a>` : '<div class="hint">No link on record.</div>'}
+      </div>
+      <div class="as-section">
+        <div class="as-section-title">Meta Ad Name</div>
+        <div class="as-name-preview"><span>${escapeHtml(d.generated_meta_ad_name)}</span></div>
+      </div>
+      <div class="as-section">
+        <div class="as-section-title">Product(s)</div>
+        <div>${d.products.map((p) => escapeHtml(p.name)).join(', ') || '&mdash;'}</div>
+      </div>
+      <div class="as-section">
+        <div class="as-section-title">Copy</div>
+        <div style="margin-bottom:8px;"><strong>Primary Text:</strong> ${escapeHtml(copyPrimary || '—')}</div>
+        <div style="margin-bottom:8px;"><strong>Headline:</strong> ${escapeHtml(copyHeadline || '—')}</div>
+        <div><strong>CTA:</strong> ${escapeHtml(CTA_LABELS[d.cta] || d.cta)}</div>
+      </div>
+      <div class="as-section">
+        <div class="as-section-title">Destination</div>
+        <div>${escapeHtml(URL_LINK_PAGE_LABELS[d.url_link_page] || d.url_link_page)} &mdash; ${escapeHtml(d.destination_url || '')}</div>
+      </div>
+    `;
+    openModal('ad-setup-approved-modal');
   } catch (e) {
     toast(e.message, true);
   }

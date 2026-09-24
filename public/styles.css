@@ -111,6 +111,7 @@ body{font-family:'Inter',sans-serif;font-size:13px;background:var(--bg);color:va
 .sidebar-user-role{color:rgba(255,255,255,0.4);text-transform:capitalize;}
 
 .btn{border:none;border-radius:var(--r);padding:9px 14px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;}
+.btn:disabled{opacity:0.45;cursor:not-allowed;}
 .btn-primary{background:var(--black);color:white;}
 .btn-primary:hover{background:var(--black-dark);}
 .btn-ghost{background:none;border:1px solid var(--border);color:var(--text-secondary);}
@@ -1958,6 +1959,36 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .shoot-card-menu-item{background:none;border:none;font-family:inherit;font-size:12px;font-weight:600;color:var(--text);text-align:left;padding:6px 8px;border-radius:var(--r);cursor:pointer;white-space:nowrap;}
 .shoot-card-menu-item:hover{background:var(--surface2);}
 .shoot-card-menu-item-carry{border-top:1px solid var(--border);margin-top:3px;padding-top:8px;color:var(--text-secondary);}
+
+/* Final Approval's 3 sub-tabs (Ready for Approval / Ad Setup / Approved) --
+   a plain pill row, same visual language as .tab-btn.active (teal fill)
+   but scoped to this one section instead of the sidebar. */
+.fa-subtabs{display:flex;gap:8px;margin:14px 0 18px;border-bottom:1px solid var(--border);padding-bottom:0;}
+.fa-subtab{background:none;border:none;font-family:inherit;font-size:13px;font-weight:600;color:var(--text-muted);padding:9px 4px;margin-right:14px;cursor:pointer;border-bottom:2px solid transparent;}
+.fa-subtab:hover{color:var(--text);}
+.fa-subtab.active{color:var(--teal-dark);border-bottom-color:var(--teal);}
+.fa-subtab-count{font-size:11px;font-weight:700;color:var(--text-muted);margin-left:2px;}
+.fa-subtab.active .fa-subtab-count{color:var(--teal-dark);}
+
+/* Ad Setup workspace body -- same section-block rhythm as the rest of the
+   app's modal forms (label + input/select/textarea stacks), grouped under
+   short uppercase section headers per the brief's suggested layout. */
+.as-section{margin-bottom:20px;}
+.as-section:last-child{margin-bottom:0;}
+.as-section-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-muted);margin-bottom:10px;}
+.as-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;}
+.as-grid label,.as-section label{display:flex;flex-direction:column;gap:5px;font-size:11px;font-weight:600;color:var(--text-secondary);}
+.as-grid input,.as-grid select,.as-section input,.as-section select,.as-section textarea{font-family:inherit;font-size:13px;padding:7px 9px;border:1px solid var(--border);border-radius:var(--r);}
+.as-name-preview{background:var(--surface2);border-radius:var(--r);padding:10px 12px;font-family:monospace;font-size:12.5px;word-break:break-all;display:flex;align-items:center;justify-content:space-between;gap:10px;}
+.as-copy-option{border:1px solid var(--border);border-radius:var(--r);padding:9px 10px;margin-bottom:7px;cursor:pointer;font-size:13px;}
+.as-copy-option:hover{background:var(--surface2);}
+.as-copy-option.selected{border-color:var(--teal);background:var(--teal-light);}
+.as-copy-option-label{font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin-bottom:3px;}
+.as-readiness-list{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:6px;font-size:12.5px;}
+.as-readiness-item{display:flex;align-items:center;gap:7px;}
+.as-readiness-item.ready{color:var(--green);}
+.as-readiness-item.missing{color:var(--text-muted);}
+.as-card-batch{font-size:11px;font-weight:700;color:var(--teal-dark);background:var(--teal-light);border-radius:var(--r-pill);padding:2px 8px;display:inline-block;margin-bottom:5px;}
 
 /* Today's worklist -- a plain vertical list, not the week grid's columns,
    since there's only ever one day's worth of cards here. */

@@ -1,6 +1,7 @@
 const express = require('express');
 const { pool } = require('../db');
 const { STATUSES } = require('../lib/statuses');
+const { createAdSetupsForConcept } = require('./adSetup');
 
 const router = express.Router();
 
@@ -82,6 +83,11 @@ router.post('/concepts/:id/approve', async (req, res, next) => {
         [req.params.id, existing.status, nextStatus, req.user.name]
       );
     }
+    // "Approve Creative" moves this Concept from Ready for Approval into
+    // Ad Setup (see the Part C brief) -- one ad_setups row per existing
+    // final_edits row on it, idempotent via UNIQUE(final_edit_id), never
+    // duplicating the creative itself.
+    await createAdSetupsForConcept(client, req.params.id);
     await client.query('COMMIT');
     res.json(result.rows[0]);
   } catch (err) {
