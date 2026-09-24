@@ -53,9 +53,15 @@
       <button class="tab-btn active" data-tab="dashboard"><span class="sidebar-nav-icon">⌂</span>Dashboard</button>
       <button class="tab-btn" data-tab="planning"><span class="sidebar-nav-icon">🗓</span>Planning</button>
 
-      <div class="sidebar-group" data-group="create-review">
-        <button type="button" class="sidebar-group-toggle" onclick="toggleSidebarGroup('create-review')" aria-expanded="false" aria-controls="sidebar-group-items-create-review">
-          <span class="sidebar-group-label">Create &amp; Review</span>
+      <!-- Production-readiness follow-up (item 1): Create & Review and
+           Production start EXPANDED on a fresh session (the `expanded` class
+           + aria-expanded="true" below), unlike Library which stays
+           collapsed until its own tab is visited. toggleSidebarGroup still
+           works unchanged either way -- this only changes the starting
+           class, not the toggle mechanism. -->
+      <div class="sidebar-group expanded" data-group="create-review">
+        <button type="button" class="sidebar-group-toggle" onclick="toggleSidebarGroup('create-review')" aria-expanded="true" aria-controls="sidebar-group-items-create-review">
+          <span class="sidebar-group-label">🎨 Create &amp; Review</span>
           <span class="sidebar-group-chevron">▾</span>
         </button>
         <div class="sidebar-group-items" id="sidebar-group-items-create-review">
@@ -64,9 +70,9 @@
         </div>
       </div>
 
-      <div class="sidebar-group" data-group="production">
-        <button type="button" class="sidebar-group-toggle" onclick="toggleSidebarGroup('production')" aria-expanded="false" aria-controls="sidebar-group-items-production">
-          <span class="sidebar-group-label">Production</span>
+      <div class="sidebar-group expanded" data-group="production">
+        <button type="button" class="sidebar-group-toggle" onclick="toggleSidebarGroup('production')" aria-expanded="true" aria-controls="sidebar-group-items-production">
+          <span class="sidebar-group-label">🎬 Production</span>
           <span class="sidebar-group-chevron">▾</span>
         </button>
         <div class="sidebar-group-items" id="sidebar-group-items-production">
@@ -78,7 +84,7 @@
 
       <div class="sidebar-group" data-group="library">
         <button type="button" class="sidebar-group-toggle" onclick="toggleSidebarGroup('library')" aria-expanded="false" aria-controls="sidebar-group-items-library">
-          <span class="sidebar-group-label">Library</span>
+          <span class="sidebar-group-label">📚 Library</span>
           <span class="sidebar-group-chevron">▾</span>
         </button>
         <div class="sidebar-group-items" id="sidebar-group-items-library">
@@ -504,6 +510,7 @@
           <div class="planning-week-picker" id="cd-week-picker" style="display:none;"></div>
         </div>
         <div class="planning-actions">
+          <button type="button" class="btn btn-primary btn-sm" onclick="openAdHocConceptModal()">+ New Concept</button>
           <button type="button" class="btn btn-ghost btn-sm" onclick="openCreativeToolkit()">💡 Creative Toolkit</button>
         </div>
       </div>
@@ -1897,12 +1904,35 @@
         </label>
         <!-- Video only -- New vs Existing Concept, same compact toggle as
              the "+ Shoot This Week" creation modal (see
-             promotionShootConceptOrigin in app.js). -->
+             promotionShootConceptOrigin in app.js). Hidden entirely when
+             opened via "Add Concept -> New Concept" (promoConceptDevBootstrapContext
+             set) -- that chooser already decided New Concept, asking again
+             here would be redundant/confusing. -->
         <div id="promo-modal-origin-wrap" style="display:none;">
           <span class="cd-field-label">Concept Approach</span>
           <div class="promo-shoot-origin-toggle">
             <button type="button" class="cd-filter-btn active" id="promo-modal-origin-new-btn" onclick="applyPromotionConceptDevOrigin('new')">New Concept</button>
             <button type="button" class="cd-filter-btn" id="promo-modal-origin-existing-btn" onclick="applyPromotionConceptDevOrigin('existing')">Existing Concept</button>
+          </div>
+        </div>
+
+        <!-- Production follow-up pass, item 3: only shown when this modal was
+             opened directly from Promotion -> Add Concept -> New Concept
+             (promoConceptDevBootstrapContext set in app.js) -- these two
+             fields are the ONLY context #promotion-shoot-modal used to
+             collect before handing off to a second modal (see
+             savePromotionShootItem's old dispatch). Collecting them right
+             here means the whole New Concept flow now happens in exactly
+             ONE modal, with ONE final "Save & Send to Tuesday Review ->"
+             CTA -- no second modal, no extra click. -->
+        <div id="promo-modal-bootstrap-fields" style="display:none;">
+          <div class="cd-modal-idea-row">
+            <label><span class="cd-field-label">Filming</span>
+              <select id="promo-modal-filming-select"></select>
+            </label>
+            <label><span class="cd-field-label">Shoot Week</span>
+              <select id="promo-modal-week-select"></select>
+            </label>
           </div>
         </div>
       </div>
@@ -2604,6 +2634,46 @@
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('brief-builder-modal')">Cancel</button>
       <button class="btn btn-primary" onclick="startBriefBuilderConcept()">Start Concept &rarr;</button>
+    </div>
+  </div>
+</div>
+
+<!-- Production follow-up pass, item 2: Concept Development's own "+ New
+     Concept" button (next to Creative Toolkit) -- a spontaneous/ad-hoc
+     concept with no Planning product/week required. Deliberately minimal:
+     just a name, an optional multi-product/style search (reusing the same
+     renderStyleSearchResults picker and staged-array pattern as Promotion's
+     Existing Concept brief, adhocConceptStyles below), and Format. Feeds the
+     exact same POST /shoot-plan + canonical #concept-dev-modal pipeline
+     every other source uses (source: 'manual') -- no second concept system,
+     see saveAdHocConcept in app.js. -->
+<div id="adhoc-concept-modal" class="modal-backdrop">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>New Concept</h3>
+      <button class="modal-close" onclick="closeModal('adhoc-concept-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <label>Concept Name<span class="cd-req-mark">*</span>
+        <input type="text" id="adhoc-concept-name" placeholder="e.g. UGC unboxing hook">
+      </label>
+      <label>Product(s) / style(s) <span class="hint">(optional -- search by SKU or product name, leave empty if not product-specific)</span>
+        <div class="promo-shoot-search">
+          <input type="text" id="adhoc-concept-style-search" placeholder="Search SKU or product name…" autocomplete="off" oninput="filterAdHocConceptStyles()" onfocus="filterAdHocConceptStyles()">
+          <div id="adhoc-concept-style-results" class="promo-shoot-search-results" style="display:none;"></div>
+        </div>
+        <div id="adhoc-concept-style-chips"></div>
+      </label>
+      <label>Format
+        <select id="adhoc-concept-format">
+          <option value="video">Video</option>
+          <option value="static">Static</option>
+        </select>
+      </label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('adhoc-concept-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveAdHocConcept()">Create Concept &rarr;</button>
     </div>
   </div>
 </div>

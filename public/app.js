@@ -208,10 +208,36 @@ function applySidebarModuleAccess() {
   if (usersTabBtn) usersTabBtn.style.display = state.currentUser && state.currentUser.role === 'admin' ? '' : 'none';
 }
 
+// Production follow-up pass, round 2: the static index.html already ships
+// Create & Review / Production with the `expanded` class baked in (and
+// Library without it) -- verified correct in isolation, so this is not
+// covering an actual bug in that markup or in toggleSidebarGroup. It exists
+// because showApp() is the one moment "the app has just loaded/signed in"
+// actually happens in this SPA (called from both login() and
+// checkSession()'s session-restore path, and only ever once per page load,
+// never again afterward, so it can never fight a user's own toggle click
+// mid-session) -- asserting the intended default here too means the
+// default no longer depends solely on the served HTML's class attribute
+// surviving whatever sits between deploy and browser (a proxy/CDN cache, an
+// old service worker, etc.), the same way applySidebarModuleAccess right
+// below it already re-asserts visibility here rather than trusting the
+// static markup alone.
+function applySidebarGroupDefaults() {
+  const defaults = { 'create-review': true, production: true, library: false };
+  Object.entries(defaults).forEach(([name, shouldBeExpanded]) => {
+    const group = document.querySelector(`.sidebar-group[data-group="${name}"]`);
+    if (!group) return;
+    group.classList.toggle('expanded', shouldBeExpanded);
+    const toggleBtn = group.querySelector('.sidebar-group-toggle');
+    if (toggleBtn) toggleBtn.setAttribute('aria-expanded', String(shouldBeExpanded));
+  });
+}
+
 function showApp() {
   document.getElementById('password-screen').style.display = 'none';
   document.getElementById('app').style.display = 'flex';
   renderSidebarUser();
+  applySidebarGroupDefaults();
   applySidebarModuleAccess();
   loadAll();
   // Opens straight into the right sidebar tab for a deep link present at
@@ -739,6 +765,10 @@ function renderBoard() {
   state.board.columns.forEach((col) => {
     const colEl = document.createElement('div');
     colEl.className = 'column';
+    // Lets the Dashboard's "Creative Library" card (item 12) scroll straight
+    // to where approved work actually lands, instead of just dumping the
+    // user at the top of the unfiltered board -- see scrollToApprovedCreative.
+    colEl.dataset.status = col.status;
     colEl.innerHTML = `<div class="column-header"><span>${col.label}</span><span class="column-count">${col.cards.length}</span></div>`;
     col.cards.forEach((card) => colEl.appendChild(renderCard(card)));
     boardEl.appendChild(colEl);
@@ -903,7 +933,24 @@ document.getElementById('week-current').addEventListener('click', () => {
 });
 
 document.getElementById('action-pipeline').addEventListener('click', () => switchTab('board'));
-document.getElementById('action-library').addEventListener('click', () => switchTab('board'));
+// Item 12 (production follow-up pass): audited where approved creative
+// currently goes -- Final Approval's Approve action sets creative_assets.
+// status to 'qc' (src/routes/finalApproval.js), and the Board/Kanban tab
+// already shows every asset grouped by that same status with no filter, so
+// approved work was never actually inaccessible -- it just wasn't obvious
+// this card led there. Rather than building a second storage/filtered view,
+// this still opens the existing Board, now scrolled straight to the QC
+// column (where Approve lands a concept) so the two "action cards" read
+// differently for the same destination instead of behaving identically.
+document.getElementById('action-library').addEventListener('click', () => scrollToApprovedCreative());
+
+function scrollToApprovedCreative() {
+  switchTab('board');
+  requestAnimationFrame(() => {
+    const col = document.querySelector('#board .column[data-status="qc"]') || document.querySelector('#board .column[data-status="uploaded_live"]');
+    if (col) col.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' });
+  });
+}
 document.getElementById('action-brief-builder').addEventListener('click', () => {
   openBriefBuilderModal();
 });
@@ -3377,8 +3424,8 @@ function populateShootPlanCreatorSelect() {
 // Promotion intake's own version of the above -- same content_creators
 // list/default logic, a separate select since it lives in a different
 // modal (see F's "Filming" field).
-function populatePromotionShootFilmingSelect() {
-  const sel = document.getElementById('promotion-shoot-filming');
+function populatePromotionShootFilmingSelect(selectId = 'promotion-shoot-filming') {
+  const sel = document.getElementById(selectId);
   sel.innerHTML = CONCEPT_ASSIGNEES.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
   sel.value = CONCEPT_ASSIGNEES[0];
 }
@@ -3409,8 +3456,8 @@ function populatePromotionShootWeekOptions() {
   return options;
 }
 
-function populatePromotionShootWeekSelect(selectedValue) {
-  const sel = document.getElementById('promotion-shoot-week');
+function populatePromotionShootWeekSelect(selectedValue, selectId = 'promotion-shoot-week') {
+  const sel = document.getElementById(selectId);
   const options = populatePromotionShootWeekOptions();
   sel.innerHTML = options.map((o) => `<option value="${o.value}">${escapeHtml(o.label)}</option>`).join('');
   sel.value = selectedValue || isoDateStr(mondayOfWeek(0));
@@ -4244,7 +4291,43 @@ function choosePromotionAddConceptOrigin(origin) {
   const stageId = promotionAddConceptChooserStageId;
   closeModal('promo-add-concept-chooser-modal');
   if (stageId == null) return;
-  shootThisWeekForPromotionStage(stageId, origin);
+  // Production follow-up pass, item 3: New Concept goes straight into the
+  // full canonical Concept Development modal (#promo-concept-dev-modal, the
+  // SAME entity/endpoints Core/High Stock/Drop already use) in ONE step --
+  // no more #promotion-shoot-modal context-collection step that then closed
+  // itself and opened a SECOND modal (the old savePromotionShootItem
+  // dispatch, see openPromotionConceptDevModalForNewConcept below).
+  // Existing Concept is untouched -- it still uses #promotion-shoot-modal's
+  // own lightweight inline execution brief, which bypasses Concept
+  // Development/Tuesday Review entirely by design (see item 4/
+  // isPromotionShootExistingBrief).
+  if (origin === 'existing') {
+    shootThisWeekForPromotionStage(stageId, 'existing');
+  } else {
+    openPromotionConceptDevModalForNewConcept(stageId);
+  }
+}
+
+// Builds the minimal synthetic "product" context openPromotionConceptDevModal
+// needs (promotion/stage name+notes for its read-only context rows) when
+// there's no real product/shoot_plan_item yet at all -- exactly the two
+// pieces of context #promotion-shoot-modal used to show before this pass,
+// nothing else invented.
+function openPromotionConceptDevModalForNewConcept(stageId) {
+  const promotion = state.currentPromotion;
+  const stage = ((promotion && promotion.stages) || []).find((s) => s.id === stageId);
+  if (!stage) return;
+  const syntheticProduct = {
+    shoot_plan_item_id: null,
+    product_name: null,
+    image_url: null,
+    creator: null,
+    colourways: [],
+    promotion_name: promotion.name,
+    promotion_notes: promotion.notes,
+    promotion_stage_name: stage.name,
+  };
+  openPromotionConceptDevModal(null, syntheticProduct, false, stageId);
 }
 
 // origin ('new'/'existing') is decided up front by the chooser above (round
@@ -4678,6 +4761,85 @@ async function startBriefBuilderConcept() {
   }
 }
 
+// ── Concept Development -- "+ New Concept" (production follow-up pass,
+// item 2): a spontaneous/ad-hoc concept a creator can start directly from
+// Concept Development itself, with no Planning product/week prerequisite.
+// Product/style linking is OPTIONAL and multi-select (unlike Brief
+// Builder's single required style) -- reuses the same renderStyleSearchResults
+// picker and staged-array-until-save pattern as Promotion's Existing Concept
+// brief (promotionShootBriefStyles). Feeds the exact same POST /shoot-plan +
+// canonical #concept-dev-modal pipeline every other source uses, with
+// source: 'manual' so it reaches Tuesday Review without waiting on Planning
+// to confirm that week's Shoot Plan (see conceptDevelopment.js's GET /
+// bypass, extended to cover 'manual' the same way it already covers
+// 'promotion'). No second concept system, no new entity.
+let adHocConceptStyles = [];
+
+function openAdHocConceptModal() {
+  adHocConceptStyles = [];
+  document.getElementById('adhoc-concept-name').value = '';
+  document.getElementById('adhoc-concept-format').value = 'video';
+  document.getElementById('adhoc-concept-style-search').value = '';
+  document.getElementById('adhoc-concept-style-results').style.display = 'none';
+  renderAdHocConceptStyleChips();
+  openModal('adhoc-concept-modal');
+}
+
+function filterAdHocConceptStyles() {
+  renderStyleSearchResults('adhoc-concept-style-search', 'adhoc-concept-style-results', selectAdHocConceptStyle);
+}
+
+function selectAdHocConceptStyle(styleId) {
+  const style = state.styles.find((s) => s.id === styleId);
+  if (!style || adHocConceptStyles.some((s) => s.style_id === styleId)) return;
+  adHocConceptStyles.push({ style_id: styleId, style_code: style.style_code, name: style.name });
+  renderAdHocConceptStyleChips();
+  document.getElementById('adhoc-concept-style-search').value = '';
+  document.getElementById('adhoc-concept-style-results').style.display = 'none';
+}
+
+function removeAdHocConceptStyle(styleId) {
+  adHocConceptStyles = adHocConceptStyles.filter((s) => s.style_id !== styleId);
+  renderAdHocConceptStyleChips();
+}
+
+function renderAdHocConceptStyleChips() {
+  const el = document.getElementById('adhoc-concept-style-chips');
+  if (!el) return;
+  el.innerHTML = adHocConceptStyles.map((s) => `
+    <span class="cd-style-chip">${escapeHtml(s.style_code)}${s.name ? ` <span class="cd-style-chip-code">${escapeHtml(s.name)}</span>` : ''}
+      <button type="button" class="cd-style-chip-remove" onclick="removeAdHocConceptStyle(${s.style_id})" title="Remove">&times;</button>
+    </span>`).join('');
+}
+
+async function saveAdHocConcept() {
+  const conceptName = document.getElementById('adhoc-concept-name').value.trim();
+  if (!conceptName) return toast('Concept Name is required', true);
+  const format = document.getElementById('adhoc-concept-format').value;
+  const defaultCreator = state.contentCreators.find((c) => c.is_default) || state.contentCreators[0];
+  const weekStart = isoDateStr(mondayOfWeek(0));
+
+  try {
+    const item = await api('/shoot-plan', {
+      method: 'POST',
+      body: JSON.stringify({
+        concept_name: conceptName,
+        colourways: adHocConceptStyles.map((s) => ({ style_id: s.style_id, size: null, colour_label: null })),
+        creator: defaultCreator ? defaultCreator.name : DEFAULT_CREATOR,
+        format,
+        source: 'manual',
+        week_start: weekStart,
+      }),
+    });
+    closeModal('adhoc-concept-modal');
+    switchTab('concept-dev');
+    await openConceptDevProductStandalone(item.id);
+    toast('Concept started');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
 // ── Planning: Step 5 -- This Week's Shoot Plan ───────
 // The Monday handoff, not another planning dashboard: a compact top summary
 // (Selected / Samples Required / Sent to Content, plus the Apparel Magic
@@ -5053,7 +5215,7 @@ function renderConceptDevWeekHeader() {
 // still uses in full): the card already shows the source badge, so
 // repeating "(High Stock)"/"Already" in the pathway badge next to it would
 // just be the same fact twice on a tile meant to be scanned in a glance.
-const CONCEPT_DEV_SOURCE_LABELS = { core: 'Core', high_stock: 'High Stock', drop: 'Upcoming Drop', promotion: 'Promotion' };
+const CONCEPT_DEV_SOURCE_LABELS = { core: 'Core', high_stock: 'High Stock', drop: 'Upcoming Drop', promotion: 'Promotion', manual: 'Ad-hoc' };
 const CONCEPT_DEV_PATHWAY_LABELS = { core: 'Develop New Concepts', high_stock: 'Creative Refresh', drop: 'Proven Concepts Assigned', promotion: 'Cover Requirement' };
 
 // Only non-zero statuses are worth a pill -- a "0 Ready for Review" chip
@@ -6500,6 +6662,15 @@ async function saveConceptDevModal(targetStatus) {
 // forever, exactly like the normal modal has no editable format field.
 let promoConceptDevModalConceptId = null;
 let promoConceptDevModalProduct = null;
+// Production follow-up pass, item 3: set (to { stageId }) only when this
+// modal was opened directly from Promotion -> Add Concept -> New Concept,
+// with no product/shoot_plan_item created yet at all -- see
+// openPromotionConceptDevModal's bootstrapStageId param and
+// savePromotionConceptDevModal, which mints the shoot_plan_item itself
+// (via POST /shoot-plan) before its normal PATCH logic when this is set.
+// null for every other entry point (add-another-concept-to-an-existing-
+// product, or opening an already-saved concept), which are unaffected.
+let promoConceptDevBootstrapContext = null;
 let promoConceptDevModalReferences = [];
 let promoConceptDevReferenceEditIndex = null;
 let promoConceptDevModalHooks = [];
@@ -6788,7 +6959,10 @@ function applyPromotionConceptDevFormat(format) {
   promoConceptDevModalFormat = format === 'static' ? 'static' : 'video';
   document.querySelectorAll('.promo-section-video-only').forEach((el) => { el.style.display = promoConceptDevModalFormat === 'video' ? '' : 'none'; });
   document.querySelectorAll('.promo-section-static-only').forEach((el) => { el.style.display = promoConceptDevModalFormat === 'static' ? '' : 'none'; });
-  document.getElementById('promo-modal-origin-wrap').style.display = promoConceptDevModalFormat === 'video' ? '' : 'none';
+  // Origin toggle only makes sense when this modal itself is offering the
+  // New/Existing choice -- opened via Add Concept -> New Concept (bootstrap
+  // mode), that choice was already made in the chooser, so it stays hidden.
+  document.getElementById('promo-modal-origin-wrap').style.display = (promoConceptDevModalFormat === 'video' && !promoConceptDevBootstrapContext) ? '' : 'none';
   applyPromotionConceptDevOriginVisibility();
 
   if (promoConceptDevModalFormat === 'static') {
@@ -7032,11 +7206,22 @@ function updatePromotionConceptDevFooterButtons(status) {
 }
 
 // concept is null for a brand-new Promotion concept (create mode, reached
-// via "+ New Concept" on a Promotion product's workspace) -- only that case
+// via either a Promotion product's own "+ New Concept" workspace button, or
+// -- bootstrapStageId set -- directly from Promotion -> Add Concept -> New
+// Concept, see choosePromotionAddConceptOrigin) -- only concept === null
 // ever shows #promo-modal-format-section, since format is permanent from
 // creation onward everywhere else in this app.
-function openPromotionConceptDevModal(concept, product, openedFromStageView = false) {
+//
+// bootstrapStageId (production follow-up pass, item 3): set only for the
+// Add Concept -> New Concept entry point, where there's no product/
+// shoot_plan_item yet at all -- promoConceptDevBootstrapContext then also
+// reveals Filming/Shoot Week (the only context #promotion-shoot-modal used
+// to collect before handing off to this modal as a SECOND popup) so the
+// whole flow now happens in this one modal, and tells
+// savePromotionConceptDevModal to mint the shoot_plan_item itself on save.
+function openPromotionConceptDevModal(concept, product, openedFromStageView = false, bootstrapStageId = null) {
   promoConceptDevOpenedFromStageView = openedFromStageView;
+  promoConceptDevBootstrapContext = bootstrapStageId != null ? { stageId: bootstrapStageId } : null;
   promoConceptDevModalConceptId = concept ? concept.id : null;
   promoConceptDevModalProduct = product;
   promoConceptDevModalFormat = concept ? (concept.format || 'video') : 'video';
@@ -7053,6 +7238,12 @@ function openPromotionConceptDevModal(concept, product, openedFromStageView = fa
     document.getElementById('promo-modal-format-select').value = 'video';
   } else {
     formatSection.style.display = 'none';
+  }
+
+  document.getElementById('promo-modal-bootstrap-fields').style.display = promoConceptDevBootstrapContext ? '' : 'none';
+  if (promoConceptDevBootstrapContext) {
+    populatePromotionShootFilmingSelect('promo-modal-filming-select');
+    populatePromotionShootWeekSelect(null, 'promo-modal-week-select');
   }
 
   applyPromotionConceptDevFormat(promoConceptDevModalFormat);
@@ -7141,6 +7332,38 @@ async function savePromotionConceptDevModal(targetStatus) {
         method: 'PATCH',
         body: JSON.stringify({ concept_assignee: conceptAssignee, editing_owner: editingOwner }),
       });
+    } else if (promoConceptDevBootstrapContext) {
+      // Add Concept -> New Concept (item 3): no shoot_plan_item exists at
+      // all yet -- mint one now via the exact same POST /shoot-plan every
+      // other source uses, using the Filming/Shoot Week this bootstrap-only
+      // section collected, then fall straight into the same PATCH the
+      // "concept already exists" branch above uses. One user action, one
+      // network round trip's worth of modal, zero second popups.
+      const format = document.getElementById('promo-modal-format-select').value;
+      const filming = document.getElementById('promo-modal-filming-select').value || CONCEPT_ASSIGNEES[0];
+      const weekStart = document.getElementById('promo-modal-week-select').value;
+      const item = await api('/shoot-plan', {
+        method: 'POST',
+        body: JSON.stringify({
+          concept_name: name,
+          format,
+          creator: filming,
+          editing_owner: editingOwner,
+          source: 'promotion',
+          promotion_stage_id: promoConceptDevBootstrapContext.stageId,
+          week_start: weekStart,
+        }),
+      });
+      await api(`/concept-development/concepts/${item.asset_id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      });
+      if (conceptAssignee) {
+        await api(`/creative-assets/${item.asset_id}/assignee`, {
+          method: 'PATCH',
+          body: JSON.stringify({ concept_assignee: conceptAssignee, editing_owner: editingOwner }),
+        });
+      }
     } else {
       const format = document.getElementById('promo-modal-format-select').value;
       const asset = await api('/concept-development/concepts', {
@@ -7159,12 +7382,16 @@ async function savePromotionConceptDevModal(targetStatus) {
       }
     }
     closeModal('promo-concept-dev-modal');
-    toast(savedToast);
-    // Opened from What We Have (Promotion Campaign Stage) -- refresh that
-    // page's card list in place instead of the (hidden) Concept Dev tab, so
-    // the concept just saved never looks stale. Never navigates the user
-    // away -- same refresh call savePromotionShootItem already uses.
-    if (promoConceptDevOpenedFromStageView) {
+    const bootstrapping = !!promoConceptDevBootstrapContext;
+    promoConceptDevBootstrapContext = null;
+    toast(bootstrapping && targetStatus === 'ready_for_review' ? 'Sent to Tuesday Review' : savedToast);
+    // Opened from What We Have (Promotion Campaign Stage), or just minted
+    // from Add Concept -> New Concept (item 3, same page) -- either way
+    // refresh that page's card list in place instead of the (hidden)
+    // Concept Dev tab, so the concept just saved never looks stale. Never
+    // navigates the user away -- same refresh call savePromotionShootItem
+    // already uses.
+    if (promoConceptDevOpenedFromStageView || bootstrapping) {
       await refreshCurrentPromotion();
       if (document.getElementById('planning-promotion-stage-view').style.display !== 'none') {
         renderPromotionStageDetailView();

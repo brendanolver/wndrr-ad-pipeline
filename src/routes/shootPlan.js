@@ -8,7 +8,7 @@ const { fetchAmData } = require('../lib/planningData');
 const router = express.Router();
 
 const STOCK_STATUSES = ['in_office', 'needs_to_be_brought_in'];
-const SOURCES = ['core', 'high_stock', 'drop', 'promotion'];
+const SOURCES = ['core', 'high_stock', 'drop', 'promotion', 'manual'];
 const WEEK_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 // Same local-date-safety reasoning as shooting.js/editing.js's own dateStr.

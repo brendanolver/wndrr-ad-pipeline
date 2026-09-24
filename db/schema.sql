@@ -1624,3 +1624,15 @@ FROM users u
 CROSS JOIN (VALUES ('planning'), ('board'), ('admin')) AS m(module_key)
 WHERE u.email = 'mark@kohindustries.com'
   AND NOT EXISTS (SELECT 1 FROM user_module_restrictions r WHERE r.user_id = u.id);
+
+-- Production follow-up pass, item 2: 'manual' is a spontaneous/ad-hoc
+-- concept started directly from Concept Development's own "+ New Concept"
+-- button, with no Planning product/week required. Reuses the exact same
+-- shoot_plan_items/creative_assets entity and POST /shoot-plan endpoint
+-- every other source already uses -- see conceptDevelopment.js's GET /,
+-- which extends its existing 'promotion' unconditional-current-week bypass
+-- to also cover 'manual', so these never wait on someone confirming that
+-- week's Shoot Plan in Planning, the same way a Promotion concept doesn't.
+ALTER TABLE shoot_plan_items DROP CONSTRAINT IF EXISTS shoot_plan_items_source_check;
+ALTER TABLE shoot_plan_items ADD CONSTRAINT shoot_plan_items_source_check
+  CHECK (source IN ('core', 'high_stock', 'drop', 'promotion', 'manual'));
