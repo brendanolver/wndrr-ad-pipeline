@@ -8207,6 +8207,36 @@ function nextWeekStartFrom(weekStartStr) {
   return isoDateStr(d);
 }
 
+function prevWeekStartFrom(weekStartStr) {
+  const d = parseDateStr(weekStartStr);
+  d.setDate(d.getDate() - 7);
+  return isoDateStr(d);
+}
+
+// Move Week (task: Shooting/Editing week rescheduling) -- "a specific
+// available week" list for the card-level "Move to week..." menu item.
+// Same "This Week/Next Week/WK NN — W/C ..." label convention Promotion
+// intake's Shoot Week dropdown already established (populatePromotionShootWeekOptions),
+// just widened to include a few recent past weeks too (that dropdown is
+// forward-only, built for scheduling a brand-new shoot -- this is for moving
+// already-existing unfinished work, which can reasonably move a little
+// backward as well as forward).
+function moveWeekOptions() {
+  const options = [];
+  for (let offset = -4; offset <= 8; offset++) {
+    const monday = mondayOfWeek(offset);
+    const value = isoDateStr(monday);
+    const wk = `WK ${isoWeekNumber(monday)}`;
+    let label;
+    if (offset === 0) label = `This Week — ${wk}`;
+    else if (offset === 1) label = `Next Week — ${wk}`;
+    else if (offset === -1) label = `Last Week — ${wk}`;
+    else label = `${wk} — W/C ${monday.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' })}`;
+    options.push({ value, label });
+  }
+  return options;
+}
+
 async function loadShootingWeek() {
   try {
     state.shooting.data = await api(`/shooting?week_start=${shootingWeekStart()}`);
@@ -8372,8 +8402,30 @@ function shootingMoveMenuItemsHtml(item) {
   const unscheduledItem = item.scheduled_day
     ? `<button type="button" class="shoot-card-menu-item" onclick="moveShootingCard(${item.id}, 'unscheduled', '${item.scheduled_week_start}'); closeAllShootCardMenus();">Unscheduled</button>`
     : '';
+  // Move Week: previous/next week (same reschedule pattern as the day items
+  // above, just changing scheduled_week_start instead of scheduled_day) plus
+  // a "pick a specific week" list -- see moveWeekOptions/showShootWeekPicker.
+  // "Scheduled"/"In Progress" both keep their status: moveShootingCard sends
+  // the same PATCH /shooting/:id this menu already used for day moves, whose
+  // status CASE only ever forces 'unscheduled' when scheduled_day becomes
+  // null -- never touched here.
+  const prevWeekItem = `<button type="button" class="shoot-card-menu-item" onclick="moveShootingCard(${item.id}, 'carry_prev_week', '${item.scheduled_week_start}'); closeAllShootCardMenus();">&larr; Move to previous week</button>`;
   const carryItem = `<button type="button" class="shoot-card-menu-item shoot-card-menu-item-carry" onclick="moveShootingCard(${item.id}, 'carry_next_week', '${item.scheduled_week_start}'); closeAllShootCardMenus();">Carry to next week &rarr;</button>`;
-  return `<div class="shoot-card-menu-label">Move to</div>${dayItems}${unscheduledItem}${carryItem}`;
+  const pickWeekItem = `<button type="button" class="shoot-card-menu-item" onclick="showShootWeekPicker(${item.id}, '${item.scheduled_week_start}')">Move to week&hellip;</button>`;
+  return `<div class="shoot-card-menu-label">Move to</div>${dayItems}${unscheduledItem}${prevWeekItem}${carryItem}${pickWeekItem}`;
+}
+
+// "Move to week..." replaces the same dropdown's contents in place with the
+// week list (see moveWeekOptions) -- no second modal, no page navigation.
+// Clicking a week or clicking outside both close it via the existing
+// closeAllShootCardMenus/document click-away handler.
+function showShootWeekPicker(scheduleId, currentWeekStart) {
+  const menu = document.getElementById(`shoot-card-menu-${scheduleId}`);
+  if (!menu) return;
+  const rows = moveWeekOptions()
+    .map((o) => `<button type="button" class="shoot-card-menu-item" onclick="moveShootingCard(${scheduleId}, 'week:${o.value}', '${currentWeekStart}'); closeAllShootCardMenus();">${escapeHtml(o.label)}</button>`)
+    .join('');
+  menu.innerHTML = `<div class="shoot-card-menu-label">Move to week</div>${rows}`;
 }
 
 function toggleShootCardMenu(id) {
@@ -8395,11 +8447,17 @@ document.addEventListener('click', (e) => {
 
 async function moveShootingCard(scheduleId, value, currentWeekStart) {
   try {
+    const isWeekPick = typeof value === 'string' && value.startsWith('week:');
     const body = value === 'unscheduled' ? { scheduled_day: null }
       : value === 'carry_next_week' ? { scheduled_day: null, scheduled_week_start: nextWeekStartFrom(currentWeekStart) }
+      : value === 'carry_prev_week' ? { scheduled_day: null, scheduled_week_start: prevWeekStartFrom(currentWeekStart) }
+      : isWeekPick ? { scheduled_day: null, scheduled_week_start: value.slice(5) }
       : { scheduled_day: value };
     await api(`/shooting/${scheduleId}`, { method: 'PATCH', body: JSON.stringify(body) });
-    toast(value === 'carry_next_week' ? 'Carried to next week' : 'Moved');
+    toast(value === 'carry_next_week' ? 'Carried to next week'
+      : value === 'carry_prev_week' ? 'Moved to previous week'
+      : isWeekPick ? 'Moved to selected week'
+      : 'Moved');
     refreshCurrentShootingView();
   } catch (e) {
     toast(e.message, true);
@@ -9908,8 +9966,19 @@ function editingMoveMenuItemsHtml(concept) {
   const unscheduledItem = concept.editing_day
     ? `<button type="button" class="shoot-card-menu-item" onclick="moveEditingCard(${concept.shoot_schedule_id}, 'unscheduled', '${concept.editing_week_start}'); closeAllEditingCardMenus();">Unscheduled</button>`
     : '';
+  const prevWeekItem = `<button type="button" class="shoot-card-menu-item" onclick="moveEditingCard(${concept.shoot_schedule_id}, 'carry_prev_week', '${concept.editing_week_start}'); closeAllEditingCardMenus();">&larr; Move to previous week</button>`;
   const carryItem = `<button type="button" class="shoot-card-menu-item shoot-card-menu-item-carry" onclick="moveEditingCard(${concept.shoot_schedule_id}, 'carry_next_week', '${concept.editing_week_start}'); closeAllEditingCardMenus();">Carry to next week &rarr;</button>`;
-  return `<div class="shoot-card-menu-label">Move to</div>${dayItems}${unscheduledItem}${carryItem}`;
+  const pickWeekItem = `<button type="button" class="shoot-card-menu-item" onclick="showEditingWeekPicker(${concept.shoot_schedule_id}, '${concept.editing_week_start}')">Move to week&hellip;</button>`;
+  return `<div class="shoot-card-menu-label">Move to</div>${dayItems}${unscheduledItem}${prevWeekItem}${carryItem}${pickWeekItem}`;
+}
+
+function showEditingWeekPicker(scheduleId, currentWeekStart) {
+  const menu = document.getElementById(`editing-card-menu-${scheduleId}`);
+  if (!menu) return;
+  const rows = moveWeekOptions()
+    .map((o) => `<button type="button" class="shoot-card-menu-item" onclick="moveEditingCard(${scheduleId}, 'week:${o.value}', '${currentWeekStart}'); closeAllEditingCardMenus();">${escapeHtml(o.label)}</button>`)
+    .join('');
+  menu.innerHTML = `<div class="shoot-card-menu-label">Move to week</div>${rows}`;
 }
 
 function toggleEditingCardMenu(scheduleId) {
@@ -9935,11 +10004,17 @@ document.addEventListener('click', (e) => {
 // never touches editing_owner or any workflow-state field.
 async function moveEditingCard(scheduleId, value, currentWeekStart) {
   try {
+    const isWeekPick = typeof value === 'string' && value.startsWith('week:');
     const body = value === 'unscheduled' ? { editing_day: null }
       : value === 'carry_next_week' ? { editing_day: null, editing_week_start: nextWeekStartFrom(currentWeekStart) }
+      : value === 'carry_prev_week' ? { editing_day: null, editing_week_start: prevWeekStartFrom(currentWeekStart) }
+      : isWeekPick ? { editing_day: null, editing_week_start: value.slice(5) }
       : { editing_day: value };
     await api(`/editing/schedule/${scheduleId}`, { method: 'PATCH', body: JSON.stringify(body) });
-    toast(value === 'carry_next_week' ? 'Carried to next week' : 'Moved');
+    toast(value === 'carry_next_week' ? 'Carried to next week'
+      : value === 'carry_prev_week' ? 'Moved to previous week'
+      : isWeekPick ? 'Moved to selected week'
+      : 'Moved');
     await refreshCurrentEditingView();
   } catch (e) {
     toast(e.message, true);

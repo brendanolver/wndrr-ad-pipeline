@@ -1952,7 +1952,7 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .shoot-card-menu{position:relative;}
 .shoot-card-menu-btn{background:none;border:none;font-family:inherit;font-size:13px;font-weight:700;letter-spacing:1px;color:var(--text-muted);cursor:pointer;padding:2px 7px;border-radius:var(--r);line-height:1.4;}
 .shoot-card-menu-btn:hover{background:var(--border);color:var(--text-secondary);}
-.shoot-card-menu-dropdown{display:none;position:absolute;right:0;bottom:calc(100% + 4px);background:white;border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--shadow);padding:4px;min-width:150px;z-index:20;}
+.shoot-card-menu-dropdown{display:none;position:absolute;right:0;bottom:calc(100% + 4px);background:white;border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--shadow);padding:4px;min-width:150px;max-height:280px;overflow-y:auto;z-index:20;}
 .shoot-card-menu-dropdown.open{display:flex;flex-direction:column;}
 .shoot-card-menu-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);padding:5px 8px 3px;}
 .shoot-card-menu-item{background:none;border:none;font-family:inherit;font-size:12px;font-weight:600;color:var(--text);text-align:left;padding:6px 8px;border-radius:var(--r);cursor:pointer;white-space:nowrap;}
