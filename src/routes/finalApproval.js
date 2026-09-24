@@ -26,7 +26,7 @@ const QUEUE_SELECT = `
   LEFT JOIN shoot_plan_items spi ON spi.id = ca.shoot_plan_item_id
   LEFT JOIN shoot_schedule ss ON ss.creative_asset_id = ca.id
   LEFT JOIN LATERAL (
-    SELECT * FROM final_edits fe2 WHERE fe2.creative_asset_id = ca.id ORDER BY fe2.created_at ASC LIMIT 1
+    SELECT * FROM final_edits fe2 WHERE fe2.creative_asset_id = ca.id AND fe2.is_active = true ORDER BY fe2.created_at ASC LIMIT 1
   ) fe ON true
   WHERE ca.editing_submitted_at IS NOT NULL AND ca.final_approval_status = 'pending'
   ORDER BY ca.editing_submitted_at ASC

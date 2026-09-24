@@ -41,6 +41,7 @@ const userRoutes = require('./routes/users');
 const editingRoutes = require('./routes/editing');
 const finalApprovalRoutes = require('./routes/finalApproval');
 const adSetupRoutes = require('./routes/adSetup');
+const moveBackRoutes = require('./routes/moveBack');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -121,6 +122,18 @@ app.use('/api/final-approval', requireAuth, requireModuleAccess('final-approval'
 // per the brief's explicit preference, since nothing about who's allowed
 // to see Ad Setup differs from who's allowed to see Final Approval today.
 app.use('/api/ad-setup', requireAuth, requireModuleAccess('final-approval'), adSetupRoutes);
+// Move Back (QA/testing + workflow correction) touches a concept across
+// every stage it can be sent back through, so -- like creative-assets --
+// it's gated by requireAnyModuleAccess rather than a single module; the
+// route file itself additionally requires requireAdmin on every action,
+// since sending real in-flight work backward is a much higher-consequence
+// action than viewing/editing within a module a user already has.
+app.use(
+  '/api/move-back',
+  requireAuth,
+  requireAnyModuleAccess('concept-dev', 'tuesday-review', 'shooting', 'editing', 'final-approval'),
+  moveBackRoutes
+);
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
 

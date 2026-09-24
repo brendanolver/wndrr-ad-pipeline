@@ -182,7 +182,7 @@ function buildPrefill(ctx) {
 // final_edits row on that concept -- see this file's header comment.
 // Idempotent: a final edit that already has an ad_setups row is skipped.
 async function createAdSetupsForConcept(client, creativeAssetId) {
-  const feResult = await client.query('SELECT id FROM final_edits WHERE creative_asset_id = $1', [creativeAssetId]);
+  const feResult = await client.query('SELECT id FROM final_edits WHERE creative_asset_id = $1 AND is_active = true', [creativeAssetId]);
   for (const fe of feResult.rows) {
     const ctx = await loadContext(client, fe.id);
     if (!ctx) continue;
@@ -234,8 +234,15 @@ const ROW_SELECT = `
 router.get('/board', async (req, res, next) => {
   try {
     const [adSetupResult, approvedResult] = await Promise.all([
-      pool.query(`${ROW_SELECT} WHERE au.status = 'draft' ORDER BY au.created_at ASC`),
-      pool.query(`${ROW_SELECT} WHERE au.status = 'approved' ORDER BY au.updated_at DESC`),
+      // fe.is_active guards against a hook Tuesday Review no longer
+      // confirms (see Move Back's reconciliation) still showing a card
+      // here. ca.final_approval_status = 'approved' guards against a
+      // concept that's been Moved Back to Final Approval -- its ad_setups
+      // rows stay in the database (reused, never re-created) but
+      // shouldn't visibly sit in this tab while the concept itself is
+      // parked one stage earlier.
+      pool.query(`${ROW_SELECT} WHERE au.status = 'draft' AND fe.is_active = true AND ca.final_approval_status = 'approved' ORDER BY au.created_at ASC`),
+      pool.query(`${ROW_SELECT} WHERE au.status = 'approved' AND fe.is_active = true ORDER BY au.updated_at DESC`),
     ]);
     res.json({ ad_setup: adSetupResult.rows, approved: approvedResult.rows });
   } catch (err) {

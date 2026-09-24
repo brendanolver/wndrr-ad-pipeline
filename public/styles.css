@@ -115,6 +115,13 @@ body{font-family:'Inter',sans-serif;font-size:13px;background:var(--bg);color:va
 .btn-primary{background:var(--black);color:white;}
 .btn-primary:hover{background:var(--black-dark);}
 .btn-ghost{background:none;border:1px solid var(--border);color:var(--text-secondary);}
+/* Move Back (QA/testing + workflow correction, admin only) -- deliberately
+   understated: a border-less text-style ghost button, pinned to the far
+   left of whichever footer it's in (margin-right:auto), so it reads as a
+   secondary/testing action rather than competing with the real primary
+   workflow buttons next to it. */
+.move-back-btn{border:none;color:var(--text-muted);margin-right:auto;padding-left:0;padding-right:0;}
+.move-back-btn:hover{color:var(--text-secondary);background:none;text-decoration:underline;}
 .btn-ghost:hover{background:var(--surface2);}
 .btn-danger{background:var(--red-light);color:var(--red);margin-right:auto;}
 .btn-sm{padding:6px 10px;font-size:11px;}

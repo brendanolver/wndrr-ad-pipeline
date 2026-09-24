@@ -7855,6 +7855,7 @@ function renderTuesdayReviewConcept() {
   document.getElementById('tr-review-prev-btn').disabled = state.tuesdayReview.queueIndex === 0;
   document.getElementById('tr-review-next-btn').disabled = state.tuesdayReview.queueIndex === state.tuesdayReview.queue.length - 1;
 
+  document.getElementById('tr-review-move-back-btn').style.display = state.currentUser && state.currentUser.role === 'admin' ? '' : 'none';
   document.getElementById('tr-review-title').textContent = concept.concept_name;
   const statusPill = document.getElementById('tr-review-status-pill');
   statusPill.className = `cd-concept-status-pill ${CONCEPT_DEV_STATUS_CLASS[concept.concept_dev_status] || ''}`;
@@ -8856,6 +8857,7 @@ async function openShootingBrief(scheduleId) {
     const brief = await api(`/shooting/${scheduleId}/brief`);
     state.shooting.briefScheduleId = scheduleId;
     state.shooting.briefData = brief;
+    document.getElementById('shoot-brief-move-back-btn').style.display = state.currentUser && state.currentUser.role === 'admin' ? '' : 'none';
     renderShootingBrief(brief);
     openModal('shoot-brief-modal');
   } catch (e) {
@@ -10207,6 +10209,7 @@ function openEditingConcept(creativeAssetId) {
   const concept = editingFindConcept(creativeAssetId);
   if (!concept) return;
   state.editing.activeConceptAssetId = creativeAssetId;
+  document.getElementById('editing-concept-move-back-btn').style.display = state.currentUser && state.currentUser.role === 'admin' ? '' : 'none';
   renderEditingConceptModal();
   openModal('editing-concept-modal');
 }
@@ -10610,6 +10613,7 @@ function openFinalApprovalModal(creativeAssetId) {
   if (!concept) return;
   state.finalApproval.activeCreativeAssetId = creativeAssetId;
   state.finalApproval.showFeedbackForm = false;
+  document.getElementById('final-approval-move-back-btn').style.display = state.currentUser && state.currentUser.role === 'admin' ? '' : 'none';
   renderFinalApprovalModal();
   openModal('final-approval-modal');
 }
@@ -10812,6 +10816,7 @@ async function openAdSetupModal(id) {
     state.adSetup.editingId = id;
     state.adSetup.draft = { ...detail };
     document.getElementById('ad-setup-modal-title').textContent = detail.concept_name;
+    document.getElementById('ad-setup-move-back-btn').style.display = state.currentUser && state.currentUser.role === 'admin' ? '' : 'none';
     renderAdSetupModal();
     openModal('ad-setup-modal');
   } catch (e) {
@@ -11128,6 +11133,8 @@ async function approveAdSetup() {
 async function openAdSetupApprovedModal(id) {
   try {
     const d = await api(`/ad-setup/${id}`);
+    state.adSetup.approvedDetail = d;
+    document.getElementById('ad-setup-approved-move-back-btn').style.display = state.currentUser && state.currentUser.role === 'admin' ? '' : 'none';
     document.getElementById('ad-setup-approved-modal-title').textContent = d.concept_name;
     const originLine = [
       d.promotion_name ? `Promotion: ${d.promotion_name}${d.promotion_stage_name ? ` (${d.promotion_stage_name})` : ''}` : (AD_CATEGORY_LABELS[d.ad_category] || d.ad_category),
@@ -11167,6 +11174,76 @@ async function openAdSetupApprovedModal(id) {
     toast(e.message, true);
   }
 }
+
+// ── Move Back (QA/testing + workflow correction, admin only) ───────────
+// One shared confirmation modal + pair of calls, reused from every stage's
+// own "<- Move Back" button (Tuesday Review's decision bar, Shooting's
+// brief, Editing's concept modal, Final Approval, Ad Setup, Approved). The
+// backend always detects the concept's real current stage itself (see
+// routes/moveBack.js) -- this never guesses or hardcodes which stage a
+// given button "means", so the confirmation text always names the actual
+// stage the concept will land in.
+let moveBackConceptId = null;
+
+async function openMoveBackModal(creativeAssetId) {
+  if (creativeAssetId == null) return;
+  try {
+    const preview = await api(`/move-back/${creativeAssetId}/preview`);
+    moveBackConceptId = creativeAssetId;
+    document.getElementById('move-back-modal-question').textContent =
+      `Move "${preview.concept_name}" back to ${preview.target_stage_label}?`;
+    openModal('move-back-modal');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function confirmMoveBack() {
+  if (moveBackConceptId == null) return;
+  try {
+    const result = await api(`/move-back/${moveBackConceptId}`, { method: 'POST' });
+    closeModal('move-back-modal');
+    // Close whichever stage modal was open -- the concept just left that
+    // stage, so nothing in it is still valid to look at.
+    ['tuesday-review-modal', 'shoot-brief-modal', 'editing-concept-modal', 'final-approval-modal', 'ad-setup-modal', 'ad-setup-approved-modal']
+      .forEach((id) => closeModal(id));
+    toast(`Moved back to ${STAGE_LABELS_CLIENT[result.to_stage] || result.to_stage}`);
+    // Refresh every screen the concept could now be sitting on -- cheap,
+    // and simpler/safer than tracking exactly which one it landed in.
+    // Wrapped defensively: some of these (refreshCurrentShootingView/
+    // refreshCurrentEditingView) are plain, not async, functions that
+    // return undefined rather than a Promise, so calling .catch() directly
+    // on their result throws -- safeMoveBackRefresh handles both cases.
+    await Promise.all([
+      safeMoveBackRefresh(loadTuesdayReviewWeek),
+      safeMoveBackRefresh(loadConceptDevWeek),
+      safeMoveBackRefresh(refreshCurrentShootingView),
+      safeMoveBackRefresh(refreshCurrentEditingView),
+      safeMoveBackRefresh(loadFinalApproval),
+      safeMoveBackRefresh(loadAdSetupBoard),
+    ]);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function safeMoveBackRefresh(fn) {
+  try {
+    return Promise.resolve(fn()).catch(() => {});
+  } catch (e) {
+    return Promise.resolve();
+  }
+}
+
+const STAGE_LABELS_CLIENT = {
+  'concept-dev': 'Concept Dev',
+  'tuesday-review': 'Tuesday Review',
+  shooting: 'Shooting',
+  editing: 'Editing',
+  'final-approval': 'Final Approval',
+  'ad-setup': 'Ad Setup',
+  approved: 'Approved',
+};
 
 // ── Reference Library ─────────────────────────────────
 // A single shared reference_library table with two different surfaces:

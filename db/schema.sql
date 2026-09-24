@@ -1788,3 +1788,17 @@ CREATE TABLE IF NOT EXISTS ad_setup_products (
   style_id INTEGER NOT NULL REFERENCES styles(id) ON DELETE CASCADE,
   PRIMARY KEY (ad_setup_id, style_id)
 );
+
+-- =====================================================================
+-- Move Back (QA/testing + workflow correction): a controlled way to send
+-- an existing concept back to an earlier pipeline stage without ever
+-- creating a duplicate concept/shoot/final edit/Ad Setup record -- see
+-- routes/moveBack.js. The only new structural bit this needs is a way to
+-- mark a final_edits row inactive (a hook Tuesday Review no longer
+-- confirms) without deleting it, since real editor work (link/notes)
+-- may already be on it and rule 5 of the brief is "don't permanently
+-- delete useful work unless it genuinely needs to be regenerated" --
+-- defaults every existing row to active, so nothing already in
+-- production changes visibility.
+-- =====================================================================
+ALTER TABLE final_edits ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true;

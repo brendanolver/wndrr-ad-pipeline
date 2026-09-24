@@ -722,6 +722,7 @@
           </div>
         </div>
         <div class="modal-footer">
+          <button class="btn btn-ghost move-back-btn" id="shoot-brief-move-back-btn" onclick="openMoveBackModal(state.shooting.briefData.creative_asset_id)" style="display:none;">&larr; Move Back</button>
           <span class="shoot-brief-overall-progress" id="shoot-brief-overall-progress" style="display:none;"></span>
           <button class="btn btn-ghost" onclick="closeModal('shoot-brief-modal')">Close</button>
           <button class="btn btn-danger" id="shoot-brief-unmark-shot-btn" onclick="unmarkShootingShotFromBrief()" style="display:none;">Mark as Not Shot</button>
@@ -841,6 +842,7 @@
           </div>
         </div>
         <div class="modal-footer" id="final-approval-modal-footer">
+          <button class="btn btn-ghost move-back-btn" id="final-approval-move-back-btn" onclick="openMoveBackModal(state.finalApproval.activeCreativeAssetId)" style="display:none;">&larr; Move Back</button>
           <button class="btn btn-ghost" id="final-approval-close-btn" onclick="closeModal('final-approval-modal')">Close</button>
           <button class="btn btn-ghost" id="final-approval-request-changes-btn" onclick="toggleFinalApprovalFeedback()">Request Changes</button>
           <button class="btn btn-primary" id="final-approval-approve-btn" onclick="submitFinalApprovalApprove()">Approve Creative &rarr;</button>
@@ -862,6 +864,7 @@
         </div>
         <div class="modal-body" id="ad-setup-modal-body"></div>
         <div class="modal-footer" id="ad-setup-modal-footer">
+          <button class="btn btn-ghost move-back-btn" id="ad-setup-move-back-btn" onclick="openMoveBackModal(state.adSetup.draft.creative_asset_id)" style="display:none;">&larr; Move Back</button>
           <button class="btn btn-ghost" onclick="closeModal('ad-setup-modal')">Close</button>
           <button class="btn btn-ghost" id="ad-setup-save-btn" onclick="saveAdSetupDraft()">Save Draft</button>
           <button class="btn btn-primary" id="ad-setup-approve-btn" onclick="approveAdSetup()">Approve Ad Setup &rarr;</button>
@@ -880,7 +883,31 @@
         </div>
         <div class="modal-body" id="ad-setup-approved-modal-body"></div>
         <div class="modal-footer">
+          <button class="btn btn-ghost move-back-btn" id="ad-setup-approved-move-back-btn" onclick="openMoveBackModal(state.adSetup.approvedDetail.creative_asset_id)" style="display:none;">&larr; Move Back</button>
           <button class="btn btn-ghost" onclick="closeModal('ad-setup-approved-modal')">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Move Back (QA/testing + workflow correction, admin only) -- sends
+         an EXISTING concept back exactly one pipeline stage. Shared by
+         every screen's "<- Move Back" button (see openMoveBackModal in
+         app.js): current/target stage are always detected server-side from
+         the concept's own real state, never guessed here, so this modal's
+         copy always names the real stage the concept will land in. -->
+    <div id="move-back-modal" class="modal-backdrop">
+      <div class="modal" style="max-width:440px;">
+        <div class="modal-header">
+          <h3>Move Back</h3>
+          <button class="modal-close" onclick="closeModal('move-back-modal')">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p id="move-back-modal-question"></p>
+          <p class="hint">Existing work (product links, hooks, shoot info, Final Edits, Ad Setup naming/copy) is kept, not lost -- this only re-enters that earlier workflow stage.</p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" onclick="closeModal('move-back-modal')">Cancel</button>
+          <button class="btn btn-primary" onclick="confirmMoveBack()">Move Back</button>
         </div>
       </div>
     </div>
@@ -928,6 +955,7 @@
           <div id="editing-final-edit-summary" class="editing-final-edit-summary"></div>
         </div>
         <div class="modal-footer editing-concept-footer">
+          <button class="btn btn-ghost move-back-btn" id="editing-concept-move-back-btn" onclick="openMoveBackModal(state.editing.activeConceptAssetId)" style="display:none;">&larr; Move Back</button>
           <span class="editing-concept-footer-status" id="editing-concept-footer-status"></span>
           <button class="btn btn-primary" id="editing-concept-ready-btn" onclick="submitEditingConceptReady()" disabled>Mark as Edited &rarr;</button>
           <button class="btn btn-ghost" id="editing-concept-close-btn" onclick="closeModal('editing-concept-modal')" style="display:none;">Close</button>
@@ -2359,6 +2387,7 @@
       <div class="tr-review-decided-note" id="tr-review-decided-note" style="display:none;"></div>
     </div>
     <div class="tr-decision-bar" id="tr-decision-bar">
+      <button type="button" class="btn btn-ghost move-back-btn" id="tr-review-move-back-btn" onclick="openMoveBackModal(state.tuesdayReview.queue[state.tuesdayReview.queueIndex].concept.id)" style="display:none;">&larr; Move Back</button>
       <button type="button" class="btn tr-btn-kill" onclick="openTuesdayReviewKillModal()">Kill Concept</button>
       <button type="button" class="btn btn-ghost" onclick="openTuesdayReviewChangesModal()">Request Changes</button>
       <button type="button" class="btn btn-primary tr-btn-approve" onclick="approveTuesdayReviewConcept()">&check; Approve for Shooting &rarr;</button>

@@ -47,6 +47,64 @@ async function ensureShootScheduleForApprovedConcept(asset) {
   );
 }
 
+// Move Back support: a concept sent back to Tuesday Review (or Concept Dev)
+// and re-approved may have had its confirmed hooks edited in the meantime
+// -- this reconciles final_edits (which Editing already builds one-per-hook,
+// see finalEditAssetsFromConceptHooks in app.js) to whatever the CURRENT
+// hook_variations says is confirmed, on every approval, first-time or not.
+// A no-op unless BOTH are true: this concept actually uses hook variations,
+// and it already has final_edits from a previous pass through Editing (a
+// first-ever approval always has zero, so Editing's own "Start Editing"
+// still creates the right N fresh, exactly as before). Never deletes a row
+// -- an unmatched existing row is deactivated (is_active = false), and a
+// hook whose exact text reappears later reactivates its old row rather than
+// creating a new one, so an editor's link/notes/status are never lost to a
+// test toggling a hook on and off.
+async function reconcileFinalEditsWithHooks(creativeAssetId, hookVariations, format) {
+  const confirmedHooks = (Array.isArray(hookVariations) ? hookVariations : [])
+    .map((h) => (h && h.text ? h.text.trim() : ''))
+    .filter(Boolean);
+  if (!confirmedHooks.length) return; // This concept doesn't use hook variations -- leave its final_edits alone.
+
+  const existingResult = await pool.query(
+    'SELECT id, variation_text, is_active FROM final_edits WHERE creative_asset_id = $1',
+    [creativeAssetId]
+  );
+  const existing = existingResult.rows;
+  if (!existing.length) return; // Editing hasn't started yet -- nothing to reconcile against.
+
+  const claimedIds = new Set();
+  for (let i = 0; i < confirmedHooks.length; i += 1) {
+    const hookText = confirmedHooks[i];
+    const match = existing.find((fe) => !claimedIds.has(fe.id) && fe.variation_text && fe.variation_text.trim() === hookText);
+    if (match) {
+      claimedIds.add(match.id);
+      if (!match.is_active) {
+        await pool.query('UPDATE final_edits SET is_active = true, updated_at = now() WHERE id = $1', [match.id]);
+      }
+      continue;
+    }
+    // A genuinely new confirmed hook (added while the concept was back at
+    // Concept Dev/Tuesday Review) -- create only the missing row.
+    await pool.query(
+      `INSERT INTO final_edits (creative_asset_id, asset_name, format, variation_text)
+       VALUES ($1, $2, $3, $4)`,
+      [creativeAssetId, `Hook ${i + 1} — ${hookText.slice(0, 40)}`, format === 'static' ? 'static' : 'video', hookText]
+    );
+  }
+
+  // Any existing active row whose hook text is no longer confirmed is a
+  // removed hook -- deactivate it so it stops counting as an active
+  // downstream variation (Editing/Ad Setup both filter on is_active), but
+  // keep the row itself so its link/editor/notes survive if the hook comes
+  // back.
+  for (const fe of existing) {
+    if (!claimedIds.has(fe.id) && fe.is_active) {
+      await pool.query('UPDATE final_edits SET is_active = false, updated_at = now() WHERE id = $1', [fe.id]);
+    }
+  }
+}
+
 // The content creator's workspace for turning a CONFIRMED weekly Shoot Plan
 // into concepts ready for the Tuesday review meeting. Deliberately reads
 // only -- product/colourways/owner/source/initial idea all come straight
@@ -708,6 +766,10 @@ router.patch('/concepts/:id/review', async (req, res, next) => {
     const asset = result.rows[0];
     if (decision === 'approved') {
       await ensureShootScheduleForApprovedConcept(asset);
+      // Move Back support: reconciles final_edits to the current confirmed
+      // hooks -- a no-op for a first-ever approval (no final_edits exist
+      // yet) or a concept that doesn't use hook variations at all.
+      await reconcileFinalEditsWithHooks(asset.id, asset.hook_variations, asset.format);
     }
 
     res.json(asset);

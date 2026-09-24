@@ -125,7 +125,7 @@ router.get('/', async (req, res, next) => {
     // own "Create Final Edits" list order.
     const editsResult = concepts.length
       ? await pool.query(
-          `SELECT * FROM final_edits WHERE creative_asset_id = ANY($1::int[]) ORDER BY created_at ASC, id ASC`,
+          `SELECT * FROM final_edits WHERE creative_asset_id = ANY($1::int[]) AND is_active = true ORDER BY created_at ASC, id ASC`,
           [concepts.map((c) => c.creative_asset_id)]
         )
       : { rows: [] };
@@ -379,7 +379,7 @@ router.post('/concepts/:creativeAssetId/ready-for-approval', async (req, res, ne
       return res.json(concept);
     }
 
-    const editsResult = await client.query('SELECT * FROM final_edits WHERE creative_asset_id = $1', [req.params.creativeAssetId]);
+    const editsResult = await client.query('SELECT * FROM final_edits WHERE creative_asset_id = $1 AND is_active = true', [req.params.creativeAssetId]);
     if (!conceptHasLinkedFinalEdit(editsResult.rows)) {
       client.release();
       return res.status(400).json({ error: 'Add the Final Edit link before sending for approval' });
