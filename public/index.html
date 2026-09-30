@@ -471,14 +471,51 @@
         </div>
         <div id="promotion-view-summary"></div>
 
-        <div class="planning-section-header">
-          <div>
-            <h2>Campaign Stages</h2>
-            <span class="admin-note">Click a stage to see what's ready, planned, and still needed</span>
-          </div>
-          <button type="button" class="btn btn-ghost btn-sm" id="new-stage-btn">+ Add Stage</button>
+        <!-- Black Friday creative-target dashboard (item 2 of the brief) --
+             only rendered when this Promotion's sale_type is 'black_friday'
+             AND it has a creative-style target matrix defined (see
+             renderBfProgressSection). Every other Promotion never shows
+             this block and the page looks exactly as it always has. -->
+        <div id="bf-progress-section" style="display:none;"></div>
+
+        <div class="fa-subtabs" id="bf-subtabs" style="display:none;">
+          <button type="button" class="fa-subtab active" data-bf-subtab="stages" onclick="switchBfSubtab('stages')">Campaign Stages</button>
+          <button type="button" class="fa-subtab" data-bf-subtab="ideas" onclick="switchBfSubtab('ideas')">Creative Ideas <span class="fa-subtab-count" id="bf-count-ideas"></span></button>
+          <button type="button" class="fa-subtab" data-bf-subtab="inspiration" onclick="switchBfSubtab('inspiration')">Inspiration Library <span class="fa-subtab-count" id="bf-count-inspiration"></span></button>
         </div>
-        <div id="promotion-stage-grid" class="coverage-grid"></div>
+
+        <div id="bf-panel-stages">
+          <div class="planning-section-header">
+            <div>
+              <h2>Campaign Stages</h2>
+              <span class="admin-note">Click a stage to see what's ready, planned, and still needed</span>
+            </div>
+            <button type="button" class="btn btn-ghost btn-sm" id="new-stage-btn">+ Add Stage</button>
+          </div>
+          <div id="promotion-stage-grid" class="coverage-grid"></div>
+        </div>
+
+        <div id="bf-panel-ideas" style="display:none;">
+          <div class="planning-section-header">
+            <div>
+              <h2>Creative Ideas</h2>
+              <span class="admin-note">2026 planned creative -- assign a Stage + Creative Style to have it count toward the target above</span>
+            </div>
+            <button type="button" class="btn btn-primary btn-sm" onclick="openBfIdeaModal()">+ New Idea</button>
+          </div>
+          <div id="bf-ideas-grid" class="cd-product-grid"></div>
+        </div>
+
+        <div id="bf-panel-inspiration" style="display:none;">
+          <div class="planning-section-header">
+            <div>
+              <h2>Inspiration Library</h2>
+              <span class="admin-note">Proven ads from previous sales -- reference only, never a production job</span>
+            </div>
+            <button type="button" class="btn btn-primary btn-sm" onclick="openBfInspirationModal()">+ New Reference</button>
+          </div>
+          <div id="bf-inspiration-grid" class="cd-product-grid"></div>
+        </div>
       </div>
 
       <div id="planning-promotion-stage-view" style="display:none;">
@@ -2787,6 +2824,125 @@
         </button>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- Black Friday Creative Idea -- a compact planning record (item 3/7 of
+     the brief), not a giant form. Need/Reference sit behind "More details"
+     since most ideas only ever need What/Stage/Style/Who/Where/Script. -->
+<div id="bf-idea-modal" class="modal-backdrop">
+  <div class="modal" style="max-width:520px;">
+    <div class="modal-header">
+      <h3 id="bf-idea-modal-title">New Creative Idea</h3>
+      <button class="modal-close" onclick="closeModal('bf-idea-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <label>Creative Idea<span class="cd-req-mark">*</span>
+        <input type="text" id="bf-idea-title" placeholder="e.g. Green Screen — Top Picks">
+      </label>
+      <div class="promo-shoot-2col">
+        <label>Black Friday Stage
+          <select id="bf-idea-stage"></select>
+        </label>
+        <label>Creative Style
+          <select id="bf-idea-style"></select>
+        </label>
+      </div>
+      <div class="promo-shoot-2col">
+        <label>Who
+          <input type="text" id="bf-idea-who" placeholder="e.g. Mark">
+        </label>
+        <label>Where
+          <input type="text" id="bf-idea-where" placeholder="e.g. Studio">
+        </label>
+      </div>
+      <label>Concept / Script
+        <textarea id="bf-idea-script" rows="3" placeholder="What's the idea, opening line, or shot list?"></textarea>
+      </label>
+      <button type="button" class="link-btn" id="bf-idea-more-toggle" onclick="toggleBfIdeaMore()">+ More details (Need, Inspo notes)</button>
+      <div id="bf-idea-more" style="display:none;">
+        <label>Need
+          <textarea id="bf-idea-need" rows="2" placeholder="Props, talent, requirements..."></textarea>
+        </label>
+        <label>Inspo Notes
+          <textarea id="bf-idea-reference-note" rows="2" placeholder="Freeform notes on why this idea exists..."></textarea>
+        </label>
+        <div id="bf-idea-inspiration-list"></div>
+        <button type="button" class="link-btn" onclick="openBfInspirationPicker()">+ Link a Previous Winning Ad</button>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" id="bf-idea-delete-btn" onclick="deleteBfIdeaFlow()" style="display:none;">Delete</button>
+      <button class="btn btn-ghost" onclick="closeModal('bf-idea-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveBfIdea()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Previous Winning Ad (Inspiration Library, item 5 of the brief) --
+     historical reference only, deliberately never creates a production
+     job (see promotionCreative.js). -->
+<div id="bf-inspiration-modal" class="modal-backdrop">
+  <div class="modal" style="max-width:480px;">
+    <div class="modal-header">
+      <h3 id="bf-inspiration-modal-title">New Reference</h3>
+      <button class="modal-close" onclick="closeModal('bf-inspiration-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <label>Ad Name<span class="cd-req-mark">*</span>
+        <input type="text" id="bf-insp-title" placeholder="e.g. Winter Sale EGC Top Picks">
+      </label>
+      <div class="promo-shoot-2col">
+        <label>Previous Campaign
+          <input type="text" id="bf-insp-campaign" placeholder="e.g. Winter Sale">
+        </label>
+        <label>Creative Style
+          <select id="bf-insp-style"></select>
+        </label>
+      </div>
+      <label>Video/Ad Link
+        <input type="text" id="bf-insp-url" placeholder="https://...">
+      </label>
+      <label>Notes
+        <textarea id="bf-insp-notes" rows="2" placeholder="Why it worked, performance notes..."></textarea>
+      </label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" id="bf-insp-delete-btn" onclick="deleteBfInspirationFlow()" style="display:none;">Delete</button>
+      <button class="btn btn-ghost" onclick="closeModal('bf-inspiration-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveBfInspiration()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Pick an existing Inspiration record to link to the idea currently open
+     in #bf-idea-modal, instead of re-typing one that already exists. -->
+<div id="bf-inspiration-picker-modal" class="modal-backdrop">
+  <div class="modal" style="max-width:440px;">
+    <div class="modal-header">
+      <h3>Link a Previous Winning Ad</h3>
+      <button class="modal-close" onclick="closeModal('bf-inspiration-picker-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div id="bf-inspiration-picker-list"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('bf-inspiration-picker-modal')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Video lightbox (item 6 of the brief) -- provider-aware: only opened
+     for a URL bfVideoPreviewInfo() judged safely embeddable (YouTube/
+     Vimeo/a direct video file), never a generic iframe of an arbitrary
+     URL. "Open Original" stays available everywhere as the fallback. -->
+<div id="bf-video-modal" class="modal-backdrop">
+  <div class="modal bf-video-modal">
+    <div class="modal-header">
+      <h3 id="bf-video-modal-title">Preview</h3>
+      <button class="modal-close" onclick="closeBfVideoModal()">&times;</button>
+    </div>
+    <div class="modal-body" id="bf-video-modal-body"></div>
   </div>
 </div>
 

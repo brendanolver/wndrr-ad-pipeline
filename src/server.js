@@ -42,6 +42,7 @@ const editingRoutes = require('./routes/editing');
 const finalApprovalRoutes = require('./routes/finalApproval');
 const adSetupRoutes = require('./routes/adSetup');
 const moveBackRoutes = require('./routes/moveBack');
+const promotionCreativeRoutes = require('./routes/promotionCreative');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -106,6 +107,9 @@ app.use('/api/shoot-plan', requireAuth, requireModuleAccess('planning'), shootPl
 app.use('/api/content-creators', requireAuth, contentCreatorRoutes);
 app.use('/api/high-stock-products', requireAuth, requireModuleAccess('planning'), highStockProductRoutes);
 app.use('/api/promotions', requireAuth, requireModuleAccess('promotions'), promotionRoutes);
+// Black Friday 2026 creative matrix/ideas/inspiration -- same module gate
+// as Promotions itself, since this is purely an extension of that screen.
+app.use('/api/promotion-creative', requireAuth, requireModuleAccess('promotions'), promotionCreativeRoutes);
 app.use('/api/weekly-shoot-plan-confirmation', requireAuth, requireModuleAccess('planning'), weeklyShootPlanConfirmationRoutes);
 app.use('/api/weekly-planning-progress', requireAuth, requireModuleAccess('planning'), weeklyPlanningProgressRoutes);
 app.use('/api/sales-cadence', requireAuth, requireModuleAccess('planning'), salesCadenceRoutes);

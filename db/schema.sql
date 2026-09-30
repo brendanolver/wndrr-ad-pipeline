@@ -1802,3 +1802,193 @@ CREATE TABLE IF NOT EXISTS ad_setup_products (
 -- production changes visibility.
 -- =====================================================================
 ALTER TABLE final_edits ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true;
+
+-- =====================================================================
+-- Black Friday 2026 creative-style matrix, progress, ideas, and
+-- inspiration library. Extends the EXISTING Promotion/Campaign Stage
+-- system (promotions/promotion_stages/shoot_plan_items.promotion_stage_id)
+-- rather than a parallel Black Friday application -- every table below is
+-- generic (not literally "black_friday_*") so a future sale could reuse
+-- the same structure, but only Black Friday 2026 is seeded/wired up in
+-- this pass. All additive; nothing here alters or removes an existing
+-- column, row, or table.
+-- =====================================================================
+
+-- The 14-row creative-style vocabulary the team's planning matrix uses
+-- (Graphic tile, EGC Video, ...). A plain reference table, not an enum, so
+-- the list itself stays editable without a migration later. media_type
+-- drives Ad Setup's existing Media auto-detect the same way format already
+-- does elsewhere -- never invented twice.
+CREATE TABLE IF NOT EXISTS creative_styles (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(255) NOT NULL UNIQUE,
+  media_type VARCHAR(10) NOT NULL CHECK (media_type IN ('graphic', 'video')),
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+INSERT INTO creative_styles (name, media_type, sort_order) VALUES
+  ('Graphic tile', 'graphic', 0),
+  ('GWP/Giveaway - Graphic', 'graphic', 1),
+  ('GWP/Giveaway - Video', 'video', 2),
+  ('GIF', 'graphic', 3),
+  ('PNG frame (flat lay, e-comm) - single/carousel', 'graphic', 4),
+  ('Product Focused Video', 'video', 5),
+  ('DPA', 'graphic', 6),
+  ('Price Strikethrough', 'graphic', 7),
+  ('Founder Video', 'video', 8),
+  ('EGC Video', 'video', 9),
+  ('UGC Video', 'video', 10),
+  ('BAU Video', 'video', 11),
+  ('Campaign Video', 'video', 12),
+  ('Other Video (eg. Humour, TikTok)', 'video', 13)
+ON CONFLICT (name) DO NOTHING;
+
+-- The target matrix itself: how many of a given Creative Style are
+-- required in a given Campaign Stage, for a given Promotion. Structured
+-- data (per the brief: "target definitions should be structured data, not
+-- hardcoded all through the frontend"), one row per non-zero cell -- a
+-- missing (promotion_stage_id, creative_style_id) pair simply means 0
+-- required, so a stage/style combo with no requirement never needs an
+-- explicit zero row.
+CREATE TABLE IF NOT EXISTS promotion_creative_targets (
+  id SERIAL PRIMARY KEY,
+  promotion_id INTEGER NOT NULL REFERENCES promotions(id) ON DELETE CASCADE,
+  promotion_stage_id INTEGER NOT NULL REFERENCES promotion_stages(id) ON DELETE CASCADE,
+  creative_style_id INTEGER NOT NULL REFERENCES creative_styles(id) ON DELETE CASCADE,
+  required_count INTEGER NOT NULL DEFAULT 0 CHECK (required_count >= 0),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (promotion_stage_id, creative_style_id)
+);
+CREATE INDEX IF NOT EXISTS idx_promotion_creative_targets_promotion_id ON promotion_creative_targets(promotion_id);
+
+-- A planning record ("2026 idea") -- What/Who/Where/Script/Need from the
+-- team's spreadsheet, plus the two links that make it real: promotion_stage_id
+-- + creative_style_id (which drive the progress counters below) and
+-- linked_creative_asset_id, the STABLE id of the real creative_assets row
+-- once this idea is sent into (or matched against) the existing pipeline --
+-- never a second/duplicate creative record. Lifecycle status is
+-- deliberately NOT a stored column here: it's derived at read time from
+-- the linked concept's own real pipeline state (concept_dev_status/
+-- shoot_schedule/editing_submitted_at/final_approval_status), same
+-- "progress is derived, not manually maintained" rule as the rest of this
+-- app's coverage counters.
+CREATE TABLE IF NOT EXISTS promotion_creative_ideas (
+  id SERIAL PRIMARY KEY,
+  promotion_id INTEGER NOT NULL REFERENCES promotions(id) ON DELETE CASCADE,
+  promotion_stage_id INTEGER REFERENCES promotion_stages(id) ON DELETE SET NULL,
+  creative_style_id INTEGER REFERENCES creative_styles(id) ON DELETE SET NULL,
+  title VARCHAR(255) NOT NULL,
+  who VARCHAR(255),
+  where_text VARCHAR(255),
+  concept_script TEXT,
+  need_text TEXT,
+  reference_note TEXT,
+  linked_creative_asset_id INTEGER REFERENCES creative_assets(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_promotion_creative_ideas_promotion_id ON promotion_creative_ideas(promotion_id);
+CREATE INDEX IF NOT EXISTS idx_promotion_creative_ideas_linked_asset ON promotion_creative_ideas(linked_creative_asset_id);
+
+-- Previous Winning Ads / Inspiration Library -- deliberately its own table,
+-- separate from promotion_creative_ideas and from reference_library (that
+-- one is a generic "reference for a new idea" list without the
+-- structured campaign/style/video-preview needs here). A historical
+-- record only, never itself a production job -- nothing in this app ever
+-- creates a shoot_plan_items/creative_assets row from one of these.
+CREATE TABLE IF NOT EXISTS creative_inspiration (
+  id SERIAL PRIMARY KEY,
+  title VARCHAR(255) NOT NULL,
+  campaign_name VARCHAR(255),
+  creative_style_id INTEGER REFERENCES creative_styles(id) ON DELETE SET NULL,
+  media_type VARCHAR(10) CHECK (media_type IS NULL OR media_type IN ('graphic', 'video')),
+  video_url TEXT,
+  notes TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+
+-- Many-to-many: a 2026 idea can point at more than one previous winning ad
+-- ("this is why we're doing it"), and the same winning ad can inspire more
+-- than one new idea. Both sides use their own stable id, per the brief.
+CREATE TABLE IF NOT EXISTS promotion_creative_idea_inspirations (
+  promotion_creative_idea_id INTEGER NOT NULL REFERENCES promotion_creative_ideas(id) ON DELETE CASCADE,
+  creative_inspiration_id INTEGER NOT NULL REFERENCES creative_inspiration(id) ON DELETE CASCADE,
+  PRIMARY KEY (promotion_creative_idea_id, creative_inspiration_id)
+);
+
+-- ---------------------------------------------------------------------
+-- Black Friday 2026: the old 20/30/25/8 (total 83) targets are obsolete,
+-- replaced with 35/50/75/20 (total 180) -- see the brief. Guarded by the
+-- OLD known value on each stage (same "only correct it if it's still
+-- exactly the seeded default" idiom the Hype/Mid Sale Offers rename above
+-- already uses), so this can only ever fire once per stage and can never
+-- clobber a required_count an admin has since edited by hand.
+-- ---------------------------------------------------------------------
+UPDATE promotion_stages ps SET required_count = 35, updated_at = now()
+FROM promotions p WHERE p.id = ps.promotion_id AND p.name = 'Black Friday 2026'
+  AND ps.name = 'Hype Ads' AND ps.required_count = 20;
+UPDATE promotion_stages ps SET required_count = 50, updated_at = now()
+FROM promotions p WHERE p.id = ps.promotion_id AND p.name = 'Black Friday 2026'
+  AND ps.name = 'Sale Live Ads' AND ps.required_count = 30;
+UPDATE promotion_stages ps SET required_count = 75, updated_at = now()
+FROM promotions p WHERE p.id = ps.promotion_id AND p.name = 'Black Friday 2026'
+  AND ps.name = 'Mid Sale Offers Ads' AND ps.required_count = 25;
+UPDATE promotion_stages ps SET required_count = 20, updated_at = now()
+FROM promotions p WHERE p.id = ps.promotion_id AND p.name = 'Black Friday 2026'
+  AND ps.name = 'Last Chance / Ends Today' AND ps.required_count = 8;
+
+-- Black Friday 2026's creative-style matrix (29 non-zero cells, columns
+-- sum to 35/50/75/20 = 180 total -- see the brief). Resolved by name
+-- lookup against the promotion/stage/style rows seeded above, so this
+-- never hardcodes an id; ON CONFLICT keeps it idempotent (a redeploy, or
+-- this file running again, never duplicates or resets a value an admin
+-- has since edited).
+DO $$
+DECLARE
+  bf_id INTEGER;
+BEGIN
+  SELECT id INTO bf_id FROM promotions WHERE name = 'Black Friday 2026';
+  IF bf_id IS NOT NULL THEN
+    INSERT INTO promotion_creative_targets (promotion_id, promotion_stage_id, creative_style_id, required_count)
+    SELECT bf_id, ps.id, cs.id, v.required_count
+    FROM (VALUES
+      ('Hype Ads', 'Graphic tile', 6),
+      ('Sale Live Ads', 'Graphic tile', 12),
+      ('Mid Sale Offers Ads', 'Graphic tile', 8),
+      ('Last Chance / Ends Today', 'Graphic tile', 8),
+      ('Hype Ads', 'GWP/Giveaway - Graphic', 5),
+      ('Sale Live Ads', 'GWP/Giveaway - Graphic', 4),
+      ('Hype Ads', 'GWP/Giveaway - Video', 5),
+      ('Sale Live Ads', 'GWP/Giveaway - Video', 6),
+      ('Mid Sale Offers Ads', 'GIF', 4),
+      ('Mid Sale Offers Ads', 'PNG frame (flat lay, e-comm) - single/carousel', 15),
+      ('Hype Ads', 'Product Focused Video', 4),
+      ('Sale Live Ads', 'Product Focused Video', 6),
+      ('Mid Sale Offers Ads', 'Product Focused Video', 6),
+      ('Mid Sale Offers Ads', 'DPA', 3),
+      ('Mid Sale Offers Ads', 'Price Strikethrough', 15),
+      ('Hype Ads', 'Founder Video', 3),
+      ('Sale Live Ads', 'Founder Video', 4),
+      ('Mid Sale Offers Ads', 'Founder Video', 4),
+      ('Last Chance / Ends Today', 'Founder Video', 4),
+      ('Hype Ads', 'EGC Video', 6),
+      ('Sale Live Ads', 'EGC Video', 12),
+      ('Mid Sale Offers Ads', 'EGC Video', 6),
+      ('Last Chance / Ends Today', 'EGC Video', 8),
+      ('Hype Ads', 'UGC Video', 4),
+      ('Mid Sale Offers Ads', 'UGC Video', 4),
+      ('Mid Sale Offers Ads', 'BAU Video', 10),
+      ('Sale Live Ads', 'Campaign Video', 2),
+      ('Hype Ads', 'Other Video (eg. Humour, TikTok)', 2),
+      ('Sale Live Ads', 'Other Video (eg. Humour, TikTok)', 4)
+    ) AS v(stage_name, style_name, required_count)
+    JOIN promotion_stages ps ON ps.promotion_id = bf_id AND ps.name = v.stage_name
+    JOIN creative_styles cs ON cs.name = v.style_name
+    ON CONFLICT (promotion_stage_id, creative_style_id) DO NOTHING;
+  END IF;
+END $$;

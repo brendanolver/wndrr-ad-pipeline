@@ -113,6 +113,14 @@ let state = {
   // draft/editingId hold the Ad Setup detail modal's working copy while
   // it's open (see openAdSetupModal/saveAdSetupDraft).
   adSetup: { board: { ad_setup: [], approved: [] }, activeSubtab: 'ready', editingId: null, draft: null },
+  // Black Friday creative dashboard (Promotion extension) -- activeSubtab
+  // is only meaningful while the currently-open Promotion is Black Friday
+  // 2026 (see isBfPromotion); styles/inspiration are cached globally
+  // (not promotion-scoped) since both are shared reference lists.
+  blackFriday: {
+    activeSubtab: 'stages', progress: null, ideas: [], inspiration: [], styles: [],
+    editingIdeaId: null, editingInspirationId: null, expandedStyleMatrix: false,
+  },
 };
 let dashboardWeekOffset = 0;
 
@@ -3904,6 +3912,7 @@ function renderPromotionView() {
   document.getElementById('promotion-view-edit-btn').onclick = () => openPromotionModal(p);
   document.getElementById('promotion-view-summary').innerHTML = promotionOverviewHtml(p);
   renderPromotionStageGrid();
+  initBfSectionForPromotion(p);
 }
 
 // Re-fetches just this promotion (not a full loadAll()) so stage add/
@@ -11170,6 +11179,528 @@ async function openAdSetupApprovedModal(id) {
       </div>
     `;
     openModal('ad-setup-approved-modal');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// ── Black Friday Creative (Promotion extension) ─────────────────────────
+// Extends the existing Promotion detail page (renderPromotionView) rather
+// than a parallel screen -- everything here is gated on the currently-open
+// Promotion being Black Friday 2026 (sale_type === 'black_friday' AND it
+// actually has a creative-style target matrix; every other Promotion's
+// page is completely unaffected, see initBfSectionForPromotion). All
+// progress numbers are computed server-side (GET /promotion-creative/:id/
+// progress) from real promotion_creative_ideas + their linked concepts'
+// real pipeline state -- nothing here is a manually-maintained counter.
+
+function isBfPromotion(p) {
+  return !!p && p.sale_type === 'black_friday';
+}
+
+async function initBfSectionForPromotion(p) {
+  const progressSection = document.getElementById('bf-progress-section');
+  const subtabs = document.getElementById('bf-subtabs');
+  if (!isBfPromotion(p)) {
+    progressSection.style.display = 'none';
+    subtabs.style.display = 'none';
+    document.getElementById('bf-panel-stages').style.display = '';
+    document.getElementById('bf-panel-ideas').style.display = 'none';
+    document.getElementById('bf-panel-inspiration').style.display = 'none';
+    return;
+  }
+  try {
+    const [progress] = await Promise.all([
+      api(`/promotion-creative/${p.id}/progress`),
+      loadBfStyles(),
+    ]);
+    // No target matrix defined for this occurrence (e.g. a future Black
+    // Friday year with no matrix seeded yet) -- still a Black Friday
+    // promotion, but nothing to show a creative-target dashboard for, so
+    // this stays exactly like every other Promotion's page.
+    if (!progress.matrix.length) {
+      progressSection.style.display = 'none';
+      subtabs.style.display = 'none';
+      document.getElementById('bf-panel-stages').style.display = '';
+      return;
+    }
+    state.blackFriday.progress = progress;
+    progressSection.style.display = '';
+    subtabs.style.display = '';
+    renderBfProgressSection();
+    switchBfSubtab(state.blackFriday.activeSubtab, true);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function loadBfStyles() {
+  if (state.blackFriday.styles.length) return;
+  const result = await api('/promotion-creative/styles');
+  state.blackFriday.styles = result.styles;
+}
+
+function bfStyleOptionsHtml(selectedId) {
+  return '<option value="">— none —</option>' + state.blackFriday.styles
+    .map((s) => `<option value="${s.id}" ${String(s.id) === String(selectedId) ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('');
+}
+
+function bfStageOptionsHtml(selectedId) {
+  const stages = (state.currentPromotion && state.currentPromotion.stages) || [];
+  return '<option value="">— none —</option>' + stages
+    .map((s) => `<option value="${s.id}" ${String(s.id) === String(selectedId) ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('');
+}
+
+// The prominent top-of-page numbers (item 2): overall stage totals always
+// visible; the per-style breakdown is progressive disclosure -- collapsed
+// by default, one line per style that actually has a requirement or a
+// planned idea, only showing the stage cells that apply to it (a style
+// with a 0/0 cell for a given stage never renders that cell at all).
+function renderBfProgressSection() {
+  const progress = state.blackFriday.progress;
+  if (!progress) return;
+  const grand = progress.grand_total;
+
+  const stageTiles = progress.stage_totals.map((s) => {
+    const pct = s.required > 0 ? Math.min(100, Math.round((s.completed / s.required) * 100)) : 0;
+    return `
+      <div class="bf-stage-total-tile" onclick="switchBfSubtab('ideas')">
+        <div class="bf-stage-total-name">${escapeHtml(s.stage_name.replace(/ Ads$/, ''))}</div>
+        <div class="bf-stage-total-nums">${s.completed} <small>/ ${s.required}</small></div>
+        <div class="bf-stage-total-bar"><div class="bf-stage-total-bar-fill" style="width:${pct}%;"></div></div>
+      </div>`;
+  }).join('');
+
+  const byStyle = new Map();
+  for (const c of progress.matrix) {
+    if (!byStyle.has(c.creative_style_id)) byStyle.set(c.creative_style_id, { style_name: c.style_name, cells: [] });
+    if (c.required > 0 || c.planned > 0) byStyle.get(c.creative_style_id).cells.push(c);
+  }
+  const styleRows = [...byStyle.values()].filter((s) => s.cells.length).map((s) => {
+    const cells = s.cells.map((c) => {
+      const shortStage = c.stage_name.replace(/ Ads$/, '').replace(' Offers', '').replace(' / Ends Today', '');
+      const needsClass = c.still_to_plan > 0 ? 'needs' : '';
+      return `<span class="bf-style-matrix-cell ${needsClass}">${escapeHtml(shortStage)} <strong>${c.completed}/${c.required}</strong>${c.still_to_plan > 0 ? ` <span class="gap-label">needs ${c.still_to_plan}</span>` : ''}</span>`;
+    }).join('');
+    return `<div class="bf-style-matrix-row"><span class="bf-style-matrix-name">${escapeHtml(s.style_name)}</span><span class="bf-style-matrix-cells">${cells}</span></div>`;
+  }).join('');
+
+  const expanded = state.blackFriday.expandedStyleMatrix;
+  document.getElementById('bf-progress-section').innerHTML = `
+    <div class="bf-progress-card">
+      <div class="bf-progress-head">
+        <span class="bf-progress-title">Black Friday 2026 Creative Progress</span>
+        <span class="bf-progress-total">${grand.completed} / ${grand.required} Completed &middot; ${grand.planned} / ${grand.required} Planned</span>
+      </div>
+      <div class="bf-stage-totals-row">${stageTiles}</div>
+      <button type="button" class="link-btn" onclick="toggleBfStyleMatrix()">${expanded ? 'Hide' : 'Show'} creative-style breakdown &rarr;</button>
+      ${expanded ? `<div class="bf-style-matrix">${styleRows}</div>` : ''}
+    </div>`;
+}
+
+function toggleBfStyleMatrix() {
+  state.blackFriday.expandedStyleMatrix = !state.blackFriday.expandedStyleMatrix;
+  renderBfProgressSection();
+}
+
+async function switchBfSubtab(name, skipReload) {
+  state.blackFriday.activeSubtab = name;
+  document.querySelectorAll('.fa-subtab[data-bf-subtab]').forEach((el) => el.classList.toggle('active', el.dataset.bfSubtab === name));
+  document.getElementById('bf-panel-stages').style.display = name === 'stages' ? '' : 'none';
+  document.getElementById('bf-panel-ideas').style.display = name === 'ideas' ? '' : 'none';
+  document.getElementById('bf-panel-inspiration').style.display = name === 'inspiration' ? '' : 'none';
+  if (skipReload) return;
+  if (name === 'ideas') await loadBfIdeas();
+  if (name === 'inspiration') await loadBfInspiration();
+}
+
+// ---------------------------------------------------------------------
+// Creative Ideas (item 3/4/7/8 of the brief)
+// ---------------------------------------------------------------------
+async function loadBfIdeas() {
+  if (!state.currentPromotionId) return;
+  try {
+    const result = await api(`/promotion-creative/${state.currentPromotionId}/ideas`);
+    state.blackFriday.ideas = result.ideas;
+    document.getElementById('bf-count-ideas').textContent = `(${result.ideas.length})`;
+    renderBfIdeasGrid();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function bfIdeaStatusBucket(idea) {
+  if (idea.production_stage === 'planned') return 'planned';
+  if (idea.production_stage === 'completed') return 'completed';
+  return 'in-production';
+}
+const BF_STATUS_LABELS = { planned: 'PLANNED', 'in-production': 'IN PRODUCTION', completed: 'COMPLETED' };
+
+function bfIdeaCardHtml(idea) {
+  const bucket = bfIdeaStatusBucket(idea);
+  const whoWhere = [idea.who, idea.where_text].filter(Boolean).join(' &middot; ');
+  const inspirationChips = (idea.inspiration || []).map((i) => `<span class="bf-style-badge">&#9654; ${escapeHtml(i.title)}</span>`).join('');
+  const pipelineAction = idea.linked_creative_asset_id
+    ? `<button type="button" class="btn btn-ghost btn-sm" onclick="event.stopPropagation();viewBfIdeaPipelineStatus(${idea.id})">View Pipeline Status &rarr;</button>`
+    : `<button type="button" class="btn btn-primary btn-sm" onclick="event.stopPropagation();sendBfIdeaToPipeline(${idea.id})" ${idea.promotion_stage_id ? '' : 'disabled title="Assign a Stage first"'}>Send to Pipeline &rarr;</button>`;
+  return `
+    <div class="cd-card bf-idea-card" onclick="openBfIdeaModal(${idea.id})">
+      <div class="bf-idea-badges">
+        ${idea.stage_name ? `<span class="bf-stage-badge">${escapeHtml(idea.stage_name.replace(/ Ads$/, ''))}</span>` : ''}
+        ${idea.style_name ? `<span class="bf-style-badge">${escapeHtml(idea.style_name)}</span>` : ''}
+        <span class="bf-status-badge ${bucket}">${BF_STATUS_LABELS[bucket]}</span>
+      </div>
+      <div class="cd-card-name">${escapeHtml(idea.title)}</div>
+      ${idea.production_stage !== 'planned' ? `<div class="hint">${escapeHtml(idea.production_stage_label)}</div>` : ''}
+      ${whoWhere ? `<div class="bf-idea-meta-row">${whoWhere}</div>` : ''}
+      ${idea.concept_script ? `<div class="bf-idea-script">${escapeHtml(idea.concept_script)}</div>` : ''}
+      ${inspirationChips ? `<div class="bf-idea-badges">${inspirationChips}</div>` : ''}
+      <div class="bf-idea-actions">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openBfIdeaModal(${idea.id})">Edit</button>
+        ${pipelineAction}
+      </div>
+    </div>`;
+}
+
+function renderBfIdeasGrid() {
+  const ideas = state.blackFriday.ideas;
+  document.getElementById('bf-ideas-grid').innerHTML = ideas.length
+    ? ideas.map(bfIdeaCardHtml).join('')
+    : '<div class="attention-empty">No creative ideas logged yet -- click + New Idea to add the first one.</div>';
+}
+
+function bfIdeaFindById(id) {
+  return state.blackFriday.ideas.find((i) => i.id === id) || null;
+}
+
+function openBfIdeaModal(id) {
+  const idea = id ? bfIdeaFindById(id) : null;
+  state.blackFriday.editingIdeaId = id || null;
+  document.getElementById('bf-idea-modal-title').textContent = idea ? 'Edit Creative Idea' : 'New Creative Idea';
+  document.getElementById('bf-idea-title').value = idea ? idea.title : '';
+  document.getElementById('bf-idea-stage').innerHTML = bfStageOptionsHtml(idea ? idea.promotion_stage_id : '');
+  document.getElementById('bf-idea-style').innerHTML = bfStyleOptionsHtml(idea ? idea.creative_style_id : '');
+  document.getElementById('bf-idea-who').value = (idea && idea.who) || '';
+  document.getElementById('bf-idea-where').value = (idea && idea.where_text) || '';
+  document.getElementById('bf-idea-script').value = (idea && idea.concept_script) || '';
+  document.getElementById('bf-idea-need').value = (idea && idea.need_text) || '';
+  document.getElementById('bf-idea-reference-note').value = (idea && idea.reference_note) || '';
+  document.getElementById('bf-idea-delete-btn').style.display = idea ? '' : 'none';
+  document.getElementById('bf-idea-more').style.display = 'none';
+  document.getElementById('bf-idea-more-toggle').textContent = '+ More details (Need, Inspo notes)';
+  renderBfIdeaInspirationList();
+  openModal('bf-idea-modal');
+}
+
+function toggleBfIdeaMore() {
+  const el = document.getElementById('bf-idea-more');
+  const isOpen = el.style.display !== 'none';
+  el.style.display = isOpen ? 'none' : '';
+  document.getElementById('bf-idea-more-toggle').textContent = isOpen ? '+ More details (Need, Inspo notes)' : '− Hide details';
+}
+
+function renderBfIdeaInspirationList() {
+  const idea = state.blackFriday.editingIdeaId ? bfIdeaFindById(state.blackFriday.editingIdeaId) : null;
+  const list = (idea && idea.inspiration) || [];
+  document.getElementById('bf-idea-inspiration-list').innerHTML = list.length
+    ? list.map((i) => `
+        <div class="bf-insp-pick-row">
+          <span>&#9654; ${escapeHtml(i.title)}${i.campaign_name ? ` <span class="hint">(${escapeHtml(i.campaign_name)})</span>` : ''}</span>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="unlinkBfInspiration(${idea.id}, ${i.id})">Unlink</button>
+        </div>`).join('')
+    : '';
+}
+
+async function saveBfIdea() {
+  const title = document.getElementById('bf-idea-title').value.trim();
+  if (!title) return toast('Creative Idea is required', true);
+  const body = {
+    title,
+    promotion_stage_id: document.getElementById('bf-idea-stage').value ? Number(document.getElementById('bf-idea-stage').value) : null,
+    creative_style_id: document.getElementById('bf-idea-style').value ? Number(document.getElementById('bf-idea-style').value) : null,
+    who: document.getElementById('bf-idea-who').value.trim(),
+    where_text: document.getElementById('bf-idea-where').value.trim(),
+    concept_script: document.getElementById('bf-idea-script').value.trim(),
+    need_text: document.getElementById('bf-idea-need').value.trim(),
+    reference_note: document.getElementById('bf-idea-reference-note').value.trim(),
+  };
+  try {
+    if (state.blackFriday.editingIdeaId) {
+      await api(`/promotion-creative/ideas/${state.blackFriday.editingIdeaId}`, { method: 'PATCH', body: JSON.stringify(body) });
+    } else {
+      await api(`/promotion-creative/${state.currentPromotionId}/ideas`, { method: 'POST', body: JSON.stringify(body) });
+    }
+    closeModal('bf-idea-modal');
+    toast('Saved');
+    await loadBfIdeas();
+    await initBfProgressRefreshOnly();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function deleteBfIdeaFlow() {
+  const id = state.blackFriday.editingIdeaId;
+  if (!id) return;
+  if (!(await confirmDialog('Delete this Creative Idea? The linked pipeline record (if any) is kept -- only this planning record is removed.'))) return;
+  try {
+    await api(`/promotion-creative/ideas/${id}`, { method: 'DELETE' });
+    closeModal('bf-idea-modal');
+    toast('Idea deleted');
+    await loadBfIdeas();
+    await initBfProgressRefreshOnly();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// Refreshes just the progress numbers (not the whole page) after an idea
+// changes -- cheap, keeps the top-of-page counters in sync with whatever
+// was just added/edited/sent to pipeline.
+async function initBfProgressRefreshOnly() {
+  if (!state.currentPromotionId) return;
+  try {
+    state.blackFriday.progress = await api(`/promotion-creative/${state.currentPromotionId}/progress`);
+    renderBfProgressSection();
+  } catch (e) { /* non-fatal */ }
+}
+
+async function sendBfIdeaToPipeline(id) {
+  try {
+    const result = await api(`/promotion-creative/ideas/${id}/send-to-pipeline`, { method: 'POST' });
+    toast(result.already_linked ? 'Already in the pipeline' : 'Sent to the pipeline');
+    await loadBfIdeas();
+    await initBfProgressRefreshOnly();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// A full deep-link into whichever of Concept Dev/Tuesday Review/Shooting/
+// Editing/Final Approval a linked concept currently sits in would need
+// separate plumbing for each (different week context, different modal) --
+// out of scope for this pass. Concept Dev's own standalone workspace
+// already renders a decided concept read-only regardless of how far past
+// it the pipeline has moved, so that's the one universal "view it"
+// action; anything further along just tells the team which tab to check
+// (the idea card's own stage badge already makes that obvious at a glance).
+function viewBfIdeaPipelineStatus(id) {
+  const idea = bfIdeaFindById(id);
+  if (!idea || !idea.linked_creative_asset_id) return;
+  if (idea.production_stage === 'concept_development' || idea.production_stage === 'tuesday_review') {
+    switchTab('concept-dev');
+    openConceptDevProductStandalone(idea.linked_creative_asset_id);
+  } else {
+    toast(`Currently in ${idea.production_stage_label} -- check the ${idea.production_stage_label} tab`);
+  }
+}
+
+// ---------------------------------------------------------------------
+// Inspiration Library / Previous Winning Ads (item 5/6 of the brief)
+// ---------------------------------------------------------------------
+async function loadBfInspiration() {
+  try {
+    const result = await api('/promotion-creative/inspiration');
+    state.blackFriday.inspiration = result.inspiration;
+    document.getElementById('bf-count-inspiration').textContent = `(${result.inspiration.length})`;
+    renderBfInspirationGrid();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// Provider-aware preview detection (item 6): only YouTube/Vimeo/a direct
+// video file are ever treated as embeddable/playable-in-app -- each is a
+// plain, official, key-free embed (or, for a direct file, the exact same
+// URL a link would already point at, played natively) with no
+// CORS/breakage risk. TikTok/Instagram/anything else deliberately never
+// gets a play button, same "don't attempt a preview that can silently
+// break" rule the existing YouTube-only reference thumbnails already use
+// elsewhere in this app -- they get a clean placeholder + Open Original
+// instead. Never downloads/re-hosts anything.
+function bfVideoPreviewInfo(url) {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^www\./, '');
+    if (host.includes('youtube.com') || host === 'youtu.be') {
+      let id = null;
+      if (host === 'youtu.be') id = u.pathname.slice(1);
+      else if (u.pathname === '/watch') id = u.searchParams.get('v');
+      else if (u.pathname.startsWith('/shorts/') || u.pathname.startsWith('/embed/')) id = u.pathname.split('/')[2];
+      if (!id) return { platform: 'YouTube', embeddable: false };
+      return { platform: 'YouTube', embeddable: true, embedUrl: `https://www.youtube.com/embed/${id}`, thumbnailUrl: `https://img.youtube.com/vi/${id}/hqdefault.jpg`, kind: 'iframe' };
+    }
+    if (host.includes('vimeo.com')) {
+      const match = u.pathname.match(/(\d{6,})/);
+      if (!match) return { platform: 'Vimeo', embeddable: false };
+      return { platform: 'Vimeo', embeddable: true, embedUrl: `https://player.vimeo.com/video/${match[1]}`, thumbnailUrl: null, kind: 'iframe' };
+    }
+    if (/\.(mp4|webm|mov)$/i.test(u.pathname)) {
+      return { platform: 'Video file', embeddable: true, embedUrl: url, thumbnailUrl: null, kind: 'video' };
+    }
+    if (host.includes('tiktok.com')) return { platform: 'TikTok', embeddable: false };
+    if (host.includes('instagram.com')) return { platform: 'Instagram', embeddable: false };
+    return { platform: host, embeddable: false };
+  } catch {
+    return null;
+  }
+}
+
+function bfInspirationVisualHtml(insp) {
+  const info = bfVideoPreviewInfo(insp.video_url);
+  if (!info) {
+    return `<div class="bf-insp-card-visual"><div class="bf-insp-placeholder"><span class="bf-insp-placeholder-icon">🖼</span>No link yet</div></div>`;
+  }
+  if (!info.embeddable) {
+    return `<div class="bf-insp-card-visual"><div class="bf-insp-placeholder"><span class="bf-insp-placeholder-icon">🔗</span>${escapeHtml(info.platform)}</div></div>`;
+  }
+  const thumb = info.thumbnailUrl
+    ? `<img src="${escapeHtml(info.thumbnailUrl)}" alt="" onerror="this.remove()">`
+    : '';
+  const safeUrl = escapeHtml(insp.video_url).replace(/'/g, '&#39;');
+  const safeTitle = escapeHtml(insp.title).replace(/'/g, '&#39;');
+  return `
+    <div class="bf-insp-card-visual">
+      ${thumb}
+      <button type="button" class="bf-insp-play-btn" onclick="event.stopPropagation();openBfVideoModal('${safeUrl}', '${safeTitle}')">
+        <span class="bf-insp-play-icon">&#9658;</span>
+      </button>
+    </div>`;
+}
+
+function openBfVideoModal(url, title) {
+  const info = bfVideoPreviewInfo(url);
+  if (!info || !info.embeddable) return;
+  document.getElementById('bf-video-modal-title').textContent = title || 'Preview';
+  const body = document.getElementById('bf-video-modal-body');
+  body.innerHTML = info.kind === 'video'
+    ? `<video src="${escapeHtml(info.embedUrl)}" controls autoplay></video>`
+    : `<iframe src="${escapeHtml(info.embedUrl)}" allow="autoplay; fullscreen" allowfullscreen></iframe>`;
+  openModal('bf-video-modal');
+}
+
+function closeBfVideoModal() {
+  document.getElementById('bf-video-modal-body').innerHTML = '';
+  closeModal('bf-video-modal');
+}
+
+function bfInspirationCardHtml(insp) {
+  return `
+    <div class="cd-card bf-idea-card">
+      ${bfInspirationVisualHtml(insp)}
+      <div class="cd-card-name">${escapeHtml(insp.title)}</div>
+      <div class="bf-idea-badges">
+        ${insp.campaign_name ? `<span class="bf-stage-badge">${escapeHtml(insp.campaign_name)}</span>` : ''}
+        ${insp.style_name ? `<span class="bf-style-badge">${escapeHtml(insp.style_name)}</span>` : ''}
+      </div>
+      ${insp.notes ? `<div class="bf-idea-script">${escapeHtml(insp.notes)}</div>` : ''}
+      <div class="bf-idea-actions">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="openBfInspirationModal(${insp.id})">Edit</button>
+        ${insp.video_url ? `<a href="${escapeHtml(insp.video_url)}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Open Original &#8599;</a>` : ''}
+      </div>
+    </div>`;
+}
+
+function renderBfInspirationGrid() {
+  const items = state.blackFriday.inspiration;
+  document.getElementById('bf-inspiration-grid').innerHTML = items.length
+    ? items.map(bfInspirationCardHtml).join('')
+    : '<div class="attention-empty">No previous winning ads logged yet -- click + New Reference to add the first one.</div>';
+}
+
+function bfInspirationFindById(id) {
+  return state.blackFriday.inspiration.find((i) => i.id === id) || null;
+}
+
+function openBfInspirationModal(id) {
+  const insp = id ? bfInspirationFindById(id) : null;
+  state.blackFriday.editingInspirationId = id || null;
+  document.getElementById('bf-inspiration-modal-title').textContent = insp ? 'Edit Reference' : 'New Reference';
+  document.getElementById('bf-insp-title').value = insp ? insp.title : '';
+  document.getElementById('bf-insp-campaign').value = (insp && insp.campaign_name) || '';
+  document.getElementById('bf-insp-style').innerHTML = bfStyleOptionsHtml(insp ? insp.creative_style_id : '');
+  document.getElementById('bf-insp-url').value = (insp && insp.video_url) || '';
+  document.getElementById('bf-insp-notes').value = (insp && insp.notes) || '';
+  document.getElementById('bf-insp-delete-btn').style.display = insp ? '' : 'none';
+  openModal('bf-inspiration-modal');
+}
+
+async function saveBfInspiration() {
+  const title = document.getElementById('bf-insp-title').value.trim();
+  if (!title) return toast('Ad Name is required', true);
+  const styleId = document.getElementById('bf-insp-style').value;
+  const style = styleId ? state.blackFriday.styles.find((s) => String(s.id) === styleId) : null;
+  const body = {
+    title,
+    campaign_name: document.getElementById('bf-insp-campaign').value.trim(),
+    creative_style_id: styleId ? Number(styleId) : null,
+    media_type: style ? style.media_type : null,
+    video_url: document.getElementById('bf-insp-url').value.trim(),
+    notes: document.getElementById('bf-insp-notes').value.trim(),
+  };
+  try {
+    if (state.blackFriday.editingInspirationId) {
+      await api(`/promotion-creative/inspiration/${state.blackFriday.editingInspirationId}`, { method: 'PATCH', body: JSON.stringify(body) });
+    } else {
+      await api('/promotion-creative/inspiration', { method: 'POST', body: JSON.stringify(body) });
+    }
+    closeModal('bf-inspiration-modal');
+    toast('Saved');
+    await loadBfInspiration();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function deleteBfInspirationFlow() {
+  const id = state.blackFriday.editingInspirationId;
+  if (!id) return;
+  if (!(await confirmDialog('Delete this reference? This only removes the historical record, never any live creative.'))) return;
+  try {
+    await api(`/promotion-creative/inspiration/${id}`, { method: 'DELETE' });
+    closeModal('bf-inspiration-modal');
+    toast('Reference deleted');
+    await loadBfInspiration();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function openBfInspirationPicker() {
+  if (!state.blackFriday.inspiration.length) await loadBfInspiration();
+  const idea = state.blackFriday.editingIdeaId ? bfIdeaFindById(state.blackFriday.editingIdeaId) : null;
+  const linkedIds = new Set((idea && idea.inspiration || []).map((i) => i.id));
+  const rows = state.blackFriday.inspiration
+    .filter((i) => !linkedIds.has(i.id))
+    .map((i) => `
+      <div class="bf-insp-pick-row">
+        <span>${escapeHtml(i.title)}${i.campaign_name ? ` <span class="hint">(${escapeHtml(i.campaign_name)})</span>` : ''}</span>
+        <button type="button" class="btn btn-primary btn-sm" onclick="linkBfInspiration(${i.id})">Link</button>
+      </div>`).join('');
+  document.getElementById('bf-inspiration-picker-list').innerHTML = rows || '<div class="attention-empty">No references yet -- add one from the Inspiration Library tab first.</div>';
+  openModal('bf-inspiration-picker-modal');
+}
+
+async function linkBfInspiration(inspirationId) {
+  const ideaId = state.blackFriday.editingIdeaId;
+  if (!ideaId) return;
+  try {
+    await api(`/promotion-creative/ideas/${ideaId}/inspiration`, { method: 'POST', body: JSON.stringify({ creative_inspiration_id: inspirationId }) });
+    await loadBfIdeas();
+    renderBfIdeaInspirationList();
+    closeModal('bf-inspiration-picker-modal');
+    toast('Linked');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function unlinkBfInspiration(ideaId, inspirationId) {
+  try {
+    await api(`/promotion-creative/ideas/${ideaId}/inspiration/${inspirationId}`, { method: 'DELETE' });
+    await loadBfIdeas();
+    renderBfIdeaInspirationList();
   } catch (e) {
     toast(e.message, true);
   }

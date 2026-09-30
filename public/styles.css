@@ -1998,6 +1998,62 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .as-readiness-item.missing{color:var(--text-muted);}
 .as-card-batch{font-size:11px;font-weight:700;color:var(--teal-dark);background:var(--teal-light);border-radius:var(--r-pill);padding:2px 8px;display:inline-block;margin-bottom:5px;}
 
+/* Black Friday creative dashboard -- compact stage totals row + a
+   collapsible per-style breakdown (progressive disclosure: the matrix
+   itself only renders once a stage is expanded), so the default view is
+   a handful of numbers, not a spreadsheet. */
+.bf-progress-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:16px 18px;margin-bottom:16px;}
+.bf-progress-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px;}
+.bf-progress-title{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);}
+.bf-progress-total{font-size:13px;font-weight:700;color:var(--text);}
+.bf-stage-totals-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:10px;}
+.bf-stage-total-tile{background:var(--surface2);border-radius:var(--r);padding:9px 11px;cursor:pointer;}
+.bf-stage-total-tile:hover{background:var(--teal-light);}
+.bf-stage-total-name{font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:3px;}
+.bf-stage-total-nums{font-size:15px;font-weight:800;color:var(--text);}
+.bf-stage-total-nums small{font-size:11px;font-weight:600;color:var(--text-muted);}
+.bf-stage-total-bar{background:var(--border);border-radius:var(--r-pill);height:5px;margin-top:6px;overflow:hidden;}
+.bf-stage-total-bar-fill{height:100%;background:var(--teal);}
+.bf-style-matrix{border-top:1px solid var(--border);padding-top:10px;margin-top:4px;}
+.bf-style-matrix-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;font-size:12.5px;border-bottom:1px solid var(--border);}
+.bf-style-matrix-row:last-child{border-bottom:none;}
+.bf-style-matrix-name{font-weight:600;color:var(--text);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.bf-style-matrix-cells{display:flex;gap:14px;flex-shrink:0;}
+.bf-style-matrix-cell{font-size:11.5px;color:var(--text-secondary);white-space:nowrap;}
+.bf-style-matrix-cell strong{color:var(--text);}
+.bf-style-matrix-cell.needs strong{color:var(--amber);}
+.bf-style-matrix-cell.gap-label{color:var(--red);font-weight:700;}
+
+/* Black Friday Idea/Inspiration cards -- reuse .cd-card's grid/spacing,
+   add their own compact meta rows per the brief's suggested hierarchy. */
+.bf-idea-card{cursor:default;}
+.bf-idea-badges{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;}
+.bf-stage-badge{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;padding:2px 8px;border-radius:var(--r-pill);background:var(--teal-light);color:var(--teal-dark);}
+.bf-style-badge{font-size:10.5px;font-weight:600;padding:2px 8px;border-radius:var(--r-pill);background:var(--surface2);color:var(--text-secondary);}
+.bf-status-badge{font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:var(--r-pill);}
+.bf-status-badge.planned{background:var(--surface2);color:var(--text-muted);}
+.bf-status-badge.in-production{background:var(--amber-light);color:var(--amber);}
+.bf-status-badge.completed{background:var(--green-light);color:var(--green);}
+.bf-idea-meta-row{font-size:12px;color:var(--text-secondary);margin-bottom:4px;}
+.bf-idea-script{font-size:12.5px;color:var(--text);white-space:pre-wrap;margin:6px 0;max-height:60px;overflow:hidden;}
+.bf-idea-actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;}
+
+/* Provider-aware video preview (item 6) -- a thumbnail + Play overlay when
+   embeddable, otherwise just a platform placeholder; Open Original is
+   always present regardless. */
+.bf-insp-card-visual{position:relative;border-radius:var(--r);overflow:hidden;background:var(--surface2);height:120px;display:flex;align-items:center;justify-content:center;margin-bottom:8px;}
+.bf-insp-card-visual img{width:100%;height:100%;object-fit:cover;}
+.bf-insp-play-btn{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.15);border:none;cursor:pointer;color:white;font-size:13px;font-weight:700;}
+.bf-insp-play-btn:hover{background:rgba(0,0,0,0.3);}
+.bf-insp-play-icon{width:44px;height:44px;border-radius:50%;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;font-size:16px;}
+.bf-insp-placeholder{display:flex;flex-direction:column;align-items:center;gap:4px;color:var(--text-muted);font-size:12px;font-weight:600;}
+.bf-insp-placeholder-icon{font-size:24px;}
+.bf-video-modal{width:70vw;max-width:900px;}
+.bf-video-modal .modal-body{padding:0;background:black;}
+.bf-video-modal iframe,.bf-video-modal video{width:100%;aspect-ratio:16/9;display:block;border:none;}
+.bf-insp-pick-row{display:flex;justify-content:space-between;align-items:center;padding:8px 4px;border-bottom:1px solid var(--border);font-size:13px;}
+.bf-insp-pick-row:last-child{border-bottom:none;}
+
 /* Today's worklist -- a plain vertical list, not the week grid's columns,
    since there's only ever one day's worth of cards here. */
 .shoot-today-list{display:flex;flex-direction:column;gap:10px;}
