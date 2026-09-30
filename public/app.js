@@ -11244,6 +11244,7 @@ async function initBfSectionForPromotion(p) {
     document.getElementById('bf-legacy-stages-panel').style.display = '';
     document.getElementById('bf-panel-ideas').style.display = 'none';
     document.getElementById('bf-panel-inspiration').style.display = 'none';
+    document.getElementById('bf-panel-plan').style.display = 'none';
     return;
   }
   try {
@@ -11267,6 +11268,9 @@ async function initBfSectionForPromotion(p) {
       document.getElementById('bf-panel-stages').style.display = '';
       document.getElementById('bf-stage-workspace').style.display = 'none';
       document.getElementById('bf-legacy-stages-panel').style.display = '';
+      document.getElementById('bf-panel-ideas').style.display = 'none';
+      document.getElementById('bf-panel-inspiration').style.display = 'none';
+      document.getElementById('bf-panel-plan').style.display = 'none';
       return;
     }
     state.blackFriday.progress = progress;
@@ -11495,9 +11499,14 @@ function bfExecutionsForCell(stageId, styleId) {
 }
 
 // One compact row per real execution behind a Target/Planned count --
-// title, Proven Winner vs New Concept (only ever from a real linked
-// inspiration relationship), current pipeline status, who's on it, and its
-// historical reference where one exists. A view of existing records only.
+// title, "Recreation" vs "New Concept" (only ever from a real linked
+// inspiration relationship -- never implies the 2026 piece itself is
+// proven/filmed), the execution's OWN current production status (derived
+// solely from its linked production record, never from the historical
+// reference), who's on it, and which historical winner inspired it where
+// one exists. A view of existing records only -- see the follow-up
+// brief's core distinction between a historical reference and a 2026
+// production status.
 function bfCellExecutionRowHtml({ idea, ex }) {
   const isProven = (idea.inspiration || []).length > 0;
   const winner = isProven ? idea.inspiration[0] : null;
@@ -11506,17 +11515,16 @@ function bfCellExecutionRowHtml({ idea, ex }) {
     <div class="bf-cell-exec-row">
       <div class="bf-cell-exec-main">
         <span class="bf-cell-exec-title">${escapeHtml(idea.title)}</span>
-        <span class="bf-style-badge">${isProven ? '&#9733; Proven Winner' : 'New Concept'}</span>
+        <span class="bf-style-badge">${isProven ? 'Recreation' : 'New Concept'}</span>
       </div>
       <div class="bf-cell-exec-meta">
-        <span class="bf-status-badge ${bucket}">${BF_STATUS_LABELS[bucket]}</span>
-        <span>${escapeHtml(ex.production_stage_label)}</span>
+        <span class="bf-status-badge ${bucket}">Status: ${escapeHtml(ex.production_stage_label)}</span>
         ${idea.who ? `<span>${escapeHtml(idea.who)}</span>` : ''}
-        ${winner ? `<span>from ${escapeHtml(winner.campaign_name || winner.title)}</span>` : ''}
+        ${winner ? `<span>Inspired by ${escapeHtml(winner.campaign_name || winner.title)}</span>` : ''}
       </div>
       <div class="bf-cell-exec-actions">
         <button type="button" class="link-btn" onclick="event.stopPropagation();openBfIdeaModal(${idea.id})">View idea</button>
-        ${ex.effective_creative_asset_id ? `<button type="button" class="link-btn" onclick="event.stopPropagation();viewBfExecutionPipelineStatus(${idea.id}, ${ex.id})">View Pipeline &rarr;</button>` : ''}
+        ${ex.effective_creative_asset_id ? `<button type="button" class="link-btn" onclick="event.stopPropagation();viewBfExecutionPipelineStatus(${idea.id}, ${ex.id})">${escapeHtml(ex.production_stage_label)} &rarr;</button>` : ''}
       </div>
     </div>`;
 }
@@ -11559,6 +11567,10 @@ function openBfAddCreativeModal(stageId, styleId, styleName) {
   state.blackFriday.addCreativeContext = { stageId, styleId, styleName };
   state.blackFriday.recreateShowAll = false;
   document.getElementById('bf-add-creative-new-title').value = '';
+  document.getElementById('bf-add-creative-new-concept').value = '';
+  document.getElementById('bf-add-creative-new-who').value = '';
+  document.getElementById('bf-add-creative-new-where').value = '';
+  document.getElementById('bf-add-creative-new-reference').value = '';
   document.getElementById('bf-recreate-search').value = '';
   const pickerWrap = document.getElementById('bf-add-creative-style-picker-wrap');
   if (styleId) {
@@ -11605,27 +11617,47 @@ function chooseBfAddCreativeRecreate() {
   renderBfRecreatePicker();
 }
 
-// New Concept: create the master idea + this one execution, then send it
-// straight into the normal Concept Development pipeline (same
-// insertCreativeAsset/shoot_plan_items path every other concept uses) --
-// no new/parallel workflow invented.
-async function saveBfNewConceptFromWorkspace() {
+// New Concept: always creates exactly one master idea + one stage
+// execution -- that alone is "Save as Planned" (follow-up brief, Part 4):
+// it counts toward Planned but creates no creative_assets/shoot_plan_items
+// row. Only when the team deliberately chooses "Save & Send to Concept
+// Development" does the SAME already-existing send-to-pipeline call run
+// afterward, using the SAME insertCreativeAsset/shoot_plan_items path
+// every other concept uses -- never a second/parallel workflow, and never
+// two master ideas or two executions for the one click.
+let bfSavingNewConcept = false;
+async function saveBfNewConceptFromWorkspace(sendToProduction) {
+  if (bfSavingNewConcept) return; // guards against a double-click creating two ideas
   const ctx = state.blackFriday.addCreativeContext;
   const title = document.getElementById('bf-add-creative-new-title').value.trim();
   if (!title) return toast('Creative Idea is required', true);
   const style = state.blackFriday.styles.find((s) => s.id === ctx.styleId);
+  const concept_script = document.getElementById('bf-add-creative-new-concept').value.trim();
+  const who = document.getElementById('bf-add-creative-new-who').value.trim();
+  const where_text = document.getElementById('bf-add-creative-new-where').value.trim();
+  const reference_note = document.getElementById('bf-add-creative-new-reference').value.trim();
+  bfSavingNewConcept = true;
   try {
     const idea = await api(`/promotion-creative/${state.currentPromotionId}/ideas`, {
       method: 'POST',
-      body: JSON.stringify({ title, media_type: style ? style.media_type : 'video', stage_ids: [ctx.stageId], creative_style_id: ctx.styleId }),
+      body: JSON.stringify({
+        title, media_type: style ? style.media_type : 'video', stage_ids: [ctx.stageId], creative_style_id: ctx.styleId,
+        concept_script: concept_script || undefined, who: who || undefined, where_text: where_text || undefined, reference_note: reference_note || undefined,
+      }),
     });
-    await api(`/promotion-creative/ideas/${idea.id}/send-to-pipeline`, { method: 'POST' });
+    if (sendToProduction) {
+      await api(`/promotion-creative/ideas/${idea.id}/send-to-pipeline`, { method: 'POST' });
+      toast('Saved and sent to Concept Development');
+    } else {
+      toast('Saved as Planned');
+    }
     closeModal('bf-add-creative-modal');
-    toast('Sent to Concept Development');
     await loadBfIdeas();
     await initBfProgressRefreshOnly();
   } catch (e) {
     toast(e.message, true);
+  } finally {
+    bfSavingNewConcept = false;
   }
 }
 
@@ -11748,28 +11780,39 @@ function bfRecreateHistRowHtml(i, showTitle) {
     </div>`;
 }
 
+// Picking a proven winner only ever PLANS the 2026 recreation (follow-up
+// brief, Part 7) -- it never sends anything into production. The team
+// deliberately does that afterward from the idea's own "Send to Concept
+// Development" action, same as any other planned idea.
+let bfRecreateBusy = false;
 async function recreateFromExistingIdea(ideaId) {
+  if (bfRecreateBusy) return;
   const ctx = state.blackFriday.addCreativeContext;
+  bfRecreateBusy = true;
   try {
     await api(`/promotion-creative/ideas/${ideaId}/executions`, {
       method: 'POST',
       body: JSON.stringify({ promotion_stage_id: ctx.stageId, creative_style_id: ctx.styleId }),
     });
     closeModal('bf-add-creative-modal');
-    toast('Stage added -- review before sending to pipeline');
+    toast('Planned -- review before sending to Concept Development');
     await loadBfIdeas();
     await initBfProgressRefreshOnly();
     openBfIdeaModal(ideaId);
   } catch (e) {
     toast(e.message, true);
+  } finally {
+    bfRecreateBusy = false;
   }
 }
 
 async function recreateFromHistorical(inspirationId) {
+  if (bfRecreateBusy) return;
   const ctx = state.blackFriday.addCreativeContext;
   const insp = state.blackFriday.inspiration.find((i) => i.id === inspirationId);
   if (!insp) return;
   const style = state.blackFriday.styles.find((s) => s.id === ctx.styleId);
+  bfRecreateBusy = true;
   try {
     const idea = await api(`/promotion-creative/${state.currentPromotionId}/ideas`, {
       method: 'POST',
@@ -11780,12 +11823,14 @@ async function recreateFromHistorical(inspirationId) {
     });
     await api(`/promotion-creative/ideas/${idea.id}/inspiration`, { method: 'POST', body: JSON.stringify({ creative_inspiration_id: inspirationId }) });
     closeModal('bf-add-creative-modal');
-    toast('Recreation added -- review before sending to pipeline');
+    toast('Planned -- review before sending to Concept Development');
     await loadBfIdeas();
     await initBfProgressRefreshOnly();
     openBfIdeaModal(idea.id);
   } catch (e) {
     toast(e.message, true);
+  } finally {
+    bfRecreateBusy = false;
   }
 }
 
@@ -11825,7 +11870,27 @@ function bfExecStatusBucket(exec) {
   if (exec.production_stage === 'completed') return 'completed';
   return 'in-production';
 }
-const BF_STATUS_LABELS = { planned: 'PLANNED', 'in-production': 'IN PRODUCTION', completed: 'COMPLETED' };
+
+// Same 7-rung ladder the backend's deriveIdeaStage() ladders every
+// execution into -- used here purely to pick the single FURTHEST-ADVANCED
+// status across a master idea's executions for one clear "2026 Status"
+// line on the card (follow-up brief, Part 3). Never derived from a linked
+// historical winner -- only ever from the idea's own real production
+// record(s), so "Planned" never silently means "filmed" or "completed".
+const BF_PROD_STAGE_ORDER = ['planned', 'concept_development', 'tuesday_review', 'scheduled_to_shoot', 'editing', 'final_approval', 'completed'];
+function bfIdeaOverallStatus(idea) {
+  const executions = idea.executions || [];
+  let best = { key: 'planned', label: 'Planned' };
+  let bestIdx = 0;
+  for (const ex of executions) {
+    const idx = BF_PROD_STAGE_ORDER.indexOf(ex.production_stage);
+    if (idx > bestIdx) {
+      bestIdx = idx;
+      best = { key: ex.production_stage, label: ex.production_stage_label };
+    }
+  }
+  return best;
+}
 const BF_STAGE_SHORT = {
   'Hype Ads': 'Hype', 'Sale Live Ads': 'Sale Live', 'Mid Sale Offers Ads': 'Mid Sale', 'Last Chance / Ends Today': 'Last Chance',
 };
@@ -11874,9 +11939,16 @@ function bfIdeaCardHtml(idea) {
     .map((ex) => `<span class="bf-stage-badge ${bfExecStatusBucket(ex)}">${escapeHtml(bfStageShortName(ex.stage_name))}</span>`)
     .join('');
   const expanded = state.blackFriday.expandedIdeaId === idea.id;
-  const pipelineAction = idea.linked_creative_asset_id
-    ? `<button type="button" class="btn btn-ghost btn-sm" onclick="event.stopPropagation();viewBfIdeaPipelineStatus(${idea.id})">View Pipeline Status &rarr;</button>`
-    : `<button type="button" class="btn btn-primary btn-sm" onclick="event.stopPropagation();sendBfIdeaToPipeline(${idea.id})" ${executions.length ? '' : 'disabled title="Add a Black Friday stage first"'}>Send to Pipeline &rarr;</button>`;
+  // The furthest-advanced real production status across this idea's
+  // executions -- "Planned" until an actual creative_assets record exists,
+  // never inferred from a linked historical winner (follow-up brief, Part
+  // 1/3). Once ANY execution has moved, the card shows that state instead
+  // of repeating the same "send it" call-to-action.
+  const overall = bfIdeaOverallStatus(idea);
+  const inProduction = overall.key !== 'planned';
+  const pipelineAction = inProduction
+    ? `<button type="button" class="btn btn-ghost btn-sm" onclick="event.stopPropagation();viewBfIdeaPipelineStatus(${idea.id})">${escapeHtml(overall.label)} &rarr;</button>`
+    : `<button type="button" class="btn btn-primary btn-sm" onclick="event.stopPropagation();sendBfIdeaToPipeline(${idea.id})" ${executions.length ? '' : 'disabled title="Add a Black Friday stage first"'}>Send to Concept Development &rarr;</button>`;
 
   const execDetail = expanded && executions.length ? `
     <div class="bf-idea-executions">
@@ -11884,27 +11956,28 @@ function bfIdeaCardHtml(idea) {
         <div class="bf-idea-execution-row">
           <span class="bf-stage-badge ${bfExecStatusBucket(ex)}">${escapeHtml(bfStageShortName(ex.stage_name))}</span>
           <span class="bf-style-badge">${ex.style_name ? escapeHtml(ex.style_name) : 'Needs Classification'}</span>
-          <span class="bf-status-badge ${bfExecStatusBucket(ex)}">${BF_STATUS_LABELS[bfExecStatusBucket(ex)]}</span>
-          <span class="hint">${escapeHtml(ex.production_stage_label)}</span>
+          <span class="bf-status-badge ${bfExecStatusBucket(ex)}">Status: ${escapeHtml(ex.production_stage_label)}</span>
         </div>`).join('')}
     </div>` : '';
 
-  // "Proven Winner" is only ever inferred from a REAL linked inspiration
-  // relationship (follow-up brief, item 10) -- never guessed from title
-  // similarity, so a badge here always means an actual historical record
-  // is attached (visible just below in the Previous Winners block).
-  const isProvenWinner = (idea.inspiration || []).length > 0;
+  // A "Recreation" badge is only ever shown when a REAL historical
+  // inspiration relationship exists (follow-up brief, Part 2) -- and even
+  // then it labels the 2026 idea as a planned recreation INSPIRED BY that
+  // reference, never as itself already a "Proven Winner". The historical
+  // records it's based on stay visible just below, clearly separate.
+  const isRecreation = (idea.inspiration || []).length > 0;
 
   return `
     <div class="cd-card bf-idea-card" onclick="toggleBfIdeaExpand(${idea.id})">
       <div class="bf-idea-badges">
         <span class="bf-style-badge">${idea.media_type === 'graphic' ? 'Graphic' : 'Video'}</span>
-        ${isProvenWinner ? '<span class="bf-proven-badge">&#9733; Proven Winner &middot; Recreate</span>' : ''}
+        ${isRecreation ? '<span class="bf-proven-badge">Recreation &middot; Proven Winner Reference</span>' : '<span class="bf-style-badge">New Concept</span>'}
         ${stageBadges}
       </div>
       <div class="cd-card-name">${escapeHtml(idea.title)}</div>
       ${whoWhere ? `<div class="bf-idea-meta-row">${whoWhere}</div>` : ''}
       ${idea.concept_script ? `<div class="bf-idea-script">${escapeHtml(idea.concept_script)}</div>` : ''}
+      <div class="bf-idea-meta-row bf-idea-2026-status">2026 Status: <strong>${escapeHtml(overall.label)}</strong></div>
       ${bfIdeaInspirationBlockHtml(idea)}
       ${execDetail}
       <div class="bf-idea-actions">
@@ -12121,14 +12194,19 @@ async function initBfProgressRefreshOnly() {
   } catch (e) { /* non-fatal */ }
 }
 
+let bfSendingToPipeline = false;
 async function sendBfIdeaToPipeline(id) {
+  if (bfSendingToPipeline) return;
+  bfSendingToPipeline = true;
   try {
     const result = await api(`/promotion-creative/ideas/${id}/send-to-pipeline`, { method: 'POST' });
-    toast(result.already_linked ? 'Already in the pipeline' : 'Sent to the pipeline');
+    toast(result.already_linked ? 'Already in Concept Development' : 'Sent to Concept Development');
     await loadBfIdeas();
     await initBfProgressRefreshOnly();
   } catch (e) {
     toast(e.message, true);
+  } finally {
+    bfSendingToPipeline = false;
   }
 }
 

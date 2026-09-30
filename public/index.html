@@ -3054,9 +3054,24 @@
         <label>Creative Idea<span class="cd-req-mark">*</span>
           <input type="text" id="bf-add-creative-new-title" placeholder="e.g. New Hype teaser">
         </label>
+        <label>Concept / What
+          <textarea id="bf-add-creative-new-concept" rows="2" placeholder="What's the idea?"></textarea>
+        </label>
+        <div class="promo-shoot-2col">
+          <label>Who
+            <input type="text" id="bf-add-creative-new-who" placeholder="e.g. Mark">
+          </label>
+          <label>Where
+            <input type="text" id="bf-add-creative-new-where" placeholder="e.g. Studio">
+          </label>
+        </div>
+        <label>Inspiration / Reference URL
+          <input type="text" id="bf-add-creative-new-reference" placeholder="https://...">
+        </label>
         <div class="modal-footer" style="padding:12px 0 0;">
           <button class="btn btn-ghost" onclick="showBfAddCreativePanel('chooser')">&larr; Back</button>
-          <button class="btn btn-primary" onclick="saveBfNewConceptFromWorkspace()">Create &amp; Send to Pipeline</button>
+          <button class="btn btn-ghost" onclick="saveBfNewConceptFromWorkspace(false)">Save as Planned</button>
+          <button class="btn btn-primary" onclick="saveBfNewConceptFromWorkspace(true)">Save &amp; Send to Concept Development</button>
         </div>
       </div>
       <div id="bf-add-creative-panel-recreate" style="display:none;">
