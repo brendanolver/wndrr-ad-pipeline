@@ -485,14 +485,33 @@
         </div>
 
         <div id="bf-panel-stages">
-          <div class="planning-section-header">
-            <div>
-              <h2>Campaign Stages</h2>
-              <span class="admin-note">Click a stage to see what's ready, planned, and still needed</span>
+          <!-- Black Friday's own Stage + Creative Style workspace -- the
+               primary Black Friday planning view (the creative-style
+               matrix is a guideline/minimum, never a cap or a set of
+               placeholder records -- see renderBfStageWorkspace). Only
+               shown for a Black Friday promotion that has a target matrix;
+               every other promotion still gets the plain generic panel
+               below, completely untouched. -->
+          <div id="bf-stage-workspace" style="display:none;">
+            <div class="planning-section-header">
+              <div>
+                <h2>Stage Workspace</h2>
+                <span class="admin-note">Targets are a planning guideline -- going over is good, not an error</span>
+              </div>
             </div>
-            <button type="button" class="btn btn-ghost btn-sm" id="new-stage-btn">+ Add Stage</button>
+            <div class="bf-stage-tabs" id="bf-stage-tabs"></div>
+            <div id="bf-stage-workspace-body"></div>
           </div>
-          <div id="promotion-stage-grid" class="coverage-grid"></div>
+          <div id="bf-legacy-stages-panel">
+            <div class="planning-section-header">
+              <div>
+                <h2>Campaign Stages</h2>
+                <span class="admin-note">Click a stage to see what's ready, planned, and still needed</span>
+              </div>
+              <button type="button" class="btn btn-ghost btn-sm" id="new-stage-btn">+ Add Stage</button>
+            </div>
+            <div id="promotion-stage-grid" class="coverage-grid"></div>
+          </div>
         </div>
 
         <div id="bf-panel-ideas" style="display:none;">
@@ -2975,6 +2994,51 @@
       <button class="modal-close" onclick="closeBfVideoModal()">&times;</button>
     </div>
     <div class="modal-body" id="bf-video-modal-body"></div>
+  </div>
+</div>
+
+<!-- Black Friday Stage Workspace's "+ Add Creative" -- New Concept vs
+     Recreate a Proven Winner (see the follow-up brief, items 10-12).
+     Promotion/Stage/Creative Style are always known from where the team
+     clicked, so neither path ever asks for them again. Three panels
+     swapped in place rather than three separate modals -- see
+     openBfAddCreativeModal/showBfAddCreativePanel in app.js. -->
+<div id="bf-add-creative-modal" class="modal-backdrop">
+  <div class="modal promo-chooser-modal">
+    <div class="modal-header">
+      <h3 id="bf-add-creative-title">Add Creative</h3>
+      <button class="modal-close" onclick="closeModal('bf-add-creative-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div id="bf-add-creative-panel-chooser">
+        <div class="hint">What are you adding?</div>
+        <div class="promo-chooser-options">
+          <button type="button" class="promo-chooser-card" onclick="chooseBfAddCreativeNew()">
+            <span class="promo-chooser-card-title">New Concept</span>
+            <span class="promo-chooser-card-desc">Develop a brand new creative idea</span>
+          </button>
+          <button type="button" class="promo-chooser-card" onclick="chooseBfAddCreativeRecreate()">
+            <span class="promo-chooser-card-title">Recreate a Proven Winner</span>
+            <span class="promo-chooser-card-desc">Adapt an existing idea or a previous winning ad</span>
+          </button>
+        </div>
+      </div>
+      <div id="bf-add-creative-panel-new" style="display:none;">
+        <label>Creative Idea<span class="cd-req-mark">*</span>
+          <input type="text" id="bf-add-creative-new-title" placeholder="e.g. New Hype teaser">
+        </label>
+        <div class="modal-footer" style="padding:12px 0 0;">
+          <button class="btn btn-ghost" onclick="showBfAddCreativePanel('chooser')">&larr; Back</button>
+          <button class="btn btn-primary" onclick="saveBfNewConceptFromWorkspace()">Create &amp; Send to Pipeline</button>
+        </div>
+      </div>
+      <div id="bf-add-creative-panel-recreate" style="display:none;">
+        <div id="bf-recreate-picker-list"></div>
+        <div class="modal-footer" style="padding:12px 0 0;">
+          <button class="btn btn-ghost" onclick="showBfAddCreativePanel('chooser')">&larr; Back</button>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 

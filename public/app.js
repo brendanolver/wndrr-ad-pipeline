@@ -119,7 +119,8 @@ let state = {
   // (not promotion-scoped) since both are shared reference lists.
   blackFriday: {
     activeSubtab: 'stages', progress: null, ideas: [], inspiration: [], styles: [],
-    editingIdeaId: null, editingInspirationId: null, expandedStyleMatrix: false, expandedIdeaId: null,
+    editingIdeaId: null, editingInspirationId: null, expandedIdeaId: null,
+    activeStageId: null, addCreativeContext: null,
   },
 };
 let dashboardWeekOffset = 0;
@@ -11205,14 +11206,21 @@ async function initBfSectionForPromotion(p) {
     progressSection.style.display = 'none';
     subtabs.style.display = 'none';
     document.getElementById('bf-panel-stages').style.display = '';
+    document.getElementById('bf-stage-workspace').style.display = 'none';
+    document.getElementById('bf-legacy-stages-panel').style.display = '';
     document.getElementById('bf-panel-ideas').style.display = 'none';
     document.getElementById('bf-panel-inspiration').style.display = 'none';
     return;
   }
   try {
+    // The Stage Workspace needs ideas+inspiration too (Needs Classification
+    // rows, Proven Winner detection, the Recreate picker) -- load everything
+    // once up front rather than only when the Creative Ideas tab is opened.
     const [progress] = await Promise.all([
       api(`/promotion-creative/${p.id}/progress`),
       loadBfStyles(),
+      loadBfIdeas(),
+      loadBfInspiration(),
     ]);
     // No target matrix defined for this occurrence (e.g. a future Black
     // Friday year with no matrix seeded yet) -- still a Black Friday
@@ -11222,12 +11230,21 @@ async function initBfSectionForPromotion(p) {
       progressSection.style.display = 'none';
       subtabs.style.display = 'none';
       document.getElementById('bf-panel-stages').style.display = '';
+      document.getElementById('bf-stage-workspace').style.display = 'none';
+      document.getElementById('bf-legacy-stages-panel').style.display = '';
       return;
     }
     state.blackFriday.progress = progress;
     progressSection.style.display = '';
     subtabs.style.display = '';
+    document.getElementById('bf-stage-workspace').style.display = '';
+    document.getElementById('bf-legacy-stages-panel').style.display = 'none';
+    const stages = (state.currentPromotion && state.currentPromotion.stages) || [];
+    if (!state.blackFriday.activeStageId || !stages.some((s) => s.id === state.blackFriday.activeStageId)) {
+      state.blackFriday.activeStageId = stages.length ? stages[0].id : null;
+    }
     renderBfProgressSection();
+    renderBfStageWorkspace();
     switchBfSubtab(state.blackFriday.activeSubtab, true);
   } catch (e) {
     toast(e.message, true);
@@ -11245,57 +11262,283 @@ function bfStyleOptionsHtml(selectedId) {
     .map((s) => `<option value="${s.id}" ${String(s.id) === String(selectedId) ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('');
 }
 
-// The prominent top-of-page numbers (item 2): overall stage totals always
-// visible; the per-style breakdown is progressive disclosure -- collapsed
-// by default, one line per style that actually has a requirement or a
-// planned idea, only showing the stage cells that apply to it (a style
-// with a 0/0 cell for a given stage never renders that cell at all).
+// The prominent top-of-page numbers (item 16 of the follow-up brief): 180
+// (and each stage's own slice of it) is a planning GUIDELINE/minimum, never
+// a hard cap -- going over is shown as a positive "+N above guideline", not
+// an error, and nothing here is ever phrased as an "X / Y" fraction once X
+// can exceed Y. The full creative-style breakdown now lives in the Stage
+// Workspace below (the primary working view, item 3) rather than behind a
+// "Show breakdown" toggle -- clicking a stage tile jumps straight there.
 function renderBfProgressSection() {
   const progress = state.blackFriday.progress;
   if (!progress) return;
   const grand = progress.grand_total;
+  const grandOver = Math.max(0, grand.planned - grand.required);
 
   const stageTiles = progress.stage_totals.map((s) => {
-    const pct = s.required > 0 ? Math.min(100, Math.round((s.completed / s.required) * 100)) : 0;
+    const statusLine = s.over_target > 0
+      ? `<span class="bf-stage-total-status over">&#10003; +${s.over_target} above guideline</span>`
+      : s.still_to_plan > 0
+        ? `<span class="bf-stage-total-status">${s.still_to_plan} still needed</span>`
+        : `<span class="bf-stage-total-status met">&#10003; Guideline met</span>`;
     return `
-      <div class="bf-stage-total-tile" onclick="switchBfSubtab('ideas')">
-        <div class="bf-stage-total-name">${escapeHtml(s.stage_name.replace(/ Ads$/, ''))}</div>
-        <div class="bf-stage-total-nums">${s.completed} <small>/ ${s.required}</small></div>
-        <div class="bf-stage-total-bar"><div class="bf-stage-total-bar-fill" style="width:${pct}%;"></div></div>
+      <div class="bf-stage-total-tile" onclick="switchBfSubtab('stages');selectBfStage(${s.promotion_stage_id});">
+        <div class="bf-stage-total-name">${escapeHtml(bfStageShortName(s.stage_name))}</div>
+        <div class="bf-stage-total-nums">${s.planned} <small>Planned &middot; ${s.required} Guideline</small></div>
+        ${statusLine}
       </div>`;
   }).join('');
 
-  const byStyle = new Map();
-  for (const c of progress.matrix) {
-    if (!byStyle.has(c.creative_style_id)) byStyle.set(c.creative_style_id, { style_name: c.style_name, cells: [] });
-    if (c.required > 0 || c.planned > 0) byStyle.get(c.creative_style_id).cells.push(c);
-  }
-  const styleRows = [...byStyle.values()].filter((s) => s.cells.length).map((s) => {
-    const cells = s.cells.map((c) => {
-      const shortStage = c.stage_name.replace(/ Ads$/, '').replace(' Offers', '').replace(' / Ends Today', '');
-      const needsClass = c.still_to_plan > 0 ? 'needs' : '';
-      return `<span class="bf-style-matrix-cell ${needsClass}">${escapeHtml(shortStage)} <strong>${c.completed}/${c.required}</strong>${c.still_to_plan > 0 ? ` <span class="gap-label">needs ${c.still_to_plan}</span>` : ''}</span>`;
-    }).join('');
-    return `<div class="bf-style-matrix-row"><span class="bf-style-matrix-name">${escapeHtml(s.style_name)}</span><span class="bf-style-matrix-cells">${cells}</span></div>`;
-  }).join('');
-
-  const expanded = state.blackFriday.expandedStyleMatrix;
   document.getElementById('bf-progress-section').innerHTML = `
     <div class="bf-progress-card">
       <div class="bf-progress-head">
         <span class="bf-progress-title">Black Friday 2026 Creative Progress</span>
-        <span class="bf-progress-total">${grand.completed} / ${grand.required} Completed &middot; ${grand.planned} / ${grand.required} Planned</span>
+        <span class="bf-progress-total">${grand.planned} Planned &middot; ${grand.completed} Completed &middot; ${grand.required} Guideline Target${grandOver ? ` &middot; <span class="bf-over-badge">+${grandOver} above guideline</span>` : ''}</span>
       </div>
       <div class="bf-stage-totals-row">${stageTiles}</div>
-      <button type="button" class="link-btn" onclick="toggleBfStyleMatrix()">${expanded ? 'Hide' : 'Show'} creative-style breakdown &rarr;</button>
-      ${expanded ? `<div class="bf-style-matrix">${styleRows}</div>` : ''}
-      ${progress.needs_classification_count ? `<div class="hint bf-needs-classification-hint">${progress.needs_classification_count} stage execution${progress.needs_classification_count === 1 ? '' : 's'} need${progress.needs_classification_count === 1 ? 's' : ''} classification &rarr; <a href="#" onclick="switchBfSubtab('ideas');return false;">review in Creative Ideas</a></div>` : ''}
+      ${progress.needs_classification_count ? `<div class="hint bf-needs-classification-hint">${progress.needs_classification_count} stage execution${progress.needs_classification_count === 1 ? '' : 's'} need${progress.needs_classification_count === 1 ? 's' : ''} classification &rarr; <a href="#" onclick="switchBfSubtab('stages');return false;">classify in the Stage Workspace</a></div>` : ''}
     </div>`;
 }
 
-function toggleBfStyleMatrix() {
-  state.blackFriday.expandedStyleMatrix = !state.blackFriday.expandedStyleMatrix;
-  renderBfProgressSection();
+function selectBfStage(stageId) {
+  state.blackFriday.activeStageId = stageId;
+  renderBfStageWorkspace();
+}
+
+// The primary Black Friday planning view (follow-up brief, items 3/4):
+// four stage tabs, each showing its creative-style guideline breakdown
+// directly -- never hidden behind a toggle. Every number is derived live
+// from real executions (progress.matrix / Needs Classification executions
+// loaded alongside it), never a stored counter and never a placeholder
+// record -- see the brief's explicit "do not create 180 placeholders".
+function renderBfStageWorkspace() {
+  const progress = state.blackFriday.progress;
+  if (!progress) return;
+  const stages = (state.currentPromotion && state.currentPromotion.stages) || [];
+  const stageIdsWithTotals = new Set(progress.stage_totals.map((s) => s.promotion_stage_id));
+  const orderedStages = stages.filter((s) => stageIdsWithTotals.has(s.id));
+
+  document.getElementById('bf-stage-tabs').innerHTML = orderedStages.map((s) => `
+    <button type="button" class="bf-stage-tab ${state.blackFriday.activeStageId === s.id ? 'active' : ''}" onclick="selectBfStage(${s.id})">${escapeHtml(bfStageShortName(s.name))}</button>
+  `).join('');
+
+  const stageId = state.blackFriday.activeStageId;
+  const stageTotal = progress.stage_totals.find((s) => s.promotion_stage_id === stageId);
+  const body = document.getElementById('bf-stage-workspace-body');
+  if (!stageTotal) {
+    body.innerHTML = '<div class="attention-empty">Select a stage above.</div>';
+    return;
+  }
+
+  const cells = progress.matrix
+    .filter((c) => c.promotion_stage_id === stageId)
+    .sort((a, b) => (a.style_sort_order || 0) - (b.style_sort_order || 0));
+  const styleRows = cells.map(bfStyleRowHtml).join('');
+
+  // Needs Classification executions in this stage -- real, already-planned
+  // work that just hasn't been assigned a style yet, so it can't count
+  // toward any one style row above. Classifying it here never creates a
+  // new record, only assigns the existing execution's style.
+  const unclassified = [];
+  for (const idea of state.blackFriday.ideas) {
+    for (const ex of idea.executions || []) {
+      if (ex.promotion_stage_id === stageId && !ex.creative_style_id) unclassified.push({ idea, ex });
+    }
+  }
+  const unclassifiedHtml = unclassified.length ? `
+    <div class="bf-style-row bf-style-row-unclassified">
+      <div class="bf-style-row-head">
+        <span class="bf-style-row-name">Needs Classification</span>
+        <span class="hint">${unclassified.length} execution${unclassified.length === 1 ? '' : 's'} -- assign a style to count toward a target</span>
+      </div>
+      <div class="bf-unclassified-list">
+        ${unclassified.map(({ idea, ex }) => `
+          <div class="bf-unclassified-row">
+            <span class="bf-unclassified-title">${escapeHtml(idea.title)}</span>
+            <select onchange="classifyBfExecutionFromWorkspace(${idea.id}, ${ex.id}, this.value)">${bfStyleOptionsHtml('')}</select>
+          </div>`).join('')}
+      </div>
+    </div>` : '';
+
+  const overallStatus = stageTotal.over_target > 0
+    ? `<span class="bf-style-row-status over">&#10003; +${stageTotal.over_target} above guideline</span>`
+    : stageTotal.still_to_plan > 0
+      ? `<span class="bf-style-row-status">${stageTotal.still_to_plan} still needed</span>`
+      : `<span class="bf-style-row-status met">&#10003; Guideline met</span>`;
+
+  body.innerHTML = `
+    <div class="bf-stage-workspace-summary">
+      <span>${escapeHtml(bfStageShortName(stageTotal.stage_name))} &mdash; ${stageTotal.planned} Planned &middot; ${stageTotal.completed} Completed &middot; ${stageTotal.required} Guideline</span>
+      ${overallStatus}
+    </div>
+    <div class="bf-style-rows">${styleRows}</div>
+    ${unclassifiedHtml}
+  `;
+}
+
+// One row per creative style guideline in the selected stage (follow-up
+// brief, item 6). Never blocks or errors when over target -- an exceeded
+// guideline is "Target met · +N extra", not a warning.
+function bfStyleRowHtml(c) {
+  const statusLine = c.over_target > 0
+    ? `<span class="bf-style-row-status over">&#10003; Target met &middot; +${c.over_target} extra</span>`
+    : c.still_to_plan > 0
+      ? `<span class="bf-style-row-status needs">${c.still_to_plan} still needed</span>`
+      : `<span class="bf-style-row-status met">&#10003; Target planned</span>`;
+  const safeStyleName = escapeHtml(c.style_name).replace(/'/g, '&#39;');
+  return `
+    <div class="bf-style-row">
+      <div class="bf-style-row-head">
+        <span class="bf-style-row-name">${escapeHtml(c.style_name)}</span>
+        <button type="button" class="btn btn-primary btn-sm" onclick="openBfAddCreativeModal(${c.promotion_stage_id}, ${c.creative_style_id}, '${safeStyleName}')">+ Add Creative</button>
+      </div>
+      <div class="bf-style-row-stats">
+        <span>Target <strong>${c.required}</strong></span>
+        <span>Planned <strong>${c.planned}</strong></span>
+        <span>Completed <strong>${c.completed}</strong></span>
+        ${statusLine}
+      </div>
+    </div>`;
+}
+
+async function classifyBfExecutionFromWorkspace(ideaId, execId, value) {
+  if (!value) return;
+  try {
+    const idea = await api(`/promotion-creative/ideas/${ideaId}/executions/${execId}`, { method: 'PATCH', body: JSON.stringify({ creative_style_id: Number(value) }) });
+    bfIdeaReplaceInState(idea);
+    await initBfProgressRefreshOnly();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// ---------------------------------------------------------------------
+// "+ Add Creative" -- New Concept vs Recreate a Proven Winner (follow-up
+// brief, items 10-12). Promotion/Stage/Creative Style are always known
+// from the style row the team clicked, so neither path ever re-asks for
+// them.
+// ---------------------------------------------------------------------
+function openBfAddCreativeModal(stageId, styleId, styleName) {
+  state.blackFriday.addCreativeContext = { stageId, styleId, styleName };
+  document.getElementById('bf-add-creative-title').textContent = `Add Creative — ${styleName}`;
+  document.getElementById('bf-add-creative-new-title').value = '';
+  showBfAddCreativePanel('chooser');
+  openModal('bf-add-creative-modal');
+}
+
+function showBfAddCreativePanel(name) {
+  document.getElementById('bf-add-creative-panel-chooser').style.display = name === 'chooser' ? '' : 'none';
+  document.getElementById('bf-add-creative-panel-new').style.display = name === 'new' ? '' : 'none';
+  document.getElementById('bf-add-creative-panel-recreate').style.display = name === 'recreate' ? '' : 'none';
+}
+
+function chooseBfAddCreativeNew() {
+  showBfAddCreativePanel('new');
+}
+
+function chooseBfAddCreativeRecreate() {
+  showBfAddCreativePanel('recreate');
+  renderBfRecreatePicker();
+}
+
+// New Concept: create the master idea + this one execution, then send it
+// straight into the normal Concept Development pipeline (same
+// insertCreativeAsset/shoot_plan_items path every other concept uses) --
+// no new/parallel workflow invented.
+async function saveBfNewConceptFromWorkspace() {
+  const ctx = state.blackFriday.addCreativeContext;
+  const title = document.getElementById('bf-add-creative-new-title').value.trim();
+  if (!title) return toast('Creative Idea is required', true);
+  const style = state.blackFriday.styles.find((s) => s.id === ctx.styleId);
+  try {
+    const idea = await api(`/promotion-creative/${state.currentPromotionId}/ideas`, {
+      method: 'POST',
+      body: JSON.stringify({ title, media_type: style ? style.media_type : 'video', stage_ids: [ctx.stageId], creative_style_id: ctx.styleId }),
+    });
+    await api(`/promotion-creative/ideas/${idea.id}/send-to-pipeline`, { method: 'POST' });
+    closeModal('bf-add-creative-modal');
+    toast('Sent to Concept Development');
+    await loadBfIdeas();
+    await initBfProgressRefreshOnly();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// Recreate: pick either (a) one of the existing Proven Winner master ideas
+// that doesn't yet run in this stage -- adds an execution to it, no
+// duplicate master -- or (b) a historical winner not yet linked to any
+// 2026 idea -- creates a new master idea linked to that same inspiration
+// record (never a duplicate inspiration row).
+function renderBfRecreatePicker() {
+  const ctx = state.blackFriday.addCreativeContext;
+  const linkedInspirationIds = new Set();
+  const provenCandidates = [];
+  for (const idea of state.blackFriday.ideas) {
+    for (const insp of idea.inspiration || []) linkedInspirationIds.add(insp.id);
+    if (!idea.inspiration || !idea.inspiration.length) continue;
+    const hasStage = (idea.executions || []).some((e) => e.promotion_stage_id === ctx.stageId);
+    if (!hasStage) provenCandidates.push(idea);
+  }
+  const unlinkedHistorical = state.blackFriday.inspiration.filter((i) => !linkedInspirationIds.has(i.id));
+
+  const ideaRows = provenCandidates.map((idea) => `
+    <div class="bf-insp-pick-row">
+      <span>${escapeHtml(idea.title)} <span class="hint">(existing idea)</span></span>
+      <button type="button" class="btn btn-primary btn-sm" onclick="recreateFromExistingIdea(${idea.id})">Use</button>
+    </div>`).join('');
+  const historicalRows = unlinkedHistorical.map((i) => `
+    <div class="bf-insp-pick-row">
+      <span>${escapeHtml(i.title)}${i.campaign_name ? ` <span class="hint">(${escapeHtml(i.campaign_name)})</span>` : ''}</span>
+      <button type="button" class="btn btn-primary btn-sm" onclick="recreateFromHistorical(${i.id})">Use</button>
+    </div>`).join('');
+
+  document.getElementById('bf-recreate-picker-list').innerHTML = `
+    ${ideaRows ? `<div class="bf-progress-title" style="margin-bottom:6px;">Existing Proven Ideas</div>${ideaRows}` : ''}
+    ${historicalRows ? `<div class="bf-progress-title" style="margin:12px 0 6px;">Previous Winners Not Yet a 2026 Idea</div>${historicalRows}` : ''}
+    ${!ideaRows && !historicalRows ? '<div class="hint">No available proven winners to recreate here.</div>' : ''}
+  `;
+}
+
+async function recreateFromExistingIdea(ideaId) {
+  const ctx = state.blackFriday.addCreativeContext;
+  try {
+    await api(`/promotion-creative/ideas/${ideaId}/executions`, {
+      method: 'POST',
+      body: JSON.stringify({ promotion_stage_id: ctx.stageId, creative_style_id: ctx.styleId }),
+    });
+    closeModal('bf-add-creative-modal');
+    toast('Stage added -- review before sending to pipeline');
+    await loadBfIdeas();
+    await initBfProgressRefreshOnly();
+    openBfIdeaModal(ideaId);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function recreateFromHistorical(inspirationId) {
+  const ctx = state.blackFriday.addCreativeContext;
+  const insp = state.blackFriday.inspiration.find((i) => i.id === inspirationId);
+  if (!insp) return;
+  const style = state.blackFriday.styles.find((s) => s.id === ctx.styleId);
+  try {
+    const idea = await api(`/promotion-creative/${state.currentPromotionId}/ideas`, {
+      method: 'POST',
+      body: JSON.stringify({
+        title: insp.title, media_type: style ? style.media_type : (insp.media_type === 'graphic' ? 'graphic' : 'video'),
+        who: insp.creator || '', stage_ids: [ctx.stageId], creative_style_id: ctx.styleId,
+      }),
+    });
+    await api(`/promotion-creative/ideas/${idea.id}/inspiration`, { method: 'POST', body: JSON.stringify({ creative_inspiration_id: inspirationId }) });
+    closeModal('bf-add-creative-modal');
+    toast('Recreation added -- review before sending to pipeline');
+    await loadBfIdeas();
+    await initBfProgressRefreshOnly();
+    openBfIdeaModal(idea.id);
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 async function switchBfSubtab(name, skipReload) {
@@ -11396,10 +11639,17 @@ function bfIdeaCardHtml(idea) {
         </div>`).join('')}
     </div>` : '';
 
+  // "Proven Winner" is only ever inferred from a REAL linked inspiration
+  // relationship (follow-up brief, item 10) -- never guessed from title
+  // similarity, so a badge here always means an actual historical record
+  // is attached (visible just below in the Previous Winners block).
+  const isProvenWinner = (idea.inspiration || []).length > 0;
+
   return `
     <div class="cd-card bf-idea-card" onclick="toggleBfIdeaExpand(${idea.id})">
       <div class="bf-idea-badges">
         <span class="bf-style-badge">${idea.media_type === 'graphic' ? 'Graphic' : 'Video'}</span>
+        ${isProvenWinner ? '<span class="bf-proven-badge">&#9733; Proven Winner &middot; Recreate</span>' : ''}
         ${stageBadges}
       </div>
       <div class="cd-card-name">${escapeHtml(idea.title)}</div>
@@ -11617,6 +11867,7 @@ async function initBfProgressRefreshOnly() {
   try {
     state.blackFriday.progress = await api(`/promotion-creative/${state.currentPromotionId}/progress`);
     renderBfProgressSection();
+    if (state.blackFriday.progress.matrix.length) renderBfStageWorkspace();
   } catch (e) { /* non-fatal */ }
 }
 

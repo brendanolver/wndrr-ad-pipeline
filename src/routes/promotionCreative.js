@@ -61,7 +61,7 @@ async function loadIdeasForPromotion(promotionId) {
   const executionsResult = ideaIds.length
     ? await pool.query(
         `SELECT pcie.*, ps.name AS stage_name, ps.sort_order AS stage_sort_order,
-                cs.name AS style_name, cs.media_type AS style_media_type
+                cs.name AS style_name, cs.media_type AS style_media_type, cs.sort_order AS style_sort_order
          FROM promotion_creative_idea_executions pcie
          JOIN promotion_stages ps ON ps.id = pcie.promotion_stage_id
          LEFT JOIN creative_styles cs ON cs.id = pcie.creative_style_id
@@ -138,6 +138,7 @@ async function loadIdeasForPromotion(promotionId) {
         stage_sort_order: exec.stage_sort_order,
         creative_style_id: exec.creative_style_id,
         style_name: exec.style_name,
+        style_sort_order: exec.style_sort_order,
         needs_classification: exec.creative_style_id === null,
         linked_creative_asset_id: exec.linked_creative_asset_id,
         effective_creative_asset_id: effectiveAssetId,
@@ -479,7 +480,7 @@ router.get('/:promotionId/progress', async (req, res, next) => {
   try {
     const promotionId = req.params.promotionId;
     const targetsResult = await pool.query(
-      `SELECT pct.*, ps.name AS stage_name, ps.sort_order AS stage_sort_order, cs.name AS style_name, cs.media_type
+      `SELECT pct.*, ps.name AS stage_name, ps.sort_order AS stage_sort_order, cs.name AS style_name, cs.media_type, cs.sort_order AS style_sort_order
        FROM promotion_creative_targets pct
        JOIN promotion_stages ps ON ps.id = pct.promotion_stage_id
        JOIN creative_styles cs ON cs.id = pct.creative_style_id
@@ -507,7 +508,7 @@ router.get('/:promotionId/progress', async (req, res, next) => {
     for (const t of targetsResult.rows) {
       cells.set(`${t.promotion_stage_id}:${t.creative_style_id}`, {
         promotion_stage_id: t.promotion_stage_id, stage_name: t.stage_name, stage_sort_order: t.stage_sort_order,
-        creative_style_id: t.creative_style_id, style_name: t.style_name, media_type: t.media_type,
+        creative_style_id: t.creative_style_id, style_name: t.style_name, style_sort_order: t.style_sort_order, media_type: t.media_type,
         required: t.required_count, planned: 0, completed: 0,
       });
     }
@@ -533,7 +534,7 @@ router.get('/:promotionId/progress', async (req, res, next) => {
         if (!cells.has(key)) {
           cells.set(key, {
             promotion_stage_id: exec.promotion_stage_id, stage_name: exec.stage_name, stage_sort_order: exec.stage_sort_order,
-            creative_style_id: exec.creative_style_id, style_name: exec.style_name, media_type: exec.style_media_type,
+            creative_style_id: exec.creative_style_id, style_name: exec.style_name, style_sort_order: exec.style_sort_order, media_type: exec.style_media_type,
             required: 0, planned: 0, completed: 0,
           });
         }
@@ -543,12 +544,22 @@ router.get('/:promotionId/progress', async (req, res, next) => {
       }
     }
 
+    // 180 (and each cell's own target) is a planning GUIDELINE, never a cap
+    // -- still_to_plan bottoms out at 0 rather than going negative, and
+    // over_target surfaces how far past the guideline the team has gone
+    // (a good thing, not an error) so the UI never has to guess which case
+    // it's in.
     const matrix = [...cells.values()].map((c) => ({
       ...c,
       still_to_plan: Math.max(0, c.required - c.planned),
-    })).sort((a, b) => a.stage_sort_order - b.stage_sort_order || a.style_name.localeCompare(b.style_name));
+      over_target: Math.max(0, c.planned - c.required),
+    })).sort((a, b) => a.stage_sort_order - b.stage_sort_order || (a.style_sort_order || 0) - (b.style_sort_order || 0));
 
-    const stageTotals = [...stageTotalsMap.values()].sort((a, b) => a.stage_sort_order - b.stage_sort_order);
+    const stageTotals = [...stageTotalsMap.values()].map((s) => ({
+      ...s,
+      still_to_plan: Math.max(0, s.required - s.planned),
+      over_target: Math.max(0, s.planned - s.required),
+    })).sort((a, b) => a.stage_sort_order - b.stage_sort_order);
 
     const grandTotal = stageTotals.reduce(
       (acc, s) => ({ required: acc.required + s.required, planned: acc.planned + s.planned, completed: acc.completed + s.completed }),
