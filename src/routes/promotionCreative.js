@@ -104,6 +104,7 @@ async function loadIdeasForPromotion(promotionId) {
   const inspirationLinksResult = ideaIds.length
     ? await pool.query(
         `SELECT pcii.promotion_creative_idea_id, ci.id, ci.title, ci.campaign_name, ci.video_url,
+                ci.additional_urls, ci.creator, ci.sale_stage_note,
                 ci.creative_style_id, cs.name AS style_name, ci.media_type
          FROM promotion_creative_idea_inspirations pcii
          JOIN creative_inspiration ci ON ci.id = pcii.creative_inspiration_id
@@ -117,6 +118,7 @@ async function loadIdeasForPromotion(promotionId) {
     if (!inspirationByIdea.has(row.promotion_creative_idea_id)) inspirationByIdea.set(row.promotion_creative_idea_id, []);
     inspirationByIdea.get(row.promotion_creative_idea_id).push({
       id: row.id, title: row.title, campaign_name: row.campaign_name, video_url: row.video_url,
+      additional_urls: row.additional_urls, creator: row.creator, sale_stage_note: row.sale_stage_note,
       creative_style_id: row.creative_style_id, style_name: row.style_name, media_type: row.media_type,
     });
   }
@@ -580,15 +582,18 @@ router.get('/inspiration', async (req, res, next) => {
 
 router.post('/inspiration', async (req, res, next) => {
   try {
-    const { title, campaign_name, creative_style_id, media_type, video_url, notes } = req.body || {};
+    const { title, campaign_name, creative_style_id, media_type, video_url, additional_urls, creator, sale_stage_note, notes } = req.body || {};
     if (!title || !title.trim()) return res.status(400).json({ error: 'title is required' });
-    if (media_type !== undefined && media_type !== null && !['graphic', 'video'].includes(media_type)) {
-      return res.status(400).json({ error: 'media_type must be graphic or video' });
+    if (media_type !== undefined && media_type !== null && !['graphic', 'video', 'mixed'].includes(media_type)) {
+      return res.status(400).json({ error: 'media_type must be graphic, video, or mixed' });
     }
     const result = await pool.query(
-      `INSERT INTO creative_inspiration (title, campaign_name, creative_style_id, media_type, video_url, notes, created_by_user_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [title.trim(), campaign_name || null, creative_style_id || null, media_type || null, video_url || null, notes || null, req.user.id]
+      `INSERT INTO creative_inspiration (title, campaign_name, creative_style_id, media_type, video_url, additional_urls, creator, sale_stage_note, notes, created_by_user_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+      [
+        title.trim(), campaign_name || null, creative_style_id || null, media_type || null, video_url || null,
+        additional_urls || null, creator || null, sale_stage_note || null, notes || null, req.user.id,
+      ]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -598,21 +603,25 @@ router.post('/inspiration', async (req, res, next) => {
 
 router.patch('/inspiration/:id', async (req, res, next) => {
   try {
-    const { title, campaign_name, creative_style_id, media_type, video_url, notes } = req.body || {};
-    if (media_type !== undefined && media_type !== null && !['graphic', 'video'].includes(media_type)) {
-      return res.status(400).json({ error: 'media_type must be graphic or video' });
+    const { title, campaign_name, creative_style_id, media_type, video_url, additional_urls, creator, sale_stage_note, notes } = req.body || {};
+    if (media_type !== undefined && media_type !== null && !['graphic', 'video', 'mixed'].includes(media_type)) {
+      return res.status(400).json({ error: 'media_type must be graphic, video, or mixed' });
     }
     const result = await pool.query(
       `UPDATE creative_inspiration SET
          title = COALESCE($1, title), campaign_name = COALESCE($2, campaign_name),
          creative_style_id = CASE WHEN $3 THEN $4 ELSE creative_style_id END,
-         media_type = COALESCE($5, media_type), video_url = COALESCE($6, video_url), notes = COALESCE($7, notes),
+         media_type = COALESCE($5, media_type), video_url = COALESCE($6, video_url),
+         additional_urls = COALESCE($7, additional_urls), creator = COALESCE($8, creator),
+         sale_stage_note = COALESCE($9, sale_stage_note), notes = COALESCE($10, notes),
          updated_at = now()
-       WHERE id = $8 RETURNING *`,
+       WHERE id = $11 RETURNING *`,
       [
         title && title.trim() ? title.trim() : null, campaign_name !== undefined ? campaign_name : null,
         Object.prototype.hasOwnProperty.call(req.body || {}, 'creative_style_id'), creative_style_id || null,
-        media_type || null, video_url !== undefined ? video_url : null, notes !== undefined ? notes : null,
+        media_type || null, video_url !== undefined ? video_url : null,
+        additional_urls !== undefined ? additional_urls : null, creator !== undefined ? creator : null,
+        sale_stage_note !== undefined ? sale_stage_note : null, notes !== undefined ? notes : null,
         req.params.id,
       ]
     );

@@ -11340,6 +11340,35 @@ function bfStageShortName(name) {
   return BF_STAGE_SHORT[name] || (name || '').replace(/ Ads$/, '');
 }
 
+// Shows linked historical winners directly on the master idea card (see
+// the follow-up brief, item 4) so the team never has to hunt through the
+// separate Inspiration Library tab when the idea already has references.
+// Reuses the exact same provider-aware preview/play behaviour as the
+// Inspiration Library itself -- a Facebook/Meta ad-preview link never gets
+// a Play button, only Open Original.
+function bfIdeaInspirationBlockHtml(idea) {
+  const list = idea.inspiration || [];
+  if (!list.length) return '';
+  const rows = list.map((i) => {
+    const info = bfVideoPreviewInfo(i.video_url);
+    const safeUrl = i.video_url ? escapeHtml(i.video_url).replace(/'/g, '&#39;') : '';
+    const safeTitle = escapeHtml(i.title).replace(/'/g, '&#39;');
+    const playBtn = info && info.embeddable
+      ? `<button type="button" class="link-btn" onclick="event.stopPropagation();openBfVideoModal('${safeUrl}', '${safeTitle}')">Play</button>`
+      : '';
+    const openOriginal = i.video_url
+      ? `<a href="${escapeHtml(i.video_url)}" target="_blank" rel="noopener" onclick="event.stopPropagation();" class="link-btn">Open Original</a>`
+      : '';
+    return `
+      <div class="bf-insp-ref-row">
+        <span class="bf-insp-ref-campaign">${escapeHtml(i.campaign_name || 'Reference')}${i.sale_stage_note ? ` &middot; ${escapeHtml(i.sale_stage_note)}` : ''}</span>
+        <span class="bf-insp-ref-title">${escapeHtml(i.title)}</span>
+        <span class="bf-insp-ref-actions">${playBtn}${playBtn && openOriginal ? ' / ' : ''}${openOriginal}</span>
+      </div>`;
+  }).join('');
+  return `<div class="bf-insp-refs"><div class="bf-insp-refs-label">Previous Winners</div>${rows}</div>`;
+}
+
 // One master card per idea (never one per stage -- "do not render
 // duplicate full-size idea cards for every stage"), with a compact stage
 // badge row always visible and the full per-stage execution detail
@@ -11351,7 +11380,6 @@ function bfIdeaCardHtml(idea) {
   const stageBadges = executions
     .map((ex) => `<span class="bf-stage-badge ${bfExecStatusBucket(ex)}">${escapeHtml(bfStageShortName(ex.stage_name))}</span>`)
     .join('');
-  const inspirationChips = (idea.inspiration || []).map((i) => `<span class="bf-style-badge">&#9654; ${escapeHtml(i.title)}</span>`).join('');
   const expanded = state.blackFriday.expandedIdeaId === idea.id;
   const pipelineAction = idea.linked_creative_asset_id
     ? `<button type="button" class="btn btn-ghost btn-sm" onclick="event.stopPropagation();viewBfIdeaPipelineStatus(${idea.id})">View Pipeline Status &rarr;</button>`
@@ -11377,7 +11405,7 @@ function bfIdeaCardHtml(idea) {
       <div class="cd-card-name">${escapeHtml(idea.title)}</div>
       ${whoWhere ? `<div class="bf-idea-meta-row">${whoWhere}</div>` : ''}
       ${idea.concept_script ? `<div class="bf-idea-script">${escapeHtml(idea.concept_script)}</div>` : ''}
-      ${inspirationChips ? `<div class="bf-idea-badges">${inspirationChips}</div>` : ''}
+      ${bfIdeaInspirationBlockHtml(idea)}
       ${execDetail}
       <div class="bf-idea-actions">
         <button type="button" class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openBfIdeaModal(${idea.id})">Edit</button>
@@ -11718,7 +11746,14 @@ function closeBfVideoModal() {
   closeModal('bf-video-modal');
 }
 
+function bfInspirationExtraUrlsHtml(insp) {
+  const extras = (insp.additional_urls || '').split('\n').map((u) => u.trim()).filter(Boolean);
+  if (!extras.length) return '';
+  return extras.map((u, idx) => `<a href="${escapeHtml(u)}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Open Ref ${idx + 2} &#8599;</a>`).join('');
+}
+
 function bfInspirationCardHtml(insp) {
+  const meta = [insp.sale_stage_note, insp.creator].filter(Boolean).join(' &middot; ');
   return `
     <div class="cd-card bf-idea-card">
       ${bfInspirationVisualHtml(insp)}
@@ -11727,10 +11762,12 @@ function bfInspirationCardHtml(insp) {
         ${insp.campaign_name ? `<span class="bf-stage-badge">${escapeHtml(insp.campaign_name)}</span>` : ''}
         ${insp.style_name ? `<span class="bf-style-badge">${escapeHtml(insp.style_name)}</span>` : ''}
       </div>
+      ${meta ? `<div class="bf-idea-meta-row">${meta}</div>` : ''}
       ${insp.notes ? `<div class="bf-idea-script">${escapeHtml(insp.notes)}</div>` : ''}
       <div class="bf-idea-actions">
         <button type="button" class="btn btn-ghost btn-sm" onclick="openBfInspirationModal(${insp.id})">Edit</button>
         ${insp.video_url ? `<a href="${escapeHtml(insp.video_url)}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Open Original &#8599;</a>` : ''}
+        ${bfInspirationExtraUrlsHtml(insp)}
       </div>
     </div>`;
 }
@@ -11752,8 +11789,11 @@ function openBfInspirationModal(id) {
   document.getElementById('bf-inspiration-modal-title').textContent = insp ? 'Edit Reference' : 'New Reference';
   document.getElementById('bf-insp-title').value = insp ? insp.title : '';
   document.getElementById('bf-insp-campaign').value = (insp && insp.campaign_name) || '';
+  document.getElementById('bf-insp-stage-note').value = (insp && insp.sale_stage_note) || '';
+  document.getElementById('bf-insp-creator').value = (insp && insp.creator) || '';
   document.getElementById('bf-insp-style').innerHTML = bfStyleOptionsHtml(insp ? insp.creative_style_id : '');
   document.getElementById('bf-insp-url').value = (insp && insp.video_url) || '';
+  document.getElementById('bf-insp-additional-urls').value = (insp && insp.additional_urls) || '';
   document.getElementById('bf-insp-notes').value = (insp && insp.notes) || '';
   document.getElementById('bf-insp-delete-btn').style.display = insp ? '' : 'none';
   openModal('bf-inspiration-modal');
@@ -11767,9 +11807,12 @@ async function saveBfInspiration() {
   const body = {
     title,
     campaign_name: document.getElementById('bf-insp-campaign').value.trim(),
+    sale_stage_note: document.getElementById('bf-insp-stage-note').value.trim(),
+    creator: document.getElementById('bf-insp-creator').value.trim(),
     creative_style_id: styleId ? Number(styleId) : null,
     media_type: style ? style.media_type : null,
     video_url: document.getElementById('bf-insp-url').value.trim(),
+    additional_urls: document.getElementById('bf-insp-additional-urls').value.trim(),
     notes: document.getElementById('bf-insp-notes').value.trim(),
   };
   try {

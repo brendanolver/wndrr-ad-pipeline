@@ -2161,3 +2161,136 @@ BEGIN
     ON CONFLICT (promotion_creative_idea_id, promotion_stage_id) DO NOTHING;
   END IF;
 END $$;
+
+-- =====================================================================
+-- Black Friday 2026 follow-up: real "TOP ADS FROM PREVIOUS SALES" data
+-- into the existing Inspiration Library, linked to the 2026 ideas they
+-- inspired where the connection is clear from title/creator/reference URL
+-- -- never a duplicate inspiration row for a creative reused across
+-- stages (the sheet's own multi-stage labels, eg. "Hype / Live", are kept
+-- as one row's sale_stage_note, exactly like the 2026 import's multi-stage
+-- master ideas). All additive: no existing inspiration/idea/link row is
+-- ever altered or removed by this block.
+-- =====================================================================
+ALTER TABLE creative_inspiration ADD COLUMN IF NOT EXISTS creator VARCHAR(255);
+ALTER TABLE creative_inspiration ADD COLUMN IF NOT EXISTS sale_stage_note VARCHAR(255);
+-- Extra reference URLs beyond the primary video_url (which drives the
+-- single provider-aware preview/play button) -- newline-separated, shown
+-- as additional "Open Original" links rather than silently dropped.
+ALTER TABLE creative_inspiration ADD COLUMN IF NOT EXISTS additional_urls TEXT;
+ALTER TABLE creative_inspiration ADD COLUMN IF NOT EXISTS source_key VARCHAR(64) UNIQUE;
+ALTER TABLE creative_inspiration ADD COLUMN IF NOT EXISTS source_label VARCHAR(255);
+-- A small number of historical ads are genuinely both ("AI poster drop -
+-- using real footage": Graphic + Video) -- loosens the existing
+-- graphic/video-only check rather than forcing one or the other.
+ALTER TABLE creative_inspiration DROP CONSTRAINT IF EXISTS creative_inspiration_media_type_check;
+ALTER TABLE creative_inspiration ADD CONSTRAINT creative_inspiration_media_type_check
+  CHECK (media_type IS NULL OR media_type IN ('graphic', 'video', 'mixed'));
+
+INSERT INTO creative_inspiration (source_key, source_label, campaign_name, sale_stage_note, media_type, creator, title, video_url, additional_urls, created_by_user_id)
+SELECT v.source_key, 'Black Friday 2026 Planning Sheet', v.campaign_name, v.sale_stage_note, v.media_type, v.creator, v.title, v.video_url, v.additional_urls, NULL
+FROM (VALUES
+  ('hist-winter26-01', 'Winter Sale 2026', 'Hype', 'graphic', 'Til', 'Backpack with offer', 'https://fb.me/adspreview/facebook/2ivpLIxsKNotBtX', NULL::text),
+  ('hist-winter26-02', 'Winter Sale 2026', 'Hype / Live', 'graphic', 'Til', 'Offer - snow on landcruiser (AI)', 'https://fb.me/adspreview/facebook/23cEP8FFDAYslMS', NULL::text),
+  ('hist-winter26-03', 'Winter Sale 2026', 'Hype', 'video', 'Mark', 'Green screen - 50% off products', 'https://fb.me/adspreview/facebook/1VCTklXnOho27py', NULL::text),
+  ('hist-winter26-04', 'Winter Sale 2026', 'Hype', 'video', 'Mark', 'Green screen - sale details', 'https://fb.me/adspreview/facebook/27xjj23NsmwJEwt', NULL::text),
+  ('hist-winter26-05', 'Winter Sale 2026', 'Hype', 'graphic', 'Til', 'Sale offer', 'https://fb.me/adspreview/facebook/27ndGrXMuPpzlOB', NULL::text),
+  ('hist-winter26-06', 'Winter Sale 2026', 'Hype', 'video', 'Steve', 'Couch - sale details talk through', 'https://fb.me/adspreview/facebook/1Sm7nXcgcP6F8do', NULL::text),
+  ('hist-winter26-07', 'Winter Sale 2026', 'Live', 'graphic', 'Til', 'Apology statement', 'https://fb.me/adspreview/facebook/1SIAFq5PExTU0Ur', NULL::text),
+  ('hist-winter26-08', 'Winter Sale 2026', 'Live', 'video', 'Mark', 'Green screen - rage bait comment', 'https://fb.me/adspreview/facebook/22VaQ6XxTJmNBn4', NULL::text),
+  ('hist-winter26-09', 'Winter Sale 2026', 'Live', 'video', 'Mark', 'Flat lay - 50% offer', 'https://fb.me/adspreview/facebook/22RcgDnYKWptBIs', NULL::text),
+  ('hist-winter26-10', 'Winter Sale 2026', 'Live', 'video', 'Steve', 'Car talk through', 'https://fb.me/adspreview/facebook/1VZOTtBHaIQ21PK', NULL::text),
+  ('hist-winter26-11', 'Winter Sale 2026', 'Live', 'video', 'Steve', 'Couch - GWP talk through', 'https://fb.me/adspreview/facebook/268OSrIEkHATtOP', NULL::text),
+  ('hist-winter26-12', 'Winter Sale 2026', 'Live', 'video', 'Mark', 'Green screen - top picks', 'https://fb.me/adspreview/facebook/2afk1UOg57bLbpe', NULL::text),
+  ('hist-winter26-13', 'Winter Sale 2026', 'Live', 'graphic', 'Til', 'Sale offer', 'https://fb.me/adspreview/facebook/278F7dnHLAUULTS', NULL::text),
+  ('hist-winter26-14', 'Winter Sale 2026', 'Mid Sale', 'graphic', 'Til', 'Ugly ad carousel', NULL::text, NULL::text),
+  ('hist-winter26-15', 'Winter Sale 2026', 'Last Chance', 'video', 'Mark', 'Flat lay - array of products', 'https://fb.me/adspreview/facebook/2lkpzYgWaI2SOzU', NULL::text),
+  ('hist-winter26-16', 'Winter Sale 2026', 'Last Chance', 'video', 'Mark', 'Roll bar talk through', 'https://fb.me/adspreview/facebook/21Z8alfx1ZV2S4Z', NULL::text),
+  ('hist-bday26-01', 'Birthday Sale 2026', 'Hype', 'graphic', 'Til', 'Apology statement', 'https://fb.me/adspreview/facebook/2ncMOwgbfamtW44', NULL::text),
+  ('hist-bday26-02', 'Birthday Sale 2026', 'Hype', 'mixed', 'Til / Shez', 'AI poster drop - using real footage', 'https://fb.me/adspreview/facebook/yBpjtyXM1IXsW12', NULL::text),
+  ('hist-bday26-03', 'Birthday Sale 2026', 'Hype', 'video', 'Shez', 'GWP concrete flat lay', 'https://fb.me/adspreview/facebook/2iSzn6WoY8nBOiI', NULL::text),
+  ('hist-bday26-04', 'Birthday Sale 2026', 'Hype / Live / Last Chance', 'video', 'Steve', 'Car talk through - sale details', 'https://fb.me/adspreview/facebook/2d4hse6qjTY1H9m', E'https://fb.me/adspreview/facebook/1VwBSHLuNJvoeGU\nhttps://fb.me/adspreview/facebook/26bWn6LPKqTNeht'),
+  ('hist-bday26-05', 'Birthday Sale 2026', 'Hype / Mid Sale', 'video', 'James', 'Roll bar with try on - top picks', 'https://fb.me/adspreview/facebook/2gg8dKbXFvhzfG0', NULL::text),
+  ('hist-bday26-06', 'Birthday Sale 2026', 'Hype', 'video', 'Shez', 'Poster drop', 'https://fb.me/adspreview/facebook/1VwBSHLuNJvoeGU', NULL::text),
+  ('hist-bday26-07', 'Birthday Sale 2026', 'Live', 'graphic', 'Til', 'Ugly ad carousel', 'https://fb.me/adspreview/facebook/21KXM5VEgIbwGyC', NULL::text),
+  ('hist-bday26-08', 'Birthday Sale 2026', 'Live', 'video', 'Steve', 'Warehouse talk through', 'https://fb.me/adspreview/facebook/1ZjffsTKz719Dcx', NULL::text),
+  ('hist-bday26-09', 'Birthday Sale 2026', 'Live', 'graphic', 'Til', 'Sale offer', 'https://fb.me/adspreview/facebook/1W6j85AtISfeBTd', NULL::text),
+  ('hist-bday26-10', 'Birthday Sale 2026', 'Mid Sale', 'video', 'James', 'Green screen - top picks', 'https://fb.me/adspreview/facebook/ySH3Yu8Dr932fLi', NULL::text),
+  ('hist-bday26-11', 'Birthday Sale 2026', 'Last Chance', 'graphic', 'Shez', 'Notes app', 'https://fb.me/adspreview/facebook/1WOA5MYBYejFqwd', NULL::text),
+  ('hist-bf25-01', 'Black Friday 2025', 'Hype', 'video', 'Fiverr', 'AI poster drop - with real footage', 'https://fb.me/adspreview/facebook/2aGyrXETwblpmWF', NULL::text),
+  ('hist-bf25-02', 'Black Friday 2025', 'Hype', 'video', 'Shez', 'Poster drop', 'https://fb.me/adspreview/facebook/26UVSQQTzKW30aK', NULL::text),
+  ('hist-bf25-03', 'Black Friday 2025', 'Hype', 'video', 'Shez', 'Facebook comments with graphic', 'https://fb.me/adspreview/facebook/1VvBbVokItUyF8p', NULL::text),
+  ('hist-bf25-04', 'Black Friday 2025', 'Hype', 'video', 'Steve, warehouse team', 'Founder/EGC warehouse talkthrough', 'https://fb.me/adspreview/facebook/1VfFfJVsd6ck5mL', NULL::text),
+  ('hist-bf25-05', 'Black Friday 2025', 'Live', 'graphic', 'Jake', 'Ugly carousel', 'https://fb.me/adspreview/facebook/2bSYVPJcBbyE511', NULL::text),
+  ('hist-bf25-06', 'Black Friday 2025', 'Live', 'video', 'Fiverr', 'AI Poster drop - with real footage', 'https://fb.me/adspreview/facebook/1Vm26vul8sbZjrA', NULL::text),
+  ('hist-bf25-07', 'Black Friday 2025', 'Live / Last Chance', 'graphic', 'Shez', 'Notes app', 'https://fb.me/adspreview/facebook/24Y4rhYBriJAV7N', 'https://fb.me/adspreview/facebook/2jvV4PvfNgipQs3'),
+  ('hist-bf25-08', 'Black Friday 2025', 'Live', 'graphic', 'Jake', 'Sale offer', 'https://fb.me/adspreview/facebook/2b2sKVylDxyEJIy', NULL::text),
+  ('hist-bf25-09', 'Black Friday 2025', 'Live', 'video', 'Max', 'Forklift accident', 'https://fb.me/adspreview/facebook/2a3gYFQIc3Q7vqb', NULL::text),
+  ('hist-bf25-10', 'Black Friday 2025', 'Live', 'video', 'Steve', 'Gym accident', 'https://fb.me/adspreview/facebook/2jraB8Hp88wloQ5', NULL::text),
+  ('hist-bf25-11', 'Black Friday 2025', 'Live', 'video', 'Steve', 'Campaign', 'https://fb.me/adspreview/facebook/28XsA6HoZaCnMpK', NULL::text),
+  ('hist-bf25-12', 'Black Friday 2025', 'Live', 'graphic', 'Jake', 'Sale offer V2', 'https://fb.me/adspreview/facebook/27GoazzhwSmz8P1', NULL::text),
+  ('hist-bf25-13', 'Black Friday 2025', 'GWP', 'video', 'Steve', 'Couch talk through', 'https://fb.me/adspreview/facebook/2iSOyatgZQ9GCzw', NULL::text),
+  ('hist-bf25-14', 'Black Friday 2025', 'GWP', 'video', 'Steve', 'Warehouse talk through announcement', 'https://fb.me/adspreview/facebook/1WrIIKsfC766Odz', NULL::text),
+  ('hist-bf25-15', 'Black Friday 2025', 'Mid Sale', 'video', 'Steve, team', 'Hangover skit', 'https://fb.me/adspreview/facebook/2qC1m15nTWSo9hk', NULL::text),
+  ('hist-bf25-16', 'Black Friday 2025', 'Mid Sale', 'video', 'Steve', 'Roll bar top picks', 'https://fb.me/adspreview/facebook/28eQzcB93Kw21mv', NULL::text),
+  ('hist-bf25-17', 'Black Friday 2025', 'Mid Sale', 'video', 'Shez', 'Flat lay', 'https://fb.me/adspreview/facebook/23yywEbk8knSnr2', NULL::text),
+  ('hist-bf25-18', 'Black Friday 2025', 'Mid Sale', 'graphic', 'Shez', 'DPA frame carousel - best-sellers', 'https://fb.me/adspreview/facebook/2qC1m15nTWSo9hk', NULL::text),
+  ('hist-bf25-19', 'Black Friday 2025', 'Last Chance', 'video', 'Steve', 'Warehouse talk through announcement', 'https://fb.me/adspreview/facebook/1WWP8ufMi6N6kje', NULL::text),
+  ('hist-misc-01', 'Mystery Box', 'Live', 'video', 'Mark', 'Unboxing', NULL::text, NULL::text),
+  ('hist-misc-02', 'Mystery Box', 'Live', 'graphic', 'Til', 'Apology statement', NULL::text, NULL::text),
+  ('hist-misc-03', 'Mystery Box', 'Live', 'video', 'Mark', 'What $X can get you', NULL::text, NULL::text),
+  ('hist-misc-04', 'Boxing Day', 'Live', 'graphic', 'Shez', 'Notes app', NULL::text, NULL::text),
+  ('hist-misc-05', 'Boxing Day', 'Live', 'graphic', 'Til', 'Ugly ad carousel', NULL::text, NULL::text)
+) AS v(source_key, campaign_name, sale_stage_note, media_type, creator, title, video_url, additional_urls)
+ON CONFLICT (source_key) DO NOTHING;
+
+-- Idea <-> historical winner links -- only where the connection is clear
+-- from title/creator/reference URL (several confirmed by an exact URL
+-- match between the idea's own reference_note and the historical record
+-- imported above). Genuinely ambiguous 2026 ideas (Secret envelope, Flyer
+-- video, UGC content, Stencil graffiti, Snipping ribbon) are deliberately
+-- left unlinked -- no historical precedent found, never guessed.
+INSERT INTO promotion_creative_idea_inspirations (promotion_creative_idea_id, creative_inspiration_id)
+SELECT pci.id, ci.id
+FROM (VALUES
+  ('bf2026-video-1', 'hist-winter26-12'), ('bf2026-video-1', 'hist-bday26-10'),
+  ('bf2026-video-2', 'hist-winter26-04'),
+  ('bf2026-video-3', 'hist-winter26-06'),
+  ('bf2026-video-4', 'hist-winter26-08'),
+  ('bf2026-video-5', 'hist-winter26-15'),
+  ('bf2026-video-6', 'hist-winter26-10'), ('bf2026-video-6', 'hist-bday26-04'),
+  ('bf2026-video-7', 'hist-winter26-16'), ('bf2026-video-7', 'hist-bday26-05'), ('bf2026-video-7', 'hist-bf25-16'),
+  ('bf2026-video-8', 'hist-bday26-06'), ('bf2026-video-8', 'hist-bf25-02'),
+  ('bf2026-video-9', 'hist-bday26-08'), ('bf2026-video-9', 'hist-bf25-14'), ('bf2026-video-9', 'hist-bf25-19'),
+  ('bf2026-video-10', 'hist-bf25-04'),
+  ('bf2026-video-11', 'hist-bf25-09'), ('bf2026-video-11', 'hist-bf25-10'),
+  ('bf2026-video-12', 'hist-bf25-11'),
+  ('bf2026-video-13', 'hist-winter26-11'), ('bf2026-video-13', 'hist-bf25-13'),
+  ('bf2026-video-14', 'hist-bf25-17'),
+  ('bf2026-video-15', 'hist-misc-03'),
+  ('bf2026-graphic-1', 'hist-winter26-01'),
+  ('bf2026-graphic-2', 'hist-winter26-02'), ('bf2026-graphic-2', 'hist-winter26-05'),
+  ('bf2026-graphic-3', 'hist-winter26-07'),
+  ('bf2026-graphic-4', 'hist-bday26-07'),
+  ('bf2026-graphic-5', 'hist-bday26-02'), ('bf2026-graphic-5', 'hist-bf25-01'), ('bf2026-graphic-5', 'hist-bf25-06'),
+  ('bf2026-graphic-6', 'hist-bday26-11'), ('bf2026-graphic-6', 'hist-bf25-07'), ('bf2026-graphic-6', 'hist-misc-04')
+) AS v(idea_source_key, inspiration_source_key)
+JOIN promotion_creative_ideas pci ON pci.source_key = v.idea_source_key
+JOIN creative_inspiration ci ON ci.source_key = v.inspiration_source_key
+ON CONFLICT DO NOTHING;
+
+-- Classification review of the 21 Needs Classification executions (see
+-- the brief): only one is genuinely unambiguous enough to resolve --
+-- "Founder/EGC warehouse talk through" is Steve-led with the warehouse
+-- team as support (matching its Black Friday 2025 precedent, a
+-- confirmed-founder-led format), so it becomes Founder Video. Everything
+-- else stays Needs Classification deliberately (mixed founder/staff
+-- casts, or formats with no clean existing bucket) -- "better data, not
+-- zero unclassified rows at any cost". Guarded by "still NULL" so this can
+-- never overwrite a classification the team has since corrected by hand.
+UPDATE promotion_creative_idea_executions pcie SET creative_style_id = cs.id, updated_at = now()
+FROM promotion_creative_ideas pci, promotion_stages ps, creative_styles cs
+WHERE pcie.promotion_creative_idea_id = pci.id AND pci.source_key = 'bf2026-video-10'
+  AND pcie.promotion_stage_id = ps.id AND ps.name = 'Hype Ads'
+  AND cs.name = 'Founder Video'
+  AND pcie.creative_style_id IS NULL;
