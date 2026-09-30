@@ -561,9 +561,15 @@ router.get('/:promotionId/progress', async (req, res, next) => {
       over_target: Math.max(0, s.planned - s.required),
     })).sort((a, b) => a.stage_sort_order - b.stage_sort_order);
 
+    // Summed from each stage's OWN still_to_plan/over_target rather than
+    // recomputed from the totals -- a stage that's over guideline and one
+    // that's under never cancel each other out into a misleading net figure.
     const grandTotal = stageTotals.reduce(
-      (acc, s) => ({ required: acc.required + s.required, planned: acc.planned + s.planned, completed: acc.completed + s.completed }),
-      { required: 0, planned: 0, completed: 0 }
+      (acc, s) => ({
+        required: acc.required + s.required, planned: acc.planned + s.planned, completed: acc.completed + s.completed,
+        still_to_plan: acc.still_to_plan + s.still_to_plan, over_target: acc.over_target + s.over_target,
+      }),
+      { required: 0, planned: 0, completed: 0, still_to_plan: 0, over_target: 0 }
     );
 
     res.json({ matrix, stage_totals: stageTotals, grand_total: grandTotal, needs_classification_count: needsClassificationCount });
@@ -674,6 +680,71 @@ router.delete('/ideas/:id/inspiration/:inspirationId', async (req, res, next) =>
       `DELETE FROM promotion_creative_idea_inspirations WHERE promotion_creative_idea_id = $1 AND creative_inspiration_id = $2`,
       [req.params.id, req.params.inspirationId]
     );
+    res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ---------------------------------------------------------------------
+// Reference/planning source documents (Creative Plan tab, item 4B of the
+// follow-up brief) -- deliberately just a label/description/url the team
+// fills in themselves; never a guessed or hardcoded Google Sheet link, and
+// the app never depends on url being set or reachable.
+// ---------------------------------------------------------------------
+router.get('/:promotionId/sources', async (req, res, next) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM promotion_reference_sources WHERE promotion_id = $1 ORDER BY sort_order ASC, id ASC',
+      [req.params.promotionId]
+    );
+    res.json({ sources: result.rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/:promotionId/sources', async (req, res, next) => {
+  try {
+    const { label, description, url } = req.body || {};
+    if (!label || !label.trim()) return res.status(400).json({ error: 'label is required' });
+    const result = await pool.query(
+      `INSERT INTO promotion_reference_sources (promotion_id, label, description, url)
+       VALUES ($1,$2,$3,$4) RETURNING *`,
+      [req.params.promotionId, label.trim(), description || null, url || null]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.patch('/sources/:id', async (req, res, next) => {
+  try {
+    const { label, description, url } = req.body || {};
+    const result = await pool.query(
+      `UPDATE promotion_reference_sources SET
+         label = COALESCE($1, label), description = CASE WHEN $2 THEN $3 ELSE description END,
+         url = CASE WHEN $4 THEN $5 ELSE url END, updated_at = now()
+       WHERE id = $6 RETURNING *`,
+      [
+        label && label.trim() ? label.trim() : null,
+        Object.prototype.hasOwnProperty.call(req.body || {}, 'description'), description || null,
+        Object.prototype.hasOwnProperty.call(req.body || {}, 'url'), url || null,
+        req.params.id,
+      ]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Source not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/sources/:id', async (req, res, next) => {
+  try {
+    const result = await pool.query('DELETE FROM promotion_reference_sources WHERE id = $1 RETURNING id', [req.params.id]);
+    if (!result.rows.length) return res.status(404).json({ error: 'Source not found' });
     res.status(204).end();
   } catch (err) {
     next(err);

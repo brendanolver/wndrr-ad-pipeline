@@ -2294,3 +2294,43 @@ WHERE pcie.promotion_creative_idea_id = pci.id AND pci.source_key = 'bf2026-vide
   AND pcie.promotion_stage_id = ps.id AND ps.name = 'Hype Ads'
   AND cs.name = 'Founder Video'
   AND pcie.creative_style_id IS NULL;
+
+-- =====================================================================
+-- Black Friday 2026 follow-up: "Creative Plan" reference tab -- planning
+-- source documents the 26 master ideas / inspiration library were built
+-- from (see the brief, Part 4B). Deliberately NOT a hardcoded/guessed
+-- Google Sheet URL -- url starts NULL and is filled in later through the
+-- app (or left empty forever, which the UI handles as a normal state,
+-- never a broken link/dependency). Generic (promotion_id-scoped, not
+-- literally Black-Friday-only) so any future promotion could use the same
+-- mechanism, but only Black Friday 2026 is seeded here.
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS promotion_reference_sources (
+  id SERIAL PRIMARY KEY,
+  promotion_id INTEGER NOT NULL REFERENCES promotions(id) ON DELETE CASCADE,
+  label VARCHAR(255) NOT NULL,
+  description VARCHAR(500),
+  url TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_promotion_reference_sources_promotion_id ON promotion_reference_sources(promotion_id);
+
+DO $$
+DECLARE
+  bf_id INTEGER;
+BEGIN
+  SELECT id INTO bf_id FROM promotions WHERE name = 'Black Friday 2026';
+  IF bf_id IS NOT NULL THEN
+    INSERT INTO promotion_reference_sources (promotion_id, label, description, sort_order)
+    SELECT bf_id, v.label, v.description, v.sort_order
+    FROM (VALUES
+      ('Creative Target & Mix Plan', 'Original guideline used to build the 180-piece creative-style matrix below. Targets are directional.', 0),
+      ('WNDRR Black Friday Sale 2026 -- Ad Ideas', 'Video ideas, graphic ideas and previous winning ads -- source for the 26 master ideas and the Inspiration Library.', 1)
+    ) AS v(label, description, sort_order)
+    WHERE NOT EXISTS (
+      SELECT 1 FROM promotion_reference_sources prs WHERE prs.promotion_id = bf_id AND prs.label = v.label
+    );
+  END IF;
+END $$;

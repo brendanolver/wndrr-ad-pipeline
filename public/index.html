@@ -482,6 +482,7 @@
           <button type="button" class="fa-subtab active" data-bf-subtab="stages" onclick="switchBfSubtab('stages')">Campaign Stages</button>
           <button type="button" class="fa-subtab" data-bf-subtab="ideas" onclick="switchBfSubtab('ideas')">Creative Ideas <span class="fa-subtab-count" id="bf-count-ideas"></span></button>
           <button type="button" class="fa-subtab" data-bf-subtab="inspiration" onclick="switchBfSubtab('inspiration')">Inspiration Library <span class="fa-subtab-count" id="bf-count-inspiration"></span></button>
+          <button type="button" class="fa-subtab" data-bf-subtab="plan" onclick="switchBfSubtab('plan')">Creative Plan</button>
         </div>
 
         <div id="bf-panel-stages">
@@ -494,10 +495,8 @@
                below, completely untouched. -->
           <div id="bf-stage-workspace" style="display:none;">
             <div class="planning-section-header">
-              <div>
-                <h2>Stage Workspace</h2>
-                <span class="admin-note">Targets are a planning guideline -- going over is good, not an error</span>
-              </div>
+              <h2>Stage Workspace</h2>
+              <button type="button" class="btn btn-ghost btn-sm" onclick="openBfAddCreativeForActiveStage()">+ Add Creative (other style)</button>
             </div>
             <div class="bf-stage-tabs" id="bf-stage-tabs"></div>
             <div id="bf-stage-workspace-body"></div>
@@ -534,6 +533,26 @@
             <button type="button" class="btn btn-primary btn-sm" onclick="openBfInspirationModal()">+ New Reference</button>
           </div>
           <div id="bf-inspiration-grid" class="cd-product-grid"></div>
+        </div>
+
+        <!-- Creative Plan (follow-up brief, Part 4) -- a REFERENCE area
+             only, never another production workflow. Renders the SAME
+             stored target data as the Stage Workspace (never a second
+             hard-coded matrix) plus the planning source documents the 26
+             master ideas/inspiration library were built from -- see
+             renderBfPlanTab in app.js. -->
+        <div id="bf-panel-plan" style="display:none;">
+          <div class="planning-section-header">
+            <div>
+              <h2>Black Friday Creative Plan</h2>
+              <span class="admin-note">Original planning guideline used to build the campaign. Targets are directional and the final campaign may contain more than the guideline total.</span>
+            </div>
+          </div>
+          <div id="bf-plan-matrix"></div>
+          <div class="planning-section-header" style="margin-top:20px;">
+            <h2>Planning Sources</h2>
+          </div>
+          <div id="bf-plan-sources"></div>
         </div>
       </div>
 
@@ -3004,12 +3023,20 @@
      swapped in place rather than three separate modals -- see
      openBfAddCreativeModal/showBfAddCreativePanel in app.js. -->
 <div id="bf-add-creative-modal" class="modal-backdrop">
-  <div class="modal promo-chooser-modal">
+  <div class="modal promo-chooser-modal bf-add-creative-modal-box">
     <div class="modal-header">
       <h3 id="bf-add-creative-title">Add Creative</h3>
       <button class="modal-close" onclick="closeModal('bf-add-creative-modal')">&times;</button>
     </div>
     <div class="modal-body">
+      <!-- Only shown when opened without a specific style (the stage-level
+           "+ Add Creative (other style)" entry point) -- every other entry
+           point already knows the style from the card the team clicked. -->
+      <div id="bf-add-creative-style-picker-wrap" style="display:none;">
+        <label>Creative Style<span class="cd-req-mark">*</span>
+          <select id="bf-add-creative-style-picker" onchange="onBfAddCreativeStylePicked(this.value)"></select>
+        </label>
+      </div>
       <div id="bf-add-creative-panel-chooser">
         <div class="hint">What are you adding?</div>
         <div class="promo-chooser-options">
@@ -3033,6 +3060,7 @@
         </div>
       </div>
       <div id="bf-add-creative-panel-recreate" style="display:none;">
+        <input type="text" id="bf-recreate-search" class="bf-recreate-search" placeholder="Search by title, campaign, style, creator..." oninput="renderBfRecreatePicker()">
         <div id="bf-recreate-picker-list"></div>
         <div class="modal-footer" style="padding:12px 0 0;">
           <button class="btn btn-ghost" onclick="showBfAddCreativePanel('chooser')">&larr; Back</button>
