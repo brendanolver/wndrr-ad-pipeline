@@ -1992,3 +1992,172 @@ BEGIN
     ON CONFLICT (promotion_stage_id, creative_style_id) DO NOTHING;
   END IF;
 END $$;
+
+-- =====================================================================
+-- Black Friday 2026 follow-up: master idea -> stage executions, and real
+-- 2026 planning-sheet data. The same creative idea (eg. "Car talk
+-- through") legitimately runs across more than one Black Friday phase
+-- with the same underlying footage/design, so promotion_creative_ideas is
+-- now the MASTER creative record (concept/footage/who/where/inspo) and
+-- each phase it runs in gets its own row here -- this is what the
+-- 180-target progress counters count against, never the master idea
+-- itself (one master idea used in 3 stages = 3 planned pieces, not 1).
+-- Additive only: the master idea's own promotion_stage_id/
+-- creative_style_id/linked_creative_asset_id columns are left in place
+-- (never dropped) for backward data compatibility, and every existing row
+-- that already used them is migrated into one matching execution row
+-- below so nothing already in production is lost; new code reads/writes
+-- exclusively through this table from here on.
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS promotion_creative_idea_executions (
+  id SERIAL PRIMARY KEY,
+  promotion_creative_idea_id INTEGER NOT NULL REFERENCES promotion_creative_ideas(id) ON DELETE CASCADE,
+  promotion_stage_id INTEGER NOT NULL REFERENCES promotion_stages(id) ON DELETE CASCADE,
+  -- NULL = "Needs Classification" (the brief's own term) -- never guessed.
+  creative_style_id INTEGER REFERENCES creative_styles(id) ON DELETE SET NULL,
+  -- NULL = inherit the master idea's shared linked_creative_asset_id (the
+  -- default -- "do not create three identical shoot jobs"); set only when
+  -- the team deliberately produces a separate version for this one stage.
+  linked_creative_asset_id INTEGER REFERENCES creative_assets(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (promotion_creative_idea_id, promotion_stage_id)
+);
+CREATE INDEX IF NOT EXISTS idx_pci_executions_idea_id ON promotion_creative_idea_executions(promotion_creative_idea_id);
+CREATE INDEX IF NOT EXISTS idx_pci_executions_stage_id ON promotion_creative_idea_executions(promotion_stage_id);
+CREATE INDEX IF NOT EXISTS idx_pci_executions_linked_asset ON promotion_creative_idea_executions(linked_creative_asset_id);
+
+-- One-time-per-row, idempotent backfill: every existing idea that already
+-- had a single stage/style/asset assigned (the pre-this-migration shape)
+-- gets exactly one matching execution row. ON CONFLICT means an idea that
+-- already has that execution (from a previous run of this file, or
+-- created fresh through the new multi-stage API) is never touched again.
+INSERT INTO promotion_creative_idea_executions (promotion_creative_idea_id, promotion_stage_id, creative_style_id, linked_creative_asset_id)
+SELECT id, promotion_stage_id, creative_style_id, linked_creative_asset_id
+FROM promotion_creative_ideas
+WHERE promotion_stage_id IS NOT NULL
+ON CONFLICT (promotion_creative_idea_id, promotion_stage_id) DO NOTHING;
+
+-- Stable spreadsheet row identity so importing the team's planning sheet is
+-- idempotent (re-running this file never creates a duplicate master idea)
+-- and safely re-runnable later if a row is added. NULL for any idea
+-- created by hand in the app. source_label is the human-readable version
+-- shown nowhere except a detail view -- never the raw key.
+ALTER TABLE promotion_creative_ideas ADD COLUMN IF NOT EXISTS source_key VARCHAR(64) UNIQUE;
+ALTER TABLE promotion_creative_ideas ADD COLUMN IF NOT EXISTS source_label VARCHAR(255);
+
+-- Video/Graphic now lives on the MASTER idea (an idea's medium doesn't
+-- change per stage), separate from any one execution's creative_style_id
+-- classification -- which may be null ("Needs Classification") even
+-- though the idea's medium is always known. Backfilled once from the
+-- legacy single creative_style_id for any idea that predates this column;
+-- guarded by "only if still NULL" so it can never overwrite a value the
+-- import below (or a human) has since set.
+ALTER TABLE promotion_creative_ideas ADD COLUMN IF NOT EXISTS media_type VARCHAR(10) CHECK (media_type IS NULL OR media_type IN ('graphic', 'video'));
+UPDATE promotion_creative_ideas pci SET media_type = cs.media_type
+FROM creative_styles cs WHERE cs.id = pci.creative_style_id AND pci.media_type IS NULL;
+
+-- ---------------------------------------------------------------------
+-- Real Black Friday 2026 planning-sheet data: the VIDEO IDEAS 2026 and
+-- GRAPHIC IDEAS 2026 tabs of the team's "WNDRR Black Friday Sale 2026 -
+-- ad ideas" sheet, imported verbatim -- no invented ideas. Each row below
+-- is a MASTER idea; a follow-up INSERT creates its real stage executions
+-- (a master used across N stages becomes N planned pieces, matching how
+-- the sheet itself marks ideas like "Hype/Live/last chance"). Style
+-- classification only applied where reasonably unambiguous from the
+-- sheet's own idea name/description -- everything else is left NULL
+-- ("Needs Classification") for the team to correct, never guessed. The
+-- sheet's "TOP ADS FROM PREVIOUS SALES" tab (historical Inspiration
+-- Library import) is NOT included here -- that data was not available at
+-- implementation time; see the accompanying report.
+-- ---------------------------------------------------------------------
+DO $$
+DECLARE
+  bf_id INTEGER;
+BEGIN
+  SELECT id INTO bf_id FROM promotions WHERE name = 'Black Friday 2026';
+  IF bf_id IS NOT NULL THEN
+    INSERT INTO promotion_creative_ideas (promotion_id, source_key, source_label, media_type, title, who, where_text, concept_script, reference_note, created_by_user_id)
+    SELECT bf_id, v.source_key, 'Black Friday 2026 Planning Sheet', v.media_type, v.title, v.who, v.where_text, v.concept_script, v.reference_note, NULL
+    FROM (VALUES
+      ('bf2026-video-1', 'video', 'Green screen - top picks', 'Mark', 'Office', NULL::text, 'https://fb.me/adspreview/facebook/1VCTklXnOho27py'),
+      ('bf2026-video-2', 'video', 'Green screen - sale details', 'Mark', 'Office', NULL::text, 'https://fb.me/adspreview/facebook/27xjj23NsmwJEwt'),
+      ('bf2026-video-3', 'video', 'Couch - sale details talk through', 'Steve', 'Office', NULL::text, 'https://fb.me/adspreview/facebook/1Sm7nXcgcP6F8do'),
+      ('bf2026-video-4', 'video', 'Green screen - rage bait', 'Mark', 'Office', NULL::text, 'https://fb.me/adspreview/facebook/22VaQ6XxTJmNBn4'),
+      ('bf2026-video-5', 'video', 'Flat lay - array of products', 'Mark', 'Office', NULL::text, 'https://fb.me/adspreview/facebook/22RcgDnYKWptBIs'),
+      ('bf2026-video-6', 'video', 'Car talk through', 'Steve', 'Car', NULL::text, 'https://fb.me/adspreview/facebook/1VZOTtBHaIQ21PK'),
+      ('bf2026-video-7', 'video', 'Roll bar top picks', 'Mark, Steve', 'Office', NULL::text, 'https://fb.me/adspreview/facebook/21Z8alfx1ZV2S4Z'),
+      ('bf2026-video-8', 'video', 'Poster drop', 'Shez', 'Warehouse', NULL::text, 'https://fb.me/adspreview/facebook/1VwBSHLuNJvoeGU'),
+      ('bf2026-video-9', 'video', 'Warehouse talk through', 'Steve / Mark', 'Warehouse', NULL::text, 'https://fb.me/adspreview/facebook/1ZjffsTKz719Dcx'),
+      ('bf2026-video-10', 'video', 'Founder/EGC warehouse talk through', 'Steve, warehouse team', 'Warehouse', NULL::text, 'https://fb.me/adspreview/facebook/1VfFfJVsd6ck5mL'),
+      ('bf2026-video-11', 'video', 'Shock value (eg. forklift and gym accident)', 'Max, Steve, Mark', 'Warehouse', NULL::text, E'https://fb.me/adspreview/facebook/2a3gYFQIc3Q7vqb\nhttps://fb.me/adspreview/facebook/2jraB8Hp88wloQ5'),
+      ('bf2026-video-12', 'video', 'BF Campaign', 'Steve', 'Off-site', NULL::text, 'https://fb.me/adspreview/facebook/28XsA6HoZaCnMpK'),
+      ('bf2026-video-13', 'video', 'GWP couch talk through', 'Mark, Steve', 'Office', NULL::text, 'https://fb.me/adspreview/facebook/2iSOyatgZQ9GCzw'),
+      ('bf2026-video-14', 'video', 'Flat lay BAU (sale edition)', 'Shez', 'Office', NULL::text, 'https://fb.me/adspreview/facebook/23yywEbk8knSnr2'),
+      ('bf2026-video-15', 'video', 'What $X can get you', 'Mark', 'Office', NULL::text, 'https://fb.me/adspreview/facebook/27SXiLusVGCuqqd'),
+      ('bf2026-video-16', 'video', 'Secret envelope', 'Mark, Steve', 'Office', 'Passing Steve or Mark an envelope in different situations, such as through a car window or dropping it on a desk. At the end of the video they pull out the graphic showing it is the Black Friday sale. Suspenseful and builds hype.', NULL::text),
+      ('bf2026-video-17', 'video', 'Flyer video', 'Mark', 'Office', 'Short clips of sticking flyers on poles, putting them on car windows, etc.', NULL::text),
+      ('bf2026-video-18', 'video', 'UGC content', NULL, NULL, 'UGC creator promoting what can be purchased during the sale.', NULL::text),
+      ('bf2026-video-19', 'video', 'Stencil graffiti', 'Steve, Mark', NULL, NULL::text, 'https://www.instagram.com/reel/DQs4Gv7E-aT/?stkn=MWZlaWE0ZjJqbXNtMw=='),
+      ('bf2026-video-20', 'video', 'Snipping ribbon in front of computer screen to indicate sale is live', 'Mark', NULL, NULL::text, NULL::text),
+      ('bf2026-graphic-1', 'graphic', 'GWP with offer', 'Til', NULL, NULL::text, 'https://fb.me/adspreview/facebook/2ivpLIxsKNotBtX'),
+      ('bf2026-graphic-2', 'graphic', 'Sale offer', 'Til', NULL, NULL::text, E'https://fb.me/adspreview/facebook/23cEP8FFDAYslMS\nhttps://fb.me/adspreview/facebook/27ndGrXMuPpzlOB'),
+      ('bf2026-graphic-3', 'graphic', 'Apology statement', 'Til', NULL, NULL::text, 'https://fb.me/adspreview/facebook/1SIAFq5PExTU0Ur'),
+      ('bf2026-graphic-4', 'graphic', 'Ugly ad carousel', 'Til', NULL, NULL::text, 'https://fb.me/adspreview/facebook/21KXM5VEgIbwGyC'),
+      ('bf2026-graphic-5', 'graphic', 'AI poster drop - using real footage', 'Til, Shez', NULL, NULL::text, 'https://fb.me/adspreview/facebook/yBpjtyXM1IXsW12'),
+      ('bf2026-graphic-6', 'graphic', 'Notes app', 'Shez', NULL, NULL::text, 'https://fb.me/adspreview/facebook/1WOA5MYBYejFqwd')
+    ) AS v(source_key, media_type, title, who, where_text, concept_script, reference_note)
+    ON CONFLICT (source_key) DO NOTHING;
+
+    INSERT INTO promotion_creative_idea_executions (promotion_creative_idea_id, promotion_stage_id, creative_style_id)
+    SELECT pci.id, ps.id, cs.id
+    FROM (VALUES
+      ('bf2026-video-1', 'Hype Ads', 'EGC Video'),
+      ('bf2026-video-1', 'Sale Live Ads', 'EGC Video'),
+      ('bf2026-video-2', 'Hype Ads', 'EGC Video'),
+      ('bf2026-video-2', 'Sale Live Ads', 'EGC Video'),
+      ('bf2026-video-3', 'Hype Ads', 'Founder Video'),
+      ('bf2026-video-4', 'Sale Live Ads', 'Other Video (eg. Humour, TikTok)'),
+      ('bf2026-video-5', 'Sale Live Ads', 'Product Focused Video'),
+      ('bf2026-video-5', 'Last Chance / Ends Today', 'Product Focused Video'),
+      ('bf2026-video-6', 'Hype Ads', 'Founder Video'),
+      ('bf2026-video-6', 'Sale Live Ads', 'Founder Video'),
+      ('bf2026-video-6', 'Last Chance / Ends Today', 'Founder Video'),
+      ('bf2026-video-7', 'Hype Ads', NULL),
+      ('bf2026-video-7', 'Mid Sale Offers Ads', NULL),
+      ('bf2026-video-8', 'Hype Ads', NULL),
+      ('bf2026-video-8', 'Sale Live Ads', NULL),
+      ('bf2026-video-9', 'Sale Live Ads', NULL),
+      ('bf2026-video-9', 'Last Chance / Ends Today', NULL),
+      ('bf2026-video-10', 'Hype Ads', NULL),
+      ('bf2026-video-11', 'Sale Live Ads', 'Other Video (eg. Humour, TikTok)'),
+      ('bf2026-video-12', 'Sale Live Ads', 'Campaign Video'),
+      ('bf2026-video-13', 'Sale Live Ads', 'GWP/Giveaway - Video'),
+      ('bf2026-video-14', 'Mid Sale Offers Ads', 'BAU Video'),
+      ('bf2026-video-15', 'Sale Live Ads', 'Product Focused Video'),
+      ('bf2026-video-16', 'Hype Ads', NULL),
+      ('bf2026-video-16', 'Sale Live Ads', NULL),
+      ('bf2026-video-17', 'Hype Ads', NULL),
+      ('bf2026-video-17', 'Sale Live Ads', NULL),
+      ('bf2026-video-18', 'Hype Ads', 'UGC Video'),
+      ('bf2026-video-18', 'Sale Live Ads', 'UGC Video'),
+      ('bf2026-video-19', 'Hype Ads', NULL),
+      ('bf2026-video-19', 'Sale Live Ads', NULL),
+      ('bf2026-video-20', 'Sale Live Ads', NULL),
+      ('bf2026-graphic-1', 'Hype Ads', 'GWP/Giveaway - Graphic'),
+      ('bf2026-graphic-2', 'Hype Ads', 'Graphic tile'),
+      ('bf2026-graphic-2', 'Sale Live Ads', 'Graphic tile'),
+      ('bf2026-graphic-3', 'Hype Ads', NULL),
+      ('bf2026-graphic-3', 'Sale Live Ads', NULL),
+      ('bf2026-graphic-4', 'Mid Sale Offers Ads', NULL),
+      ('bf2026-graphic-5', 'Hype Ads', NULL),
+      ('bf2026-graphic-6', 'Hype Ads', NULL),
+      ('bf2026-graphic-6', 'Sale Live Ads', NULL),
+      ('bf2026-graphic-6', 'Last Chance / Ends Today', NULL)
+    ) AS v(source_key, stage_name, style_name)
+    JOIN promotion_creative_ideas pci ON pci.source_key = v.source_key
+    JOIN promotion_stages ps ON ps.promotion_id = bf_id AND ps.name = v.stage_name
+    LEFT JOIN creative_styles cs ON cs.name = v.style_name
+    ON CONFLICT (promotion_creative_idea_id, promotion_stage_id) DO NOTHING;
+  END IF;
+END $$;

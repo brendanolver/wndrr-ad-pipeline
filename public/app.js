@@ -119,7 +119,7 @@ let state = {
   // (not promotion-scoped) since both are shared reference lists.
   blackFriday: {
     activeSubtab: 'stages', progress: null, ideas: [], inspiration: [], styles: [],
-    editingIdeaId: null, editingInspirationId: null, expandedStyleMatrix: false,
+    editingIdeaId: null, editingInspirationId: null, expandedStyleMatrix: false, expandedIdeaId: null,
   },
 };
 let dashboardWeekOffset = 0;
@@ -11241,13 +11241,7 @@ async function loadBfStyles() {
 }
 
 function bfStyleOptionsHtml(selectedId) {
-  return '<option value="">— none —</option>' + state.blackFriday.styles
-    .map((s) => `<option value="${s.id}" ${String(s.id) === String(selectedId) ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('');
-}
-
-function bfStageOptionsHtml(selectedId) {
-  const stages = (state.currentPromotion && state.currentPromotion.stages) || [];
-  return '<option value="">— none —</option>' + stages
+  return '<option value="">Needs Classification</option>' + state.blackFriday.styles
     .map((s) => `<option value="${s.id}" ${String(s.id) === String(selectedId) ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('');
 }
 
@@ -11295,6 +11289,7 @@ function renderBfProgressSection() {
       <div class="bf-stage-totals-row">${stageTiles}</div>
       <button type="button" class="link-btn" onclick="toggleBfStyleMatrix()">${expanded ? 'Hide' : 'Show'} creative-style breakdown &rarr;</button>
       ${expanded ? `<div class="bf-style-matrix">${styleRows}</div>` : ''}
+      ${progress.needs_classification_count ? `<div class="hint bf-needs-classification-hint">${progress.needs_classification_count} stage execution${progress.needs_classification_count === 1 ? '' : 's'} need${progress.needs_classification_count === 1 ? 's' : ''} classification &rarr; <a href="#" onclick="switchBfSubtab('ideas');return false;">review in Creative Ideas</a></div>` : ''}
     </div>`;
 }
 
@@ -11329,37 +11324,72 @@ async function loadBfIdeas() {
   }
 }
 
-function bfIdeaStatusBucket(idea) {
-  if (idea.production_stage === 'planned') return 'planned';
-  if (idea.production_stage === 'completed') return 'completed';
+// A master idea itself has no single status any more (it can be running in
+// several stages at once, each possibly at a different point in the real
+// pipeline) -- status is always per-EXECUTION now (item 2/8 of the brief).
+function bfExecStatusBucket(exec) {
+  if (exec.production_stage === 'planned') return 'planned';
+  if (exec.production_stage === 'completed') return 'completed';
   return 'in-production';
 }
 const BF_STATUS_LABELS = { planned: 'PLANNED', 'in-production': 'IN PRODUCTION', completed: 'COMPLETED' };
+const BF_STAGE_SHORT = {
+  'Hype Ads': 'Hype', 'Sale Live Ads': 'Sale Live', 'Mid Sale Offers Ads': 'Mid Sale', 'Last Chance / Ends Today': 'Last Chance',
+};
+function bfStageShortName(name) {
+  return BF_STAGE_SHORT[name] || (name || '').replace(/ Ads$/, '');
+}
 
+// One master card per idea (never one per stage -- "do not render
+// duplicate full-size idea cards for every stage"), with a compact stage
+// badge row always visible and the full per-stage execution detail
+// (style/status/pipeline stage) behind a click-to-expand toggle --
+// progressive disclosure for what would otherwise be a much longer card.
 function bfIdeaCardHtml(idea) {
-  const bucket = bfIdeaStatusBucket(idea);
   const whoWhere = [idea.who, idea.where_text].filter(Boolean).join(' &middot; ');
+  const executions = idea.executions || [];
+  const stageBadges = executions
+    .map((ex) => `<span class="bf-stage-badge ${bfExecStatusBucket(ex)}">${escapeHtml(bfStageShortName(ex.stage_name))}</span>`)
+    .join('');
   const inspirationChips = (idea.inspiration || []).map((i) => `<span class="bf-style-badge">&#9654; ${escapeHtml(i.title)}</span>`).join('');
+  const expanded = state.blackFriday.expandedIdeaId === idea.id;
   const pipelineAction = idea.linked_creative_asset_id
     ? `<button type="button" class="btn btn-ghost btn-sm" onclick="event.stopPropagation();viewBfIdeaPipelineStatus(${idea.id})">View Pipeline Status &rarr;</button>`
-    : `<button type="button" class="btn btn-primary btn-sm" onclick="event.stopPropagation();sendBfIdeaToPipeline(${idea.id})" ${idea.promotion_stage_id ? '' : 'disabled title="Assign a Stage first"'}>Send to Pipeline &rarr;</button>`;
+    : `<button type="button" class="btn btn-primary btn-sm" onclick="event.stopPropagation();sendBfIdeaToPipeline(${idea.id})" ${executions.length ? '' : 'disabled title="Add a Black Friday stage first"'}>Send to Pipeline &rarr;</button>`;
+
+  const execDetail = expanded && executions.length ? `
+    <div class="bf-idea-executions">
+      ${executions.map((ex) => `
+        <div class="bf-idea-execution-row">
+          <span class="bf-stage-badge ${bfExecStatusBucket(ex)}">${escapeHtml(bfStageShortName(ex.stage_name))}</span>
+          <span class="bf-style-badge">${ex.style_name ? escapeHtml(ex.style_name) : 'Needs Classification'}</span>
+          <span class="bf-status-badge ${bfExecStatusBucket(ex)}">${BF_STATUS_LABELS[bfExecStatusBucket(ex)]}</span>
+          <span class="hint">${escapeHtml(ex.production_stage_label)}</span>
+        </div>`).join('')}
+    </div>` : '';
+
   return `
-    <div class="cd-card bf-idea-card" onclick="openBfIdeaModal(${idea.id})">
+    <div class="cd-card bf-idea-card" onclick="toggleBfIdeaExpand(${idea.id})">
       <div class="bf-idea-badges">
-        ${idea.stage_name ? `<span class="bf-stage-badge">${escapeHtml(idea.stage_name.replace(/ Ads$/, ''))}</span>` : ''}
-        ${idea.style_name ? `<span class="bf-style-badge">${escapeHtml(idea.style_name)}</span>` : ''}
-        <span class="bf-status-badge ${bucket}">${BF_STATUS_LABELS[bucket]}</span>
+        <span class="bf-style-badge">${idea.media_type === 'graphic' ? 'Graphic' : 'Video'}</span>
+        ${stageBadges}
       </div>
       <div class="cd-card-name">${escapeHtml(idea.title)}</div>
-      ${idea.production_stage !== 'planned' ? `<div class="hint">${escapeHtml(idea.production_stage_label)}</div>` : ''}
       ${whoWhere ? `<div class="bf-idea-meta-row">${whoWhere}</div>` : ''}
       ${idea.concept_script ? `<div class="bf-idea-script">${escapeHtml(idea.concept_script)}</div>` : ''}
       ${inspirationChips ? `<div class="bf-idea-badges">${inspirationChips}</div>` : ''}
+      ${execDetail}
       <div class="bf-idea-actions">
         <button type="button" class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openBfIdeaModal(${idea.id})">Edit</button>
         ${pipelineAction}
+        ${executions.length ? `<button type="button" class="link-btn bf-idea-expand-toggle" onclick="event.stopPropagation();toggleBfIdeaExpand(${idea.id})">${expanded ? 'Hide stages' : `Show ${executions.length} stage${executions.length === 1 ? '' : 's'}`}</button>` : ''}
       </div>
     </div>`;
+}
+
+function toggleBfIdeaExpand(id) {
+  state.blackFriday.expandedIdeaId = state.blackFriday.expandedIdeaId === id ? null : id;
+  renderBfIdeasGrid();
 }
 
 function renderBfIdeasGrid() {
@@ -11373,13 +11403,18 @@ function bfIdeaFindById(id) {
   return state.blackFriday.ideas.find((i) => i.id === id) || null;
 }
 
+function bfIdeaReplaceInState(idea) {
+  const idx = state.blackFriday.ideas.findIndex((i) => i.id === idea.id);
+  if (idx >= 0) state.blackFriday.ideas[idx] = idea;
+  renderBfIdeasGrid();
+}
+
 function openBfIdeaModal(id) {
   const idea = id ? bfIdeaFindById(id) : null;
   state.blackFriday.editingIdeaId = id || null;
   document.getElementById('bf-idea-modal-title').textContent = idea ? 'Edit Creative Idea' : 'New Creative Idea';
   document.getElementById('bf-idea-title').value = idea ? idea.title : '';
-  document.getElementById('bf-idea-stage').innerHTML = bfStageOptionsHtml(idea ? idea.promotion_stage_id : '');
-  document.getElementById('bf-idea-style').innerHTML = bfStyleOptionsHtml(idea ? idea.creative_style_id : '');
+  document.getElementById('bf-idea-media-type').value = (idea && idea.media_type) || 'video';
   document.getElementById('bf-idea-who').value = (idea && idea.who) || '';
   document.getElementById('bf-idea-where').value = (idea && idea.where_text) || '';
   document.getElementById('bf-idea-script').value = (idea && idea.concept_script) || '';
@@ -11388,8 +11423,99 @@ function openBfIdeaModal(id) {
   document.getElementById('bf-idea-delete-btn').style.display = idea ? '' : 'none';
   document.getElementById('bf-idea-more').style.display = 'none';
   document.getElementById('bf-idea-more-toggle').textContent = '+ More details (Need, Inspo notes)';
+
+  if (!idea) {
+    // Create mode: pick stages up front + one shared style for all of them.
+    document.getElementById('bf-idea-new-style-group').style.display = '';
+    document.getElementById('bf-idea-new-style').innerHTML = bfStyleOptionsHtml('');
+    document.getElementById('bf-idea-stage-checks-wrap').style.display = '';
+    const stages = (state.currentPromotion && state.currentPromotion.stages) || [];
+    document.getElementById('bf-idea-stage-checks').innerHTML = stages
+      .map((s) => `<label class="bf-stage-check"><input type="checkbox" value="${s.id}"> ${escapeHtml(bfStageShortName(s.name))}</label>`)
+      .join('');
+    document.getElementById('bf-idea-executions-section').style.display = 'none';
+  } else {
+    // Edit mode: the idea's real, independently-editable stage executions.
+    document.getElementById('bf-idea-new-style-group').style.display = 'none';
+    document.getElementById('bf-idea-stage-checks-wrap').style.display = 'none';
+    document.getElementById('bf-idea-executions-section').style.display = '';
+    renderBfIdeaExecutionsEditor();
+  }
   renderBfIdeaInspirationList();
   openModal('bf-idea-modal');
+}
+
+// Every action here (add/reclassify/remove a stage) persists immediately
+// against its own small endpoint -- these are sub-records with their own
+// ids and their own idempotent add semantics, not fields that belong on
+// the main Save button.
+function renderBfIdeaExecutionsEditor() {
+  const idea = bfIdeaFindById(state.blackFriday.editingIdeaId);
+  if (!idea) return;
+  const executions = idea.executions || [];
+  document.getElementById('bf-idea-executions-list').innerHTML = executions.length
+    ? executions.map((ex) => `
+        <div class="bf-exec-row">
+          <div class="bf-exec-row-main">
+            <span class="bf-exec-stage">${escapeHtml(bfStageShortName(ex.stage_name))}</span>
+            <select onchange="changeBfIdeaExecutionStyle(${ex.id}, this.value)">${bfStyleOptionsHtml(ex.creative_style_id)}</select>
+          </div>
+          <div class="bf-exec-row-sub">
+            <span class="hint">${escapeHtml(ex.production_stage_label)}</span>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="removeBfIdeaExecution(${ex.id})">Remove</button>
+          </div>
+        </div>`).join('')
+    : '<div class="hint">No stages yet -- add one below.</div>';
+
+  const usedStageIds = new Set(executions.map((ex) => ex.promotion_stage_id));
+  const stages = (state.currentPromotion && state.currentPromotion.stages) || [];
+  const remaining = stages.filter((s) => !usedStageIds.has(s.id));
+  const addRow = document.getElementById('bf-idea-add-exec-row');
+  if (remaining.length) {
+    addRow.style.display = '';
+    document.getElementById('bf-idea-add-exec-stage').innerHTML = remaining
+      .map((s) => `<option value="${s.id}">${escapeHtml(bfStageShortName(s.name))}</option>`).join('');
+  } else {
+    addRow.style.display = 'none';
+  }
+}
+
+async function addBfIdeaExecution() {
+  const id = state.blackFriday.editingIdeaId;
+  const stageId = Number(document.getElementById('bf-idea-add-exec-stage').value);
+  if (!stageId) return;
+  try {
+    const idea = await api(`/promotion-creative/ideas/${id}/executions`, { method: 'POST', body: JSON.stringify({ promotion_stage_id: stageId }) });
+    bfIdeaReplaceInState(idea);
+    renderBfIdeaExecutionsEditor();
+    await initBfProgressRefreshOnly();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function changeBfIdeaExecutionStyle(execId, value) {
+  const id = state.blackFriday.editingIdeaId;
+  try {
+    const idea = await api(`/promotion-creative/ideas/${id}/executions/${execId}`, { method: 'PATCH', body: JSON.stringify({ creative_style_id: value ? Number(value) : null }) });
+    bfIdeaReplaceInState(idea);
+    await initBfProgressRefreshOnly();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function removeBfIdeaExecution(execId) {
+  const id = state.blackFriday.editingIdeaId;
+  if (!(await confirmDialog('Remove this stage from the idea? Any linked pipeline record is kept.'))) return;
+  try {
+    await api(`/promotion-creative/ideas/${id}/executions/${execId}`, { method: 'DELETE' });
+    await loadBfIdeas();
+    renderBfIdeaExecutionsEditor();
+    await initBfProgressRefreshOnly();
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 function toggleBfIdeaMore() {
@@ -11416,8 +11542,7 @@ async function saveBfIdea() {
   if (!title) return toast('Creative Idea is required', true);
   const body = {
     title,
-    promotion_stage_id: document.getElementById('bf-idea-stage').value ? Number(document.getElementById('bf-idea-stage').value) : null,
-    creative_style_id: document.getElementById('bf-idea-style').value ? Number(document.getElementById('bf-idea-style').value) : null,
+    media_type: document.getElementById('bf-idea-media-type').value,
     who: document.getElementById('bf-idea-who').value.trim(),
     where_text: document.getElementById('bf-idea-where').value.trim(),
     concept_script: document.getElementById('bf-idea-script').value.trim(),
@@ -11428,6 +11553,8 @@ async function saveBfIdea() {
     if (state.blackFriday.editingIdeaId) {
       await api(`/promotion-creative/ideas/${state.blackFriday.editingIdeaId}`, { method: 'PATCH', body: JSON.stringify(body) });
     } else {
+      body.stage_ids = [...document.querySelectorAll('#bf-idea-stage-checks input:checked')].map((el) => Number(el.value));
+      body.creative_style_id = document.getElementById('bf-idea-new-style').value ? Number(document.getElementById('bf-idea-new-style').value) : null;
       await api(`/promotion-creative/${state.currentPromotionId}/ideas`, { method: 'POST', body: JSON.stringify(body) });
     }
     closeModal('bf-idea-modal');
@@ -11483,15 +11610,21 @@ async function sendBfIdeaToPipeline(id) {
 // already renders a decided concept read-only regardless of how far past
 // it the pipeline has moved, so that's the one universal "view it"
 // action; anything further along just tells the team which tab to check
-// (the idea card's own stage badge already makes that obvious at a glance).
+// (each execution's own stage badge already makes that obvious at a
+// glance). Status is now per-execution, not per-master-idea -- reads it
+// off whichever execution actually uses the master's shared asset (the
+// normal case), since an execution deliberately overridden with its own
+// separate asset has nothing to do with this button.
 function viewBfIdeaPipelineStatus(id) {
   const idea = bfIdeaFindById(id);
   if (!idea || !idea.linked_creative_asset_id) return;
-  if (idea.production_stage === 'concept_development' || idea.production_stage === 'tuesday_review') {
+  const exec = (idea.executions || []).find((e) => e.effective_creative_asset_id === idea.linked_creative_asset_id);
+  if (!exec) return;
+  if (exec.production_stage === 'concept_development' || exec.production_stage === 'tuesday_review') {
     switchTab('concept-dev');
     openConceptDevProductStandalone(idea.linked_creative_asset_id);
   } else {
-    toast(`Currently in ${idea.production_stage_label} -- check the ${idea.production_stage_label} tab`);
+    toast(`Currently in ${exec.production_stage_label} -- check the ${exec.production_stage_label} tab`);
   }
 }
 

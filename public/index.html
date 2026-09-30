@@ -2838,15 +2838,36 @@
     </div>
     <div class="modal-body">
       <label>Creative Idea<span class="cd-req-mark">*</span>
-        <input type="text" id="bf-idea-title" placeholder="e.g. Green Screen — Top Picks">
+        <input type="text" id="bf-idea-title" placeholder="e.g. Car talk through">
       </label>
       <div class="promo-shoot-2col">
-        <label>Black Friday Stage
-          <select id="bf-idea-stage"></select>
+        <label>Type
+          <select id="bf-idea-media-type">
+            <option value="video">Video</option>
+            <option value="graphic">Graphic</option>
+          </select>
         </label>
-        <label>Creative Style
-          <select id="bf-idea-style"></select>
+        <label id="bf-idea-new-style-group">Creative Style
+          <select id="bf-idea-new-style"></select>
         </label>
+      </div>
+      <!-- Create mode: pick which Black Friday stages this idea runs in up
+           front (one shared style above applies to all of them at first --
+           refine per stage afterwards in Edit). -->
+      <div id="bf-idea-stage-checks-wrap">
+        <label>Black Friday Stages</label>
+        <div id="bf-idea-stage-checks" class="bf-stage-checks"></div>
+      </div>
+      <!-- Edit mode: the idea's real stage executions -- one master idea,
+           N stage pieces, each independently classified/status'd (item 2/8
+           of the brief). Persists immediately per row, not on Save. -->
+      <div id="bf-idea-executions-section" style="display:none;">
+        <label>Stage Executions</label>
+        <div id="bf-idea-executions-list"></div>
+        <div id="bf-idea-add-exec-row" class="bf-idea-add-exec-row">
+          <select id="bf-idea-add-exec-stage"></select>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="addBfIdeaExecution()">+ Add Stage</button>
+        </div>
       </div>
       <div class="promo-shoot-2col">
         <label>Who
