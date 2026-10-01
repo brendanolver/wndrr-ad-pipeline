@@ -1190,6 +1190,16 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .cd-promo-group:last-child{margin-bottom:0;}
 .cd-promo-group-title{font-size:12.5px;font-weight:700;color:var(--text-secondary);margin-bottom:8px;}
 
+/* Empty-workspace remove action (UX follow-up brief) -- a Promotion card's
+   own top-right &times; (reuses .cd-concept-card-remove verbatim, same
+   subtle hover-to-red treatment as the concept card's own Delete), shown
+   only when the card has zero concepts. Scoped to .cd-card-promo rather
+   than the base .cd-card so Day-to-Day/Core/Drop/High-Stock cards
+   (conceptDevProductCardHtml, which never adds this class) are completely
+   unaffected -- they get no position:relative and never render this
+   button in the first place. */
+.cd-card-promo{position:relative;}
+
 /* Product Workspace -- level 2: "what concepts need preparing for this
    product?" A read-only header (everything inherited from Planning) plus
    a compact grid of concept cards; the full development form only opens
