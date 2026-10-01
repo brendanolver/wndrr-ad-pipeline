@@ -197,4 +197,14 @@ router.post('/:creativeAssetId', requireAdmin, async (req, res, next) => {
   }
 });
 
+// Attached to the exported router (same pattern as
+// ensureShootScheduleForApprovedConcept in conceptDevelopment.js) -- the
+// Admin-only "Remove from Concept Dev" action (see
+// DELETE /concept-development/workspace/:id) needs this exact same
+// "what stage is this concept really at" detection to refuse removing a
+// concept that has already progressed into Tuesday Review, Shooting,
+// Editing, Final Approval, Ad Setup or Approved, rather than inventing a
+// second, possibly-inconsistent notion of pipeline stage.
+router.loadMoveBackState = loadMoveBackState;
+router.STAGE_LABELS = STAGE_LABELS;
 module.exports = router;
