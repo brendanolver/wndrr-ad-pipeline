@@ -5381,14 +5381,46 @@ function conceptDevPromotionCardHtml(product) {
   const stagesLine = bfCtx
     ? `${escapeHtml(product.promotion_name || '')} &middot; ${escapeHtml(bfCtx.stages.map((s) => bfStageShortName(s.stage_name)).join(' + '))}`
     : `${escapeHtml(product.promotion_name || '')}${product.promotion_stage_name ? ` &middot; ${escapeHtml(bfStageShortName(product.promotion_stage_name))}` : ''}`;
+  // Empty-workspace remove action (UX follow-up brief): only ever shown
+  // when this card has ZERO concepts -- an orphan shoot_plan_item left
+  // behind once its one seed concept was removed via Delete Concept (see
+  // DELETE /concept-development/workspace/:id for why this is safe). A
+  // card with real concepts already has its own per-concept Delete inside
+  // the workspace, never this -- reuses the same small top-right &times;
+  // the concept card itself uses, just scoped to the workspace as a whole.
+  const removeBtn = !count
+    ? `<button type="button" class="cd-concept-card-remove" onclick="event.stopPropagation(); removeConceptDevWorkspace(${product.shoot_plan_item_id})" aria-label="Remove empty workspace" title="Remove this empty workspace">&times;</button>`
+    : '';
   return `
-    <div class="cd-card" onclick="openConceptDevProduct(${product.shoot_plan_item_id})">
+    <div class="cd-card cd-card-promo" onclick="openConceptDevProduct(${product.shoot_plan_item_id})">
+      ${removeBtn}
       <div class="cd-card-name">${escapeHtml(title)}</div>
       <div class="cd-card-meta">${stagesLine}</div>
       <div class="cd-card-meta">Owner: ${escapeHtml(product.creator || '—')}</div>
       ${breakdown.length ? `<div class="cd-card-status-row">${breakdown.map((s) => `<span class="cd-concept-status-pill ${CONCEPT_DEV_STATUS_CLASS[s.status] || ''}">${s.count} ${CONCEPT_DEV_STATUS_LABELS[s.status] || s.status}</span>`).join('')}</div>` : `<div class="cd-card-count">${count ? '' : 'No new concepts yet'}</div>`}
       <div class="cd-card-action">${conceptDevProductCtaLabel(product)} &rarr;</div>
     </div>`;
+}
+
+// Removes an orphaned, zero-concept Promotion workspace -- NOT the Black
+// Friday master creative idea, which is already fully disconnected from it
+// by this point (see the backend route's own comment). Combined into one
+// flowing confirmation message rather than a title+body pair, since
+// confirmDialog's shared modal only has a single message slot and this is
+// the one place that needed two sentences -- not worth widening a dialog
+// used all over the app for this single caller.
+async function removeConceptDevWorkspace(shootPlanItemId) {
+  if (!(await confirmDialog(
+    'Remove this empty promotion workspace from Concept Development? This only removes the empty Concept Development workspace. The original promotion creative idea and Black Friday planning data will not be deleted.',
+    { okLabel: 'Remove Workspace' }
+  ))) return;
+  try {
+    await api(`/concept-development/workspace/${shootPlanItemId}`, { method: 'DELETE' });
+    toast('Empty workspace removed');
+    refreshConceptDevAfterChange();
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 // Understated by design ("do not make this header oversized or dashboard-

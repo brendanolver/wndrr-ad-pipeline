@@ -445,6 +445,49 @@ router.get('/item/:shootPlanItemId', async (req, res, next) => {
   }
 });
 
+// Safe removal of an orphaned, zero-concept Promotion workspace (UX
+// follow-up brief) -- NOT a delete of the Black Friday master creative
+// idea. These orphans are shoot_plan_items rows left behind once their one
+// seed concept is removed via Delete Concept (DELETE /creative-assets/:id,
+// a plain `DELETE FROM creative_assets`): promotion_creative_ideas(
+// _executions).linked_creative_asset_id already goes to NULL via its own
+// ON DELETE SET NULL the moment that happens (see schema.sql), so by the
+// time a workspace card has zero concepts, the Black Friday idea is
+// ALREADY fully disconnected from it -- removing the leftover
+// shoot_plan_item here touches nothing else (no cascade reaches
+// promotion_creative_ideas, its executions, inspiration links, or the
+// target matrix; nothing else references this specific shoot_plan_item
+// once it has zero concepts). Scoped to source = 'promotion' (the only
+// place this action is ever exposed) and hard-guarded on zero concepts
+// existing RIGHT NOW via a fresh count, not just what the client believed
+// when it rendered the remove button -- a concept added in the gap
+// between page load and this click must block the delete.
+router.delete('/workspace/:shootPlanItemId', async (req, res, next) => {
+  try {
+    const itemId = Number(req.params.shootPlanItemId);
+    if (!Number.isFinite(itemId)) return res.status(400).json({ error: 'Invalid shoot plan item id' });
+
+    const itemResult = await pool.query('SELECT id, source FROM shoot_plan_items WHERE id = $1', [itemId]);
+    if (!itemResult.rows.length) return res.status(404).json({ error: 'Shoot plan item not found' });
+    if (itemResult.rows[0].source !== 'promotion') {
+      return res.status(400).json({ error: 'Only an empty Promotion workspace can be removed this way' });
+    }
+
+    const conceptCountResult = await pool.query(
+      'SELECT count(*)::int AS count FROM creative_assets WHERE shoot_plan_item_id = $1',
+      [itemId]
+    );
+    if (conceptCountResult.rows[0].count > 0) {
+      return res.status(400).json({ error: 'This workspace still has concepts -- remove them individually first' });
+    }
+
+    await pool.query('DELETE FROM shoot_plan_items WHERE id = $1', [itemId]);
+    res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Ad-hoc concept for a Core/High Stock/Promotion product -- a Drop
 // product's "+ Add Concept" instead reuses the existing
 // POST /drop-product-plans/:id/slots (adds a 'new' Required Concept slot,
