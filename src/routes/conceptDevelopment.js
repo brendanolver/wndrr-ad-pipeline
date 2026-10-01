@@ -3,6 +3,7 @@ const { pool } = require('../db');
 const { insertCreativeAsset } = require('../lib/assets');
 const { CONCEPT_DEV_STATUSES, TUESDAY_REVIEW_DECISIONS, FORMATS, CONCEPT_ORIGINS, STATUSES } = require('../lib/statuses');
 const { generateOrTopUpPlan } = require('./dropProductPlans');
+const { loadBlackFridayShootContext } = require('../lib/blackFridayContext');
 
 const router = express.Router();
 
@@ -272,6 +273,23 @@ router.get('/', async (req, res, next) => {
       conceptsByItem.set(item.id, slotAssetsResult.rows.map((row) => ({ ...row, name_locked: false })));
     }
 
+    // Black Friday (or any Promotion built on the master-idea system)
+    // identity, by reversing the existing linked_creative_asset_id
+    // relationship -- the SAME lookup Shooting's own Shoot Brief already
+    // uses (src/lib/blackFridayContext.js), never a disconnected copy of
+    // the idea's title. Only promotion-source items can possibly match (the
+    // reverse lookup is a no-op/null for everything else), and only the
+    // first concept is checked -- a Promotion item's one seed concept is
+    // what send-to-pipeline actually links the master idea to.
+    const blackFridayContextByItem = new Map();
+    for (const i of items) {
+      if (i.source !== 'promotion') continue;
+      const concepts = conceptsByItem.get(i.id) || [];
+      if (!concepts.length) continue;
+      const ctx = await loadBlackFridayShootContext(concepts[0].id);
+      if (ctx) blackFridayContextByItem.set(i.id, ctx);
+    }
+
     const products = items.map((i) => ({
       shoot_plan_item_id: i.id,
       product_code: i.product_code,
@@ -285,6 +303,7 @@ router.get('/', async (req, res, next) => {
       promotion_name: i.promotion_name,
       promotion_notes: i.promotion_notes,
       promotion_stage_name: i.promotion_stage_name,
+      black_friday_context: blackFridayContextByItem.get(i.id) || null,
       // The concept's own planned Shoot Week (see shootPlan.js/shoot-week
       // brief) -- distinct from resolvedWeekStart, which is just which
       // week's Concept Dev/Tuesday Review view this response is for.
@@ -393,6 +412,14 @@ router.get('/item/:shootPlanItemId', async (req, res, next) => {
       concepts = conceptsResult.rows.map((row) => ({ ...row, name_locked: false }));
     }
 
+    // Same reverse lookup as GET / above -- this standalone endpoint is also
+    // what viewBfIdeaPipelineStatus/viewBfExecutionPipelineStatus (app.js)
+    // deep-link into from the Black Friday Stage Workspace, so it needs the
+    // same identity attached, not just the weekly list.
+    const blackFridayContext = item.source === 'promotion' && concepts.length
+      ? await loadBlackFridayShootContext(concepts[0].id)
+      : null;
+
     res.json({
       shoot_plan_item_id: item.id,
       product_code: item.product_code,
@@ -406,6 +433,7 @@ router.get('/item/:shootPlanItemId', async (req, res, next) => {
       promotion_name: item.promotion_name,
       promotion_notes: item.promotion_notes,
       promotion_stage_name: item.promotion_stage_name,
+      black_friday_context: blackFridayContext,
       shoot_week: dateStr(item.week_start),
       drop_plan_id: dropPlanId,
       proven_coverage_count: provenCoverageCount,

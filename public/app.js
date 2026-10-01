@@ -5357,6 +5357,40 @@ function conceptDevProductCardHtml(product) {
     </div>`;
 }
 
+// Promotions section's own card (UX follow-up brief, item 3) -- a Promotion
+// product used to render through conceptDevProductCardHtml above, which
+// leads with product_name (always blank here -- Promotion items never set
+// it, see promotionCreative.js's send-to-pipeline routes) and a generic
+// "Cover Requirement" pathway badge, so Mark had no way to tell which
+// Black Friday idea a card was even for. Kept as its own function rather
+// than branching conceptDevProductCardHtml so Core/High Stock/Drop cards
+// are provably unaffected: self-explanatory per the brief ("Mark should be
+// able to understand what it is without opening several screens") --
+// master idea name, promotion + every stage this one shared asset covers
+// (black_friday_context, same reverse lookup Shooting's own Shoot Brief
+// already uses), owner, status, and the same Open/Continue Concept action
+// every other product card already has. Falls back to the plain Promotion/
+// concept_name shape for a promotion product with no master-idea
+// relationship (e.g. a future promotion not yet on this system, or a
+// generic "Existing Concept" style Cover Requirement).
+function conceptDevPromotionCardHtml(product) {
+  const bfCtx = product.black_friday_context;
+  const count = product.concepts.length;
+  const breakdown = conceptDevStatusBreakdown(product.concepts);
+  const title = bfCtx ? bfCtx.idea_title : (product.product_name || product.concepts[0]?.concept_name || 'Untitled Concept');
+  const stagesLine = bfCtx
+    ? `${escapeHtml(product.promotion_name || '')} &middot; ${escapeHtml(bfCtx.stages.map((s) => bfStageShortName(s.stage_name)).join(' + '))}`
+    : `${escapeHtml(product.promotion_name || '')}${product.promotion_stage_name ? ` &middot; ${escapeHtml(bfStageShortName(product.promotion_stage_name))}` : ''}`;
+  return `
+    <div class="cd-card" onclick="openConceptDevProduct(${product.shoot_plan_item_id})">
+      <div class="cd-card-name">${escapeHtml(title)}</div>
+      <div class="cd-card-meta">${stagesLine}</div>
+      <div class="cd-card-meta">Owner: ${escapeHtml(product.creator || '—')}</div>
+      ${breakdown.length ? `<div class="cd-card-status-row">${breakdown.map((s) => `<span class="cd-concept-status-pill ${CONCEPT_DEV_STATUS_CLASS[s.status] || ''}">${s.count} ${CONCEPT_DEV_STATUS_LABELS[s.status] || s.status}</span>`).join('')}</div>` : `<div class="cd-card-count">${count ? '' : 'No new concepts yet'}</div>`}
+      <div class="cd-card-action">${conceptDevProductCtaLabel(product)} &rarr;</div>
+    </div>`;
+}
+
 // Understated by design ("do not make this header oversized or dashboard-
 // heavy") -- one small line of plain counts, not a coloured summary card.
 function conceptDevWeekSummaryLineHtml(data) {
@@ -5463,15 +5497,28 @@ function conceptDevWorkspaceHeaderHtml(product) {
     .map((c) => `<span class="shoot-plan-style-chip">${escapeHtml(c.colour_label || c.style_code)}${c.size ? ` · ${escapeHtml(c.size)}` : ''}</span>`)
     .join('');
   const count = product.concepts.length;
+  const bfCtx = product.black_friday_context;
   // Promotion-sourced products need the Promotion name front and centre --
   // the pathway badge below only carries the Campaign Stage name, so
   // someone opening this workspace cold (e.g. from a Concept Development
   // link, not having come from the Promotion page) wouldn't otherwise know
   // WHY this concept exists. Scoped to source === 'promotion' only, so
-  // Core/High Stock/Drop workspaces are unaffected.
+  // Core/High Stock/Drop workspaces are unaffected. When this concept came
+  // from the Black Friday (or any master-idea-driven Promotion) system,
+  // black_friday_context already carries every stage this one shared asset
+  // covers (e.g. "Hype + Live") -- shown instead of promotion_stage_name's
+  // single anchor stage, which would otherwise under-represent a multi-
+  // stage idea as if it only ran in one.
   const promoOrigin = product.source === 'promotion' && product.promotion_name
-    ? `<div class="cd-workspace-promo-origin">Promotion: <strong>${escapeHtml(product.promotion_name)}</strong> — ${escapeHtml(product.promotion_stage_name || '')}</div>`
+    ? `<div class="cd-workspace-promo-origin">Promotion: <strong>${escapeHtml(product.promotion_name)}</strong> — ${escapeHtml(bfCtx ? bfCtx.stages.map((s) => bfStageShortName(s.stage_name)).join(' + ') : (product.promotion_stage_name || ''))}</div>`
     : '';
+  // The Black Friday master idea's own name IS the thing Mark needs to
+  // develop -- using it here (same stable linked_creative_asset_id
+  // relationship blackFridayContext.js already resolves, never a second
+  // copy of the title) instead of product_name, which Promotion items never
+  // set (see promotionCreative.js's send-to-pipeline routes) and would
+  // otherwise render this heading blank.
+  const workspaceName = bfCtx ? bfCtx.idea_title : product.product_name;
   // Shoot Week -- Promotion only (see the Shoot Week brief, section 2:
   // "Promotion Concept Dev cards should retain useful context... planned
   // Shoot Week"). Editable in place until Tuesday Review approves it (the
@@ -5486,7 +5533,7 @@ function conceptDevWorkspaceHeaderHtml(product) {
       ${thumb}
       <div class="cd-workspace-header-info">
         ${promoOrigin}
-        <div class="cd-workspace-header-name">${escapeHtml(product.product_name)}</div>
+        <div class="cd-workspace-header-name">${escapeHtml(workspaceName)}</div>
         <div class="cd-workspace-header-meta">
           <span>${escapeHtml(sourceLabel)}</span>
           <span>&middot;</span>
@@ -5497,6 +5544,7 @@ function conceptDevWorkspaceHeaderHtml(product) {
           <span>${count} New Concept${count === 1 ? '' : 's'}</span>
           ${shootWeekHtml ? `<span>&middot;</span>${shootWeekHtml}` : ''}
         </div>
+        ${product.source === 'promotion' && conceptDevStatusBreakdown(product.concepts).length ? `<div class="cd-card-status-row">${conceptDevStatusBreakdown(product.concepts).map((s) => `<span class="cd-concept-status-pill ${CONCEPT_DEV_STATUS_CLASS[s.status] || ''}">${s.count} ${CONCEPT_DEV_STATUS_LABELS[s.status] || s.status}</span>`).join('')}</div>` : ''}
         <div class="shoot-plan-style-chips">${chips}</div>
         ${product.initial_idea ? `<div class="shoot-plan-idea">💡 ${escapeHtml(product.initial_idea)}</div>` : ''}
       </div>
@@ -5664,9 +5712,47 @@ function renderConceptDevList() {
   list.innerHTML = `
     ${conceptDevWeekSummaryLineHtml(data)}
     ${conceptDevFiltersHtml(data)}
-    <div class="cd-product-grid">
-      ${filtered.length ? filtered.map(conceptDevProductCardHtml).join('') : '<div class="attention-empty">No products match this filter.</div>'}
-    </div>`;
+    ${filtered.length ? conceptDevGroupedSectionsHtml(filtered) : '<div class="attention-empty">No products match this filter.</div>'}`;
+}
+
+// UX follow-up brief, item 2: Day-to-Day vs Promotions is a presentation
+// split only -- same filtered list, same cards' own click-through into the
+// exact same product workspace, same Concept Development -> Tuesday
+// Review -> Shooting -> Editing -> Final Approval pipeline underneath.
+// Nothing here changes which products exist or how a concept moves; it
+// only changes which of two headings a card renders under, so a long-lead
+// Promotion concept being progressively developed weeks out never reads as
+// "due this week" alongside today's actual Core/Drop/manual work. Grouped
+// by promotion_name (not promotion_id -- the API doesn't carry the id, and
+// a name collision across promotions isn't a real scenario) so Boxing Day
+// 2026/Birthday Sale/EOFY naturally get their own group the moment they
+// start using this same send-to-pipeline path, with zero new code.
+function conceptDevGroupedSectionsHtml(filtered) {
+  const dayToDay = filtered.filter((p) => p.source !== 'promotion');
+  const promotions = filtered.filter((p) => p.source === 'promotion');
+  if (!promotions.length) {
+    // The overwhelming common case (no Promotion work in flight this week)
+    // -- renders exactly the single plain grid this screen always has, no
+    // empty "Promotions" heading ever shown for nothing.
+    return `<div class="cd-product-grid">${dayToDay.map(conceptDevProductCardHtml).join('')}</div>`;
+  }
+  const groups = new Map();
+  for (const p of promotions) {
+    const key = p.promotion_name || 'Other Promotions';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(p);
+  }
+  const promoGroupsHtml = [...groups.entries()].map(([name, products]) => `
+    <div class="cd-promo-group">
+      <div class="cd-promo-group-title">${escapeHtml(name)}</div>
+      <div class="cd-product-grid">${products.map(conceptDevPromotionCardHtml).join('')}</div>
+    </div>`).join('');
+  return `
+    ${dayToDay.length ? `
+      <div class="cd-section-title">Day-to-Day Concept Development</div>
+      <div class="cd-product-grid">${dayToDay.map(conceptDevProductCardHtml).join('')}</div>` : ''}
+    <div class="cd-section-title cd-section-title-promotions">Promotions</div>
+    ${promoGroupsHtml}`;
 }
 
 function findConceptDevConcept(conceptId) {

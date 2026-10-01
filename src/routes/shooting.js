@@ -2,6 +2,7 @@ const express = require('express');
 const { pool } = require('../db');
 const { SHOOT_DAYS, STATUSES } = require('../lib/statuses');
 const { assertCanEnterFilming, RuleViolationError } = require('../lib/rules');
+const { loadBlackFridayShootContext } = require('../lib/blackFridayContext');
 
 const router = express.Router();
 
@@ -20,79 +21,6 @@ function dateStr(d) {
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
-}
-
-// Finds the Black Friday master idea (if any) this creative asset's shoot
-// job came from, purely by reversing the existing linked_creative_asset_id
-// relationship (promotionCreative.js's send-to-pipeline routes are the only
-// writers of that column) -- an execution's own deliberate override is
-// checked first, falling back to the master idea's shared asset, mirroring
-// loadIdeasForPromotion's effective_creative_asset_id resolution exactly so
-// this never disagrees with what the Black Friday tab itself shows. Also
-// returns every OTHER stage execution of the same master idea that resolves
-// to this SAME asset (e.g. Hype + Live sharing one shoot) so the brief makes
-// that shared-footage relationship visible rather than only naming one
-// stage. Returns null for any non-Black-Friday shoot (the normal case).
-async function loadBlackFridayShootContext(creativeAssetId) {
-  if (!creativeAssetId) return null;
-  const ownerResult = await pool.query(
-    `SELECT pci.id AS idea_id
-     FROM promotion_creative_idea_executions pcie
-     JOIN promotion_creative_ideas pci ON pci.id = pcie.promotion_creative_idea_id
-     WHERE pcie.linked_creative_asset_id = $1
-     UNION
-     SELECT pci.id AS idea_id
-     FROM promotion_creative_ideas pci
-     WHERE pci.linked_creative_asset_id = $1
-     LIMIT 1`,
-    [creativeAssetId]
-  );
-  if (!ownerResult.rows.length) return null;
-  const ideaId = ownerResult.rows[0].idea_id;
-
-  const ideaResult = await pool.query(
-    `SELECT pci.id, pci.title, pci.who, pci.where_text, pci.concept_script, pci.need_text,
-            pci.linked_creative_asset_id, p.name AS promotion_name
-     FROM promotion_creative_ideas pci
-     JOIN promotions p ON p.id = pci.promotion_id
-     WHERE pci.id = $1`,
-    [ideaId]
-  );
-  if (!ideaResult.rows.length) return null;
-  const idea = ideaResult.rows[0];
-
-  const executionsResult = await pool.query(
-    `SELECT pcie.linked_creative_asset_id, ps.name AS stage_name, ps.sort_order AS stage_sort_order,
-            cs.name AS style_name
-     FROM promotion_creative_idea_executions pcie
-     JOIN promotion_stages ps ON ps.id = pcie.promotion_stage_id
-     LEFT JOIN creative_styles cs ON cs.id = pcie.creative_style_id
-     WHERE pcie.promotion_creative_idea_id = $1
-     ORDER BY ps.sort_order ASC`,
-    [ideaId]
-  );
-  const sharedStages = executionsResult.rows
-    .filter((ex) => (ex.linked_creative_asset_id || idea.linked_creative_asset_id) === creativeAssetId)
-    .map((ex) => ({ stage_name: ex.stage_name, style_name: ex.style_name }));
-
-  const inspirationResult = await pool.query(
-    `SELECT ci.title, ci.campaign_name, ci.video_url, ci.additional_urls, ci.creator, ci.sale_stage_note
-     FROM promotion_creative_idea_inspirations pcii
-     JOIN creative_inspiration ci ON ci.id = pcii.creative_inspiration_id
-     WHERE pcii.promotion_creative_idea_id = $1`,
-    [ideaId]
-  );
-
-  return {
-    promotion_name: idea.promotion_name,
-    idea_title: idea.title,
-    who: idea.who,
-    where_text: idea.where_text,
-    concept_script: idea.concept_script,
-    need_text: idea.need_text,
-    stages: sharedStages,
-    inspiration: inspirationResult.rows,
-  };
 }
 
 // Compact card-level fields only -- Week/Today views stay scannable, full

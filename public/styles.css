@@ -1177,6 +1177,19 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .cd-card-meta{font-size:11.5px;color:var(--text-muted);}
 .cd-card-action{font-size:12px;font-weight:700;color:var(--teal-dark);margin-top:2px;}
 
+/* UX follow-up brief, item 2: Day-to-Day vs Promotions section headings --
+   deliberately plain text, same weight as the rest of this screen, not a
+   coloured dashboard banner ("keep this compact, do not create another
+   huge dashboard"). A promotion group's own title sits one level down,
+   slightly smaller, so "Black Friday 2026" never competes with "Promotions"
+   itself for attention. */
+.cd-section-title{font-size:14px;font-weight:700;color:var(--text);margin:22px 0 10px;padding-top:16px;border-top:1px solid var(--border);}
+.cd-section-title:first-child{margin-top:0;padding-top:0;border-top:none;}
+.cd-section-title-promotions{margin-top:22px;}
+.cd-promo-group{margin-bottom:18px;}
+.cd-promo-group:last-child{margin-bottom:0;}
+.cd-promo-group-title{font-size:12.5px;font-weight:700;color:var(--text-secondary);margin-bottom:8px;}
+
 /* Product Workspace -- level 2: "what concepts need preparing for this
    product?" A read-only header (everything inherited from Planning) plus
    a compact grid of concept cards; the full development form only opens
@@ -2052,6 +2065,32 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .bf-idea-add-exec-label{margin:0;}
 .bf-idea-add-exec-controls{display:flex;gap:8px;align-items:center;}
 .bf-idea-add-exec-controls select{flex:1;}
+
+/* UX follow-up brief, item 4: Edit Creative Idea was too small vertically
+   once an idea had several Stage Executions -- the base .modal rule
+   (styles.css, width:420px/max-height:88vh/overflow-y:auto on the WHOLE
+   box) scrolls header+body+footer together as one unit, so Save/Cancel
+   could scroll out of view along with the content above them. Scoped to
+   #bf-idea-modal only (never the base .modal class, so every other modal
+   in the app is untouched) -- widens the box for desktop, and splits it
+   into header/footer that stay put with only .modal-body scrolling
+   between them, so the footer buttons are always visible regardless of
+   how many Stage Executions/how much Concept/Script text is in view.
+   Below the breakpoint it falls back to the normal full-width mobile
+   modal sizing, unchanged. */
+#bf-idea-modal .modal{
+  width:640px;
+  max-width:92vw;
+  max-height:86vh;
+  display:flex;
+  flex-direction:column;
+}
+#bf-idea-modal .modal-header,
+#bf-idea-modal .modal-footer{flex:0 0 auto;}
+#bf-idea-modal .modal-body{flex:1 1 auto;overflow-y:auto;}
+@media (max-width:700px){
+  #bf-idea-modal .modal{width:94vw;max-height:92vh;}
+}
 .bf-exec-row{padding:7px 0;border-bottom:1px solid var(--border);font-size:12.5px;}
 .bf-exec-row:last-child{border-bottom:none;}
 .bf-exec-row-main{display:flex;align-items:center;gap:8px;}
