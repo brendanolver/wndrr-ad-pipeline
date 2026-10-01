@@ -5381,15 +5381,14 @@ function conceptDevPromotionCardHtml(product) {
   const stagesLine = bfCtx
     ? `${escapeHtml(product.promotion_name || '')} &middot; ${escapeHtml(bfCtx.stages.map((s) => bfStageShortName(s.stage_name)).join(' + '))}`
     : `${escapeHtml(product.promotion_name || '')}${product.promotion_stage_name ? ` &middot; ${escapeHtml(bfStageShortName(product.promotion_stage_name))}` : ''}`;
-  // Empty-workspace remove action (UX follow-up brief): only ever shown
-  // when this card has ZERO concepts -- an orphan shoot_plan_item left
-  // behind once its one seed concept was removed via Delete Concept (see
-  // DELETE /concept-development/workspace/:id for why this is safe). A
-  // card with real concepts already has its own per-concept Delete inside
-  // the workspace, never this -- reuses the same small top-right &times;
-  // the concept card itself uses, just scoped to the workspace as a whole.
-  const removeBtn = !count
-    ? `<button type="button" class="cd-concept-card-remove" onclick="event.stopPropagation(); removeConceptDevWorkspace(${product.shoot_plan_item_id})" aria-label="Remove empty workspace" title="Remove this empty workspace">&times;</button>`
+  // Remove-from-Concept-Dev action (UX follow-up brief, round 2): shown on
+  // EVERY Promotion card, admin only -- not just the zero-concept orphans
+  // round 1 covered. removeConceptDevWorkspace branches the confirmation
+  // copy (and, server-side, the blocking rules) on whether the workspace
+  // currently has any concepts; the button itself is identical either way,
+  // reusing the same small top-right &times; the concept card itself uses.
+  const removeBtn = state.currentUser && state.currentUser.role === 'admin'
+    ? `<button type="button" class="cd-concept-card-remove" onclick="event.stopPropagation(); removeConceptDevWorkspace(${product.shoot_plan_item_id}, ${count})" aria-label="Remove from Concept Development" title="${count ? 'Remove this from Concept Development' : 'Remove this empty workspace'}">&times;</button>`
     : '';
   return `
     <div class="cd-card cd-card-promo" onclick="openConceptDevProduct(${product.shoot_plan_item_id})">
@@ -5402,21 +5401,36 @@ function conceptDevPromotionCardHtml(product) {
     </div>`;
 }
 
-// Removes an orphaned, zero-concept Promotion workspace -- NOT the Black
-// Friday master creative idea, which is already fully disconnected from it
-// by this point (see the backend route's own comment). Combined into one
-// flowing confirmation message rather than a title+body pair, since
-// confirmDialog's shared modal only has a single message slot and this is
-// the one place that needed two sentences -- not worth widening a dialog
-// used all over the app for this single caller.
-async function removeConceptDevWorkspace(shootPlanItemId) {
-  if (!(await confirmDialog(
-    'Remove this empty promotion workspace from Concept Development? This only removes the empty Concept Development workspace. The original promotion creative idea and Black Friday planning data will not be deleted.',
-    { okLabel: 'Remove Workspace' }
-  ))) return;
+// Removes a Promotion Concept Development workspace -- NOT the Black
+// Friday (or other Promotion) master creative idea, which stays completely
+// untouched (empty case) or is safely disconnected via its own
+// ON DELETE SET NULL (non-empty case; see the backend route's comment).
+// Admin only -- the button itself is only ever rendered for an admin (see
+// conceptDevPromotionCardHtml), and the backend route re-enforces this with
+// its own requireAdmin, so a non-admin can't reach this via a direct API
+// call either.
+//
+// Two different confirmations, chosen by the workspace's concept count at
+// the moment the card was rendered -- the backend re-checks the real count
+// (and every concept's real pipeline stage) fresh before actually deleting
+// anything, so a stale count here can only ever show the wrong confirmation
+// copy, never cause an unsafe delete. Each is combined into one flowing
+// message rather than a title+body pair, since confirmDialog's shared
+// modal only has a single message slot.
+async function removeConceptDevWorkspace(shootPlanItemId, count) {
+  const confirmed = count
+    ? await confirmDialog(
+        'Remove this from Concept Development? This will remove the Concept Development work created for this promotion idea. The original promotion creative idea and Black Friday planning record will remain available.',
+        { okLabel: 'Remove from Concept Dev' }
+      )
+    : await confirmDialog(
+        'Remove this empty promotion workspace from Concept Development? This only removes the empty Concept Development workspace. The original promotion creative idea and Black Friday planning data will not be deleted.',
+        { okLabel: 'Remove Workspace' }
+      );
+  if (!confirmed) return;
   try {
     await api(`/concept-development/workspace/${shootPlanItemId}`, { method: 'DELETE' });
-    toast('Empty workspace removed');
+    toast(count ? 'Removed from Concept Development' : 'Empty workspace removed');
     refreshConceptDevAfterChange();
   } catch (e) {
     toast(e.message, true);

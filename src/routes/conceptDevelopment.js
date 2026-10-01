@@ -4,6 +4,8 @@ const { insertCreativeAsset } = require('../lib/assets');
 const { CONCEPT_DEV_STATUSES, TUESDAY_REVIEW_DECISIONS, FORMATS, CONCEPT_ORIGINS, STATUSES } = require('../lib/statuses');
 const { generateOrTopUpPlan } = require('./dropProductPlans');
 const { loadBlackFridayShootContext } = require('../lib/blackFridayContext');
+const { requireAdmin } = require('../lib/permissions');
+const { loadMoveBackState, STAGE_LABELS } = require('./moveBack');
 
 const router = express.Router();
 
@@ -445,46 +447,85 @@ router.get('/item/:shootPlanItemId', async (req, res, next) => {
   }
 });
 
-// Safe removal of an orphaned, zero-concept Promotion workspace (UX
-// follow-up brief) -- NOT a delete of the Black Friday master creative
-// idea. These orphans are shoot_plan_items rows left behind once their one
-// seed concept is removed via Delete Concept (DELETE /creative-assets/:id,
-// a plain `DELETE FROM creative_assets`): promotion_creative_ideas(
-// _executions).linked_creative_asset_id already goes to NULL via its own
-// ON DELETE SET NULL the moment that happens (see schema.sql), so by the
-// time a workspace card has zero concepts, the Black Friday idea is
-// ALREADY fully disconnected from it -- removing the leftover
-// shoot_plan_item here touches nothing else (no cascade reaches
-// promotion_creative_ideas, its executions, inspiration links, or the
-// target matrix; nothing else references this specific shoot_plan_item
-// once it has zero concepts). Scoped to source = 'promotion' (the only
-// place this action is ever exposed) and hard-guarded on zero concepts
-// existing RIGHT NOW via a fresh count, not just what the client believed
-// when it rendered the remove button -- a concept added in the gap
-// between page load and this click must block the delete.
-router.delete('/workspace/:shootPlanItemId', async (req, res, next) => {
-  try {
-    const itemId = Number(req.params.shootPlanItemId);
-    if (!Number.isFinite(itemId)) return res.status(400).json({ error: 'Invalid shoot plan item id' });
+// Admin-only removal of a Promotion Concept Development workspace (UX
+// follow-up brief, round 2) -- NOT a delete of the Black Friday master
+// creative idea. Covers two cases, both scoped to source = 'promotion' (the
+// only place this action is ever exposed):
+//
+// 1. Zero concepts: the orphan case from round 1. These are shoot_plan_items
+//    rows left behind once their one seed concept was removed via Delete
+//    Concept (DELETE /creative-assets/:id, a plain `DELETE FROM
+//    creative_assets`): promotion_creative_ideas(_executions).
+//    linked_creative_asset_id already goes to NULL via its own
+//    ON DELETE SET NULL the moment that happens (see schema.sql), so the
+//    Black Friday idea is ALREADY fully disconnected from it. Removing the
+//    leftover shoot_plan_item touches nothing else.
+//
+// 2. One or more concepts: an admin deciding something was sent to Concept
+//    Development by mistake, or shouldn't be developed yet. Every concept
+//    in the workspace is deleted via a plain `DELETE FROM creative_assets`
+//    -- the SAME statement (and therefore the SAME cascades: status_history/
+//    shoot_schedule/final_edits/ad_setups ON DELETE CASCADE,
+//    promotion_creative_ideas(_executions).linked_creative_asset_id
+//    ON DELETE SET NULL) that DELETE /creative-assets/:id and
+//    DELETE /concepts/:id above already rely on -- then the now-empty
+//    shoot_plan_item is removed the same way as case 1, so this can never
+//    leave a fresh "Untitled Concept" orphan behind.
+//
+// Before touching anything, every concept in the workspace is checked with
+// Move Back's own loadMoveBackState (the app's one existing "what stage is
+// this concept really at" detector, also used to gate the Move Back
+// button) -- if ANY of them has already progressed beyond Concept Dev
+// (Tuesday Review, Shooting, Editing, Final Approval, Ad Setup, Approved),
+// the whole removal is refused rather than silently discarding that
+// downstream work. Re-checked fresh against the DB inside one transaction
+// (FOR UPDATE), not trusted from what the client believed when it rendered
+// the button -- a concept that advances in the gap between page load and
+// this click must still block the delete.
+router.delete('/workspace/:shootPlanItemId', requireAdmin, async (req, res, next) => {
+  const itemId = Number(req.params.shootPlanItemId);
+  if (!Number.isFinite(itemId)) return res.status(400).json({ error: 'Invalid shoot plan item id' });
 
-    const itemResult = await pool.query('SELECT id, source FROM shoot_plan_items WHERE id = $1', [itemId]);
-    if (!itemResult.rows.length) return res.status(404).json({ error: 'Shoot plan item not found' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const itemResult = await client.query('SELECT id, source FROM shoot_plan_items WHERE id = $1 FOR UPDATE', [itemId]);
+    if (!itemResult.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Shoot plan item not found' });
+    }
     if (itemResult.rows[0].source !== 'promotion') {
-      return res.status(400).json({ error: 'Only an empty Promotion workspace can be removed this way' });
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Only a Promotion workspace can be removed this way' });
     }
 
-    const conceptCountResult = await pool.query(
-      'SELECT count(*)::int AS count FROM creative_assets WHERE shoot_plan_item_id = $1',
+    const conceptsResult = await client.query(
+      'SELECT id, concept_name FROM creative_assets WHERE shoot_plan_item_id = $1 FOR UPDATE',
       [itemId]
     );
-    if (conceptCountResult.rows[0].count > 0) {
-      return res.status(400).json({ error: 'This workspace still has concepts -- remove them individually first' });
+
+    for (const concept of conceptsResult.rows) {
+      const state = await loadMoveBackState(concept.id);
+      if (state && state.currentStage !== 'concept-dev') {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          error: `"${concept.concept_name}" has already progressed to ${STAGE_LABELS[state.currentStage] || state.currentStage} and can't be removed from Concept Development this way -- use Move Back to bring it back a stage first.`,
+        });
+      }
     }
 
-    await pool.query('DELETE FROM shoot_plan_items WHERE id = $1', [itemId]);
+    if (conceptsResult.rows.length) {
+      await client.query('DELETE FROM creative_assets WHERE shoot_plan_item_id = $1', [itemId]);
+    }
+    await client.query('DELETE FROM shoot_plan_items WHERE id = $1', [itemId]);
+    await client.query('COMMIT');
     res.status(204).end();
   } catch (err) {
+    await client.query('ROLLBACK');
     next(err);
+  } finally {
+    client.release();
   }
 });
 
