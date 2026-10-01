@@ -11450,7 +11450,7 @@ function renderBfStageWorkspace() {
       <div class="bf-unclassified-list">
         ${unclassified.map(({ idea, ex }) => `
           <div class="bf-unclassified-row">
-            <span class="bf-unclassified-title">${escapeHtml(idea.title)}</span>
+            <button type="button" class="link-btn bf-unclassified-title" onclick="openBfIdeaDetailModal(${idea.id})">${escapeHtml(idea.title)}</button>
             <select onchange="classifyBfExecutionFromWorkspace(${idea.id}, ${ex.id}, this.value)">${bfStyleOptionsHtml('')}</select>
           </div>`).join('')}
       </div>
@@ -11564,7 +11564,7 @@ function bfCellExecutionRowHtml({ idea, ex }) {
         ${winner ? `<span>Inspired by ${escapeHtml(winner.campaign_name || winner.title)}</span>` : ''}
       </div>
       <div class="bf-cell-exec-actions">
-        <button type="button" class="link-btn" onclick="event.stopPropagation();openBfIdeaModal(${idea.id})">View idea</button>
+        <button type="button" class="link-btn" onclick="event.stopPropagation();openBfIdeaDetailModal(${idea.id})">View idea</button>
         ${ex.effective_creative_asset_id ? `<button type="button" class="link-btn" onclick="event.stopPropagation();viewBfExecutionPipelineStatus(${idea.id}, ${ex.id})">${escapeHtml(ex.production_stage_label)} &rarr;</button>` : ''}
       </div>
     </div>`;
@@ -12050,6 +12050,72 @@ function bfIdeaFindById(id) {
   return state.blackFriday.ideas.find((i) => i.id === id) || null;
 }
 
+// Black Friday Idea Detail (UX follow-up brief, item 2): "View idea" used
+// to just open the plain edit form (openBfIdeaModal) -- no production
+// status, no Recreation context, nothing from the historical inspiration
+// relationship. Pure read of the existing idea/execution/inspiration
+// records already in state.blackFriday.ideas -- never fetches or writes
+// anything of its own. Edit and Send to Production still delegate to the
+// exact same existing actions (openBfIdeaModal / promptBfProductionRoute),
+// so this is one more entry point onto them (reachable from the Stage
+// Workspace's execution rows and the Needs Classification rows, neither of
+// which could reach either action before), not a second workflow.
+let bfIdeaDetailId = null;
+function openBfIdeaDetailModal(id) {
+  const idea = bfIdeaFindById(id);
+  if (!idea) return;
+  bfIdeaDetailId = id;
+
+  const isRecreation = (idea.inspiration || []).length > 0;
+  document.getElementById('bf-idea-detail-title').textContent = idea.title;
+  document.getElementById('bf-idea-detail-badges').innerHTML = `
+    <span class="bf-style-badge">${idea.media_type === 'graphic' ? 'Graphic' : 'Video'}</span>
+    ${isRecreation ? '<span class="bf-proven-badge">Recreation &middot; Proven Winner Reference</span>' : '<span class="bf-style-badge">New Concept</span>'}
+  `;
+
+  const whoWhere = [idea.who, idea.where_text].filter(Boolean).map(escapeHtml).join(' &middot; ');
+  const whoWhereEl = document.getElementById('bf-idea-detail-who-where');
+  whoWhereEl.style.display = whoWhere ? '' : 'none';
+  whoWhereEl.innerHTML = whoWhere;
+
+  const scriptEl = document.getElementById('bf-idea-detail-script');
+  scriptEl.style.display = idea.concept_script ? '' : 'none';
+  scriptEl.textContent = idea.concept_script || '';
+
+  const needEl = document.getElementById('bf-idea-detail-need');
+  needEl.style.display = idea.need_text ? '' : 'none';
+  needEl.innerHTML = idea.need_text ? `<span class="cd-field-label">Need</span>${escapeHtml(idea.need_text)}` : '';
+
+  const overall = bfIdeaOverallStatus(idea);
+  document.getElementById('bf-idea-detail-status').innerHTML = `2026 Status: <strong>${escapeHtml(overall.label)}</strong>`;
+
+  const executions = idea.executions || [];
+  document.getElementById('bf-idea-detail-executions').innerHTML = executions.length ? `
+    <div class="cd-modal-section-title">Black Friday Stages</div>
+    <div class="bf-idea-executions">
+      ${executions.map((ex) => `
+        <div class="bf-idea-execution-row">
+          <span class="bf-stage-badge ${bfExecStatusBucket(ex)}">${escapeHtml(bfStageShortName(ex.stage_name))}</span>
+          <span class="bf-style-badge">${ex.style_name ? escapeHtml(ex.style_name) : 'Needs Classification'}</span>
+          <span class="bf-status-badge ${bfExecStatusBucket(ex)}">Status: ${escapeHtml(ex.production_stage_label)}</span>
+        </div>`).join('')}
+    </div>` : '<div class="hint">No Black Friday stages added yet.</div>';
+
+  document.getElementById('bf-idea-detail-inspiration').innerHTML = bfIdeaInspirationBlockHtml(idea);
+
+  // Same routing entry point the Creative Ideas tab's own card already
+  // uses (promptBfProductionRoute) -- a planned idea gets the Send to
+  // Production action here too; one already in production gets the same
+  // "jump to where it currently sits" link instead, never a duplicate
+  // action for the same underlying state.
+  const inProduction = overall.key !== 'planned';
+  document.getElementById('bf-idea-detail-action').innerHTML = inProduction
+    ? `<button type="button" class="btn btn-primary" onclick="closeModal('bf-idea-detail-modal');viewBfIdeaPipelineStatus(${idea.id})">${escapeHtml(overall.label)} &rarr;</button>`
+    : `<button type="button" class="btn btn-primary" onclick="closeModal('bf-idea-detail-modal');promptBfProductionRoute(${idea.id})" ${executions.length ? '' : 'disabled title="Add a Black Friday stage first"'}>Send to Production &rarr;</button>`;
+
+  openModal('bf-idea-detail-modal');
+}
+
 function bfIdeaReplaceInState(idea) {
   const idx = state.blackFriday.ideas.findIndex((i) => i.id === idea.id);
   if (idx >= 0) state.blackFriday.ideas[idx] = idea;
@@ -12120,7 +12186,13 @@ function renderBfIdeaExecutionsEditor() {
   const addRow = document.getElementById('bf-idea-add-exec-row');
   if (remaining.length) {
     addRow.style.display = '';
-    document.getElementById('bf-idea-add-exec-stage').innerHTML = remaining
+    // "Select stage..." as a real, deliberately-unselected first option --
+    // without it, the <select> defaulted to showing the first remaining
+    // stage name (e.g. "Mid Sale") pre-filled, which could read as though
+    // that stage were already attached rather than just this picker's
+    // current (unconfirmed) value. addBfIdeaExecution already no-ops on an
+    // empty selection, so this never changes what a real "+ Add" click does.
+    document.getElementById('bf-idea-add-exec-stage').innerHTML = '<option value="">Select stage…</option>' + remaining
       .map((s) => `<option value="${s.id}">${escapeHtml(bfStageShortName(s.name))}</option>`).join('');
   } else {
     addRow.style.display = 'none';

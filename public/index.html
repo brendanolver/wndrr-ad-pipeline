@@ -2916,9 +2916,21 @@
       <div id="bf-idea-executions-section" style="display:none;">
         <label>Stage Executions</label>
         <div id="bf-idea-executions-list"></div>
+        <!-- UX follow-up brief, item 6: the stage select used to default to
+             the first remaining stage name (e.g. "Mid Sale") sitting right
+             next to the real attached-stage rows above, with nothing
+             distinguishing "this is the add-another-stage picker" from
+             "this stage is already attached". The "Add another stage"
+             label plus a neutral "Select stage..." placeholder (see
+             renderBfIdeaExecutionsEditor in app.js) fixes that -- purely a
+             display change, addBfIdeaExecution already no-ops on an empty
+             selection. -->
         <div id="bf-idea-add-exec-row" class="bf-idea-add-exec-row">
-          <select id="bf-idea-add-exec-stage"></select>
-          <button type="button" class="btn btn-ghost btn-sm" onclick="addBfIdeaExecution()">+ Add Stage</button>
+          <label class="hint bf-idea-add-exec-label">Add another stage</label>
+          <div class="bf-idea-add-exec-controls">
+            <select id="bf-idea-add-exec-stage"></select>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="addBfIdeaExecution()">+ Add</button>
+          </div>
         </div>
       </div>
       <div class="promo-shoot-2col">
@@ -2948,6 +2960,42 @@
       <button class="btn btn-ghost" id="bf-idea-delete-btn" onclick="deleteBfIdeaFlow()" style="display:none;">Delete</button>
       <button class="btn btn-ghost" onclick="closeModal('bf-idea-modal')">Cancel</button>
       <button class="btn btn-primary" onclick="saveBfIdea()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Black Friday Idea Detail (UX follow-up brief, item 2): a read-first
+     view of a Creative Idea -- "View idea" previously just opened the same
+     plain edit form as "Edit" (#bf-idea-modal above), with no production
+     status, no Recreation context, and no Previous Winner references
+     visible anywhere outside the Creative Ideas tab's own card. This is a
+     pure presentation of the existing idea/execution/inspiration records
+     (openBfIdeaDetailModal in app.js) -- it never writes anything itself.
+     Edit still opens #bf-idea-modal; Send to Production still opens the
+     existing #bf-production-route-modal chooser (promptBfProductionRoute),
+     unchanged from the routing feature -- this modal only makes both
+     reachable from everywhere "View idea"/"View" appears (Stage Workspace
+     execution rows, Needs Classification rows), not just the Creative
+     Ideas tab. -->
+<div id="bf-idea-detail-modal" class="modal-backdrop">
+  <div class="modal" style="max-width:520px;">
+    <div class="modal-header">
+      <h3 id="bf-idea-detail-title">Creative Idea</h3>
+      <button class="modal-close" onclick="closeModal('bf-idea-detail-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="bf-idea-badges" id="bf-idea-detail-badges"></div>
+      <div class="bf-idea-meta-row" id="bf-idea-detail-who-where" style="display:none;"></div>
+      <div class="bf-idea-script" id="bf-idea-detail-script" style="display:none;"></div>
+      <div class="shoot-brief-text" id="bf-idea-detail-need" style="display:none;"></div>
+      <div class="bf-idea-meta-row bf-idea-2026-status" id="bf-idea-detail-status"></div>
+      <div id="bf-idea-detail-executions"></div>
+      <div id="bf-idea-detail-inspiration"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('bf-idea-detail-modal');openBfIdeaModal(bfIdeaDetailId)">Edit</button>
+      <button class="btn btn-ghost" onclick="closeModal('bf-idea-detail-modal')">Close</button>
+      <span id="bf-idea-detail-action"></span>
     </div>
   </div>
 </div>
