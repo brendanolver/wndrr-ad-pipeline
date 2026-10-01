@@ -346,6 +346,17 @@ function switchTab(name) {
   // whichever of its 3 sub-tabs is currently active (see
   // switchFinalApprovalSubtab) -- always Ready for Approval the first time.
   if (name === 'final-approval') loadFinalApprovalActiveSubtab();
+  // Concept Dev and Tuesday Review both render state.conceptDev.data/
+  // state.tuesdayReview.data, which loadAll() only ever populates once at
+  // boot -- every other tab above already force-refreshes itself for
+  // exactly this reason. Without this, "Save & Send to Tuesday Review" on
+  // Concept Dev (which does refresh state.conceptDev.data) left Tuesday
+  // Review showing the concept's stale pre-submission status/count until
+  // the next full page reload, since nothing had told Tuesday Review's own
+  // cached data to refresh. Same staleness risk the other direction, so
+  // both tabs get the same fresh-fetch-on-every-visit treatment.
+  if (name === 'concept-dev') loadConceptDevWeek();
+  if (name === 'tuesday-review') loadTuesdayReviewWeek();
   // Upcoming Drops/Promotions are hash-routed within their own tab (list vs
   // drop/product or promotion/stage sub-views -- see renderDropsRoute/
   // renderPromotionsRoute). Arriving here via a plain sidebar click (not a

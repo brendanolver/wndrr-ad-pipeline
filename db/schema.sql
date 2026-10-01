@@ -1384,6 +1384,16 @@ ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS editing_started_at TIMESTAM
 ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS concept_assignee VARCHAR(20)
   CHECK (concept_assignee IS NULL OR concept_assignee IN ('Mark', 'Shez', 'Til'));
 
+-- Steve (an existing team member/user, not a new one -- see SEED_USERS in
+-- db.js and his existing content_creators row) is a real option for
+-- Concept Development's "Assigned To", same roster as Mark/Shez/Til. Widens
+-- the CHECK in place (drop + re-add, since Postgres has no ALTER ... ADD
+-- VALUE for an inline CHECK) rather than a new column -- purely additive,
+-- never narrows what's already allowed, and touches no existing row's data.
+ALTER TABLE creative_assets DROP CONSTRAINT IF EXISTS creative_assets_concept_assignee_check;
+ALTER TABLE creative_assets ADD CONSTRAINT creative_assets_concept_assignee_check
+  CHECK (concept_assignee IS NULL OR concept_assignee IN ('Mark', 'Steve', 'Shez', 'Til'));
+
 -- ---------------------------------------------------------------------------
 -- Promotion concept-first flow: Promotion's "+ Shoot This Week" now starts
 -- from a Concept Type + Concept Name, not a product -- see the architecture
@@ -2293,6 +2303,45 @@ FROM promotion_creative_ideas pci, promotion_stages ps, creative_styles cs
 WHERE pcie.promotion_creative_idea_id = pci.id AND pci.source_key = 'bf2026-video-10'
   AND pcie.promotion_stage_id = ps.id AND ps.name = 'Hype Ads'
   AND cs.name = 'Founder Video'
+  AND pcie.creative_style_id IS NULL;
+
+-- Max's follow-up decision on 5 more of the remaining Needs Classification
+-- ideas (see the brief): applies to EVERY stage execution the idea
+-- currently has (not just one stage), since the classification is a
+-- property of the idea's format, not of which sale stage it's running in.
+-- "Secret envelope", "Flyer video", and "Stencil graffiti" are deliberately
+-- NOT touched here -- Max's decision was to leave them Needs Classification
+-- rather than force them into an ill-fitting existing style. Each UPDATE is
+-- guarded by "still NULL" so it can never overwrite a classification the
+-- team has since corrected by hand.
+UPDATE promotion_creative_idea_executions pcie SET creative_style_id = cs.id, updated_at = now()
+FROM promotion_creative_ideas pci, creative_styles cs
+WHERE pcie.promotion_creative_idea_id = pci.id AND pci.source_key = 'bf2026-video-7'
+  AND cs.name = 'EGC Video'
+  AND pcie.creative_style_id IS NULL;
+
+UPDATE promotion_creative_idea_executions pcie SET creative_style_id = cs.id, updated_at = now()
+FROM promotion_creative_ideas pci, creative_styles cs
+WHERE pcie.promotion_creative_idea_id = pci.id AND pci.source_key = 'bf2026-video-8'
+  AND cs.name = 'EGC Video'
+  AND pcie.creative_style_id IS NULL;
+
+UPDATE promotion_creative_idea_executions pcie SET creative_style_id = cs.id, updated_at = now()
+FROM promotion_creative_ideas pci, creative_styles cs
+WHERE pcie.promotion_creative_idea_id = pci.id AND pci.source_key = 'bf2026-graphic-3'
+  AND cs.name = 'Graphic tile'
+  AND pcie.creative_style_id IS NULL;
+
+UPDATE promotion_creative_idea_executions pcie SET creative_style_id = cs.id, updated_at = now()
+FROM promotion_creative_ideas pci, creative_styles cs
+WHERE pcie.promotion_creative_idea_id = pci.id AND pci.source_key = 'bf2026-graphic-5'
+  AND cs.name = 'Graphic tile'
+  AND pcie.creative_style_id IS NULL;
+
+UPDATE promotion_creative_idea_executions pcie SET creative_style_id = cs.id, updated_at = now()
+FROM promotion_creative_ideas pci, creative_styles cs
+WHERE pcie.promotion_creative_idea_id = pci.id AND pci.source_key = 'bf2026-graphic-6'
+  AND cs.name = 'Graphic tile'
   AND pcie.creative_style_id IS NULL;
 
 -- =====================================================================

@@ -45,7 +45,7 @@ const FORMATS = ['video', 'static'];
 // Concepts list) -- a fixed short list for now, deliberately not the
 // content_creators table (that's shoot-day/sizing scoped) or any of the
 // strategy_owner/filming_owner/editing_owner/qc_owner fields above.
-const CONCEPT_ASSIGNEES = ['Mark', 'Shez', 'Til'];
+const CONCEPT_ASSIGNEES = ['Mark', 'Steve', 'Shez', 'Til'];
 
 // New vs Existing Concept -- Promotion Video Concept Development only (see
 // schema.sql's comment on creative_assets.concept_origin). Deliberately not
