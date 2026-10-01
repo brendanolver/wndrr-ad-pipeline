@@ -1162,6 +1162,12 @@ main{flex:1;min-width:0;padding:20px 24px;}
    use the extra space intelligently rather than just stretching everything. */
 .promo-shoot-2col{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
 @media (max-width:640px){.promo-shoot-2col{grid-template-columns:1fr;}}
+
+/* Black Friday Who multi-select's "+ Add person" row (UX follow-up brief,
+   issue 4) -- the select/Other-input/Add button sit on one compact line
+   below the chip list above (.cd-modal-styles-list, reused as-is). */
+.bf-who-add-row{display:flex;gap:6px;align-items:center;}
+.bf-who-add-row select,.bf-who-add-row input[type="text"]{flex:1;min-width:0;}
 .cd-product-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
 @media (max-width:1100px){.cd-product-grid{grid-template-columns:repeat(2,1fr);}}
 @media (max-width:700px){.cd-product-grid{grid-template-columns:1fr;}}

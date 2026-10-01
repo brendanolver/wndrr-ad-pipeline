@@ -2934,9 +2934,23 @@
         </div>
       </div>
       <div class="promo-shoot-2col">
-        <label>Who
-          <input type="text" id="bf-idea-who" placeholder="e.g. Mark">
-        </label>
+        <div>
+          <label>Who</label>
+          <!-- Chip multi-select (UX follow-up brief, issue 4) -- replaces a
+               free-text input so "Mark, Steve", "Steve, warehouse team" etc.
+               stop depending on everyone typing names the same way.
+               Rendered/driven by renderBfIdeaWhoChips in app.js; reuses the
+               existing .cd-style-chip/.cd-style-chip-remove chip language
+               rather than a new pattern. -->
+          <div id="bf-idea-who-chips" class="cd-modal-styles-list"></div>
+          <div class="bf-who-add-row">
+            <select id="bf-idea-who-add-select" onchange="addBfIdeaWhoFromSelect(this.value); this.value='';">
+              <option value="">+ Add person…</option>
+            </select>
+            <input type="text" id="bf-idea-who-other-input" placeholder="e.g. warehouse team" style="display:none;" onkeydown="if(event.key==='Enter'){event.preventDefault();confirmBfIdeaWhoOther();}">
+            <button type="button" class="btn btn-ghost btn-sm" id="bf-idea-who-other-add-btn" style="display:none;" onclick="confirmBfIdeaWhoOther()">Add</button>
+          </div>
+        </div>
         <label>Where
           <input type="text" id="bf-idea-where" placeholder="e.g. Studio">
         </label>

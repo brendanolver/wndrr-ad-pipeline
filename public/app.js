@@ -121,6 +121,14 @@ let state = {
     activeSubtab: 'stages', progress: null, ideas: [], inspiration: [], styles: [], sources: [],
     editingIdeaId: null, editingInspirationId: null, expandedIdeaId: null,
     activeStageId: null, addCreativeContext: null, expandedCells: new Set(), recreateShowAll: false,
+    // Working set for the Add/Edit Creative Idea modal's Who multi-select
+    // (UX follow-up brief, issue 4) -- rebuilt from the idea's own comma-
+    // separated `who` string every time the modal opens, mutated as the
+    // admin adds/removes chips, then re-joined back to that same string
+    // format on Save. The underlying column stays plain text throughout
+    // (no schema change): every other place `idea.who` is read (cards,
+    // search, Shoot Brief) keeps working unchanged.
+    whoChips: [],
   },
 };
 let dashboardWeekOffset = 0;
@@ -5375,8 +5383,18 @@ function conceptDevProductCardHtml(product) {
 // generic "Existing Concept" style Cover Requirement).
 function conceptDevPromotionCardHtml(product) {
   const bfCtx = product.black_friday_context;
-  const count = product.concepts.length;
-  const breakdown = conceptDevStatusBreakdown(product.concepts);
+  // Pipeline summary (see buildWorkspacePipelineSummary in
+  // conceptDevelopment.js) covers EVERY concept physically attached to this
+  // workspace, including any the editable `concepts` list below excludes --
+  // the card must agree with what the server knows is actually attached
+  // (misleading-card brief), not just what's currently editable here. Falls
+  // back to `concepts` itself for a non-Promotion product (pipeline_summary
+  // is always null there) -- never actually hit, since this function is
+  // only ever called for source === 'promotion' cards, but keeps this
+  // function safe to call on its own.
+  const summary = product.pipeline_summary;
+  const totalCount = summary ? summary.total_count : product.concepts.length;
+  const breakdown = summary ? summary.breakdown : conceptDevStatusBreakdown(product.concepts).map((s) => ({ status_key: s.status, label: CONCEPT_DEV_STATUS_LABELS[s.status] || s.status, count: s.count }));
   const title = bfCtx ? bfCtx.idea_title : (product.product_name || product.concepts[0]?.concept_name || 'Untitled Concept');
   const stagesLine = bfCtx
     ? `${escapeHtml(product.promotion_name || '')} &middot; ${escapeHtml(bfCtx.stages.map((s) => bfStageShortName(s.stage_name)).join(' + '))}`
@@ -5387,8 +5405,11 @@ function conceptDevPromotionCardHtml(product) {
   // copy (and, server-side, the blocking rules) on whether the workspace
   // currently has any concepts; the button itself is identical either way,
   // reusing the same small top-right &times; the concept card itself uses.
+  // Uses totalCount (not the editable concepts list) so a workspace whose
+  // only concept has progressed downstream still gets the stronger
+  // non-empty confirmation copy, matching what the server will actually do.
   const removeBtn = state.currentUser && state.currentUser.role === 'admin'
-    ? `<button type="button" class="cd-concept-card-remove" onclick="event.stopPropagation(); removeConceptDevWorkspace(${product.shoot_plan_item_id}, ${count})" aria-label="Remove from Concept Development" title="${count ? 'Remove this from Concept Development' : 'Remove this empty workspace'}">&times;</button>`
+    ? `<button type="button" class="cd-concept-card-remove" onclick="event.stopPropagation(); removeConceptDevWorkspace(${product.shoot_plan_item_id}, ${totalCount})" aria-label="Remove from Concept Development" title="${totalCount ? 'Remove this from Concept Development' : 'Remove this empty workspace'}">&times;</button>`
     : '';
   return `
     <div class="cd-card cd-card-promo" onclick="openConceptDevProduct(${product.shoot_plan_item_id})">
@@ -5396,7 +5417,7 @@ function conceptDevPromotionCardHtml(product) {
       <div class="cd-card-name">${escapeHtml(title)}</div>
       <div class="cd-card-meta">${stagesLine}</div>
       <div class="cd-card-meta">Owner: ${escapeHtml(product.creator || '—')}</div>
-      ${breakdown.length ? `<div class="cd-card-status-row">${breakdown.map((s) => `<span class="cd-concept-status-pill ${CONCEPT_DEV_STATUS_CLASS[s.status] || ''}">${s.count} ${CONCEPT_DEV_STATUS_LABELS[s.status] || s.status}</span>`).join('')}</div>` : `<div class="cd-card-count">${count ? '' : 'No new concepts yet'}</div>`}
+      ${breakdown.length ? `<div class="cd-card-status-row">${breakdown.map((s) => `<span class="cd-concept-status-pill ${CONCEPT_DEV_STATUS_CLASS[s.status_key] || ''}">${s.count} ${escapeHtml(s.label)}</span>`).join('')}</div>` : `<div class="cd-card-count">${totalCount ? '' : 'No new concepts yet'}</div>`}
       <div class="cd-card-action">${conceptDevProductCtaLabel(product)} &rarr;</div>
     </div>`;
 }
@@ -5590,7 +5611,7 @@ function conceptDevWorkspaceHeaderHtml(product) {
           <span>${count} New Concept${count === 1 ? '' : 's'}</span>
           ${shootWeekHtml ? `<span>&middot;</span>${shootWeekHtml}` : ''}
         </div>
-        ${product.source === 'promotion' && conceptDevStatusBreakdown(product.concepts).length ? `<div class="cd-card-status-row">${conceptDevStatusBreakdown(product.concepts).map((s) => `<span class="cd-concept-status-pill ${CONCEPT_DEV_STATUS_CLASS[s.status] || ''}">${s.count} ${CONCEPT_DEV_STATUS_LABELS[s.status] || s.status}</span>`).join('')}</div>` : ''}
+        ${product.source === 'promotion' && product.pipeline_summary && product.pipeline_summary.breakdown.length ? `<div class="cd-card-status-row">${product.pipeline_summary.breakdown.map((s) => `<span class="cd-concept-status-pill ${CONCEPT_DEV_STATUS_CLASS[s.status_key] || ''}">${s.count} ${escapeHtml(s.label)}</span>`).join('')}</div>` : ''}
         <div class="shoot-plan-style-chips">${chips}</div>
         ${product.initial_idea ? `<div class="shoot-plan-idea">💡 ${escapeHtml(product.initial_idea)}</div>` : ''}
       </div>
@@ -12254,13 +12275,79 @@ function bfIdeaReplaceInState(idea) {
   renderBfIdeasGrid();
 }
 
+// Black Friday Add/Edit Creative Idea's Who field (UX follow-up brief,
+// issue 4): a compact chip multi-select, not CONCEPT_ASSIGNEES (that list
+// backs a DIFFERENT field -- Filming/Editing owner -- is missing Max, and
+// is deliberately left untouched here to avoid any risk to those unrelated
+// dropdowns). "Other" always stays available alongside these five so a
+// team/person outside this short list (e.g. "warehouse team") can still be
+// added as free text.
+const BF_WHO_OPTIONS = ['Mark', 'Steve', 'Shez', 'Til', 'Max'];
+
+function parseBfWhoString(who) {
+  return (who || '').split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+function renderBfIdeaWhoChips() {
+  const chips = state.blackFriday.whoChips;
+  document.getElementById('bf-idea-who-chips').innerHTML = chips.length
+    ? chips.map((name, idx) => `
+        <span class="cd-style-chip">${escapeHtml(name)}
+          <button type="button" class="cd-style-chip-remove" onclick="removeBfIdeaWhoChip(${idx})" title="Remove">&times;</button>
+        </span>`).join('')
+    : '<span class="hint">No one assigned yet</span>';
+
+  // The add-select only ever offers names not already picked, plus "Other…"
+  // (always last, always available -- more than one custom entry is fine,
+  // e.g. "Steve" + "warehouse team").
+  const used = new Set(chips.map((n) => n.toLowerCase()));
+  const select = document.getElementById('bf-idea-who-add-select');
+  select.innerHTML = '<option value="">+ Add person…</option>'
+    + BF_WHO_OPTIONS.filter((n) => !used.has(n.toLowerCase())).map((n) => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('')
+    + '<option value="__other__">Other…</option>';
+  select.value = '';
+  document.getElementById('bf-idea-who-other-input').style.display = 'none';
+  document.getElementById('bf-idea-who-other-add-btn').style.display = 'none';
+  document.getElementById('bf-idea-who-other-input').value = '';
+}
+
+function addBfIdeaWhoFromSelect(value) {
+  if (!value) return;
+  if (value === '__other__') {
+    document.getElementById('bf-idea-who-other-input').style.display = '';
+    document.getElementById('bf-idea-who-other-add-btn').style.display = '';
+    document.getElementById('bf-idea-who-other-input').focus();
+    return;
+  }
+  if (!state.blackFriday.whoChips.some((n) => n.toLowerCase() === value.toLowerCase())) {
+    state.blackFriday.whoChips.push(value);
+  }
+  renderBfIdeaWhoChips();
+}
+
+function confirmBfIdeaWhoOther() {
+  const input = document.getElementById('bf-idea-who-other-input');
+  const value = input.value.trim();
+  if (!value) return;
+  if (!state.blackFriday.whoChips.some((n) => n.toLowerCase() === value.toLowerCase())) {
+    state.blackFriday.whoChips.push(value);
+  }
+  renderBfIdeaWhoChips();
+}
+
+function removeBfIdeaWhoChip(idx) {
+  state.blackFriday.whoChips.splice(idx, 1);
+  renderBfIdeaWhoChips();
+}
+
 function openBfIdeaModal(id) {
   const idea = id ? bfIdeaFindById(id) : null;
   state.blackFriday.editingIdeaId = id || null;
   document.getElementById('bf-idea-modal-title').textContent = idea ? 'Edit Creative Idea' : 'New Creative Idea';
   document.getElementById('bf-idea-title').value = idea ? idea.title : '';
   document.getElementById('bf-idea-media-type').value = (idea && idea.media_type) || 'video';
-  document.getElementById('bf-idea-who').value = (idea && idea.who) || '';
+  state.blackFriday.whoChips = parseBfWhoString((idea && idea.who) || '');
+  renderBfIdeaWhoChips();
   document.getElementById('bf-idea-where').value = (idea && idea.where_text) || '';
   document.getElementById('bf-idea-script').value = (idea && idea.concept_script) || '';
   document.getElementById('bf-idea-need').value = (idea && idea.need_text) || '';
@@ -12394,7 +12481,7 @@ async function saveBfIdea() {
   const body = {
     title,
     media_type: document.getElementById('bf-idea-media-type').value,
-    who: document.getElementById('bf-idea-who').value.trim(),
+    who: state.blackFriday.whoChips.join(', '),
     where_text: document.getElementById('bf-idea-where').value.trim(),
     concept_script: document.getElementById('bf-idea-script').value.trim(),
     need_text: document.getElementById('bf-idea-need').value.trim(),

@@ -1,7 +1,7 @@
 const express = require('express');
 const { pool } = require('../db');
 const { insertCreativeAsset } = require('../lib/assets');
-const { CONCEPT_DEV_STATUSES, TUESDAY_REVIEW_DECISIONS, FORMATS, CONCEPT_ORIGINS, STATUSES } = require('../lib/statuses');
+const { CONCEPT_DEV_STATUSES, CONCEPT_DEV_STATUS_LABELS, TUESDAY_REVIEW_DECISIONS, FORMATS, CONCEPT_ORIGINS, STATUSES } = require('../lib/statuses');
 const { generateOrTopUpPlan } = require('./dropProductPlans');
 const { loadBlackFridayShootContext } = require('../lib/blackFridayContext');
 const { requireAdmin } = require('../lib/permissions');
@@ -106,6 +106,61 @@ async function reconcileFinalEditsWithHooks(creativeAssetId, hookVariations, for
       await pool.query('UPDATE final_edits SET is_active = false, updated_at = now() WHERE id = $1', [fe.id]);
     }
   }
+}
+
+// Fixed display order for a Promotion workspace card's pipeline summary --
+// concept-dev substatuses first (in roughly workflow order), then every
+// downstream Move Back stage in pipeline order. 'ready_for_review' is
+// deliberately absent: loadMoveBackState always resolves that status to
+// the 'tuesday-review' stage below, never to 'concept-dev', so it can never
+// actually appear in the concept-dev bucket.
+const CONCEPT_DEV_SUBSTATUS_ORDER = ['not_started', 'in_development', 'changes_required', 'killed'];
+const DOWNSTREAM_STAGE_ORDER = ['tuesday-review', 'shooting', 'editing', 'final-approval', 'ad-setup', 'approved'];
+
+// A Promotion workspace card must agree with what the server actually knows
+// about every concept attached to it (see the "misleading card" brief) --
+// not just the ones the editable Concept Dev workspace itself is willing to
+// list. The `concepts` arrays built above/below deliberately exclude
+// concept_origin = 'existing' rows -- that flag is meant to mark the
+// Promotion "Existing Concept" bypass (skips Concept Dev entirely), but the
+// flag alone doesn't guarantee that bypass actually fired: a concept can
+// carry concept_origin = 'existing' and still have gone through a
+// completely normal concept_dev_status progression (ready_for_review,
+// etc.), in which case it's real, current downstream work that a workspace
+// card must not silently hide as "No new concepts yet". This reuses Move
+// Back's own loadMoveBackState (never a second, competing notion of "what
+// stage is this concept at") for EVERY concept physically attached via
+// shoot_plan_item_id, filtered or not -- purely for display; it never
+// changes which concepts the editable workspace itself shows.
+async function buildWorkspacePipelineSummary(shootPlanItemId) {
+  const result = await pool.query(
+    'SELECT id, concept_name, concept_dev_status FROM creative_assets WHERE shoot_plan_item_id = $1 ORDER BY created_at ASC',
+    [shootPlanItemId]
+  );
+  const concepts = [];
+  const substatusCounts = {};
+  const stageCounts = {};
+  for (const row of result.rows) {
+    const state = await loadMoveBackState(row.id);
+    const stageKey = state ? state.currentStage : 'concept-dev';
+    const statusKey = stageKey === 'concept-dev' ? row.concept_dev_status : null;
+    if (statusKey) {
+      substatusCounts[statusKey] = (substatusCounts[statusKey] || 0) + 1;
+    } else {
+      stageCounts[stageKey] = (stageCounts[stageKey] || 0) + 1;
+    }
+    concepts.push({
+      id: row.id,
+      concept_name: row.concept_name,
+      stage_key: stageKey,
+      stage_label: statusKey ? (CONCEPT_DEV_STATUS_LABELS[statusKey] || statusKey) : (STAGE_LABELS[stageKey] || stageKey),
+    });
+  }
+  const breakdown = [
+    ...CONCEPT_DEV_SUBSTATUS_ORDER.filter((s) => substatusCounts[s]).map((s) => ({ status_key: s, stage_key: 'concept-dev', label: CONCEPT_DEV_STATUS_LABELS[s] || s, count: substatusCounts[s] })),
+    ...DOWNSTREAM_STAGE_ORDER.filter((s) => stageCounts[s]).map((s) => ({ status_key: null, stage_key: s, label: STAGE_LABELS[s] || s, count: stageCounts[s] })),
+  ];
+  return { total_count: result.rows.length, breakdown, concepts };
 }
 
 // The content creator's workspace for turning a CONFIRMED weekly Shoot Plan
@@ -275,6 +330,17 @@ router.get('/', async (req, res, next) => {
       conceptsByItem.set(item.id, slotAssetsResult.rows.map((row) => ({ ...row, name_locked: false })));
     }
 
+    // Workspace pipeline summary (see buildWorkspacePipelineSummary above) --
+    // Promotion items only, same scope as the Black Friday identity lookup
+    // below. Computed BEFORE that lookup because the summary's own
+    // unfiltered concept list is also what fixes the identity lookup's own
+    // half of this bug (see next comment).
+    const pipelineSummaryByItem = new Map();
+    for (const i of items) {
+      if (i.source !== 'promotion') continue;
+      pipelineSummaryByItem.set(i.id, await buildWorkspacePipelineSummary(i.id));
+    }
+
     // Black Friday (or any Promotion built on the master-idea system)
     // identity, by reversing the existing linked_creative_asset_id
     // relationship -- the SAME lookup Shooting's own Shoot Brief already
@@ -283,10 +349,19 @@ router.get('/', async (req, res, next) => {
     // reverse lookup is a no-op/null for everything else), and only the
     // first concept is checked -- a Promotion item's one seed concept is
     // what send-to-pipeline actually links the master idea to.
+    //
+    // Uses the UNFILTERED pipeline summary's concept list, not
+    // conceptsByItem (which excludes concept_origin = 'existing') -- a
+    // workspace whose only concept happens to carry that flag but never
+    // actually bypassed Concept Dev (see buildWorkspacePipelineSummary's
+    // comment) was losing its Black Friday identity entirely here, which is
+    // the other half of the "Untitled Concept" card bug: with no concepts
+    // and no identity, the title fell all the way back to the generic
+    // "Untitled Concept" default.
     const blackFridayContextByItem = new Map();
     for (const i of items) {
       if (i.source !== 'promotion') continue;
-      const concepts = conceptsByItem.get(i.id) || [];
+      const concepts = (pipelineSummaryByItem.get(i.id) || {}).concepts || [];
       if (!concepts.length) continue;
       const ctx = await loadBlackFridayShootContext(concepts[0].id);
       if (ctx) blackFridayContextByItem.set(i.id, ctx);
@@ -319,6 +394,11 @@ router.get('/', async (req, res, next) => {
         size: s.size,
       })),
       concepts: conceptsByItem.get(i.id) || [],
+      // Promotion items only (null otherwise) -- see
+      // buildWorkspacePipelineSummary's comment. The card uses this instead
+      // of deriving a breakdown from `concepts` above, which can under-
+      // report a workspace that still has real, further-along work.
+      pipeline_summary: pipelineSummaryByItem.get(i.id) || null,
     }));
 
     res.json({ week_start: resolvedWeekStart, confirmed: !!confirmation, confirmed_at: confirmation ? confirmation.confirmed_at : null, products });
@@ -414,12 +494,19 @@ router.get('/item/:shootPlanItemId', async (req, res, next) => {
       concepts = conceptsResult.rows.map((row) => ({ ...row, name_locked: false }));
     }
 
+    // Same pipeline summary as GET / above -- see buildWorkspacePipelineSummary's
+    // comment for why this must use the UNFILTERED concept list, not the
+    // editable `concepts` above.
+    const pipelineSummary = item.source === 'promotion' ? await buildWorkspacePipelineSummary(itemId) : null;
+
     // Same reverse lookup as GET / above -- this standalone endpoint is also
     // what viewBfIdeaPipelineStatus/viewBfExecutionPipelineStatus (app.js)
     // deep-link into from the Black Friday Stage Workspace, so it needs the
-    // same identity attached, not just the weekly list.
-    const blackFridayContext = item.source === 'promotion' && concepts.length
-      ? await loadBlackFridayShootContext(concepts[0].id)
+    // same identity attached, not just the weekly list. Uses the pipeline
+    // summary's unfiltered concept list for the same reason GET / now does.
+    const blackFridayConcepts = pipelineSummary ? pipelineSummary.concepts : [];
+    const blackFridayContext = item.source === 'promotion' && blackFridayConcepts.length
+      ? await loadBlackFridayShootContext(blackFridayConcepts[0].id)
       : null;
 
     res.json({
@@ -441,6 +528,7 @@ router.get('/item/:shootPlanItemId', async (req, res, next) => {
       proven_coverage_count: provenCoverageCount,
       colourways,
       concepts,
+      pipeline_summary: pipelineSummary,
     });
   } catch (err) {
     next(err);
@@ -509,8 +597,18 @@ router.delete('/workspace/:shootPlanItemId', requireAdmin, async (req, res, next
       const state = await loadMoveBackState(concept.id);
       if (state && state.currentStage !== 'concept-dev') {
         await client.query('ROLLBACK');
+        const stageLabel = STAGE_LABELS[state.currentStage] || state.currentStage;
+        // Named concept + real current stage + plain reason (UX follow-up
+        // brief, issue 2) -- structured fields alongside the text so a
+        // future caller could build a richer "open it" action without
+        // another round trip; the error string alone already satisfies the
+        // brief's own example wording.
         return res.status(409).json({
-          error: `"${concept.concept_name}" has already progressed to ${STAGE_LABELS[state.currentStage] || state.currentStage} and can't be removed from Concept Development this way -- use Move Back to bring it back a stage first.`,
+          error: `"${concept.concept_name}" is currently in ${stageLabel}. This workspace can't be removed while it has work further along the pipeline -- use Move Back (from ${stageLabel}) if it needs to come back a stage first.`,
+          concept_id: concept.id,
+          concept_name: concept.concept_name,
+          stage_key: state.currentStage,
+          stage_label: stageLabel,
         });
       }
     }
