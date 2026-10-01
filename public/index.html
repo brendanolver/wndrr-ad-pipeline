@@ -687,6 +687,18 @@
         <div class="modal-body">
           <div class="shoot-brief-context" id="shoot-brief-context"></div>
 
+          <!-- Black Friday recreation context (follow-up brief) -- only
+               present when this shoot's creative_asset came from a Black
+               Friday idea/execution (loadBlackFridayShootContext in
+               shooting.js). Shown prominently, not collapsed, since a
+               "Recreate & Film"/"Recreate -> Production" concept skips
+               Concept Development/Tuesday Review entirely -- this is the
+               first and only screen anyone sees this context on. -->
+          <div class="cd-modal-section" id="shoot-brief-bf-section" style="display:none;">
+            <div class="cd-modal-section-title">Black Friday &mdash; Recreating</div>
+            <div id="shoot-brief-bf-content"></div>
+          </div>
+
           <!-- OPENINGS -- one equal-weight compact block per Hook Variation,
                never a single highlighted "Primary" hook plus a buried list
                of others: on set each one is its own thing to capture. The
@@ -3082,6 +3094,37 @@
         <div class="modal-footer" style="padding:12px 0 0;">
           <button class="btn btn-ghost" onclick="showBfAddCreativePanel('chooser')">&larr; Back</button>
         </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Black Friday "send to production" routing choice (follow-up brief):
+     a Recreation/Proven Winner Reference should NOT automatically mean a
+     full Concept Development pass -- the team decides per-idea, at the
+     point it's actually sent into production, not back when it was
+     planned. Develop Concept keeps today's full pipeline unchanged.
+     Recreate & Film (video) / Recreate -> Production (graphic) reuses the
+     SAME concept_origin='existing' bypass Promotion's generic "Existing
+     Concept" brief already has (see promotionCreative.js's send-to-pipeline
+     routes) -- not a second workflow. Labels swap for graphic vs video in
+     promptBfProductionRoute (app.js). -->
+<div id="bf-production-route-modal" class="modal-backdrop">
+  <div class="modal promo-chooser-modal">
+    <div class="modal-header">
+      <h3>How should we produce this?</h3>
+      <button class="modal-close" onclick="closeModal('bf-production-route-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="promo-chooser-options">
+        <button type="button" class="promo-chooser-card" onclick="chooseBfProductionRoute('develop')">
+          <span class="promo-chooser-card-title">Develop Concept</span>
+          <span class="promo-chooser-card-desc">Needs a new angle, hook, script or execution.</span>
+        </button>
+        <button type="button" class="promo-chooser-card" onclick="chooseBfProductionRoute('recreate')">
+          <span class="promo-chooser-card-title" id="bf-production-route-recreate-title">Recreate &amp; Film</span>
+          <span class="promo-chooser-card-desc" id="bf-production-route-recreate-desc">Recreate the proven creative and go straight to filming.</span>
+        </button>
       </div>
     </div>
   </div>

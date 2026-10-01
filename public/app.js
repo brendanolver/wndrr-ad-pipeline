@@ -9063,6 +9063,34 @@ function toggleShootingChecklistItem(key) {
   renderShootingChecklist();
 }
 
+// Black Friday context (follow-up brief) -- only present when this shoot's
+// creative_asset came from a Black Friday idea/execution (see
+// loadBlackFridayShootContext in shooting.js). Reuses bfIdeaInspirationBlockHtml
+// for the Previous Winners block -- the exact same reference relationship/UI
+// the Black Friday tab itself already uses, never a duplicate, and never
+// re-hosts the previous ad (Open Original only, same as everywhere else).
+// Shown prominently (not collapsed) since a "Recreate & Film"/"Recreate ->
+// Production" concept skips Concept Development/Tuesday Review entirely --
+// this is the first and only screen anyone sees this context on.
+function renderShootingBriefBlackFridayContext(brief) {
+  const section = document.getElementById('shoot-brief-bf-section');
+  const ctx = brief.black_friday_context;
+  if (!ctx) {
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = '';
+  const stagesLine = (ctx.stages || []).map((s) => bfStageShortName(s.stage_name)).join(' + ');
+  const whoWhere = [ctx.who, ctx.where_text].filter(Boolean).map(escapeHtml).join(' &middot; ');
+  const lines = [
+    `<div class="cd-modal-context-line"><strong>${escapeHtml(ctx.idea_title)}</strong>${stagesLine ? ` &middot; ${escapeHtml(stagesLine)}` : ''}</div>`,
+    whoWhere ? `<div class="cd-modal-context-line">${whoWhere}</div>` : '',
+    ctx.concept_script ? `<div class="shoot-brief-text">${escapeHtml(ctx.concept_script)}</div>` : '',
+    ctx.need_text ? `<div class="shoot-brief-text"><span class="cd-field-label">Need</span>${escapeHtml(ctx.need_text)}</div>` : '',
+  ].filter(Boolean).join('');
+  document.getElementById('shoot-brief-bf-content').innerHTML = lines + bfIdeaInspirationBlockHtml({ inspiration: ctx.inspiration });
+}
+
 function renderShootingBrief(brief) {
   document.getElementById('shoot-brief-title').textContent = brief.concept_name;
   const isShot = brief.status === 'shot';
@@ -9081,6 +9109,8 @@ function renderShootingBrief(brief) {
   document.getElementById('shoot-brief-context').innerHTML = `
     ${brief.image_url ? `<img class="cd-modal-context-thumb" src="${brief.image_url}" alt="">` : '<span class="cd-modal-context-thumb cd-modal-context-noimg">🖼</span>'}
     <div class="cd-modal-context-lines"><div class="cd-modal-context-line">${contextLine}</div></div>`;
+
+  renderShootingBriefBlackFridayContext(brief);
 
   const hooks = Array.isArray(brief.hook_variations) ? brief.hook_variations.filter((h) => h.text && h.text.trim()) : [];
 
@@ -11902,8 +11932,13 @@ function bfIdeaOverallStatus(idea) {
   }
   return best;
 }
+// Display labels only -- the canonical DB stage name ('Sale Live Ads')
+// is never renamed, so existing joins/counts/mappings stay intact. 'Sale
+// Live' -> 'Live' per the follow-up brief; every BF surface (stage tabs,
+// progress cards, idea badges, Creative Plan headers) already renders
+// through bfStageShortName, so this one entry covers all of them.
 const BF_STAGE_SHORT = {
-  'Hype Ads': 'Hype', 'Sale Live Ads': 'Sale Live', 'Mid Sale Offers Ads': 'Mid Sale', 'Last Chance / Ends Today': 'Last Chance',
+  'Hype Ads': 'Hype', 'Sale Live Ads': 'Live', 'Mid Sale Offers Ads': 'Mid Sale', 'Last Chance / Ends Today': 'Last Chance',
 };
 function bfStageShortName(name) {
   return BF_STAGE_SHORT[name] || (name || '').replace(/ Ads$/, '');
@@ -11959,7 +11994,7 @@ function bfIdeaCardHtml(idea) {
   const inProduction = overall.key !== 'planned';
   const pipelineAction = inProduction
     ? `<button type="button" class="btn btn-ghost btn-sm" onclick="event.stopPropagation();viewBfIdeaPipelineStatus(${idea.id})">${escapeHtml(overall.label)} &rarr;</button>`
-    : `<button type="button" class="btn btn-primary btn-sm" onclick="event.stopPropagation();sendBfIdeaToPipeline(${idea.id})" ${executions.length ? '' : 'disabled title="Add a Black Friday stage first"'}>Send to Concept Development &rarr;</button>`;
+    : `<button type="button" class="btn btn-primary btn-sm" onclick="event.stopPropagation();promptBfProductionRoute(${idea.id})" ${executions.length ? '' : 'disabled title="Add a Black Friday stage first"'}>Send to Production &rarr;</button>`;
 
   const execDetail = expanded && executions.length ? `
     <div class="bf-idea-executions">
@@ -12205,13 +12240,46 @@ async function initBfProgressRefreshOnly() {
   } catch (e) { /* non-fatal */ }
 }
 
+// Opens the compact Develop Concept / Recreate & Film choice (follow-up
+// brief) rather than sending straight to Concept Development -- the team
+// decides the production route per-idea, at the point it's actually sent
+// into production. Labels swap for graphic ("Recreate -> Production", no
+// fake filming step -- it's the SAME Shooting/Editing pipeline every
+// static concept already uses, just a different button) vs video
+// ("Recreate & Film").
+let bfProductionRouteIdeaId = null;
+function promptBfProductionRoute(ideaId) {
+  const idea = bfIdeaFindById(ideaId);
+  if (!idea) return;
+  bfProductionRouteIdeaId = ideaId;
+  const isGraphic = idea.media_type === 'graphic';
+  document.getElementById('bf-production-route-recreate-title').textContent = isGraphic ? 'Recreate → Production' : 'Recreate & Film';
+  document.getElementById('bf-production-route-recreate-desc').textContent = isGraphic
+    ? 'Recreate the proven creative and go straight to production.'
+    : 'Recreate the proven creative and go straight to filming.';
+  openModal('bf-production-route-modal');
+}
+function chooseBfProductionRoute(route) {
+  const id = bfProductionRouteIdeaId;
+  bfProductionRouteIdeaId = null;
+  closeModal('bf-production-route-modal');
+  if (id) sendBfIdeaToPipeline(id, route);
+}
+
 let bfSendingToPipeline = false;
-async function sendBfIdeaToPipeline(id) {
+async function sendBfIdeaToPipeline(id, route) {
   if (bfSendingToPipeline) return;
   bfSendingToPipeline = true;
   try {
-    const result = await api(`/promotion-creative/ideas/${id}/send-to-pipeline`, { method: 'POST' });
-    toast(result.already_linked ? 'Already in Concept Development' : 'Sent to Concept Development');
+    const production_route = route === 'recreate' ? 'recreate' : 'develop';
+    const result = await api(`/promotion-creative/ideas/${id}/send-to-pipeline`, {
+      method: 'POST',
+      body: JSON.stringify({ production_route }),
+    });
+    const message = result.already_linked
+      ? 'Already in production'
+      : production_route === 'recreate' ? 'Sent straight to production' : 'Sent to Concept Development';
+    toast(message);
     await loadBfIdeas();
     await initBfProgressRefreshOnly();
   } catch (e) {

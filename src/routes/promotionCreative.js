@@ -15,8 +15,20 @@ const express = require('express');
 const { pool } = require('../db');
 const { STATUSES } = require('../lib/statuses');
 const { insertCreativeAsset } = require('../lib/assets');
+const { ensureShootScheduleForApprovedConcept } = require('./conceptDevelopment');
 
 const router = express.Router();
+
+// "Develop Concept" (default) vs "Recreate & Film"/"Recreate -> Production"
+// -- the choice the team makes at the point a Black Friday idea/execution
+// goes into production (see the brief). Reuses the SAME concept_origin/
+// concept_dev_status mechanism Promotion's own generic "Existing Concept"
+// shoot brief already uses to skip Concept Development/Tuesday Review
+// (src/routes/conceptDevelopment.js) -- not a second bypass mechanism, and
+// identical for video and graphic (there's no separate graphic pipeline to
+// branch into; format only changes display labels elsewhere, e.g. "Shot"
+// vs "Filmed").
+const PRODUCTION_ROUTES = ['develop', 'recreate'];
 
 // ---------------------------------------------------------------------
 // Production stage of a single execution -- derived, never stored (see the
@@ -363,6 +375,9 @@ router.delete('/ideas/:id/executions/:execId', async (req, res, next) => {
 router.post('/ideas/:id/send-to-pipeline', async (req, res, next) => {
   const client = await pool.connect();
   try {
+    const { production_route } = req.body || {};
+    const route = PRODUCTION_ROUTES.includes(production_route) ? production_route : 'develop';
+
     const ideaResult = await client.query('SELECT * FROM promotion_creative_ideas WHERE id = $1', [req.params.id]);
     if (!ideaResult.rows.length) return res.status(404).json({ error: 'Idea not found' });
     const idea = ideaResult.rows[0];
@@ -398,8 +413,26 @@ router.post('/ideas/:id/send-to-pipeline', async (req, res, next) => {
     );
     await client.query('UPDATE creative_assets SET shoot_plan_item_id = $1 WHERE id = $2', [itemResult.rows[0].id, asset.id]);
     await client.query('UPDATE promotion_creative_ideas SET linked_creative_asset_id = $1, updated_at = now() WHERE id = $2', [asset.id, req.params.id]);
+    // Recreate & Film / Recreate -> Production: an almost-exact replica of
+    // the proven winner, so the team is deliberately skipping fresh
+    // ideation -- same concept_origin/concept_dev_status shortcut Promotion's
+    // generic "Existing Concept" brief already uses (see the comment on
+    // PRODUCTION_ROUTES above), done here inside the same transaction that
+    // just created this asset rather than a separate follow-up edit.
+    if (route === 'recreate') {
+      await client.query(
+        `UPDATE creative_assets SET concept_dev_status = 'approved', concept_origin = 'existing', updated_at = now() WHERE id = $1`,
+        [asset.id]
+      );
+    }
     await client.query('COMMIT');
-    res.status(201).json({ ok: true, already_linked: false, creative_asset_id: asset.id });
+    // Outside the transaction (and thus after it's visible to the pool's
+    // other connections) -- same ordering ensureShootScheduleForApprovedConcept
+    // already requires when conceptDevelopment.js calls it.
+    if (route === 'recreate') {
+      await ensureShootScheduleForApprovedConcept({ id: asset.id, shoot_plan_item_id: itemResult.rows[0].id });
+    }
+    res.status(201).json({ ok: true, already_linked: false, creative_asset_id: asset.id, production_route: route });
   } catch (err) {
     await client.query('ROLLBACK');
     next(err);
@@ -416,6 +449,9 @@ router.post('/ideas/:id/send-to-pipeline', async (req, res, next) => {
 router.post('/ideas/:id/executions/:execId/send-to-pipeline', async (req, res, next) => {
   const client = await pool.connect();
   try {
+    const { production_route } = req.body || {};
+    const route = PRODUCTION_ROUTES.includes(production_route) ? production_route : 'develop';
+
     const execResult = await client.query(
       `SELECT pcie.*, pci.title, pci.who, pci.concept_script, pci.media_type, pci.promotion_id
        FROM promotion_creative_idea_executions pcie
@@ -445,8 +481,17 @@ router.post('/ideas/:id/executions/:execId/send-to-pipeline', async (req, res, n
     );
     await client.query('UPDATE creative_assets SET shoot_plan_item_id = $1 WHERE id = $2', [itemResult.rows[0].id, asset.id]);
     await client.query('UPDATE promotion_creative_idea_executions SET linked_creative_asset_id = $1, updated_at = now() WHERE id = $2', [asset.id, req.params.execId]);
+    if (route === 'recreate') {
+      await client.query(
+        `UPDATE creative_assets SET concept_dev_status = 'approved', concept_origin = 'existing', updated_at = now() WHERE id = $1`,
+        [asset.id]
+      );
+    }
     await client.query('COMMIT');
-    res.status(201).json({ ok: true, already_linked: false, creative_asset_id: asset.id });
+    if (route === 'recreate') {
+      await ensureShootScheduleForApprovedConcept({ id: asset.id, shoot_plan_item_id: itemResult.rows[0].id });
+    }
+    res.status(201).json({ ok: true, already_linked: false, creative_asset_id: asset.id, production_route: route });
   } catch (err) {
     await client.query('ROLLBACK');
     next(err);

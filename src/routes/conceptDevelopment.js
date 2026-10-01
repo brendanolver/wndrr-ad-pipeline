@@ -778,4 +778,12 @@ router.patch('/concepts/:id/review', async (req, res, next) => {
   }
 });
 
+// Attached to the exported router (a function, so this is just an extra
+// property on it) rather than changing module.exports to an object -- the
+// one place that requires this file (server.js) uses it directly as
+// Express middleware, and promotionCreative.js's Black Friday "Recreate &
+// Film" bypass (see its send-to-pipeline routes) needs this exact same
+// "reach approved -> get a shoot_schedule row" step, not a second copy of
+// it.
+router.ensureShootScheduleForApprovedConcept = ensureShootScheduleForApprovedConcept;
 module.exports = router;
