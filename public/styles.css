@@ -2337,3 +2337,14 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .shoot-brief-collapsible .shoot-brief-text{margin-top:8px;}
 
 .tr-kill-reason-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;}
+
+/* Settings -> Meta Sync (temporary operator control) */
+.meta-sync-card{border:1px solid var(--border);border-radius:var(--r);padding:14px 16px;max-width:560px;background:var(--surface);}
+.meta-sync-stats{margin:0 0 14px;display:grid;gap:8px;}
+.meta-sync-stats>div{display:flex;justify-content:space-between;gap:12px;font-size:13px;}
+.meta-sync-stats dt{color:var(--text-secondary);}
+.meta-sync-stats dd{margin:0;font-weight:600;text-align:right;}
+.meta-sync-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+.meta-sync-message{font-size:12.5px;}
+.meta-sync-message.ok{color:var(--green,#1a7f37);}
+.meta-sync-message.err{color:var(--red);}
