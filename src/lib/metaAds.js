@@ -136,9 +136,43 @@ function getMetaAdsCacheStatus() {
   return cacheStatus('metaLiveAdCoverage');
 }
 
+// Generic authenticated read -- for the Insights validation round's
+// diagnostic endpoint (debug.js), and any other future read that isn't the
+// live-ad-name list above. `params` is a plain object of query params and
+// must NEVER include access_token -- that's appended here, the one place
+// outside this module's own top-level consts the token is ever touched.
+// Callers only ever see { status, data }, exactly as metaRequest returns it
+// -- Meta's own error bodies don't echo back the request URL/params, so
+// this can never leak the token into a caller's error handling either.
+function metaGet(path, params = {}) {
+  if (!configured()) {
+    return Promise.reject(new Error('Meta Ads is not configured (META_AD_ACCOUNT_ID / META_ACCESS_TOKEN missing)'));
+  }
+  const query = new URLSearchParams({ ...params, access_token: META_ACCESS_TOKEN });
+  // Defense in depth: metaRequest only ever rejects on a network-level
+  // error (DNS/connection failure, never a Meta error response -- those
+  // resolve normally with a non-200 status), and Node's own https error
+  // messages don't echo the request URL back today -- but a thrown error
+  // is exactly the kind of thing that ends up in a log line someone pastes
+  // into a ticket, so the token is stripped from the message here too,
+  // not just trusted to never appear.
+  return metaRequest(`${path}?${query.toString()}`).catch((err) => {
+    throw new Error(String(err.message || err).split(META_ACCESS_TOKEN).join('[REDACTED]'));
+  });
+}
+
+// "/act_<id>" with the "act_" prefix normalised exactly once, same as
+// fetchAllLiveAdNames above -- every other caller building a path off the
+// account should use this rather than re-deriving it.
+function accountPath() {
+  return `/act_${String(META_AD_ACCOUNT_ID || '').replace(/^act_/, '')}`;
+}
+
 module.exports = {
   configured,
   getLiveAdCoverage,
   warmMetaAdsCache,
   getMetaAdsCacheStatus,
+  metaGet,
+  accountPath,
 };
