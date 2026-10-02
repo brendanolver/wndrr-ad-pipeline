@@ -2383,3 +2383,162 @@ BEGIN
     );
   END IF;
 END $$;
+
+-- ---------------------------------------------------------------------------
+-- Meta performance data layer, Phase 1 (Meta -> database only -- see the
+-- investigation/validation rounds that preceded this). Four additive
+-- tables, nothing above this line touched, no existing table altered.
+-- Stable Meta IDs are the source of truth throughout; ad names are
+-- metadata/historical-matching assistance only (see meta_ads.ad_name).
+-- Nothing here is populated automatically on deploy -- see
+-- src/lib/metaSync.js / src/routes/metaSync.js: every sync is admin-
+-- triggered via an explicit endpoint call, never a startup hook.
+-- ---------------------------------------------------------------------------
+
+-- One row per Meta ad, upserted by metaSync.js's discovery pass. Name/
+-- status/campaign/adset/creative IDs are refreshed on every discovery run
+-- (an ad's name or status can change on Meta's side); the match_* columns
+-- are deliberately NEVER touched by that upsert (see metaSync.js's own
+-- comment on its ON CONFLICT clause) -- a confirmed mapping must survive
+-- forever, and even a 'suggested' one is only ever overwritten by a human
+-- action, never silently re-guessed by a later discovery run.
+CREATE TABLE IF NOT EXISTS meta_ads (
+  id SERIAL PRIMARY KEY,
+  meta_ad_id VARCHAR(64) UNIQUE NOT NULL,
+  meta_adset_id VARCHAR(64),
+  meta_campaign_id VARCHAR(64),
+  meta_creative_id VARCHAR(64),
+  ad_name TEXT,
+  effective_status VARCHAR(30),
+  created_time TIMESTAMPTZ,
+  first_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  -- Mapping to WNDRR's own creative record. No FK to a specific table is
+  -- forced here (ad_setups is the obvious target once the matching UI
+  -- exists, but that's a future round's decision) -- matched_ad_setup_id
+  -- stays a plain nullable integer rather than a premature FK, so this
+  -- round's schema can't silently constrain a decision nobody has made
+  -- yet. match_status is the real state machine: unmatched (default,
+  -- every historical/newly-discovered ad starts and stays here until a
+  -- human or a future matching step acts), suggested (a candidate match
+  -- exists but isn't confirmed), confirmed (persists permanently; see
+  -- above).
+  matched_ad_setup_id INTEGER,
+  match_status VARCHAR(20) NOT NULL DEFAULT 'unmatched'
+    CHECK (match_status IN ('unmatched', 'suggested', 'confirmed')),
+  match_confidence NUMERIC(4,3),
+  match_method VARCHAR(30),
+  match_confirmed_at TIMESTAMPTZ,
+  match_confirmed_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_meta_ads_match_status ON meta_ads(match_status);
+CREATE INDEX IF NOT EXISTS idx_meta_ads_meta_campaign_id ON meta_ads(meta_campaign_id);
+CREATE INDEX IF NOT EXISTS idx_meta_ads_meta_adset_id ON meta_ads(meta_adset_id);
+
+-- Daily ad-level performance, the grain every flexible date range (Today/
+-- Last 7 Days/This Month/Custom/Compare-to-previous-period, per the
+-- architecture brief) is built from by summing rows -- never pre-
+-- aggregated weekly/monthly totals, which could never support an
+-- arbitrary custom range. UNIQUE(meta_ad_id, insight_date) is the upsert
+-- key metaSync.js's daily-insights upsert conflicts on, so re-syncing the
+-- same ad/day (the 3-day overlap refresh, or a re-run backfill chunk)
+-- updates in place rather than duplicating.
+--
+-- cost_per_add_to_cart / cost_per_purchase are deliberately NOT columns
+-- here -- see the Phase 1 report's reasoning: derived as spend / count at
+-- query time (with a NULLIF guard against divide-by-zero) stays correct
+-- automatically if spend or conversion counts are later corrected by a
+-- re-sync, where a stored derived value would silently go stale.
+--
+-- raw_actions / raw_action_values keep the exact action_type breakdown
+-- Meta returned for that ad/day, beyond just the canonical purchase/
+-- add-to-cart figures already extracted into their own columns -- so a
+-- different canonical action_type choice later never requires re-pulling
+-- this day from Meta again, only a backfill over what's already stored
+-- locally.
+CREATE TABLE IF NOT EXISTS meta_ad_insights_daily (
+  id SERIAL PRIMARY KEY,
+  meta_ad_id VARCHAR(64) NOT NULL REFERENCES meta_ads(meta_ad_id) ON DELETE CASCADE,
+  insight_date DATE NOT NULL,
+
+  impressions BIGINT NOT NULL DEFAULT 0,
+  reach BIGINT NOT NULL DEFAULT 0,
+  frequency NUMERIC(10,4),
+  spend NUMERIC(14,2) NOT NULL DEFAULT 0,
+
+  outbound_clicks BIGINT NOT NULL DEFAULT 0,
+  outbound_ctr NUMERIC(10,6),
+
+  -- Canonical conversion figures -- see the Phase 1 report for exactly
+  -- which Meta action_type each is extracted from, and why.
+  add_to_cart BIGINT NOT NULL DEFAULT 0,
+  purchases BIGINT NOT NULL DEFAULT 0,
+  purchase_value NUMERIC(14,2) NOT NULL DEFAULT 0,
+
+  video_plays BIGINT NOT NULL DEFAULT 0,
+  thruplays BIGINT NOT NULL DEFAULT 0,
+  video_p25 BIGINT NOT NULL DEFAULT 0,
+  video_p50 BIGINT NOT NULL DEFAULT 0,
+  video_p75 BIGINT NOT NULL DEFAULT 0,
+  video_p95 BIGINT NOT NULL DEFAULT 0,
+  video_p100 BIGINT NOT NULL DEFAULT 0,
+
+  raw_actions JSONB,
+  raw_action_values JSONB,
+
+  currency VARCHAR(8),
+  -- What WE explicitly requested for this pull (action_attribution_windows
+  -- sent on the Insights call), never a value Meta told us was "the"
+  -- account setting -- the validation round confirmed Meta doesn't expose
+  -- that cleanly (use_account_attribution_setting is not a valid field;
+  -- Meta error #100). See the Phase 1 report's open question on whether
+  -- this specific window is the right one to standardize on.
+  attribution_setting VARCHAR(60),
+
+  fetched_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  UNIQUE (meta_ad_id, insight_date)
+);
+CREATE INDEX IF NOT EXISTS idx_meta_ad_insights_daily_date ON meta_ad_insights_daily(insight_date);
+
+-- Single-row-per-account snapshot of the settings needed to interpret
+-- stored figures consistently (currency/timezone) -- refreshed by every
+-- sync run, never hand-edited. Keyed by the account id (not a bare
+-- singleton row) so a second ad account is additive, not a schema change,
+-- if WNDRR ever has one.
+CREATE TABLE IF NOT EXISTS meta_account_settings (
+  meta_ad_account_id VARCHAR(64) PRIMARY KEY,
+  account_name VARCHAR(255),
+  currency VARCHAR(8),
+  timezone_name VARCHAR(64),
+  timezone_offset_hours_utc NUMERIC(5,2),
+  account_status VARCHAR(30),
+  fetched_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- One row per sync run (default-window or backfill-chunk), so "most recent
+-- successful sync" / counts / date range synced (the debug endpoint's own
+-- requirements) are a real log, not a guess from the data tables alone --
+-- a run that fails partway still leaves a record of exactly what it did
+-- and didn't get through.
+CREATE TABLE IF NOT EXISTS meta_sync_runs (
+  id SERIAL PRIMARY KEY,
+  run_type VARCHAR(20) NOT NULL CHECK (run_type IN ('default', 'backfill')),
+  range_since DATE NOT NULL,
+  range_until DATE NOT NULL,
+  ads_discovered INTEGER NOT NULL DEFAULT 0,
+  ads_inserted INTEGER NOT NULL DEFAULT 0,
+  ads_updated INTEGER NOT NULL DEFAULT 0,
+  daily_rows_inserted INTEGER NOT NULL DEFAULT 0,
+  daily_rows_updated INTEGER NOT NULL DEFAULT 0,
+  status VARCHAR(20) NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'success', 'failed')),
+  error_message TEXT,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at TIMESTAMPTZ,
+  started_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_meta_sync_runs_started_at ON meta_sync_runs(started_at);

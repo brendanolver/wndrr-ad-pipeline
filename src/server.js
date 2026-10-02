@@ -43,6 +43,7 @@ const finalApprovalRoutes = require('./routes/finalApproval');
 const adSetupRoutes = require('./routes/adSetup');
 const moveBackRoutes = require('./routes/moveBack');
 const promotionCreativeRoutes = require('./routes/promotionCreative');
+const metaSyncRoutes = require('./routes/metaSync');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -138,6 +139,11 @@ app.use(
   requireAnyModuleAccess('concept-dev', 'tuesday-review', 'shooting', 'editing', 'final-approval'),
   moveBackRoutes
 );
+// Meta performance data layer, Phase 1 (Meta -> database). No dedicated
+// sidebar module exists for this yet, same as metaProductMappingRoutes
+// above -- every route inside metaSync.js self-gates with requireAdmin,
+// matching that existing precedent rather than inventing a new module key.
+app.use('/api/meta-sync', requireAuth, metaSyncRoutes);
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
 

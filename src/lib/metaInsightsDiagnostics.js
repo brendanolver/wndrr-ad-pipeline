@@ -59,6 +59,15 @@ async function testAccountAttributionSpec() {
 
 // 2. Smallest possible Insights read -- the direct "does ads_read actually
 // cover Insights" test. One field, one day, one row.
+//
+// Security fix (post-validation): this used to return the raw `result.data`
+// wholesale, which for a list endpoint like /insights is
+// `{ data: [...], paging: { cursors, next, previous } }` -- paging.next/
+// previous are full URLs with access_token=... embedded by Meta. That's
+// the exact leak this round's diagnostic caused. metaRequest now strips
+// paging.next/previous for every call (see metaAds.js's stripPagingUrls),
+// but this probe no longer echoes the raw payload at all regardless --
+// only the status and the row(s) actually needed to answer the question.
 async function testInsightsPermission() {
   const result = await metaGet(`${accountPath()}/insights`, {
     level: 'ad',
@@ -66,7 +75,12 @@ async function testInsightsPermission() {
     date_preset: 'yesterday',
     limit: '1',
   });
-  return { status: result.status, data: result.data };
+  return {
+    status: result.status,
+    rows_returned: result.status === 200 ? (result.data?.data || []).length : 0,
+    sample_row: result.status === 200 ? (result.data?.data || [])[0] : undefined,
+    error: result.status !== 200 ? result.data : undefined,
+  };
 }
 
 // 3. Daily grain -- a real time_increment=1 pull over a few days, checking
