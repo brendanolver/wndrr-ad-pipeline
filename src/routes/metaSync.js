@@ -73,4 +73,34 @@ router.post('/backfill', requireAdmin, async (req, res, next) => {
   }
 });
 
+// Production-QA reconciliation aid: every purchase / add-to-cart alias Meta
+// returned, totalled over a stored date range, next to the currently
+// configured canonical choice (see metaReportingConfig.js). Local read only
+// -- never calls Meta.
+router.get('/conversion-aliases', requireAdmin, async (req, res, next) => {
+  try {
+    const { since, until } = req.query;
+    if (!since || !DATE_RE.test(since)) return res.status(400).json({ error: 'since (YYYY-MM-DD) is required' });
+    if (!until || !DATE_RE.test(until)) return res.status(400).json({ error: 'until (YYYY-MM-DD) is required' });
+    res.json(await metaSync.conversionAliasTotals({ since, until }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// After changing the canonical action types in metaReportingConfig.js (or
+// its env vars), recomputes the derived conversion columns for stored rows
+// from their own stored raw action JSON. No Meta call, no schema change.
+router.post('/rederive-conversions', requireAdmin, async (req, res, next) => {
+  try {
+    const { since, until } = req.body || {};
+    if (!since || !DATE_RE.test(since)) return res.status(400).json({ error: 'since (YYYY-MM-DD) is required' });
+    if (!until || !DATE_RE.test(until)) return res.status(400).json({ error: 'until (YYYY-MM-DD) is required' });
+    if (since > until) return res.status(400).json({ error: 'since must be on or before until' });
+    res.json(await metaSync.rederiveConversions({ since, until }));
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;
