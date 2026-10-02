@@ -4,6 +4,8 @@ const reportPipeline = require('../lib/reportPipeline');
 const metaAds = require('../lib/metaAds');
 const { fetchAmData } = require('../lib/planningData');
 const { pool } = require('../db');
+const { requireAdmin } = require('../lib/permissions');
+const metaInsightsDiagnostics = require('../lib/metaInsightsDiagnostics');
 
 const router = express.Router();
 
@@ -125,6 +127,24 @@ router.get('/meta-ads/status', async (req, res, next) => {
     });
   } catch (err) {
     res.status(502).json({ configured: true, error: err.message });
+  }
+});
+
+// TEMPORARY -- Meta Insights validation round. Admin-only, read-only: every
+// call it makes is a GET against Meta's /insights, account, or /ads
+// endpoints using the EXISTING META_AD_ACCOUNT_ID / META_ACCESS_TOKEN
+// (same credential metaAds.js's live-ad-count feature already uses) --
+// nothing here can create, modify, or delete anything in Meta, and the
+// token itself is never returned, logged, or otherwise exposed (see
+// metaInsightsDiagnostics.js's own comment). Meant to be deleted once the
+// real analytics architecture is decided and built -- delete this route,
+// its require above, and src/lib/metaInsightsDiagnostics.js.
+router.get('/meta-ads/insights-validation', requireAdmin, async (req, res, next) => {
+  try {
+    const result = await metaInsightsDiagnostics.runFullValidation();
+    res.json(result);
+  } catch (err) {
+    res.status(502).json({ error: err.message });
   }
 });
 
