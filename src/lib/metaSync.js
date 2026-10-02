@@ -11,30 +11,13 @@
 // triggered by an explicit, admin-only API call (src/routes/metaSync.js).
 const { pool } = require('../db');
 const { configured, metaGet, accountPath, metaGetAllPages } = require('./metaAds');
-
-// Canonical conversion action types -- see the Phase 1 report for the full
-// reasoning. Short version: Meta's "omni_*" action types are its own
-// deduplicated, cross-source (pixel + onsite + offline) total for a given
-// event -- exactly the figure that avoids double-counting between the
-// overlapping aliases a Shopify + Pixel + Conversions API setup can
-// return simultaneously for the same real-world purchase (e.g. purchase,
-// omni_purchase, offsite_conversion.fb_pixel_purchase, onsite_web_purchase
-// all present on the same row). These are matched by EXACT action_type
-// only -- if the canonical type isn't present on a row, that row's count
-// is 0, never silently substituted from a different alias.
-const CANONICAL_PURCHASE_ACTION = 'omni_purchase';
-const CANONICAL_ADD_TO_CART_ACTION = 'omni_add_to_cart';
-
-// Explicitly requested on every Insights pull -- NOT a value Meta told us
-// is the account's own default (the validation round confirmed Meta
-// doesn't expose that cleanly: use_account_attribution_setting is not a
-// valid Insights field and returns Meta error #100, which this file never
-// requests). 7d-click/1d-view is Meta's own long-standing platform
-// default, picked here for a deterministic, reconcilable number -- but
-// this IS a modeling choice, not something Meta confirmed back to us; see
-// the Phase 1 report's open question.
-const ATTRIBUTION_WINDOWS = ['7d_click', '1d_view'];
-const ATTRIBUTION_SETTING_LABEL = '7d_click,1d_view (explicitly requested)';
+// Which Meta action_type counts as a Purchase / Add to Cart / purchase
+// value, and which attribution window is requested, are provisional
+// reporting choices isolated in ONE file -- see metaReportingConfig.js.
+// Nothing in this file hard-codes any of them.
+const {
+  getConversionConfig, getAttributionWindows, getAttributionLabel, deriveConversions,
+} = require('./metaReportingConfig');
 
 const INSIGHTS_FIELDS = [
   'ad_id', 'impressions', 'reach', 'frequency', 'spend',
@@ -57,29 +40,30 @@ function accountId() {
   return accountPath().replace(/^\/act_/, '');
 }
 
-// Exact-match extraction for conversions -- never falls back to a
-// different action_type. A row with no matching entry is 0, not a guess.
-function exactValue(arr, actionType) {
+// Verified against the real WNDRR account's production diagnostic:
+//  - outbound_clicks / outbound_clicks_ctr carry action_type 'outbound_click'
+//  - video_play_actions carries action_type 'video_view'
+// Those are matched by EXACT action_type only (no fallback) -- a missing
+// entry is 0, never a guess from whatever else the array happens to hold.
+function exactEntryValue(arr, actionType) {
   if (!Array.isArray(arr)) return 0;
   const match = arr.find((a) => a && a.action_type === actionType);
   return match ? Number(match.value) || 0 : 0;
 }
 
-// outbound_clicks/outbound_clicks_ctr and every video_*_watched_actions
-// field are each narrow, single-purpose fields that only ever carry
-// entries for their own action (documented as 'outbound_click' and
-// 'video_view' respectively) -- preferred by exact match, falling back to
-// the array's first entry only because the field itself can't contain
-// anything else. This fallback has NOT been verified against this
-// account's real response (this environment has no network path to
-// graph.facebook.com -- see the validation round); treat the exact-match
-// case as the documented behaviour and the fallback as a safety net to
-// confirm in QA against a real sync run.
-function firstValue(arr, preferredActionType) {
+// The remaining video_*_watched_actions fields (thruplay, p25/50/75/95/100)
+// were NOT individually confirmed in that diagnostic -- only
+// video_play_actions was. They follow the same documented 'video_view'
+// convention, so exact match is preferred, with the array's first entry as
+// a fallback because each of these fields is single-purpose. Confirm from
+// the first real sync's stored values; if one turns out to carry a
+// different action_type, change it here (these columns can be re-synced
+// from Meta at any time -- unlike the conversion columns, there's no raw
+// copy of these arrays stored).
+function videoValue(arr) {
   if (!Array.isArray(arr) || !arr.length) return 0;
-  const match = preferredActionType ? arr.find((a) => a && a.action_type === preferredActionType) : null;
-  const chosen = match || arr[0];
-  return chosen ? Number(chosen.value) || 0 : 0;
+  const match = arr.find((a) => a && a.action_type === 'video_view') || arr[0];
+  return match ? Number(match.value) || 0 : 0;
 }
 
 function mapInsightsRow(row, currency) {
@@ -90,23 +74,21 @@ function mapInsightsRow(row, currency) {
     reach: Math.round(Number(row.reach) || 0),
     frequency: row.frequency != null && row.frequency !== '' ? Number(row.frequency) : null,
     spend: Number(row.spend) || 0,
-    outbound_clicks: Math.round(firstValue(row.outbound_clicks, 'outbound_click')),
+    outbound_clicks: Math.round(exactEntryValue(row.outbound_clicks, 'outbound_click')),
     outbound_ctr: Array.isArray(row.outbound_clicks_ctr) && row.outbound_clicks_ctr.length
-      ? firstValue(row.outbound_clicks_ctr, 'outbound_click') : null,
-    add_to_cart: Math.round(exactValue(row.actions, CANONICAL_ADD_TO_CART_ACTION)),
-    purchases: Math.round(exactValue(row.actions, CANONICAL_PURCHASE_ACTION)),
-    purchase_value: exactValue(row.action_values, CANONICAL_PURCHASE_ACTION),
-    video_plays: Math.round(firstValue(row.video_play_actions, 'video_view')),
-    thruplays: Math.round(firstValue(row.video_thruplay_watched_actions, 'video_view')),
-    video_p25: Math.round(firstValue(row.video_p25_watched_actions, 'video_view')),
-    video_p50: Math.round(firstValue(row.video_p50_watched_actions, 'video_view')),
-    video_p75: Math.round(firstValue(row.video_p75_watched_actions, 'video_view')),
-    video_p95: Math.round(firstValue(row.video_p95_watched_actions, 'video_view')),
-    video_p100: Math.round(firstValue(row.video_p100_watched_actions, 'video_view')),
+      ? exactEntryValue(row.outbound_clicks_ctr, 'outbound_click') : null,
+    ...deriveConversions(row.actions, row.action_values),
+    video_plays: Math.round(exactEntryValue(row.video_play_actions, 'video_view')),
+    thruplays: Math.round(videoValue(row.video_thruplay_watched_actions)),
+    video_p25: Math.round(videoValue(row.video_p25_watched_actions)),
+    video_p50: Math.round(videoValue(row.video_p50_watched_actions)),
+    video_p75: Math.round(videoValue(row.video_p75_watched_actions)),
+    video_p95: Math.round(videoValue(row.video_p95_watched_actions)),
+    video_p100: Math.round(videoValue(row.video_p100_watched_actions)),
     raw_actions: row.actions ? JSON.stringify(row.actions) : null,
     raw_action_values: row.action_values ? JSON.stringify(row.action_values) : null,
     currency: currency || null,
-    attribution_setting: ATTRIBUTION_SETTING_LABEL,
+    attribution_setting: getAttributionLabel(),
   };
 }
 
@@ -257,7 +239,7 @@ async function fetchAndUpsertInsights(since, until, currency) {
     time_increment: '1',
     time_range: JSON.stringify({ since, until }),
     fields: INSIGHTS_FIELDS,
-    action_attribution_windows: JSON.stringify(ATTRIBUTION_WINDOWS),
+    action_attribution_windows: JSON.stringify(getAttributionWindows()),
     limit: '500',
   }, async (rows) => {
     for (const row of rows) {
@@ -392,12 +374,79 @@ async function getSyncStatus() {
   };
 }
 
+// Recomputes purchases / add_to_cart / purchase_value for already-stored
+// rows from their own stored raw_actions / raw_action_values, using
+// whatever metaReportingConfig.js currently says -- no Meta call, no schema
+// change, raw JSON untouched. This is the "change the canonical action
+// type later" path: edit the config (or env var), redeploy, then call this
+// for the date range to refresh the derived columns. Explicit range only,
+// same as backfill; only rows whose derived values would actually change
+// are written.
+async function rederiveConversions({ since, until }) {
+  const config = getConversionConfig();
+  const rows = await pool.query(
+    `SELECT id, raw_actions, raw_action_values, purchases, add_to_cart, purchase_value
+     FROM meta_ad_insights_daily
+     WHERE insight_date BETWEEN $1 AND $2 AND (raw_actions IS NOT NULL OR raw_action_values IS NOT NULL)`,
+    [since, until]
+  );
+  let updated = 0;
+  for (const row of rows.rows) {
+    const next = deriveConversions(row.raw_actions, row.raw_action_values, config);
+    if (
+      Number(row.purchases) !== next.purchases
+      || Number(row.add_to_cart) !== next.add_to_cart
+      || Number(row.purchase_value) !== next.purchase_value
+    ) {
+      await pool.query(
+        'UPDATE meta_ad_insights_daily SET purchases = $1, add_to_cart = $2, purchase_value = $3 WHERE id = $4',
+        [next.purchases, next.add_to_cart, next.purchase_value, row.id]
+      );
+      updated += 1;
+    }
+  }
+  return { range: { since, until }, rows_examined: rows.rows.length, rows_updated: updated, config_used: config };
+}
+
+// Reconciliation aid for production QA: totals EVERY purchase / add-to-cart
+// related action_type Meta returned over a stored date range, side by side
+// (counts from raw_actions, values from raw_action_values), plus which one
+// is currently configured. Compare these against Ads Manager's own
+// Purchases / Add to Cart / Purchase Value for the same range and
+// attribution window to decide which alias WNDRR should standardise on.
+async function conversionAliasTotals({ since, until }) {
+  const [counts, values] = await Promise.all([
+    pool.query(
+      `SELECT a->>'action_type' AS action_type, sum((a->>'value')::numeric) AS total
+       FROM meta_ad_insights_daily d, jsonb_array_elements(d.raw_actions) a
+       WHERE d.insight_date BETWEEN $1 AND $2
+         AND (a->>'action_type' ILIKE '%purchase%' OR a->>'action_type' ILIKE '%add_to_cart%')
+       GROUP BY 1 ORDER BY 1`,
+      [since, until]
+    ),
+    pool.query(
+      `SELECT a->>'action_type' AS action_type, sum((a->>'value')::numeric) AS total
+       FROM meta_ad_insights_daily d, jsonb_array_elements(d.raw_action_values) a
+       WHERE d.insight_date BETWEEN $1 AND $2
+         AND (a->>'action_type' ILIKE '%purchase%' OR a->>'action_type' ILIKE '%add_to_cart%')
+       GROUP BY 1 ORDER BY 1`,
+      [since, until]
+    ),
+  ]);
+  return {
+    range: { since, until },
+    currently_configured: getConversionConfig(),
+    attribution: getAttributionLabel(),
+    action_counts: counts.rows.map((r) => ({ action_type: r.action_type, total: Number(r.total) })),
+    action_values: values.rows.map((r) => ({ action_type: r.action_type, total: Number(r.total) })),
+  };
+}
+
 module.exports = {
   runSync,
   runDefaultSync,
   runBackfill,
   getSyncStatus,
-  CANONICAL_PURCHASE_ACTION,
-  CANONICAL_ADD_TO_CART_ACTION,
-  ATTRIBUTION_SETTING_LABEL,
+  rederiveConversions,
+  conversionAliasTotals,
 };

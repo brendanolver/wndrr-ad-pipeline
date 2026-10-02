@@ -2414,7 +2414,16 @@ CREATE TABLE IF NOT EXISTS meta_ads (
   first_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-  -- Mapping to WNDRR's own creative record. No FK to a specific table is
+  -- Mapping to WNDRR's own creative record -- ad -> creative, a separate axis
+  -- from the PRODUCT-FAMILY mapping that already exists in Settings -> Meta
+  -- Mapping (meta_product_mappings: Product + Product Type -> product_code).
+  -- That existing system is preserved as-is and is NOT duplicated here: a
+  -- later round can parse ad_name with metaProductMapping.parseMetaAdName
+  -- and look the result up in meta_product_mappings to SUGGEST a product
+  -- family for a historical ad, but such a suggestion is only ever a
+  -- hint -- it must never write match_status = 'confirmed' (only an
+  -- explicit human action does). Stable meta_ad_id stays the permanent ad
+  -- identity throughout. No FK to a specific table is
   -- forced here (ad_setups is the obvious target once the matching UI
   -- exists, but that's a future round's decision) -- matched_ad_setup_id
   -- stays a plain nullable integer rather than a premature FK, so this
@@ -2473,8 +2482,13 @@ CREATE TABLE IF NOT EXISTS meta_ad_insights_daily (
   outbound_clicks BIGINT NOT NULL DEFAULT 0,
   outbound_ctr NUMERIC(10,6),
 
-  -- Canonical conversion figures -- see the Phase 1 report for exactly
-  -- which Meta action_type each is extracted from, and why.
+  -- Derived conversion figures. Which Meta action_type each is extracted
+  -- from is a PROVISIONAL choice configured in exactly one place
+  -- (src/lib/metaReportingConfig.js) -- never hard-wired here or anywhere
+  -- else. Changing it needs no schema change: raw_actions /
+  -- raw_action_values below keep the full per-alias breakdown, and
+  -- POST /api/meta-sync/rederive-conversions recomputes these three
+  -- columns from that stored raw data without calling Meta.
   add_to_cart BIGINT NOT NULL DEFAULT 0,
   purchases BIGINT NOT NULL DEFAULT 0,
   purchase_value NUMERIC(14,2) NOT NULL DEFAULT 0,
@@ -2495,8 +2509,9 @@ CREATE TABLE IF NOT EXISTS meta_ad_insights_daily (
   -- sent on the Insights call), never a value Meta told us was "the"
   -- account setting -- the validation round confirmed Meta doesn't expose
   -- that cleanly (use_account_attribution_setting is not a valid field;
-  -- Meta error #100). See the Phase 1 report's open question on whether
-  -- this specific window is the right one to standardize on.
+  -- Meta error #100). PROVISIONAL: configured in one place
+  -- (src/lib/metaReportingConfig.js) and compared against Ads Manager
+  -- during production QA before attribution behaviour is finalised.
   attribution_setting VARCHAR(60),
 
   fetched_at TIMESTAMPTZ NOT NULL DEFAULT now(),
