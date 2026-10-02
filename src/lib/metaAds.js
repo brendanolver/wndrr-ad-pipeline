@@ -30,6 +30,23 @@ function configured() {
   return Boolean(META_AD_ACCOUNT_ID && META_ACCESS_TOKEN);
 }
 
+// Security fix (Meta Insights validation round): Graph API list responses
+// carry paging.next/paging.previous -- full URLs with access_token=... as
+// a query param, Meta's own doing, not something any caller here ever
+// builds. Stripped at this single lowest level so EVERY caller, present
+// and future, is covered automatically -- not just the one diagnostic
+// probe that leaked it. paging.cursors (before/after) are kept: those are
+// opaque cursor tokens, never the credential, and existing pagination
+// (fetchAllLiveAdNames below, and metaSync.js) reads only cursors.after,
+// never .next/.previous.
+function stripPagingUrls(data) {
+  if (data && typeof data === 'object' && data.paging && typeof data.paging === 'object') {
+    data.paging = data.paging.cursors ? { cursors: data.paging.cursors } : undefined;
+    if (data.paging === undefined) delete data.paging;
+  }
+  return data;
+}
+
 function metaRequest(pathAndQuery) {
   if (!configured()) {
     return Promise.reject(new Error('Meta Ads is not configured (META_AD_ACCOUNT_ID / META_ACCESS_TOKEN missing)'));
@@ -42,7 +59,7 @@ function metaRequest(pathAndQuery) {
       res.on('data', (chunk) => { raw += chunk; });
       res.on('end', () => {
         try {
-          resolve({ status: res.statusCode, data: JSON.parse(raw) });
+          resolve({ status: res.statusCode, data: stripPagingUrls(JSON.parse(raw)) });
         } catch {
           resolve({ status: res.statusCode, data: raw });
         }
@@ -168,6 +185,34 @@ function accountPath() {
   return `/act_${String(META_AD_ACCOUNT_ID || '').replace(/^act_/, '')}`;
 }
 
+// Generic cursor-pagination follower for metaSync.js -- a second one
+// alongside fetchAllLiveAdNames' own inline loop rather than refactoring
+// that existing, already-production function (live-ad-coverage behaviour
+// must stay exactly as it is). Follows paging.cursors.after only -- never
+// paging.next -- so this can never touch a credential-bearing URL even
+// before stripPagingUrls runs; it would work identically if Meta stopped
+// sending .next/.previous altogether. Calls `onPage(rows)` per page so a
+// caller can upsert as it goes rather than holding the whole result set
+// in memory. maxPages is a hard stop against a runaway loop, not an
+// expected limit for any real call this app makes.
+async function metaGetAllPages(path, params, onPage, maxPages = 200) {
+  let after = null;
+  for (let i = 0; i < maxPages; i += 1) {
+    const pageParams = after ? { ...params, after } : { ...params };
+    const result = await metaGet(path, pageParams);
+    if (result.status !== 200) {
+      const err = new Error(`Meta Graph API returned status ${result.status}: ${JSON.stringify(result.data)}`);
+      err.status = result.status;
+      err.metaError = result.data;
+      throw err;
+    }
+    const rows = result.data?.data || [];
+    await onPage(rows);
+    after = result.data?.paging?.cursors?.after || null;
+    if (!after || !rows.length) break;
+  }
+}
+
 module.exports = {
   configured,
   getLiveAdCoverage,
@@ -175,4 +220,5 @@ module.exports = {
   getMetaAdsCacheStatus,
   metaGet,
   accountPath,
+  metaGetAllPages,
 };
