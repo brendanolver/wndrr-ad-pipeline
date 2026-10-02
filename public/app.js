@@ -228,6 +228,8 @@ function applySidebarModuleAccess() {
   });
   const usersTabBtn = document.getElementById('settings-users-tab-btn');
   if (usersTabBtn) usersTabBtn.style.display = state.currentUser && state.currentUser.role === 'admin' ? '' : 'none';
+  const metaSyncTabBtn = document.getElementById('settings-meta-sync-tab-btn');
+  if (metaSyncTabBtn) metaSyncTabBtn.style.display = state.currentUser && state.currentUser.role === 'admin' ? '' : 'none';
 }
 
 // Production follow-up pass, round 2: the static index.html already ships
@@ -398,11 +400,76 @@ function switchSettingsPanel(name) {
   // until an admin actually opens this tab), refetched on every visit so a
   // change made elsewhere (or by another admin) isn't shown stale.
   if (name === 'users') loadUsersAccessPanel();
+  // Meta Sync only ever READS stored status on open -- it never starts a
+  // sync by itself; that only happens from the explicit button below.
+  if (name === 'meta-sync') loadMetaSyncPanel();
 }
 
 document.querySelectorAll('.settings-subnav-btn').forEach((btn) => {
   btn.addEventListener('click', () => switchSettingsPanel(btn.dataset.settingsPanel));
 });
+
+// ── Meta Sync (Settings, temporary admin-only operator control) ─────────
+// Calls only the existing admin endpoints: GET /api/meta-sync/status (local
+// DB read, never calls Meta) and POST /api/meta-sync/run with no body (the
+// server's default 3-day window). The server never returns credentials or
+// token-bearing URLs (see metaAds.js's stripPagingUrls/metaGet redaction),
+// so error text from it is safe to show as-is.
+let metaSyncRunning = false;
+
+function setMetaSyncMessage(text, kind) {
+  const el = document.getElementById('meta-sync-message');
+  el.textContent = text || '';
+  el.className = `meta-sync-message${kind ? ` ${kind}` : ''}`;
+}
+
+async function loadMetaSyncPanel() {
+  try {
+    const status = await api('/meta-sync/status');
+    const last = status.last_successful_run || null;
+    document.getElementById('meta-sync-last').textContent = last && last.finished_at
+      ? new Date(last.finished_at).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })
+      : 'Never';
+    document.getElementById('meta-sync-range').textContent = last
+      ? `${formatDate(last.range_since)} – ${formatDate(last.range_until)}`
+      : '—';
+    document.getElementById('meta-sync-ads').textContent = Number(status.total_meta_ads || 0).toLocaleString();
+    document.getElementById('meta-sync-rows').textContent = Number((status.daily_insights && status.daily_insights.row_count) || 0).toLocaleString();
+    document.getElementById('meta-sync-unmatched').textContent = Number((status.match_counts && status.match_counts.unmatched) || 0).toLocaleString();
+    if (!status.configured && !metaSyncRunning) {
+      setMetaSyncMessage('Meta is not configured on this server (META_AD_ACCOUNT_ID / META_ACCESS_TOKEN missing).', 'err');
+    }
+  } catch (e) {
+    setMetaSyncMessage(`Could not load sync status: ${e.message}`, 'err');
+  }
+}
+
+async function runMetaSync() {
+  if (metaSyncRunning) return;
+  metaSyncRunning = true;
+  const btn = document.getElementById('meta-sync-run-btn');
+  btn.disabled = true;
+  btn.textContent = 'Syncing…';
+  setMetaSyncMessage('');
+  try {
+    const r = await api('/meta-sync/run', { method: 'POST' });
+    setMetaSyncMessage(
+      `Synced ${formatDate(r.range.since)} – ${formatDate(r.range.until)}: ${r.ads_discovered} ads found (${r.ads_inserted} new), ${r.daily_rows_seen} daily rows (${r.daily_rows_inserted} new, ${r.daily_rows_updated} updated).`,
+      'ok'
+    );
+  } catch (e) {
+    setMetaSyncMessage(`Sync failed: ${e.message}`, 'err');
+  } finally {
+    metaSyncRunning = false;
+    btn.disabled = false;
+    btn.textContent = 'Run 3-Day Sync';
+    // Refresh the counts either way (a failed run still logs a meta_sync_runs
+    // row, and partially-synced rows may already be stored) without
+    // overwriting the success/error message just set above.
+    loadMetaSyncPanel();
+  }
+}
+document.getElementById('meta-sync-run-btn').addEventListener('click', runMetaSync);
 
 // ── User Access (Settings) ────────────────────────────
 // Round 12 redesign: a scannable table (was a wide card per user with 13

@@ -1181,6 +1181,7 @@
         <button type="button" class="settings-subnav-btn" data-settings-panel="creative-playbook">Creative Playbook</button>
         <button type="button" class="settings-subnav-btn" data-settings-panel="meta-mapping">Meta Mapping</button>
         <button type="button" class="settings-subnav-btn" id="settings-users-tab-btn" data-settings-panel="users" style="display:none;">Users</button>
+        <button type="button" class="settings-subnav-btn" id="settings-meta-sync-tab-btn" data-settings-panel="meta-sync" style="display:none;">Meta Sync</button>
       </div>
 
       <div class="settings-panel active" id="settings-panel-planning">
@@ -1271,6 +1272,32 @@
         </div>
         <div id="mpm-check-result"></div>
         <div id="mpm-list" class="mpm-list"></div>
+      </div>
+
+      <!-- TEMPORARY operator control (Meta performance data layer, Phase 1):
+           admin-only (sub-tab hidden for non-admins in applySidebarModuleAccess,
+           and POST/GET /api/meta-sync/* are independently admin-gated
+           server-side). Runs the existing default 3-day sync only -- never on
+           page load, no date picker, no backfill. Remove once a scheduled
+           sync/real analytics UI replaces it. -->
+      <div class="settings-panel" id="settings-panel-meta-sync">
+        <div class="planning-section-header">
+          <h2>Meta Sync</h2>
+          <span class="admin-note">Pulls the last 3 days of Meta ad performance into WNDRR (read-only -- nothing is changed in Meta). Safe to re-run: existing rows are updated, never duplicated.</span>
+        </div>
+        <div class="meta-sync-card">
+          <dl class="meta-sync-stats">
+            <div><dt>Last sync</dt><dd id="meta-sync-last">&mdash;</dd></div>
+            <div><dt>Last synced range</dt><dd id="meta-sync-range">&mdash;</dd></div>
+            <div><dt>Meta ads stored</dt><dd id="meta-sync-ads">&mdash;</dd></div>
+            <div><dt>Daily insight rows stored</dt><dd id="meta-sync-rows">&mdash;</dd></div>
+            <div><dt>Unmatched ads</dt><dd id="meta-sync-unmatched">&mdash;</dd></div>
+          </dl>
+          <div class="meta-sync-actions">
+            <button type="button" class="btn btn-primary" id="meta-sync-run-btn">Run 3-Day Sync</button>
+            <span id="meta-sync-message" class="meta-sync-message"></span>
+          </div>
+        </div>
       </div>
 
       <!-- Round 12 (and its Round 13 cleanup pass): admin-only (see

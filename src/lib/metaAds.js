@@ -174,7 +174,10 @@ function metaGet(path, params = {}) {
   // into a ticket, so the token is stripped from the message here too,
   // not just trusted to never appear.
   return metaRequest(`${path}?${query.toString()}`).catch((err) => {
-    throw new Error(String(err.message || err).split(META_ACCESS_TOKEN).join('[REDACTED]'));
+    // URLs are dropped outright (not just the token inside them): this
+    // message can now reach an admin-facing UI, and a request URL has no
+    // diagnostic value there anyway.
+    throw new Error(String(err.message || err).split(META_ACCESS_TOKEN).join('[REDACTED]').replace(/https?:\/\/\S+/g, '[url removed]'));
   });
 }
 
