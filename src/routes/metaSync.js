@@ -29,7 +29,7 @@ router.get('/status', requireAdmin, async (req, res, next) => {
 
 // Runs one sync: account settings refresh + full ad discovery (all
 // statuses, not just ACTIVE) + daily Insights for an explicit range, or
-// the safe default (today back 2 days) when no range is given. Always
+// the safe default (Sydney today back 2 days) when no range is given. Always
 // admin-triggered -- nothing calls this on a schedule or at server
 // startup.
 router.post('/run', requireAdmin, async (req, res, next) => {

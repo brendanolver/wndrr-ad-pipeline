@@ -11,6 +11,7 @@
 // triggered by an explicit, admin-only API call (src/routes/metaSync.js).
 const { pool } = require('../db');
 const { configured, metaGet, accountPath, metaGetAllPages } = require('./metaAds');
+const { ymdInZone, addDays, REPORTING_TIMEZONE } = require('./metaPerformance');
 // Which Meta action_type counts as a Purchase / Add to Cart / purchase
 // value (verified against Ads Manager) and which attribution window is
 // requested (still provisional) are isolated in ONE file -- see
@@ -298,15 +299,17 @@ async function runSync({ since, until, runType = 'default', userId = null }) {
   }
 }
 
-// Default window: today back 2 days (a 3-day span, inclusive) -- the
+// Default window: Sydney today back 2 days (a 3-day span, inclusive) -- the
 // small overlap refresh so recent attribution/conversion changes get
-// re-pulled, per the brief's own suggested default.
-function defaultWindow() {
-  const until = new Date();
-  until.setUTCHours(0, 0, 0, 0);
-  const since = new Date(until);
-  since.setUTCDate(since.getUTCDate() - 2);
-  return { since: fmtDate(since), until: fmtDate(until) };
+// re-pulled, per the brief's own suggested default. Calendar dates are
+// resolved in the account reporting timezone (Australia/Sydney, the same
+// single constant Meta Performance uses), NOT the UTC date: Meta buckets
+// insight days in the ad account's timezone, so at 9am Sydney on 5 Oct the
+// window must be 3-5 Oct (UTC would still say 4 Oct and request 2-4 Oct).
+// `now` is injectable only so the Sydney/UTC/DST boundaries can be tested.
+function defaultWindow(now = new Date()) {
+  const until = ymdInZone(now, REPORTING_TIMEZONE);
+  return { since: addDays(until, -2), until };
 }
 
 async function runDefaultSync(userId) {
@@ -511,6 +514,7 @@ async function adInventoryDiagnostics() {
 module.exports = {
   runSync,
   runDefaultSync,
+  defaultWindow,
   runBackfill,
   getSyncStatus,
   rederiveConversions,
