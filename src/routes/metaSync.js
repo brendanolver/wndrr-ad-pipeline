@@ -88,6 +88,16 @@ router.get('/conversion-aliases', requireAdmin, async (req, res, next) => {
   }
 });
 
+// Read-only inventory report over the LOCAL meta_ads table (never calls Meta,
+// never writes) -- see metaSync.adInventoryDiagnostics.
+router.get('/ad-inventory', requireAdmin, async (req, res, next) => {
+  try {
+    res.json(await metaSync.adInventoryDiagnostics());
+  } catch (err) {
+    next(err);
+  }
+});
+
 // After changing the canonical action types in metaReportingConfig.js (or
 // its env vars), recomputes the derived conversion columns for stored rows
 // from their own stored raw action JSON. No Meta call, no schema change.

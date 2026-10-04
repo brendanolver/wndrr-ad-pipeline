@@ -2483,7 +2483,8 @@ CREATE TABLE IF NOT EXISTS meta_ad_insights_daily (
   outbound_ctr NUMERIC(10,6),
 
   -- Derived conversion figures. Which Meta action_type each is extracted
-  -- from is a PROVISIONAL choice configured in exactly one place
+  -- from (omni_purchase / omni_add_to_cart -- verified against Ads Manager
+  -- for 2-4 Oct 2026) is configured in exactly one place
   -- (src/lib/metaReportingConfig.js) -- never hard-wired here or anywhere
   -- else. Changing it needs no schema change: raw_actions /
   -- raw_action_values below keep the full per-alias breakdown, and

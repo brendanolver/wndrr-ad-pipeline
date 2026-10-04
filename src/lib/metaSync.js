@@ -12,9 +12,9 @@
 const { pool } = require('../db');
 const { configured, metaGet, accountPath, metaGetAllPages } = require('./metaAds');
 // Which Meta action_type counts as a Purchase / Add to Cart / purchase
-// value, and which attribution window is requested, are provisional
-// reporting choices isolated in ONE file -- see metaReportingConfig.js.
-// Nothing in this file hard-codes any of them.
+// value (verified against Ads Manager) and which attribution window is
+// requested (still provisional) are isolated in ONE file -- see
+// metaReportingConfig.js. Nothing in this file hard-codes any of them.
 const {
   getConversionConfig, getAttributionWindows, getAttributionLabel, deriveConversions,
 } = require('./metaReportingConfig');
@@ -442,6 +442,72 @@ async function conversionAliasTotals({ since, until }) {
   };
 }
 
+// Read-only inventory report over the LOCAL meta_ads table (plus the local
+// meta_sync_runs log) -- never calls Meta, never writes. Exists to tell a
+// genuine historical ad inventory apart from a discovery/pagination bug:
+// meta_ads.meta_ad_id is UNIQUE and discovery upserts ON CONFLICT, so the
+// stored row count can only ever equal the number of DISTINCT ad ids Meta
+// returned; the recent-runs block adds the other half of the check
+// (ads_discovered per run vs rows actually inserted/updated -- a repeated
+// page would show up as discovered > distinct stored).
+async function adInventoryDiagnostics() {
+  const q = (sql, params) => pool.query(sql, params).then((r) => r.rows);
+  const [
+    totals, byStatus, createdRange, byYear, windows, shell, withInsights, firstSeen, uniqueIdx, runs, hierarchy,
+  ] = await Promise.all([
+    q(`SELECT count(*)::int AS total_rows, count(DISTINCT meta_ad_id)::int AS distinct_ids FROM meta_ads`),
+    q(`SELECT COALESCE(effective_status, '(null)') AS effective_status, count(*)::int AS count
+       FROM meta_ads GROUP BY 1 ORDER BY 2 DESC`),
+    q(`SELECT min(created_time) AS oldest, max(created_time) AS newest,
+              count(*) FILTER (WHERE created_time IS NULL)::int AS null_created_time,
+              count(*) FILTER (WHERE created_time > now())::int AS future_dated
+       FROM meta_ads`),
+    q(`SELECT COALESCE(EXTRACT(YEAR FROM created_time AT TIME ZONE 'UTC')::int::text, '(null)') AS year, count(*)::int AS count
+       FROM meta_ads GROUP BY 1 ORDER BY 1`),
+    q(`SELECT count(*) FILTER (WHERE created_time >= now() - interval '30 days')::int AS last_30_days,
+              count(*) FILTER (WHERE created_time >= now() - interval '90 days')::int AS last_90_days,
+              count(*) FILTER (WHERE created_time >= '2026-01-01T00:00:00Z' AND created_time < '2027-01-01T00:00:00Z')::int AS created_in_2026
+       FROM meta_ads`),
+    q(`SELECT count(*) FILTER (WHERE ad_name IS NULL)::int AS null_ad_name FROM meta_ads`),
+    q(`SELECT count(DISTINCT meta_ad_id)::int AS ads_with_daily_insights FROM meta_ad_insights_daily`),
+    q(`SELECT min(first_seen_at) AS earliest, max(first_seen_at) AS latest,
+              count(DISTINCT first_seen_at::date)::int AS distinct_first_seen_days FROM meta_ads`),
+    q(`SELECT count(*)::int AS n FROM pg_indexes
+       WHERE tablename = 'meta_ads' AND indexdef ILIKE 'CREATE UNIQUE INDEX%(meta_ad_id)%'`),
+    q(`SELECT id, run_type, range_since, range_until, status, ads_discovered, ads_inserted, ads_updated,
+              daily_rows_inserted, daily_rows_updated, started_at, finished_at
+       FROM meta_sync_runs ORDER BY started_at DESC LIMIT 5`),
+    q(`SELECT count(DISTINCT meta_campaign_id)::int AS distinct_campaigns,
+              count(DISTINCT meta_adset_id)::int AS distinct_adsets,
+              count(*) FILTER (WHERE meta_ad_id = meta_campaign_id OR meta_ad_id = meta_adset_id)::int AS ad_id_equals_campaign_or_adset_id
+       FROM meta_ads`),
+  ]);
+  const { total_rows: totalRows, distinct_ids: distinctIds } = totals[0];
+  return {
+    local_only: true,
+    total_rows: totalRows,
+    distinct_meta_ad_ids: distinctIds,
+    duplicate_meta_ad_ids: totalRows - distinctIds,
+    unique_index_on_meta_ad_id: uniqueIdx[0].n > 0,
+    by_effective_status: byStatus,
+    created_time: {
+      oldest: createdRange[0].oldest,
+      newest: createdRange[0].newest,
+      null_created_time: createdRange[0].null_created_time,
+      future_dated: createdRange[0].future_dated,
+    },
+    by_creation_year_utc: byYear,
+    created_last_30_days: windows[0].last_30_days,
+    created_last_90_days: windows[0].last_90_days,
+    created_in_2026: windows[0].created_in_2026,
+    rows_with_null_ad_name: shell[0].null_ad_name,
+    ads_with_daily_insights: withInsights[0].ads_with_daily_insights,
+    first_seen_at: firstSeen[0],
+    hierarchy_sanity: hierarchy[0],
+    recent_sync_runs: runs,
+  };
+}
+
 module.exports = {
   runSync,
   runDefaultSync,
@@ -449,4 +515,5 @@ module.exports = {
   getSyncStatus,
   rederiveConversions,
   conversionAliasTotals,
+  adInventoryDiagnostics,
 };

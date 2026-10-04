@@ -1,18 +1,22 @@
-// The ONE place every provisional Meta reporting choice lives -- which
-// Meta action_type counts as a "Purchase" / "Add to Cart" / purchase value,
-// and which attribution window the sync explicitly requests. Nothing else
-// in the app hard-codes any of these (metaSync.js and the routes only ever
-// read them from here), so changing a choice is a one-line edit below --
-// or an env var, no code change at all -- never a schema change.
+// The ONE place every Meta reporting choice lives -- which Meta action_type
+// counts as a "Purchase" / "Add to Cart" / purchase value, and which
+// attribution window the sync explicitly requests. Nothing else in the app
+// hard-codes any of these (metaSync.js and the routes only ever read them
+// from here), so changing a choice is a one-line edit below -- or an env
+// var, no code change at all -- never a schema change.
 //
-// BOTH CHOICES ARE PROVISIONAL, not confirmed WNDRR/Ads Manager defaults.
-// The goal is that WNDRR's Purchases / CPA / Add to Cart / Cost per Add to
-// Cart / Purchase Value reconcile as closely as possible with what is
-// actually seen in Meta Ads Manager, and that gets decided by comparing
-// real stored numbers against Ads Manager during production QA (see
-// GET /api/meta-sync/conversion-aliases, which totals every purchase/add-
-// to-cart alias Meta returned for a stored date range, side by side) --
-// not by assuming one alias is "right" because it sounds comprehensive.
+// CONVERSION ACTION TYPES: VERIFIED against Meta Ads Manager (first real
+// production sync, 2-4 Oct 2026, same attribution window):
+//   Purchases        Ads Manager 299          stored omni_purchase 299
+//   Adds to Cart     Ads Manager 3,441        stored omni_add_to_cart 3,441
+//   Purchase value   Ads Manager ~$50,578.57  stored omni_purchase $50,578.57
+// So omni_purchase / omni_add_to_cart (and omni_purchase in action_values
+// for value) are WNDRR's canonical conversion actions, not provisional
+// defaults. They stay overridable via env for the same reason any other
+// reporting choice would be (see below) -- but the defaults are now settled.
+//
+// ATTRIBUTION WINDOW: still PROVISIONAL (see DEFAULT_ATTRIBUTION_WINDOWS
+// below) until attribution behaviour is separately verified.
 //
 // The real WNDRR account returns overlapping aliases for the same real
 // event, for example: purchase, omni_purchase,
@@ -27,8 +31,8 @@
 // from that stored raw JSON using whatever this file currently says.
 
 const DEFAULT_CONVERSION_ACTION_TYPES = {
-  // Provisional default: Meta's deduplicated cross-source total. Chosen as
-  // a starting point only -- see the note above.
+  // Verified against Ads Manager for 2-4 Oct 2026 (see the note at the top
+  // of this file): Meta's deduplicated cross-source total.
   purchase: 'omni_purchase',
   purchaseValue: 'omni_purchase',
   addToCart: 'omni_add_to_cart',
