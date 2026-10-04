@@ -222,6 +222,10 @@ function applySidebarModuleAccess() {
   if (usersTabBtn) usersTabBtn.style.display = state.currentUser && state.currentUser.role === 'admin' ? '' : 'none';
   const metaSyncTabBtn = document.getElementById('settings-meta-sync-tab-btn');
   if (metaSyncTabBtn) metaSyncTabBtn.style.display = state.currentUser && state.currentUser.role === 'admin' ? '' : 'none';
+  // Meta Performance is admin-only (the API enforces it too). The loop above
+  // would otherwise un-hide every [data-tab] button not in the deny-list.
+  const metaPerfBtn = document.getElementById('sidebar-meta-performance');
+  if (metaPerfBtn) metaPerfBtn.style.display = state.currentUser && state.currentUser.role === 'admin' ? '' : 'none';
 }
 
 // Production follow-up pass, round 2: the static index.html already ships
@@ -330,6 +334,10 @@ function switchTab(name) {
     toast("You don't have access to this module.", true);
     return;
   }
+  if (name === 'meta-performance' && !(state.currentUser && state.currentUser.role === 'admin')) {
+    toast("You don't have access to this module.", true);
+    return;
+  }
   document.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
   document.querySelectorAll('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === `tab-${name}`));
   autoExpandSidebarGroupForTab(name);
@@ -339,6 +347,8 @@ function switchTab(name) {
   // reliably shows up without a full page reload.
   if (name === 'shooting') refreshCurrentShootingView();
   if (name === 'reference-library') loadReferenceLibraryPage();
+  // Meta Performance reads stored data only (never Meta) -- refetched on every visit so a sync just run from Settings shows up.
+  if (name === 'meta-performance') loadMetaPerformance();
   // Same reasoning as Shooting above -- Editing is the direct downstream
   // consumer of Shooting's Mark as Shot action, so it needs a fresh fetch
   // on every visit too.
@@ -399,6 +409,355 @@ function switchSettingsPanel(name) {
 
 document.querySelectorAll('.settings-subnav-btn').forEach((btn) => {
   btn.addEventListener('click', () => switchSettingsPanel(btn.dataset.settingsPanel));
+});
+
+// ── Meta Performance V1 (admin-only page) ──────────────────────────────
+// Reads ONLY /api/meta-performance/* (summary, ads, ads/:id), which query
+// the local Meta tables -- nothing on this page ever calls Meta, so it
+// keeps working from stored data if Meta is down. Date presets are resolved
+// SERVER-side in Australia/Sydney (the browser's own timezone is never
+// used for "today"/"this week"); the server's resolved range is what's
+// shown and what the table/detail requests reuse.
+//
+// Reach/Frequency and Thumbstop/Hold Rate are deliberately NOT displayed:
+// reach isn't additive across days/ads (summary.reach_frequency carries the
+// placeholder for a future exact range-level pull) and the Thumbstop/Hold
+// Rate formulas aren't confirmed. See src/lib/metaPerformance.js.
+const MP_TZ = 'Australia/Sydney';
+const MP_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const mpState = {
+  preset: 'last_7',
+  customSince: '',
+  customUntil: '',
+  compare: false,
+  q: '',
+  status: 'all',
+  sort: 'spend',
+  dir: 'desc',
+  page: 1,
+  pageSize: 25,
+  range: null,
+  currency: null,
+  reqId: 0,
+  adsReqId: 0,
+};
+// better: which direction is an improvement (costs: lower; volumes/CTR: higher).
+// Amount Spent is neutral -- spending more or less isn't inherently good or bad.
+const MP_KPIS = [
+  { key: 'spend', label: 'Amount Spent', fmt: 'money', better: null },
+  { key: 'purchases', label: 'Purchases', fmt: 'int', better: 'up' },
+  { key: 'cpa', label: 'CPA', fmt: 'money', better: 'down' },
+  { key: 'add_to_cart', label: 'Adds to Cart', fmt: 'int', better: 'up' },
+  { key: 'cost_per_atc', label: 'Cost / ATC', fmt: 'money', better: 'down' },
+  { key: 'outbound_ctr', label: 'Outbound CTR', fmt: 'pct', better: 'up' },
+];
+
+function mpDate(ymd, withYear) {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return `${d} ${MP_MONTHS[m - 1]}${withYear ? ` ${y}` : ''}`;
+}
+function mpRange(r, withYear) {
+  if (!r) return '';
+  if (r.since === r.until) return mpDate(r.since, withYear);
+  const sameYear = r.since.slice(0, 4) === r.until.slice(0, 4);
+  return `${mpDate(r.since, withYear && !sameYear)} – ${mpDate(r.until, withYear)}`;
+}
+function mpRangeList(ranges) {
+  return (ranges || []).map((r) => mpRange(r, false)).join(', ');
+}
+function mpDateTime(iso) {
+  if (!iso) return '';
+  return new Intl.DateTimeFormat('en-AU', {
+    timeZone: MP_TZ, day: 'numeric', month: 'short', year: 'numeric',
+    hour: 'numeric', minute: '2-digit', hour12: true,
+  }).format(new Date(iso)).replace(/\bAM\b/, 'am').replace(/\bPM\b/, 'pm');
+}
+function mpFmt(value, kind) {
+  if (value === null || value === undefined) return '<span class="mp-na">—</span>';
+  if (kind === 'int') return Number(value).toLocaleString('en-AU');
+  if (kind === 'pct') return `${Number(value).toFixed(2)}%`;
+  try {
+    return new Intl.NumberFormat('en-AU', {
+      style: 'currency', currency: mpState.currency || 'AUD', minimumFractionDigits: 2, maximumFractionDigits: 2,
+    }).format(Number(value));
+  } catch (e) {
+    return `$${Number(value).toFixed(2)}`;
+  }
+}
+function mpStatusChip(status) {
+  const raw = status || 'UNKNOWN';
+  const label = raw.toLowerCase().replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
+  const cls = raw === 'ACTIVE' ? 'active' : raw.includes('PAUSED') ? 'paused' : '';
+  return `<span class="mp-status ${cls}">${escapeHtml(label)}</span>`;
+}
+function mpMapState(match) {
+  const label = { unmatched: 'Unmatched', suggested: 'Suggested', confirmed: 'Confirmed' }[match] || 'Unmatched';
+  return `<span class="mp-map ${escapeHtml(match || 'unmatched')}">${label}</span>`;
+}
+function mpRangeQuery() {
+  if (mpState.preset === 'custom') {
+    return `preset=custom&since=${mpState.customSince}&until=${mpState.customUntil}`;
+  }
+  return `preset=${mpState.preset}`;
+}
+
+function mpRenderCoverage(cov, label) {
+  if (cov.status === 'none') return '';
+  if (cov.missing_days > 0) {
+    return `<div class="mp-banner"><strong>Data not fully synced for this period</strong>
+      ${cov.complete_days + cov.partial_days} of ${cov.total_days} days have been synced. Not yet synced: ${escapeHtml(mpRangeList(cov.missing_ranges))}.
+      The totals below only include the synced days${cov.partial_days ? ' and some days that are still in progress' : ''}.</div>`;
+  }
+  if (cov.partial_days > 0) {
+    return `<div class="mp-banner soft"><strong>Some days are still in progress</strong>
+      ${escapeHtml(mpRangeList(cov.partial_ranges))} ${cov.partial_ranges.length === 1 && cov.partial_ranges[0].since === cov.partial_ranges[0].until ? 'was' : 'were'} last synced before the day finished, so ${label || 'these'} figures may still change.</div>`;
+  }
+  return '';
+}
+
+function mpDelta(def, cur, prev, ok) {
+  if (!ok || cur === null || prev === null || !(prev > 0)) return '';
+  const pct = ((cur - prev) / prev) * 100;
+  if (!Number.isFinite(pct)) return '';
+  const arrow = pct > 0 ? '▲' : pct < 0 ? '▼' : '•';
+  let cls = '';
+  if (def.better && pct !== 0) cls = (pct > 0) === (def.better === 'up') ? 'good' : 'bad';
+  return `<div class="mp-kpi-delta ${cls}" title="Previous: ${escapeHtml(String(prev))}">${arrow} ${Math.abs(pct).toFixed(1)}% vs prev</div>`;
+}
+
+function mpRenderSummary(sum) {
+  mpState.range = sum.range;
+  mpState.currency = sum.freshness.currency;
+  document.getElementById('mp-range-line').textContent =
+    `${sum.label} · ${mpRange(sum.range, true)} · ${sum.timezone.replace('_', ' ')} time`;
+  document.getElementById('mp-fresh').textContent = sum.freshness.last_synced_at
+    ? `Last synced: ${mpDateTime(sum.freshness.last_synced_at)}`
+    : 'Never synced';
+
+  const cov = sum.coverage;
+  const empty = document.getElementById('mp-empty');
+  const body = document.getElementById('mp-body');
+  document.getElementById('mp-coverage').innerHTML = mpRenderCoverage(cov, 'the');
+
+  if (cov.status === 'none') {
+    body.style.display = 'none';
+    empty.style.display = '';
+    empty.innerHTML = `<strong>No Meta data has been synced for this period yet</strong>
+      ${escapeHtml(mpRange(sum.range, true))} isn't in WNDRR's stored Meta data, so there is nothing to report
+      (this isn't the same as zero spend). Recent days come in from Settings → Meta Sync; earlier periods need a
+      historical backfill, which is not run automatically.`;
+    return false;
+  }
+  empty.style.display = 'none';
+  body.style.display = '';
+
+  const cmp = sum.compare;
+  const bothComplete = !!cmp && cov.missing_days === 0 && cmp.coverage.missing_days === 0 && cmp.coverage.status !== 'none';
+  document.getElementById('mp-kpis').innerHTML = MP_KPIS.map((def) => `
+    <div class="mp-kpi">
+      <div class="mp-kpi-label">${def.label}</div>
+      <div class="mp-kpi-value">${mpFmt(sum.totals[def.key], def.fmt)}</div>
+      ${cmp ? (mpDelta(def, sum.totals[def.key], cmp.totals[def.key], bothComplete) || '<div class="mp-kpi-delta"></div>') : ''}
+    </div>`).join('') +
+    `<div class="mp-secondary" style="grid-column:1 / -1;">
+       <span>Purchase Value <b>${mpFmt(sum.totals.purchase_value, 'money')}</b></span>
+       <span>Ads with activity <b>${Number(sum.totals.ads_with_activity).toLocaleString('en-AU')}</b></span>
+     </div>`;
+
+  const cl = document.getElementById('mp-compare-line');
+  if (!cmp) {
+    cl.textContent = '';
+  } else if (!bothComplete) {
+    cl.textContent = `Previous period ${mpRange(cmp.range, true)}: ${cmp.coverage.status === 'none' ? 'no data synced' : 'not fully synced'} — comparison unavailable.`;
+  } else {
+    const partial = cov.partial_days > 0 || cmp.coverage.partial_days > 0;
+    cl.textContent = `Compared with ${mpRange(cmp.range, true)}${partial ? ' (includes days still in progress)' : ''}.`;
+  }
+  return true;
+}
+
+function mpRenderAds(res) {
+  const body = document.getElementById('mp-ads-body');
+  document.querySelectorAll('.mp-table th[data-sort]').forEach((th) => {
+    const on = th.dataset.sort === res.sort;
+    th.classList.toggle('sorted', on);
+    const label = th.textContent.replace(/[▲▼]/g, '').trim();
+    th.innerHTML = `${escapeHtml(label)}${on ? `<span class="mp-arrow">${res.dir === 'asc' ? '▲' : '▼'}</span>` : ''}`;
+  });
+  document.getElementById('mp-table-count').textContent =
+    `${res.total.toLocaleString('en-AU')} ad${res.total === 1 ? '' : 's'} with activity`;
+  if (!res.ads.length) {
+    body.innerHTML = `<tr><td colspan="8" class="mp-table-empty">${
+      res.q || res.status !== 'all' ? 'No ads match this search or filter.' : 'No ads had spend or impressions in this period.'}</td></tr>`;
+  } else {
+    body.innerHTML = res.ads.map((a) => `
+      <tr data-ad-id="${escapeHtml(a.meta_ad_id)}">
+        <td class="mp-name" title="${escapeHtml(a.ad_name || a.meta_ad_id)}">${escapeHtml(a.ad_name || '(unnamed ad)')}</td>
+        <td>${mpStatusChip(a.effective_status)}</td>
+        <td class="num">${mpFmt(a.spend, 'money')}</td>
+        <td class="num">${mpFmt(a.purchases, 'int')}</td>
+        <td class="num">${mpFmt(a.cpa, 'money')}</td>
+        <td class="num">${mpFmt(a.add_to_cart, 'int')}</td>
+        <td class="num">${mpFmt(a.cost_per_atc, 'money')}</td>
+        <td class="num">${mpFmt(a.outbound_ctr, 'pct')}</td>
+      </tr>`).join('');
+  }
+  const pager = document.getElementById('mp-pager');
+  if (res.total_pages <= 1) {
+    pager.innerHTML = '';
+  } else {
+    const from = (res.page - 1) * res.page_size + 1;
+    const to = Math.min(res.total, res.page * res.page_size);
+    pager.innerHTML = `
+      <button type="button" class="btn btn-ghost btn-sm" id="mp-prev" ${res.page <= 1 ? 'disabled' : ''}>← Prev</button>
+      <span>${from.toLocaleString('en-AU')}–${to.toLocaleString('en-AU')} of ${res.total.toLocaleString('en-AU')} · page ${res.page} of ${res.total_pages}</span>
+      <button type="button" class="btn btn-ghost btn-sm" id="mp-next" ${res.page >= res.total_pages ? 'disabled' : ''}>Next →</button>`;
+  }
+}
+
+async function loadMetaPerformanceAds() {
+  const id = ++mpState.adsReqId;
+  const qs = `${mpRangeQuery()}&q=${encodeURIComponent(mpState.q)}&status=${mpState.status}` +
+    `&sort=${mpState.sort}&dir=${mpState.dir}&page=${mpState.page}&page_size=${mpState.pageSize}`;
+  try {
+    const res = await api(`/meta-performance/ads?${qs}`);
+    if (id !== mpState.adsReqId) return; // a newer request superseded this one
+    mpRenderAds(res);
+  } catch (e) {
+    if (id !== mpState.adsReqId) return;
+    document.getElementById('mp-ads-body').innerHTML = `<tr><td colspan="8" class="mp-table-empty">${escapeHtml(e.message)}</td></tr>`;
+  }
+}
+
+async function loadMetaPerformance() {
+  if (!state.currentUser || state.currentUser.role !== 'admin') return;
+  const id = ++mpState.reqId;
+  const qs = `${mpRangeQuery()}${mpState.compare ? '&compare=1' : ''}`;
+  try {
+    const sum = await api(`/meta-performance/summary?${qs}`);
+    if (id !== mpState.reqId) return;
+    const hasData = mpRenderSummary(sum);
+    if (hasData) await loadMetaPerformanceAds();
+  } catch (e) {
+    if (id !== mpState.reqId) return;
+    document.getElementById('mp-body').style.display = 'none';
+    const empty = document.getElementById('mp-empty');
+    empty.style.display = '';
+    empty.innerHTML = `<strong>Couldn't load Meta performance</strong>${escapeHtml(e.message)}`;
+  }
+}
+
+async function openMetaAdDetail(adId) {
+  const title = document.getElementById('mp-detail-title');
+  const body = document.getElementById('mp-detail-body');
+  title.textContent = 'Ad detail';
+  body.innerHTML = '<div class="mp-table-empty">Loading…</div>';
+  openModal('meta-ad-detail-modal');
+  try {
+    const r = mpState.range;
+    const res = await api(`/meta-performance/ads/${encodeURIComponent(adId)}?preset=custom&since=${r.since}&until=${r.until}`);
+    const ad = res.ad;
+    const m = res.metrics;
+    title.textContent = ad.ad_name || '(unnamed ad)';
+    const created = ad.created_time
+      ? new Intl.DateTimeFormat('en-AU', { timeZone: MP_TZ, day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(ad.created_time))
+      : '—';
+    const dash = (v) => escapeHtml(v || '—');
+    body.innerHTML = `
+      <dl class="mp-detail-grid">
+        <div><dt>Meta Ad ID</dt><dd>${dash(ad.meta_ad_id)}</dd></div>
+        <div><dt>Status</dt><dd>${mpStatusChip(ad.effective_status)}</dd></div>
+        <div><dt>Created</dt><dd>${created}</dd></div>
+        <div><dt>Mapping</dt><dd>${mpMapState(ad.match_status)}</dd></div>
+        <div><dt>Campaign ID</dt><dd>${dash(ad.meta_campaign_id)}</dd></div>
+        <div><dt>Ad Set ID</dt><dd>${dash(ad.meta_adset_id)}</dd></div>
+        <div><dt>Creative ID</dt><dd>${dash(ad.meta_creative_id)}</dd></div>
+      </dl>
+      <div class="mp-detail-h">${escapeHtml(mpRange(res.range, true))}</div>
+      <div class="mp-detail-metrics">
+        ${[...MP_KPIS, { key: 'purchase_value', label: 'Purchase Value', fmt: 'money' }].map((def) => `
+          <div class="mp-kpi"><div class="mp-kpi-label">${def.label}</div><div class="mp-kpi-value">${mpFmt(m[def.key], def.fmt)}</div></div>`).join('')}
+      </div>
+      <div class="mp-detail-h">Daily breakdown</div>
+      ${res.daily.length ? `<table class="mp-daily"><thead><tr><th>Date</th><th>Spend</th><th>Purchases</th><th>ATC</th><th>Outbound CTR</th></tr></thead><tbody>
+        ${res.daily.map((d) => `<tr><td>${mpDate(d.date, false)}</td><td>${mpFmt(d.spend, 'money')}</td><td>${mpFmt(d.purchases, 'int')}</td><td>${mpFmt(d.add_to_cart, 'int')}</td><td>${mpFmt(d.outbound_ctr, 'pct')}</td></tr>`).join('')}
+      </tbody></table>` : '<div class="mp-table-empty">No daily rows in this period.</div>'}`;
+  } catch (e) {
+    body.innerHTML = `<div class="mp-table-empty">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function mpSetPreset(preset) {
+  mpState.preset = preset;
+  mpState.page = 1;
+  document.querySelectorAll('.mp-preset').forEach((b) => b.classList.toggle('active', b.dataset.preset === preset));
+  document.getElementById('mp-custom').style.display = preset === 'custom' ? '' : 'none';
+}
+
+document.querySelectorAll('.mp-preset').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const preset = btn.dataset.preset;
+    if (preset === 'custom') {
+      mpSetPreset('custom');
+      const since = document.getElementById('mp-custom-since');
+      const until = document.getElementById('mp-custom-until');
+      if (!since.value && mpState.range) { since.value = mpState.range.since; until.value = mpState.range.until; }
+      return; // loads on Apply
+    }
+    mpSetPreset(preset);
+    loadMetaPerformance();
+  });
+});
+document.getElementById('mp-custom-apply').addEventListener('click', () => {
+  const since = document.getElementById('mp-custom-since').value;
+  const until = document.getElementById('mp-custom-until').value;
+  if (!since || !until) { toast('Pick a start and end date.', true); return; }
+  if (since > until) { toast('Start date must be on or before the end date.', true); return; }
+  mpState.customSince = since;
+  mpState.customUntil = until;
+  mpState.page = 1;
+  loadMetaPerformance();
+});
+document.getElementById('mp-compare').addEventListener('change', (e) => {
+  mpState.compare = e.target.checked;
+  loadMetaPerformance();
+});
+let mpSearchTimer = null;
+document.getElementById('mp-search').addEventListener('input', (e) => {
+  clearTimeout(mpSearchTimer);
+  mpSearchTimer = setTimeout(() => {
+    mpState.q = e.target.value.trim();
+    mpState.page = 1;
+    loadMetaPerformanceAds();
+  }, 300);
+});
+document.getElementById('mp-status').addEventListener('change', (e) => {
+  mpState.status = e.target.value;
+  mpState.page = 1;
+  loadMetaPerformanceAds();
+});
+document.querySelectorAll('.mp-table th[data-sort]').forEach((th) => {
+  th.addEventListener('click', () => {
+    const key = th.dataset.sort;
+    if (mpState.sort === key) {
+      mpState.dir = mpState.dir === 'desc' ? 'asc' : 'desc';
+    } else {
+      mpState.sort = key;
+      mpState.dir = key === 'ad_name' || key === 'status' ? 'asc' : 'desc';
+    }
+    mpState.page = 1;
+    loadMetaPerformanceAds();
+  });
+});
+document.getElementById('mp-pager').addEventListener('click', (e) => {
+  if (e.target.id === 'mp-prev' && mpState.page > 1) mpState.page -= 1;
+  else if (e.target.id === 'mp-next') mpState.page += 1;
+  else return;
+  loadMetaPerformanceAds();
+});
+document.getElementById('mp-ads-body').addEventListener('click', (e) => {
+  const row = e.target.closest('tr[data-ad-id]');
+  if (row) openMetaAdDetail(row.dataset.adId);
 });
 
 // ── Meta Sync (Settings, temporary admin-only operator control) ─────────

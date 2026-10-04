@@ -51,6 +51,11 @@
     </div>
     <nav class="sidebar-nav" id="sidebar-nav">
       <button class="tab-btn active" data-tab="dashboard"><span class="sidebar-nav-icon">⌂</span>Dashboard</button>
+      <!-- Meta Performance V1: admin-only (hidden until applySidebarModuleAccess
+           confirms an admin; /api/meta-performance/* is independently
+           admin-gated server-side, so this hiding is a convenience, not the
+           enforcement). A real top-level page, not a Settings tab. -->
+      <button class="tab-btn" data-tab="meta-performance" id="sidebar-meta-performance" style="display:none;"><span class="sidebar-nav-icon">📊</span>Meta Performance</button>
       <button class="tab-btn" data-tab="planning"><span class="sidebar-nav-icon">🗓</span>Planning</button>
 
       <!-- Production-readiness follow-up (item 1): Create & Review and
@@ -162,6 +167,79 @@
       <div class="health-row">
         <div class="health-header">Creative Machine Health</div>
         <div class="health-grid" id="health-grid"></div>
+      </div>
+    </section>
+
+    <!-- Meta Performance V1: reads ONLY the local Meta tables via
+         /api/meta-performance/* (admin-only, never calls Meta). Compact KPI
+         row + a paged table of ads with activity in the selected dates;
+         clicking a row opens #meta-ad-detail-modal. Reach/Frequency and
+         Thumbstop/Hold Rate are intentionally absent -- see
+         src/lib/metaPerformance.js for why. -->
+    <section id="tab-meta-performance" class="tab-panel">
+      <div class="mp-header">
+        <div>
+          <h2>Meta Performance</h2>
+          <div class="mp-range-line" id="mp-range-line">&nbsp;</div>
+        </div>
+        <div class="mp-fresh" id="mp-fresh"></div>
+      </div>
+
+      <div class="mp-controls">
+        <div class="mp-presets" id="mp-presets" role="group" aria-label="Date range">
+          <button type="button" class="mp-preset" data-preset="today">Today</button>
+          <button type="button" class="mp-preset" data-preset="yesterday">Yesterday</button>
+          <button type="button" class="mp-preset active" data-preset="last_7">Last 7 Days</button>
+          <button type="button" class="mp-preset" data-preset="last_14">Last 14 Days</button>
+          <button type="button" class="mp-preset" data-preset="last_30">Last 30 Days</button>
+          <button type="button" class="mp-preset" data-preset="this_week">This Week</button>
+          <button type="button" class="mp-preset" data-preset="last_week">Last Week</button>
+          <button type="button" class="mp-preset" data-preset="this_month">This Month</button>
+          <button type="button" class="mp-preset" data-preset="custom">Custom</button>
+        </div>
+        <div class="mp-custom" id="mp-custom" style="display:none;">
+          <input type="date" id="mp-custom-since" aria-label="Start date">
+          <span>to</span>
+          <input type="date" id="mp-custom-until" aria-label="End date">
+          <button type="button" class="btn btn-ghost btn-sm" id="mp-custom-apply">Apply</button>
+        </div>
+        <label class="mp-compare"><input type="checkbox" id="mp-compare"> Compare to previous period</label>
+      </div>
+
+      <div id="mp-coverage"></div>
+      <div id="mp-empty" class="mp-empty" style="display:none;"></div>
+
+      <div id="mp-body">
+        <div class="mp-kpis" id="mp-kpis"></div>
+        <div class="mp-compare-line" id="mp-compare-line"></div>
+
+        <div class="mp-table-toolbar">
+          <input type="search" id="mp-search" placeholder="Search ad name or Meta Ad ID" autocomplete="off">
+          <select id="mp-status" aria-label="Status filter">
+            <option value="all">All statuses</option>
+            <option value="active">Active</option>
+            <option value="paused">Paused</option>
+            <option value="other">Other</option>
+          </select>
+          <span class="mp-table-count" id="mp-table-count"></span>
+        </div>
+        <table class="mp-table">
+          <thead>
+            <tr>
+              <th class="mp-th-name" data-sort="ad_name">Ad Name</th>
+              <th data-sort="status">Status</th>
+              <th class="num" data-sort="spend">Amount Spent</th>
+              <th class="num" data-sort="purchases">Purchases</th>
+              <th class="num" data-sort="cpa">CPA</th>
+              <th class="num" data-sort="add_to_cart">Adds to Cart</th>
+              <th class="num" data-sort="cost_per_atc">Cost / ATC</th>
+              <th class="num" data-sort="outbound_ctr">Outbound CTR</th>
+            </tr>
+          </thead>
+          <tbody id="mp-ads-body"></tbody>
+        </table>
+        <div class="mp-pager" id="mp-pager"></div>
+        <div class="mp-footnote">Attribution: 7-day click + 1-day view (provisional). Not shown yet: Reach &amp; Frequency (need exact range-level data from Meta &mdash; they can't be summed from daily rows), and Thumbstop &amp; Hold Rate (formulas not yet confirmed).</div>
       </div>
     </section>
 
@@ -1358,6 +1436,18 @@
      actual password -- "Reset Password" reveals a plain new-password input
      that's submitted straight to PATCH /users/:id/password (hashed
      server-side); nothing here can read an existing password back. -->
+<!-- Meta Performance V1: read-only ad detail (no matching controls yet --
+     the historical matching workflow is the next phase). -->
+<div id="meta-ad-detail-modal" class="modal-backdrop">
+  <div class="modal mp-detail-modal">
+    <div class="modal-header">
+      <h3 id="mp-detail-title">Ad detail</h3>
+      <button class="modal-close" onclick="closeModal('meta-ad-detail-modal')">&times;</button>
+    </div>
+    <div class="modal-body" id="mp-detail-body"></div>
+  </div>
+</div>
+
 <div id="user-access-modal" class="modal-backdrop">
   <div class="modal">
     <div class="modal-header">
