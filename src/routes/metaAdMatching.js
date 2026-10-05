@@ -53,6 +53,14 @@ router.post('/suggest', handle((req) => matching.refreshSuggestions({
   limit: req.body && req.body.limit,
 })));
 
+// Backlog reprocess: every non-confirmed ad still on an older rules version, in
+// the background, resumable. POST starts (returns at once), GET reports
+// progress + the remaining-stale truth from the database, POST /stop asks it
+// to finish its current ad and stop. Local database only.
+router.get('/reprocess-backlog', handle(() => matching.getBacklogStatus()));
+router.post('/reprocess-backlog', handle(() => matching.startBacklogReprocess()));
+router.post('/reprocess-backlog/stop', handle(() => matching.stopBacklogReprocess()));
+
 // Workspace for one ad: Meta evidence + current classification + suggestions.
 router.get('/ads/:metaAdId', handle((req) => matching.getAdWorkspace(adId(req), { refresh: req.query.refresh !== '0' })));
 

@@ -876,10 +876,62 @@ async function loadMetaMatching() {
       if (id !== mmState.reqId) return;
     }
     mmRenderRows(res);
+    mmLoadBacklog();
   } catch (e) {
     if (id !== mmState.reqId) return;
     document.getElementById('mm-body').innerHTML = `<tr><td colspan="8" class="mp-table-empty">${escapeHtml(e.message)}</td></tr>`;
   }
+}
+
+
+// ── Historical backlog reprocess (admin; background, resumable) ─────────
+// Ads still on older matching rules (typically historical ads outside the
+// 30-day scope) are run through the current matcher by an explicit action.
+// The server runs it in the background; this only starts it and polls.
+let mmBacklogTimer = null;
+const mmN = (v) => Number(v || 0).toLocaleString('en-AU');
+function mmRenderBacklog(st) {
+  const box = document.getElementById('mm-backlog');
+  const db = st.db;
+  const j = st.job;
+  const running = st.running;
+  const left = db.stale_processable;
+  if (!running && !left && !(j && j.state !== 'completed')) {
+    box.style.display = j ? '' : 'none';
+    box.innerHTML = j ? `<span class="mm-bl-ok">Backlog processed: ${mmN(j.totals.evaluated)} evaluated · ${mmN(j.totals.auto_matched)} auto-matched · ${mmN(j.totals.needs_review)} need review · ${mmN(j.totals.unmatched)} unmatched · ${mmN(j.totals.skipped_protected)} protected · ${mmN(j.totals.errors)} errors. Nothing left on older rules.</span>` : '';
+    return;
+  }
+  box.style.display = '';
+  const protectedTxt = db.stale_protected ? ` (${mmN(db.stale_protected)} more are human-owned and will be left alone)` : '';
+  if (running) {
+    box.innerHTML = `<div class="mm-bl-run"><b>Processing backlog…</b> ${mmN(j.totals.evaluated)} evaluated · ${mmN(j.totals.auto_matched)} auto-matched · ${mmN(j.totals.needs_review)} need review · ${mmN(j.totals.unmatched)} unmatched · ${mmN(j.totals.skipped_protected)} protected · ${mmN(j.totals.errors)} errors · ${mmN(left)} left${j.stop_requested ? ' · stopping…' : ''}
+      <button type="button" class="btn btn-ghost btn-sm" id="mm-backlog-stop">Stop</button></div>`;
+    document.getElementById('mm-backlog-stop').addEventListener('click', async () => { try { await api('/meta-ad-matching/reprocess-backlog/stop', { method: 'POST' }); } catch (e) { toast(e.message, true); } });
+    return;
+  }
+  const last = j ? ` Last run ${j.state}: ${mmN(j.totals.evaluated)} evaluated, ${mmN(j.totals.errors)} errors${j.fatal_error ? ` — ${escapeHtml(j.fatal_error)}` : ''}.` : '';
+  box.innerHTML = `<div class="mm-bl-idle"><b>${mmN(left)} ads</b> are still on older matching rules${protectedTxt}.${last}
+    <button type="button" class="btn btn-primary btn-sm" id="mm-backlog-start">${j && j.state !== 'completed' ? 'Resume backlog processing' : 'Process backlog'}</button></div>`;
+  document.getElementById('mm-backlog-start').addEventListener('click', async () => {
+    if (!(await confirmDialog(`Run ${mmN(left)} historical ads through the current matching rules? Confirmed ads and any other human-owned state are never touched. It runs in the background, can be stopped, and picks up where it left off if interrupted.`, { okLabel: 'Process backlog' }))) return;
+    try { await api('/meta-ad-matching/reprocess-backlog', { method: 'POST' }); mmLoadBacklog(); } catch (e) { toast(e.message, true); }
+  });
+}
+async function mmLoadBacklog() {
+  if (!state.currentUser || state.currentUser.role !== 'admin') return;
+  clearTimeout(mmBacklogTimer);
+  try {
+    const st = await api('/meta-ad-matching/reprocess-backlog');
+    mmRenderBacklog(st);
+    if (st.running && mmState.view === 'matching') {
+      mmBacklogTimer = setTimeout(async () => { await mmLoadBacklog(); loadMetaMatchingRowsOnly(); }, 3000);
+    }
+  } catch (e) { /* the banner is optional */ }
+}
+// While the job runs, keep the table/counts fresh without re-triggering anything.
+function loadMetaMatchingRowsOnly() {
+  const qs = `scope=${mmState.scope}&filter=${mmState.filter}&q=${encodeURIComponent(mmState.q)}&page=${mmState.page}&page_size=${mmState.pageSize}`;
+  api(`/meta-ad-matching/queue?${qs}`).then(mmRenderRows).catch(() => {});
 }
 
 document.getElementById('mm-scope').addEventListener('change', (e) => {
