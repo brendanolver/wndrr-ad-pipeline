@@ -46,6 +46,7 @@ const promotionCreativeRoutes = require('./routes/promotionCreative');
 const metaSyncRoutes = require('./routes/metaSync');
 const metaPerformanceRoutes = require('./routes/metaPerformance');
 const metaAdMatchingRoutes = require('./routes/metaAdMatching');
+const creativeOpportunitiesRoutes = require('./routes/creativeOpportunities');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -151,6 +152,8 @@ app.use('/api/meta-sync', requireAuth, metaSyncRoutes);
 app.use('/api/meta-performance', requireAuth, metaPerformanceRoutes);
 // Meta Ad Matching V1: admin-only, local-DB-only classification workflow.
 app.use('/api/meta-ad-matching', requireAuth, metaAdMatchingRoutes);
+// Creative Opportunities V1: admin-only, computed on read from local data (no Meta calls).
+app.use('/api/creative-opportunities', requireAuth, creativeOpportunitiesRoutes);
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
 

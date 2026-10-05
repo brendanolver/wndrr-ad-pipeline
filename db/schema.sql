@@ -2735,3 +2735,26 @@ ALTER TABLE meta_ad_classifications ADD COLUMN IF NOT EXISTS auto_fields JSONB;
 -- Which version of the auto-match rules last evaluated the ad, so a rule
 -- change re-evaluates already-suggested ads on the next suggestion run.
 ALTER TABLE meta_ads ADD COLUMN IF NOT EXISTS match_rules_version INTEGER;
+
+-- Creative Opportunities V1: only the HUMAN decisions about a recommendation
+-- are stored. The recommendations themselves are computed on read from the
+-- local Meta / sales / creative tables (deterministic, so they do not drift
+-- between refreshes). One row per opportunity_key
+-- (type:product_code[:concept_key]); the fingerprint records the priority +
+-- severity at the time of the decision, which is how a dismissed item stays
+-- hidden until its evidence materially worsens (see lib/creativeOpportunities.js).
+CREATE TABLE IF NOT EXISTS creative_opportunity_states (
+  opportunity_key VARCHAR(300) PRIMARY KEY,
+  rec_type VARCHAR(40) NOT NULL,
+  product_code VARCHAR(64),
+  state VARCHAR(20) NOT NULL CHECK (state IN ('dismissed', 'acted_on')),
+  priority VARCHAR(10),
+  severity INTEGER,
+  -- the recommendation exactly as it was shown when the person acted (traceability)
+  snapshot JSONB,
+  note TEXT,
+  shoot_plan_item_id INTEGER,
+  acted_by_user_id INTEGER,
+  acted_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_creative_opportunity_states_state ON creative_opportunity_states(state);
