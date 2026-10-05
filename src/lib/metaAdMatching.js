@@ -60,6 +60,29 @@ const {
 // Bump when evaluateAutoMatch's rules change: ads last evaluated under an
 // older version are re-evaluated by the next suggestion run.
 const AUTO_RULES_VERSION = 2;
+
+// ONE definition of "a person owns this ad's state", as a SQL CASE returning
+// the reason (or NULL). Aliases: m = meta_ads, c = meta_ad_classifications.
+// Used by the backlog job to pick candidates AND to re-check under the row
+// lock, and by its status report -- so selection, protection and reporting
+// can never disagree. Machine-written state (auto_matched / auto_structured,
+// suggestions, per-field auto provenance) is NOT human-owned and stays
+// re-evaluable; a classification with values on an ad that is neither
+// confirmed nor auto-matched can only have come from a person, so it is
+// protected too.
+const HUMAN_OWNED_SQL = `(CASE
+  WHEN COALESCE(c.excluded_from_intelligence, false) THEN 'excluded'
+  WHEN m.match_status = 'confirmed' THEN 'confirmed'
+  WHEN m.match_confirmed_at IS NOT NULL OR m.match_confirmed_by_user_id IS NOT NULL OR m.match_method = 'manual' THEN 'manually_confirmed'
+  WHEN m.matched_ad_setup_id IS NOT NULL THEN 'linked_ad_setup'
+  WHEN c.skipped_at IS NOT NULL THEN 'skipped'
+  WHEN c.classified_by_user_id IS NOT NULL OR c.creative_style_id IS NOT NULL THEN 'human_classification'
+  WHEN m.match_status <> 'auto_matched' AND (
+         c.concept_type_id IS NOT NULL OR c.concept_label IS NOT NULL OR c.creator_name IS NOT NULL
+         OR c.media_type IS NOT NULL OR COALESCE(c.not_product_specific, false)
+         OR EXISTS (SELECT 1 FROM meta_ad_products pp WHERE pp.meta_ad_id = m.meta_ad_id)
+       ) THEN 'unexpected_classification_values'
+  END)`;
 const HIGH = 0.85;
 const MEDIUM = 0.6;
 function confidenceLevel(c) {
@@ -710,9 +733,10 @@ function evaluateAutoMatch(ad, built, ctx) {
 // human has blocked it) or moved between unmatched <-> suggested. An
 // auto-matched ad whose evidence no longer qualifies has its machine-written
 // classification removed again (it was never a human decision).
-async function refreshSuggestionsForAd(client, ad, ctx) {
+async function refreshSuggestionsForAd(client, ad, ctx, opts = {}) {
   const locked = await client.query(
-    `SELECT m.match_status, COALESCE(c.excluded_from_intelligence, false) AS excluded, c.auto_match_blocked_at
+    `SELECT m.match_status, COALESCE(c.excluded_from_intelligence, false) AS excluded, c.auto_match_blocked_at,
+            ${HUMAN_OWNED_SQL} AS human_owned
        FROM meta_ads m LEFT JOIN meta_ad_classifications c ON c.meta_ad_id = m.meta_ad_id
       WHERE m.meta_ad_id = $1 FOR UPDATE OF m`,
     [ad.meta_ad_id]
@@ -721,6 +745,9 @@ async function refreshSuggestionsForAd(client, ad, ctx) {
   const prev = locked.rows[0];
   if (prev.match_status === 'confirmed') return { skipped: 'confirmed' };
   if (prev.excluded) return { skipped: 'excluded' };
+  // Backlog job only: re-check, under the row lock, that no human owns this ad
+  // (a person may have acted since the batch was selected).
+  if (opts.protectHumanState && prev.human_owned) return { skipped: prev.human_owned };
 
   const built = buildSuggestions(ad, ctx);
   const { suggestions } = built;
@@ -844,6 +871,181 @@ async function refreshSuggestions({ scope = '30d', pendingOnly = true, limit = 1
     }
   }
   return { examined: ads.length, with_suggestions: withSuggestions, auto_matched: autoMatched, needs_review: needsReview, unmatched, review_reasons: reasons };
+}
+
+// ── Backlog reprocess (explicit admin action, resumable) ────────────────
+// Runs every NON-confirmed ad whose match_rules_version is older than
+// AUTO_RULES_VERSION (or NULL) through the SAME per-ad matcher the app always
+// uses (refreshSuggestionsForAd: buildSuggestions + evaluateAutoMatch), with no
+// activity-window limit. Design:
+//   * the stale predicate IS the work queue: refreshSuggestionsForAd stamps
+//     match_rules_version in the same per-ad transaction as its writes, so an
+//     evaluated ad never qualifies again and a re-run after a crash/redeploy
+//     simply continues with what is left (idempotent, resumable);
+//   * one transaction per ad, row-locked -- a failure rolls back only that ad;
+//   * batches of BACKLOG_BATCH ads selected by a keyset cursor (meta_ad_id >
+//     last), so skipped / failing ads can never be picked twice in one run;
+//   * human-owned ads are never selected (HUMAN_OWNED_SQL) and are re-checked
+//     under the lock;
+//   * a Postgres advisory lock allows one run at a time (even across instances);
+//   * the HTTP request only STARTS the job; progress is polled, so no request
+//     ever has to survive the full run.
+// Local database only: nothing here can reach Meta.
+const BACKLOG_BATCH = 500;
+const BACKLOG_LOCK_KEY = 7240913; // pg_try_advisory_lock key
+const BACKLOG_MAX_CONSECUTIVE_ERRORS = 50;
+let backlogJob = null;
+
+const emptyTotals = () => ({ evaluated: 0, auto_matched: 0, needs_review: 0, unmatched: 0, skipped_protected: 0, errors: 0 });
+
+async function backlogDbStatus(db = pool) {
+  const [stale, v2] = await Promise.all([
+    db.query(
+      `SELECT m.match_status, ${HUMAN_OWNED_SQL} AS human_owned, count(*)::int AS n
+         FROM meta_ads m LEFT JOIN meta_ad_classifications c ON c.meta_ad_id = m.meta_ad_id
+        WHERE m.match_status <> 'confirmed' AND COALESCE(m.match_rules_version, 0) < $1
+        GROUP BY 1, 2`,
+      [AUTO_RULES_VERSION]
+    ),
+    db.query('SELECT match_status, count(*)::int AS n FROM meta_ads WHERE match_rules_version >= $1 GROUP BY 1', [AUTO_RULES_VERSION]),
+  ]);
+  let total = 0;
+  let protectedN = 0;
+  const byStatus = {};
+  const protectedBy = {};
+  stale.rows.forEach((r) => {
+    total += r.n;
+    byStatus[r.match_status] = (byStatus[r.match_status] || 0) + r.n;
+    if (r.human_owned) { protectedN += r.n; protectedBy[r.human_owned] = (protectedBy[r.human_owned] || 0) + r.n; }
+  });
+  const evaluated = {};
+  v2.rows.forEach((r) => { evaluated[r.match_status] = r.n; });
+  return {
+    rules_version: AUTO_RULES_VERSION,
+    stale_total: total,
+    stale_by_status: byStatus,
+    stale_protected: protectedN,
+    stale_protected_by_reason: protectedBy,
+    // what a run would still process
+    stale_processable: total - protectedN,
+    evaluated_current_version_by_status: evaluated,
+  };
+}
+
+function publicJob(job) {
+  if (!job) return null;
+  return {
+    state: job.state, // running | completed | stopped | aborted | failed
+    started_at: job.started_at, finished_at: job.finished_at,
+    target_version: job.target_version,
+    processable_at_start: job.processable_at_start,
+    totals: { ...job.totals },
+    skipped_by_reason: { ...job.skipped_by_reason },
+    batches: job.batches, last_batch_at: job.last_batch_at,
+    stop_requested: job.stop_requested,
+    error_samples: job.error_samples.slice(0, 10),
+    fatal_error: job.fatal_error || null,
+  };
+}
+
+async function getBacklogStatus() {
+  return { running: !!(backlogJob && backlogJob.state === 'running'), job: publicJob(backlogJob), db: await backlogDbStatus() };
+}
+
+async function runBacklog(job, lockClient, deps = {}) {
+  const evaluate = deps.evaluateAd || refreshSuggestionsForAd;
+  let cursor = '';
+  let consecutiveErrors = 0;
+  try {
+    for (;;) {
+      if (job.stop_requested) { job.state = 'stopped'; break; }
+      const { rows } = await pool.query(
+        `SELECT m.meta_ad_id, m.ad_name, ${HUMAN_OWNED_SQL} AS human_owned
+           FROM meta_ads m LEFT JOIN meta_ad_classifications c ON c.meta_ad_id = m.meta_ad_id
+          WHERE m.match_status <> 'confirmed' AND COALESCE(m.match_rules_version, 0) < $1 AND m.meta_ad_id > $2
+          ORDER BY m.meta_ad_id LIMIT $3`,
+        [job.target_version, cursor, BACKLOG_BATCH]
+      );
+      if (!rows.length) { job.state = 'completed'; break; }
+      cursor = rows[rows.length - 1].meta_ad_id;
+      const ctx = await loadContext(); // fresh per batch: picks up humans' confirmations made meanwhile
+      for (const ad of rows) {
+        if (job.stop_requested) break;
+        if (ad.human_owned) { job.totals.skipped_protected += 1; job.skipped_by_reason[ad.human_owned] = (job.skipped_by_reason[ad.human_owned] || 0) + 1; continue; }
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+          const r = await evaluate(client, ad, ctx, { protectHumanState: true });
+          await client.query('COMMIT');
+          consecutiveErrors = 0;
+          if (r.skipped) {
+            job.totals.skipped_protected += 1;
+            job.skipped_by_reason[r.skipped] = (job.skipped_by_reason[r.skipped] || 0) + 1;
+          } else {
+            job.totals.evaluated += 1;
+            if (r.auto_matched) job.totals.auto_matched += 1;
+            else if (r.status === 'suggested') job.totals.needs_review += 1;
+            else job.totals.unmatched += 1;
+          }
+        } catch (err) {
+          await client.query('ROLLBACK').catch(() => {});
+          job.totals.errors += 1;
+          consecutiveErrors += 1;
+          if (job.error_samples.length < 25) job.error_samples.push({ meta_ad_id: ad.meta_ad_id, error: String(err && err.message).slice(0, 200) });
+        } finally {
+          client.release();
+        }
+        if (consecutiveErrors >= BACKLOG_MAX_CONSECUTIVE_ERRORS) {
+          job.state = 'aborted';
+          job.fatal_error = `Stopped after ${BACKLOG_MAX_CONSECUTIVE_ERRORS} consecutive errors (last: ${job.error_samples[job.error_samples.length - 1].error}). Fix the cause and start it again -- it resumes.`;
+          return;
+        }
+      }
+      job.batches += 1;
+      job.last_batch_at = new Date().toISOString();
+      console.log(`[ad-matching backlog] batch ${job.batches}: evaluated ${job.totals.evaluated}, auto ${job.totals.auto_matched}, review ${job.totals.needs_review}, unmatched ${job.totals.unmatched}, protected ${job.totals.skipped_protected}, errors ${job.totals.errors}`);
+      if (job.stop_requested) { job.state = 'stopped'; break; }
+    }
+  } catch (err) {
+    job.state = 'failed';
+    job.fatal_error = String(err && err.message).slice(0, 300);
+  } finally {
+    job.finished_at = new Date().toISOString();
+    if (job.state === 'running') job.state = 'failed';
+    console.log(`[ad-matching backlog] ${job.state}: ${JSON.stringify({ totals: job.totals, skipped_by_reason: job.skipped_by_reason, batches: job.batches })}`);
+    try { await lockClient.query('SELECT pg_advisory_unlock($1)', [BACKLOG_LOCK_KEY]); } catch (e) { /* released with the connection anyway */ }
+    lockClient.release();
+  }
+}
+
+// Starts the job and returns immediately. `deps.evaluateAd` is a test seam.
+async function startBacklogReprocess(deps = {}) {
+  if (backlogJob && backlogJob.state === 'running') throw new HttpError(409, 'A backlog reprocess is already running');
+  const lockClient = await pool.connect();
+  let got = false;
+  try {
+    got = (await lockClient.query('SELECT pg_try_advisory_lock($1) AS ok', [BACKLOG_LOCK_KEY])).rows[0].ok;
+  } catch (err) {
+    lockClient.release();
+    throw err;
+  }
+  if (!got) { lockClient.release(); throw new HttpError(409, 'A backlog reprocess is already running (another instance)'); }
+  const status = await backlogDbStatus().catch(() => null);
+  const job = {
+    state: 'running', started_at: new Date().toISOString(), finished_at: null, target_version: AUTO_RULES_VERSION,
+    processable_at_start: status ? status.stale_processable : null,
+    totals: emptyTotals(), skipped_by_reason: {}, batches: 0, last_batch_at: null, stop_requested: false, error_samples: [], fatal_error: null,
+  };
+  backlogJob = job;
+  const done = runBacklog(job, lockClient, deps);
+  if (deps.wait) await done; // tests only
+  return getBacklogStatus();
+}
+
+function stopBacklogReprocess() {
+  if (!backlogJob || backlogJob.state !== 'running') throw new HttpError(409, 'No backlog reprocess is running');
+  backlogJob.stop_requested = true;
+  return { stop_requested: true };
 }
 
 // ── Queue ───────────────────────────────────────────────────────────────
@@ -1412,6 +1614,11 @@ module.exports = {
   confidenceLabel,
   refreshSuggestions,
   refreshSuggestionsForAd,
+  startBacklogReprocess,
+  stopBacklogReprocess,
+  getBacklogStatus,
+  HUMAN_OWNED_SQL,
+  AUTO_RULES_VERSION,
   getQueue,
   getAdWorkspace,
   confirmMapping,
