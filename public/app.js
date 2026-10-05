@@ -793,7 +793,7 @@ document.querySelectorAll('.mp-subnav-btn').forEach((b) => b.addEventListener('c
 //   Likely = a reasonable match to check;  Weak = a hint only
 const MM_LABEL_CLASS = { Exact: 'high', Likely: 'medium', Weak: 'low' };
 function mmConfDot(label, status) {
-  if (status === 'auto_matched') return '<span class="mm-conf high"><i></i>Exact</span>';
+  if (status === 'auto_matched') return `<span class="mm-conf ${MM_LABEL_CLASS[label] || 'high'}"><i></i>${label === 'Likely' ? 'Likely' : 'Exact'}</span>`;
   if (!label) return '<span class="mp-na">—</span>';
   const tail = label === 'Weak' ? 'needs review' : 'review';
   return `<span class="mm-conf ${MM_LABEL_CLASS[label]}"><i></i>${label}<small> · ${tail}</small></span>`;
@@ -904,8 +904,8 @@ document.getElementById('mm-refresh-suggestions').addEventListener('click', asyn
   const btn = document.getElementById('mm-refresh-suggestions');
   btn.disabled = true; btn.textContent = 'Refreshing…';
   try {
-    const r = await api('/meta-ad-matching/suggest', { method: 'POST', body: JSON.stringify({ scope: mmState.scope, all: true }) });
-    toast(`Suggestions refreshed for ${r.examined} ad${r.examined === 1 ? '' : 's'} (${r.with_suggestions} with suggestions).`);
+    const r = await api('/meta-ad-matching/suggest', { method: 'POST', body: JSON.stringify({ scope: mmState.scope, all: true, limit: 5000 }) });
+    toast(`Re-evaluated ${r.examined} ad${r.examined === 1 ? '' : 's'}: ${r.auto_matched} auto-classified, ${r.needs_review} need review, ${r.unmatched} unmatched.`);
     await loadMetaMatching();
   } catch (e) {
     toast(e.message, true);
@@ -1059,7 +1059,14 @@ function renderMatchWorkspace(ws, options) {
   const reasons = cls.review_reasons || [];
   let stateNote = '';
   if (cls.confirmed) stateNote = '<span class="mm-note ok">Confirmed by a person — edits replace the mapping when you save.</span>';
-  else if (cls.auto_matched) stateNote = '<span class="mm-note auto">Auto-matched: the name gives an exact product, media, creator and concept. Confirm to lock it in, or edit.</span>';
+  else if (cls.auto_matched) {
+    const AF = { product: 'Product', concept: 'Concept', creator: 'Creator', media_type: 'Media' };
+    const BASIS = { confirmed_pair: 'confirmed before', meta_mapping: 'Meta mapping', catalogue_exact: 'exact', catalogue_similar: 'best match', existing_concept: 'exact', legacy_text: 'legacy text', roster: 'roster', media_token: 'name', ad_type: 'ad type' };
+    const af = cls.auto_fields || {};
+    const known = Object.keys(AF).filter((k) => af[k]).map((k) => `${AF[k]} (${BASIS[af[k].basis] || af[k].basis})`);
+    const blank = (cls.left_blank || []).map((t) => t.replace(/ \(.*$/, ''));
+    stateNote = `<span class="mm-note auto" title="${escapeHtml((cls.left_blank || []).join('; '))}">Auto-classified: ${escapeHtml(known.join(', '))}${blank.length ? ` · left blank: ${escapeHtml(blank.join(', '))}` : ''}. Edit only if something is wrong.</span>`;
+  }
   else if (ad.match_status === 'suggested') stateNote = `<span class="mm-note review" title="${escapeHtml(reasons.join('; '))}">Needs review${reasons.length ? ` — ${escapeHtml(reasons[0])}${reasons.length > 1 ? ` (+${reasons.length - 1} more)` : ''}` : ''}</span>`;
   else stateNote = '<span class="mm-note">Unmatched — not enough evidence in the name.</span>';
 
@@ -1216,7 +1223,11 @@ function renderMatchWorkspace(ws, options) {
   const done = (msg) => { toast(msg); closeModal('meta-match-modal'); loadMetaMatching(); };
   const act = async (path, opts, msg) => {
     errEl.textContent = '';
-    try { await api(`/meta-ad-matching/ads/${encodeURIComponent(ad.meta_ad_id)}${path}`, opts); done(msg); } catch (e) { errEl.textContent = e.message; }
+    try {
+      const r = await api(`/meta-ad-matching/ads/${encodeURIComponent(ad.meta_ad_id)}${path}`, opts);
+      const n = r && r.auto_applied_to_similar;
+      done(n ? `${msg} Also applied to ${n} similar ad${n === 1 ? '' : 's'}.` : msg);
+    } catch (e) { errEl.textContent = e.message; }
   };
   document.getElementById('mm-confirm').addEventListener('click', () => {
     const concept = conceptPicker.get()[0];

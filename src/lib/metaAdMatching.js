@@ -57,6 +57,9 @@ const {
   ymdInZone, addDays, REPORTING_TIMEZONE, deriveMetrics, HttpError, parseRangeParams,
 } = require('./metaPerformance');
 
+// Bump when evaluateAutoMatch's rules change: ads last evaluated under an
+// older version are re-evaluated by the next suggestion run.
+const AUTO_RULES_VERSION = 2;
 const HIGH = 0.85;
 const MEDIUM = 0.6;
 function confidenceLevel(c) {
@@ -120,7 +123,7 @@ function parseStructuredMetaName(name) {
 
 // ── Suggestion context (loaded once per batch) ──────────────────────────
 async function loadContext(db = pool) {
-  const [mappings, families, concepts, creators, styles, setups, setupProducts, setupStyles] = await Promise.all([
+  const [mappings, families, concepts, creators, styles, setups, setupProducts, setupStyles, confirmedSingles] = await Promise.all([
     db.query('SELECT meta_product, meta_product_type, product_code, product_name FROM meta_product_mappings'),
     listProductFamilies(db),
     db.query('SELECT id, name, format FROM concept_types WHERE active ORDER BY sort_order, name'),
@@ -149,6 +152,18 @@ async function loadContext(db = pool) {
         WHERE COALESCE(e.creative_style_id, i.creative_style_id) IS NOT NULL
           AND COALESCE(e.linked_creative_asset_id, i.linked_creative_asset_id) IS NOT NULL`
     ),
+    // Human-confirmed, single-product ads: the source of the "trusted
+    // Product + Category pair" reuse (see trustedPairs below).
+    db.query(
+      `SELECT m.ad_name, (array_agg(p.product_code))[1] AS product_code
+         FROM meta_ads m
+         JOIN meta_ad_products p ON p.meta_ad_id = m.meta_ad_id
+         LEFT JOIN meta_ad_classifications c ON c.meta_ad_id = m.meta_ad_id
+        WHERE m.match_status = 'confirmed' AND m.match_method = 'manual'
+          AND NOT COALESCE(c.excluded_from_intelligence, false) AND NOT COALESCE(c.not_product_specific, false)
+        GROUP BY m.meta_ad_id, m.ad_name
+       HAVING count(*) = 1`
+    ),
   ]);
 
   const mappingByKey = new Map();
@@ -160,6 +175,24 @@ async function loadContext(db = pool) {
       if (!mappingCodesByProduct.has(k)) mappingCodesByProduct.set(k, new Set());
       mappingCodesByProduct.get(k).add(r.product_code);
     }
+  });
+  // A Product + Category pair a PERSON already confirmed (as exactly one
+  // product family on one or more ads). key -> Map(product_code -> #ads).
+  // One code = trusted and reused for every matching historical/future ad;
+  // several codes = the humans disagreed -> surfaced as a conflict, never guessed.
+  const trustedPairs = new Map();
+  confirmedSingles.rows.forEach((r) => {
+    const st = parseStructuredMetaName(r.ad_name);
+    const lg = parseMetaAdName(r.ad_name);
+    const pairs = [];
+    if (st && st.product_name && st.product_category) pairs.push([st.product_name, st.product_category]);
+    if (lg && lg.product && lg.productType) pairs.push([lg.product, lg.productType]);
+    pairs.forEach(([prod, cat]) => {
+      const k = `${norm(prod)}||${norm(cat)}`;
+      if (!trustedPairs.has(k)) trustedPairs.set(k, new Map());
+      const m = trustedPairs.get(k);
+      m.set(r.product_code, (m.get(r.product_code) || 0) + 1);
+    });
   });
   const familyIndex = buildFamilyIndex(families);
   const familyByCode = new Map(families.map((f) => [f.product_code, f]));
@@ -240,7 +273,7 @@ async function loadContext(db = pool) {
   });
 
   return {
-    mappingByKey, mappingCodesByProduct, familyIndex, adSetupsByLabel, families, familyByCode, familyByNorm, concepts: concepts.rows, conceptByNorm,
+    mappingByKey, mappingCodesByProduct, trustedPairs, familyIndex, adSetupsByLabel, families, familyByCode, familyByNorm, concepts: concepts.rows, conceptByNorm,
     creators: creators.rows.map((c) => c.name), creatorByNorm, styles: styles.rows, styleByNorm, styleById,
     adSetups, adSetupByNorm, adSetupById,
   };
@@ -251,6 +284,63 @@ function jaccard(a, b) {
   let inter = 0;
   a.forEach((t) => { if (b.has(t)) inter += 1; });
   return inter / (a.size + b.size - inter);
+}
+
+// ── Product resolution for structured names (hands-off auto-matching) ───
+// Decides whether a structured name's Product (+ Category) points to ONE
+// clearly best existing product family, in this order of trust:
+//   confirmed_pair     a person already confirmed this exact Product + Category
+//                      as one family on other ads (reused automatically)
+//   meta_mapping       existing Settings -> Meta Mapping (Product + Type, or a
+//                      product name that maps to a single family)
+//   catalogue_exact    exact normalised family name
+//   catalogue_similar  ONE family clearly ahead of the rest (see clearBest)
+// Anything with two plausible families, human disagreement, conflicting
+// evidence or a set/bundle wording is NOT resolved -- that is a genuine
+// exception for a person.
+const PRODUCT_BASIS_CONFIDENCE = { confirmed_pair: 0.95, meta_mapping: 0.9, catalogue_exact: 0.9, catalogue_similar: 0.8 };
+function clearBest(cands) {
+  if (!cands.length) return null;
+  const [top, second] = cands;
+  if (top.ties > 1 || top.confidence < 0.6) return null;
+  if (top.kind === 'fuzzy' && top.inter < 3) return null; // two shared words isn't enough to act alone
+  if (second && !(top.jacc - second.jacc >= 0.1 || top.confidence - second.confidence >= 0.15)) return null;
+  return top;
+}
+function resolveStructuredProduct(src, ctx, { cands }) {
+  const fam = (code) => ctx.familyByCode.get(code);
+  const hit = (code, basis, why) => ({ status: 'resolved', code, name: fam(code).product_name, basis, confidence: PRODUCT_BASIS_CONFIDENCE[basis], why });
+  const setWording = hasSetWord(src.phrase) || hasSetWord(src.type || '');
+  const best = clearBest(cands);
+  let res = null;
+
+  const trusted = src.type ? ctx.trustedPairs.get(`${norm(src.phrase)}||${norm(src.type)}`) : null;
+  if (trusted && trusted.size > 1) return { status: 'ambiguous', reason: 'People have confirmed this Product + Category as different product families' };
+  if (trusted && trusted.size === 1) {
+    const code = [...trusted.keys()][0];
+    if (fam(code)) res = hit(code, 'confirmed_pair', 'Product + Category already confirmed by a person');
+  }
+  if (!res && src.type) {
+    const row = ctx.mappingByKey.get(`${norm(src.phrase)}||${norm(src.type)}`);
+    if (row && row.product_code && fam(row.product_code)) res = hit(row.product_code, 'meta_mapping', 'Existing Meta Product Mapping');
+  }
+  if (!res) {
+    const codes = ctx.mappingCodesByProduct.get(norm(src.phrase));
+    if (codes && codes.size === 1 && fam([...codes][0])) res = hit([...codes][0], 'meta_mapping', 'Existing Meta Product Mapping (product name)');
+  }
+  if (res) {
+    // human-curated evidence still loses to an exact catalogue match for a DIFFERENT family
+    if (best && best.kind === 'exact' && best.family.product_code !== res.code) return { status: 'ambiguous', reason: 'Conflicting product evidence (mapping vs name)' };
+    return res;
+  }
+  if (best && setWording && best.kind !== 'exact') return { status: 'ambiguous', reason: 'Looks like a set / bundle that may include several products' };
+  if (best) {
+    return hit(best.family.product_code, best.kind === 'exact' ? 'catalogue_exact' : 'catalogue_similar',
+      best.kind === 'exact' ? 'Exact product family name' : `One clearly best product family (${best.kind.replace('_', ' ')} match)`);
+  }
+  if (cands.length) return { status: 'ambiguous', reason: 'More than one plausible product family' };
+  if (setWording) return { status: 'ambiguous', reason: 'Looks like a set / bundle that may include several products' };
+  return { status: 'none', reason: 'No matching product family' };
 }
 
 // Pure: ad row + loaded context -> proposed suggestions (no DB access), so
@@ -331,15 +421,6 @@ function buildSuggestions(ad, ctx) {
     contains: 'matches part of existing WNDRR product family "%F" (shares %I words) — check before confirming',
     fuzzy: 'partially matches existing WNDRR product family "%F" (shares %I words) — check before confirming',
   };
-  const matchCatalogue = (phrase, origin) => {
-    const cands = matchProductPhrase(phrase, ctx.familyIndex);
-    cands.forEach((c) => {
-      const how = MATCH_WORDING[c.kind].replace('%F', c.family.product_name).replace('%I', c.inter).replace('%U', c.family.matchSet.size);
-      const tie = c.ties > 1 ? ` — ${c.ties} families matched equally closely` : '';
-      pushProduct(c.family, c.confidence, `Product "${phrase}" parsed from the Meta ad name ${how}${tie}`, 'name_product_match', { phrase, kind: c.kind, origin, shared_words: c.inter, family_words: c.family.matchSet.size });
-    });
-    return cands.length > 0;
-  };
   const setFromHistory = (phrase) => {
     if (!hasSetWord(phrase)) return false;
     const hits = (ctx.adSetupsByLabel.get(coreTokens(phrase).join(' ')) || []).filter((a) => a.product_codes.length >= 2);
@@ -361,15 +442,44 @@ function buildSuggestions(ad, ctx) {
     });
     return true;
   };
+  const lookupTrusted = (product, type, shown) => {
+    const entry = type ? ctx.trustedPairs.get(`${norm(product)}||${norm(type)}`) : null;
+    if (!entry || !entry.size) return false;
+    if (entry.size === 1) {
+      const [[code, n]] = [...entry.entries()];
+      pushProduct(famOf(code), 0.95, `${shown} was already confirmed by a person as this product family on ${n} other ad${n === 1 ? '' : 's'} — reused automatically`, 'confirmed_pair', { meta_product: product, meta_product_type: type, confirmed_ads: n });
+    } else {
+      entry.forEach((n, code) => pushProduct(famOf(code), 0.6, `${shown} was confirmed by people as different product families (${entry.size}) — pick the right one`, 'confirmed_pair', { meta_product: product, meta_product_type: type, conflict: true, confirmed_ads: n }));
+    }
+    return true;
+  };
   const productSources = [];
   if (legacy) productSources.push({ phrase: legacy.product, type: legacy.productType, shown: `${legacy.product} + ${legacy.productType}`, origin: 'legacy_name' });
   if (structured && structured.product_name) productSources.push({ phrase: structured.product_name, type: structured.product_category, shown: `${structured.product_name}${structured.product_category ? ` + ${structured.product_category}` : ''}`, origin: 'structured_name' });
   if (loose && loose.product_phrase && loose.product_catalogue_match) productSources.push({ phrase: loose.product_phrase, type: null, shown: loose.product_phrase, origin: 'loose_name' });
+  let productResolution = null;
   productSources.forEach((src) => {
+    const isStructured = src.origin === 'structured_name';
+    // Catalogue candidates for the product phrase alone and for Product + Category;
+    // the better-scoring list wins (Category usually disambiguates), ties go to
+    // the more specific combined phrase.
+    const alone = matchProductPhrase(src.phrase, ctx.familyIndex);
+    const combined = src.type ? matchProductPhrase(`${src.phrase} ${src.type}`, ctx.familyIndex) : [];
+    const cands = combined.length && (!alone.length || combined[0].confidence >= alone[0].confidence) ? combined : alone;
+    if (isStructured) productResolution = resolveStructuredProduct(src, ctx, { trusted: ctx.trustedPairs, alone, combined, cands });
+
+    if (lookupTrusted(src.phrase, src.type, src.shown)) return;
     if (lookupMapping(src.phrase, src.type, src.shown)) return;
     if (lookupMappingByName(src.phrase)) return;
-    if (matchCatalogue(src.phrase, src.origin)) return;
-    if (src.type && matchCatalogue(`${src.phrase} ${src.type}`, src.origin)) return;
+    if (cands.length) {
+      const phraseUsed = cands === combined ? `${src.phrase} ${src.type}` : src.phrase;
+      cands.forEach((c) => {
+        const how = MATCH_WORDING[c.kind].replace('%F', c.family.product_name).replace('%I', c.inter).replace('%U', c.family.matchSet.size);
+        const tie = c.ties > 1 ? ` — ${c.ties} families matched equally closely` : '';
+        pushProduct(c.family, c.confidence, `Product "${phraseUsed}" parsed from the Meta ad name ${how}${tie}`, 'name_product_match', { phrase: phraseUsed, kind: c.kind, origin: src.origin, shared_words: c.inter, family_words: c.family.matchSet.size });
+      });
+      return;
+    }
     if (setFromHistory(src.phrase)) return;
     matchSet(src.phrase, src.origin);
   });
@@ -488,71 +598,108 @@ function buildSuggestions(ad, ctx) {
     suggestions: [...best.values()].sort((a, b) => b.confidence - a.confidence),
     parsed: { legacy, structured, loose },
     anchor_ad_setup_id: anchor ? anchor.setup.id : null,
+    anchor: anchor ? { id: anchor.setup.id, confidence: anchor.confidence, product_codes: anchor.setup.product_codes } : null,
+    product_resolution: productResolution,
   };
 }
 
-// ── Auto-match rules ────────────────────────────────────────────────────
-// An ad is AUTO-MATCHED only when ALL of these hold (otherwise it stays in
-// Needs review / Unmatched -- an ambiguous field blocks the whole ad):
-//   * the name follows the structured WNDRR layout
-//   * Product: exactly ONE candidate family, from an existing Meta Product
-//     Mapping (Product + Type pair) or an exact normalised family name --
-//     never fuzzy, never a set/bundle inference, never in conflict with a
-//     linked Ad Setup's product
-//   * Media: exactly one media value, from an explicit structured token
-//   * Creator: exactly one, an explicit token that is ON the creator roster
-//   * Concept: exactly one, an explicit token that EXISTS in concept_types
-//     (legacy free text never auto-matches)
-//   * no "not product-specific" (DPA) signal
-// Returns { qualifies, blockers[], values, confidence }.
+// ── Auto-match rules (hands-off, per field) ─────────────────────────────
+// A structured WNDRR name is classified field by field; one unresolved
+// OPTIONAL field never blocks the fields that are known. The ad becomes
+// AUTO-MATCHED as soon as its Product resolves safely (everything the product
+// attribution needs); Concept / Creator / Media are persisted individually
+// when unambiguous and simply left blank otherwise.
+//
+//   Product   ONE clearly best existing family: a person's earlier confirmation
+//             of the same Product + Category, an existing Meta Product Mapping,
+//             an exact family name, or one family clearly ahead of the rest
+//             (resolveStructuredProduct). Never a guess between families.
+//   Concept   exact existing concept (concept_type_id) -- or, when the token
+//             isn't in the concept list, kept as LEGACY free text on this ad
+//             only (never inserted into concept_types)
+//   Creator   exact creator-roster name (an off-roster token stays blank)
+//   Media     the explicit Media token; a Carousel ad type is Carousel
+//   Creative Style: never required, never written here
+//
+// Genuine exceptions -- the ONLY reasons an ad is held for a person:
+//   * not in the structured layout / DPA (not product-specific) wording
+//   * product unresolved: none, two or more plausible families, people or
+//     sources disagree, or a set/bundle that may hold several products
+//   * product contradicts the linked (exact) Ad Setup's products
+//   * conflicting media tokens in the name
+// Returns { qualifies, blockers[], values, left_blank[], auto_fields, confidence }.
+const JUNK_TOKEN = /^(NA|N A|NONE|TBC|TBD|UNKNOWN|NULL|TEST)$/;
 function evaluateAutoMatch(ad, built, ctx) {
   const blockers = [];
+  const leftBlank = [];
   const st = built.parsed && built.parsed.structured;
-  if (!st) return { qualifies: false, blockers: ['The name isn\'t in the structured WNDRR layout'], values: null };
+  if (!st) return { qualifies: false, blockers: ['The name isn\'t in the structured WNDRR layout'], left_blank: [], values: null, auto_fields: null };
   const by = (f) => built.suggestions.filter((s) => s.field === f);
   const keys = (arr) => new Set(arr.map((s) => s.value_key));
-  let product = null;
-  let concept = null;
-  let creator = null;
-  let media = null;
 
-  const prods = by('product');
-  if (!prods.length) blockers.push('No matching product found');
-  else if (keys(prods).size > 1) blockers.push('More than one possible product');
+  // ---- Product (required to attribute the ad) ----
+  const res = built.product_resolution;
+  let product = null;
+  if (!res || res.status !== 'resolved') blockers.push(res ? res.reason : 'No matching product family');
   else {
-    const p = prods[0];
-    const exact = p.confidence >= 0.9 && (p.source === 'meta_product_mapping' || (p.source === 'name_product_match' && p.evidence.kind === 'exact'));
-    if (!exact) blockers.push('Product matched by similarity, not an exact match');
-    else if (!ctx.familyByCode.has(p.value_key)) blockers.push('Product isn\'t an existing product family');
-    else product = { product_code: p.value_key, product_name: p.value_label };
+    product = { product_code: res.code, product_name: res.name, basis: res.basis, confidence: res.confidence };
+    const anchor = built.anchor;
+    if (anchor && anchor.confidence >= 0.9 && anchor.product_codes.length && !anchor.product_codes.includes(res.code)) {
+      blockers.push('Product conflicts with the linked Ad Setup\'s product');
+      product = null;
+    }
   }
 
-  const cons = by('concept');
-  if (!cons.length) blockers.push('No concept in the name');
-  else if (keys(cons).size > 1) blockers.push('Conflicting concepts');
-  else if (!cons[0].value_ref || cons[0].source !== 'structured_name' || cons[0].confidence < 0.9) blockers.push('Concept isn\'t in the WNDRR concept list');
-  else concept = { concept_type_id: cons[0].value_ref, label: cons[0].value_label };
+  // ---- Media: explicit tokens only ----
+  let media = null;
+  const tokenMedia = by('media_type').filter((m) => m.source === 'structured_name' || m.source === 'name_token');
+  const mediaKeys = keys(tokenMedia.filter((m) => m.value_key !== 'carousel'));
+  if (mediaKeys.size > 1) blockers.push('Conflicting media tokens in the name');
+  else if (st.ad_type === 'carousel') media = { value: 'carousel', basis: 'ad_type' };
+  else if (mediaKeys.size === 1) media = { value: [...mediaKeys][0], basis: 'media_token' };
+  else leftBlank.push('Media type (no explicit token)');
 
-  const crs = by('creator');
-  if (!crs.length) blockers.push('No creator in the name');
-  else if (keys(crs).size > 1) blockers.push('Conflicting creators');
-  else if (crs[0].evidence.off_roster || crs[0].source !== 'structured_name') blockers.push('Creator isn\'t on the creator roster');
-  else creator = crs[0].value_label;
+  // ---- Concept: exact existing, else legacy text ----
+  let concept = null;
+  const conTok = by('concept').filter((s) => s.source === 'structured_name');
+  const conKeys = keys(by('concept').filter((s) => s.confidence >= 0.8 || s.source === 'structured_name'));
+  if (!conTok.length) leftBlank.push('Concept (none in the name)');
+  else if (conKeys.size > 1) leftBlank.push('Concept (conflicting evidence)');
+  else if (JUNK_TOKEN.test(norm(conTok[0].value_label))) leftBlank.push('Concept (placeholder text)');
+  else if (conTok[0].value_ref) concept = { concept_type_id: conTok[0].value_ref, label: conTok[0].value_label, basis: 'existing_concept' };
+  else concept = { concept_type_id: null, label: conTok[0].value_label, basis: 'legacy_text' };
 
-  const meds = by('media_type');
-  if (!meds.length) blockers.push('No media type in the name');
-  else if (keys(meds).size > 1) blockers.push('Conflicting media evidence');
-  else if (!meds.some((m) => m.source === 'structured_name' && m.confidence >= 0.9)) blockers.push('Media type isn\'t an explicit token');
-  else media = meds[0].value_key;
+  // ---- Creator: roster only ----
+  let creator = null;
+  const crTok = by('creator').filter((s) => s.source === 'structured_name');
+  const crKeys = keys(by('creator').filter((s) => !s.evidence.off_roster));
+  if (!crTok.length) leftBlank.push('Creator (none in the name)');
+  else if (crTok[0].evidence.off_roster) leftBlank.push('Creator (not on the creator roster)');
+  else if (crKeys.size > 1) leftBlank.push('Creator (conflicting evidence)');
+  else creator = { value: crTok[0].value_label, basis: 'roster' };
 
   if (by('scope').length) blockers.push('Looks like a DPA / not product-specific ad');
 
-  const qualifies = !blockers.length && product && concept && creator && media;
+  const qualifies = !blockers.length && !!product;
+  if (!qualifies) return { qualifies: false, blockers, left_blank: [], values: null, auto_fields: null };
+  const auto_fields = { product: { basis: product.basis, confidence: product.confidence } };
+  if (concept) auto_fields.concept = { basis: concept.basis };
+  if (creator) auto_fields.creator = { basis: creator.basis };
+  if (media) auto_fields.media_type = { basis: media.basis };
   return {
-    qualifies: !!qualifies,
-    blockers,
-    values: qualifies ? { product, concept, creator, media_type: media } : null,
-    confidence: qualifies ? 0.9 : null,
+    qualifies: true,
+    blockers: [],
+    left_blank: leftBlank,
+    values: {
+      product: { product_code: product.product_code, product_name: product.product_name },
+      concept: concept ? { concept_type_id: concept.concept_type_id, label: concept.label } : null,
+      creator: creator ? creator.value : null,
+      media_type: media ? media.value : null,
+    },
+    auto_fields,
+    // The ad-level label follows the product evidence (the attribution key):
+    // Exact for confirmed/exact evidence, Likely for a clear similarity match.
+    confidence: Math.min(0.9, product.confidence),
   };
 }
 
@@ -589,22 +736,26 @@ async function refreshSuggestionsForAd(client, ad, ctx) {
   const auto = evaluateAutoMatch(ad, built, ctx);
   if (auto.qualifies && !prev.auto_match_blocked_at) {
     const v = auto.values;
+    // Machine-owned write (the ad is neither confirmed nor excluded -- checked
+    // above under the row lock): every unresolved optional field is NULL, and
+    // auto_fields records which evidence produced each value.
     await client.query(
-      `INSERT INTO meta_ad_classifications (meta_ad_id, not_product_specific, concept_type_id, concept_label, creator_name, media_type)
-       VALUES ($1, false, $2, $3, $4, $5)
+      `INSERT INTO meta_ad_classifications (meta_ad_id, not_product_specific, concept_type_id, concept_label, creator_name, media_type, auto_fields)
+       VALUES ($1, false, $2, $3, $4, $5, $6)
        ON CONFLICT (meta_ad_id) DO UPDATE SET
          not_product_specific = false, concept_type_id = EXCLUDED.concept_type_id, concept_label = EXCLUDED.concept_label,
-         creator_name = EXCLUDED.creator_name, media_type = EXCLUDED.media_type, updated_at = now()`,
-      [ad.meta_ad_id, v.concept.concept_type_id, v.concept.label, v.creator, v.media_type]
+         creator_name = EXCLUDED.creator_name, media_type = EXCLUDED.media_type, auto_fields = EXCLUDED.auto_fields, updated_at = now()`,
+      [ad.meta_ad_id, v.concept ? v.concept.concept_type_id : null, v.concept ? v.concept.label : null, v.creator, v.media_type, JSON.stringify(auto.auto_fields)]
     );
     await client.query('DELETE FROM meta_ad_products WHERE meta_ad_id = $1', [ad.meta_ad_id]);
     await client.query('INSERT INTO meta_ad_products (meta_ad_id, product_code, product_name) VALUES ($1,$2,$3)', [ad.meta_ad_id, v.product.product_code, v.product.product_name]);
     await client.query(
-      `UPDATE meta_ads SET match_status = 'auto_matched', match_method = 'auto_structured', match_confidence = $2, match_suggestions_at = now()
+      `UPDATE meta_ads SET match_status = 'auto_matched', match_method = 'auto_structured', match_confidence = $2, match_suggestions_at = now(),
+              match_rules_version = $3
         WHERE meta_ad_id = $1 AND match_status IN ('unmatched', 'suggested', 'auto_matched')`,
-      [ad.meta_ad_id, auto.confidence]
+      [ad.meta_ad_id, auto.confidence, AUTO_RULES_VERSION]
     );
-    return { suggestions: suggestions.length, auto_matched: true };
+    return { suggestions: suggestions.length, auto_matched: true, status: 'auto_matched', left_blank: auto.left_blank };
   }
 
   if (prev.match_status === 'auto_matched') {
@@ -612,7 +763,7 @@ async function refreshSuggestionsForAd(client, ad, ctx) {
     await client.query('DELETE FROM meta_ad_products WHERE meta_ad_id = $1', [ad.meta_ad_id]);
     await client.query(
       `UPDATE meta_ad_classifications SET not_product_specific = false, concept_type_id = NULL, concept_label = NULL,
-              creator_name = NULL, media_type = NULL, updated_at = now() WHERE meta_ad_id = $1`,
+              creator_name = NULL, media_type = NULL, auto_fields = NULL, updated_at = now() WHERE meta_ad_id = $1`,
       [ad.meta_ad_id]
     );
   }
@@ -623,11 +774,11 @@ async function refreshSuggestionsForAd(client, ad, ctx) {
        match_status = CASE WHEN $2::numeric IS NULL THEN 'unmatched' ELSE 'suggested' END,
        match_confidence = $2,
        match_method = CASE WHEN $2::numeric IS NULL THEN NULL ELSE 'auto_suggest' END,
-       match_suggestions_at = now()
+       match_suggestions_at = now(), match_rules_version = $3
      WHERE meta_ad_id = $1 AND match_status IN ('unmatched', 'suggested', 'auto_matched')`,
-    [ad.meta_ad_id, top]
+    [ad.meta_ad_id, top, AUTO_RULES_VERSION]
   );
-  return { suggestions: suggestions.length, auto_matched: false };
+  return { suggestions: suggestions.length, auto_matched: false, status: top === null ? 'unmatched' : 'suggested', blockers: auto.blockers };
 }
 
 // Window helpers: the queue's "recent activity" scope is relative to the
@@ -641,8 +792,10 @@ function scopeWindow(scope, now = new Date()) {
 }
 
 // Recomputes suggestions for non-confirmed, non-excluded ads. `pendingOnly`
-// (the default for the automatic call) restricts to ads never evaluated.
+// (the default for the automatic call) restricts to ads never evaluated, or
+// last evaluated under an older AUTO_RULES_VERSION.
 async function refreshSuggestions({ scope = '30d', pendingOnly = true, limit = 1500 } = {}) {
+  limit = Math.min(10000, Math.max(1, parseInt(limit, 10) || 1500));
   const win = scopeWindow(scope);
   const params = [];
   let activityJoin = '';
@@ -657,14 +810,18 @@ async function refreshSuggestions({ scope = '30d', pendingOnly = true, limit = 1
        ${activityJoin}
        LEFT JOIN meta_ad_classifications c ON c.meta_ad_id = a.meta_ad_id
       WHERE a.match_status <> 'confirmed' AND COALESCE(c.excluded_from_intelligence, false) = false
-        ${pendingOnly ? 'AND a.match_suggestions_at IS NULL' : ''}
+        ${pendingOnly ? `AND (a.match_suggestions_at IS NULL OR COALESCE(a.match_rules_version, 0) < ${AUTO_RULES_VERSION})` : ''}
+      ORDER BY COALESCE(a.match_rules_version, 0) ASC, a.match_suggestions_at ASC NULLS FIRST
       LIMIT $${params.length}`,
     params
   );
-  if (!ads.length) return { examined: 0, with_suggestions: 0, auto_matched: 0 };
+  if (!ads.length) return { examined: 0, with_suggestions: 0, auto_matched: 0, needs_review: 0, unmatched: 0, review_reasons: {} };
   const ctx = await loadContext();
   let withSuggestions = 0;
   let autoMatched = 0;
+  let needsReview = 0;
+  let unmatched = 0;
+  const reasons = {}; // why ads were held for a person (first blocker per ad)
   for (const ad of ads) {
     const client = await pool.connect();
     try {
@@ -673,6 +830,12 @@ async function refreshSuggestions({ scope = '30d', pendingOnly = true, limit = 1
       await client.query('COMMIT');
       if (r.suggestions) withSuggestions += 1;
       if (r.auto_matched) autoMatched += 1;
+      else if (r.status === 'suggested') needsReview += 1;
+      else if (r.status === 'unmatched') unmatched += 1;
+      if (!r.auto_matched && r.status) {
+        const why = (r.blockers && r.blockers[0]) || (r.status === 'unmatched' ? 'No evidence in the name' : 'Needs a person to choose');
+        reasons[why] = (reasons[why] || 0) + 1;
+      }
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
       throw err;
@@ -680,7 +843,7 @@ async function refreshSuggestions({ scope = '30d', pendingOnly = true, limit = 1
       client.release();
     }
   }
-  return { examined: ads.length, with_suggestions: withSuggestions, auto_matched: autoMatched };
+  return { examined: ads.length, with_suggestions: withSuggestions, auto_matched: autoMatched, needs_review: needsReview, unmatched, review_reasons: reasons };
 }
 
 // ── Queue ───────────────────────────────────────────────────────────────
@@ -761,7 +924,7 @@ async function getQueue(query = {}) {
   const listParams = [...filterParams, pageSize, (page - 1) * pageSize];
   const { rows } = await pool.query(
     `${cte}
-     SELECT a.meta_ad_id, a.ad_name, a.effective_status, a.created_time, a.match_status, a.matched_ad_setup_id,
+     SELECT a.meta_ad_id, a.ad_name, a.effective_status, a.created_time, a.match_status, a.matched_ad_setup_id, a.match_confidence,
             COALESCE(act.spend, 0) AS spend, act.last_active,
             c.skipped_at, COALESCE(c.excluded_from_intelligence, false) AS excluded,
             COALESCE(c.not_product_specific, false) AS not_product_specific,
@@ -810,7 +973,8 @@ async function getQueue(query = {}) {
       confidence_level: r.top_confidence === null ? null : confidenceLevel(r.top_confidence),
       // "Exact" is reserved for ads that were actually auto-matched; anything still
       // awaiting a person is at best "Likely".
-      confidence_label: r.top_confidence === null ? null : (r.match_status !== 'auto_matched' && confidenceLabel(r.top_confidence) === 'Exact' ? 'Likely' : confidenceLabel(r.top_confidence)),
+      confidence_label: r.match_status === 'auto_matched' && r.match_confidence !== null ? confidenceLabel(r.match_confidence)
+        : r.top_confidence === null ? null : (confidenceLabel(r.top_confidence) === 'Exact' ? 'Likely' : confidenceLabel(r.top_confidence)),
     })),
   };
 }
@@ -834,7 +998,7 @@ function describeAdSetup(s) {
 async function getAdWorkspace(metaAdId, { refresh = true } = {}) {
   const loadRow = () => pool.query(
     `SELECT a.*, c.not_product_specific, c.concept_type_id, c.concept_label, c.creative_style_id, c.creator_name, c.media_type,
-            COALESCE(c.excluded_from_intelligence, false) AS excluded, c.excluded_reason, c.skipped_at, c.auto_match_blocked_at
+            COALESCE(c.excluded_from_intelligence, false) AS excluded, c.excluded_reason, c.skipped_at, c.auto_match_blocked_at, c.auto_fields
        FROM meta_ads a LEFT JOIN meta_ad_classifications c ON c.meta_ad_id = a.meta_ad_id
       WHERE a.meta_ad_id = $1`,
     [metaAdId]
@@ -916,6 +1080,9 @@ async function getAdWorkspace(metaAdId, { refresh = true } = {}) {
       auto_matched: autoMatched,
       auto_match_blocked: !!ad.auto_match_blocked_at,
       review_reasons: confirmed ? [] : autoEval.blockers,
+      // Per-field provenance of the machine's own values (null for human-confirmed).
+      auto_fields: confirmed ? null : (ad.auto_fields || null),
+      left_blank: autoMatched ? autoEval.left_blank : [],
       excluded: ad.excluded,
       excluded_reason: ad.excluded_reason || null,
       skipped: !!ad.skipped_at,
@@ -999,7 +1166,7 @@ async function confirmMapping(metaAdId, body, userId) {
          not_product_specific = EXCLUDED.not_product_specific, concept_type_id = EXCLUDED.concept_type_id,
          concept_label = EXCLUDED.concept_label, creative_style_id = EXCLUDED.creative_style_id,
          creator_name = EXCLUDED.creator_name, media_type = EXCLUDED.media_type, skipped_at = NULL,
-         classified_by_user_id = EXCLUDED.classified_by_user_id, updated_at = now()`,
+         auto_fields = NULL, classified_by_user_id = EXCLUDED.classified_by_user_id, updated_at = now()`,
       [metaAdId, notProductSpecific, conceptTypeId, conceptLabel, styleId, creator, mediaType, userId || null]
     );
     await client.query('DELETE FROM meta_ad_products WHERE meta_ad_id = $1', [metaAdId]);
@@ -1020,7 +1187,49 @@ async function confirmMapping(metaAdId, body, userId) {
   } finally {
     client.release();
   }
-  return getAdWorkspace(metaAdId, { refresh: false });
+  let similarApplied = 0;
+  if (!notProductSpecific && productCodes.length === 1) {
+    try { similarApplied = await reapplyTrustedPair(metaAdId); } catch (err) { /* best effort */ }
+  }
+  const workspace = await getAdWorkspace(metaAdId, { refresh: false });
+  workspace.auto_applied_to_similar = similarApplied;
+  return workspace;
+}
+
+// After a person confirms a single-product mapping, every OTHER not-yet-
+// classified ad with the same structured Product + Category is re-evaluated
+// so the now-trusted pair is applied to the historical backlog straight away
+// (future ads pick it up through loadContext). Confirmed/excluded/blocked ads
+// are skipped inside refreshSuggestionsForAd. Best effort: never fails the
+// confirmation that triggered it. Local database only.
+async function reapplyTrustedPair(metaAdId) {
+  const r = await pool.query('SELECT ad_name FROM meta_ads WHERE meta_ad_id = $1', [metaAdId]);
+  const st = r.rows.length ? parseStructuredMetaName(r.rows[0].ad_name) : null;
+  if (!st || !st.product_name || !st.product_category) return 0;
+  const cands = await pool.query(
+    `SELECT meta_ad_id, ad_name FROM meta_ads
+      WHERE match_status IN ('unmatched', 'suggested') AND meta_ad_id <> $1
+        AND ad_name ILIKE $2 ESCAPE '\\' AND ad_name ILIKE $3 ESCAPE '\\'
+      LIMIT 2000`,
+    [metaAdId, `%${escapeLike(st.product_name)}%`, `%${escapeLike(st.product_category)}%`]
+  );
+  if (!cands.rows.length) return 0;
+  const ctx = await loadContext();
+  let applied = 0;
+  for (const ad of cands.rows) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const out = await refreshSuggestionsForAd(client, ad, ctx);
+      await client.query('COMMIT');
+      if (out.auto_matched) applied += 1;
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+    } finally {
+      client.release();
+    }
+  }
+  return applied;
 }
 
 async function ensureAd(metaAdId) {
@@ -1072,7 +1281,7 @@ async function clearMapping(metaAdId) {
        ON CONFLICT (meta_ad_id) DO UPDATE SET
          not_product_specific = false, concept_type_id = NULL, concept_label = NULL,
          creative_style_id = NULL, creator_name = NULL, media_type = NULL, skipped_at = NULL,
-         auto_match_blocked_at = now(), updated_at = now()`,
+         auto_fields = NULL, auto_match_blocked_at = now(), updated_at = now()`,
       [metaAdId]
     );
     await client.query(

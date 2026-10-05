@@ -2726,3 +2726,12 @@ END $$;
 -- Set when a human rejects/clears a mapping, so the auto-matcher never
 -- re-applies one to an ad a person has already overruled (it still suggests).
 ALTER TABLE meta_ad_classifications ADD COLUMN IF NOT EXISTS auto_match_blocked_at TIMESTAMPTZ;
+
+-- Hands-off Ad Matching: per-field provenance of the machine's own
+-- classification, e.g. {"product":{"basis":"confirmed_pair","confidence":0.95},
+-- "concept":{"basis":"legacy_text"}}. NULL on human-confirmed classifications
+-- (match_status = 'confirmed' / match_method = 'manual' is the human marker).
+ALTER TABLE meta_ad_classifications ADD COLUMN IF NOT EXISTS auto_fields JSONB;
+-- Which version of the auto-match rules last evaluated the ad, so a rule
+-- change re-evaluates already-suggested ads on the next suggestion run.
+ALTER TABLE meta_ads ADD COLUMN IF NOT EXISTS match_rules_version INTEGER;

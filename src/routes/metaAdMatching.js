@@ -50,6 +50,7 @@ router.get('/ad-setups/:id/prefill', handle((req) => matching.adSetupPrefill(req
 router.post('/suggest', handle((req) => matching.refreshSuggestions({
   scope: (req.body && req.body.scope) || '30d',
   pendingOnly: !(req.body && req.body.all === true),
+  limit: req.body && req.body.limit,
 })));
 
 // Workspace for one ad: Meta evidence + current classification + suggestions.
