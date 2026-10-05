@@ -61,7 +61,9 @@ function canonTokens(text) {
     .replace(/&/g, ' AND ');
   return t.replace(/[^A-Z0-9]+/g, ' ').trim().split(' ').filter(Boolean).map((w) => {
     if (w === 'QTR') return 'QUARTER';
-    return w.length >= 5 && w.endsWith('S') && !w.endsWith('SS') ? w.slice(0, -1) : w;
+    // plural -> singular (both sides of any comparison go through this, so
+    // TEES == TEE, TOPS == TOP, SHORTS == SHORT)
+    return w.length >= 4 && w.endsWith('S') && !/(SS|US|IS)$/.test(w) ? w.slice(0, -1) : w;
   });
 }
 
