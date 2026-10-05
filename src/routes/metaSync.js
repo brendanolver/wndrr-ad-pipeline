@@ -14,6 +14,26 @@ const metaSync = require('../lib/metaSync');
 const router = express.Router();
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+// One place that turns a failed Meta-touching action into an HTTP response
+// that is safe to show an admin: a Meta rate limit is a 429 with the fixed
+// "existing data is safe" message (+ a retry hint in seconds when Meta or
+// the in-process cooldown supplied one); every other MetaApiError already
+// carries a sanitised message; anything else is URL-stripped and capped so
+// an unexpected error can never put a credential-bearing URL on screen.
+function sendMetaError(res, err) {
+  if (err && err.rateLimited) {
+    return res.status(429).json({
+      error: err.message,
+      rate_limited: true,
+      retry_after_seconds: err.retryAfterSeconds || null,
+    });
+  }
+  const message = err && err.safe
+    ? err.message
+    : String((err && err.message) || 'Meta sync failed').replace(/https?:\/\/\S+/g, '[url removed]').slice(0, 300);
+  return res.status(502).json({ error: message });
+}
+
 // Account connected / ads discovered / rows stored / most recent sync --
 // exactly the checklist the brief asked for, read from meta_sync_runs +
 // meta_ads + meta_ad_insights_daily + meta_account_settings. Never queries
@@ -27,11 +47,12 @@ router.get('/status', requireAdmin, async (req, res, next) => {
   }
 });
 
-// Runs one sync: account settings refresh + full ad discovery (all
-// statuses, not just ACTIVE) + daily Insights for an explicit range, or
-// the safe default (Sydney today back 2 days) when no range is given. Always
-// admin-triggered -- nothing calls this on a schedule or at server
-// startup.
+// Routine (lightweight) performance sync: account settings + daily ad-level
+// Insights for an explicit range, or the safe default (Sydney today back 2
+// days) when no range is given, plus a metadata lookup for ONLY those ads in
+// the Insights that have no meta_ads row yet. It never lists or upserts the
+// ad inventory -- see /refresh-inventory for that. Always admin-triggered --
+// nothing calls this on a schedule or at server startup.
 router.post('/run', requireAdmin, async (req, res, next) => {
   try {
     if (!metaAds.configured()) {
@@ -47,7 +68,24 @@ router.post('/run', requireAdmin, async (req, res, next) => {
       : await metaSync.runDefaultSync(req.user.id);
     res.json(result);
   } catch (err) {
-    res.status(502).json({ error: err.message });
+    sendMetaError(res, err);
+  }
+});
+
+// Full ad-inventory refresh: the heavy, explicit maintenance action,
+// deliberately separate from the routine sync above. Pages through every ad
+// in the account (~60 Meta calls at ~30k ads) to refresh names/statuses/IDs
+// and add historical ads not yet stored. Idempotent upsert; never deletes a
+// meta_ads row, never touches match_* (confirmed mappings survive); read-
+// only against Meta. Never called by anything automatically.
+router.post('/refresh-inventory', requireAdmin, async (req, res) => {
+  try {
+    if (!metaAds.configured()) {
+      return res.status(503).json({ error: 'Meta Ads is not configured (META_AD_ACCOUNT_ID / META_ACCESS_TOKEN missing)' });
+    }
+    res.json(await metaSync.refreshInventory({ userId: req.user.id }));
+  } catch (err) {
+    sendMetaError(res, err);
   }
 });
 
@@ -69,7 +107,7 @@ router.post('/backfill', requireAdmin, async (req, res, next) => {
     const result = await metaSync.runBackfill({ since, until, userId: req.user.id });
     res.status(result.completed ? 200 : 207).json(result);
   } catch (err) {
-    res.status(502).json({ error: err.message });
+    sendMetaError(res, err);
   }
 });
 

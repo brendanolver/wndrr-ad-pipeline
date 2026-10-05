@@ -761,9 +761,11 @@ document.getElementById('mp-ads-body').addEventListener('click', (e) => {
 });
 
 // ── Meta Sync (Settings, temporary admin-only operator control) ─────────
-// Calls only the existing admin endpoints: GET /api/meta-sync/status (local
-// DB read, never calls Meta) and POST /api/meta-sync/run with no body (the
-// server's default 3-day window). The server never returns credentials or
+// Calls only the admin endpoints: GET /api/meta-sync/status (local DB read,
+// never calls Meta), POST /api/meta-sync/run with no body (the server's
+// default LIGHTWEIGHT 3-day performance sync) and, as a separate maintenance
+// action behind a confirm, POST /api/meta-sync/refresh-inventory (the full
+// ad-inventory refresh). The server never returns credentials or
 // token-bearing URLs (see metaAds.js's stripPagingUrls/metaGet redaction),
 // so error text from it is safe to show as-is.
 let metaSyncRunning = false;
@@ -774,53 +776,96 @@ function setMetaSyncMessage(text, kind) {
   el.className = `meta-sync-message${kind ? ` ${kind}` : ''}`;
 }
 
+function setMetaSyncBusy(busy, runLabel) {
+  metaSyncRunning = busy;
+  const runBtn = document.getElementById('meta-sync-run-btn');
+  const invBtn = document.getElementById('meta-inventory-refresh-btn');
+  // Both actions share one in-flight lock so they can never overlap.
+  runBtn.disabled = busy;
+  invBtn.disabled = busy;
+  runBtn.textContent = runLabel || 'Run 3-Day Sync';
+  invBtn.textContent = 'Refresh Ad Inventory';
+}
+
 async function loadMetaSyncPanel() {
   try {
     const status = await api('/meta-sync/status');
     const last = status.last_successful_run || null;
-    document.getElementById('meta-sync-last').textContent = last && last.finished_at
-      ? new Date(last.finished_at).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })
-      : 'Never';
+    const fmtWhen = (iso) => new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+    document.getElementById('meta-sync-last').textContent = last && last.finished_at ? fmtWhen(last.finished_at) : 'Never';
     document.getElementById('meta-sync-range').textContent = last
       ? `${formatDate(last.range_since)} – ${formatDate(last.range_until)}`
       : '—';
     document.getElementById('meta-sync-ads').textContent = Number(status.total_meta_ads || 0).toLocaleString();
     document.getElementById('meta-sync-rows').textContent = Number((status.daily_insights && status.daily_insights.row_count) || 0).toLocaleString();
     document.getElementById('meta-sync-unmatched').textContent = Number((status.match_counts && status.match_counts.unmatched) || 0).toLocaleString();
+    const inv = status.last_inventory_refresh || null;
+    document.getElementById('meta-sync-inventory-last').textContent = inv && inv.finished_at ? fmtWhen(inv.finished_at) : 'Never';
     if (!status.configured && !metaSyncRunning) {
       setMetaSyncMessage('Meta is not configured on this server (META_AD_ACCOUNT_ID / META_ACCESS_TOKEN missing).', 'err');
+    } else if (status.rate_limit_cooldown_seconds > 0 && !metaSyncRunning && !document.getElementById('meta-sync-message').textContent) {
+      const mins = Math.max(1, Math.ceil(status.rate_limit_cooldown_seconds / 60));
+      setMetaSyncMessage(`Meta rate limit active. Existing data is safe. Try again in about ${mins} min.`, 'err');
     }
   } catch (e) {
     setMetaSyncMessage(`Could not load sync status: ${e.message}`, 'err');
   }
 }
 
+// Routine, lightweight performance sync (daily Insights for Sydney today +
+// the previous 2 days). Does NOT rescan the ad inventory.
 async function runMetaSync() {
   if (metaSyncRunning) return;
-  metaSyncRunning = true;
-  const btn = document.getElementById('meta-sync-run-btn');
-  btn.disabled = true;
-  btn.textContent = 'Syncing…';
+  setMetaSyncBusy(true, 'Syncing…');
   setMetaSyncMessage('');
   try {
     const r = await api('/meta-sync/run', { method: 'POST' });
+    const newAds = r.new_ads_identified || 0;
     setMetaSyncMessage(
-      `Synced ${formatDate(r.range.since)} – ${formatDate(r.range.until)}: ${r.ads_discovered} ads found (${r.ads_inserted} new), ${r.daily_rows_seen} daily rows (${r.daily_rows_inserted} new, ${r.daily_rows_updated} updated).`,
+      `Synced ${formatDate(r.range.since)} – ${formatDate(r.range.until)}: ${r.daily_rows_seen} daily rows (${r.daily_rows_inserted} new, ${r.daily_rows_updated} updated)${newAds ? `, ${newAds} new ad${newAds === 1 ? '' : 's'} added` : ''}.`,
       'ok'
     );
   } catch (e) {
-    setMetaSyncMessage(`Sync failed: ${e.message}`, 'err');
+    // The server's error text is already UI-safe (rate limits arrive as
+    // "Meta rate limit reached. Existing data is safe. Try again later.").
+    setMetaSyncMessage(e.status === 429 ? e.message : `Sync failed: ${e.message}`, 'err');
   } finally {
-    metaSyncRunning = false;
-    btn.disabled = false;
-    btn.textContent = 'Run 3-Day Sync';
+    setMetaSyncBusy(false);
     // Refresh the counts either way (a failed run still logs a meta_sync_runs
     // row, and partially-synced rows may already be stored) without
     // overwriting the success/error message just set above.
     loadMetaSyncPanel();
   }
 }
+
+// Maintenance: full ad-inventory refresh. Heavy (pages through every ad in
+// the account), so it asks first, and it is never triggered by anything
+// else -- not by page load, not by Run 3-Day Sync.
+async function refreshMetaInventory() {
+  if (metaSyncRunning) return;
+  const ok = await confirmDialog(
+    'Refresh the full Meta ad inventory? This pages through every ad in the account (roughly 60 Meta requests for ~30,000 ads) to refresh names and statuses and add any missing historical ads. It is only needed occasionally and is not part of normal daily syncing. Existing ads and mappings are never deleted or changed.',
+    { okLabel: 'Refresh inventory' }
+  );
+  if (!ok) return;
+  setMetaSyncBusy(true);
+  document.getElementById('meta-inventory-refresh-btn').textContent = 'Refreshing…';
+  setMetaSyncMessage('');
+  try {
+    const r = await api('/meta-sync/refresh-inventory', { method: 'POST' });
+    setMetaSyncMessage(
+      `Inventory refreshed: ${Number(r.ads_discovered).toLocaleString()} ads checked (${Number(r.ads_inserted).toLocaleString()} new, ${Number(r.ads_updated).toLocaleString()} updated).${r.complete ? '' : ' The listing stopped early, so it may be incomplete — existing data is safe.'}`,
+      r.complete ? 'ok' : 'err'
+    );
+  } catch (e) {
+    setMetaSyncMessage(e.status === 429 ? e.message : `Inventory refresh failed: ${e.message}`, 'err');
+  } finally {
+    setMetaSyncBusy(false);
+    loadMetaSyncPanel();
+  }
+}
 document.getElementById('meta-sync-run-btn').addEventListener('click', runMetaSync);
+document.getElementById('meta-inventory-refresh-btn').addEventListener('click', refreshMetaInventory);
 
 // ── User Access (Settings) ────────────────────────────
 // Round 12 redesign: a scannable table (was a wide card per user with 13

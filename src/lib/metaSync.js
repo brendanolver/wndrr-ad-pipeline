@@ -7,10 +7,25 @@
 // final_edits, ad_setups are never written to by this file).
 //
 // Nothing in this file runs automatically. server.js does not call
-// anything here on boot -- every sync (default-window or backfill) is
-// triggered by an explicit, admin-only API call (src/routes/metaSync.js).
+// anything here on boot -- every sync (default-window, backfill or
+// inventory refresh) is triggered by an explicit, admin-only API call
+// (src/routes/metaSync.js).
+//
+// TWO separate jobs, deliberately never combined:
+//   A. Routine performance sync (runSync / runDefaultSync / runBackfill):
+//      account settings + daily ad-level Insights for a date range, plus a
+//      metadata lookup ONLY for ads that appear in those Insights but have
+//      no meta_ads identity yet. Cost is proportional to the date range --
+//      never to the ~30k-ad historical inventory -- so it is safe to
+//      schedule later.
+//   B. Full inventory refresh (refreshInventory): pages through EVERY ad in
+//      the account to refresh names/statuses/IDs and pick up historical
+//      ads. Heavy (~60 calls at 500/page for ~30k ads), explicit admin
+//      action only, never part of A.
 const { pool } = require('../db');
-const { configured, metaGet, accountPath, metaGetAllPages } = require('./metaAds');
+const {
+  configured, metaGet, accountPath, metaGetAllPages, metaGetByIds, buildMetaApiError, MetaApiError, RATE_LIMIT_MESSAGE,
+} = require('./metaAds');
 const { ymdInZone, addDays, REPORTING_TIMEZONE } = require('./metaPerformance');
 // Which Meta action_type counts as a Purchase / Add to Cart / purchase
 // value (verified against Ads Manager) and which attribution window is
@@ -32,6 +47,31 @@ const INSIGHTS_FIELDS = [
 const AD_FIELDS = 'id,name,effective_status,campaign_id,adset_id,creative{id},created_time';
 
 const BACKFILL_CHUNK_DAYS = 30;
+// Graph API multi-id reads accept up to 50 ids per request.
+const AD_LOOKUP_BATCH = 50;
+// Used only when Meta gave no retry hint with a rate-limit response.
+const DEFAULT_RATE_LIMIT_COOLDOWN_SECONDS = 300;
+
+// In-process cooldown after a rate-limit response. While it is active every
+// Meta-touching action here fails fast WITHOUT calling Meta, so a second
+// click (or a future scheduler) can't pile more calls onto an account that
+// just told us to wait. Memory only: a restart clears it, which is fine --
+// the real limit lives on Meta's side and is re-detected on the next call.
+let rateLimitedUntil = 0;
+
+function noteRateLimit(err) {
+  if (err && err.rateLimited) {
+    const seconds = err.retryAfterSeconds || DEFAULT_RATE_LIMIT_COOLDOWN_SECONDS;
+    rateLimitedUntil = Math.max(rateLimitedUntil, Date.now() + seconds * 1000);
+  }
+}
+
+function assertNotRateLimited() {
+  const remaining = Math.ceil((rateLimitedUntil - Date.now()) / 1000);
+  if (remaining > 0) {
+    throw new MetaApiError(RATE_LIMIT_MESSAGE, { rateLimited: true, retryAfterSeconds: remaining });
+  }
+}
 
 function fmtDate(d) {
   return d.toISOString().slice(0, 10);
@@ -108,6 +148,10 @@ async function upsertAd(ad) {
        meta_creative_id = EXCLUDED.meta_creative_id,
        ad_name = EXCLUDED.ad_name,
        effective_status = EXCLUDED.effective_status,
+       -- created_time never changes on Meta's side, so only FILL it when absent
+       -- (an id-only shell created for an ad seen in Insights before its
+       -- metadata was fetched) -- never overwrite a stored value.
+       created_time = COALESCE(meta_ads.created_time, EXCLUDED.created_time),
        last_seen_at = now(),
        updated_at = now()
      RETURNING (xmax = 0) AS inserted`,
@@ -176,11 +220,7 @@ async function fetchAccountSettings() {
   const result = await metaGet(accountPath(), {
     fields: 'name,currency,timezone_name,timezone_offset_hours_utc,account_status',
   });
-  if (result.status !== 200) {
-    const err = new Error(`Failed to fetch account settings: Meta returned status ${result.status}: ${JSON.stringify(result.data)}`);
-    err.metaError = result.data;
-    throw err;
-  }
+  if (result.status !== 200) throw buildMetaApiError(result, 'Account settings request');
   return result.data;
 }
 
@@ -203,39 +243,98 @@ async function upsertAccountSettings(info) {
   );
 }
 
-// Discovery: deliberately NO effective_status filter -- requesting a
-// specific status LIST (as the existing live-ad-coverage feature does,
-// scoped to ['ACTIVE'] only) would narrow results, not broaden them.
-// Omitting the filter asks Meta for its own default set, which needs
-// confirming against this account's real ad count (see the Phase 1
-// report) rather than assumed complete.
+// Full-inventory discovery (job B only -- see refreshInventory). Deliberately
+// NO effective_status filter -- requesting a specific status LIST (as the
+// existing live-ad-coverage feature does, scoped to ['ACTIVE'] only) would
+// narrow results, not broaden them. Omitting the filter asks Meta for its
+// own default set (production confirmed: ~29.7k ads back to 2019).
 async function discoverAds() {
   let discovered = 0;
   let inserted = 0;
   let updated = 0;
-  await metaGetAllPages(`${accountPath()}/ads`, { fields: AD_FIELDS, limit: '500' }, async (rows) => {
+  const paging = await metaGetAllPages(`${accountPath()}/ads`, { fields: AD_FIELDS, limit: '500' }, async (rows) => {
     for (const row of rows) {
       discovered += 1;
-      const wasInserted = await upsertAd({
-        meta_ad_id: row.id,
-        meta_adset_id: row.adset_id || null,
-        meta_campaign_id: row.campaign_id || null,
-        meta_creative_id: (row.creative && row.creative.id) || null,
-        ad_name: row.name || null,
-        effective_status: row.effective_status || null,
-        created_time: row.created_time || null,
-      });
+      const wasInserted = await upsertAd(adFromMeta(row));
       if (wasInserted) inserted += 1; else updated += 1;
     }
   });
-  return { discovered, inserted, updated };
+  return { discovered, inserted, updated, pages: paging.pages, stoppedReason: paging.stoppedReason };
+}
+
+function adFromMeta(row) {
+  return {
+    meta_ad_id: row.id,
+    meta_adset_id: row.adset_id || null,
+    meta_campaign_id: row.campaign_id || null,
+    meta_creative_id: (row.creative && row.creative.id) || null,
+    ad_name: row.name || null,
+    effective_status: row.effective_status || null,
+    created_time: row.created_time || null,
+  };
+}
+
+// For one page of Insights rows: guarantees every referenced ad has a
+// meta_ads row (the FK target) and reports which of them still lack real
+// metadata. An ad "needs a lookup" when it has no meta_ads row at all, or
+// only an id-only shell (ad_name IS NULL, e.g. an earlier lookup failed).
+// A known ad -- the normal case, ~every ad in a routine window -- costs one
+// local SELECT per page and NO Meta call. Never touches match_*.
+async function ensureIdentitiesForPage(adIds, needLookup, counters) {
+  if (!adIds.length) return;
+  const known = await pool.query(
+    'SELECT meta_ad_id, ad_name FROM meta_ads WHERE meta_ad_id = ANY($1)',
+    [adIds]
+  );
+  const byId = new Map(known.rows.map((r) => [r.meta_ad_id, r.ad_name]));
+  for (const id of adIds) {
+    if (!byId.has(id)) {
+      await ensureAdShell(id);
+      counters.newIdentities += 1;
+      needLookup.add(id);
+    } else if (byId.get(id) === null) {
+      needLookup.add(id);
+    }
+  }
+}
+
+// Fetches metadata for ONLY the given ad ids, in batches of up to 50 per
+// call (`/?ids=...`) -- never a full-account listing. A rate limit aborts
+// (thrown); any other failure leaves those ads as id-only shells (their
+// daily rows are already safely stored) and is reported, not fatal.
+async function lookupMissingAds(ids) {
+  const out = { requested: ids.length, resolved: 0, unresolved: 0, calls: 0 };
+  for (let i = 0; i < ids.length; i += AD_LOOKUP_BATCH) {
+    const batch = ids.slice(i, i + AD_LOOKUP_BATCH);
+    let map;
+    try {
+      out.calls += 1;
+      map = await metaGetByIds(batch, AD_FIELDS);
+    } catch (err) {
+      if (err.rateLimited) throw err;
+      out.unresolved += batch.length;
+      continue;
+    }
+    for (const id of batch) {
+      const row = map[id];
+      if (row && row.id) {
+        await upsertAd(adFromMeta(row));
+        out.resolved += 1;
+      } else {
+        out.unresolved += 1;
+      }
+    }
+  }
+  return out;
 }
 
 async function fetchAndUpsertInsights(since, until, currency) {
   let rowsSeen = 0;
   let inserted = 0;
   let updated = 0;
-  await metaGetAllPages(`${accountPath()}/insights`, {
+  const counters = { newIdentities: 0 };
+  const needLookup = new Set();
+  const paging = await metaGetAllPages(`${accountPath()}/insights`, {
     level: 'ad',
     time_increment: '1',
     time_range: JSON.stringify({ since, until }),
@@ -243,27 +342,37 @@ async function fetchAndUpsertInsights(since, until, currency) {
     action_attribution_windows: JSON.stringify(getAttributionWindows()),
     limit: '500',
   }, async (rows) => {
-    for (const row of rows) {
-      if (!row.ad_id || !row.date_start) continue;
+    const valid = rows.filter((r) => r.ad_id && r.date_start);
+    await ensureIdentitiesForPage([...new Set(valid.map((r) => r.ad_id))], needLookup, counters);
+    for (const row of valid) {
       rowsSeen += 1;
-      await ensureAdShell(row.ad_id);
       const wasInserted = await upsertDailyRow(mapInsightsRow(row, currency));
       if (wasInserted) inserted += 1; else updated += 1;
     }
   });
-  return { rowsSeen, inserted, updated };
+  // A truncated Insights listing must never be recorded as a successful
+  // sync: the coverage logic treats a successful run as "these days are
+  // fully in", so an early stop here is a failure (rows already stored are
+  // correct and idempotent; the run just doesn't claim coverage).
+  if (paging.stoppedReason !== 'end') {
+    throw new Error(`Meta Insights pagination stopped early (${paging.stoppedReason}); this run is not recorded as synced. Existing data is safe.`);
+  }
+  return { rowsSeen, inserted, updated, newIdentities: counters.newIdentities, needLookup: [...needLookup] };
 }
 
-// One sync run = account settings refresh + full ad discovery + daily
-// Insights for [since, until], logged start-to-finish in meta_sync_runs
-// regardless of outcome. Discovery always runs in full (not scoped to the
-// insights date range) so a confirmed/suggested mapping on an older ad
-// still gets its name/status refreshed even on a narrow recent-window
-// sync.
+// Job A: routine performance sync for [since, until], logged start-to-
+// finish in meta_sync_runs regardless of outcome.
+//   account settings (1 call) -> daily ad-level Insights (paged) -> for ads
+//   in those Insights with no meta_ads identity: fetch just those ads'
+//   metadata by id.
+// It does NOT list or upsert the account's ad inventory, so the
+// ~29.7k existing meta_ads rows are never touched here (names/statuses of
+// ads that have no new Insights only refresh via refreshInventory).
 async function runSync({ since, until, runType = 'default', userId = null }) {
   if (!configured()) {
     throw new Error('Meta Ads is not configured (META_AD_ACCOUNT_ID / META_ACCESS_TOKEN missing)');
   }
+  assertNotRateLimited();
   const runInsert = await pool.query(
     `INSERT INTO meta_sync_runs (run_type, range_since, range_until, started_by_user_id)
      VALUES ($1,$2,$3,$4) RETURNING id`,
@@ -274,27 +383,86 @@ async function runSync({ since, until, runType = 'default', userId = null }) {
   try {
     const accountInfo = await fetchAccountSettings();
     await upsertAccountSettings(accountInfo);
-    const discovery = await discoverAds();
     const insights = await fetchAndUpsertInsights(since, until, accountInfo.currency);
+    const lookup = await lookupMissingAds(insights.needLookup);
 
+    // ads_discovered / ads_inserted / ads_updated keep their column meaning
+    // for the run log: ads whose metadata was needed, ads that gained a
+    // brand-new meta_ads identity, and previously id-only shells filled in.
+    const adsDiscovered = lookup.requested;
+    const adsInserted = insights.newIdentities;
+    const adsUpdated = Math.max(0, lookup.resolved - insights.newIdentities);
     await pool.query(
       `UPDATE meta_sync_runs SET
          ads_discovered = $1, ads_inserted = $2, ads_updated = $3,
          daily_rows_inserted = $4, daily_rows_updated = $5,
          status = 'success', finished_at = now()
        WHERE id = $6`,
-      [discovery.discovered, discovery.inserted, discovery.updated, insights.inserted, insights.updated, runId]
+      [adsDiscovered, adsInserted, adsUpdated, insights.inserted, insights.updated, runId]
     );
     return {
       run_id: runId, range: { since, until },
-      ads_discovered: discovery.discovered, ads_inserted: discovery.inserted, ads_updated: discovery.updated,
       daily_rows_seen: insights.rowsSeen, daily_rows_inserted: insights.inserted, daily_rows_updated: insights.updated,
+      new_ads_identified: insights.newIdentities,
+      ad_metadata_lookups: { requested: lookup.requested, resolved: lookup.resolved, unresolved: lookup.unresolved, calls: lookup.calls },
     };
   } catch (err) {
+    noteRateLimit(err);
+    await failRun(runId, err);
+    throw err;
+  }
+}
+
+// Failure bookkeeping: only the already-safe message is stored (a
+// MetaApiError's message is sanitised at source; anything else is
+// URL-stripped and length-capped).
+async function failRun(runId, err) {
+  const message = err && err.safe ? err.message : String((err && err.message) || err).replace(/https?:\/\/\S+/g, '[url removed]');
+  await pool.query(
+    `UPDATE meta_sync_runs SET status = 'failed', error_message = $1, finished_at = now() WHERE id = $2`,
+    [message.slice(0, 500), runId]
+  );
+}
+
+// Job B: explicit full-inventory refresh. Idempotent upsert keyed on the
+// stable meta_ad_id: refreshes Meta-owned fields (name, status, ids,
+// last_seen_at) and inserts historical ads not yet stored. Never deletes a
+// meta_ads row and never touches match_* (see upsertAd), so confirmed
+// mappings survive. Logged in meta_sync_runs as run_type 'inventory' --
+// excluded from every "which days are synced" calculation because it pulls
+// no Insights (see metaPerformance.getCoverage). Progress is upserted as it
+// goes, so a rate limit midway leaves everything fetched so far stored.
+async function refreshInventory({ userId = null } = {}) {
+  if (!configured()) {
+    throw new Error('Meta Ads is not configured (META_AD_ACCOUNT_ID / META_ACCESS_TOKEN missing)');
+  }
+  assertNotRateLimited();
+  const today = ymdInZone(new Date(), REPORTING_TIMEZONE);
+  const runInsert = await pool.query(
+    `INSERT INTO meta_sync_runs (run_type, range_since, range_until, started_by_user_id)
+     VALUES ('inventory',$1,$1,$2) RETURNING id`,
+    [today, userId]
+  );
+  const runId = runInsert.rows[0].id;
+  try {
+    const discovery = await discoverAds();
     await pool.query(
-      `UPDATE meta_sync_runs SET status = 'failed', error_message = $1, finished_at = now() WHERE id = $2`,
-      [String(err.message || err).slice(0, 2000), runId]
+      `UPDATE meta_sync_runs SET ads_discovered = $1, ads_inserted = $2, ads_updated = $3,
+         status = 'success', finished_at = now() WHERE id = $4`,
+      [discovery.discovered, discovery.inserted, discovery.updated, runId]
     );
+    return {
+      run_id: runId,
+      ads_discovered: discovery.discovered, ads_inserted: discovery.inserted, ads_updated: discovery.updated,
+      pages: discovery.pages,
+      // 'end' = listing completed; anything else means Meta's cursor looped
+      // and the listing is INCOMPLETE (rows fetched so far are stored).
+      complete: discovery.stoppedReason === 'end',
+      stopped_reason: discovery.stoppedReason,
+    };
+  } catch (err) {
+    noteRateLimit(err);
+    await failRun(runId, err);
     throw err;
   }
 }
@@ -347,7 +515,7 @@ async function runBackfill({ since, until, userId }) {
       const result = await runSync({ since: chunk.since, until: chunk.until, runType: 'backfill', userId });
       results.push({ ...chunk, ok: true, ...result });
     } catch (err) {
-      results.push({ ...chunk, ok: false, error: err.message });
+      results.push({ ...chunk, ok: false, error: err.safe ? err.message : String(err.message || err).replace(/https?:\/\/\S+/g, '[url removed]').slice(0, 300), rate_limited: !!err.rateLimited });
       break;
     }
   }
@@ -355,9 +523,13 @@ async function runBackfill({ since, until, userId }) {
 }
 
 async function getSyncStatus() {
-  const [lastRunResult, lastSuccessResult, matchCountsResult, dailyRangeResult, accountSettingsResult] = await Promise.all([
-    pool.query('SELECT * FROM meta_sync_runs ORDER BY started_at DESC LIMIT 1'),
-    pool.query(`SELECT * FROM meta_sync_runs WHERE status = 'success' ORDER BY finished_at DESC LIMIT 1`),
+  // last_run / last_successful_run describe PERFORMANCE syncs only
+  // (default + backfill); inventory refreshes are reported separately so a
+  // maintenance refresh never reads as "performance data was synced".
+  const [lastRunResult, lastSuccessResult, lastInventoryResult, matchCountsResult, dailyRangeResult, accountSettingsResult] = await Promise.all([
+    pool.query(`SELECT * FROM meta_sync_runs WHERE run_type IN ('default','backfill') ORDER BY started_at DESC LIMIT 1`),
+    pool.query(`SELECT * FROM meta_sync_runs WHERE run_type IN ('default','backfill') AND status = 'success' ORDER BY finished_at DESC LIMIT 1`),
+    pool.query(`SELECT * FROM meta_sync_runs WHERE run_type = 'inventory' AND status = 'success' ORDER BY finished_at DESC LIMIT 1`),
     pool.query('SELECT match_status, count(*)::int AS count FROM meta_ads GROUP BY match_status'),
     pool.query('SELECT min(insight_date) AS min_date, max(insight_date) AS max_date, count(*)::int AS row_count FROM meta_ad_insights_daily'),
     pool.query('SELECT * FROM meta_account_settings ORDER BY fetched_at DESC LIMIT 1'),
@@ -371,6 +543,9 @@ async function getSyncStatus() {
     account_settings: accountSettingsResult.rows[0] || null,
     last_run: lastRunResult.rows[0] || null,
     last_successful_run: lastSuccessResult.rows[0] || null,
+    last_inventory_refresh: lastInventoryResult.rows[0] || null,
+    // Seconds left on the in-process rate-limit cooldown (0 = none).
+    rate_limit_cooldown_seconds: Math.max(0, Math.ceil((rateLimitedUntil - Date.now()) / 1000)),
     total_meta_ads: Object.values(matchCounts).reduce((a, b) => a + b, 0),
     match_counts: matchCounts,
     daily_insights: dailyRangeResult.rows[0] || null,
@@ -514,6 +689,7 @@ async function adInventoryDiagnostics() {
 module.exports = {
   runSync,
   runDefaultSync,
+  refreshInventory,
   defaultWindow,
   runBackfill,
   getSyncStatus,

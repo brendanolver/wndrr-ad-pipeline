@@ -2543,7 +2543,7 @@ CREATE TABLE IF NOT EXISTS meta_account_settings (
 -- and didn't get through.
 CREATE TABLE IF NOT EXISTS meta_sync_runs (
   id SERIAL PRIMARY KEY,
-  run_type VARCHAR(20) NOT NULL CHECK (run_type IN ('default', 'backfill')),
+  run_type VARCHAR(20) NOT NULL CHECK (run_type IN ('default', 'backfill', 'inventory')),
   range_since DATE NOT NULL,
   range_until DATE NOT NULL,
   ads_discovered INTEGER NOT NULL DEFAULT 0,
@@ -2558,3 +2558,23 @@ CREATE TABLE IF NOT EXISTS meta_sync_runs (
   started_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_meta_sync_runs_started_at ON meta_sync_runs(started_at);
+
+-- 'inventory' = the explicit full ad-inventory refresh (no Insights pulled),
+-- logged here for visibility but EXCLUDED from sync-coverage calculations
+-- (metaPerformance.getCoverage only counts 'default'/'backfill'). Databases
+-- created before this existed have the narrower two-value CHECK, so widen it
+-- in place -- idempotent (no-ops once the constraint already allows it) and
+-- touches no rows.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'meta_sync_runs_run_type_check'
+      AND conrelid = 'meta_sync_runs'::regclass
+      AND pg_get_constraintdef(oid) NOT LIKE '%inventory%'
+  ) THEN
+    ALTER TABLE meta_sync_runs DROP CONSTRAINT meta_sync_runs_run_type_check;
+    ALTER TABLE meta_sync_runs ADD CONSTRAINT meta_sync_runs_run_type_check
+      CHECK (run_type IN ('default', 'backfill', 'inventory'));
+  END IF;
+END $$;
