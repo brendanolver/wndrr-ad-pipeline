@@ -47,6 +47,32 @@ function stripPagingUrls(data) {
   return data;
 }
 
+// Seconds Meta says to wait before retrying, read from its documented
+// rate-limit response headers -- a plain number or null, never the header
+// text itself. Retry-After is seconds; x-business-use-case-usage carries
+// estimated_time_to_regain_access in MINUTES; x-ad-account-usage carries
+// reset_time_duration in seconds. Clamped to a sane range so a malformed
+// header can't produce a silly cooldown.
+function extractRetryHintSeconds(headers) {
+  if (!headers) return null;
+  const clamp = (n) => (Number.isFinite(n) && n > 0 ? Math.min(Math.round(n), 3600) : null);
+  const retryAfter = clamp(Number(headers['retry-after']));
+  if (retryAfter) return retryAfter;
+  try {
+    const biz = headers['x-business-use-case-usage'];
+    if (biz) {
+      const parsed = JSON.parse(biz);
+      const minutes = Object.values(parsed).flat().map((e) => Number(e && e.estimated_time_to_regain_access)).filter((n) => n > 0);
+      if (minutes.length) return clamp(Math.max(...minutes) * 60);
+    }
+    const acct = headers['x-ad-account-usage'];
+    if (acct) return clamp(Number(JSON.parse(acct).reset_time_duration));
+  } catch {
+    // unparseable usage header: no hint, not an error
+  }
+  return null;
+}
+
 function metaRequest(pathAndQuery) {
   if (!configured()) {
     return Promise.reject(new Error('Meta Ads is not configured (META_AD_ACCOUNT_ID / META_ACCESS_TOKEN missing)'));
@@ -58,10 +84,11 @@ function metaRequest(pathAndQuery) {
       let raw = '';
       res.on('data', (chunk) => { raw += chunk; });
       res.on('end', () => {
+        const retryAfterSeconds = extractRetryHintSeconds(res.headers);
         try {
-          resolve({ status: res.statusCode, data: stripPagingUrls(JSON.parse(raw)) });
+          resolve({ status: res.statusCode, data: stripPagingUrls(JSON.parse(raw)), retryAfterSeconds });
         } catch {
-          resolve({ status: res.statusCode, data: raw });
+          resolve({ status: res.statusCode, data: raw, retryAfterSeconds });
         }
       });
     }).on('error', reject);
@@ -188,6 +215,66 @@ function accountPath() {
   return `/act_${String(META_AD_ACCOUNT_ID || '').replace(/^act_/, '')}`;
 }
 
+// ── Meta API errors: classification + UI-safe messages ──────────────────
+// A Meta error body can be large and (via fbtrace ids, request echoes,
+// paging URLs) is not something an admin UI or a stored error_message
+// should ever carry verbatim. Every non-200 from metaGetAllPages /
+// buildMetaApiError is therefore reduced to: HTTP status, Meta's numeric
+// code/subcode, a short URL-stripped message, and a rate-limit flag.
+//
+// Rate limiting: 80004 (+ subcode 2446079) is the ad-account-level limit
+// WNDRR hit in production; the rest of Meta's documented rate-limit family
+// (app 4, user 17, 32, 613, and the 800xx business-use-case codes) is
+// treated the same way, because the right response is identical for all of
+// them: stop immediately, never retry in a loop, leave stored data alone.
+const RATE_LIMIT_CODES = new Set([4, 17, 32, 613, 80000, 80001, 80002, 80003, 80004, 80005, 80006, 80008, 80009, 80014]);
+const RATE_LIMIT_SUBCODES = new Set([2446079]);
+const RATE_LIMIT_MESSAGE = 'Meta rate limit reached. Existing data is safe. Try again later.';
+
+class MetaApiError extends Error {
+  constructor(message, details = {}) {
+    super(message);
+    this.name = 'MetaApiError';
+    this.status = details.status || null;
+    this.metaCode = details.code === undefined ? null : details.code;
+    this.metaSubcode = details.subcode === undefined ? null : details.subcode;
+    this.rateLimited = !!details.rateLimited;
+    this.retryAfterSeconds = details.retryAfterSeconds || null;
+    // Every message on a MetaApiError is safe to show an admin as-is.
+    this.safe = true;
+  }
+}
+
+function safeText(text, max = 160) {
+  let out = String(text == null ? '' : text);
+  if (META_ACCESS_TOKEN) out = out.split(META_ACCESS_TOKEN).join('[REDACTED]');
+  return out.replace(/https?:\/\/\S+/g, '[url removed]').replace(/\s+/g, ' ').trim().slice(0, max);
+}
+
+function numOrNull(v) {
+  const n = Number(v);
+  return v !== undefined && v !== null && Number.isFinite(n) ? n : null;
+}
+
+function isRateLimitResponse(status, error) {
+  return status === 429
+    || RATE_LIMIT_CODES.has(numOrNull(error && error.code))
+    || RATE_LIMIT_SUBCODES.has(numOrNull(error && error.error_subcode));
+}
+
+function buildMetaApiError(result, what = 'Meta request') {
+  const error = (result.data && typeof result.data === 'object' && result.data.error) || {};
+  const code = numOrNull(error.code);
+  const subcode = numOrNull(error.error_subcode);
+  const rateLimited = isRateLimitResponse(result.status, error);
+  const message = rateLimited
+    ? RATE_LIMIT_MESSAGE
+    : `${what} failed (Meta HTTP ${result.status}${code !== null ? `, code ${code}` : ''}${subcode !== null ? `, subcode ${subcode}` : ''})${error.message ? `: ${safeText(error.message)}` : ''}`;
+  return new MetaApiError(message, {
+    status: result.status, code, subcode, rateLimited, retryAfterSeconds: result.retryAfterSeconds,
+  });
+}
+
 // Generic cursor-pagination follower for metaSync.js -- a second one
 // alongside fetchAllLiveAdNames' own inline loop rather than refactoring
 // that existing, already-production function (live-ad-coverage behaviour
@@ -198,22 +285,42 @@ function accountPath() {
 // caller can upsert as it goes rather than holding the whole result set
 // in memory. maxPages is a hard stop against a runaway loop, not an
 // expected limit for any real call this app makes.
+//
+// Repeated-cursor guard: if Meta ever hands back an `after` cursor this
+// call has already followed, the listing is looping -- stop immediately
+// instead of re-fetching the same page until maxPages. Returns
+// { pages, stoppedReason } where stoppedReason is 'end' (normal),
+// 'repeated_cursor' or 'max_pages', so a caller that must not treat a
+// truncated listing as complete (the Insights pull) can refuse to.
+// No retry of any kind happens here: a non-200 (including a rate limit)
+// throws straight away as a MetaApiError.
 async function metaGetAllPages(path, params, onPage, maxPages = 200) {
   let after = null;
+  const seenCursors = new Set();
+  let pages = 0;
   for (let i = 0; i < maxPages; i += 1) {
     const pageParams = after ? { ...params, after } : { ...params };
     const result = await metaGet(path, pageParams);
-    if (result.status !== 200) {
-      const err = new Error(`Meta Graph API returned status ${result.status}: ${JSON.stringify(result.data)}`);
-      err.status = result.status;
-      err.metaError = result.data;
-      throw err;
-    }
+    if (result.status !== 200) throw buildMetaApiError(result, 'Meta request');
+    pages += 1;
     const rows = result.data?.data || [];
     await onPage(rows);
-    after = result.data?.paging?.cursors?.after || null;
-    if (!after || !rows.length) break;
+    const next = result.data?.paging?.cursors?.after || null;
+    if (!next || !rows.length) return { pages, stoppedReason: 'end' };
+    if (seenCursors.has(next) || next === after) return { pages, stoppedReason: 'repeated_cursor' };
+    seenCursors.add(next);
+    after = next;
   }
+  return { pages, stoppedReason: 'max_pages' };
+}
+
+// Read several objects by stable ID in ONE Graph call (`/?ids=a,b,c`),
+// returning the raw { id: object } map. Callers keep batches small
+// (Meta allows up to 50 ids per request). Read-only.
+async function metaGetByIds(ids, fields) {
+  const result = await metaGet('/', { ids: ids.join(','), fields });
+  if (result.status !== 200) throw buildMetaApiError(result, 'Meta ad lookup');
+  return result.data && typeof result.data === 'object' ? result.data : {};
 }
 
 module.exports = {
@@ -224,4 +331,8 @@ module.exports = {
   metaGet,
   accountPath,
   metaGetAllPages,
+  metaGetByIds,
+  buildMetaApiError,
+  MetaApiError,
+  RATE_LIMIT_MESSAGE,
 };

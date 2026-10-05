@@ -289,7 +289,8 @@ async function getCoverage(range, now = new Date()) {
             to_char(range_until, 'YYYY-MM-DD') AS until,
             started_at
        FROM meta_sync_runs
-      WHERE status = 'success' AND range_until >= $1 AND range_since <= $2`,
+      WHERE status = 'success' AND run_type IN ('default', 'backfill')
+        AND range_until >= $1 AND range_since <= $2`,
     [range.since, range.until]
   );
   const days = listDates(range.since, range.until);
@@ -322,7 +323,7 @@ async function getFreshness() {
   const { rows } = await pool.query(
     `SELECT finished_at, to_char(range_until, 'YYYY-MM-DD') AS range_until
        FROM meta_sync_runs
-      WHERE status = 'success' AND finished_at IS NOT NULL
+      WHERE status = 'success' AND run_type IN ('default', 'backfill') AND finished_at IS NOT NULL
       ORDER BY finished_at DESC LIMIT 1`
   );
   const { rows: acct } = await pool.query(

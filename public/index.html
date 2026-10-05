@@ -1361,7 +1361,7 @@
       <div class="settings-panel" id="settings-panel-meta-sync">
         <div class="planning-section-header">
           <h2>Meta Sync</h2>
-          <span class="admin-note">Pulls the last 3 days of Meta ad performance into WNDRR (read-only -- nothing is changed in Meta). Safe to re-run: existing rows are updated, never duplicated.</span>
+          <span class="admin-note">Pulls the last 3 days (Sydney dates) of Meta ad performance into WNDRR (read-only -- nothing is changed in Meta). Safe to re-run: existing rows are updated, never duplicated. It doesn't rescan the full ad inventory, so it's light enough to run daily.</span>
         </div>
         <div class="meta-sync-card">
           <dl class="meta-sync-stats">
@@ -1370,10 +1370,18 @@
             <div><dt>Meta ads stored</dt><dd id="meta-sync-ads">&mdash;</dd></div>
             <div><dt>Daily insight rows stored</dt><dd id="meta-sync-rows">&mdash;</dd></div>
             <div><dt>Unmatched ads</dt><dd id="meta-sync-unmatched">&mdash;</dd></div>
+            <div><dt>Last inventory refresh</dt><dd id="meta-sync-inventory-last">&mdash;</dd></div>
           </dl>
           <div class="meta-sync-actions">
             <button type="button" class="btn btn-primary" id="meta-sync-run-btn">Run 3-Day Sync</button>
             <span id="meta-sync-message" class="meta-sync-message"></span>
+          </div>
+          <!-- Maintenance, not the normal action: the full-inventory refresh
+               (POST /api/meta-sync/refresh-inventory) is a separate, heavy,
+               explicit job -- never run automatically or by Run 3-Day Sync. -->
+          <div class="meta-sync-maintenance">
+            <button type="button" class="btn btn-ghost btn-sm" id="meta-inventory-refresh-btn">Refresh Ad Inventory</button>
+            <span class="meta-sync-hint">Refreshes Meta ad names/statuses and discovers new historical ad records. Not required for normal daily performance syncing.</span>
           </div>
         </div>
       </div>
