@@ -816,6 +816,9 @@ function mmRenderRows(res) {
     const con = a.match_status === 'confirmed' && !a.excluded
       ? escapeHtml(a.confirmed_concept || '—')
       : (a.suggested_concept ? `<span class="mm-guess" title="Suggestion — not confirmed">${escapeHtml(a.suggested_concept)}</span>` : '<span class="mp-na">—</span>');
+    const media = a.match_status === 'confirmed' && !a.excluded
+      ? escapeHtml(a.confirmed_media || '—')
+      : (a.suggested_media ? `<span class="mm-guess" title="Suggestion — not confirmed">${escapeHtml(a.suggested_media)}</span>` : '<span class="mp-na">—</span>');
     const conf = a.match_status === 'confirmed' ? '<span class="mm-tick">✓</span>' : mmConfDot(a.confidence_level);
     return `<tr data-ad-id="${escapeHtml(a.meta_ad_id)}">
       <td class="mp-name" title="${escapeHtml(a.ad_name || a.meta_ad_id)}">${escapeHtml(a.ad_name || '(unnamed ad)')}</td>
@@ -824,8 +827,9 @@ function mmRenderRows(res) {
       <td>${mmStateChip(a)}</td>
       <td class="mm-cell">${prod}</td>
       <td class="mm-cell">${con}</td>
+      <td class="mm-cell">${media}</td>
       <td>${conf}</td></tr>`;
-  }).join('') : `<tr><td colspan="7" class="mp-table-empty">${
+  }).join('') : `<tr><td colspan="8" class="mp-table-empty">${
     mmState.q ? 'No ads match this search.' : mmState.filter === 'needs' ? 'Nothing left to match in this view — nice work.' : 'No ads in this view.'}</td></tr>`;
   const pager = document.getElementById('mm-pager');
   if (res.total_pages <= 1) {
@@ -860,7 +864,7 @@ async function loadMetaMatching() {
     mmRenderRows(res);
   } catch (e) {
     if (id !== mmState.reqId) return;
-    document.getElementById('mm-body').innerHTML = `<tr><td colspan="7" class="mp-table-empty">${escapeHtml(e.message)}</td></tr>`;
+    document.getElementById('mm-body').innerHTML = `<tr><td colspan="8" class="mp-table-empty">${escapeHtml(e.message)}</td></tr>`;
   }
 }
 
@@ -988,9 +992,9 @@ async function mmLoadOptions() {
   return mmState.options;
 }
 
-function mmSuggChips(items, field) {
+function mmSuggChips(items, field, limit = 3) {
   if (!items || !items.length) return '';
-  return `<div class="mm-sugg">${items.slice(0, 3).map((s, i) => `
+  return `<div class="mm-sugg">${items.slice(0, limit).map((s, i) => `
     <button type="button" class="mm-sugg-chip ${s.confidence_level}" data-field="${field}" data-i="${i}" title="${escapeHtml(s.reason)}">
       + ${escapeHtml(s.value_label || '')}<span>${s.confidence_level}</span></button>`).join('')}
     <div class="mm-reason">${escapeHtml(items[0].reason)}</div></div>`;
@@ -1026,6 +1030,12 @@ function renderMatchWorkspace(ws, options) {
     const s = ws.parsed.structured;
     [['Product', s.product_name], ['Category', s.product_category], ['Hook', s.hook], ['Media', s.media], ['Creator', s.creator], ['Concept', s.concept], ['Page', s.url_link_page], ['Batch', s.batch], ['Week', s.week]]
       .forEach(([k, v]) => parsedRows.push(`<tr><th>${k}</th><td>${dash(v)}</td></tr>`));
+  } else if (ws.parsed.loose) {
+    const l = ws.parsed.loose;
+    [['Product phrase', l.product_phrase ? `${l.product_phrase}${l.product_catalogue_match ? '' : ' (not found in the product list)'}` : null], ['Media', l.media], ['Ad type', l.ad_type], ['Page', l.url_link_page],
+      ['Code', l.code], ['Variant', l.variant], ['Concept', l.concept], ['Creator', l.creator], ['Batch', l.batch], ['Week', l.week]]
+      .forEach(([k, v]) => { if (v) parsedRows.push(`<tr><th>${k}</th><td>${dash(v)}</td></tr>`); });
+    parsedRows.push('<tr><th></th><td class="mm-muted-line">Read from an older / non-standard name — suggestions only, please check.</td></tr>');
   } else if (ws.parsed.legacy) {
     const l = ws.parsed.legacy;
     [['Product', l.product], ['Product type', l.productType], ['Batch', l.batchNo]].forEach(([k, v]) => parsedRows.push(`<tr><th>${k}</th><td>${dash(v)}</td></tr>`));
@@ -1072,7 +1082,7 @@ function renderMatchWorkspace(ws, options) {
         <div class="mm-field"><label>Product(s)</label>
           <label class="mm-check"><input type="checkbox" id="mm-nps"> Not product-specific <small>(DPA / sale / campaign / general ad)</small></label>
           <div id="mm-f-products"></div>
-          ${mmSuggChips(sg.product, 'product')}
+          ${mmSuggChips(sg.product, 'product', 5)}
           ${(sg.scope || []).length ? `<div class="mm-sugg"><button type="button" class="mm-sugg-chip ${sg.scope[0].confidence_level}" data-field="scope" data-i="0" title="${escapeHtml(sg.scope[0].reason)}">+ Not product-specific<span>${sg.scope[0].confidence_level}</span></button><div class="mm-reason">${escapeHtml(sg.scope[0].reason)}</div></div>` : ''}
         </div>
 
@@ -1084,6 +1094,9 @@ function renderMatchWorkspace(ws, options) {
 
         <div class="mm-field"><label>Creator <small>(name)</small></label>
           <div id="mm-f-creator"></div>${mmSuggChips(sg.creator, 'creator')}</div>
+
+        <div class="mm-field"><label>Media Type</label>
+          <div id="mm-f-media"></div>${mmSuggChips(sg.media_type, 'media_type')}</div>
 
         <div class="mm-error" id="mm-error"></div>
       </section>
@@ -1122,6 +1135,11 @@ function renderMatchWorkspace(ws, options) {
     multi: false, allowFree: true, placeholder: 'Search creators, or type a name…', options: options.creators.map((c) => ({ key: c, label: c })),
     selected: cls.creator_name ? [{ key: cls.creator_name, label: cls.creator_name }] : [],
   });
+  const mediaOpts = options.media_types.map((m) => ({ key: m.key, label: m.label }));
+  const mediaPicker = mmPicker(document.getElementById('mm-f-media'), {
+    multi: false, placeholder: 'Video, Image / Static, Carousel, GIF…', options: mediaOpts,
+    selected: cls.media_type ? mediaOpts.filter((m) => m.key === cls.media_type) : [],
+  });
   const nps = document.getElementById('mm-nps');
   nps.checked = form.notProductSpecific;
   const syncNps = () => {
@@ -1137,21 +1155,34 @@ function renderMatchWorkspace(ws, options) {
     else if (field === 'concept') conceptPicker.set([{ key: s.value_ref ? `ct:${s.value_ref}` : `free:${s.value_label}`, label: s.value_label, free: !s.value_ref, concept_type_id: s.value_ref || null }]);
     else if (field === 'creative_style') stylePicker.set([{ key: s.value_ref, label: s.value_label }]);
     else if (field === 'creator') creatorPicker.set([{ key: s.value_label, label: s.value_label }]);
+    else if (field === 'media_type') mediaPicker.set(mediaOpts.filter((m) => m.key === s.value_key));
     else if (field === 'ad_setup') adSetupPicker.set([{ key: s.value_ref, label: (s.ad_setup && s.ad_setup.generated_name) || `Ad Setup #${s.value_ref}` }]);
   };
   body.querySelectorAll('.mm-sugg-chip').forEach((btn) => btn.addEventListener('click', () => {
     const list = sg[btn.dataset.field];
     applySuggestion(btn.dataset.field, list[Number(btn.dataset.i)]);
   }));
+  // "Fill from suggestions": loads the STRONGEST proposal per field into the
+  // form for review -- nothing is saved until Confirm Mapping. Products: the
+  // top suggestion, plus every other member of the same SET group (a set's
+  // pieces belong together; unrelated alternatives are not added). The Ad
+  // Setup is only filled for a medium-or-better match.
   const fill = document.getElementById('mm-fill');
   if (fill) {
     fill.addEventListener('click', () => {
-      ['product', 'concept', 'creative_style', 'creator', 'ad_setup'].forEach((f) => {
+      const topProduct = (sg.product || [])[0];
+      if (topProduct) {
+        const group = topProduct.evidence && topProduct.evidence.set_group;
+        const picks = group ? sg.product.filter((p) => p.evidence && p.evidence.set_group === group) : [topProduct];
+        picks.forEach((p) => applySuggestion('product', p));
+      }
+      ['concept', 'creative_style', 'creator', 'media_type'].forEach((f) => {
         const top = (sg[f] || [])[0];
-        if (!top) return;
-        if (f === 'product') (sg.product || []).filter((p) => p.confidence >= 0.6).forEach((p) => applySuggestion('product', p));
-        else if (top.confidence >= 0.6) applySuggestion(f, top);
+        if (top) applySuggestion(f, top);
       });
+      const topSetup = (sg.ad_setup || [])[0];
+      if (topSetup && topSetup.confidence >= 0.6) applySuggestion('ad_setup', topSetup);
+      if (!topProduct && !['concept', 'creative_style', 'creator', 'media_type'].some((f) => (sg[f] || []).length)) toast('No suggestions to fill for this ad.');
     });
   }
 
@@ -1195,6 +1226,7 @@ function renderMatchWorkspace(ws, options) {
         concept: concept ? (concept.free ? { label: concept.label } : { concept_type_id: concept.concept_type_id }) : null,
         creative_style_id: style ? style.key : null,
         creator_name: creator ? creator.label : null,
+        media_type: mediaPicker.get()[0] ? mediaPicker.get()[0].key : null,
       }),
     }, 'Mapping confirmed.');
   });
