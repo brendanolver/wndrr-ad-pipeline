@@ -2701,3 +2701,28 @@ BEGIN
       CHECK (field IN ('product', 'concept', 'creator', 'creative_style', 'ad_setup', 'scope', 'media_type'));
   END IF;
 END $$;
+
+-- Auto-matching (Ad Matching V1 refinement): an ad whose structured name gives
+-- exact, unambiguous evidence for Product + Media + Creator + Concept is stored
+-- as 'auto_matched' (machine-written, usable by the intelligence layer with no
+-- human click). Needs-review ads stay 'suggested' (shown as "Needs review"),
+-- 'unmatched' = insufficient evidence, 'confirmed' = a human's decision, which
+-- always wins and is never written by any automatic path. The original
+-- three-value CHECK is widened in place (idempotent, touches no rows).
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'meta_ads_match_status_check'
+      AND conrelid = 'meta_ads'::regclass
+      AND pg_get_constraintdef(oid) NOT LIKE '%auto_matched%'
+  ) THEN
+    ALTER TABLE meta_ads DROP CONSTRAINT meta_ads_match_status_check;
+    ALTER TABLE meta_ads ADD CONSTRAINT meta_ads_match_status_check
+      CHECK (match_status IN ('unmatched', 'suggested', 'auto_matched', 'confirmed'));
+  END IF;
+END $$;
+
+-- Set when a human rejects/clears a mapping, so the auto-matcher never
+-- re-applies one to an ad a person has already overruled (it still suggests).
+ALTER TABLE meta_ad_classifications ADD COLUMN IF NOT EXISTS auto_match_blocked_at TIMESTAMPTZ;

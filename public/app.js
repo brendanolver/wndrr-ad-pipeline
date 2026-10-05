@@ -779,7 +779,7 @@ const mmState = {
   reqId: 0, autoSuggested: false, options: null,
 };
 const MM_FILTERS = [
-  ['needs', 'Needs matching'], ['unmatched', 'Unmatched'], ['suggested', 'Suggested'],
+  ['needs', 'To do'], ['suggested', 'Needs review'], ['unmatched', 'Unmatched'], ['auto', 'Auto-matched'],
   ['confirmed', 'Confirmed'], ['not_product_specific', 'Not product-specific'], ['excluded', 'Excluded'],
 ];
 
@@ -796,17 +796,26 @@ function mpSetView(view) {
 }
 document.querySelectorAll('.mp-subnav-btn').forEach((b) => b.addEventListener('click', () => mpSetView(b.dataset.mpView)));
 
-function mmConfDot(level) {
-  if (!level) return '<span class="mp-na">—</span>';
-  const label = { high: 'High', medium: 'Medium', low: 'Low' }[level];
-  return `<span class="mm-conf ${level}"><i></i>${label}</span>`;
+// Plain-language confidence (the numeric score stays server-side):
+//   Exact  = deterministic evidence matched a known value
+//   Likely = a reasonable match to check;  Weak = a hint only
+const MM_LABEL_CLASS = { Exact: 'high', Likely: 'medium', Weak: 'low' };
+function mmConfDot(label, status) {
+  if (status === 'auto_matched') return '<span class="mm-conf high"><i></i>Exact</span>';
+  if (!label) return '<span class="mp-na">—</span>';
+  const tail = label === 'Weak' ? 'needs review' : 'review';
+  return `<span class="mm-conf ${MM_LABEL_CLASS[label]}"><i></i>${label}<small> · ${tail}</small></span>`;
 }
 function mmStateChip(a) {
+  const skipped = a.skipped ? ' <span class="mm-skipped">skipped</span>' : '';
   if (a.excluded) return '<span class="mm-state excluded">Not relevant</span>';
   if (a.match_status === 'confirmed') return a.not_product_specific ? '<span class="mm-state confirmed">Not product-specific</span>' : '<span class="mm-state confirmed">Confirmed</span>';
-  if (a.match_status === 'suggested') return `<span class="mm-state suggested">Suggested</span>${a.skipped ? ' <span class="mm-skipped">skipped</span>' : ''}`;
-  return `<span class="mm-state unmatched">Unmatched</span>${a.skipped ? ' <span class="mm-skipped">skipped</span>' : ''}`;
+  if (a.match_status === 'auto_matched') return '<span class="mm-state auto">Auto-matched</span>';
+  if (a.match_status === 'suggested') return `<span class="mm-state suggested">Needs review</span>${skipped}`;
+  return `<span class="mm-state unmatched">Unmatched</span>${skipped}`;
 }
+// Ads whose classification values are real (human-confirmed or auto-matched).
+const mmHasValues = (a) => (a.match_status === 'confirmed' || a.match_status === 'auto_matched') && !a.excluded;
 
 function mmRenderChips(counts) {
   const chips = document.getElementById('mm-chips');
@@ -818,16 +827,16 @@ function mmRenderChips(counts) {
 function mmRenderRows(res) {
   mmRenderChips(res.counts);
   document.getElementById('mm-body').innerHTML = res.ads.length ? res.ads.map((a) => {
-    const prod = a.match_status === 'confirmed' && !a.excluded
+    const prod = mmHasValues(a)
       ? (a.not_product_specific ? '<em class="mm-muted">Not product-specific</em>' : escapeHtml(a.confirmed_products || '—'))
       : (a.suggested_product ? `<span class="mm-guess" title="Suggestion — not confirmed">${escapeHtml(a.suggested_product)}</span>` : '<span class="mp-na">—</span>');
-    const con = a.match_status === 'confirmed' && !a.excluded
+    const con = mmHasValues(a)
       ? escapeHtml(a.confirmed_concept || '—')
       : (a.suggested_concept ? `<span class="mm-guess" title="Suggestion — not confirmed">${escapeHtml(a.suggested_concept)}</span>` : '<span class="mp-na">—</span>');
-    const media = a.match_status === 'confirmed' && !a.excluded
+    const media = mmHasValues(a)
       ? escapeHtml(a.confirmed_media || '—')
       : (a.suggested_media ? `<span class="mm-guess" title="Suggestion — not confirmed">${escapeHtml(a.suggested_media)}</span>` : '<span class="mp-na">—</span>');
-    const conf = a.match_status === 'confirmed' ? '<span class="mm-tick">✓</span>' : mmConfDot(a.confidence_level);
+    const conf = a.match_status === 'confirmed' ? '<span class="mm-tick">✓</span>' : mmConfDot(a.confidence_label, a.match_status);
     return `<tr data-ad-id="${escapeHtml(a.meta_ad_id)}">
       <td class="mp-name" title="${escapeHtml(a.ad_name || a.meta_ad_id)}">${escapeHtml(a.ad_name || '(unnamed ad)')}</td>
       <td>${mpStatusChip(a.effective_status)}</td>
@@ -838,7 +847,7 @@ function mmRenderRows(res) {
       <td class="mm-cell">${media}</td>
       <td>${conf}</td></tr>`;
   }).join('') : `<tr><td colspan="8" class="mp-table-empty">${
-    mmState.q ? 'No ads match this search.' : mmState.filter === 'needs' ? 'Nothing left to match in this view — nice work.' : 'No ads in this view.'}</td></tr>`;
+    mmState.q ? 'No ads match this search.' : mmState.filter === 'needs' ? 'Nothing left to do in this view — nice work.' : 'No ads in this view.'}</td></tr>`;
   const pager = document.getElementById('mm-pager');
   if (res.total_pages <= 1) {
     pager.innerHTML = res.total ? `<span>${res.total.toLocaleString('en-AU')} ad${res.total === 1 ? '' : 's'}</span>` : '';
@@ -1000,18 +1009,20 @@ async function mmLoadOptions() {
   return mmState.options;
 }
 
-function mmSuggChips(items, field, limit = 3) {
+// Compact suggestion chips: the label is plain language (Exact / Likely / Weak),
+// the full reason is one truncated line under the chips (full text on hover).
+function mmSuggChips(items, field, limit = 2) {
   if (!items || !items.length) return '';
   return `<div class="mm-sugg">${items.slice(0, limit).map((s, i) => `
-    <button type="button" class="mm-sugg-chip ${s.confidence_level}" data-field="${field}" data-i="${i}" title="${escapeHtml(s.reason)}">
-      + ${escapeHtml(s.value_label || '')}<span>${s.confidence_level}</span></button>`).join('')}
-    <div class="mm-reason">${escapeHtml(items[0].reason)}</div></div>`;
+    <button type="button" class="mm-sugg-chip ${MM_LABEL_CLASS[s.confidence_label]}" data-field="${field}" data-i="${i}" title="${escapeHtml(s.reason)}">
+      + ${escapeHtml(s.value_label || '')}<span>${s.confidence_label}</span></button>`).join('')}
+    <div class="mm-reason" title="${escapeHtml(items[0].reason)}">${escapeHtml(items[0].reason)}</div></div>`;
 }
 
 async function openMatchWorkspace(adId) {
   const title = document.getElementById('mm-modal-title');
   const body = document.getElementById('mm-modal-body');
-  title.textContent = 'Match ad';
+  title.textContent = 'Match Meta ad';
   body.innerHTML = '<div class="mp-table-empty">Loading…</div>';
   openModal('meta-match-modal');
   try {
@@ -1028,128 +1039,128 @@ function renderMatchWorkspace(ws, options) {
   const cls = ws.classification;
   const sg = ws.suggestions;
   const perf = ws.performance;
-  document.getElementById('mm-modal-title').textContent = ad.ad_name || '(unnamed ad)';
+  const hasValues = cls.confirmed || cls.auto_matched;
   const created = ad.created_time
     ? new Intl.DateTimeFormat('en-AU', { timeZone: MP_TZ, day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(ad.created_time))
     : '—';
   const dash = (v) => escapeHtml(v || '—');
-  const parsedRows = [];
+
+  // Parsed fields as compact label/value chips (not one big row each).
+  const chips = [];
+  const chip = (k, v) => { if (v) chips.push(`<span class="mm-pc"><b>${k}</b>${escapeHtml(v)}</span>`); };
   if (ws.parsed.structured) {
-    const s = ws.parsed.structured;
-    [['Product', s.product_name], ['Category', s.product_category], ['Hook', s.hook], ['Media', s.media], ['Creator', s.creator], ['Concept', s.concept], ['Page', s.url_link_page], ['Batch', s.batch], ['Week', s.week]]
-      .forEach(([k, v]) => parsedRows.push(`<tr><th>${k}</th><td>${dash(v)}</td></tr>`));
+    const t = ws.parsed.structured;
+    chip('Product', t.product_name); chip('Category', t.product_category); chip('Media', t.media); chip('Creator', t.creator);
+    chip('Concept', t.concept); chip('Hook', t.hook); chip('Batch', [t.batch, t.week].filter(Boolean).join(' · '));
   } else if (ws.parsed.loose) {
-    const l = ws.parsed.loose;
-    [['Product phrase', l.product_phrase ? `${l.product_phrase}${l.product_catalogue_match ? '' : ' (not found in the product list)'}` : null], ['Media', l.media], ['Ad type', l.ad_type], ['Page', l.url_link_page],
-      ['Code', l.code], ['Variant', l.variant], ['Concept', l.concept], ['Creator', l.creator], ['Batch', l.batch], ['Week', l.week]]
-      .forEach(([k, v]) => { if (v) parsedRows.push(`<tr><th>${k}</th><td>${dash(v)}</td></tr>`); });
-    parsedRows.push('<tr><th></th><td class="mm-muted-line">Read from an older / non-standard name — suggestions only, please check.</td></tr>');
+    const t = ws.parsed.loose;
+    chip('Product', t.product_phrase ? `${t.product_phrase}${t.product_catalogue_match ? '' : ' ?'}` : null); chip('Media', t.media); chip('Ad type', t.ad_type);
+    chip('Concept', t.concept); chip('Creator', t.creator); chip('Code', t.code); chip('Variant', t.variant); chip('Batch', [t.batch, t.week].filter(Boolean).join(' · '));
   } else if (ws.parsed.legacy) {
-    const l = ws.parsed.legacy;
-    [['Product', l.product], ['Product type', l.productType], ['Batch', l.batchNo]].forEach(([k, v]) => parsedRows.push(`<tr><th>${k}</th><td>${dash(v)}</td></tr>`));
+    const t = ws.parsed.legacy;
+    chip('Product', t.product); chip('Type', t.productType); chip('Batch', t.batchNo);
   }
+  const parsedNote = ws.parsed.structured ? '' : ws.parsed.loose ? 'Older / non-standard name — read by pattern, please check.' : (ws.parsed.legacy ? '' : 'Not a recognised naming pattern.');
   const m = perf.recent;
-  const form = {
-    ad_setup: cls.ad_setup ? { key: cls.ad_setup.id, label: cls.ad_setup.generated_name } : null,
-    notProductSpecific: !!cls.not_product_specific,
-  };
+
+  // One-line state explanation (auto-matched / why it needs review / unmatched).
+  const reasons = cls.review_reasons || [];
+  let stateNote = '';
+  if (cls.confirmed) stateNote = '<span class="mm-note ok">Confirmed by a person — edits replace the mapping when you save.</span>';
+  else if (cls.auto_matched) stateNote = '<span class="mm-note auto">Auto-matched: the name gives an exact product, media, creator and concept. Confirm to lock it in, or edit.</span>';
+  else if (ad.match_status === 'suggested') stateNote = `<span class="mm-note review" title="${escapeHtml(reasons.join('; '))}">Needs review${reasons.length ? ` — ${escapeHtml(reasons[0])}${reasons.length > 1 ? ` (+${reasons.length - 1} more)` : ''}` : ''}</span>`;
+  else stateNote = '<span class="mm-note">Unmatched — not enough evidence in the name.</span>';
 
   body.innerHTML = `
     <div class="mm-grid">
       <section class="mm-evidence">
-        <h4>Meta evidence</h4>
-        <dl class="mp-detail-grid">
-          <div><dt>Meta Ad ID</dt><dd>${dash(ad.meta_ad_id)}</dd></div>
-          <div><dt>Status</dt><dd>${mpStatusChip(ad.effective_status)}</dd></div>
-          <div><dt>Created</dt><dd>${created}</dd></div>
-          <div><dt>State</dt><dd>${mmStateChip({ match_status: ad.match_status, excluded: cls.excluded, not_product_specific: cls.not_product_specific, skipped: cls.skipped })}</dd></div>
-        </dl>
-        <h4>${escapeHtml(perf.window.label)} · ${escapeHtml(mpRange({ since: perf.window.since, until: perf.window.until }, false))}</h4>
+        <div class="mm-adname" title="${escapeHtml(ad.ad_name || '')}">${escapeHtml(ad.ad_name || '(unnamed ad)')}</div>
+        <div class="mm-metaline">
+          <span class="mm-idtag" title="Meta Ad ID">${escapeHtml(ad.meta_ad_id)}</span>
+          ${mpStatusChip(ad.effective_status)}
+          <span>Created ${created}</span>
+        </div>
         <div class="mm-perf">
-          <div><b>${mpFmt(m.spend, 'money')}</b><span>spent</span></div>
+          <div><b>${mpFmt(m.spend, 'money')}</b><span>30d spend</span></div>
           <div><b>${mpFmt(m.purchases, 'int')}</b><span>purchases</span></div>
           <div><b>${mpFmt(m.cpa, 'money')}</b><span>CPA</span></div>
           <div><b>${mpFmt(m.add_to_cart, 'int')}</b><span>adds to cart</span></div>
         </div>
-        <div class="mm-muted-line">Lifetime spend ${mpFmt(perf.lifetime_spend, 'money')}${perf.first_active ? ` · active ${escapeHtml(mpDate(perf.first_active, true))} – ${escapeHtml(mpDate(perf.last_active, true))}` : ''}</div>
-        <h4>Parsed from the ad name</h4>
-        ${parsedRows.length ? `<table class="mm-parsed"><tbody>${parsedRows.join('')}</tbody></table>` : '<div class="mm-muted-line">Not a recognised naming pattern — classify from the name above.</div>'}
+        <div class="mm-muted-line">Lifetime ${mpFmt(perf.lifetime_spend, 'money')}${perf.first_active ? ` · ${escapeHtml(mpDate(perf.first_active, true))} – ${escapeHtml(mpDate(perf.last_active, true))}` : ''}</div>
+        <div class="mm-label">Parsed from the name</div>
+        <div class="mm-pcs">${chips.join('') || ''}</div>
+        ${parsedNote ? `<div class="mm-muted-line">${parsedNote}</div>` : ''}
       </section>
 
       <section class="mm-mapping" id="mm-mapping">
-        <div class="mm-mapping-head"><h4>Mapping</h4>
-          ${cls.confirmed ? '' : '<button type="button" class="btn btn-ghost btn-sm" id="mm-fill">Fill from suggestions</button>'}</div>
-        ${cls.confirmed ? '<div class="mm-note ok">Confirmed — edits here replace the confirmed mapping when you save.</div>' : '<div class="mm-note">Suggestions are proposals only — nothing is saved until you press Confirm Mapping.</div>'}
+        <div class="mm-mapping-head">${stateNote}
+          ${hasValues ? '' : '<button type="button" class="btn btn-ghost btn-sm" id="mm-fill">Fill from suggestions</button>'}</div>
 
-        <div class="mm-field"><label>WNDRR Ad Setup <small>(optional — only if this ad came from the pipeline)</small></label>
-          <div id="mm-f-adsetup"></div>
-          ${(sg.ad_setup || []).slice(0, 2).map((s, i) => `<div class="mm-sugg"><button type="button" class="mm-sugg-chip ${s.confidence_level}" data-field="ad_setup" data-i="${i}" title="${escapeHtml(s.reason)}">+ Link Ad Setup #${s.value_ref}<span>${s.confidence_level}</span></button><div class="mm-reason">${escapeHtml(s.reason)}</div></div>`).join('')}
-          <div id="mm-adsetup-prefill"></div>
+        <div class="mm-field mm-full"><div class="mm-lab"><span>WNDRR Ad Setup</span><small>optional — only if this ad came from the pipeline</small></div>
+          <div class="mm-inline"><div id="mm-f-adsetup" class="mm-grow"></div><span id="mm-adsetup-prefill"></span></div>
+          ${(sg.ad_setup || []).slice(0, 1).map((x) => `<div class="mm-sugg"><button type="button" class="mm-sugg-chip ${MM_LABEL_CLASS[x.confidence_label]}" data-field="ad_setup" data-i="0" title="${escapeHtml(x.reason)}">+ Link Ad Setup #${x.value_ref}<span>${x.confidence_label}</span></button><div class="mm-reason" title="${escapeHtml(x.reason)}">${escapeHtml(x.reason)}</div></div>`).join('')}
         </div>
 
-        <div class="mm-field"><label>Product(s)</label>
-          <label class="mm-check"><input type="checkbox" id="mm-nps"> Not product-specific <small>(DPA / sale / campaign / general ad)</small></label>
-          <div id="mm-f-products"></div>
-          ${mmSuggChips(sg.product, 'product', 5)}
-          ${(sg.scope || []).length ? `<div class="mm-sugg"><button type="button" class="mm-sugg-chip ${sg.scope[0].confidence_level}" data-field="scope" data-i="0" title="${escapeHtml(sg.scope[0].reason)}">+ Not product-specific<span>${sg.scope[0].confidence_level}</span></button><div class="mm-reason">${escapeHtml(sg.scope[0].reason)}</div></div>` : ''}
+        <div class="mm-fields">
+          <div class="mm-field"><div class="mm-lab"><span>Product(s)</span><label class="mm-check"><input type="checkbox" id="mm-nps"> Not product-specific</label></div>
+            <div id="mm-f-products"></div>
+            ${mmSuggChips(sg.product, 'product', 3)}
+            ${(sg.scope || []).length ? `<div class="mm-sugg"><button type="button" class="mm-sugg-chip ${MM_LABEL_CLASS[sg.scope[0].confidence_label]}" data-field="scope" data-i="0" title="${escapeHtml(sg.scope[0].reason)}">+ Not product-specific<span>${sg.scope[0].confidence_label}</span></button></div>` : ''}</div>
+          <div class="mm-field"><div class="mm-lab"><span>Media Type</span></div>
+            <div id="mm-f-media"></div>${mmSuggChips(sg.media_type, 'media_type')}</div>
+          <div class="mm-field"><div class="mm-lab"><span>Concept</span><small>legacy text allowed</small></div>
+            <div id="mm-f-concept"></div>${mmSuggChips(sg.concept, 'concept')}</div>
+          <div class="mm-field"><div class="mm-lab"><span>Creator</span></div>
+            <div id="mm-f-creator"></div>${mmSuggChips(sg.creator, 'creator')}</div>
+          <div class="mm-field mm-dropup"><div class="mm-lab"><span>Creative Style</span><small>separate from Concept</small></div>
+            <div id="mm-f-style"></div>${mmSuggChips(sg.creative_style, 'creative_style')}</div>
+          <div class="mm-field mm-reviewbox">${!cls.confirmed && reasons.length ? `<div class="mm-lab"><span>Check before confirming</span></div><ul>${reasons.slice(0, 3).map((r) => `<li>${escapeHtml(r)}</li>`).join('')}</ul>` : ''}</div>
         </div>
-
-        <div class="mm-field"><label>Concept <small>(reusable concept list; unknown names are kept as legacy text)</small></label>
-          <div id="mm-f-concept"></div>${mmSuggChips(sg.concept, 'concept')}</div>
-
-        <div class="mm-field"><label>Creative Style <small>(promotion style list — separate from Concept)</small></label>
-          <div id="mm-f-style"></div>${mmSuggChips(sg.creative_style, 'creative_style')}</div>
-
-        <div class="mm-field"><label>Creator <small>(name)</small></label>
-          <div id="mm-f-creator"></div>${mmSuggChips(sg.creator, 'creator')}</div>
-
-        <div class="mm-field"><label>Media Type</label>
-          <div id="mm-f-media"></div>${mmSuggChips(sg.media_type, 'media_type')}</div>
-
         <div class="mm-error" id="mm-error"></div>
       </section>
     </div>
     <div class="mm-actions">
       <div class="mm-actions-left">
         ${cls.excluded
-          ? '<button type="button" class="btn btn-ghost btn-sm" id="mm-include">Include in creative intelligence again</button>'
-          : '<button type="button" class="btn btn-ghost btn-sm" id="mm-exclude">Not relevant for creative intelligence</button>'}
-        ${cls.confirmed ? '<button type="button" class="btn btn-ghost btn-sm" id="mm-clear">Clear mapping</button>' : '<button type="button" class="btn btn-ghost btn-sm" id="mm-skip">Skip for now</button>'}
+          ? '<button type="button" class="btn btn-ghost btn-sm" id="mm-include">Include again</button>'
+          : '<button type="button" class="btn btn-ghost btn-sm" id="mm-exclude">Not relevant</button>'}
+        ${hasValues ? `<button type="button" class="btn btn-ghost btn-sm" id="mm-clear">${cls.auto_matched ? 'Reject auto-match' : 'Clear mapping'}</button>` : '<button type="button" class="btn btn-ghost btn-sm" id="mm-skip">Skip</button>'}
       </div>
-      <button type="button" class="btn btn-primary" id="mm-confirm">Confirm Mapping</button>
+      <button type="button" class="btn btn-primary" id="mm-confirm">${cls.auto_matched ? 'Confirm' : 'Confirm Mapping'}</button>
     </div>`;
 
   // ---- pickers ----
   const adSetupPicker = mmPicker(document.getElementById('mm-f-adsetup'), {
     multi: false, placeholder: 'Search Ad Setups by name or ID…',
-    selected: form.ad_setup ? [form.ad_setup] : [],
-    fetch: async (q) => (await api(`/meta-ad-matching/ad-setups?q=${encodeURIComponent(q)}`)).map((s) => ({ key: s.id, label: s.generated_name, hint: `#${s.id}` })),
+    selected: cls.ad_setup ? [{ key: cls.ad_setup.id, label: cls.ad_setup.generated_name }] : [],
+    fetch: async (q) => (await api(`/meta-ad-matching/ad-setups?q=${encodeURIComponent(q)}`)).map((x) => ({ key: x.id, label: x.generated_name, hint: `#${x.id}` })),
     onChange: (sel) => { form.ad_setup = sel[0] || null; mmShowPrefill(); },
   });
+  const form = { ad_setup: cls.ad_setup ? { key: cls.ad_setup.id } : null };
   const productPicker = mmPicker(document.getElementById('mm-f-products'), {
-    multi: true, placeholder: 'Search products…', options: options.products.map((p) => ({ key: p.key, label: p.label, hint: p.key })),
-    selected: cls.products.map((p) => ({ key: p.product_code, label: p.product_name || p.product_code })),
+    multi: true, placeholder: 'Search products…', options: options.products.map((x) => ({ key: x.key, label: x.label, hint: x.key })),
+    selected: cls.products.map((x) => ({ key: x.product_code, label: x.product_name || x.product_code })),
+  });
+  const mediaOpts = options.media_types.map((x) => ({ key: x.key, label: x.label }));
+  const mediaPicker = mmPicker(document.getElementById('mm-f-media'), {
+    multi: false, placeholder: 'Video, Image, Carousel, GIF…', options: mediaOpts,
+    selected: cls.media_type ? mediaOpts.filter((x) => x.key === cls.media_type) : [],
   });
   const conceptPicker = mmPicker(document.getElementById('mm-f-concept'), {
-    multi: false, allowFree: true, placeholder: 'Search concepts, or type a legacy name…',
-    options: options.concepts.map((c) => ({ key: `ct:${c.id}`, label: c.label, concept_type_id: c.id })),
+    multi: false, allowFree: true, placeholder: 'Search concepts…',
+    options: options.concepts.map((x) => ({ key: `ct:${x.id}`, label: x.label, concept_type_id: x.id })),
     selected: cls.concept ? [{ key: cls.concept.concept_type_id ? `ct:${cls.concept.concept_type_id}` : `free:${cls.concept.label}`, label: cls.concept.label, free: cls.concept.legacy, concept_type_id: cls.concept.concept_type_id }] : [],
   });
-  const stylePicker = mmPicker(document.getElementById('mm-f-style'), {
-    multi: false, placeholder: 'Search creative styles…', options: options.creative_styles.map((s) => ({ key: s.id, label: s.label })),
-    selected: cls.creative_style_id ? (options.creative_styles.filter((s) => s.id === cls.creative_style_id).map((s) => ({ key: s.id, label: s.label }))) : [],
-  });
   const creatorPicker = mmPicker(document.getElementById('mm-f-creator'), {
-    multi: false, allowFree: true, placeholder: 'Search creators, or type a name…', options: options.creators.map((c) => ({ key: c, label: c })),
+    multi: false, allowFree: true, placeholder: 'Search creators…', options: options.creators.map((x) => ({ key: x, label: x })),
     selected: cls.creator_name ? [{ key: cls.creator_name, label: cls.creator_name }] : [],
   });
-  const mediaOpts = options.media_types.map((m) => ({ key: m.key, label: m.label }));
-  const mediaPicker = mmPicker(document.getElementById('mm-f-media'), {
-    multi: false, placeholder: 'Video, Image / Static, Carousel, GIF…', options: mediaOpts,
-    selected: cls.media_type ? mediaOpts.filter((m) => m.key === cls.media_type) : [],
+  const stylePicker = mmPicker(document.getElementById('mm-f-style'), {
+    multi: false, placeholder: 'Search creative styles…', options: options.creative_styles.map((x) => ({ key: x.id, label: x.label })),
+    selected: cls.creative_style_id ? options.creative_styles.filter((x) => x.id === cls.creative_style_id).map((x) => ({ key: x.id, label: x.label })) : [],
   });
   const nps = document.getElementById('mm-nps');
-  nps.checked = form.notProductSpecific;
+  nps.checked = !!cls.not_product_specific;
   const syncNps = () => {
     if (nps.checked) productPicker.set([]);
     productPicker.setDisabled(nps.checked);
@@ -1157,37 +1168,32 @@ function renderMatchWorkspace(ws, options) {
   nps.addEventListener('change', syncNps);
   syncNps();
 
-  const applySuggestion = (field, s) => {
-    if (field === 'product') { nps.checked = false; productPicker.setDisabled(false); productPicker.add({ key: s.value_key, label: s.value_label }); }
+  const applySuggestion = (field, x) => {
+    if (field === 'product') { nps.checked = false; productPicker.setDisabled(false); productPicker.add({ key: x.value_key, label: x.value_label }); }
     else if (field === 'scope') { nps.checked = true; syncNps(); }
-    else if (field === 'concept') conceptPicker.set([{ key: s.value_ref ? `ct:${s.value_ref}` : `free:${s.value_label}`, label: s.value_label, free: !s.value_ref, concept_type_id: s.value_ref || null }]);
-    else if (field === 'creative_style') stylePicker.set([{ key: s.value_ref, label: s.value_label }]);
-    else if (field === 'creator') creatorPicker.set([{ key: s.value_label, label: s.value_label }]);
-    else if (field === 'media_type') mediaPicker.set(mediaOpts.filter((m) => m.key === s.value_key));
-    else if (field === 'ad_setup') adSetupPicker.set([{ key: s.value_ref, label: (s.ad_setup && s.ad_setup.generated_name) || `Ad Setup #${s.value_ref}` }]);
+    else if (field === 'concept') conceptPicker.set([{ key: x.value_ref ? `ct:${x.value_ref}` : `free:${x.value_label}`, label: x.value_label, free: !x.value_ref, concept_type_id: x.value_ref || null }]);
+    else if (field === 'creative_style') stylePicker.set([{ key: x.value_ref, label: x.value_label }]);
+    else if (field === 'creator') creatorPicker.set([{ key: x.value_label, label: x.value_label }]);
+    else if (field === 'media_type') mediaPicker.set(mediaOpts.filter((o) => o.key === x.value_key));
+    else if (field === 'ad_setup') adSetupPicker.set([{ key: x.value_ref, label: (x.ad_setup && x.ad_setup.generated_name) || `Ad Setup #${x.value_ref}` }]);
   };
   body.querySelectorAll('.mm-sugg-chip').forEach((btn) => btn.addEventListener('click', () => {
-    const list = sg[btn.dataset.field];
-    applySuggestion(btn.dataset.field, list[Number(btn.dataset.i)]);
+    applySuggestion(btn.dataset.field, sg[btn.dataset.field][Number(btn.dataset.i)]);
   }));
+
   // "Fill from suggestions": loads the STRONGEST proposal per field into the
   // form for review -- nothing is saved until Confirm Mapping. Products: the
-  // top suggestion, plus every other member of the same SET group (a set's
-  // pieces belong together; unrelated alternatives are not added). The Ad
-  // Setup is only filled for a medium-or-better match.
+  // top suggestion plus every other member of the same SET group. The Ad
+  // Setup is only filled for a Likely-or-better match.
   const fill = document.getElementById('mm-fill');
   if (fill) {
     fill.addEventListener('click', () => {
       const topProduct = (sg.product || [])[0];
       if (topProduct) {
         const group = topProduct.evidence && topProduct.evidence.set_group;
-        const picks = group ? sg.product.filter((p) => p.evidence && p.evidence.set_group === group) : [topProduct];
-        picks.forEach((p) => applySuggestion('product', p));
+        (group ? sg.product.filter((x) => x.evidence && x.evidence.set_group === group) : [topProduct]).forEach((x) => applySuggestion('product', x));
       }
-      ['concept', 'creative_style', 'creator', 'media_type'].forEach((f) => {
-        const top = (sg[f] || [])[0];
-        if (top) applySuggestion(f, top);
-      });
+      ['concept', 'creative_style', 'creator', 'media_type'].forEach((f) => { const top = (sg[f] || [])[0]; if (top) applySuggestion(f, top); });
       const topSetup = (sg.ad_setup || [])[0];
       if (topSetup && topSetup.confidence >= 0.6) applySuggestion('ad_setup', topSetup);
       if (!topProduct && !['concept', 'creative_style', 'creator', 'media_type'].some((f) => (sg[f] || []).length)) toast('No suggestions to fill for this ad.');
@@ -1198,15 +1204,15 @@ function renderMatchWorkspace(ws, options) {
   function mmShowPrefill() {
     const host = document.getElementById('mm-adsetup-prefill');
     if (!form.ad_setup) { host.innerHTML = ''; return; }
-    host.innerHTML = '<button type="button" class="btn btn-ghost btn-sm" id="mm-prefill-btn">Use this Ad Setup’s product(s), concept &amp; creator</button>';
+    host.innerHTML = '<button type="button" class="btn btn-ghost btn-sm" id="mm-prefill-btn">Use its product, concept &amp; creator</button>';
     document.getElementById('mm-prefill-btn').addEventListener('click', async () => {
       try {
         const pre = await api(`/meta-ad-matching/ad-setups/${form.ad_setup.key}/prefill`);
-        if (pre.products.length) { nps.checked = false; productPicker.setDisabled(false); pre.products.forEach((p) => productPicker.add({ key: p.key, label: p.label })); }
+        if (pre.products.length) { nps.checked = false; productPicker.setDisabled(false); pre.products.forEach((x) => productPicker.add({ key: x.key, label: x.label })); }
         if (pre.concept) conceptPicker.set([{ key: pre.concept.concept_type_id ? `ct:${pre.concept.concept_type_id}` : `free:${pre.concept.label}`, label: pre.concept.label, free: pre.concept.legacy, concept_type_id: pre.concept.concept_type_id }]);
         if (pre.creator_name) creatorPicker.set([{ key: pre.creator_name, label: pre.creator_name }]);
         const sid = (pre.creative_style_ids || [])[0];
-        const st = sid && options.creative_styles.find((s) => s.id === sid);
+        const st = sid && options.creative_styles.find((x) => x.id === sid);
         if (st) stylePicker.set([{ key: st.id, label: st.label }]);
       } catch (e) { toast(e.message, true); }
     });
@@ -1229,7 +1235,7 @@ function renderMatchWorkspace(ws, options) {
       method: 'POST',
       body: JSON.stringify({
         ad_setup_id: setup ? setup.key : null,
-        product_codes: productPicker.get().map((p) => p.key),
+        product_codes: productPicker.get().map((x) => x.key),
         not_product_specific: nps.checked,
         concept: concept ? (concept.free ? { label: concept.label } : { concept_type_id: concept.concept_type_id }) : null,
         creative_style_id: style ? style.key : null,
@@ -1242,7 +1248,8 @@ function renderMatchWorkspace(ws, options) {
   if (skip) skip.addEventListener('click', () => act('/skip', { method: 'POST' }, 'Skipped for now — nothing was classified.'));
   const clear = document.getElementById('mm-clear');
   if (clear) clear.addEventListener('click', async () => {
-    if (await confirmDialog('Clear this confirmed mapping? The ad goes back to unmatched.', { okLabel: 'Clear mapping' })) act('/mapping', { method: 'DELETE' }, 'Mapping cleared.');
+    const msg = cls.auto_matched ? 'Reject this auto-match? The ad goes to Needs review and will not be auto-matched again.' : 'Clear this confirmed mapping? The ad goes back to unmatched.';
+    if (await confirmDialog(msg, { okLabel: cls.auto_matched ? 'Reject auto-match' : 'Clear mapping' })) act('/mapping', { method: 'DELETE' }, cls.auto_matched ? 'Auto-match rejected.' : 'Mapping cleared.');
   });
   const exclude = document.getElementById('mm-exclude');
   if (exclude) exclude.addEventListener('click', async () => {
