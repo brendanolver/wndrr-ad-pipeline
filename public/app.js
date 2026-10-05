@@ -348,7 +348,7 @@ function switchTab(name) {
   if (name === 'shooting') refreshCurrentShootingView();
   if (name === 'reference-library') loadReferenceLibraryPage();
   // Meta Performance reads stored data only (never Meta) -- refetched on every visit so a sync just run from Settings shows up.
-  if (name === 'meta-performance') loadMetaPerformance();
+  if (name === 'meta-performance') loadMetaPerformanceArea();
   // Same reasoning as Shooting above -- Editing is the direct downstream
   // consumer of Shooting's Mark as Shot action, so it needs a fresh fetch
   // on every visit too.
@@ -759,6 +759,460 @@ document.getElementById('mp-ads-body').addEventListener('click', (e) => {
   const row = e.target.closest('tr[data-ad-id]');
   if (row) openMetaAdDetail(row.dataset.adId);
 });
+
+// ── Meta Performance: sub-navigation + Ad Matching ──────────────────────
+// "Performance | Ad Matching" live in the same top-level page. Ad Matching
+// reads/writes ONLY /api/meta-ad-matching/* (admin-only, local database --
+// it never calls Meta). Suggestions are proposals; only the explicit
+// "Confirm Mapping" button persists a classification (see
+// src/lib/metaAdMatching.js).
+const mmState = {
+  view: 'performance', scope: '30d', filter: 'needs', q: '', page: 1, pageSize: 25,
+  reqId: 0, autoSuggested: false, options: null,
+};
+const MM_FILTERS = [
+  ['needs', 'Needs matching'], ['unmatched', 'Unmatched'], ['suggested', 'Suggested'],
+  ['confirmed', 'Confirmed'], ['not_product_specific', 'Not product-specific'], ['excluded', 'Excluded'],
+];
+
+function loadMetaPerformanceArea() {
+  if (mmState.view === 'matching') loadMetaMatching(); else loadMetaPerformance();
+}
+
+function mpSetView(view) {
+  mmState.view = view;
+  document.querySelectorAll('.mp-subnav-btn').forEach((b) => b.classList.toggle('active', b.dataset.mpView === view));
+  document.getElementById('mp-view-performance').style.display = view === 'performance' ? '' : 'none';
+  document.getElementById('mp-view-matching').style.display = view === 'matching' ? '' : 'none';
+  loadMetaPerformanceArea();
+}
+document.querySelectorAll('.mp-subnav-btn').forEach((b) => b.addEventListener('click', () => mpSetView(b.dataset.mpView)));
+
+function mmConfDot(level) {
+  if (!level) return '<span class="mp-na">—</span>';
+  const label = { high: 'High', medium: 'Medium', low: 'Low' }[level];
+  return `<span class="mm-conf ${level}"><i></i>${label}</span>`;
+}
+function mmStateChip(a) {
+  if (a.excluded) return '<span class="mm-state excluded">Not relevant</span>';
+  if (a.match_status === 'confirmed') return a.not_product_specific ? '<span class="mm-state confirmed">Not product-specific</span>' : '<span class="mm-state confirmed">Confirmed</span>';
+  if (a.match_status === 'suggested') return `<span class="mm-state suggested">Suggested</span>${a.skipped ? ' <span class="mm-skipped">skipped</span>' : ''}`;
+  return `<span class="mm-state unmatched">Unmatched</span>${a.skipped ? ' <span class="mm-skipped">skipped</span>' : ''}`;
+}
+
+function mmRenderChips(counts) {
+  const chips = document.getElementById('mm-chips');
+  chips.innerHTML = MM_FILTERS.map(([key, label]) => `
+    <button type="button" class="mm-chip${mmState.filter === key ? ' active' : ''}" data-filter="${key}">${label}
+      <span class="mm-chip-n">${Number((counts && counts[key]) || 0).toLocaleString('en-AU')}</span></button>`).join('');
+}
+
+function mmRenderRows(res) {
+  mmRenderChips(res.counts);
+  document.getElementById('mm-body').innerHTML = res.ads.length ? res.ads.map((a) => {
+    const prod = a.match_status === 'confirmed' && !a.excluded
+      ? (a.not_product_specific ? '<em class="mm-muted">Not product-specific</em>' : escapeHtml(a.confirmed_products || '—'))
+      : (a.suggested_product ? `<span class="mm-guess" title="Suggestion — not confirmed">${escapeHtml(a.suggested_product)}</span>` : '<span class="mp-na">—</span>');
+    const con = a.match_status === 'confirmed' && !a.excluded
+      ? escapeHtml(a.confirmed_concept || '—')
+      : (a.suggested_concept ? `<span class="mm-guess" title="Suggestion — not confirmed">${escapeHtml(a.suggested_concept)}</span>` : '<span class="mp-na">—</span>');
+    const conf = a.match_status === 'confirmed' ? '<span class="mm-tick">✓</span>' : mmConfDot(a.confidence_level);
+    return `<tr data-ad-id="${escapeHtml(a.meta_ad_id)}">
+      <td class="mp-name" title="${escapeHtml(a.ad_name || a.meta_ad_id)}">${escapeHtml(a.ad_name || '(unnamed ad)')}</td>
+      <td>${mpStatusChip(a.effective_status)}</td>
+      <td class="num">${mpFmt(a.recent_spend, 'money')}</td>
+      <td>${mmStateChip(a)}</td>
+      <td class="mm-cell">${prod}</td>
+      <td class="mm-cell">${con}</td>
+      <td>${conf}</td></tr>`;
+  }).join('') : `<tr><td colspan="7" class="mp-table-empty">${
+    mmState.q ? 'No ads match this search.' : mmState.filter === 'needs' ? 'Nothing left to match in this view — nice work.' : 'No ads in this view.'}</td></tr>`;
+  const pager = document.getElementById('mm-pager');
+  if (res.total_pages <= 1) {
+    pager.innerHTML = res.total ? `<span>${res.total.toLocaleString('en-AU')} ad${res.total === 1 ? '' : 's'}</span>` : '';
+  } else {
+    const from = (res.page - 1) * res.page_size + 1;
+    const to = Math.min(res.total, res.page * res.page_size);
+    pager.innerHTML = `
+      <button type="button" class="btn btn-ghost btn-sm" id="mm-prev" ${res.page <= 1 ? 'disabled' : ''}>← Prev</button>
+      <span>${from.toLocaleString('en-AU')}–${to.toLocaleString('en-AU')} of ${res.total.toLocaleString('en-AU')} · page ${res.page} of ${res.total_pages}</span>
+      <button type="button" class="btn btn-ghost btn-sm" id="mm-next" ${res.page >= res.total_pages ? 'disabled' : ''}>Next →</button>`;
+  }
+}
+
+async function loadMetaMatching() {
+  if (!state.currentUser || state.currentUser.role !== 'admin') return;
+  const id = ++mmState.reqId;
+  const qs = `scope=${mmState.scope}&filter=${mmState.filter}&q=${encodeURIComponent(mmState.q)}&page=${mmState.page}&page_size=${mmState.pageSize}`;
+  try {
+    let res = await api(`/meta-ad-matching/queue?${qs}`);
+    if (id !== mmState.reqId) return;
+    // Ads in a recent-activity window that have never been evaluated get
+    // their deterministic suggestions computed once, automatically (a local
+    // computation -- no Meta call). Skipped for "All ads", which would be
+    // the whole 30k inventory; use Refresh suggestions + search there.
+    if (res.counts.pending_suggestions > 0 && mmState.scope !== 'all' && !mmState.autoSuggested) {
+      mmState.autoSuggested = true;
+      await api('/meta-ad-matching/suggest', { method: 'POST', body: JSON.stringify({ scope: mmState.scope }) });
+      res = await api(`/meta-ad-matching/queue?${qs}`);
+      if (id !== mmState.reqId) return;
+    }
+    mmRenderRows(res);
+  } catch (e) {
+    if (id !== mmState.reqId) return;
+    document.getElementById('mm-body').innerHTML = `<tr><td colspan="7" class="mp-table-empty">${escapeHtml(e.message)}</td></tr>`;
+  }
+}
+
+document.getElementById('mm-scope').addEventListener('change', (e) => {
+  mmState.scope = e.target.value; mmState.page = 1; mmState.autoSuggested = false; loadMetaMatching();
+});
+let mmSearchTimer = null;
+document.getElementById('mm-search').addEventListener('input', (e) => {
+  clearTimeout(mmSearchTimer);
+  mmSearchTimer = setTimeout(() => { mmState.q = e.target.value.trim(); mmState.page = 1; loadMetaMatching(); }, 300);
+});
+document.getElementById('mm-chips').addEventListener('click', (e) => {
+  const chip = e.target.closest('.mm-chip');
+  if (!chip) return;
+  mmState.filter = chip.dataset.filter; mmState.page = 1; loadMetaMatching();
+});
+document.getElementById('mm-pager').addEventListener('click', (e) => {
+  if (e.target.id === 'mm-prev' && mmState.page > 1) mmState.page -= 1;
+  else if (e.target.id === 'mm-next') mmState.page += 1;
+  else return;
+  loadMetaMatching();
+});
+document.getElementById('mm-body').addEventListener('click', (e) => {
+  const row = e.target.closest('tr[data-ad-id]');
+  if (row) openMatchWorkspace(row.dataset.adId);
+});
+document.getElementById('mm-refresh-suggestions').addEventListener('click', async () => {
+  const btn = document.getElementById('mm-refresh-suggestions');
+  btn.disabled = true; btn.textContent = 'Refreshing…';
+  try {
+    const r = await api('/meta-ad-matching/suggest', { method: 'POST', body: JSON.stringify({ scope: mmState.scope, all: true }) });
+    toast(`Suggestions refreshed for ${r.examined} ad${r.examined === 1 ? '' : 's'} (${r.with_suggestions} with suggestions).`);
+    await loadMetaMatching();
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Refresh suggestions';
+  }
+});
+
+// ── Searchable selector (no giant <select>s) ────────────────────────────
+// opts: { options:[{key,label,hint}] | fetch:async(q)->options, multi, allowFree,
+//         placeholder, selected:[{key,label,...}], onChange(selected) }
+function mmPicker(host, opts) {
+  let selected = (opts.selected || []).slice();
+  let options = opts.options || [];
+  let open = false;
+  let timer = null;
+  host.classList.add('mm-picker');
+  host.innerHTML = '<div class="mm-picker-sel"></div><input type="text" class="mm-picker-input" autocomplete="off"><div class="mm-picker-list" style="display:none;"></div>';
+  const selEl = host.querySelector('.mm-picker-sel');
+  const input = host.querySelector('.mm-picker-input');
+  const list = host.querySelector('.mm-picker-list');
+  input.placeholder = opts.placeholder || 'Search…';
+
+  const emit = () => { if (opts.onChange) opts.onChange(selected.slice()); };
+  const renderSel = () => {
+    selEl.innerHTML = selected.map((s, i) => `<span class="mm-pill${s.free ? ' free' : ''}">${escapeHtml(s.label)}${s.free ? '<small>legacy</small>' : ''}<button type="button" data-i="${i}" aria-label="Remove">×</button></span>`).join('');
+    input.style.display = !opts.multi && selected.length ? 'none' : '';
+    input.disabled = !!host.dataset.disabled;
+  };
+  const filtered = () => {
+    const term = input.value.trim().toLowerCase();
+    const taken = new Set(selected.map((s) => String(s.key)));
+    const rows = options.filter((o) => !taken.has(String(o.key)) && (!term || o.label.toLowerCase().includes(term) || String(o.hint || '').toLowerCase().includes(term)));
+    return rows.slice(0, 8);
+  };
+  const renderList = () => {
+    const rows = filtered();
+    const term = input.value.trim();
+    const exact = options.some((o) => o.label.toLowerCase() === term.toLowerCase()) || selected.some((s) => s.label.toLowerCase() === term.toLowerCase());
+    let html = rows.map((o, i) => `<div class="mm-opt" data-i="${i}">${escapeHtml(o.label)}${o.hint ? `<small>${escapeHtml(o.hint)}</small>` : ''}</div>`).join('');
+    if (opts.allowFree && term && !exact) html += `<div class="mm-opt free" data-free="1">Use “${escapeHtml(term)}” as legacy / free text</div>`;
+    if (!html) html = '<div class="mm-opt none">No matches</div>';
+    list.innerHTML = html;
+    list.style.display = open ? '' : 'none';
+    list._rows = rows;
+  };
+  const pick = (item) => {
+    selected = opts.multi ? [...selected, item] : [item];
+    input.value = ''; open = false; renderSel(); renderList(); emit();
+  };
+  const refetch = () => {
+    if (!opts.fetch) return renderList();
+    clearTimeout(timer);
+    timer = setTimeout(async () => { options = await opts.fetch(input.value.trim()); renderList(); }, 200);
+  };
+  selEl.addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-i]');
+    if (!b) return;
+    selected.splice(Number(b.dataset.i), 1); renderSel(); renderList(); emit();
+  });
+  input.addEventListener('focus', () => { open = true; refetch(); renderList(); });
+  input.addEventListener('input', () => { open = true; refetch(); renderList(); });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { open = false; renderList(); }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const rows = list._rows || [];
+      const term = input.value.trim();
+      if (rows.length) pick(rows[0]);
+      else if (opts.allowFree && term) pick({ key: `free:${term}`, label: term, free: true });
+    }
+  });
+  list.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    const o = e.target.closest('.mm-opt');
+    if (!o || o.classList.contains('none')) return;
+    if (o.dataset.free) pick({ key: `free:${input.value.trim()}`, label: input.value.trim(), free: true });
+    else pick(list._rows[Number(o.dataset.i)]);
+  });
+  input.addEventListener('blur', () => { open = false; setTimeout(renderList, 0); });
+  renderSel(); renderList();
+  return {
+    get: () => selected.slice(),
+    set: (items) => { selected = items.slice(); renderSel(); emit(); },
+    add: (item) => { if (!selected.some((s) => String(s.key) === String(item.key))) { selected = opts.multi ? [...selected, item] : [item]; renderSel(); emit(); } },
+    setDisabled: (d) => { if (d) host.dataset.disabled = '1'; else delete host.dataset.disabled; renderSel(); host.classList.toggle('disabled', !!d); },
+  };
+}
+
+// ── Matching workspace ──────────────────────────────────────────────────
+async function mmLoadOptions() {
+  if (!mmState.options) mmState.options = await api('/meta-ad-matching/options');
+  return mmState.options;
+}
+
+function mmSuggChips(items, field) {
+  if (!items || !items.length) return '';
+  return `<div class="mm-sugg">${items.slice(0, 3).map((s, i) => `
+    <button type="button" class="mm-sugg-chip ${s.confidence_level}" data-field="${field}" data-i="${i}" title="${escapeHtml(s.reason)}">
+      + ${escapeHtml(s.value_label || '')}<span>${s.confidence_level}</span></button>`).join('')}
+    <div class="mm-reason">${escapeHtml(items[0].reason)}</div></div>`;
+}
+
+async function openMatchWorkspace(adId) {
+  const title = document.getElementById('mm-modal-title');
+  const body = document.getElementById('mm-modal-body');
+  title.textContent = 'Match ad';
+  body.innerHTML = '<div class="mp-table-empty">Loading…</div>';
+  openModal('meta-match-modal');
+  try {
+    const [ws, options] = await Promise.all([api(`/meta-ad-matching/ads/${encodeURIComponent(adId)}`), mmLoadOptions()]);
+    renderMatchWorkspace(ws, options);
+  } catch (e) {
+    body.innerHTML = `<div class="mp-table-empty">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function renderMatchWorkspace(ws, options) {
+  const body = document.getElementById('mm-modal-body');
+  const ad = ws.ad;
+  const cls = ws.classification;
+  const sg = ws.suggestions;
+  const perf = ws.performance;
+  document.getElementById('mm-modal-title').textContent = ad.ad_name || '(unnamed ad)';
+  const created = ad.created_time
+    ? new Intl.DateTimeFormat('en-AU', { timeZone: MP_TZ, day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(ad.created_time))
+    : '—';
+  const dash = (v) => escapeHtml(v || '—');
+  const parsedRows = [];
+  if (ws.parsed.structured) {
+    const s = ws.parsed.structured;
+    [['Product', s.product_name], ['Category', s.product_category], ['Hook', s.hook], ['Media', s.media], ['Creator', s.creator], ['Concept', s.concept], ['Page', s.url_link_page], ['Batch', s.batch], ['Week', s.week]]
+      .forEach(([k, v]) => parsedRows.push(`<tr><th>${k}</th><td>${dash(v)}</td></tr>`));
+  } else if (ws.parsed.legacy) {
+    const l = ws.parsed.legacy;
+    [['Product', l.product], ['Product type', l.productType], ['Batch', l.batchNo]].forEach(([k, v]) => parsedRows.push(`<tr><th>${k}</th><td>${dash(v)}</td></tr>`));
+  }
+  const m = perf.recent;
+  const form = {
+    ad_setup: cls.ad_setup ? { key: cls.ad_setup.id, label: cls.ad_setup.generated_name } : null,
+    notProductSpecific: !!cls.not_product_specific,
+  };
+
+  body.innerHTML = `
+    <div class="mm-grid">
+      <section class="mm-evidence">
+        <h4>Meta evidence</h4>
+        <dl class="mp-detail-grid">
+          <div><dt>Meta Ad ID</dt><dd>${dash(ad.meta_ad_id)}</dd></div>
+          <div><dt>Status</dt><dd>${mpStatusChip(ad.effective_status)}</dd></div>
+          <div><dt>Created</dt><dd>${created}</dd></div>
+          <div><dt>State</dt><dd>${mmStateChip({ match_status: ad.match_status, excluded: cls.excluded, not_product_specific: cls.not_product_specific, skipped: cls.skipped })}</dd></div>
+        </dl>
+        <h4>${escapeHtml(perf.window.label)} · ${escapeHtml(mpRange({ since: perf.window.since, until: perf.window.until }, false))}</h4>
+        <div class="mm-perf">
+          <div><b>${mpFmt(m.spend, 'money')}</b><span>spent</span></div>
+          <div><b>${mpFmt(m.purchases, 'int')}</b><span>purchases</span></div>
+          <div><b>${mpFmt(m.cpa, 'money')}</b><span>CPA</span></div>
+          <div><b>${mpFmt(m.add_to_cart, 'int')}</b><span>adds to cart</span></div>
+        </div>
+        <div class="mm-muted-line">Lifetime spend ${mpFmt(perf.lifetime_spend, 'money')}${perf.first_active ? ` · active ${escapeHtml(mpDate(perf.first_active, true))} – ${escapeHtml(mpDate(perf.last_active, true))}` : ''}</div>
+        <h4>Parsed from the ad name</h4>
+        ${parsedRows.length ? `<table class="mm-parsed"><tbody>${parsedRows.join('')}</tbody></table>` : '<div class="mm-muted-line">Not a recognised naming pattern — classify from the name above.</div>'}
+      </section>
+
+      <section class="mm-mapping" id="mm-mapping">
+        <div class="mm-mapping-head"><h4>Mapping</h4>
+          ${cls.confirmed ? '' : '<button type="button" class="btn btn-ghost btn-sm" id="mm-fill">Fill from suggestions</button>'}</div>
+        ${cls.confirmed ? '<div class="mm-note ok">Confirmed — edits here replace the confirmed mapping when you save.</div>' : '<div class="mm-note">Suggestions are proposals only — nothing is saved until you press Confirm Mapping.</div>'}
+
+        <div class="mm-field"><label>WNDRR Ad Setup <small>(optional — only if this ad came from the pipeline)</small></label>
+          <div id="mm-f-adsetup"></div>
+          ${(sg.ad_setup || []).slice(0, 2).map((s, i) => `<div class="mm-sugg"><button type="button" class="mm-sugg-chip ${s.confidence_level}" data-field="ad_setup" data-i="${i}" title="${escapeHtml(s.reason)}">+ Link Ad Setup #${s.value_ref}<span>${s.confidence_level}</span></button><div class="mm-reason">${escapeHtml(s.reason)}</div></div>`).join('')}
+          <div id="mm-adsetup-prefill"></div>
+        </div>
+
+        <div class="mm-field"><label>Product(s)</label>
+          <label class="mm-check"><input type="checkbox" id="mm-nps"> Not product-specific <small>(DPA / sale / campaign / general ad)</small></label>
+          <div id="mm-f-products"></div>
+          ${mmSuggChips(sg.product, 'product')}
+          ${(sg.scope || []).length ? `<div class="mm-sugg"><button type="button" class="mm-sugg-chip ${sg.scope[0].confidence_level}" data-field="scope" data-i="0" title="${escapeHtml(sg.scope[0].reason)}">+ Not product-specific<span>${sg.scope[0].confidence_level}</span></button><div class="mm-reason">${escapeHtml(sg.scope[0].reason)}</div></div>` : ''}
+        </div>
+
+        <div class="mm-field"><label>Concept <small>(reusable concept list; unknown names are kept as legacy text)</small></label>
+          <div id="mm-f-concept"></div>${mmSuggChips(sg.concept, 'concept')}</div>
+
+        <div class="mm-field"><label>Creative Style <small>(promotion style list — separate from Concept)</small></label>
+          <div id="mm-f-style"></div>${mmSuggChips(sg.creative_style, 'creative_style')}</div>
+
+        <div class="mm-field"><label>Creator <small>(name)</small></label>
+          <div id="mm-f-creator"></div>${mmSuggChips(sg.creator, 'creator')}</div>
+
+        <div class="mm-error" id="mm-error"></div>
+      </section>
+    </div>
+    <div class="mm-actions">
+      <div class="mm-actions-left">
+        ${cls.excluded
+          ? '<button type="button" class="btn btn-ghost btn-sm" id="mm-include">Include in creative intelligence again</button>'
+          : '<button type="button" class="btn btn-ghost btn-sm" id="mm-exclude">Not relevant for creative intelligence</button>'}
+        ${cls.confirmed ? '<button type="button" class="btn btn-ghost btn-sm" id="mm-clear">Clear mapping</button>' : '<button type="button" class="btn btn-ghost btn-sm" id="mm-skip">Skip for now</button>'}
+      </div>
+      <button type="button" class="btn btn-primary" id="mm-confirm">Confirm Mapping</button>
+    </div>`;
+
+  // ---- pickers ----
+  const adSetupPicker = mmPicker(document.getElementById('mm-f-adsetup'), {
+    multi: false, placeholder: 'Search Ad Setups by name or ID…',
+    selected: form.ad_setup ? [form.ad_setup] : [],
+    fetch: async (q) => (await api(`/meta-ad-matching/ad-setups?q=${encodeURIComponent(q)}`)).map((s) => ({ key: s.id, label: s.generated_name, hint: `#${s.id}` })),
+    onChange: (sel) => { form.ad_setup = sel[0] || null; mmShowPrefill(); },
+  });
+  const productPicker = mmPicker(document.getElementById('mm-f-products'), {
+    multi: true, placeholder: 'Search products…', options: options.products.map((p) => ({ key: p.key, label: p.label, hint: p.key })),
+    selected: cls.products.map((p) => ({ key: p.product_code, label: p.product_name || p.product_code })),
+  });
+  const conceptPicker = mmPicker(document.getElementById('mm-f-concept'), {
+    multi: false, allowFree: true, placeholder: 'Search concepts, or type a legacy name…',
+    options: options.concepts.map((c) => ({ key: `ct:${c.id}`, label: c.label, concept_type_id: c.id })),
+    selected: cls.concept ? [{ key: cls.concept.concept_type_id ? `ct:${cls.concept.concept_type_id}` : `free:${cls.concept.label}`, label: cls.concept.label, free: cls.concept.legacy, concept_type_id: cls.concept.concept_type_id }] : [],
+  });
+  const stylePicker = mmPicker(document.getElementById('mm-f-style'), {
+    multi: false, placeholder: 'Search creative styles…', options: options.creative_styles.map((s) => ({ key: s.id, label: s.label })),
+    selected: cls.creative_style_id ? (options.creative_styles.filter((s) => s.id === cls.creative_style_id).map((s) => ({ key: s.id, label: s.label }))) : [],
+  });
+  const creatorPicker = mmPicker(document.getElementById('mm-f-creator'), {
+    multi: false, allowFree: true, placeholder: 'Search creators, or type a name…', options: options.creators.map((c) => ({ key: c, label: c })),
+    selected: cls.creator_name ? [{ key: cls.creator_name, label: cls.creator_name }] : [],
+  });
+  const nps = document.getElementById('mm-nps');
+  nps.checked = form.notProductSpecific;
+  const syncNps = () => {
+    if (nps.checked) productPicker.set([]);
+    productPicker.setDisabled(nps.checked);
+  };
+  nps.addEventListener('change', syncNps);
+  syncNps();
+
+  const applySuggestion = (field, s) => {
+    if (field === 'product') { nps.checked = false; productPicker.setDisabled(false); productPicker.add({ key: s.value_key, label: s.value_label }); }
+    else if (field === 'scope') { nps.checked = true; syncNps(); }
+    else if (field === 'concept') conceptPicker.set([{ key: s.value_ref ? `ct:${s.value_ref}` : `free:${s.value_label}`, label: s.value_label, free: !s.value_ref, concept_type_id: s.value_ref || null }]);
+    else if (field === 'creative_style') stylePicker.set([{ key: s.value_ref, label: s.value_label }]);
+    else if (field === 'creator') creatorPicker.set([{ key: s.value_label, label: s.value_label }]);
+    else if (field === 'ad_setup') adSetupPicker.set([{ key: s.value_ref, label: (s.ad_setup && s.ad_setup.generated_name) || `Ad Setup #${s.value_ref}` }]);
+  };
+  body.querySelectorAll('.mm-sugg-chip').forEach((btn) => btn.addEventListener('click', () => {
+    const list = sg[btn.dataset.field];
+    applySuggestion(btn.dataset.field, list[Number(btn.dataset.i)]);
+  }));
+  const fill = document.getElementById('mm-fill');
+  if (fill) {
+    fill.addEventListener('click', () => {
+      ['product', 'concept', 'creative_style', 'creator', 'ad_setup'].forEach((f) => {
+        const top = (sg[f] || [])[0];
+        if (!top) return;
+        if (f === 'product') (sg.product || []).filter((p) => p.confidence >= 0.6).forEach((p) => applySuggestion('product', p));
+        else if (top.confidence >= 0.6) applySuggestion(f, top);
+      });
+    });
+  }
+
+  // Offer (never auto-apply) the linked Ad Setup's own product/concept/creator.
+  function mmShowPrefill() {
+    const host = document.getElementById('mm-adsetup-prefill');
+    if (!form.ad_setup) { host.innerHTML = ''; return; }
+    host.innerHTML = '<button type="button" class="btn btn-ghost btn-sm" id="mm-prefill-btn">Use this Ad Setup’s product(s), concept &amp; creator</button>';
+    document.getElementById('mm-prefill-btn').addEventListener('click', async () => {
+      try {
+        const pre = await api(`/meta-ad-matching/ad-setups/${form.ad_setup.key}/prefill`);
+        if (pre.products.length) { nps.checked = false; productPicker.setDisabled(false); pre.products.forEach((p) => productPicker.add({ key: p.key, label: p.label })); }
+        if (pre.concept) conceptPicker.set([{ key: pre.concept.concept_type_id ? `ct:${pre.concept.concept_type_id}` : `free:${pre.concept.label}`, label: pre.concept.label, free: pre.concept.legacy, concept_type_id: pre.concept.concept_type_id }]);
+        if (pre.creator_name) creatorPicker.set([{ key: pre.creator_name, label: pre.creator_name }]);
+        const sid = (pre.creative_style_ids || [])[0];
+        const st = sid && options.creative_styles.find((s) => s.id === sid);
+        if (st) stylePicker.set([{ key: st.id, label: st.label }]);
+      } catch (e) { toast(e.message, true); }
+    });
+  }
+  mmShowPrefill();
+
+  // ---- actions ----
+  const errEl = document.getElementById('mm-error');
+  const done = (msg) => { toast(msg); closeModal('meta-match-modal'); loadMetaMatching(); };
+  const act = async (path, opts, msg) => {
+    errEl.textContent = '';
+    try { await api(`/meta-ad-matching/ads/${encodeURIComponent(ad.meta_ad_id)}${path}`, opts); done(msg); } catch (e) { errEl.textContent = e.message; }
+  };
+  document.getElementById('mm-confirm').addEventListener('click', () => {
+    const concept = conceptPicker.get()[0];
+    const style = stylePicker.get()[0];
+    const creator = creatorPicker.get()[0];
+    const setup = adSetupPicker.get()[0];
+    act('/confirm', {
+      method: 'POST',
+      body: JSON.stringify({
+        ad_setup_id: setup ? setup.key : null,
+        product_codes: productPicker.get().map((p) => p.key),
+        not_product_specific: nps.checked,
+        concept: concept ? (concept.free ? { label: concept.label } : { concept_type_id: concept.concept_type_id }) : null,
+        creative_style_id: style ? style.key : null,
+        creator_name: creator ? creator.label : null,
+      }),
+    }, 'Mapping confirmed.');
+  });
+  const skip = document.getElementById('mm-skip');
+  if (skip) skip.addEventListener('click', () => act('/skip', { method: 'POST' }, 'Skipped for now — nothing was classified.'));
+  const clear = document.getElementById('mm-clear');
+  if (clear) clear.addEventListener('click', async () => {
+    if (await confirmDialog('Clear this confirmed mapping? The ad goes back to unmatched.', { okLabel: 'Clear mapping' })) act('/mapping', { method: 'DELETE' }, 'Mapping cleared.');
+  });
+  const exclude = document.getElementById('mm-exclude');
+  if (exclude) exclude.addEventListener('click', async () => {
+    if (await confirmDialog('Mark this ad as not relevant for creative intelligence? It will be left out of concept and product recommendations. You can reverse this at any time.', { okLabel: 'Mark not relevant' })) {
+      act('/exclude', { method: 'POST', body: JSON.stringify({ reason: 'Not relevant for creative intelligence' }) }, 'Marked not relevant.');
+    }
+  });
+  const include = document.getElementById('mm-include');
+  if (include) include.addEventListener('click', () => act('/include', { method: 'POST' }, 'Included again.'));
+}
 
 // ── Meta Sync (Settings, temporary admin-only operator control) ─────────
 // Calls only the admin endpoints: GET /api/meta-sync/status (local DB read,
