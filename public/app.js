@@ -234,6 +234,9 @@ function applySidebarModuleAccess() {
   // would otherwise un-hide every [data-tab] button not in the deny-list.
   const metaPerfBtn = document.getElementById('sidebar-meta-performance');
   if (metaPerfBtn) metaPerfBtn.style.display = state.currentUser && state.currentUser.role === 'admin' ? '' : 'none';
+  // Creative Opportunities: admin-only in V1 (the API enforces it too).
+  const coBtn = document.getElementById('sidebar-creative-opportunities');
+  if (coBtn) coBtn.style.display = state.currentUser && state.currentUser.role === 'admin' ? '' : 'none';
 }
 
 // Production follow-up pass, round 2: the static index.html already ships
@@ -342,7 +345,7 @@ function switchTab(name) {
     toast("You don't have access to this module.", true);
     return;
   }
-  if (name === 'meta-performance' && !(state.currentUser && state.currentUser.role === 'admin')) {
+  if ((name === 'meta-performance' || name === 'creative-opportunities') && !(state.currentUser && state.currentUser.role === 'admin')) {
     toast("You don't have access to this module.", true);
     return;
   }
@@ -357,6 +360,8 @@ function switchTab(name) {
   if (name === 'reference-library') loadReferenceLibraryPage();
   // Meta Performance reads stored data only (never Meta) -- refetched on every visit so a sync just run from Settings shows up.
   if (name === 'meta-performance') loadMetaPerformanceArea();
+  // Creative Opportunities is computed on read from local data -- refetched on every visit so a sync / matching just done is reflected.
+  if (name === 'creative-opportunities') loadCreativeOpportunities();
   // Same reasoning as Shooting above -- Editing is the direct downstream
   // consumer of Shooting's Mark as Shot action, so it needs a fresh fetch
   // on every visit too.
@@ -919,6 +924,227 @@ document.getElementById('mm-refresh-suggestions').addEventListener('click', asyn
     toast(e.message, true);
   } finally {
     btn.disabled = false; btn.textContent = 'Refresh suggestions';
+  }
+});
+
+// ── Creative Opportunities (admin-only) ─────────────────────────────────
+// Reads /api/creative-opportunities (local data only -- never Meta). The
+// server computes everything; this renders the ranked list, the evidence
+// drawer and wires Shoot This into the EXISTING Shoot This Week modal.
+const coState = { filter: 'active', data: null, loading: false };
+const CO_TYPE_LABEL = {
+  freshen_strong_seller: 'Strong seller · stale creative', refresh_before_deprioritising: 'Weak seller · old creative',
+  test_proven_concept: 'Proven concept · untested', increase_creative_coverage: 'Thin coverage', possible_fatigue: 'Possible fatigue',
+  diversify_concept: 'Concept concentration', diversify_creator: 'Creator concentration', diversify_media: 'Media concentration',
+};
+const coMoney = (v) => (v === null || v === undefined ? '—' : `$${Math.round(Number(v)).toLocaleString('en-AU')}`);
+const coNum = (v, d = 0) => (v === null || v === undefined ? '—' : Number(v).toLocaleString('en-AU', { maximumFractionDigits: d }));
+
+async function loadCreativeOpportunities() {
+  if (coState.loading) return;
+  coState.loading = true;
+  const list = document.getElementById('co-list');
+  if (!coState.data) list.innerHTML = '<div class="co-empty">Working out what to make next…</div>';
+  try {
+    coState.data = await api(`/creative-opportunities?state=${encodeURIComponent(coState.filter)}`);
+    renderCreativeOpportunities();
+  } catch (e) {
+    list.innerHTML = `<div class="co-empty co-error">${escapeHtml(e.message)}</div>`;
+  } finally {
+    coState.loading = false;
+  }
+}
+
+function coCardHtml(o) {
+  const p = o.products[0];
+  const chips = (o.chips || []).map((c) => `<span class="co-chip ${escapeHtml(c.tone || 'neutral')}">${escapeHtml(c.text)}</span>`).join('');
+  const note = o.requalified
+    ? `<div class="co-note">Back on the list: ${o.requalified.previously_dismissed_at ? 'the evidence got materially worse since you dismissed it' : `acted on ${o.requalified.days_ago} days ago and it still applies`}.</div>`
+    : (o.state ? `<div class="co-note">${o.state.state === 'dismissed' ? 'Dismissed' : 'Marked acted on'} ${escapeHtml(o.state.acted_at.slice(0, 10))}${o.state.note ? ` — ${escapeHtml(o.state.note)}` : ''}</div>` : '');
+  const stateButtons = o.state
+    ? `<button type="button" class="btn btn-ghost btn-sm" data-co-act="reopen">Put back on the list</button>`
+    : `<button type="button" class="btn btn-ghost btn-sm" data-co-act="acted">Mark acted on</button>
+       <button type="button" class="btn btn-ghost btn-sm" data-co-act="dismiss">Dismiss</button>`;
+  return `
+    <article class="co-card pri-${o.priority.toLowerCase()}" data-co-key="${escapeHtml(o.key)}">
+      <div class="co-card-head">
+        <span class="co-pri pri-${o.priority.toLowerCase()}">${escapeHtml(o.priority.toUpperCase())}</span>
+        <span class="co-product">${escapeHtml(p.product_name)}</span>
+        <span class="co-type">${escapeHtml(CO_TYPE_LABEL[o.type] || o.type)}</span>
+      </div>
+      <h3 class="co-title">${escapeHtml(o.title)}</h3>
+      <p class="co-expl">${escapeHtml(o.explanation)}</p>
+      <div class="co-chips">${chips}</div>
+      ${note}
+      <div class="co-actions">
+        <button type="button" class="btn btn-ghost btn-sm" data-co-act="product">View Product</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-co-act="evidence">View Evidence</button>
+        <button type="button" class="btn btn-primary btn-sm" data-co-act="shoot">Shoot This</button>
+        <span class="co-actions-spacer"></span>
+        ${stateButtons}
+      </div>
+    </article>`;
+}
+
+function renderCreativeOpportunities() {
+  const d = coState.data;
+  document.querySelectorAll('#co-state-nav .co-subnav-btn').forEach((b) => b.classList.toggle('active', b.dataset.coState === coState.filter));
+  const status = document.getElementById('co-data-status');
+  status.innerHTML = d.data_status.sales_available ? '' : `<div class="co-banner">${escapeHtml(d.data_status.sales_note)}</div>`;
+  const c = d.counts;
+  const n = d.opportunities.length;
+  const label = coState.filter === 'active' ? `${n} thing${n === 1 ? '' : 's'} worth acting on` : coState.filter === 'acted_on' ? `${n} acted on` : `${n} dismissed`;
+  const split = coState.filter === 'active' ? ['Critical', 'High', 'Medium'].filter((k) => c.by_priority[k]).map((k) => `<span class="co-pri pri-${k.toLowerCase()}">${c.by_priority[k]} ${k.toUpperCase()}</span>`).join(' ') : '';
+  document.getElementById('co-summary').innerHTML = `<div class="co-summary-line"><strong>${escapeHtml(label)}</strong> ${split}</div>
+    <div class="hint">${d.data_status.classified_ads_used} classified ad${d.data_status.classified_ads_used === 1 ? '' : 's'} used (confirmed + auto-matched only) · Meta data through ${escapeHtml(d.data_status.meta_insights_through || 'n/a')} · windows end yesterday (Sydney)</div>`;
+  document.getElementById('co-list').innerHTML = n
+    ? d.opportunities.map(coCardHtml).join('')
+    : `<div class="co-empty">${coState.filter === 'active'
+      ? (d.data_status.classified_ads_used ? 'Nothing needs acting on right now.' : 'No classified Meta ads yet — confirm or auto-match ads in Meta Performance → Ad Matching and recommendations will appear here.')
+      : 'Nothing here.'}</div>`;
+  const t = d.thresholds;
+  document.getElementById('co-how-body').innerHTML = `<ul class="co-how-list">
+    <li><b>Only confirmed and auto-matched ads</b> count. Needs-review, unmatched and excluded ads never contribute.</li>
+    <li><b>Freshness</b> (days since the product's newest creative): Fresh &lt; ${t.freshness.fresh_lt} · Aging &lt; ${t.freshness.aging_lt} · Stale &lt; ${t.freshness.stale_lt} · Very stale ${t.freshness.stale_lt}+. The newest creative is the later of the newest Meta launch (first day with meaningful spend) and the newest WNDRR "went live" date.</li>
+    <li><b>Strong / weak seller</b> reuses the app's sales tiers (${escapeHtml(t.seller.strong_tiers.join(' / '))} = strong; ${escapeHtml(t.seller.weak_tiers.join(' / '))} with ${t.seller.weak_min_units_365d}+ units in a year = weak) and High Stock's sales trend.</li>
+    <li><b>Proven concept</b>: ≥ ${coMoney(t.concept.min_spend)} spend, ≥ ${t.concept.min_purchases} purchases, ≥ ${t.concept.min_creatives} creatives and CPA no worse than the account's, in the last ${t.windows.evidence_days} days. Suggested for a product only when proven on ≥ ${t.concept.test_min_products} products and that product has never run it.</li>
+    <li><b>Coverage</b>: fewer than ${t.coverage.min_creatives_90d} creatives with spend in ${t.windows.evidence_days} days. <b>Concentration</b>: one concept / creator / media type carries ≥ ${Math.round(t.concentration.share * 100)}% of spend (≥ ${t.concentration.min_creatives} creatives).</li>
+    <li><b>Possible fatigue</b>: same ads (running ${t.fatigue.min_run_days}+ days), last ${t.windows.fatigue_days} days vs the ${t.windows.fatigue_days} before — outbound CTR down ≥ ${t.fatigue.ctr_drop_pct}% and CPA up ≥ ${t.fatigue.cpa_rise_pct}%. Reach and frequency are never used.</li>
+    <li><b>Shared ads</b> (several products): spend and purchases are split equally between the products; creative presence counts for each.</li>
+    <li><b>Dismissed</b> items stay hidden until their priority or severity increases. <b>Acted on</b> items return after ${t.state.acted_on_review_days} days if the problem is still there.</li>
+  </ul>`;
+  const cs = d.concepts;
+  document.getElementById('co-concepts-body').innerHTML = cs.concepts.length
+    ? `<div class="hint">Account CPA (last ${t.windows.evidence_days}d): ${coMoney(cs.benchmark.cpa)} on ${coMoney(cs.benchmark.spend)} spend.</div>
+       <table class="co-table"><thead><tr><th>Concept</th><th>Status</th><th>Creatives</th><th>Spend</th><th>Purchases</th><th>CPA</th><th>Products</th></tr></thead><tbody>${
+  cs.concepts.slice(0, 25).map((x) => `<tr><td>${escapeHtml(x.label)}${x.legacy ? ' <span class="co-legacy">legacy</span>' : ''}</td><td><span class="co-status ${x.status}">${x.cross_product_winner ? 'cross-product winner' : x.status}</span></td><td>${x.creatives}</td><td>${coMoney(x.spend)}</td><td>${coNum(x.purchases)}</td><td>${coMoney(x.cpa)}</td><td>${x.products_used_on}</td></tr>`).join('')}</tbody></table>`
+    : '<div class="co-empty">No concept data yet.</div>';
+}
+
+function coFind(key) {
+  return coState.data && coState.data.opportunities.find((o) => o.key === key);
+}
+
+// "View Product": Planning is the only existing product-level view (there is
+// no standalone product page), so this opens Planning's Core / High Stock
+// step on that product when it is on this week's lists, and says so when not.
+function coViewProduct(code, name) {
+  const inCore = (state.coreProducts || []).some((p) => p.product_code === code);
+  const inHs = (state.highStockProducts || []).some((p) => p.product_code === code);
+  if (!inCore && !inHs) {
+    toast(`${name} isn't on this week's Core or High Stock lists. Planning has no standalone product page.`, true);
+    return;
+  }
+  switchTab('planning');
+  setPlanningStep(inCore ? 'core' : 'high-stocks');
+  if (inCore && !state.coreExpandedProducts.has(code)) toggleCoreProduct(code);
+  setTimeout(() => {
+    const row = document.querySelector(`.planning-step-panel.active [data-product-code="${code}"]`);
+    if (row) { row.scrollIntoView({ block: 'center', behavior: 'smooth' }); row.classList.add('co-flash'); setTimeout(() => row.classList.remove('co-flash'), 1800); }
+  }, 120);
+}
+
+function coEvidenceHtml(o) {
+  const e = o.evidence;
+  const kv = (rows) => `<dl class="co-kv">${rows.filter(Boolean).map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${v}</dd>`).join('')}</dl>`;
+  const sales = e.sales.available
+    ? kv([
+      ['Seller class', `${escapeHtml(e.sales.seller_class)} <span class="hint">(${escapeHtml(e.sales.basis)})</span>`],
+      ['Units 7d / 30d / 365d', `${coNum(e.sales.units_7d, 1)} / ${coNum(e.sales.units_30d, 1)} / ${coNum(e.sales.units_365d, 1)}`],
+      ['Weekly velocity 30d vs 365d', `${coNum(e.sales.vel30, 1)} vs ${coNum(e.sales.vel365, 1)} · ${escapeHtml(e.sales.trend.display)}`],
+    ])
+    : '<div class="hint">Sales data unavailable.</div>';
+  const m30 = e.meta.last_30d; const m90 = e.meta.last_90d;
+  const meta = `<table class="co-table"><thead><tr><th></th><th>Spend</th><th>Purchases</th><th>CPA</th><th>Cost / ATC</th><th>Outbound CTR</th></tr></thead><tbody>
+    <tr><td>Last 30d</td><td>${coMoney(m30.spend)}</td><td>${coNum(m30.purchases, 1)}</td><td>${coMoney(m30.cpa)}</td><td>${coMoney(m30.cost_per_atc)}</td><td>${m30.outbound_ctr === null ? '—' : `${m30.outbound_ctr}%`}</td></tr>
+    <tr><td>Last 90d</td><td>${coMoney(m90.spend)}</td><td>${coNum(m90.purchases, 1)}</td><td>${coMoney(m90.cpa)}</td><td>${coMoney(m90.cost_per_atc)}</td><td>${m90.outbound_ctr === null ? '—' : `${m90.outbound_ctr}%`}</td></tr></tbody></table>`;
+  const cr = e.creative;
+  const creative = kv([
+    ['Freshness', `${escapeHtml(cr.freshness.label)}${cr.days_since_newest_creative === null ? ' (no creative on record)' : ` · ${cr.days_since_newest_creative} days`}`],
+    ['Newest creative', cr.newest_creative_date ? `${escapeHtml(cr.newest_creative_date)} <span class="hint">(${escapeHtml(cr.newest_creative_source)})</span>` : '—'],
+    ['Newest Meta launch', cr.newest_meta_launch ? `${escapeHtml(cr.newest_meta_launch)} · ${cr.days_since_meta_launch} days ago` : '—'],
+    ['WNDRR went live / final approved', `${escapeHtml(cr.wndrr_live || '—')} / ${escapeHtml(cr.wndrr_approved || '—')}`],
+    ['Creatives with spend (30d / 90d)', `${cr.creatives_30d} / ${cr.creatives_90d}`],
+    ['Active ads (30d)', String(e.meta.active_ads_30d)],
+    ['Spend on creative 120d+ old (30d)', `${coMoney(e.meta.old_creative_spend_30d)}${e.meta.old_creative_share_30d === null ? '' : ` (${Math.round(e.meta.old_creative_share_30d * 100)}%)`}`],
+  ]);
+  const mix = (title, rows, cov) => `<div class="co-mix"><div class="co-mix-title">${title} <span class="hint">${cov === null ? '' : `${Math.round(cov * 100)}% of spend classified`}</span></div>${
+    rows.length ? rows.map((r) => `<div class="co-mix-row"><span>${escapeHtml(r.label)}</span><span class="co-mix-bar"><i style="width:${Math.round((r.share || 0) * 100)}%"></i></span><span>${r.share === null ? '—' : `${Math.round(r.share * 100)}%`} · ${coMoney(r.spend)}</span></div>`).join('') : '<div class="hint">None classified</div>'}</div>`;
+  const ads = e.ads.length
+    ? `<table class="co-table"><thead><tr><th>Ad</th><th>Launch</th><th>Spend</th><th>Purch.</th><th>Concept</th><th>Creator</th><th>Media</th></tr></thead><tbody>${e.ads.map((a) => `<tr><td title="${escapeHtml(a.ad_name || '')}">${escapeHtml((a.ad_name || a.meta_ad_id).slice(0, 48))}${a.shared_with_products ? ` <span class="co-legacy">shared ×${a.shared_with_products + 1}</span>` : ''}</td><td>${escapeHtml(a.launch || '—')}</td><td>${coMoney(a.spend)}</td><td>${coNum(a.purchases, 1)}</td><td>${escapeHtml(a.concept || '—')}</td><td>${escapeHtml(a.creator || '—')}</td><td>${escapeHtml(a.media || '—')}</td></tr>`).join('')}</tbody></table>`
+    : '<div class="hint">No ads with spend in the window.</div>';
+  const concept = e.concept
+    ? `<h4>Concept benchmark — ${escapeHtml(e.concept.label)}</h4>${kv([
+      ['Status', escapeHtml(e.concept.cross_product_winner ? 'proven · cross-product winner' : e.concept.status)],
+      ['Creatives / spend / purchases', `${e.concept.creatives} / ${coMoney(e.concept.spend)} / ${coNum(e.concept.purchases)}`],
+      ['CPA vs account', `${coMoney(e.concept.cpa)} vs ${coMoney(e.concept.account_cpa)}`],
+      ['Worked on', escapeHtml(e.concept.products.map((x) => `${x.name} (${coMoney(x.spend)})`).join(', ') || '—')],
+    ])}`
+    : '';
+  const fat = e.fatigue
+    ? `<h4>Fatigue comparison</h4><table class="co-table"><thead><tr><th></th><th>Window</th><th>Spend</th><th>Purchases</th><th>CPA</th><th>Outbound CTR</th></tr></thead><tbody>
+       <tr><td>Prior</td><td>${escapeHtml(e.fatigue.prior.since)} → ${escapeHtml(e.fatigue.prior.until)}</td><td>${coMoney(e.fatigue.prior.spend)}</td><td>${coNum(e.fatigue.prior.purchases, 1)}</td><td>${coMoney(e.fatigue.prior.cpa)}</td><td>${e.fatigue.prior.outbound_ctr}%</td></tr>
+       <tr><td>Recent</td><td>${escapeHtml(e.fatigue.recent.since)} → ${escapeHtml(e.fatigue.recent.until)}</td><td>${coMoney(e.fatigue.recent.spend)}</td><td>${coNum(e.fatigue.recent.purchases, 1)}</td><td>${coMoney(e.fatigue.recent.cpa)}</td><td>${e.fatigue.recent.outbound_ctr}%</td></tr></tbody></table>
+       <div class="hint">${e.fatigue.ads_compared} ad${e.fatigue.ads_compared === 1 ? '' : 's'} compared · CTR ${e.fatigue.ctr_change_pct}% · CPA +${e.fatigue.cpa_change_pct}%</div>`
+    : '';
+  const rank = `<table class="co-table"><tbody>${o.rank.components.map((c) => `<tr><td>${escapeHtml(c.name)}</td><td>+${coNum(c.points, 1)}</td></tr>`).join('')}<tr><td><b>Strength (capped 0–100)</b></td><td><b>${o.rank.strength}</b></td></tr><tr><td><b>${escapeHtml(o.priority)} base + strength = rank score</b></td><td><b>${o.rank.score}</b></td></tr></tbody></table>`;
+  return `
+    <div class="co-ev-head"><span class="co-pri pri-${o.priority.toLowerCase()}">${escapeHtml(o.priority.toUpperCase())}</span> <b>${escapeHtml(o.title)}</b><div class="hint">${escapeHtml(o.explanation)}</div></div>
+    <h4>Why this appeared</h4>${kv([['Rule', escapeHtml((e.reason && e.reason.rule) || '')], ['Evidence window', `${escapeHtml(e.window.since)} → ${escapeHtml(e.window.until)}`], ['Generated', escapeHtml(o.generated_at.slice(0, 16).replace('T', ' ') + ' UTC')]])}
+    <h4>Sales signal</h4>${sales}
+    <h4>Meta performance <span class="hint">(confirmed + auto-matched ads)</span></h4>${meta}
+    <h4>Creative freshness</h4>${creative}
+    <h4>Recent mix (last 90d)</h4>${mix('Concepts', e.mix.concept, e.mix.field_coverage.concept)}${mix('Creators', e.mix.creator, e.mix.field_coverage.creator)}${mix('Media', e.mix.media, e.mix.field_coverage.media)}
+    ${concept}${fat}
+    <h4>Relevant ads</h4>${ads}
+    <h4>How it was ranked</h4>${rank}
+    <div class="hint co-attrib">${escapeHtml(e.attribution)}</div>`;
+}
+
+async function coShoot(o) {
+  try {
+    const p = o.products[0];
+    const preset = await api(`/creative-opportunities/shoot-preset?product_code=${encodeURIComponent(p.product_code)}`);
+    preset.opportunity = {
+      key: o.key, title: o.title, explanation: o.explanation, priority: o.priority,
+      concept: o.recommended_concept ? o.recommended_concept.label : null,
+      media: o.recommended_media ? o.recommended_media.label : null,
+    };
+    openShootPlanModal(preset);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function coSetOpportunityState(key, st, note, shootPlanItemId) {
+  await api('/creative-opportunities/state', { method: 'POST', body: JSON.stringify({ key, state: st, note: note || null, shoot_plan_item_id: shootPlanItemId || null }) });
+}
+
+document.getElementById('co-state-nav').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-co-state]');
+  if (!b) return;
+  coState.filter = b.dataset.coState;
+  loadCreativeOpportunities();
+});
+document.getElementById('co-list').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-co-act]');
+  const card = e.target.closest('[data-co-key]');
+  if (!btn || !card) return;
+  const o = coFind(card.dataset.coKey);
+  if (!o) return;
+  const act = btn.dataset.coAct;
+  try {
+    if (act === 'product') coViewProduct(o.products[0].product_code, o.products[0].product_name);
+    else if (act === 'evidence') {
+      document.getElementById('co-evidence-title').textContent = `${o.products[0].product_name} — evidence`;
+      document.getElementById('co-evidence-body').innerHTML = coEvidenceHtml(o);
+      openModal('co-evidence-modal');
+    } else if (act === 'shoot') await coShoot(o);
+    else if (act === 'dismiss') { await coSetOpportunityState(o.key, 'dismissed'); toast('Dismissed — it stays hidden unless the evidence gets materially worse.'); await loadCreativeOpportunities(); }
+    else if (act === 'acted') { await coSetOpportunityState(o.key, 'acted_on'); toast('Marked as acted on.'); await loadCreativeOpportunities(); }
+    else if (act === 'reopen') { await coSetOpportunityState(o.key, 'open'); toast('Back on the list.'); await loadCreativeOpportunities(); }
+  } catch (err) {
+    toast(err.message, true);
   }
 });
 
@@ -4413,7 +4639,21 @@ function openShootPlanModal(preset) {
   // list depends on are visible unless someone actively says otherwise.
   document.getElementById('shoot-plan-stock-status').value = 'needs_to_be_brought_in';
   populateShootPlanCreatorSelect();
-  document.getElementById('shoot-plan-initial-idea').value = '';
+  // "Shoot This" from Creative Opportunities: the recommendation travels
+  // with the modal as a banner + an editable Quick Idea. Nothing exists
+  // until the person confirms "Add to Shoot Plan" below.
+  const oppBanner = document.getElementById('shoot-plan-opportunity');
+  const opp = preset.opportunity || null;
+  if (opp) {
+    oppBanner.innerHTML = `<div class="co-shoot-title">🎯 Creative Opportunity · ${escapeHtml(opp.priority)}</div><div><b>${escapeHtml(opp.title)}</b></div><div class="hint">${escapeHtml(opp.explanation)}</div>${opp.concept ? `<div class="hint">Suggested concept: <b>${escapeHtml(opp.concept)}</b>${opp.media ? ` · ${escapeHtml(opp.media)}` : ''}</div>` : ''}`;
+    oppBanner.style.display = '';
+  } else {
+    oppBanner.style.display = 'none';
+    oppBanner.innerHTML = '';
+  }
+  document.getElementById('shoot-plan-initial-idea').value = opp
+    ? [opp.concept ? `Try: ${opp.concept}${opp.media ? ` (${opp.media})` : ''}` : null, `From Creative Opportunities: ${opp.title}`].filter(Boolean).join(' — ')
+    : '';
   applyShootPlanSizeDefaults();
   updateShootPlanSampleStatusVisibility();
   openModal('shoot-plan-modal');
@@ -4542,9 +4782,15 @@ async function saveShootPlanItem() {
     week_start: planningWeekStart(),
   };
   try {
-    await api('/shoot-plan', { method: 'POST', body: JSON.stringify(payload) });
+    const created = await api('/shoot-plan', { method: 'POST', body: JSON.stringify(payload) });
+    const fromOpportunity = shootPlanModalContext.opportunity;
     closeModal('shoot-plan-modal');
     toast('Added to Shoot Plan');
+    if (fromOpportunity) {
+      // The person just confirmed the shoot from a recommendation -> record it as acted on (traceable to the shoot plan item).
+      try { await coSetOpportunityState(fromOpportunity.key, 'acted_on', 'Added to Shoot Plan', created && created.id); } catch (err) { /* best effort */ }
+      if (document.getElementById('tab-creative-opportunities').classList.contains('active')) loadCreativeOpportunities();
+    }
     loadAll();
   } catch (e) {
     toast(e.message, true);

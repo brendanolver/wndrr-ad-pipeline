@@ -326,4 +326,4 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-module.exports = { router, computeHighStockProducts };
+module.exports = { router, computeHighStockProducts, salesTrendInfo };

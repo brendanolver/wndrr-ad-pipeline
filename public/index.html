@@ -56,6 +56,7 @@
            admin-gated server-side, so this hiding is a convenience, not the
            enforcement). A real top-level page, not a Settings tab. -->
       <button class="tab-btn" data-tab="meta-performance" id="sidebar-meta-performance" style="display:none;"><span class="sidebar-nav-icon">📊</span>Meta Performance</button>
+      <button class="tab-btn" data-tab="creative-opportunities" id="sidebar-creative-opportunities" style="display:none;"><span class="sidebar-nav-icon">🎯</span>Creative Opportunities</button>
       <button class="tab-btn" data-tab="planning"><span class="sidebar-nav-icon">🗓</span>Planning</button>
 
       <!-- Production-readiness follow-up (item 1): Create & Review and
@@ -168,6 +169,30 @@
         <div class="health-header">Creative Machine Health</div>
         <div class="health-grid" id="health-grid"></div>
       </div>
+    </section>
+
+    <!-- Creative Opportunities V1 (admin-only): a ranked, explainable action
+         list computed on read from LOCAL data (confirmed + auto-matched Meta
+         ads, sales, creative history) by /api/creative-opportunities. Never
+         calls Meta. Shoot This opens the existing Shoot This Week modal
+         pre-filled for review -- nothing is created until it is confirmed. -->
+    <section id="tab-creative-opportunities" class="tab-panel">
+      <div class="co-top">
+        <div>
+          <h2>Creative Opportunities</h2>
+          <div class="hint">What creative should WNDRR make next — and why. Built from confirmed and auto-matched Meta ads, sales and creative history.</div>
+        </div>
+        <div class="co-subnav" id="co-state-nav" role="tablist">
+          <button type="button" class="co-subnav-btn active" data-co-state="active">To act on</button>
+          <button type="button" class="co-subnav-btn" data-co-state="acted_on">Acted on</button>
+          <button type="button" class="co-subnav-btn" data-co-state="dismissed">Dismissed</button>
+        </div>
+      </div>
+      <div id="co-data-status"></div>
+      <div id="co-summary" class="co-summary"></div>
+      <div id="co-list" class="co-list"></div>
+      <details class="co-how" id="co-how"><summary>How recommendations are decided</summary><div id="co-how-body"></div></details>
+      <details class="co-how" id="co-concepts"><summary>Concept evidence</summary><div id="co-concepts-body"></div></details>
     </section>
 
     <!-- Meta Performance V1: reads ONLY the local Meta tables via
@@ -1482,6 +1507,18 @@
      server-side); nothing here can read an existing password back. -->
 <!-- Meta Performance V1: read-only ad detail (matching happens in the
      Ad Matching view's own workspace). -->
+<!-- Creative Opportunities evidence: facts only (sales signal, Meta performance,
+     creative dates, mix, ads, concept benchmark) -- no free-form prose. -->
+<div id="co-evidence-modal" class="modal-backdrop">
+  <div class="modal co-drawer-modal">
+    <div class="modal-header">
+      <h3 id="co-evidence-title">Evidence</h3>
+      <button class="modal-close" onclick="closeModal('co-evidence-modal')">&times;</button>
+    </div>
+    <div class="modal-body" id="co-evidence-body"></div>
+  </div>
+</div>
+
 <div id="meta-ad-detail-modal" class="modal-backdrop">
   <div class="modal mp-detail-modal">
     <div class="modal-header">
@@ -1873,6 +1910,7 @@
       <button class="modal-close" onclick="closeModal('shoot-plan-modal')">&times;</button>
     </div>
     <div class="modal-body">
+      <div id="shoot-plan-opportunity" class="co-shoot-banner" style="display:none;"></div>
       <div class="shoot-plan-product-header">
         <div id="shoot-plan-product-image" class="shoot-plan-product-image"></div>
         <div>
