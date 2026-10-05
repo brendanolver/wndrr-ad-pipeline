@@ -10,6 +10,7 @@ const express = require('express');
 const { requireAdmin } = require('../lib/permissions');
 const metaAds = require('../lib/metaAds');
 const metaSync = require('../lib/metaSync');
+const adMatching = require('../lib/metaAdMatching');
 
 const router = express.Router();
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -66,6 +67,15 @@ router.post('/run', requireAdmin, async (req, res, next) => {
     const result = since && until
       ? await metaSync.runSync({ since, until, runType: 'default', userId: req.user.id })
       : await metaSync.runDefaultSync(req.user.id);
+    // Best-effort, LOCAL-only follow-up: newly synced ads get their Ad Matching
+    // suggestions / auto-match evaluated straight away, so exact structured
+    // matches don't wait for someone to open Ad Matching. Never affects (or
+    // fails) the sync result; makes no Meta call.
+    try {
+      result.ad_matching = await adMatching.refreshSuggestions({ scope: '30d' });
+    } catch (e) {
+      result.ad_matching = { error: 'Ad Matching refresh skipped' };
+    }
     res.json(result);
   } catch (err) {
     sendMetaError(res, err);
