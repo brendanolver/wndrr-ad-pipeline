@@ -2661,7 +2661,7 @@ CREATE INDEX IF NOT EXISTS idx_meta_ad_products_product_code ON meta_ad_products
 CREATE TABLE IF NOT EXISTS meta_ad_suggestions (
   id SERIAL PRIMARY KEY,
   meta_ad_id VARCHAR(64) NOT NULL REFERENCES meta_ads(meta_ad_id) ON DELETE CASCADE,
-  field VARCHAR(20) NOT NULL CHECK (field IN ('product', 'concept', 'creator', 'creative_style', 'ad_setup', 'scope')),
+  field VARCHAR(20) NOT NULL CHECK (field IN ('product', 'concept', 'creator', 'creative_style', 'ad_setup', 'scope', 'media_type')),
   -- Natural key of the proposed value (product_code / normalised concept or
   -- creator text / style id / ad setup id / 'not_product_specific').
   value_key VARCHAR(255) NOT NULL,
@@ -2677,3 +2677,27 @@ CREATE TABLE IF NOT EXISTS meta_ad_suggestions (
   UNIQUE (meta_ad_id, field, value_key)
 );
 CREATE INDEX IF NOT EXISTS idx_meta_ad_suggestions_meta_ad_id ON meta_ad_suggestions(meta_ad_id);
+
+-- Media Type (Video / Image-Static / Carousel / GIF / Unknown) joins the
+-- human-confirmed classification. NULL = undecided (never guessed); 'unknown'
+-- is a deliberate human answer. Suggestions for it come from local evidence
+-- only (name tokens, linked Ad Setup, final edit format) and live in
+-- meta_ad_suggestions like every other field.
+ALTER TABLE meta_ad_classifications ADD COLUMN IF NOT EXISTS media_type VARCHAR(12)
+  CHECK (media_type IN ('video', 'image', 'carousel', 'gif', 'unknown'));
+
+-- meta_ad_suggestions was created before media_type existed: widen its field
+-- CHECK in place (idempotent; touches no rows).
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'meta_ad_suggestions_field_check'
+      AND conrelid = 'meta_ad_suggestions'::regclass
+      AND pg_get_constraintdef(oid) NOT LIKE '%media_type%'
+  ) THEN
+    ALTER TABLE meta_ad_suggestions DROP CONSTRAINT meta_ad_suggestions_field_check;
+    ALTER TABLE meta_ad_suggestions ADD CONSTRAINT meta_ad_suggestions_field_check
+      CHECK (field IN ('product', 'concept', 'creator', 'creative_style', 'ad_setup', 'scope', 'media_type'));
+  END IF;
+END $$;

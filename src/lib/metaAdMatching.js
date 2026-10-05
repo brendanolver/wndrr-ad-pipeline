@@ -45,6 +45,10 @@ const { parseMetaAdName, listProductFamilies } = require('./metaProductMapping')
 const { buildMetaAdName, detectPromotionStageType } = require('./adSetupNaming');
 const { deriveProductCode } = require('./apparelmagic');
 const {
+  MEDIA_TYPES, MEDIA_KEYS, MEDIA_LABEL, buildFamilyIndex, matchProductPhrase, expandSet, hasSetWord,
+  coreTokens, mediaTokensFromName, parseLooseMetaName,
+} = require('./metaNameParsing');
+const {
   ymdInZone, addDays, REPORTING_TIMEZONE, deriveMetrics, HttpError, parseRangeParams,
 } = require('./metaPerformance');
 
@@ -105,16 +109,18 @@ async function loadContext(db = pool) {
   const [mappings, families, concepts, creators, styles, setups, setupProducts, setupStyles] = await Promise.all([
     db.query('SELECT meta_product, meta_product_type, product_code, product_name FROM meta_product_mappings'),
     listProductFamilies(db),
-    db.query('SELECT id, name FROM concept_types WHERE active ORDER BY sort_order, name'),
+    db.query('SELECT id, name, format FROM concept_types WHERE active ORDER BY sort_order, name'),
     db.query('SELECT name FROM content_creators ORDER BY name'),
     db.query('SELECT id, name, media_type FROM creative_styles ORDER BY sort_order, name'),
     db.query(
       `SELECT au.id, au.status, au.week_no, au.ad_date, au.product_label, au.product_type, au.hook_short,
               au.media_type, au.ad_type, au.creator_name, au.concept_label, au.url_link_page,
               au.ad_category, au.sale_sequence_number, au.creative_asset_id, au.final_edit_id,
-              ab.batch_number, ps.name AS promotion_stage_name, ca.concept_name, ca.concept_type
+              ab.batch_number, ps.name AS promotion_stage_name, ca.concept_name, ca.concept_type,
+              fe.format AS final_edit_format
          FROM ad_setups au
          JOIN creative_assets ca ON ca.id = au.creative_asset_id
+         LEFT JOIN final_edits fe ON fe.id = au.final_edit_id
          LEFT JOIN ad_batches ab ON ab.id = au.ad_batch_id
          LEFT JOIN promotion_stages ps ON ps.id = au.promotion_stage_id`
     ),
@@ -132,7 +138,16 @@ async function loadContext(db = pool) {
   ]);
 
   const mappingByKey = new Map();
-  mappings.rows.forEach((r) => mappingByKey.set(`${norm(r.meta_product)}||${norm(r.meta_product_type)}`, r));
+  const mappingCodesByProduct = new Map(); // product name (any type) -> set of mapped product_codes
+  mappings.rows.forEach((r) => {
+    mappingByKey.set(`${norm(r.meta_product)}||${norm(r.meta_product_type)}`, r);
+    if (r.product_code) {
+      const k = norm(r.meta_product);
+      if (!mappingCodesByProduct.has(k)) mappingCodesByProduct.set(k, new Set());
+      mappingCodesByProduct.get(k).add(r.product_code);
+    }
+  });
+  const familyIndex = buildFamilyIndex(families);
   const familyByCode = new Map(families.map((f) => [f.product_code, f]));
   const familyByNorm = new Map();
   families.forEach((f) => { const k = norm(f.product_name); if (!familyByNorm.has(k)) familyByNorm.set(k, f); });
@@ -183,6 +198,9 @@ async function loadContext(db = pool) {
       product_codes: [...(productsBySetup.get(row.id) || [])],
       concept_label: row.concept_label || row.concept_type || null,
       creator_name: row.creator_name || null,
+      media_type: row.media_type || null,
+      ad_type: row.ad_type || null,
+      final_edit_format: row.final_edit_format || null,
       creative_asset_id: row.creative_asset_id,
       final_edit_id: row.final_edit_id,
       concept_name: row.concept_name,
@@ -196,9 +214,19 @@ async function loadContext(db = pool) {
     adSetupByNorm.get(a.norm_name).push(a);
   });
   const adSetupById = new Map(adSetups.map((a) => [a.id, a]));
+  // Ad Setups keyed by their product label's core words, so a set phrase seen
+  // before (an Ad Setup already linking several families) can be reused.
+  const adSetupsByLabel = new Map();
+  adSetups.forEach((a) => {
+    if (!a.product_label) return;
+    const k = coreTokens(a.product_label).join(' ');
+    if (!k) return;
+    if (!adSetupsByLabel.has(k)) adSetupsByLabel.set(k, []);
+    adSetupsByLabel.get(k).push(a);
+  });
 
   return {
-    mappingByKey, families, familyByCode, familyByNorm, concepts: concepts.rows, conceptByNorm,
+    mappingByKey, mappingCodesByProduct, familyIndex, adSetupsByLabel, families, familyByCode, familyByNorm, concepts: concepts.rows, conceptByNorm,
     creators: creators.rows.map((c) => c.name), creatorByNorm, styles: styles.rows, styleByNorm, styleById,
     adSetups, adSetupByNorm, adSetupById,
   };
@@ -219,6 +247,9 @@ function buildSuggestions(ad, ctx) {
   const name = ad.ad_name || '';
   const legacy = parseMetaAdName(name);
   const structured = parseStructuredMetaName(name);
+  // Older / non-standard names: a tolerant token-driven reader that only runs
+  // when the name does NOT follow the current structured layout.
+  const loose = structured ? null : parseLooseMetaName(name, ctx);
 
   // ---- Ad Setup candidates (exact, then near-exact, on the generated name) ----
   let anchor = null;
@@ -257,34 +288,80 @@ function buildSuggestions(ad, ctx) {
   const fromSetup = anchor ? Math.max(0.5, anchor.confidence - 0.05) : null;
 
   // ---- Products ----
+  // Priority for each product phrase the name yields:
+  //   1. existing Meta Product Mapping (Product + Type pair, then product name)
+  //   2. exact / strong / bounded-fuzzy match against EXISTING product families
+  //   3. an Ad Setup already linking several families for the same set name
+  //   4. set expansion from the catalogue's own collection structure
+  //   5. otherwise nothing -- no guess, no new families
   const pushProduct = (family, confidence, reason, source, evidence) => add({
     field: 'product', value_key: family.product_code, value_label: family.product_name, confidence, reason, source, evidence,
   });
+  const famOf = (code, fallbackName) => ctx.familyByCode.get(code) || { product_code: code, product_name: fallbackName || code };
   const lookupMapping = (product, type, shown) => {
-    const row = ctx.mappingByKey.get(`${norm(product)}||${norm(type)}`);
+    const row = type ? ctx.mappingByKey.get(`${norm(product)}||${norm(type)}`) : null;
     if (!row || !row.product_code) return false;
-    const fam = ctx.familyByCode.get(row.product_code) || { product_code: row.product_code, product_name: row.product_name || row.product_code };
-    pushProduct(fam, 0.9, `Existing Meta Product Mapping matched ${shown}`, 'meta_product_mapping', { meta_product: product, meta_product_type: type });
+    pushProduct(famOf(row.product_code, row.product_name), 0.9, `Existing Meta Product Mapping matched ${shown}`, 'meta_product_mapping', { meta_product: product, meta_product_type: type });
     return true;
   };
-  let mappedProduct = false;
-  if (legacy) mappedProduct = lookupMapping(legacy.product, legacy.productType, `${legacy.product} + ${legacy.productType}`) || mappedProduct;
-  if (structured && structured.product_name && structured.product_category) {
-    mappedProduct = lookupMapping(structured.product_name, structured.product_category, `${structured.product_name} + ${structured.product_category}`) || mappedProduct;
-  }
-  if (structured && structured.product_name && !mappedProduct) {
-    const full = ctx.familyByNorm.get(norm(`${structured.product_name} ${structured.product_category || ''}`));
-    const nameOnly = ctx.familyByNorm.get(norm(structured.product_name));
-    if (full) {
-      const shown = `${structured.product_name}${structured.product_category ? ` ${structured.product_category}` : ''}`;
-      pushProduct(full, 0.8, `Product name "${shown}" in the structured Meta name matches product family ${full.product_name}`, 'structured_name', { token: shown });
-    }
-    else if (nameOnly) pushProduct(nameOnly, 0.7, `Product token "${structured.product_name}" in the structured Meta name matches product family ${nameOnly.product_name}`, 'structured_name', { token: structured.product_name });
-  }
+  const lookupMappingByName = (product) => {
+    const codes = ctx.mappingCodesByProduct.get(norm(product));
+    if (!codes || codes.size !== 1) return false; // ambiguous across types -> don't pick one
+    const code = [...codes][0];
+    pushProduct(famOf(code), 0.85, `Existing Meta Product Mapping already maps the product name "${product}" to this family (product type ignored)`, 'meta_product_mapping', { meta_product: product, by: 'name_only' });
+    return true;
+  };
+  const MATCH_WORDING = {
+    exact: 'matches existing WNDRR product family "%F" (exact normalised name)',
+    contains_strong: 'closely matches existing WNDRR product family "%F" (shares %I of %U words)',
+    contains: 'matches part of existing WNDRR product family "%F" (shares %I words) — check before confirming',
+    fuzzy: 'partially matches existing WNDRR product family "%F" (shares %I words) — check before confirming',
+  };
+  const matchCatalogue = (phrase, origin) => {
+    const cands = matchProductPhrase(phrase, ctx.familyIndex);
+    cands.forEach((c) => {
+      const how = MATCH_WORDING[c.kind].replace('%F', c.family.product_name).replace('%I', c.inter).replace('%U', c.family.matchSet.size);
+      const tie = c.ties > 1 ? ` — ${c.ties} families matched equally closely` : '';
+      pushProduct(c.family, c.confidence, `Product "${phrase}" parsed from the Meta ad name ${how}${tie}`, 'name_product_match', { phrase, kind: c.kind, origin, shared_words: c.inter, family_words: c.family.matchSet.size });
+    });
+    return cands.length > 0;
+  };
+  const setFromHistory = (phrase) => {
+    if (!hasSetWord(phrase)) return false;
+    const hits = (ctx.adSetupsByLabel.get(coreTokens(phrase).join(' ')) || []).filter((a) => a.product_codes.length >= 2);
+    if (!hits.length) return false;
+    const a = hits[0];
+    a.product_codes.forEach((code) => pushProduct(famOf(code), 0.75, `Set "${phrase}": existing WNDRR Ad Setup #${a.id} with the same product name already links ${a.product_codes.length} families`, 'ad_setup_products', { phrase, ad_setup_id: a.id, set_group: `set:${norm(phrase)}`, kind: 'set_history' }));
+    return true;
+  };
+  const matchSet = (phrase, origin) => {
+    const set = expandSet(phrase, ctx.familyIndex);
+    if (!set) return false;
+    const names = set.members.map((m) => m.family.product_name).join(', ');
+    set.members.forEach((m) => {
+      const how = m.role === 'anchor' ? 'shares a word stem with the set name'
+        : m.role === 'sibling' ? 'sits in the same sub-collection as a matching piece' : 'belongs to the same collection';
+      pushProduct(m.family, m.confidence,
+        `"${phrase}" looks like a set from the "${set.lead}" collection; WNDRR families ${set.members.length > 1 ? 'that fit' : 'that fits'}: ${names}. This piece ${how} — confirm which pieces the set includes`,
+        'name_set_match', { phrase, origin, kind: 'set_expansion', role: m.role, set_group: `set:${norm(phrase)}`, collection_size: set.collection_size });
+    });
+    return true;
+  };
+  const productSources = [];
+  if (legacy) productSources.push({ phrase: legacy.product, type: legacy.productType, shown: `${legacy.product} + ${legacy.productType}`, origin: 'legacy_name' });
+  if (structured && structured.product_name) productSources.push({ phrase: structured.product_name, type: structured.product_category, shown: `${structured.product_name}${structured.product_category ? ` + ${structured.product_category}` : ''}`, origin: 'structured_name' });
+  if (loose && loose.product_phrase && loose.product_catalogue_match) productSources.push({ phrase: loose.product_phrase, type: null, shown: loose.product_phrase, origin: 'loose_name' });
+  productSources.forEach((src) => {
+    if (lookupMapping(src.phrase, src.type, src.shown)) return;
+    if (lookupMappingByName(src.phrase)) return;
+    if (matchCatalogue(src.phrase, src.origin)) return;
+    if (src.type && matchCatalogue(`${src.phrase} ${src.type}`, src.origin)) return;
+    if (setFromHistory(src.phrase)) return;
+    matchSet(src.phrase, src.origin);
+  });
   if (anchor) {
     anchor.setup.product_codes.forEach((code) => {
-      const fam = ctx.familyByCode.get(code) || { product_code: code, product_name: code };
-      pushProduct(fam, fromSetup, `Product of the linked Ad Setup #${anchor.setup.id}`, 'ad_setup_products', { ad_setup_id: anchor.setup.id });
+      pushProduct(famOf(code), fromSetup, `Product of the linked Ad Setup #${anchor.setup.id}`, 'ad_setup_products', { ad_setup_id: anchor.setup.id });
     });
   }
 
@@ -303,6 +380,12 @@ function buildSuggestions(ad, ctx) {
   let conceptFound = false;
   if (structured && structured.concept) {
     pushConcept(structured.concept, 0.9, `Parsed directly from the structured Meta name ("${structured.concept}")`, 'structured_name', { token: structured.concept });
+    conceptFound = true;
+  }
+  if (loose && loose.concept) {
+    pushConcept(loose.concept, loose.concept_formed_from ? 0.55 : 0.75,
+      loose.concept_formed_from ? `Formed from the name's "${loose.concept_formed_from}" tokens` : `Concept token "${loose.concept}" found in the Meta ad name`,
+      'loose_name', { token: loose.concept, formed_from: loose.concept_formed_from || undefined });
     conceptFound = true;
   }
   if (anchor && anchor.setup.concept_label) {
@@ -325,6 +408,7 @@ function buildSuggestions(ad, ctx) {
     else add({ field: 'creator', value_key: norm(token), value_label: token, confidence: Math.min(confidence, 0.6), reason: `${reason}; not on the creator roster`, source, evidence: { ...evidence, off_roster: true } });
   };
   if (structured && structured.creator) pushCreator(structured.creator, 0.9, `Parsed directly from the structured Meta name ("${structured.creator}")`, 'structured_name', { token: structured.creator });
+  if (loose && loose.creator) pushCreator(loose.creator, 0.8, `Creator "${loose.creator}" found in the Meta ad name`, 'loose_name', { token: loose.creator });
   if (anchor && anchor.setup.creator_name) pushCreator(anchor.setup.creator_name, fromSetup, `Creator of the linked Ad Setup #${anchor.setup.id}`, 'ad_setup', { ad_setup_id: anchor.setup.id });
 
   // ---- Creative Style (promotion creative-style matrix; separate taxonomy) ----
@@ -344,6 +428,30 @@ function buildSuggestions(ad, ctx) {
     });
   }
 
+  // ---- Media type (local evidence only -- never a Meta call) ----
+  const pushMedia = (key, confidence, reason, source, evidence) => {
+    if (!MEDIA_KEYS.has(key) || key === 'unknown') return;
+    add({ field: 'media_type', value_key: key, value_label: MEDIA_LABEL[key], confidence, reason, source, evidence });
+  };
+  if (structured && structured.media) pushMedia(structured.media, 0.9, `Media token "${structured.media}" parsed from the structured Meta name`, 'structured_name', { token: structured.media });
+  if (structured && structured.ad_type === 'carousel') pushMedia('carousel', 0.85, 'Ad type "Carousel" parsed from the structured Meta name', 'structured_name', { token: 'carousel' });
+  if (loose && loose.media) pushMedia(loose.media, 0.85, `Media token "${loose.media}" found in the Meta ad name`, 'name_token', { token: loose.media });
+  mediaTokensFromName(name).forEach((t) => pushMedia(t, 0.8, `Media token "${t}" found in the Meta ad name`, 'name_token', { token: t }));
+  if (anchor) {
+    const su = anchor.setup;
+    if (su.media_type) pushMedia(su.media_type, fromSetup, `Media of the linked Ad Setup #${su.id}`, 'ad_setup', { ad_setup_id: su.id });
+    if (su.ad_type === 'carousel') pushMedia('carousel', fromSetup, `Ad type of the linked Ad Setup #${su.id} is Carousel`, 'ad_setup', { ad_setup_id: su.id });
+    const fe = { video: 'video', static: 'image', carousel: 'carousel' }[su.final_edit_format];
+    if (fe) pushMedia(fe, Math.max(0.5, fromSetup - 0.05), `Format of the linked Ad Setup's final edit is ${su.final_edit_format}`, 'ad_setup', { ad_setup_id: su.id });
+  }
+  if (!out.some((s) => s.field === 'media_type')) {
+    // weakest evidence: the format recorded on a suggested concept type
+    const cs = out.filter((s) => s.field === 'concept' && s.value_ref).sort((a, b) => b.confidence - a.confidence)[0];
+    const fmt = cs && (ctx.concepts.find((c) => c.id === cs.value_ref) || {}).format;
+    const k = { video: 'video', static: 'image' }[fmt];
+    if (k) pushMedia(k, 0.5, `Concept "${cs.value_label}" is recorded as a ${fmt} format`, 'concept_format', { concept_id: cs.value_ref });
+  }
+
   // ---- Not product-specific ----
   if (/\bDPA\b/i.test(name)) {
     add({ field: 'scope', value_key: 'not_product_specific', value_label: 'Not product-specific', confidence: 0.5, reason: 'Ad name contains "DPA" (dynamic product ads cover the whole catalogue)', source: 'name_keyword', evidence: { keyword: 'DPA' } });
@@ -355,12 +463,15 @@ function buildSuggestions(ad, ctx) {
     const k = `${s.field}|${s.value_key}`;
     const cur = best.get(k);
     if (!cur) best.set(k, s);
-    else if (s.confidence > cur.confidence) best.set(k, { ...s, evidence: { ...s.evidence, also: [cur.source, ...(cur.evidence.also || [])] } });
-    else cur.evidence = { ...cur.evidence, also: [...(cur.evidence.also || []), s.source] };
+    else if (s.confidence > cur.confidence) best.set(k, { ...s, reason: s.source === cur.source ? s.reason : `${s.reason}. Also: ${cur.reason}`, evidence: { ...s.evidence, also: [cur.source, ...(cur.evidence.also || [])] } });
+    else {
+      cur.evidence = { ...cur.evidence, also: [...(cur.evidence.also || []), s.source] };
+      if (s.source !== cur.source && !cur.reason.includes('. Also: ')) cur.reason = `${cur.reason}. Also: ${s.reason}`;
+    }
   });
   return {
     suggestions: [...best.values()].sort((a, b) => b.confidence - a.confidence),
-    parsed: { legacy, structured },
+    parsed: { legacy, structured, loose },
     anchor_ad_setup_id: anchor ? anchor.setup.id : null,
   };
 }
@@ -534,11 +645,12 @@ async function getQueue(query = {}) {
             COALESCE(act.spend, 0) AS spend, act.last_active,
             c.skipped_at, COALESCE(c.excluded_from_intelligence, false) AS excluded,
             COALESCE(c.not_product_specific, false) AS not_product_specific,
-            c.concept_label AS confirmed_concept, c.creator_name AS confirmed_creator,
+            c.concept_label AS confirmed_concept, c.creator_name AS confirmed_creator, c.media_type AS confirmed_media,
             (SELECT string_agg(p.product_name, ', ' ORDER BY p.product_name) FROM meta_ad_products p WHERE p.meta_ad_id = a.meta_ad_id) AS confirmed_products,
             (SELECT s.value_label FROM meta_ad_suggestions s WHERE s.meta_ad_id = a.meta_ad_id AND s.field = 'product' ORDER BY s.confidence DESC LIMIT 1) AS suggested_product,
             (SELECT s.confidence FROM meta_ad_suggestions s WHERE s.meta_ad_id = a.meta_ad_id AND s.field = 'product' ORDER BY s.confidence DESC LIMIT 1) AS suggested_product_confidence,
             (SELECT s.value_label FROM meta_ad_suggestions s WHERE s.meta_ad_id = a.meta_ad_id AND s.field = 'concept' ORDER BY s.confidence DESC LIMIT 1) AS suggested_concept,
+            (SELECT s.value_label FROM meta_ad_suggestions s WHERE s.meta_ad_id = a.meta_ad_id AND s.field = 'media_type' ORDER BY s.confidence DESC LIMIT 1) AS suggested_media,
             (SELECT max(s.confidence) FROM meta_ad_suggestions s WHERE s.meta_ad_id = a.meta_ad_id) AS top_confidence
        ${base}
        ${whereSql}
@@ -570,6 +682,8 @@ async function getQueue(query = {}) {
       confirmed_products: r.confirmed_products,
       confirmed_concept: r.confirmed_concept,
       confirmed_creator: r.confirmed_creator,
+      confirmed_media: r.confirmed_media ? MEDIA_LABEL[r.confirmed_media] : null,
+      suggested_media: r.suggested_media,
       suggested_product: r.suggested_product,
       suggested_concept: r.suggested_concept,
       confidence: r.top_confidence === null ? null : Number(r.top_confidence),
@@ -596,7 +710,7 @@ function describeAdSetup(s) {
 
 async function getAdWorkspace(metaAdId, { refresh = true } = {}) {
   const { rows } = await pool.query(
-    `SELECT a.*, c.not_product_specific, c.concept_type_id, c.concept_label, c.creative_style_id, c.creator_name,
+    `SELECT a.*, c.not_product_specific, c.concept_type_id, c.concept_label, c.creative_style_id, c.creator_name, c.media_type,
             COALESCE(c.excluded_from_intelligence, false) AS excluded, c.excluded_reason, c.skipped_at
        FROM meta_ads a LEFT JOIN meta_ad_classifications c ON c.meta_ad_id = a.meta_ad_id
       WHERE a.meta_ad_id = $1`,
@@ -640,7 +754,7 @@ async function getAdWorkspace(metaAdId, { refresh = true } = {}) {
     pool.query('SELECT field, value_key, value_label, value_ref, confidence, reason, source, evidence FROM meta_ad_suggestions WHERE meta_ad_id = $1 ORDER BY confidence DESC, value_label', [metaAdId]),
   ]);
 
-  const suggestions = { product: [], concept: [], creator: [], creative_style: [], ad_setup: [], scope: [] };
+  const suggestions = { product: [], concept: [], creator: [], creative_style: [], ad_setup: [], scope: [], media_type: [] };
   sugg.rows.forEach((s) => {
     const item = {
       value_key: s.value_key, value_label: s.value_label, value_ref: s.value_ref,
@@ -650,7 +764,8 @@ async function getAdWorkspace(metaAdId, { refresh = true } = {}) {
     suggestions[s.field].push(item);
   });
 
-  const parsed = { legacy: parseMetaAdName(ad.ad_name), structured: parseStructuredMetaName(ad.ad_name) };
+  const structuredParse = parseStructuredMetaName(ad.ad_name);
+  const parsed = { legacy: parseMetaAdName(ad.ad_name), structured: structuredParse, loose: structuredParse ? null : parseLooseMetaName(ad.ad_name, ctx) };
   const confirmed = ad.match_status === 'confirmed';
   return {
     ad: {
@@ -679,6 +794,7 @@ async function getAdWorkspace(metaAdId, { refresh = true } = {}) {
       concept: ad.concept_label ? { concept_type_id: ad.concept_type_id, label: ad.concept_label, legacy: ad.concept_type_id === null } : null,
       creative_style_id: ad.creative_style_id,
       creator_name: ad.creator_name,
+      media_type: ad.media_type || null,
       ad_setup: describeAdSetup(ctx.adSetupById.get(ad.matched_ad_setup_id)),
     },
     suggestions,
@@ -734,6 +850,12 @@ async function confirmMapping(metaAdId, body, userId) {
     adSetupId = r.rows[0].id;
   }
   const creator = trimText(input.creator_name);
+  // Media Type is optional; 'unknown' is a deliberate human answer, NULL = undecided.
+  let mediaType = null;
+  if (input.media_type !== undefined && input.media_type !== null && input.media_type !== '') {
+    if (!MEDIA_KEYS.has(input.media_type)) throw new HttpError(400, 'Unknown media type');
+    mediaType = input.media_type;
+  }
 
   const client = await pool.connect();
   try {
@@ -741,14 +863,14 @@ async function confirmMapping(metaAdId, body, userId) {
     const lock = await client.query('SELECT meta_ad_id FROM meta_ads WHERE meta_ad_id = $1 FOR UPDATE', [metaAdId]);
     if (!lock.rows.length) throw new HttpError(404, 'Ad not found');
     await client.query(
-      `INSERT INTO meta_ad_classifications (meta_ad_id, not_product_specific, concept_type_id, concept_label, creative_style_id, creator_name, skipped_at, classified_by_user_id)
-       VALUES ($1,$2,$3,$4,$5,$6,NULL,$7)
+      `INSERT INTO meta_ad_classifications (meta_ad_id, not_product_specific, concept_type_id, concept_label, creative_style_id, creator_name, media_type, skipped_at, classified_by_user_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,NULL,$8)
        ON CONFLICT (meta_ad_id) DO UPDATE SET
          not_product_specific = EXCLUDED.not_product_specific, concept_type_id = EXCLUDED.concept_type_id,
          concept_label = EXCLUDED.concept_label, creative_style_id = EXCLUDED.creative_style_id,
-         creator_name = EXCLUDED.creator_name, skipped_at = NULL,
+         creator_name = EXCLUDED.creator_name, media_type = EXCLUDED.media_type, skipped_at = NULL,
          classified_by_user_id = EXCLUDED.classified_by_user_id, updated_at = now()`,
-      [metaAdId, notProductSpecific, conceptTypeId, conceptLabel, styleId, creator, userId || null]
+      [metaAdId, notProductSpecific, conceptTypeId, conceptLabel, styleId, creator, mediaType, userId || null]
     );
     await client.query('DELETE FROM meta_ad_products WHERE meta_ad_id = $1', [metaAdId]);
     for (const code of productCodes) {
@@ -815,7 +937,7 @@ async function clearMapping(metaAdId) {
     await client.query('DELETE FROM meta_ad_products WHERE meta_ad_id = $1', [metaAdId]);
     await client.query(
       `UPDATE meta_ad_classifications SET not_product_specific = false, concept_type_id = NULL, concept_label = NULL,
-              creative_style_id = NULL, creator_name = NULL, skipped_at = NULL, updated_at = now()
+              creative_style_id = NULL, creator_name = NULL, media_type = NULL, skipped_at = NULL, updated_at = now()
         WHERE meta_ad_id = $1`,
       [metaAdId]
     );
@@ -848,6 +970,7 @@ async function listOptions() {
     concepts: concepts.rows.map((c) => ({ id: c.id, label: c.name, format: c.format })),
     creative_styles: styles.rows.map((s) => ({ id: s.id, label: s.name, media_type: s.media_type })),
     creators: creators.rows.map((c) => c.name),
+    media_types: MEDIA_TYPES,
   };
 }
 
@@ -894,6 +1017,7 @@ const GROUPS = {
   concept: { select: `COALESCE(c.concept_type_id::text, 'legacy:' || lower(c.concept_label)) AS key, c.concept_label AS label`, join: '', group: `COALESCE(c.concept_type_id::text, 'legacy:' || lower(c.concept_label)), c.concept_label`, where: 'c.concept_label IS NOT NULL' },
   creator: { select: `lower(c.creator_name) AS key, c.creator_name AS label`, join: '', group: 'lower(c.creator_name), c.creator_name', where: 'c.creator_name IS NOT NULL' },
   creative_style: { select: `cs.id::text AS key, cs.name AS label`, join: 'JOIN creative_styles cs ON cs.id = c.creative_style_id', group: 'cs.id, cs.name' },
+  media_type: { select: `c.media_type AS key, c.media_type AS label`, join: '', group: 'c.media_type', where: 'c.media_type IS NOT NULL' },
   ad_setup: { select: `a.matched_ad_setup_id::text AS key, 'Ad Setup #' || a.matched_ad_setup_id AS label`, join: '', group: 'a.matched_ad_setup_id', where: 'a.matched_ad_setup_id IS NOT NULL' },
 };
 
@@ -907,6 +1031,7 @@ async function performanceBy(query = {}) {
   if (query.product_code) { params.push(String(query.product_code)); where.push(`EXISTS (SELECT 1 FROM meta_ad_products fp WHERE fp.meta_ad_id = a.meta_ad_id AND fp.product_code = $${params.length})`); }
   if (query.concept) { params.push(String(query.concept).toLowerCase()); where.push(`lower(c.concept_label) = $${params.length}`); }
   if (query.creator) { params.push(String(query.creator).toLowerCase()); where.push(`lower(c.creator_name) = $${params.length}`); }
+  if (query.media_type) { params.push(String(query.media_type)); where.push(`c.media_type = $${params.length}`); }
   if (query.creative_style_id) { params.push(parseInt(query.creative_style_id, 10)); where.push(`c.creative_style_id = $${params.length}`); }
   const { rows } = await pool.query(
     `SELECT ${g.select},
@@ -926,7 +1051,7 @@ async function performanceBy(query = {}) {
   return {
     by, range: parsed.range,
     note: by === 'product' ? 'An ad with several products is counted under each of its products, so product rows do not add up to a total.' : undefined,
-    rows: rows.map((r) => ({ key: r.key, label: r.label, ads: r.ads, ...deriveMetrics(r) })),
+    rows: rows.map((r) => ({ key: r.key, label: by === 'media_type' ? (MEDIA_LABEL[r.key] || r.key) : r.label, ads: r.ads, ...deriveMetrics(r) })),
   };
 }
 
@@ -934,6 +1059,7 @@ module.exports = {
   confidenceLevel,
   norm,
   parseStructuredMetaName,
+  parseLooseMetaName,
   loadContext,
   buildSuggestions,
   refreshSuggestions,
