@@ -177,9 +177,19 @@
          Thumbstop/Hold Rate are intentionally absent -- see
          src/lib/metaPerformance.js for why. -->
     <section id="tab-meta-performance" class="tab-panel">
+      <div class="mp-top">
+        <h2>Meta Performance</h2>
+        <!-- Performance | Ad Matching: one area, two views (no extra top-level
+             sidebar item). Performance is the original page, unchanged. -->
+        <div class="mp-subnav" id="mp-subnav" role="tablist">
+          <button type="button" class="mp-subnav-btn active" data-mp-view="performance" role="tab">Performance</button>
+          <button type="button" class="mp-subnav-btn" data-mp-view="matching" role="tab">Ad Matching</button>
+        </div>
+      </div>
+
+      <div id="mp-view-performance">
       <div class="mp-header">
         <div>
-          <h2>Meta Performance</h2>
           <div class="mp-range-line" id="mp-range-line">&nbsp;</div>
         </div>
         <div class="mp-fresh" id="mp-fresh"></div>
@@ -240,6 +250,32 @@
         </table>
         <div class="mp-pager" id="mp-pager"></div>
         <div class="mp-footnote">Attribution: 7-day click + 1-day view (provisional). Not shown yet: Reach &amp; Frequency (need exact range-level data from Meta &mdash; they can't be summed from daily rows), and Thumbstop &amp; Hold Rate (formulas not yet confirmed).</div>
+      </div>
+      </div><!-- /#mp-view-performance -->
+
+      <!-- Ad Matching: classify Meta ads into Product(s) / Concept / Creative
+           Style / Creator / Ad Setup. Local database only -- this view never
+           calls Meta. Confirmed mappings are only ever written by the explicit
+           buttons in the workspace modal below. -->
+      <div id="mp-view-matching" style="display:none;">
+        <div class="mm-intro">Match Meta ads to WNDRR products, concepts and creators so performance can follow the creative. Suggestions are only proposals — nothing changes until you confirm it. Works entirely from stored data (no Meta calls).</div>
+        <div class="mm-toolbar">
+          <select id="mm-scope" aria-label="Which ads">
+            <option value="30d">Active in last 30 days</option>
+            <option value="90d">Active in last 90 days</option>
+            <option value="all">All ads (search older)</option>
+          </select>
+          <input type="search" id="mm-search" placeholder="Search ad name, Meta Ad ID or product" autocomplete="off">
+          <button type="button" class="btn btn-ghost btn-sm" id="mm-refresh-suggestions">Refresh suggestions</button>
+        </div>
+        <div class="mm-chips" id="mm-chips" role="group" aria-label="Mapping state"></div>
+        <table class="mp-table mm-table">
+          <thead>
+            <tr><th class="mp-th-name">Ad Name</th><th>Status</th><th class="num">Recent spend</th><th>Mapping</th><th>Product</th><th>Concept</th><th>Confidence</th></tr>
+          </thead>
+          <tbody id="mm-body"></tbody>
+        </table>
+        <div class="mp-pager" id="mm-pager"></div>
       </div>
     </section>
 
@@ -1444,8 +1480,8 @@
      actual password -- "Reset Password" reveals a plain new-password input
      that's submitted straight to PATCH /users/:id/password (hashed
      server-side); nothing here can read an existing password back. -->
-<!-- Meta Performance V1: read-only ad detail (no matching controls yet --
-     the historical matching workflow is the next phase). -->
+<!-- Meta Performance V1: read-only ad detail (matching happens in the
+     Ad Matching view's own workspace). -->
 <div id="meta-ad-detail-modal" class="modal-backdrop">
   <div class="modal mp-detail-modal">
     <div class="modal-header">
@@ -1453,6 +1489,18 @@
       <button class="modal-close" onclick="closeModal('meta-ad-detail-modal')">&times;</button>
     </div>
     <div class="modal-body" id="mp-detail-body"></div>
+  </div>
+</div>
+
+<!-- Ad Matching workspace (Meta Performance -> Ad Matching): Meta evidence on
+     the left, editable mapping on the right. All local; nothing here calls Meta. -->
+<div id="meta-match-modal" class="modal-backdrop">
+  <div class="modal mm-modal">
+    <div class="modal-header">
+      <h3 id="mm-modal-title">Match ad</h3>
+      <button class="modal-close" onclick="closeModal('meta-match-modal')">&times;</button>
+    </div>
+    <div class="modal-body mm-modal-body" id="mm-modal-body"></div>
   </div>
 </div>
 

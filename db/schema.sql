@@ -2578,3 +2578,102 @@ BEGIN
       CHECK (run_type IN ('default', 'backfill', 'inventory'));
   END IF;
 END $$;
+
+-- =====================================================================
+-- Meta Ad Matching V1: classify Meta ads into WNDRR's creative-intelligence
+-- vocabulary (Product(s) / Concept / Creative Style / Creator / optional
+-- Ad Setup link) without inventing records that don't exist.
+--
+-- Source-of-truth split (no duplicated truths):
+--   meta_ads                 Meta-owned fields (sync/inventory write ONLY
+--                            these) + the EXISTING match_status /
+--                            matched_ad_setup_id / match_* state machine
+--                            (unmatched | suggested | confirmed), which
+--                            stays THE state field. Sync and inventory
+--                            refresh never touch any match_* column or
+--                            anything below.
+--   meta_ad_classifications  the HUMAN-confirmed classification values
+--                            (+ excluded / skipped flags), one row per ad.
+--   meta_ad_products         the HUMAN-confirmed product(s), many per ad,
+--                            keyed on the stable product_code
+--                            (deriveProductCode(style_code)) -- the same
+--                            identity meta_product_mappings and coverage
+--                            use. Never a free-typed product name.
+--   meta_ad_suggestions      DISPOSABLE, derived suggestions (value +
+--                            confidence + reason). Rewritable at will;
+--                            never read as truth, never written for a
+--                            confirmed ad.
+--
+-- An ad that matches a WNDRR Ad Setup links via the existing
+-- meta_ads.matched_ad_setup_id (ad_setup -> final_edit -> creative_asset);
+-- a historical ad with no Ad Setup is classified here directly, with
+-- matched_ad_setup_id left NULL -- no fake ad_setup/final_edit/creative_asset
+-- rows are ever created.
+--
+-- Two taxonomies are deliberately kept SEPARATE (not merged here):
+--   concept_type_id   -> concept_types (the reusable concept vocabulary;
+--                        creative_assets.concept_type / ad_setups.
+--                        concept_label come from it). concept_label always
+--                        snapshots the text, so a historical concept that
+--                        isn't in concept_types can be saved as a legacy
+--                        free-text classification (concept_type_id NULL)
+--                        without polluting concept_types.
+--   creative_style_id -> creative_styles (the Black Friday / promotion
+--                        creative-style matrix vocabulary).
+-- (concept_types today also contains the 14 creative_styles names -- that
+-- overlap is existing data, left exactly as it is.)
+-- Creator stays a plain name (like ad_setups.creator_name) -- no user FK.
+-- =====================================================================
+ALTER TABLE meta_ads ADD COLUMN IF NOT EXISTS match_suggestions_at TIMESTAMPTZ;
+
+CREATE TABLE IF NOT EXISTS meta_ad_classifications (
+  meta_ad_id VARCHAR(64) PRIMARY KEY REFERENCES meta_ads(meta_ad_id) ON DELETE CASCADE,
+  -- Deliberate "Not product-specific" decision (DPA / sale / campaign /
+  -- general ads) -- mutually exclusive with any meta_ad_products rows.
+  not_product_specific BOOLEAN NOT NULL DEFAULT false,
+  concept_type_id INTEGER REFERENCES concept_types(id) ON DELETE SET NULL,
+  concept_label VARCHAR(255),
+  creative_style_id INTEGER REFERENCES creative_styles(id) ON DELETE SET NULL,
+  creator_name VARCHAR(255),
+  -- Reversible "Not relevant for creative intelligence" flag (utility /
+  -- DPA / internal ads that must not influence concept recommendations).
+  excluded_from_intelligence BOOLEAN NOT NULL DEFAULT false,
+  excluded_reason VARCHAR(255),
+  excluded_at TIMESTAMPTZ,
+  -- "Skip for now": no classification is implied, the ad just sorts to the
+  -- bottom of the matching queue.
+  skipped_at TIMESTAMPTZ,
+  classified_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS meta_ad_products (
+  meta_ad_id VARCHAR(64) NOT NULL REFERENCES meta_ads(meta_ad_id) ON DELETE CASCADE,
+  product_code VARCHAR(64) NOT NULL,
+  -- Display snapshot only; identity is product_code.
+  product_name VARCHAR(255),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (meta_ad_id, product_code)
+);
+CREATE INDEX IF NOT EXISTS idx_meta_ad_products_product_code ON meta_ad_products(product_code);
+
+CREATE TABLE IF NOT EXISTS meta_ad_suggestions (
+  id SERIAL PRIMARY KEY,
+  meta_ad_id VARCHAR(64) NOT NULL REFERENCES meta_ads(meta_ad_id) ON DELETE CASCADE,
+  field VARCHAR(20) NOT NULL CHECK (field IN ('product', 'concept', 'creator', 'creative_style', 'ad_setup', 'scope')),
+  -- Natural key of the proposed value (product_code / normalised concept or
+  -- creator text / style id / ad setup id / 'not_product_specific').
+  value_key VARCHAR(255) NOT NULL,
+  value_label VARCHAR(255),
+  -- concept_types.id / creative_styles.id / ad_setups.id when the value is
+  -- one of those records; NULL for free-text (legacy) concept/creator.
+  value_ref INTEGER,
+  confidence NUMERIC(4,3) NOT NULL,
+  reason TEXT NOT NULL,
+  source VARCHAR(40) NOT NULL,
+  evidence JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (meta_ad_id, field, value_key)
+);
+CREATE INDEX IF NOT EXISTS idx_meta_ad_suggestions_meta_ad_id ON meta_ad_suggestions(meta_ad_id);
