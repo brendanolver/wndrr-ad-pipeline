@@ -1533,6 +1533,17 @@
 
 <!-- Ad Matching workspace (Meta Performance -> Ad Matching): Meta evidence on
      the left, editable mapping on the right. All local; nothing here calls Meta. -->
+<!-- Backlog dry-run preview: what WOULD the current matching rules change? Read-only. -->
+<div id="mm-preview-modal" class="modal-backdrop">
+  <div class="modal mm-preview-modal">
+    <div class="modal-header">
+      <h3>Backlog preview <span class="hint">(dry run — nothing was changed)</span></h3>
+      <button class="modal-close" onclick="closeModal('mm-preview-modal')">&times;</button>
+    </div>
+    <div class="modal-body" id="mm-preview-body"></div>
+  </div>
+</div>
+
 <div id="meta-match-modal" class="modal-backdrop">
   <div class="modal mm-modal">
     <div class="modal-header">

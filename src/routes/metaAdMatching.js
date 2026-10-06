@@ -59,6 +59,11 @@ router.post('/suggest', handle((req) => matching.refreshSuggestions({
 // to finish its current ad and stop. Local database only.
 router.get('/reprocess-backlog', handle(() => matching.getBacklogStatus()));
 router.post('/reprocess-backlog', handle(() => matching.startBacklogReprocess()));
+// Dry run: what WOULD the current rules change? Background, read-only (SELECTs only).
+router.get('/reprocess-backlog/preview', handle(() => matching.getBacklogPreview()));
+router.post('/reprocess-backlog/preview', handle((req) => matching.startBacklogPreview({ scope: req.body && req.body.scope, samples: req.body && req.body.samples })));
+// Read-only: does the live ApparelMagic catalogue contain these products? (?probe=PHRASE, repeatable)
+router.get('/catalogue-check', handle((req) => matching.catalogueCheck([].concat(req.query.probe || []))));
 router.post('/reprocess-backlog/stop', handle(() => matching.stopBacklogReprocess()));
 
 // Workspace for one ad: Meta evidence + current classification + suggestions.

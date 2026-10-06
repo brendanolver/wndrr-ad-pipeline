@@ -2591,3 +2591,9 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .mm-backlog{background:var(--amber-light);border:1px solid #fcd34d;border-radius:var(--r);padding:8px 12px;margin-bottom:10px;font-size:12.5px;color:#92400e;}
 .mm-backlog .btn{margin-left:10px;}
 .mm-backlog .mm-bl-ok{color:var(--green);}
+
+.mm-preview-modal{max-width:1100px;width:96vw;}
+.mm-preview-modal .modal-body{max-height:78vh;overflow:auto;}
+.mm-preview-modal h4{font-size:12px;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-muted);margin:14px 0 4px;}
+.mm-pv-summary{max-width:480px;margin:8px 0;}
+.mm-pv-table td,.mm-pv-table th{font-size:12px;vertical-align:top;}
