@@ -2820,3 +2820,8 @@ CREATE TABLE IF NOT EXISTS meta_match_changes (
 );
 CREATE INDEX IF NOT EXISTS idx_meta_match_changes_run ON meta_match_changes (run_id);
 CREATE INDEX IF NOT EXISTS idx_meta_match_changes_ad ON meta_match_changes (meta_ad_id);
+
+-- Ad Matching V4.1: remember which snapshot families also exist as local styles, so a
+-- same-name product group is represented by the code the app already links to.
+-- Additive and idempotent (no existing data is changed).
+ALTER TABLE meta_catalogue_families ADD COLUMN IF NOT EXISTS in_local BOOLEAN NOT NULL DEFAULT false;

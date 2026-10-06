@@ -156,7 +156,10 @@ function parseStructuredMetaName(name) {
 // Family-derived structures, shared by loadContext and the preview's V3-vs-V4 comparison.
 function familyStructures(families) {
   const familyIndex = buildFamilyIndex(families);
-  const familyByCode = new Map(families.map((f) => [f.product_code, f]));
+  // every underlying product code of a logical family (V4 collapses same-name codes) resolves to it
+  const familyByCode = new Map();
+  families.forEach((f) => (f.member_codes || []).forEach((c) => familyByCode.set(c, f)));
+  families.forEach((f) => familyByCode.set(f.product_code, f));
   const familyByNorm = new Map();
   families.forEach((f) => { const k = norm(f.product_name); if (!familyByNorm.has(k)) familyByNorm.set(k, f); });
   return { families, familyIndex, familyByCode, familyByNorm };
@@ -348,6 +351,8 @@ function clearBest(cands) {
   if (second && !(top.jacc - second.jacc >= 0.1 || top.confidence - second.confidence >= 0.15)) return null;
   return top;
 }
+// Representative code of the (logical) family a code belongs to; the code itself when unknown.
+const repCode = (ctx, code) => { const f = ctx.familyByCode && ctx.familyByCode.get(code); return f ? f.product_code : code; };
 const spreadCache = new WeakMap();
 function spreadFor(ctx) {
   if (!ctx.tokenSpread) {
@@ -379,7 +384,7 @@ function resolveStructuredProduct(src, ctx, { cands }) {
   }
   if (res) {
     // human-curated evidence still loses to an exact catalogue match for a DIFFERENT family
-    if (best && best.kind === 'exact' && best.family.product_code !== res.code) return { status: 'ambiguous', reason: 'Conflicting product evidence (mapping vs name)' };
+    if (best && best.kind === 'exact' && best.family.product_code !== repCode(ctx, res.code)) return { status: 'ambiguous', reason: 'Conflicting product evidence (mapping vs name)' };
     return res;
   }
   if (best && setWording && best.kind !== 'exact') return { status: 'ambiguous', reason: 'Looks like a set / bundle that may include several products' };
@@ -394,7 +399,7 @@ function resolveStructuredProduct(src, ctx, { cands }) {
     return hit(best.family.product_code, best.kind === 'exact' ? 'catalogue_exact' : 'catalogue_similar',
       best.kind === 'exact' ? 'Exact product family name' : `One clearly best product family (${best.kind.replace('_', ' ')} match)`);
   }
-  if (cands.length) return { status: 'ambiguous', reason: 'More than one plausible product family' };
+  if (cands.length) return { status: 'ambiguous', reason: AMBIGUOUS_PRODUCT_REASON };
   if (setWording) return { status: 'ambiguous', reason: 'Looks like a set / bundle that may include several products' };
   return { status: 'none', reason: 'No matching product family' };
 }
@@ -708,7 +713,7 @@ function evaluateAutoMatch(ad, built, ctx) {
   else {
     product = { product_code: res.code, product_name: res.name, basis: res.basis, confidence: res.confidence };
     const anchor = built.anchor;
-    if (anchor && anchor.confidence >= 0.9 && anchor.product_codes.length && !anchor.product_codes.includes(res.code)) {
+    if (anchor && anchor.confidence >= 0.9 && anchor.product_codes.length && !anchor.product_codes.some((c) => repCode(ctx, c) === repCode(ctx, res.code))) {
       blockers.push('Product conflicts with the linked Ad Setup\'s product');
       product = null;
     }
@@ -747,6 +752,8 @@ function evaluateAutoMatch(ad, built, ctx) {
   const qualifies = !blockers.length && !!product;
   if (!qualifies) return { qualifies: false, blockers, left_blank: [], values: null, auto_fields: null };
   const auto_fields = { product: { basis: product.basis, confidence: product.confidence } };
+  const famOfProduct = ctx.familyByCode && ctx.familyByCode.get(product.product_code);
+  if (famOfProduct && famOfProduct.member_codes && famOfProduct.member_codes.length > 1) auto_fields.product.member_codes = famOfProduct.member_codes; // same-name codes (V4)
   if (concept) auto_fields.concept = { basis: concept.basis };
   if (creator) auto_fields.creator = { basis: creator.basis };
   if (media) auto_fields.media_type = { basis: media.basis };
@@ -1216,6 +1223,7 @@ async function changesCsv(runId) {
 //   auto_to_review | review_to_auto | auto_to_different_auto | unchanged_auto |
 //   unchanged_review | protected | errors
 let previewJob = null;
+const AMBIGUOUS_PRODUCT_REASON = 'More than one plausible product family';
 const PREVIEW_CATEGORIES = ['auto_to_review', 'review_to_auto', 'auto_to_different_auto'];
 const DELTA_CATEGORIES = ['newly_auto', 'product_changed', 'lost_auto'];
 
@@ -1229,6 +1237,27 @@ function topEntries(map, n, mapper) {
   return [...map.entries()].sort((a, b) => b[1].count - a[1].count).slice(0, n).map(mapper);
 }
 
+// What the two headline numbers compare (documented here AND shown in the preview):
+//   lost_auto                 = V3-now says auto  AND V4 says not auto      (every previewed, non-protected ad;
+//                               V3 is re-EVALUATED in memory with the local catalogue, whatever the ad's stored status)
+//   Auto-matched -> Needs review = STORED status is auto_matched AND V4 says not auto
+//                               (the stored status may come from older V2 rules that V3 would not repeat, and ads
+//                               that V3 would auto-match but that were never re-processed are stored as review)
+// So the two differ by: stored-auto ads V3-now would NOT auto-match, and stored-review ads V3-now WOULD auto-match.
+const RECON_LABELS = {
+  'db_auto|v3_auto|v4_auto': 'Stored auto · V3 auto · V4 auto (kept)',
+  'db_auto|v3_auto|v4_not_auto': 'Stored auto · V3 auto · V4 NOT auto  (counts in BOTH lost_auto and Auto→Review)',
+  'db_auto|v3_not_auto|v4_auto': 'Stored auto · V3 not auto · V4 auto  (older link V3 would drop, V4 re-links)',
+  'db_auto|v3_not_auto|v4_not_auto': 'Stored auto · V3 not auto · V4 not auto  (Auto→Review only, NOT lost_auto)',
+  'db_not_auto|v3_auto|v4_auto': 'Stored review · V3 auto · V4 auto  (Review→Auto in both)',
+  'db_not_auto|v3_auto|v4_not_auto': 'Stored review · V3 auto · V4 NOT auto  (lost_auto only, NOT Auto→Review)',
+  'db_not_auto|v3_not_auto|v4_auto': 'Stored review · V3 not auto · V4 auto  (new in V4)',
+  'db_not_auto|v3_not_auto|v4_not_auto': 'Stored review · V3 not auto · V4 not auto  (unchanged)',
+};
+function reconciliationRows(recon) {
+  return Object.keys(RECON_LABELS).map((k) => ({ key: k, label: RECON_LABELS[k], ads: recon[k] || 0 }));
+}
+
 function publicPreview(job) {
   if (!job) return null;
   const done = job.state !== 'running';
@@ -1236,7 +1265,15 @@ function publicPreview(job) {
     state: job.state, scope: job.scope, compare: job.compare, started_at: job.started_at, finished_at: job.finished_at,
     rules_version: job.rules_version, catalogue: job.catalogue, total: job.total, processed: job.processed,
     counts: { ...job.counts }, protected_by_reason: { ...job.protected_by_reason },
-    v4_vs_v3: job.compare ? { counts: { ...job.delta.counts }, samples: job.delta.samples, pairs: done ? job.deltaPairList(60) : [] } : null,
+    v4_vs_v3: job.compare ? {
+      counts: { ...job.delta.counts }, samples: job.delta.samples, pairs: done ? job.deltaPairList(60) : [],
+      lost_reasons: Object.fromEntries([...job.delta.lost_reasons.entries()].sort((a, b) => b[1] - a[1])),
+      reconciliation: reconciliationRows(job.recon),
+    } : null,
+    ambiguity: {
+      same_name_blocking: job.ambiguity.same_name, distinct_name_blocking: job.ambiguity.distinct_name,
+      top_pairs: [...job.ambiguity.pairs.values()].sort((a, b) => b.ads - a.ads).slice(0, 40),
+    },
     unresolved_reasons: Object.fromEntries([...job.unresolved.entries()].sort((a, b) => b[1] - a[1]).slice(0, 15)),
     unresolved_phrases: done ? topEntries(job.phrases, 40, ([phrase, v]) => ({ phrase, ads: v.count, reason: v.reason, nearest_family: v.nearest })) : [],
     ambiguous_same_name_ads: job.ambiguous_same_name,
@@ -1306,6 +1343,19 @@ async function runPreview(job, matching, v3Families) {
             }
             const prods = built.suggestions.filter((x) => x.field === 'product');
             if (prods.length > 1 && norm(prods[0].value_label) === norm(prods[1].value_label)) job.ambiguous_same_name += 1;
+            if (reason === AMBIGUOUS_PRODUCT_REASON) {
+              // Is the tie between the SAME canonical family name (should not block any more) or between different names (genuine)?
+              const tops = prods.filter((x) => x.confidence === prods[0].confidence);
+              const keys = new Set(tops.map((x) => catalogueLib.canonicalKey(x.value_label)));
+              if (keys.size <= 1) job.ambiguity.same_name += 1;
+              else {
+                job.ambiguity.distinct_name += 1;
+                const pk = tops.slice(0, 3).map((x) => x.value_label).sort().join('  |  ');
+                const cur2 = job.ambiguity.pairs.get(pk) || { candidates: pk, ads: 0, example_ad_name: ad.ad_name };
+                cur2.ads += 1;
+                job.ambiguity.pairs.set(pk, cur2);
+              }
+            }
           }
           if (cat !== 'unchanged_auto' && cat !== 'unchanged_review') {
             if (job.samples[cat].length < job.sample_size) job.samples[cat].push(row);
@@ -1319,6 +1369,9 @@ async function runPreview(job, matching, v3Families) {
             const e3 = evaluateAutoMatch(adIn, b3, ctx3);
             const v3Auto = e3.qualifies && !ad.auto_match_blocked_at;
             const v3Code = v3Auto ? e3.values.product.product_code : null;
+            // Reconciliation of the two headline metrics (see RECON_LABELS): STORED status x V3-now x V4.
+            const rk = `${oldAuto ? 'db_auto' : 'db_not_auto'}|${v3Auto ? 'v3_auto' : 'v3_not_auto'}|${newAuto ? 'v4_auto' : 'v4_not_auto'}`;
+            job.recon[rk] = (job.recon[rk] || 0) + 1;
             let dcat = null;
             if (!v3Auto && newAuto) dcat = 'newly_auto';
             else if (v3Auto && !newAuto) dcat = 'lost_auto';
@@ -1326,6 +1379,7 @@ async function runPreview(job, matching, v3Families) {
             else job.delta.counts[v3Auto ? 'same_auto' : 'same_review'] += 1;
             if (dcat) {
               job.delta.counts[dcat] += 1;
+              if (dcat === 'lost_auto') job.delta.lost_reasons.set(reason || 'Needs a person to choose', (job.delta.lost_reasons.get(reason || 'Needs a person to choose') || 0) + 1);
               const drow = {
                 ad_name: ad.ad_name,
                 v3_product: v3Auto ? e3.values.product.product_name : null, v3_basis: v3Auto ? e3.auto_fields.product.basis : null, v3_reason: v3Auto ? null : (e3.blockers[0] || null),
@@ -1372,7 +1426,8 @@ async function startBacklogPreview({ scope = 'stale', samples = 25, catalogue = 
     counts: { auto_to_review: 0, review_to_auto: 0, auto_to_different_auto: 0, unchanged_auto: 0, unchanged_review: 0, protected: 0, errors: 0 },
     protected_by_reason: {}, samples: Object.fromEntries(PREVIEW_CATEGORIES.map((c) => [c, []])),
     pairs: new Map(), unresolved: new Map(), phrases: new Map(), ambiguous_same_name: 0, warnings: [],
-    delta: { counts: { newly_auto: 0, product_changed: 0, lost_auto: 0, same_auto: 0, same_review: 0 }, samples: Object.fromEntries(DELTA_CATEGORIES.map((c) => [c, []])) },
+    delta: { lost_reasons: new Map(), counts: { newly_auto: 0, product_changed: 0, lost_auto: 0, same_auto: 0, same_review: 0 }, samples: Object.fromEntries(DELTA_CATEGORIES.map((c) => [c, []])) },
+    recon: {}, ambiguity: { same_name: 0, distinct_name: 0, pairs: new Map() },
     deltaPairs: new Map(), error_samples: [], fatal_error: null, last_batch_at: null,
     pairList(n) { return [...this.pairs.values()].sort((a, b) => b.count - a.count).slice(0, n); },
     deltaPairList(n) { return [...this.deltaPairs.values()].sort((a, b) => b.count - a.count).slice(0, n); },
@@ -1386,11 +1441,12 @@ async function startBacklogPreview({ scope = 'stale', samples = 25, catalogue = 
       const prev = (await catalogueLib.listSnapshots(1))[0] || null;
       const validation = catalogueLib.validateCatalogue(live, { previous: prev, minFamilies: deps.minFamilies });
       if (!validation.ok) job.warnings.push(...validation.problems);
-      matching = { families: live.families, rulesVersion: 4, catalogue: { source: 'live', snapshot_id: null, fingerprint: live.fingerprint, family_count: live.families.length } };
-      job.catalogue = { source: 'live', fingerprint: live.fingerprint, family_count: live.families.length, stats: live.stats, validation };
+      const logical = catalogueLib.collapseFamilies(live.families); // exactly what loadMatchingFamilies gives for a snapshot of this catalogue
+      matching = { families: logical, rulesVersion: 4, catalogue: { source: 'live', snapshot_id: null, fingerprint: live.fingerprint, family_count: logical.length, code_count: live.families.length } };
+      job.catalogue = { source: 'live', fingerprint: live.fingerprint, family_count: logical.length, code_count: live.families.length, stats: live.stats, validation };
     } else {
       matching = await catalogueLib.loadMatchingFamilies(pool);
-      job.catalogue = { source: matching.catalogue.source, fingerprint: matching.catalogue.fingerprint, snapshot_id: matching.catalogue.snapshot_id, family_count: matching.families.length };
+      job.catalogue = { source: matching.catalogue.source, fingerprint: matching.catalogue.fingerprint, snapshot_id: matching.catalogue.snapshot_id, family_count: matching.families.length, code_count: matching.catalogue.code_count || matching.families.length };
     }
     job.rules_version = matching.rulesVersion;
     if (job.compare) v3Families = await catalogueLib.loadLocalFamilies(pool);

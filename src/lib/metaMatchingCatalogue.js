@@ -16,13 +16,17 @@
 //     activate actions read the (already cached) AM catalogue, and they refuse
 //     rather than block on a cold cache.
 //
-// One entry per product CODE is kept even when two codes share a name: such
-// same-name entries tie in the matcher and stay in Needs Review (no tie-break).
+// The snapshot keeps one row per product CODE (traceability, fingerprint). For
+// MATCHING, codes whose canonical product name is identical are one LOGICAL family
+// (see collapseFamilies): the same WNDRR product sold under several season codes is
+// not "ambiguous". Genuinely different names that the ad phrase cannot tell apart
+// still tie and stay in Needs Review. There is no newest-year / newest-code tie-break.
 const crypto = require('crypto');
 const { pool } = require('../db');
 const { HttpError } = require('./metaPerformance');
 const apparelmagic = require('./apparelmagic');
 const { listProductFamilies } = require('./metaProductMapping');
+const { canonTokens } = require('./metaNameParsing');
 
 // Modern WNDRR style codes (any season letter): letter + 2-digit year + 2-letter
 // collection + 3-digit number + 3-letter colour. Product code = first 8 chars.
@@ -44,6 +48,41 @@ class CatalogueError extends HttpError {
 
 const norm = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
 
+// Canonical product-family name: the matcher's own word canonicalisation (case,
+// punctuation, 1/4 = QUARTER, TEES = TEE ...), keeping word ORDER and every word.
+// Two codes are the same logical family only when this is identical.
+const canonicalKey = (name) => canonTokens(name).join(' ');
+
+// ── pure: collapse same-canonical-name product codes into LOGICAL families ──
+// families: [{ product_code, product_name, colourways, source, in_local }]
+// Returns one entry per canonical name, ordered by representative code:
+//   { product_code (representative), product_name, colourways (sum), source, in_local,
+//     member_codes (ALL underlying codes, sorted), name_variants? }
+// The representative is the code the app already knows (local style) first, then the
+// most colourways, then the lowest code -- deterministic, and NOT a "newest year wins"
+// guess. Every member code stays resolvable (aliases) for traceability.
+function collapseFamilies(families) {
+  const groups = new Map();
+  (families || []).forEach((f) => {
+    const k = canonicalKey(f.product_name) || `~${f.product_code}`; // an unnameable code is never grouped
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(f);
+  });
+  const out = [];
+  groups.forEach((members) => {
+    const sorted = [...members].sort((a, b) => (b.in_local ? 1 : 0) - (a.in_local ? 1 : 0) || (b.colourways || 0) - (a.colourways || 0) || String(a.product_code).localeCompare(String(b.product_code)));
+    const rep = sorted[0];
+    const variants = [...new Set(sorted.map((m) => m.product_name))].sort();
+    const fam = {
+      product_code: rep.product_code, product_name: rep.product_name, colourways: sorted.reduce((n, m) => n + (m.colourways || 0), 0),
+      source: rep.source, in_local: sorted.some((m) => m.in_local), member_codes: sorted.map((m) => m.product_code).sort(),
+    };
+    if (variants.length > 1) fam.name_variants = variants;
+    out.push(fam);
+  });
+  return out.sort((a, b) => a.product_code.localeCompare(b.product_code));
+}
+
 // ── pure: build a catalogue from the AM style map + local style rows ────
 // amCatalogue: Map(style_code -> { productName, ... }) | null
 // localStyles: [{ style_code, name }]
@@ -52,6 +91,7 @@ function buildCatalogue({ amCatalogue, localStyles = [] }) {
     am_style_rows: 0, am_style_rows_excluded: 0, am_excluded_examples: [], am_unnamed_rows: 0,
     am_families: 0, local_families: 0, local_only_families: 0, am_only_families: 0,
     duplicate_name_groups: 0, duplicate_name_codes: 0, families_by_season: {},
+    logical_families: 0, collapsed_groups: 0, collapsed_codes: 0, collapsed_groups_top: [], name_variant_groups: 0,
   };
   const amGroups = new Map(); // code8 -> { names: Map(name->n), colourways }
   if (amCatalogue) {
@@ -76,7 +116,7 @@ function buildCatalogue({ amCatalogue, localStyles = [] }) {
   amGroups.forEach((g, code) => {
     // the most common name across the colourways (ties -> alphabetical, so the result is deterministic)
     const name = [...g.names.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0][0];
-    families.set(code, { product_code: code, product_name: name, colourways: g.colourways, source: 'apparelmagic' });
+    families.set(code, { product_code: code, product_name: name, colourways: g.colourways, source: 'apparelmagic', in_local: false });
   });
   stats.am_families = families.size;
 
@@ -89,8 +129,8 @@ function buildCatalogue({ amCatalogue, localStyles = [] }) {
   });
   stats.local_families = localByCode.size;
   localByCode.forEach((l, code) => {
-    if (families.has(code)) return; // ApparelMagic's name wins for a code in both
-    families.set(code, { product_code: code, product_name: String(l.name || code).trim(), colourways: l.colourways, source: 'local' });
+    if (families.has(code)) { families.get(code).in_local = true; return; } // ApparelMagic's name wins for a code in both
+    families.set(code, { product_code: code, product_name: String(l.name || code).trim(), colourways: l.colourways, source: 'local', in_local: true });
     stats.local_only_families += 1;
   });
   stats.am_only_families = [...families.values()].filter((f) => f.source === 'apparelmagic' && !localByCode.has(f.product_code)).length;
@@ -108,6 +148,15 @@ function buildCatalogue({ amCatalogue, localStyles = [] }) {
   byName.forEach((codes) => { if (codes.length > 1) { stats.duplicate_name_groups += 1; stats.duplicate_name_codes += codes.length; } });
   stats.families_by_season = Object.fromEntries(Object.entries(stats.families_by_season).sort());
   stats.family_count = list.length;
+  // what the matcher will see: one logical family per canonical name
+  const logical = collapseFamilies(list);
+  stats.logical_families = logical.length;
+  const multi = logical.filter((f) => f.member_codes.length > 1);
+  stats.collapsed_groups = multi.length;
+  stats.collapsed_codes = multi.reduce((n, f) => n + f.member_codes.length, 0);
+  stats.name_variant_groups = logical.filter((f) => f.name_variants).length;
+  stats.collapsed_groups_top = multi.sort((a, b) => b.member_codes.length - a.member_codes.length || a.product_name.localeCompare(b.product_name)).slice(0, 25)
+    .map((f) => ({ name: f.product_name, representative: f.product_code, codes: f.member_codes.slice(0, 12), code_count: f.member_codes.length, name_variants: f.name_variants || undefined }));
   return { families: list, stats, fingerprint: fingerprintOf(list) };
 }
 
@@ -179,7 +228,7 @@ async function getActiveSnapshot(db = pool) {
 const snapshotFamilyCache = new Map(); // snapshot id -> families (immutable once written)
 async function loadSnapshotFamilies(snapshotId, db = pool) {
   if (snapshotFamilyCache.has(snapshotId)) return snapshotFamilyCache.get(snapshotId);
-  const r = await db.query('SELECT product_code, product_name, colourways, source FROM meta_catalogue_families WHERE snapshot_id = $1 ORDER BY product_code', [snapshotId]);
+  const r = await db.query('SELECT product_code, product_name, colourways, source, in_local FROM meta_catalogue_families WHERE snapshot_id = $1 ORDER BY product_code', [snapshotId]);
   if (snapshotFamilyCache.size > 3) snapshotFamilyCache.clear();
   snapshotFamilyCache.set(snapshotId, r.rows);
   return r.rows;
@@ -195,8 +244,9 @@ async function loadMatchingFamilies(db = pool) {
     const families = await listProductFamilies(db);
     return { families, rulesVersion: 3, catalogue: { source: 'local_styles', snapshot_id: null, fingerprint: null, family_count: families.length } };
   }
-  const families = await loadSnapshotFamilies(snap.id, db);
-  return { families, rulesVersion: 4, catalogue: { source: 'snapshot', snapshot_id: snap.id, fingerprint: snap.fingerprint, family_count: snap.family_count } };
+  const rows = await loadSnapshotFamilies(snap.id, db);
+  const families = collapseFamilies(rows); // logical families; every underlying code stays an alias (member_codes)
+  return { families, rulesVersion: 4, catalogue: { source: 'snapshot', snapshot_id: snap.id, fingerprint: snap.fingerprint, family_count: families.length, code_count: rows.length } };
 }
 
 // Families offered for HUMAN choice (product picker + confirm validation):
@@ -225,9 +275,9 @@ async function saveAndActivate(candidate, userId, db = pool) {
     );
     const id = ins.rows[0].id;
     await client.query(
-      `INSERT INTO meta_catalogue_families (snapshot_id, product_code, product_name, colourways, source)
-       SELECT $1::int, * FROM unnest($2::text[], $3::text[], $4::int[], $5::text[])`,
-      [id, candidate.families.map((f) => f.product_code), candidate.families.map((f) => f.product_name), candidate.families.map((f) => f.colourways), candidate.families.map((f) => f.source)]
+      `INSERT INTO meta_catalogue_families (snapshot_id, product_code, product_name, colourways, source, in_local)
+       SELECT $1::int, * FROM unnest($2::text[], $3::text[], $4::int[], $5::text[], $6::boolean[])`,
+      [id, candidate.families.map((f) => f.product_code), candidate.families.map((f) => f.product_name), candidate.families.map((f) => f.colourways), candidate.families.map((f) => f.source), candidate.families.map((f) => !!f.in_local)]
     );
     await client.query('COMMIT');
     return { id, fingerprint: candidate.fingerprint, family_count: candidate.families.length, activated_at: ins.rows[0].activated_at };
@@ -254,7 +304,7 @@ async function listSnapshots(limit = 10, db = pool) {
 
 module.exports = {
   STYLE_CODE_RE, MIN_FAMILIES, CatalogueError,
-  buildCatalogue, fingerprintOf, validateCatalogue,
+  buildCatalogue, collapseFamilies, canonicalKey, fingerprintOf, validateCatalogue,
   amState, readCachedAmCatalogue, startAmCatalogueLoad, buildLiveCatalogue,
   getActiveSnapshot, loadSnapshotFamilies, loadMatchingFamilies, loadLocalFamilies, loadPickerFamilies,
   saveAndActivate, deactivateSnapshot, listSnapshots,
