@@ -73,10 +73,22 @@ const hasSetWord = (text) => canonTokens(text).some((t) => SET_WORDS.has(t));
 
 // Pre-tokenised view of the product-family list ({product_code, product_name}).
 function buildFamilyIndex(families) {
-  return families.map((f) => {
+  const index = families.map((f, i) => {
     const match = matchTokens(f.product_name);
-    return { ...f, match, matchSet: new Set(match), core: coreTokens(f.product_name) };
+    return { ...f, match, matchSet: new Set(match), core: coreTokens(f.product_name), _i: i };
   });
+  // token -> families containing it. Pure speed-up for large catalogues: a
+  // family sharing NO word with a phrase scores null in scoreSets anyway, so only
+  // families that share at least one word are scored (see matchProductPhrase).
+  const byToken = new Map();
+  index.forEach((f) => {
+    f.matchSet.forEach((t) => {
+      if (!byToken.has(t)) byToken.set(t, []);
+      byToken.get(t).push(f);
+    });
+  });
+  index.byToken = byToken;
+  return index;
 }
 
 function scoreSets(P, F) {
@@ -173,7 +185,15 @@ function matchProductPhrase(phrase, index) {
   const P = new Set(matchTokens(phrase));
   if (!P.size) return [];
   const scored = [];
-  index.forEach((f) => {
+  // Candidate pool: only families sharing a word (indexed), kept in ORIGINAL index
+  // order so ties / ordering are identical to scanning every family.
+  let pool = index;
+  if (index.byToken) {
+    const seen = new Set();
+    P.forEach((t) => (index.byToken.get(t) || []).forEach((f) => seen.add(f)));
+    pool = [...seen].sort((a, b) => a._i - b._i);
+  }
+  pool.forEach((f) => {
     const s = scoreSets(P, f.matchSet);
     if (s) scored.push({ family: f, ...s });
   });

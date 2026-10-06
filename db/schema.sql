@@ -2758,3 +2758,65 @@ CREATE TABLE IF NOT EXISTS creative_opportunity_states (
   acted_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_creative_opportunity_states_state ON creative_opportunity_states(state);
+
+-- Ad Matching V4: persisted matching-catalogue snapshots. A snapshot is the
+-- ApparelMagic product catalogue (grouped into product families by 8-character
+-- product code) merged with local-only styles, frozen at a point in time and
+-- identified by a content fingerprint. The matcher uses the ACTIVE snapshot (at
+-- most one, enforced below); with none active it behaves exactly as V3 (local
+-- styles only). Activating a snapshot is what makes the effective matching rules
+-- version 4. Purely additive: no existing table is touched.
+CREATE TABLE IF NOT EXISTS meta_catalogue_snapshots (
+  id SERIAL PRIMARY KEY,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_by_user_id INTEGER,
+  fingerprint VARCHAR(64) NOT NULL,
+  family_count INTEGER NOT NULL,
+  am_family_count INTEGER NOT NULL DEFAULT 0,
+  local_only_count INTEGER NOT NULL DEFAULT 0,
+  stats JSONB,
+  active BOOLEAN NOT NULL DEFAULT false,
+  activated_at TIMESTAMPTZ,
+  activated_by_user_id INTEGER,
+  deactivated_at TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_meta_catalogue_snapshots_one_active ON meta_catalogue_snapshots (active) WHERE active;
+
+CREATE TABLE IF NOT EXISTS meta_catalogue_families (
+  snapshot_id INTEGER NOT NULL REFERENCES meta_catalogue_snapshots(id) ON DELETE CASCADE,
+  product_code VARCHAR(64) NOT NULL,
+  product_name VARCHAR(255) NOT NULL,
+  colourways INTEGER NOT NULL DEFAULT 1,
+  source VARCHAR(20) NOT NULL,
+  PRIMARY KEY (snapshot_id, product_code)
+);
+
+-- Audit trail of what the BACKLOG reprocess job actually changed on an ad
+-- (machine-owned state only; human-owned ads are never touched so never appear).
+-- One row per ad whose status, product, match method/basis or machine
+-- classification values really changed; dry runs never write here. Deliberately
+-- no foreign key: the record outlives the ad.
+CREATE TABLE IF NOT EXISTS meta_match_changes (
+  id BIGSERIAL PRIMARY KEY,
+  run_id VARCHAR(48) NOT NULL,
+  meta_ad_id VARCHAR(64) NOT NULL,
+  changed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  old_status VARCHAR(20),
+  new_status VARCHAR(20),
+  old_product_code VARCHAR(255),
+  old_product_name TEXT,
+  new_product_code VARCHAR(255),
+  new_product_name TEXT,
+  old_match_method VARCHAR(30),
+  old_basis VARCHAR(40),
+  new_match_method VARCHAR(30),
+  new_basis VARCHAR(40),
+  new_confidence NUMERIC(4,3),
+  old_classification JSONB,
+  new_classification JSONB,
+  rules_version INTEGER NOT NULL,
+  catalogue_snapshot_id INTEGER,
+  catalogue_fingerprint VARCHAR(64)
+);
+CREATE INDEX IF NOT EXISTS idx_meta_match_changes_run ON meta_match_changes (run_id);
+CREATE INDEX IF NOT EXISTS idx_meta_match_changes_ad ON meta_match_changes (meta_ad_id);

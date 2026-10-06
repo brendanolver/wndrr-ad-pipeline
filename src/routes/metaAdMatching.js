@@ -21,7 +21,7 @@ function handle(fn) {
       if (result === undefined) return res.status(204).end();
       return res.json(result);
     } catch (err) {
-      if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });
+      if (err instanceof HttpError) return res.status(err.status).json({ error: err.message, code: err.code });
       return next(err);
     }
   };
@@ -61,7 +61,29 @@ router.get('/reprocess-backlog', handle(() => matching.getBacklogStatus()));
 router.post('/reprocess-backlog', handle(() => matching.startBacklogReprocess()));
 // Dry run: what WOULD the current rules change? Background, read-only (SELECTs only).
 router.get('/reprocess-backlog/preview', handle(() => matching.getBacklogPreview()));
-router.post('/reprocess-backlog/preview', handle((req) => matching.startBacklogPreview({ scope: req.body && req.body.scope, samples: req.body && req.body.samples })));
+router.post('/reprocess-backlog/preview', handle((req) => matching.startBacklogPreview({
+  scope: req.body && req.body.scope, samples: req.body && req.body.samples, catalogue: req.body && req.body.catalogue, compare: !!(req.body && req.body.compare),
+})));
+// All grouped pairs of the last preview as CSV (?category=review_to_auto|auto_to_review|auto_to_different_auto).
+router.get('/reprocess-backlog/preview/export', (req, res) => {
+  res.type('text/csv').attachment('backlog-preview.csv').send(matching.previewCsv(req.query.category || null));
+});
+// Audit of what a REAL run changed (never written by dry runs). ?run_id= & ?format=csv
+router.get('/reprocess-backlog/changes', async (req, res, next) => {
+  try {
+    if (req.query.format === 'csv') return res.type('text/csv').attachment('backlog-changes.csv').send(await matching.changesCsv(req.query.run_id || null));
+    return res.json(await matching.getChanges({ runId: req.query.run_id || null, limit: req.query.limit, offset: req.query.offset }));
+  } catch (err) {
+    if (err instanceof HttpError) return res.status(err.status).json({ error: err.message, code: err.code });
+    return next(err);
+  }
+});
+
+// Matching catalogue (ApparelMagic snapshot). All explicit, admin-only, MANUAL.
+router.get('/catalogue', handle(() => matching.getCatalogueStatus()));
+router.post('/catalogue/load', handle(() => matching.startCatalogueLoad()));
+router.post('/catalogue/activate', handle((req) => matching.activateCatalogue({ expectedFingerprint: req.body && req.body.expected_fingerprint, userId: req.user && req.user.id })));
+router.post('/catalogue/deactivate', handle(() => matching.deactivateCatalogue()));
 // Read-only: does the live ApparelMagic catalogue contain these products? (?probe=PHRASE, repeatable)
 router.get('/catalogue-check', handle((req) => matching.catalogueCheck([].concat(req.query.probe || []))));
 router.post('/reprocess-backlog/stop', handle(() => matching.stopBacklogReprocess()));
