@@ -884,6 +884,7 @@ async function loadMetaMatching() {
       if (id !== mmState.reqId) return;
     }
     mmRenderRows(res);
+    mmLoadCatalogue();
     mmLoadBacklog();
   } catch (e) {
     if (id !== mmState.reqId) return;
@@ -904,6 +905,7 @@ function mmRenderBacklog(st) {
   const j = st.job;
   const running = st.running;
   const left = db.stale_processable;
+  const gate = st.preview_gate || { required: false, satisfied: true };
   if (!running && !left && !(j && j.state !== 'completed')) {
     box.style.display = j ? '' : 'none';
     box.innerHTML = j ? `<span class="mm-bl-ok">Backlog processed: ${mmN(j.totals.evaluated)} evaluated · ${mmN(j.totals.auto_matched)} auto-matched · ${mmN(j.totals.needs_review)} need review · ${mmN(j.totals.unmatched)} unmatched · ${mmN(j.totals.skipped_protected)} protected · ${mmN(j.totals.errors)} errors. Nothing left on older rules.</span>` : '';
@@ -920,10 +922,11 @@ function mmRenderBacklog(st) {
   const last = j ? ` Last run ${j.state}: ${mmN(j.totals.evaluated)} evaluated, ${mmN(j.totals.errors)} errors${j.fatal_error ? ` — ${escapeHtml(j.fatal_error)}` : ''}.` : '';
   box.innerHTML = `<div class="mm-bl-idle"><b>${mmN(left)} ads</b> are still on older matching rules${protectedTxt}.${last}
     <button type="button" class="btn btn-ghost btn-sm" id="mm-backlog-preview">Preview changes (dry run)</button>
-    <button type="button" class="btn btn-primary btn-sm" id="mm-backlog-start">${j && j.state !== 'completed' ? 'Resume backlog processing' : 'Process backlog'}</button></div>`;
-  document.getElementById('mm-backlog-preview').addEventListener('click', mmStartPreview);
+    <button type="button" class="btn btn-primary btn-sm" id="mm-backlog-start" ${gate.required && !gate.satisfied ? 'disabled' : ''}>${j && j.state !== 'completed' ? 'Resume backlog processing' : 'Process backlog'}</button>
+    ${gate.required && !gate.satisfied ? `<div class="mm-cat-warn">${escapeHtml(gate.reason || 'Run a preview against the active catalogue first.')}</div>` : ''}</div>`;
+  document.getElementById('mm-backlog-preview').addEventListener('click', () => mmStartPreview(st.catalogue && st.catalogue.source === 'snapshot' ? { catalogue: 'active', compare: true } : {}));
   document.getElementById('mm-backlog-start').addEventListener('click', async () => {
-    if (!(await confirmDialog(`Run ${mmN(left)} historical ads through the current matching rules? Confirmed ads and any other human-owned state are never touched. It runs in the background, can be stopped, and picks up where it left off if interrupted.`, { okLabel: 'Process backlog' }))) return;
+    if (!(await confirmDialog(`Run ${mmN(left)} historical ads through the current matching rules (v${db.rules_version}${st.catalogue && st.catalogue.fingerprint ? `, catalogue ${escapeHtml(st.catalogue.fingerprint.slice(0, 12))}` : ''})? Real changes are recorded in an audit log. Confirmed ads and any other human-owned state are never touched. It runs in the background, can be stopped, and picks up where it left off if interrupted.`, { okLabel: 'Process backlog' }))) return;
     try { await api('/meta-ad-matching/reprocess-backlog', { method: 'POST' }); mmLoadBacklog(); } catch (e) { toast(e.message, true); }
   });
 }
@@ -945,12 +948,64 @@ function loadMetaMatchingRowsOnly() {
 }
 
 
+// ── V4 matching catalogue (ApparelMagic snapshot) — all manual, admin only ──
+// Nothing here runs automatically: load the ApparelMagic catalogue, preview V4
+// against V3, then activate the snapshot. Activation processes nothing.
+let mmCatTimer = null;
+function mmRenderCatalogue(st) {
+  const box = document.getElementById('mm-catalogue');
+  const am = st.apparelmagic || {};
+  const snap = st.active_snapshot;
+  const lp = st.last_preview;
+  const parts = [];
+  if (snap) {
+    parts.push(`<b>Matching catalogue: ApparelMagic snapshot #${snap.id}</b> (rules v${st.effective_rules_version}) · ${mmN(snap.family_count)} families (${mmN(snap.am_family_count)} AM + ${mmN(snap.local_only_count)} local-only) · fingerprint <code title="${escapeHtml(snap.fingerprint)}">${escapeHtml(snap.fingerprint.slice(0, 12))}</code>`);
+  } else {
+    parts.push(`<b>Matching catalogue: local styles only</b> (rules v${st.effective_rules_version}, V3 behaviour)`);
+  }
+  const amTxt = !am.configured ? 'ApparelMagic not configured' : am.fetching ? 'ApparelMagic catalogue loading…' : am.has_data ? `ApparelMagic catalogue loaded ${escapeHtml(am.fetched_at ? new Date(am.fetched_at).toLocaleString('en-AU') : '')}` : 'ApparelMagic catalogue not loaded';
+  parts.push(`<span class="hint">${amTxt}</span>`);
+  const btns = [];
+  if (am.configured) btns.push(`<button type="button" class="btn btn-ghost btn-sm" id="mm-cat-load" ${am.fetching ? 'disabled' : ''}>Load ApparelMagic catalogue</button>`);
+  if (am.configured && am.has_data && !snap) btns.push('<button type="button" class="btn btn-ghost btn-sm" id="mm-cat-preview">Preview V4 vs V3</button>');
+  if (snap) btns.push('<button type="button" class="btn btn-ghost btn-sm" id="mm-cat-deactivate">Deactivate (back to V3)</button>');
+  const canActivate = !snap && lp && lp.source === 'live' && lp.compare;
+  if (canActivate) btns.push(`<button type="button" class="btn btn-primary btn-sm" id="mm-cat-activate">Activate catalogue <code>${escapeHtml(lp.fingerprint.slice(0, 12))}</code></button>`);
+  parts.push(btns.join(' '));
+  if (lp && !snap) parts.push(`<span class="hint">Last V4 preview: catalogue <code>${escapeHtml(lp.fingerprint.slice(0, 12))}</code>${lp.delta ? ` · ${mmN(lp.delta.newly_auto)} newly auto · ${mmN(lp.delta.lost_auto)} lost` : ''}</span>`);
+  box.innerHTML = parts.join(' ');
+  box.style.display = '';
+  const on = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener('click', fn); };
+  on('mm-cat-load', async () => {
+    try { await api('/meta-ad-matching/catalogue/load', { method: 'POST' }); toast('Loading the ApparelMagic catalogue in the background — this can take several minutes.'); mmLoadCatalogue(); } catch (e) { toast(e.message, true); }
+  });
+  on('mm-cat-preview', () => mmStartPreview({ catalogue: 'live', compare: true }, 'mm-cat-preview'));
+  on('mm-cat-activate', async () => {
+    if (!(await confirmDialog(`Activate catalogue ${lp.fingerprint.slice(0, 12)}? Matching rules become v4. Nothing is processed: ads are only re-evaluated when you explicitly run the backlog (which needs a preview against this catalogue first). You can deactivate at any time; ad data is never reverted.`, { okLabel: 'Activate catalogue' }))) return;
+    try { await api('/meta-ad-matching/catalogue/activate', { method: 'POST', body: JSON.stringify({ expected_fingerprint: lp.fingerprint }) }); toast('Catalogue activated (rules v4). Run a preview against it before processing the backlog.'); mmLoadCatalogue(); mmLoadBacklog(); } catch (e) { toast(e.message, true); }
+  });
+  on('mm-cat-deactivate', async () => {
+    if (!(await confirmDialog('Deactivate the catalogue snapshot? Matching returns to local styles (rules v3). No ad data is changed or reverted.', { okLabel: 'Deactivate' }))) return;
+    try { await api('/meta-ad-matching/catalogue/deactivate', { method: 'POST' }); toast('Catalogue deactivated (rules v3).'); mmLoadCatalogue(); mmLoadBacklog(); } catch (e) { toast(e.message, true); }
+  });
+}
+async function mmLoadCatalogue() {
+  if (!state.currentUser || state.currentUser.role !== 'admin') return;
+  clearTimeout(mmCatTimer);
+  try {
+    const st = await api('/meta-ad-matching/catalogue');
+    mmRenderCatalogue(st);
+    if (st.apparelmagic && st.apparelmagic.fetching && mmState.view === 'matching') mmCatTimer = setTimeout(mmLoadCatalogue, 5000);
+  } catch (e) { /* the strip is optional */ }
+}
+
 // Dry run: evaluates the stale ads with the current rules in memory and shows what WOULD change.
-async function mmStartPreview() {
-  const btn = document.getElementById('mm-backlog-preview');
+async function mmStartPreview(opts = {}, btnId = 'mm-backlog-preview') {
+  const btn = document.getElementById(btnId);
+  const label = btn ? btn.textContent : '';
   if (btn) { btn.disabled = true; btn.textContent = 'Previewing…'; }
   try {
-    await api('/meta-ad-matching/reprocess-backlog/preview', { method: 'POST', body: JSON.stringify({ scope: 'stale', samples: 25 }) });
+    await api('/meta-ad-matching/reprocess-backlog/preview', { method: 'POST', body: JSON.stringify({ scope: 'stale', samples: 25, ...opts }) });
     for (;;) {
       await new Promise((r) => setTimeout(r, 1500));
       const st = await api('/meta-ad-matching/reprocess-backlog/preview');
@@ -959,7 +1014,8 @@ async function mmStartPreview() {
       if (!st.running) { mmShowPreview(pv); break; }
     }
   } catch (e) { toast(e.message, true); }
-  if (btn) { btn.disabled = false; btn.textContent = 'Preview changes (dry run)'; }
+  if (btn) { btn.disabled = false; btn.textContent = label; }
+  mmLoadCatalogue(); mmLoadBacklog();
 }
 const MM_PREVIEW_LABELS = {
   auto_to_review: 'Auto-matched → Needs review', review_to_auto: 'Needs review → Auto-matched',
@@ -976,14 +1032,35 @@ function mmShowPreview(pv) {
     return `<table class="mp-table mm-pv-table"><thead><tr><th>Meta ad name (example)</th><th class="num">Ads</th><th>Old product</th><th>Proposed product</th><th>Old basis</th><th>Proposed basis / confidence</th></tr></thead><tbody>${
       list.map((p) => `<tr><td title="${escapeHtml(p.example_ad_name || '')}">${escapeHtml((p.example_ad_name || '').slice(0, 70))}</td><td class="num">${mmN(p.count)}</td><td>${escapeHtml(p.old_product || '—')}</td><td>${p.proposed_product ? escapeHtml(p.proposed_product) : `<i>Needs review — ${escapeHtml(p.reason || '')}</i>`}</td><td>${escapeHtml(p.old_basis || '—')}</td><td>${escapeHtml(p.proposed_basis || '—')}</td></tr>`).join('')}</tbody></table>`;
   };
+  const cat = pv.catalogue || {};
+  const d = pv.v4_vs_v3;
+  const unres = Object.entries(pv.unresolved_reasons || {});
+  const dTable = (cat2) => {
+    const list = ((d && d.pairs) || []).filter((p) => p.category === cat2);
+    if (!list.length) return '<div class="hint">None.</div>';
+    return `<table class="mp-table mm-pv-table"><thead><tr><th>Meta ad name (example)</th><th class="num">Ads</th><th>V3 product</th><th>V4 product</th></tr></thead><tbody>${
+      list.map((p) => `<tr><td title="${escapeHtml(p.example_ad_name || '')}">${escapeHtml((p.example_ad_name || '').slice(0, 70))}</td><td class="num">${mmN(p.count)}</td><td>${escapeHtml(p.v3_product || p.old_product || '—')}</td><td>${escapeHtml(p.v4_product || p.proposed_product || '—')}</td></tr>`).join('')}</tbody></table>`;
+  };
   document.getElementById('mm-preview-body').innerHTML = `
-    <div class="hint">Rules v${pv.rules_version} · ${mmN(pv.processed)} ads examined (${escapeHtml(pv.scope)}) · read-only: no ad, classification or suggestion was written.</div>
+    <div class="hint">Rules v${pv.rules_version} · ${mmN(pv.processed)} ads examined (${escapeHtml(pv.scope)}) · catalogue: ${escapeHtml(cat.source || 'local_styles')}${cat.fingerprint ? ` <code>${escapeHtml(cat.fingerprint)}</code>` : ''}${cat.family_count ? ` · ${mmN(cat.family_count)} families` : ''} · read-only: no ad, classification, snapshot or audit row was written.</div>
+    ${(pv.warnings || []).length ? `<div class="mm-pv-warn"><b>Do not activate:</b> ${escapeHtml(pv.warnings.join(' · '))}</div>` : ''}
+    ${pv.fatal_error ? `<div class="mm-pv-warn">${escapeHtml(pv.fatal_error)}</div>` : ''}
+    ${cat.stats ? `<div class="hint">Catalogue: ${mmN(cat.stats.am_families)} ApparelMagic families (${mmN(cat.stats.am_style_rows)} style rows, ${mmN(cat.stats.am_style_rows_excluded)} excluded) · ${mmN(cat.stats.local_only_families)} local-only · ${mmN(cat.stats.duplicate_name_groups)} same-name groups (stay in review)</div>` : ''}
+    ${d ? `<table class="mp-table mm-pv-summary"><tbody>
+      <tr><td>V4 vs V3: newly auto-matched (bigger catalogue)</td><td class="num"><b>${mmN(d.counts.newly_auto)}</b></td></tr>
+      <tr><td>V4 vs V3: auto product changed</td><td class="num"><b>${mmN(d.counts.product_changed)}</b></td></tr>
+      <tr><td>V4 vs V3: auto-match LOST</td><td class="num"><b>${mmN(d.counts.lost_auto)}</b></td></tr></tbody></table>` : ''}
+    <div class="hint"><a href="/api/meta-ad-matching/reprocess-backlog/preview/export" target="_blank" rel="noopener">Export all grouped pairs (CSV)</a> · <a href="/api/meta-ad-matching/reprocess-backlog/preview/export?category=auto_to_different_auto" target="_blank" rel="noopener">auto → different auto (CSV)</a> · <a href="/api/meta-ad-matching/reprocess-backlog/preview/export?category=auto_to_review" target="_blank" rel="noopener">auto → review (CSV)</a></div>
     <table class="mp-table mm-pv-summary"><tbody>${rows}</tbody></table>
     ${Object.keys(pv.protected_by_reason || {}).length ? `<div class="hint">Protected by reason: ${escapeHtml(JSON.stringify(pv.protected_by_reason))}</div>` : ''}
     ${pv.error_samples.length ? `<div class="hint" style="color:var(--red)">Errors (sample): ${escapeHtml(JSON.stringify(pv.error_samples.slice(0, 3)))}</div>` : ''}
     <h4>Auto-matched → DIFFERENT auto product</h4>${table('auto_to_different_auto')}
     <h4>Auto-matched → Needs review</h4>${table('auto_to_review')}
-    <h4>Needs review → Auto-matched</h4>${table('review_to_auto')}`;
+    <h4>Needs review → Auto-matched</h4>${table('review_to_auto')}
+    ${d ? `<h4>V4 vs V3 — newly auto-matched</h4>${dTable('newly_auto')}<h4>V4 vs V3 — auto product changed</h4>${dTable('product_changed')}<h4>V4 vs V3 — auto-match lost</h4>${dTable('lost_auto')}` : ''}
+    <h4>Still unresolved — reasons</h4>${unres.length ? `<table class="mp-table mm-pv-summary"><tbody>${unres.map(([k, v]) => `<tr><td>${escapeHtml(k)}</td><td class="num">${mmN(v)}</td></tr>`).join('')}</tbody></table>` : '<div class="hint">None.</div>'}
+    ${pv.ambiguous_same_name_ads ? `<div class="hint">${mmN(pv.ambiguous_same_name_ads)} ads match a product name that exists under more than one product code. These stay in Needs review (no year tie-break).</div>` : ''}
+    <h4>Top unresolved phrases</h4>${(pv.unresolved_phrases || []).length ? `<table class="mp-table mm-pv-table"><thead><tr><th>Phrase</th><th class="num">Ads</th><th>Why</th><th>Nearest family</th></tr></thead><tbody>${pv.unresolved_phrases.slice(0, 25).map((r) => `<tr><td>${escapeHtml(r.phrase)}</td><td class="num">${mmN(r.ads)}</td><td>${escapeHtml(r.reason || '')}</td><td>${escapeHtml(r.nearest_family || '—')}</td></tr>`).join('')}</tbody></table>` : '<div class="hint">None.</div>'}`;
   openModal('mm-preview-modal');
 }
 document.getElementById('mm-scope').addEventListener('change', (e) => {

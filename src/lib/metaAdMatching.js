@@ -46,9 +46,10 @@
 //   ad_setup  exact / near-exact match of the ad's name against the Meta
 //             name generated from each WNDRR Ad Setup
 const { pool } = require('../db');
-const { parseMetaAdName, listProductFamilies } = require('./metaProductMapping');
+const { parseMetaAdName } = require('./metaProductMapping');
 const { buildMetaAdName, detectPromotionStageType } = require('./adSetupNaming');
 const { deriveProductCode } = require('./apparelmagic');
+const catalogueLib = require('./metaMatchingCatalogue');
 const {
   MEDIA_TYPES, MEDIA_KEYS, MEDIA_LABEL, buildFamilyIndex, matchProductPhrase, expandSet, hasSetWord,
   coreTokens, mediaTokensFromName, parseLooseMetaName,
@@ -62,7 +63,11 @@ const {
 // older version are re-evaluated by the next suggestion run.
 // v3: product identity guard + phrase cleaning + promo guard (a similarity match
 // no longer auto-links on shared garment words alone). v2 ads are re-evaluated.
-const AUTO_RULES_VERSION = 3;
+const BASE_RULES_VERSION = 3;
+const AUTO_RULES_VERSION = BASE_RULES_VERSION; // legacy export name = the rules version with NO catalogue snapshot active
+// v4: the matching catalogue is the ApparelMagic snapshot (see metaMatchingCatalogue.js).
+// The EFFECTIVE version is 4 only while a snapshot is active, 3 otherwise
+// (rulesInfo() / ctx.rulesVersion) -- activation, not deployment, changes it.
 
 // ONE definition of "a person owns this ad's state", as a SQL CASE returning
 // the reason (or NULL). Aliases: m = meta_ads, c = meta_ad_classifications.
@@ -148,10 +153,22 @@ function parseStructuredMetaName(name) {
 }
 
 // ── Suggestion context (loaded once per batch) ──────────────────────────
-async function loadContext(db = pool) {
-  const [mappings, families, concepts, creators, styles, setups, setupProducts, setupStyles, confirmedSingles] = await Promise.all([
+// Family-derived structures, shared by loadContext and the preview's V3-vs-V4 comparison.
+function familyStructures(families) {
+  const familyIndex = buildFamilyIndex(families);
+  const familyByCode = new Map(families.map((f) => [f.product_code, f]));
+  const familyByNorm = new Map();
+  families.forEach((f) => { const k = norm(f.product_name); if (!familyByNorm.has(k)) familyByNorm.set(k, f); });
+  return { families, familyIndex, familyByCode, familyByNorm };
+}
+
+// opts.matching = { families, rulesVersion, catalogue } overrides the catalogue (dry runs);
+// otherwise the active snapshot -- or local styles (V3) when none is active.
+async function loadContext(db = pool, opts = {}) {
+  const matchingP = opts.matching ? Promise.resolve(opts.matching) : catalogueLib.loadMatchingFamilies(db);
+  const [mappings, matching, concepts, creators, styles, setups, setupProducts, setupStyles, confirmedSingles] = await Promise.all([
     db.query('SELECT meta_product, meta_product_type, product_code, product_name FROM meta_product_mappings'),
-    listProductFamilies(db),
+    matchingP,
     db.query('SELECT id, name, format FROM concept_types WHERE active ORDER BY sort_order, name'),
     db.query('SELECT name FROM content_creators ORDER BY name'),
     db.query('SELECT id, name, media_type FROM creative_styles ORDER BY sort_order, name'),
@@ -220,10 +237,7 @@ async function loadContext(db = pool) {
       m.set(r.product_code, (m.get(r.product_code) || 0) + 1);
     });
   });
-  const familyIndex = buildFamilyIndex(families);
-  const familyByCode = new Map(families.map((f) => [f.product_code, f]));
-  const familyByNorm = new Map();
-  families.forEach((f) => { const k = norm(f.product_name); if (!familyByNorm.has(k)) familyByNorm.set(k, f); });
+  const { families, familyIndex, familyByCode, familyByNorm } = familyStructures(matching.families);
   const conceptByNorm = new Map(concepts.rows.map((c) => [norm(c.name), c]));
   const creatorByNorm = new Map(creators.rows.map((c) => [norm(c.name), c.name]));
   const styleByNorm = new Map(styles.rows.map((s) => [norm(s.name), s]));
@@ -302,6 +316,7 @@ async function loadContext(db = pool) {
     mappingByKey, mappingCodesByProduct, trustedPairs, familyIndex, adSetupsByLabel, families, familyByCode, familyByNorm, concepts: concepts.rows, conceptByNorm,
     creators: creators.rows.map((c) => c.name), creatorByNorm, styles: styles.rows, styleByNorm, styleById,
     adSetups, adSetupByNorm, adSetupById,
+    rulesVersion: matching.rulesVersion, catalogue: matching.catalogue,
   };
 }
 
@@ -806,7 +821,7 @@ async function refreshSuggestionsForAd(client, ad, ctx, opts = {}) {
       `UPDATE meta_ads SET match_status = 'auto_matched', match_method = 'auto_structured', match_confidence = $2, match_suggestions_at = now(),
               match_rules_version = $3
         WHERE meta_ad_id = $1 AND match_status IN ('unmatched', 'suggested', 'auto_matched')`,
-      [ad.meta_ad_id, auto.confidence, AUTO_RULES_VERSION]
+      [ad.meta_ad_id, auto.confidence, ctx.rulesVersion || BASE_RULES_VERSION]
     );
     return { suggestions: suggestions.length, auto_matched: true, status: 'auto_matched', left_blank: auto.left_blank };
   }
@@ -829,7 +844,7 @@ async function refreshSuggestionsForAd(client, ad, ctx, opts = {}) {
        match_method = CASE WHEN $2::numeric IS NULL THEN NULL ELSE 'auto_suggest' END,
        match_suggestions_at = now(), match_rules_version = $3
      WHERE meta_ad_id = $1 AND match_status IN ('unmatched', 'suggested', 'auto_matched')`,
-    [ad.meta_ad_id, top, AUTO_RULES_VERSION]
+    [ad.meta_ad_id, top, ctx.rulesVersion || BASE_RULES_VERSION]
   );
   return { suggestions: suggestions.length, auto_matched: false, status: top === null ? 'unmatched' : 'suggested', blockers: auto.blockers };
 }
@@ -849,6 +864,7 @@ function scopeWindow(scope, now = new Date()) {
 // last evaluated under an older AUTO_RULES_VERSION.
 async function refreshSuggestions({ scope = '30d', pendingOnly = true, limit = 1500 } = {}) {
   limit = Math.min(10000, Math.max(1, parseInt(limit, 10) || 1500));
+  const ctx = await loadContext(); // also fixes the effective rules version for this run (3, or 4 while a catalogue snapshot is active)
   const win = scopeWindow(scope);
   const params = [];
   let activityJoin = '';
@@ -863,13 +879,12 @@ async function refreshSuggestions({ scope = '30d', pendingOnly = true, limit = 1
        ${activityJoin}
        LEFT JOIN meta_ad_classifications c ON c.meta_ad_id = a.meta_ad_id
       WHERE a.match_status <> 'confirmed' AND COALESCE(c.excluded_from_intelligence, false) = false
-        ${pendingOnly ? `AND (a.match_suggestions_at IS NULL OR COALESCE(a.match_rules_version, 0) < ${AUTO_RULES_VERSION})` : ''}
+        ${pendingOnly ? `AND (a.match_suggestions_at IS NULL OR COALESCE(a.match_rules_version, 0) < ${ctx.rulesVersion})` : ''}
       ORDER BY COALESCE(a.match_rules_version, 0) ASC, a.match_suggestions_at ASC NULLS FIRST
       LIMIT $${params.length}`,
     params
   );
   if (!ads.length) return { examined: 0, with_suggestions: 0, auto_matched: 0, needs_review: 0, unmatched: 0, review_reasons: {} };
-  const ctx = await loadContext();
   let withSuggestions = 0;
   let autoMatched = 0;
   let needsReview = 0;
@@ -920,20 +935,34 @@ async function refreshSuggestions({ scope = '30d', pendingOnly = true, limit = 1
 const BACKLOG_BATCH = 500;
 const BACKLOG_LOCK_KEY = 7240913; // pg_try_advisory_lock key
 const BACKLOG_MAX_CONSECUTIVE_ERRORS = 50;
+const PREVIEW_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 let backlogJob = null;
+// The most recent COMPLETED, error-free preview (in memory by design: after a
+// restart a fresh preview is needed). It is what gates activation and, once a
+// catalogue snapshot is active, the backlog run.
+let lastGoodPreview = null;
 
 const emptyTotals = () => ({ evaluated: 0, auto_matched: 0, needs_review: 0, unmatched: 0, skipped_protected: 0, errors: 0 });
+const tick = () => new Promise((r) => setImmediate(r)); // let the event loop breathe during long pure loops
+const shortFp = (fp) => (fp ? String(fp).slice(0, 12) : null);
 
-async function backlogDbStatus(db = pool) {
-  const [stale, v2] = await Promise.all([
+// Effective rules: 4 while a catalogue snapshot is active, else 3 (V3 behaviour).
+async function rulesInfo(db = pool) {
+  const snap = await catalogueLib.getActiveSnapshot(db);
+  return { version: snap ? 4 : BASE_RULES_VERSION, snapshot: snap };
+}
+
+async function backlogDbStatus(db = pool, version) {
+  const v = version || (await rulesInfo(db)).version;
+  const [stale, cur] = await Promise.all([
     db.query(
       `SELECT m.match_status, ${HUMAN_OWNED_SQL} AS human_owned, count(*)::int AS n
          FROM meta_ads m LEFT JOIN meta_ad_classifications c ON c.meta_ad_id = m.meta_ad_id
         WHERE m.match_status <> 'confirmed' AND COALESCE(m.match_rules_version, 0) < $1
         GROUP BY 1, 2`,
-      [AUTO_RULES_VERSION]
+      [v]
     ),
-    db.query('SELECT match_status, count(*)::int AS n FROM meta_ads WHERE match_rules_version >= $1 GROUP BY 1', [AUTO_RULES_VERSION]),
+    db.query('SELECT match_status, count(*)::int AS n FROM meta_ads WHERE match_rules_version >= $1 GROUP BY 1', [v]),
   ]);
   let total = 0;
   let protectedN = 0;
@@ -945,9 +974,9 @@ async function backlogDbStatus(db = pool) {
     if (r.human_owned) { protectedN += r.n; protectedBy[r.human_owned] = (protectedBy[r.human_owned] || 0) + r.n; }
   });
   const evaluated = {};
-  v2.rows.forEach((r) => { evaluated[r.match_status] = r.n; });
+  cur.rows.forEach((r) => { evaluated[r.match_status] = r.n; });
   return {
-    rules_version: AUTO_RULES_VERSION,
+    rules_version: v,
     stale_total: total,
     stale_by_status: byStatus,
     stale_protected: protectedN,
@@ -962,11 +991,14 @@ function publicJob(job) {
   if (!job) return null;
   return {
     state: job.state, // running | completed | stopped | aborted | failed
+    run_id: job.run_id,
     started_at: job.started_at, finished_at: job.finished_at,
     target_version: job.target_version,
+    catalogue: job.catalogue,
     processable_at_start: job.processable_at_start,
     totals: { ...job.totals },
     skipped_by_reason: { ...job.skipped_by_reason },
+    changes_recorded: job.changes_recorded,
     batches: job.batches, last_batch_at: job.last_batch_at,
     stop_requested: job.stop_requested,
     error_samples: job.error_samples.slice(0, 10),
@@ -974,8 +1006,56 @@ function publicJob(job) {
   };
 }
 
+function previewGate(snapshot) {
+  const fp = snapshot ? snapshot.fingerprint : null;
+  if (!fp) return { required: false, satisfied: true, reason: null };
+  const p = lastGoodPreview;
+  if (!p) return { required: true, satisfied: false, reason: `No completed preview against the active catalogue (${shortFp(fp)}). Run "Preview" first.` };
+  if (p.fingerprint !== fp) return { required: true, satisfied: false, reason: `The last preview used catalogue ${shortFp(p.fingerprint)}, not the active ${shortFp(fp)}. Run the preview again.` };
+  if (Date.now() - p.completed_ms > PREVIEW_MAX_AGE_MS) return { required: true, satisfied: false, reason: 'The last preview is more than 24 hours old. Run it again.' };
+  return { required: true, satisfied: true, reason: null, preview_completed_at: p.completed_at };
+}
+
 async function getBacklogStatus() {
-  return { running: !!(backlogJob && backlogJob.state === 'running'), job: publicJob(backlogJob), db: await backlogDbStatus() };
+  const info = await rulesInfo();
+  return {
+    running: !!(backlogJob && backlogJob.state === 'running'),
+    job: publicJob(backlogJob),
+    db: await backlogDbStatus(pool, info.version),
+    catalogue: { source: info.snapshot ? 'snapshot' : 'local_styles', snapshot_id: info.snapshot ? info.snapshot.id : null, fingerprint: info.snapshot ? info.snapshot.fingerprint : null },
+    preview_gate: previewGate(info.snapshot),
+  };
+}
+
+// ── audit of real machine changes ───────────────────────────────────────
+async function readAdState(client, id) {
+  const r = await client.query(
+    `SELECT m.match_status, m.match_method, m.match_confidence::float AS conf,
+            c.auto_fields -> 'product' ->> 'basis' AS basis, c.concept_type_id, c.concept_label, c.creator_name, c.media_type,
+            (SELECT string_agg(p.product_code, ',' ORDER BY p.product_code) FROM meta_ad_products p WHERE p.meta_ad_id = m.meta_ad_id) AS codes,
+            (SELECT string_agg(p.product_name, ' + ' ORDER BY p.product_code) FROM meta_ad_products p WHERE p.meta_ad_id = m.meta_ad_id) AS names
+       FROM meta_ads m LEFT JOIN meta_ad_classifications c ON c.meta_ad_id = m.meta_ad_id WHERE m.meta_ad_id = $1`,
+    [id]
+  );
+  const x = r.rows[0] || {};
+  return {
+    status: x.match_status || null, method: x.match_method || null, confidence: x.conf === undefined ? null : x.conf, basis: x.basis || null,
+    codes: x.codes || null, names: x.names || null,
+    classification: { concept_type_id: x.concept_type_id || null, concept_label: x.concept_label || null, creator_name: x.creator_name || null, media_type: x.media_type || null },
+  };
+}
+const stateChanged = (a, b) => a.status !== b.status || (a.codes || '') !== (b.codes || '') || (a.basis || '') !== (b.basis || '')
+  || (a.method || '') !== (b.method || '') || JSON.stringify(a.classification) !== JSON.stringify(b.classification);
+
+async function writeChangeRow(client, job, adId, before, after) {
+  await client.query(
+    `INSERT INTO meta_match_changes (run_id, meta_ad_id, old_status, new_status, old_product_code, old_product_name, new_product_code, new_product_name,
+                                    old_match_method, old_basis, new_match_method, new_basis, new_confidence, old_classification, new_classification,
+                                    rules_version, catalogue_snapshot_id, catalogue_fingerprint)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
+    [job.run_id, adId, before.status, after.status, before.codes, before.names, after.codes, after.names, before.method, before.basis, after.method, after.basis,
+      after.confidence, JSON.stringify(before.classification), JSON.stringify(after.classification), job.target_version, job.catalogue.snapshot_id, job.catalogue.fingerprint]
+  );
 }
 
 async function runBacklog(job, lockClient, deps = {}) {
@@ -995,13 +1075,24 @@ async function runBacklog(job, lockClient, deps = {}) {
       if (!rows.length) { job.state = 'completed'; break; }
       cursor = rows[rows.length - 1].meta_ad_id;
       const ctx = await loadContext(); // fresh per batch: picks up humans' confirmations made meanwhile
+      // the catalogue / rules must not change under a running job (deactivated, re-activated, ...)
+      if (ctx.rulesVersion !== job.target_version || (ctx.catalogue.fingerprint || null) !== (job.catalogue.fingerprint || null)) {
+        job.state = 'aborted';
+        job.fatal_error = 'The matching catalogue / rules version changed while the job was running. Nothing further was processed; start it again.';
+        return;
+      }
       for (const ad of rows) {
         if (job.stop_requested) break;
         if (ad.human_owned) { job.totals.skipped_protected += 1; job.skipped_by_reason[ad.human_owned] = (job.skipped_by_reason[ad.human_owned] || 0) + 1; continue; }
         const client = await pool.connect();
         try {
           await client.query('BEGIN');
+          const before = await readAdState(client, ad.meta_ad_id);
           const r = await evaluate(client, ad, ctx, { protectHumanState: true });
+          if (!r.skipped) {
+            const after = await readAdState(client, ad.meta_ad_id);
+            if (stateChanged(before, after)) { await writeChangeRow(client, job, ad.meta_ad_id, before, after); job.changes_recorded += 1; }
+          }
           await client.query('COMMIT');
           consecutiveErrors = 0;
           if (r.skipped) {
@@ -1029,7 +1120,7 @@ async function runBacklog(job, lockClient, deps = {}) {
       }
       job.batches += 1;
       job.last_batch_at = new Date().toISOString();
-      console.log(`[ad-matching backlog] batch ${job.batches}: evaluated ${job.totals.evaluated}, auto ${job.totals.auto_matched}, review ${job.totals.needs_review}, unmatched ${job.totals.unmatched}, protected ${job.totals.skipped_protected}, errors ${job.totals.errors}`);
+      console.log(`[ad-matching backlog ${job.run_id}] batch ${job.batches}: evaluated ${job.totals.evaluated}, auto ${job.totals.auto_matched}, review ${job.totals.needs_review}, unmatched ${job.totals.unmatched}, protected ${job.totals.skipped_protected}, errors ${job.totals.errors}, changes ${job.changes_recorded}`);
       if (job.stop_requested) { job.state = 'stopped'; break; }
     }
   } catch (err) {
@@ -1038,15 +1129,20 @@ async function runBacklog(job, lockClient, deps = {}) {
   } finally {
     job.finished_at = new Date().toISOString();
     if (job.state === 'running') job.state = 'failed';
-    console.log(`[ad-matching backlog] ${job.state}: ${JSON.stringify({ totals: job.totals, skipped_by_reason: job.skipped_by_reason, batches: job.batches })}`);
+    console.log(`[ad-matching backlog ${job.run_id}] ${job.state}: ${JSON.stringify({ totals: job.totals, skipped_by_reason: job.skipped_by_reason, batches: job.batches, changes: job.changes_recorded })}`);
     try { await lockClient.query('SELECT pg_advisory_unlock($1)', [BACKLOG_LOCK_KEY]); } catch (e) { /* released with the connection anyway */ }
     lockClient.release();
   }
 }
 
 // Starts the job and returns immediately. `deps.evaluateAd` is a test seam.
+// With a catalogue snapshot active, a completed preview against that exact
+// fingerprint is REQUIRED (previewGate).
 async function startBacklogReprocess(deps = {}) {
   if (backlogJob && backlogJob.state === 'running') throw new HttpError(409, 'A backlog reprocess is already running');
+  const info = await rulesInfo();
+  const gate = previewGate(info.snapshot);
+  if (!gate.satisfied) throw new HttpError(409, gate.reason);
   const lockClient = await pool.connect();
   let got = false;
   try {
@@ -1056,11 +1152,13 @@ async function startBacklogReprocess(deps = {}) {
     throw err;
   }
   if (!got) { lockClient.release(); throw new HttpError(409, 'A backlog reprocess is already running (another instance)'); }
-  const status = await backlogDbStatus().catch(() => null);
+  const status = await backlogDbStatus(pool, info.version).catch(() => null);
   const job = {
-    state: 'running', started_at: new Date().toISOString(), finished_at: null, target_version: AUTO_RULES_VERSION,
+    state: 'running', run_id: `bl_${new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14)}_${Math.random().toString(36).slice(2, 6)}`,
+    started_at: new Date().toISOString(), finished_at: null, target_version: info.version,
+    catalogue: { source: info.snapshot ? 'snapshot' : 'local_styles', snapshot_id: info.snapshot ? info.snapshot.id : null, fingerprint: info.snapshot ? info.snapshot.fingerprint : null },
     processable_at_start: status ? status.stale_processable : null,
-    totals: emptyTotals(), skipped_by_reason: {}, batches: 0, last_batch_at: null, stop_requested: false, error_samples: [], fatal_error: null,
+    totals: emptyTotals(), skipped_by_reason: {}, changes_recorded: 0, batches: 0, last_batch_at: null, stop_requested: false, error_samples: [], fatal_error: null,
   };
   backlogJob = job;
   const done = runBacklog(job, lockClient, deps);
@@ -1074,42 +1172,84 @@ function stopBacklogReprocess() {
   return { stop_requested: true };
 }
 
+// Audit trail of what a real run changed (dry runs never write it).
+async function getChanges({ runId, limit = 200, offset = 0 } = {}) {
+  const run = runId || (backlogJob && backlogJob.run_id) || (await pool.query('SELECT run_id FROM meta_match_changes ORDER BY id DESC LIMIT 1')).rows[0]?.run_id;
+  if (!run) return { run_id: null, total: 0, by_transition: [], rows: [] };
+  const lim = Math.min(5000, Math.max(1, parseInt(limit, 10) || 200));
+  const [tot, trans, rows] = await Promise.all([
+    pool.query('SELECT count(*)::int AS n FROM meta_match_changes WHERE run_id = $1', [run]),
+    pool.query('SELECT old_status, new_status, count(*)::int AS n FROM meta_match_changes WHERE run_id = $1 GROUP BY 1, 2 ORDER BY n DESC', [run]),
+    pool.query('SELECT * FROM meta_match_changes WHERE run_id = $1 ORDER BY id LIMIT $2 OFFSET $3', [run, lim, Math.max(0, parseInt(offset, 10) || 0)]),
+  ]);
+  return { run_id: run, total: tot.rows[0].n, by_transition: trans.rows, rows: rows.rows };
+}
+
+const csvCell = (v) => { const t = v === null || v === undefined ? '' : (typeof v === 'object' ? JSON.stringify(v) : String(v)); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+const toCsv = (cols, rows) => [cols.join(','), ...rows.map((r) => cols.map((c) => csvCell(r[c])).join(','))].join('\n');
+
+async function changesCsv(runId) {
+  const run = runId || (await getChanges({ limit: 1 })).run_id;
+  if (!run) return 'run_id\n';
+  const r = await pool.query('SELECT * FROM meta_match_changes WHERE run_id = $1 ORDER BY id', [run]);
+  const cols = ['run_id', 'meta_ad_id', 'changed_at', 'old_status', 'new_status', 'old_product_code', 'old_product_name', 'new_product_code', 'new_product_name', 'old_match_method', 'old_basis', 'new_match_method', 'new_basis', 'new_confidence', 'rules_version', 'catalogue_snapshot_id', 'catalogue_fingerprint', 'old_classification', 'new_classification'];
+  return toCsv(cols, r.rows);
+}
+
 // ── Backlog DRY-RUN preview (read-only) ─────────────────────────────────
-// Evaluates the ads a backlog run would touch with the CURRENT rules, entirely
+// Evaluates the ads a backlog run would touch with the chosen rules, entirely
 // in memory (buildSuggestions + evaluateAutoMatch -- the same functions the real
 // path uses) and reports what WOULD change. It issues SELECTs only: no ad,
-// classification, product or suggestion row is written, and human-owned ads
-// (HUMAN_OWNED_SQL) are counted and skipped exactly as the real job skips them.
-//   scope 'stale' (default)  non-confirmed ads on an older rules version
-//         'auto'             only ads currently auto_matched (fast "what would the
-//                            guard undo?" check)
-//         'all'              every non-confirmed ad
-// Categories (old -> proposed):
+// classification, product, suggestion, snapshot or audit row is written, and
+// human-owned ads (HUMAN_OWNED_SQL) are counted and skipped exactly as the real
+// job skips them.
+//   scope     'stale' (default) non-confirmed ads on an older rules version
+//             'auto'            only ads currently auto_matched
+//             'all'             every non-confirmed ad
+//   catalogue 'active' (default) the active snapshot (or local styles if none: V3)
+//             'live'            the ApparelMagic catalogue rebuilt IN MEMORY from the
+//                               cached crawl + local styles, evaluated as rules v4 --
+//                               nothing is persisted, not even a snapshot
+//   compare   true  also evaluates every ad with the V3 (local styles) catalogue and
+//                   reports what the bigger catalogue changes
+// Categories (old DB state -> proposed):
 //   auto_to_review | review_to_auto | auto_to_different_auto | unchanged_auto |
-//   unchanged_review (review/unmatched stays) | protected | errors
+//   unchanged_review | protected | errors
 let previewJob = null;
-const PREVIEW_CATEGORIES = ['auto_to_review', 'review_to_auto', 'auto_to_different_auto', 'unchanged_auto', 'unchanged_review'];
+const PREVIEW_CATEGORIES = ['auto_to_review', 'review_to_auto', 'auto_to_different_auto'];
+const DELTA_CATEGORIES = ['newly_auto', 'product_changed', 'lost_auto'];
 
-function previewWhere(scope) {
+function previewWhere(scope, version) {
   if (scope === 'auto') return "m.match_status = 'auto_matched'";
   if (scope === 'all') return "m.match_status <> 'confirmed'";
-  return `m.match_status <> 'confirmed' AND COALESCE(m.match_rules_version, 0) < ${AUTO_RULES_VERSION}`;
+  return `m.match_status <> 'confirmed' AND COALESCE(m.match_rules_version, 0) < ${Number(version)}`;
+}
+
+function topEntries(map, n, mapper) {
+  return [...map.entries()].sort((a, b) => b[1].count - a[1].count).slice(0, n).map(mapper);
 }
 
 function publicPreview(job) {
   if (!job) return null;
+  const done = job.state !== 'running';
   return {
-    state: job.state, scope: job.scope, started_at: job.started_at, finished_at: job.finished_at,
-    rules_version: job.rules_version, total: job.total, processed: job.processed,
+    state: job.state, scope: job.scope, compare: job.compare, started_at: job.started_at, finished_at: job.finished_at,
+    rules_version: job.rules_version, catalogue: job.catalogue, total: job.total, processed: job.processed,
     counts: { ...job.counts }, protected_by_reason: { ...job.protected_by_reason },
-    samples: job.samples, pairs: job.state === 'running' ? [] : job.pairList(),
+    v4_vs_v3: job.compare ? { counts: { ...job.delta.counts }, samples: job.delta.samples, pairs: done ? job.deltaPairList(60) : [] } : null,
+    unresolved_reasons: Object.fromEntries([...job.unresolved.entries()].sort((a, b) => b[1] - a[1]).slice(0, 15)),
+    unresolved_phrases: done ? topEntries(job.phrases, 40, ([phrase, v]) => ({ phrase, ads: v.count, reason: v.reason, nearest_family: v.nearest })) : [],
+    ambiguous_same_name_ads: job.ambiguous_same_name,
+    samples: job.samples, pairs: done ? job.pairList(60) : [], pairs_total: job.pairs.size,
+    warnings: job.warnings,
     error_samples: job.error_samples.slice(0, 10), fatal_error: job.fatal_error || null,
+    gate_recorded: !!job.gate_recorded,
     read_only: true,
   };
 }
 
-async function runPreview(job) {
-  const where = previewWhere(job.scope);
+async function runPreview(job, matching, v3Families) {
+  const where = previewWhere(job.scope, job.rules_version);
   let cursor = '';
   try {
     for (;;) {
@@ -1126,13 +1266,16 @@ async function runPreview(job) {
       );
       if (!rows.length) break;
       cursor = rows[rows.length - 1].meta_ad_id;
-      const ctx = await loadContext();
+      const ctx = await loadContext(pool, { matching });
+      const ctx3 = job.compare ? { ...ctx, ...familyStructures(v3Families), tokenSpread: undefined, rulesVersion: 3 } : null;
       for (const ad of rows) {
         job.processed += 1;
+        if (job.processed % 100 === 0) await tick();
         if (ad.human_owned) { job.counts.protected += 1; job.protected_by_reason[ad.human_owned] = (job.protected_by_reason[ad.human_owned] || 0) + 1; continue; }
         try {
-          const built = buildSuggestions({ ad_name: ad.ad_name || '' }, ctx);
-          const ev = evaluateAutoMatch({ ad_name: ad.ad_name || '' }, built, ctx);
+          const adIn = { ad_name: ad.ad_name || '' };
+          const built = buildSuggestions(adIn, ctx);
+          const ev = evaluateAutoMatch(adIn, built, ctx);
           const newAuto = ev.qualifies && !ad.auto_match_blocked_at;
           const oldAuto = ad.match_status === 'auto_matched';
           const newCode = newAuto ? ev.values.product.product_code : null;
@@ -1142,20 +1285,59 @@ async function runPreview(job) {
           else if (oldAuto && newAuto) cat = (ad.old_codes || '') === newCode ? 'unchanged_auto' : 'auto_to_different_auto';
           else cat = 'unchanged_review';
           job.counts[cat] += 1;
-          if (cat === 'unchanged_auto' || cat === 'unchanged_review') continue;
+          const reason = newAuto ? null : (ad.auto_match_blocked_at ? 'auto-match blocked by a person' : (ev.blockers[0] || 'Needs a person to choose'));
           const row = {
             ad_name: ad.ad_name,
             old_product: ad.old_names || null,
             old_basis: ad.old_basis || (oldAuto ? 'auto (older rules, no provenance)' : null),
             proposed_product: newAuto ? ev.values.product.product_name : null,
             proposed_basis: newAuto ? `${ev.auto_fields.product.basis} @ ${ev.auto_fields.product.confidence}` : null,
-            reason: newAuto ? null : (ad.auto_match_blocked_at ? 'auto-match blocked by a person' : (ev.blockers[0] || 'Needs a person to choose')),
+            reason,
           };
-          if (job.samples[cat].length < job.sample_size) job.samples[cat].push(row);
-          const key = `${cat}|${ad.old_codes || ''}|${newCode || row.reason}`;
-          const cur = job.pairs.get(key) || { category: cat, old_product: row.old_product, proposed_product: row.proposed_product, old_basis: row.old_basis, proposed_basis: row.proposed_basis, reason: row.reason, count: 0, example_ad_name: ad.ad_name };
-          cur.count += 1;
-          job.pairs.set(key, cur);
+          if (!newAuto) {
+            job.unresolved.set(reason, (job.unresolved.get(reason) || 0) + 1);
+            const st = built.parsed && built.parsed.structured;
+            if (st && st.product_name && !ad.auto_match_blocked_at) {
+              const phrase = cleanProductPhrase(st.product_name).toUpperCase();
+              const top = built.suggestions.find((x) => x.field === 'product');
+              const cur = job.phrases.get(phrase) || { count: 0, reason, nearest: top ? top.value_label : null };
+              cur.count += 1;
+              job.phrases.set(phrase, cur);
+            }
+            const prods = built.suggestions.filter((x) => x.field === 'product');
+            if (prods.length > 1 && norm(prods[0].value_label) === norm(prods[1].value_label)) job.ambiguous_same_name += 1;
+          }
+          if (cat !== 'unchanged_auto' && cat !== 'unchanged_review') {
+            if (job.samples[cat].length < job.sample_size) job.samples[cat].push(row);
+            const key = `${cat}|${ad.old_codes || ''}|${newCode || reason}`;
+            const cur = job.pairs.get(key) || { category: cat, old_product: row.old_product, proposed_product: row.proposed_product, old_basis: row.old_basis, proposed_basis: row.proposed_basis, reason: row.reason, count: 0, example_ad_name: ad.ad_name };
+            cur.count += 1;
+            job.pairs.set(key, cur);
+          }
+          if (ctx3) {
+            const b3 = buildSuggestions(adIn, ctx3);
+            const e3 = evaluateAutoMatch(adIn, b3, ctx3);
+            const v3Auto = e3.qualifies && !ad.auto_match_blocked_at;
+            const v3Code = v3Auto ? e3.values.product.product_code : null;
+            let dcat = null;
+            if (!v3Auto && newAuto) dcat = 'newly_auto';
+            else if (v3Auto && !newAuto) dcat = 'lost_auto';
+            else if (v3Auto && newAuto && v3Code !== newCode) dcat = 'product_changed';
+            else job.delta.counts[v3Auto ? 'same_auto' : 'same_review'] += 1;
+            if (dcat) {
+              job.delta.counts[dcat] += 1;
+              const drow = {
+                ad_name: ad.ad_name,
+                v3_product: v3Auto ? e3.values.product.product_name : null, v3_basis: v3Auto ? e3.auto_fields.product.basis : null, v3_reason: v3Auto ? null : (e3.blockers[0] || null),
+                v4_product: newAuto ? ev.values.product.product_name : null, v4_basis: newAuto ? `${ev.auto_fields.product.basis} @ ${ev.auto_fields.product.confidence}` : null, v4_reason: reason,
+              };
+              if (job.delta.samples[dcat].length < job.sample_size) job.delta.samples[dcat].push(drow);
+              const dkey = `${dcat}|${v3Code || ''}|${newCode || ''}`;
+              const dc = job.deltaPairs.get(dkey) || { category: dcat, ...drow, count: 0, example_ad_name: ad.ad_name };
+              dc.count += 1;
+              job.deltaPairs.set(dkey, dc);
+            }
+          }
         } catch (err) {
           job.counts.errors += 1;
           if (job.error_samples.length < 25) job.error_samples.push({ meta_ad_id: ad.meta_ad_id, error: String(err && err.message).slice(0, 200) });
@@ -1164,6 +1346,14 @@ async function runPreview(job) {
       job.last_batch_at = new Date().toISOString();
     }
     job.state = 'completed';
+    // A clean, complete preview of the whole stale set is what unlocks activation / the backlog run.
+    if (job.counts.errors === 0 && (job.scope === 'stale' || job.scope === 'all') && job.catalogue.fingerprint && !job.warnings.length) {
+      lastGoodPreview = {
+        fingerprint: job.catalogue.fingerprint, source: job.catalogue.source, scope: job.scope, compare: job.compare, rules_version: job.rules_version,
+        completed_at: new Date().toISOString(), completed_ms: Date.now(), counts: { ...job.counts }, delta: job.compare ? { ...job.delta.counts } : null,
+      };
+      job.gate_recorded = true;
+    }
   } catch (err) {
     job.state = 'failed';
     job.fatal_error = String(err && err.message).slice(0, 300);
@@ -1172,31 +1362,102 @@ async function runPreview(job) {
   }
 }
 
-async function startBacklogPreview({ scope = 'stale', samples = 25 } = {}, deps = {}) {
+async function startBacklogPreview({ scope = 'stale', samples = 25, catalogue = 'active', compare = false } = {}, deps = {}) {
   if (!['stale', 'auto', 'all'].includes(scope)) throw new HttpError(400, 'scope must be stale, auto or all');
+  if (!['active', 'live'].includes(catalogue)) throw new HttpError(400, 'catalogue must be active or live');
   if (previewJob && previewJob.state === 'running') throw new HttpError(409, 'A preview is already running');
   const job = {
-    state: 'running', scope, started_at: new Date().toISOString(), finished_at: null, rules_version: AUTO_RULES_VERSION,
-    total: null, processed: 0, sample_size: Math.min(100, Math.max(1, parseInt(samples, 10) || 25)),
+    state: 'running', scope, compare: !!compare, started_at: new Date().toISOString(), finished_at: null, rules_version: BASE_RULES_VERSION,
+    catalogue: { source: null, fingerprint: null }, total: null, processed: 0, sample_size: Math.min(100, Math.max(1, parseInt(samples, 10) || 25)),
     counts: { auto_to_review: 0, review_to_auto: 0, auto_to_different_auto: 0, unchanged_auto: 0, unchanged_review: 0, protected: 0, errors: 0 },
-    protected_by_reason: {}, samples: Object.fromEntries(PREVIEW_CATEGORIES.filter((c) => c.indexOf('unchanged') < 0).map((c) => [c, []])),
-    pairs: new Map(), error_samples: [], fatal_error: null, last_batch_at: null,
-    pairList() { return [...this.pairs.values()].sort((a, b) => b.count - a.count).slice(0, 60); },
+    protected_by_reason: {}, samples: Object.fromEntries(PREVIEW_CATEGORIES.map((c) => [c, []])),
+    pairs: new Map(), unresolved: new Map(), phrases: new Map(), ambiguous_same_name: 0, warnings: [],
+    delta: { counts: { newly_auto: 0, product_changed: 0, lost_auto: 0, same_auto: 0, same_review: 0 }, samples: Object.fromEntries(DELTA_CATEGORIES.map((c) => [c, []])) },
+    deltaPairs: new Map(), error_samples: [], fatal_error: null, last_batch_at: null,
+    pairList(n) { return [...this.pairs.values()].sort((a, b) => b.count - a.count).slice(0, n); },
+    deltaPairList(n) { return [...this.deltaPairs.values()].sort((a, b) => b.count - a.count).slice(0, n); },
   };
   previewJob = job; // claimed synchronously so two starts can never both pass the check above
+  let matching;
+  let v3Families = null;
   try {
-    job.total = (await pool.query(`SELECT count(*)::int AS n FROM meta_ads m WHERE ${previewWhere(scope)}`)).rows[0].n;
+    if (catalogue === 'live') {
+      const live = await catalogueLib.buildLiveCatalogue(); // refuses (CatalogueError) when ApparelMagic is cold / unconfigured
+      const prev = (await catalogueLib.listSnapshots(1))[0] || null;
+      const validation = catalogueLib.validateCatalogue(live, { previous: prev, minFamilies: deps.minFamilies });
+      if (!validation.ok) job.warnings.push(...validation.problems);
+      matching = { families: live.families, rulesVersion: 4, catalogue: { source: 'live', snapshot_id: null, fingerprint: live.fingerprint, family_count: live.families.length } };
+      job.catalogue = { source: 'live', fingerprint: live.fingerprint, family_count: live.families.length, stats: live.stats, validation };
+    } else {
+      matching = await catalogueLib.loadMatchingFamilies(pool);
+      job.catalogue = { source: matching.catalogue.source, fingerprint: matching.catalogue.fingerprint, snapshot_id: matching.catalogue.snapshot_id, family_count: matching.families.length };
+    }
+    job.rules_version = matching.rulesVersion;
+    if (job.compare) v3Families = await catalogueLib.loadLocalFamilies(pool);
+    job.total = (await pool.query(`SELECT count(*)::int AS n FROM meta_ads m WHERE ${previewWhere(scope, job.rules_version)}`)).rows[0].n;
   } catch (err) {
     job.state = 'failed'; job.fatal_error = String(err && err.message).slice(0, 300); job.finished_at = new Date().toISOString();
     throw err;
   }
-  const done = runPreview(job);
+  const done = runPreview(job, matching, v3Families);
   if (deps.wait) await done;
   return publicPreview(job);
 }
 
 function getBacklogPreview() {
   return { running: !!(previewJob && previewJob.state === 'running'), preview: publicPreview(previewJob) };
+}
+
+function previewCsv(category) {
+  if (!previewJob) return 'no preview has been run\n';
+  const cols = ['category', 'count', 'example_ad_name', 'old_product', 'proposed_product', 'old_basis', 'proposed_basis', 'reason'];
+  const rows = [...previewJob.pairs.values()].filter((p) => !category || p.category === category).sort((a, b) => b.count - a.count);
+  return toCsv(cols, rows);
+}
+
+// ── Catalogue snapshot: status / load / activate / deactivate ───────────
+async function getCatalogueStatus() {
+  const [info, snaps] = await Promise.all([rulesInfo(), catalogueLib.listSnapshots(10)]);
+  const gate = previewGate(info.snapshot);
+  const lp = lastGoodPreview;
+  return {
+    effective_rules_version: info.version,
+    active_snapshot: info.snapshot ? { id: info.snapshot.id, fingerprint: info.snapshot.fingerprint, family_count: info.snapshot.family_count, am_family_count: info.snapshot.am_family_count, local_only_count: info.snapshot.local_only_count, activated_at: info.snapshot.activated_at, stats: info.snapshot.stats } : null,
+    matching_catalogue: info.snapshot ? 'ApparelMagic snapshot' : 'local styles only (V3 behaviour)',
+    apparelmagic: catalogueLib.amState(),
+    recent_snapshots: snaps,
+    last_preview: lp ? { fingerprint: lp.fingerprint, source: lp.source, scope: lp.scope, compare: lp.compare, completed_at: lp.completed_at, counts: lp.counts, delta: lp.delta } : null,
+    backlog_gate: gate,
+    refresh: 'manual only — nothing refreshes the catalogue automatically',
+  };
+}
+
+function startCatalogueLoad() { return { apparelmagic: catalogueLib.startAmCatalogueLoad() }; }
+
+async function activateCatalogue({ expectedFingerprint, userId } = {}, deps = {}) {
+  if (!expectedFingerprint || typeof expectedFingerprint !== 'string') throw new HttpError(400, 'expected_fingerprint is required (it comes from the completed preview)');
+  if (backlogJob && backlogJob.state === 'running') throw new HttpError(409, 'A backlog reprocess is running; stop it first');
+  if (previewJob && previewJob.state === 'running') throw new HttpError(409, 'A preview is running; wait for it to finish');
+  const p = lastGoodPreview;
+  if (!p || p.fingerprint !== expectedFingerprint) throw new HttpError(409, 'No completed preview matches that fingerprint. Run the V4 preview (live catalogue, compare with V3) first.');
+  if (!p.compare || p.source !== 'live') throw new HttpError(409, 'Activation requires a completed LIVE-catalogue preview compared with V3.');
+  if (Date.now() - p.completed_ms > PREVIEW_MAX_AGE_MS) throw new HttpError(409, 'The preview is more than 24 hours old. Run it again.');
+  const live = await catalogueLib.buildLiveCatalogue(); // refuses if ApparelMagic is cold / unconfigured
+  const prev = (await catalogueLib.listSnapshots(1))[0] || null;
+  const validation = catalogueLib.validateCatalogue(live, { previous: prev, minFamilies: deps.minFamilies });
+  if (!validation.ok) throw new HttpError(409, `The catalogue failed validation, nothing was activated: ${validation.problems.join('; ')}`);
+  if (live.fingerprint !== expectedFingerprint) {
+    throw new HttpError(409, `The catalogue changed since the preview (preview ${shortFp(expectedFingerprint)}, now ${shortFp(live.fingerprint)}). Run the preview again.`);
+  }
+  const snap = await catalogueLib.saveAndActivate(live, userId);
+  return { activated: true, snapshot: snap, effective_rules_version: 4, note: 'Every non-confirmed ad evaluated under rules v3 is now stale. Nothing has been processed: run the backlog explicitly.' };
+}
+
+async function deactivateCatalogue() {
+  if (backlogJob && backlogJob.state === 'running') throw new HttpError(409, 'A backlog reprocess is running; stop it first');
+  const was = await catalogueLib.deactivateSnapshot();
+  if (!was) throw new HttpError(409, 'No catalogue snapshot is active');
+  return { deactivated: true, snapshot_id: was.id, effective_rules_version: BASE_RULES_VERSION, note: 'Matching is back to local styles (V3). No ad data was changed or reverted.' };
 }
 
 // ── ApparelMagic catalogue coverage check (read-only) ───────────────────
@@ -1550,7 +1811,7 @@ async function confirmMapping(metaAdId, body, userId) {
   if (notProductSpecific && productCodes.length) throw new HttpError(400, '"Not product-specific" can’t be combined with products');
   if (!notProductSpecific && !productCodes.length) throw new HttpError(400, 'Choose at least one product, or mark the ad "Not product-specific"');
 
-  const families = await listProductFamilies();
+  const families = await catalogueLib.loadPickerFamilies();
   const famByCode = new Map(families.map((f) => [f.product_code, f]));
   const unknown = productCodes.filter((c) => !famByCode.has(c));
   if (unknown.length) throw new HttpError(400, `Unknown product family: ${unknown.join(', ')}`);
@@ -1738,7 +1999,7 @@ async function clearMapping(metaAdId) {
 // ── Selector data ───────────────────────────────────────────────────────
 async function listOptions() {
   const [families, concepts, styles, creators] = await Promise.all([
-    listProductFamilies(),
+    catalogueLib.loadPickerFamilies(),
     pool.query('SELECT id, name, format FROM concept_types WHERE active ORDER BY sort_order, name'),
     pool.query('SELECT id, name, media_type FROM creative_styles ORDER BY sort_order, name'),
     pool.query('SELECT name FROM content_creators ORDER BY name'),
@@ -1850,6 +2111,16 @@ module.exports = {
   startBacklogReprocess,
   startBacklogPreview,
   getBacklogPreview,
+  previewCsv,
+  getChanges,
+  changesCsv,
+  getCatalogueStatus,
+  startCatalogueLoad,
+  activateCatalogue,
+  deactivateCatalogue,
+  rulesInfo,
+  BASE_RULES_VERSION,
+  familyStructures,
   catalogueCheck,
   stopBacklogReprocess,
   getBacklogStatus,
