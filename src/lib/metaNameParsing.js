@@ -101,6 +101,72 @@ function scoreSets(P, F) {
   return null;
 }
 
+
+// ── Product identity guard (V3) ─────────────────────────────────────────
+// Why: the similarity tiers above count every word equally, so a Meta phrase
+// like "HAVOK 1/4 ZIP POLAR FLEECE" scores 0.6 against "STXR 1/4 ZIP POLAR
+// FLEECE" purely on shared GARMENT words. A similarity match may only
+// AUTO-LINK when the phrase's distinctive (identity) words are all present in
+// the family. "Descriptor" words (ZIP, SHERPA, TEE, HOOD ...) are not
+// hard-coded: a token is a descriptor when it appears in families under at
+// least DESCRIPTOR_MIN_LEADS different lead words, so the list follows the
+// catalogue. Everything else -- including words the catalogue has never seen
+// -- is an identity word. Exact matches are unaffected (identical word sets).
+const DESCRIPTOR_MIN_LEADS = 3;
+
+// Promotional / concept phrases that are deliberately NOT product-focused.
+// A phrase made only of these (plus filler) is never linked to a product.
+const PROMO_WORDS = new Set(['SALE', 'LIVE', 'HYPE', 'BUNDLE', 'MYSTERY', 'GWP', 'DPA', 'RESTOCK', 'PRESALE', 'CLEARANCE', 'FLASH', 'OFFER', 'DEAL', 'FREE', 'GIFT', 'CYBER', 'EOFY', 'FRIDAY', 'MEGA']);
+const PROMO_FILLER = new Set(['BOX', 'PACK', 'SET', 'BLACK', 'WEEKEND', 'EVENT', 'ANNOUNCEMENT', 'UPDATE']);
+
+// Meta product phrase -> the form the catalogue uses: drop a leading marker
+// ("*"), a trailing " - COLOUR" (AM splits product from colour on the last
+// " - "), and any "(...)" note.
+function cleanProductPhrase(text) {
+  return String(text || '')
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/^[^A-Za-z0-9¼½¾]+/, '')
+    .replace(/\s+[–—-]\s+[^–—-]+$/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isPromoPhrase(text) {
+  const t = matchTokens(cleanProductPhrase(text));
+  return t.length > 0 && t.every((w) => PROMO_WORDS.has(w) || PROMO_FILLER.has(w)) && t.some((w) => PROMO_WORDS.has(w));
+}
+
+// token -> Set of lead words of the families containing it.
+function buildTokenSpread(familyIndex) {
+  const leads = new Map();
+  familyIndex.forEach((f) => {
+    if (!f.match.length) return;
+    const lead = f.match[0];
+    f.match.forEach((t) => {
+      if (!leads.has(t)) leads.set(t, new Set());
+      leads.get(t).add(lead);
+    });
+  });
+  return leads;
+}
+
+// ok=false when the phrase carries an identity word the family lacks, or the
+// family's own lead word is not in the phrase.
+function identityGuard(productPhrase, categoryPhrase, family, spread) {
+  const pt = [...new Set(matchTokens(cleanProductPhrase(productPhrase)))];
+  const ct = matchTokens(cleanProductPhrase(categoryPhrase || ''));
+  const size = (t) => (spread.get(t) ? spread.get(t).size : 0);
+  const missing = pt.filter((t) => size(t) < DESCRIPTOR_MIN_LEADS && !family.matchSet.has(t));
+  if (missing.length) {
+    return { ok: false, missing, reason: `"${missing.join(' ')}" is not part of the "${family.product_name}" name (only generic garment words match)` };
+  }
+  const lead = family.match[0];
+  if (lead && !pt.includes(lead) && !ct.includes(lead)) {
+    return { ok: false, missing: [], reason: `The ad doesn't mention "${lead}", the lead word of "${family.product_name}"` };
+  }
+  return { ok: true, missing: [] };
+}
+
 // Existing product families a phrase refers to, best first (<= 3), each with
 // confidence + how it matched. [] when nothing clears the bounds above.
 function matchProductPhrase(phrase, index) {
@@ -282,4 +348,5 @@ module.exports = {
   STOP, SET_WORDS, MEDIA_TYPES, MEDIA_KEYS, MEDIA_LABEL, MEDIA_WORDS,
   norm, canonTokens, matchTokens, coreTokens, hasSetWord,
   buildFamilyIndex, matchProductPhrase, expandSet, mediaTokensFromName, stripCopySuffix, parseLooseMetaName,
+  DESCRIPTOR_MIN_LEADS, PROMO_WORDS, cleanProductPhrase, isPromoPhrase, buildTokenSpread, identityGuard,
 };

@@ -52,6 +52,7 @@ const { deriveProductCode } = require('./apparelmagic');
 const {
   MEDIA_TYPES, MEDIA_KEYS, MEDIA_LABEL, buildFamilyIndex, matchProductPhrase, expandSet, hasSetWord,
   coreTokens, mediaTokensFromName, parseLooseMetaName,
+  cleanProductPhrase, isPromoPhrase, buildTokenSpread, identityGuard,
 } = require('./metaNameParsing');
 const {
   ymdInZone, addDays, REPORTING_TIMEZONE, deriveMetrics, HttpError, parseRangeParams,
@@ -59,7 +60,9 @@ const {
 
 // Bump when evaluateAutoMatch's rules change: ads last evaluated under an
 // older version are re-evaluated by the next suggestion run.
-const AUTO_RULES_VERSION = 2;
+// v3: product identity guard + phrase cleaning + promo guard (a similarity match
+// no longer auto-links on shared garment words alone). v2 ads are re-evaluated.
+const AUTO_RULES_VERSION = 3;
 
 // ONE definition of "a person owns this ad's state", as a SQL CASE returning
 // the reason (or NULL). Aliases: m = meta_ads, c = meta_ad_classifications.
@@ -330,6 +333,14 @@ function clearBest(cands) {
   if (second && !(top.jacc - second.jacc >= 0.1 || top.confidence - second.confidence >= 0.15)) return null;
   return top;
 }
+const spreadCache = new WeakMap();
+function spreadFor(ctx) {
+  if (!ctx.tokenSpread) {
+    if (!spreadCache.has(ctx)) spreadCache.set(ctx, buildTokenSpread(ctx.familyIndex));
+    return spreadCache.get(ctx);
+  }
+  return ctx.tokenSpread;
+}
 function resolveStructuredProduct(src, ctx, { cands }) {
   const fam = (code) => ctx.familyByCode.get(code);
   const hit = (code, basis, why) => ({ status: 'resolved', code, name: fam(code).product_name, basis, confidence: PRODUCT_BASIS_CONFIDENCE[basis], why });
@@ -357,6 +368,13 @@ function resolveStructuredProduct(src, ctx, { cands }) {
     return res;
   }
   if (best && setWording && best.kind !== 'exact') return { status: 'ambiguous', reason: 'Looks like a set / bundle that may include several products' };
+  if (best && best.kind !== 'exact') {
+    // V3 identity guard: a similarity match may only auto-link when the phrase's
+    // identity (non-descriptor) words are all in the family and the family's lead
+    // word is in the ad -- never on shared garment words alone.
+    const g = identityGuard(src.phrase, src.type, best.family, spreadFor(ctx));
+    if (!g.ok) return { status: 'ambiguous', reason: g.reason, guard: true };
+  }
   if (best) {
     return hit(best.family.product_code, best.kind === 'exact' ? 'catalogue_exact' : 'catalogue_similar',
       best.kind === 'exact' ? 'Exact product family name' : `One clearly best product family (${best.kind.replace('_', ' ')} match)`);
@@ -483,11 +501,19 @@ function buildSuggestions(ad, ctx) {
   let productResolution = null;
   productSources.forEach((src) => {
     const isStructured = src.origin === 'structured_name';
-    // Catalogue candidates for the product phrase alone and for Product + Category;
-    // the better-scoring list wins (Category usually disambiguates), ties go to
-    // the more specific combined phrase.
-    const alone = matchProductPhrase(src.phrase, ctx.familyIndex);
-    const combined = src.type ? matchProductPhrase(`${src.phrase} ${src.type}`, ctx.familyIndex) : [];
+    // A purely promotional / concept phrase (SALE, HYPE, LIVE, BUNDLE ...) is
+    // deliberately not product-focused: no product link and no product suggestion.
+    if (isStructured && isPromoPhrase(src.phrase)) {
+      productResolution = { status: 'none', reason: 'Promotional / generic phrase — not product-focused', promo: true };
+      return;
+    }
+    // Catalogue candidates for the CLEANED product phrase ("*" / " - COLOUR" / "(..)"
+    // removed) alone and for Product + Category; the better-scoring list wins
+    // (Category usually disambiguates), ties go to the more specific combined phrase.
+    const cleanPhrase = cleanProductPhrase(src.phrase);
+    const cleanType = src.type ? cleanProductPhrase(src.type) : '';
+    const alone = matchProductPhrase(cleanPhrase, ctx.familyIndex);
+    const combined = cleanType ? matchProductPhrase(`${cleanPhrase} ${cleanType}`, ctx.familyIndex) : [];
     const cands = combined.length && (!alone.length || combined[0].confidence >= alone[0].confidence) ? combined : alone;
     if (isStructured) productResolution = resolveStructuredProduct(src, ctx, { trusted: ctx.trustedPairs, alone, combined, cands });
 
@@ -495,7 +521,7 @@ function buildSuggestions(ad, ctx) {
     if (lookupMapping(src.phrase, src.type, src.shown)) return;
     if (lookupMappingByName(src.phrase)) return;
     if (cands.length) {
-      const phraseUsed = cands === combined ? `${src.phrase} ${src.type}` : src.phrase;
+      const phraseUsed = cands === combined ? `${cleanPhrase} ${cleanType}` : cleanPhrase;
       cands.forEach((c) => {
         const how = MATCH_WORDING[c.kind].replace('%F', c.family.product_name).replace('%I', c.inter).replace('%U', c.family.matchSet.size);
         const tie = c.ties > 1 ? ` — ${c.ties} families matched equally closely` : '';
@@ -503,8 +529,8 @@ function buildSuggestions(ad, ctx) {
       });
       return;
     }
-    if (setFromHistory(src.phrase)) return;
-    matchSet(src.phrase, src.origin);
+    if (setFromHistory(cleanPhrase)) return;
+    matchSet(cleanPhrase, src.origin);
   });
   if (anchor) {
     anchor.setup.product_codes.forEach((code) => {
@@ -1047,6 +1073,213 @@ function stopBacklogReprocess() {
   backlogJob.stop_requested = true;
   return { stop_requested: true };
 }
+
+// ── Backlog DRY-RUN preview (read-only) ─────────────────────────────────
+// Evaluates the ads a backlog run would touch with the CURRENT rules, entirely
+// in memory (buildSuggestions + evaluateAutoMatch -- the same functions the real
+// path uses) and reports what WOULD change. It issues SELECTs only: no ad,
+// classification, product or suggestion row is written, and human-owned ads
+// (HUMAN_OWNED_SQL) are counted and skipped exactly as the real job skips them.
+//   scope 'stale' (default)  non-confirmed ads on an older rules version
+//         'auto'             only ads currently auto_matched (fast "what would the
+//                            guard undo?" check)
+//         'all'              every non-confirmed ad
+// Categories (old -> proposed):
+//   auto_to_review | review_to_auto | auto_to_different_auto | unchanged_auto |
+//   unchanged_review (review/unmatched stays) | protected | errors
+let previewJob = null;
+const PREVIEW_CATEGORIES = ['auto_to_review', 'review_to_auto', 'auto_to_different_auto', 'unchanged_auto', 'unchanged_review'];
+
+function previewWhere(scope) {
+  if (scope === 'auto') return "m.match_status = 'auto_matched'";
+  if (scope === 'all') return "m.match_status <> 'confirmed'";
+  return `m.match_status <> 'confirmed' AND COALESCE(m.match_rules_version, 0) < ${AUTO_RULES_VERSION}`;
+}
+
+function publicPreview(job) {
+  if (!job) return null;
+  return {
+    state: job.state, scope: job.scope, started_at: job.started_at, finished_at: job.finished_at,
+    rules_version: job.rules_version, total: job.total, processed: job.processed,
+    counts: { ...job.counts }, protected_by_reason: { ...job.protected_by_reason },
+    samples: job.samples, pairs: job.state === 'running' ? [] : job.pairList(),
+    error_samples: job.error_samples.slice(0, 10), fatal_error: job.fatal_error || null,
+    read_only: true,
+  };
+}
+
+async function runPreview(job) {
+  const where = previewWhere(job.scope);
+  let cursor = '';
+  try {
+    for (;;) {
+      const { rows } = await pool.query(
+        `SELECT m.meta_ad_id, m.ad_name, m.match_status, c.auto_match_blocked_at,
+                c.auto_fields -> 'product' ->> 'basis' AS old_basis,
+                (SELECT string_agg(p.product_code, ',' ORDER BY p.product_code) FROM meta_ad_products p WHERE p.meta_ad_id = m.meta_ad_id) AS old_codes,
+                (SELECT string_agg(p.product_name, ' + ' ORDER BY p.product_code) FROM meta_ad_products p WHERE p.meta_ad_id = m.meta_ad_id) AS old_names,
+                ${HUMAN_OWNED_SQL} AS human_owned
+           FROM meta_ads m LEFT JOIN meta_ad_classifications c ON c.meta_ad_id = m.meta_ad_id
+          WHERE ${where} AND m.meta_ad_id > $1
+          ORDER BY m.meta_ad_id LIMIT $2`,
+        [cursor, BACKLOG_BATCH]
+      );
+      if (!rows.length) break;
+      cursor = rows[rows.length - 1].meta_ad_id;
+      const ctx = await loadContext();
+      for (const ad of rows) {
+        job.processed += 1;
+        if (ad.human_owned) { job.counts.protected += 1; job.protected_by_reason[ad.human_owned] = (job.protected_by_reason[ad.human_owned] || 0) + 1; continue; }
+        try {
+          const built = buildSuggestions({ ad_name: ad.ad_name || '' }, ctx);
+          const ev = evaluateAutoMatch({ ad_name: ad.ad_name || '' }, built, ctx);
+          const newAuto = ev.qualifies && !ad.auto_match_blocked_at;
+          const oldAuto = ad.match_status === 'auto_matched';
+          const newCode = newAuto ? ev.values.product.product_code : null;
+          let cat;
+          if (oldAuto && !newAuto) cat = 'auto_to_review';
+          else if (!oldAuto && newAuto) cat = 'review_to_auto';
+          else if (oldAuto && newAuto) cat = (ad.old_codes || '') === newCode ? 'unchanged_auto' : 'auto_to_different_auto';
+          else cat = 'unchanged_review';
+          job.counts[cat] += 1;
+          if (cat === 'unchanged_auto' || cat === 'unchanged_review') continue;
+          const row = {
+            ad_name: ad.ad_name,
+            old_product: ad.old_names || null,
+            old_basis: ad.old_basis || (oldAuto ? 'auto (older rules, no provenance)' : null),
+            proposed_product: newAuto ? ev.values.product.product_name : null,
+            proposed_basis: newAuto ? `${ev.auto_fields.product.basis} @ ${ev.auto_fields.product.confidence}` : null,
+            reason: newAuto ? null : (ad.auto_match_blocked_at ? 'auto-match blocked by a person' : (ev.blockers[0] || 'Needs a person to choose')),
+          };
+          if (job.samples[cat].length < job.sample_size) job.samples[cat].push(row);
+          const key = `${cat}|${ad.old_codes || ''}|${newCode || row.reason}`;
+          const cur = job.pairs.get(key) || { category: cat, old_product: row.old_product, proposed_product: row.proposed_product, old_basis: row.old_basis, proposed_basis: row.proposed_basis, reason: row.reason, count: 0, example_ad_name: ad.ad_name };
+          cur.count += 1;
+          job.pairs.set(key, cur);
+        } catch (err) {
+          job.counts.errors += 1;
+          if (job.error_samples.length < 25) job.error_samples.push({ meta_ad_id: ad.meta_ad_id, error: String(err && err.message).slice(0, 200) });
+        }
+      }
+      job.last_batch_at = new Date().toISOString();
+    }
+    job.state = 'completed';
+  } catch (err) {
+    job.state = 'failed';
+    job.fatal_error = String(err && err.message).slice(0, 300);
+  } finally {
+    job.finished_at = new Date().toISOString();
+  }
+}
+
+async function startBacklogPreview({ scope = 'stale', samples = 25 } = {}, deps = {}) {
+  if (!['stale', 'auto', 'all'].includes(scope)) throw new HttpError(400, 'scope must be stale, auto or all');
+  if (previewJob && previewJob.state === 'running') throw new HttpError(409, 'A preview is already running');
+  const job = {
+    state: 'running', scope, started_at: new Date().toISOString(), finished_at: null, rules_version: AUTO_RULES_VERSION,
+    total: null, processed: 0, sample_size: Math.min(100, Math.max(1, parseInt(samples, 10) || 25)),
+    counts: { auto_to_review: 0, review_to_auto: 0, auto_to_different_auto: 0, unchanged_auto: 0, unchanged_review: 0, protected: 0, errors: 0 },
+    protected_by_reason: {}, samples: Object.fromEntries(PREVIEW_CATEGORIES.filter((c) => c.indexOf('unchanged') < 0).map((c) => [c, []])),
+    pairs: new Map(), error_samples: [], fatal_error: null, last_batch_at: null,
+    pairList() { return [...this.pairs.values()].sort((a, b) => b.count - a.count).slice(0, 60); },
+  };
+  previewJob = job; // claimed synchronously so two starts can never both pass the check above
+  try {
+    job.total = (await pool.query(`SELECT count(*)::int AS n FROM meta_ads m WHERE ${previewWhere(scope)}`)).rows[0].n;
+  } catch (err) {
+    job.state = 'failed'; job.fatal_error = String(err && err.message).slice(0, 300); job.finished_at = new Date().toISOString();
+    throw err;
+  }
+  const done = runPreview(job);
+  if (deps.wait) await done;
+  return publicPreview(job);
+}
+
+function getBacklogPreview() {
+  return { running: !!(previewJob && previewJob.state === 'running'), preview: publicPreview(previewJob) };
+}
+
+// ── ApparelMagic catalogue coverage check (read-only) ───────────────────
+// Answers "does the live AM /products catalogue actually contain the historical
+// products we want to match?" BEFORE the matcher is pointed at it. Reads only the
+// already-cached getStyleCatalogue() result (one AM read-only crawl if the cache
+// is cold) and the local styles table; writes nothing and never calls Meta.
+const DEFAULT_CATALOGUE_PROBES = [
+  'OFFCUT 1/4 ZIP SHERPA FLEECE', 'WAYNE HOCKEY JERSEY', 'ENGLAND WORLD CUP TEE', 'FRANCE WORLD CUP TEE',
+  'HAVOK 1/4 ZIP POLAR FLEECE', 'MAISON PANEL HOOD',
+];
+
+function familiesFromNames(entries) {
+  // entries: [{ code, name, colour }] -> Map(familyCode -> { code, names: Map(name->n), colourways })
+  const byCode = new Map();
+  entries.forEach((e) => {
+    if (!byCode.has(e.code)) byCode.set(e.code, { code: e.code, names: new Map(), colourways: 0 });
+    const f = byCode.get(e.code);
+    f.colourways += 1;
+    if (e.name) f.names.set(e.name, (f.names.get(e.name) || 0) + 1);
+  });
+  return [...byCode.values()].map((f) => ({
+    product_code: f.code,
+    product_name: [...f.names.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] || f.code,
+    colourways: f.colourways,
+  }));
+}
+
+async function catalogueCheck(probes) {
+  const am = require('./apparelmagic');
+  const list = (Array.isArray(probes) && probes.length ? probes : DEFAULT_CATALOGUE_PROBES)
+    .map((p) => String(p).trim().slice(0, 80)).filter(Boolean).slice(0, 20);
+  const out = { read_only: true, apparelmagic_configured: am.configured(), cache: am.getAmCacheStatus().catalogue, probes: list };
+  const local = await pool.query('SELECT style_code, name FROM styles');
+  const localFamilies = familiesFromNames(local.rows.map((r) => ({ code: deriveProductCode(r.style_code), name: r.name })));
+  out.local_styles = { style_rows: local.rows.length, product_codes: localFamilies.length };
+  if (!out.apparelmagic_configured) { out.note = 'ApparelMagic is not configured in this environment, so the live catalogue cannot be checked here.'; return out; }
+  const catalogue = await am.getStyleCatalogue();
+  const rows = [...catalogue.entries()];
+  const wndrr = rows.filter(([code]) => am.isWndrrStyleCode(code));
+  const nonStandard = rows.filter(([code]) => !am.isWndrrStyleCode(code));
+  const amFamilies = familiesFromNames(wndrr.map(([code, d]) => ({ code: deriveProductCode(code), name: d.productName })));
+  const years = {};
+  amFamilies.forEach((f) => { const y = /^W(\d{2})/.exec(f.product_code); const k = y ? `20${y[1]}` : 'other'; years[k] = (years[k] || 0) + 1; });
+  const cats = {};
+  wndrr.forEach(([, d]) => { const k = d.category || '(none)'; cats[k] = (cats[k] || 0) + 1; });
+  const uniqueNames = new Set(amFamilies.map((f) => norm(f.product_name)));
+  const amCodes = new Set(amFamilies.map((f) => f.product_code));
+  const localCodes = new Set(localFamilies.map((f) => f.product_code));
+  out.apparelmagic = {
+    style_rows_total: rows.length,
+    style_rows_wndrr_coded: wndrr.length,
+    style_rows_non_standard_or_non_apparel: nonStandard.length,
+    non_standard_examples: nonStandard.slice(0, 8).map(([code, d]) => `${code} — ${d.productName || ''}`),
+    unique_product_codes: amFamilies.length,
+    unique_product_names: uniqueNames.size,
+    product_codes_by_season: Object.fromEntries(Object.entries(years).sort()),
+    style_rows_by_category: Object.fromEntries(Object.entries(cats).sort((a, b) => b[1] - a[1]).slice(0, 15)),
+    codes_in_am_not_in_local_styles: [...amCodes].filter((c) => !localCodes.has(c)).length,
+    codes_in_local_styles_not_in_am: [...localCodes].filter((c) => !amCodes.has(c)).length,
+  };
+  const amIndex = buildFamilyIndex(amFamilies);
+  const localIndex = buildFamilyIndex(localFamilies);
+  const where = (phrase, index) => {
+    const toks = new Set(matchTokensOf(phrase));
+    const contains = index.filter((f) => [...toks].every((t) => f.matchSet.has(t))).slice(0, 10).map((f) => ({ product_code: f.product_code, name: f.product_name, colourways: f.colourways }));
+    const best = matchProductPhrase(phrase, index).map((c) => ({ product_code: c.family.product_code, name: c.family.product_name, kind: c.kind, confidence: c.confidence }));
+    return { contains_all_words: contains, closest: best };
+  };
+  out.probe_results = list.map((phrase) => {
+    const a = where(phrase, amIndex);
+    const l = where(phrase, localIndex);
+    return {
+      phrase,
+      found_in_apparelmagic: a.contains_all_words.length > 0,
+      apparelmagic: a,
+      found_in_local_styles: l.contains_all_words.length > 0,
+      local_styles: l,
+    };
+  });
+  return out;
+}
+const matchTokensOf = (text) => cleanProductPhrase(text).length ? require('./metaNameParsing').matchTokens(cleanProductPhrase(text)) : [];
 
 // ── Queue ───────────────────────────────────────────────────────────────
 const FILTERS = {
@@ -1615,6 +1848,9 @@ module.exports = {
   refreshSuggestions,
   refreshSuggestionsForAd,
   startBacklogReprocess,
+  startBacklogPreview,
+  getBacklogPreview,
+  catalogueCheck,
   stopBacklogReprocess,
   getBacklogStatus,
   HUMAN_OWNED_SQL,

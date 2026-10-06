@@ -919,7 +919,9 @@ function mmRenderBacklog(st) {
   }
   const last = j ? ` Last run ${j.state}: ${mmN(j.totals.evaluated)} evaluated, ${mmN(j.totals.errors)} errors${j.fatal_error ? ` — ${escapeHtml(j.fatal_error)}` : ''}.` : '';
   box.innerHTML = `<div class="mm-bl-idle"><b>${mmN(left)} ads</b> are still on older matching rules${protectedTxt}.${last}
+    <button type="button" class="btn btn-ghost btn-sm" id="mm-backlog-preview">Preview changes (dry run)</button>
     <button type="button" class="btn btn-primary btn-sm" id="mm-backlog-start">${j && j.state !== 'completed' ? 'Resume backlog processing' : 'Process backlog'}</button></div>`;
+  document.getElementById('mm-backlog-preview').addEventListener('click', mmStartPreview);
   document.getElementById('mm-backlog-start').addEventListener('click', async () => {
     if (!(await confirmDialog(`Run ${mmN(left)} historical ads through the current matching rules? Confirmed ads and any other human-owned state are never touched. It runs in the background, can be stopped, and picks up where it left off if interrupted.`, { okLabel: 'Process backlog' }))) return;
     try { await api('/meta-ad-matching/reprocess-backlog', { method: 'POST' }); mmLoadBacklog(); } catch (e) { toast(e.message, true); }
@@ -942,6 +944,48 @@ function loadMetaMatchingRowsOnly() {
   api(`/meta-ad-matching/queue?${qs}`).then(mmRenderRows).catch(() => {});
 }
 
+
+// Dry run: evaluates the stale ads with the current rules in memory and shows what WOULD change.
+async function mmStartPreview() {
+  const btn = document.getElementById('mm-backlog-preview');
+  if (btn) { btn.disabled = true; btn.textContent = 'Previewing…'; }
+  try {
+    await api('/meta-ad-matching/reprocess-backlog/preview', { method: 'POST', body: JSON.stringify({ scope: 'stale', samples: 25 }) });
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 1500));
+      const st = await api('/meta-ad-matching/reprocess-backlog/preview');
+      const pv = st.preview;
+      if (btn && pv) btn.textContent = `Previewing… ${mmN(pv.processed)} / ${mmN(pv.total)}`;
+      if (!st.running) { mmShowPreview(pv); break; }
+    }
+  } catch (e) { toast(e.message, true); }
+  if (btn) { btn.disabled = false; btn.textContent = 'Preview changes (dry run)'; }
+}
+const MM_PREVIEW_LABELS = {
+  auto_to_review: 'Auto-matched → Needs review', review_to_auto: 'Needs review → Auto-matched',
+  auto_to_different_auto: 'Auto-matched → DIFFERENT auto product', unchanged_auto: 'Unchanged auto-matched',
+  unchanged_review: 'Unchanged needs review / unmatched', protected: 'Protected / human-owned (skipped)', errors: 'Errors',
+};
+function mmShowPreview(pv) {
+  if (!pv) return;
+  const c = pv.counts;
+  const rows = Object.keys(MM_PREVIEW_LABELS).map((k) => `<tr><td>${escapeHtml(MM_PREVIEW_LABELS[k])}</td><td class="num"><b>${mmN(c[k])}</b></td></tr>`).join('');
+  const table = (cat) => {
+    const list = pv.pairs.filter((p) => p.category === cat);
+    if (!list.length) return '<div class="hint">None.</div>';
+    return `<table class="mp-table mm-pv-table"><thead><tr><th>Meta ad name (example)</th><th class="num">Ads</th><th>Old product</th><th>Proposed product</th><th>Old basis</th><th>Proposed basis / confidence</th></tr></thead><tbody>${
+      list.map((p) => `<tr><td title="${escapeHtml(p.example_ad_name || '')}">${escapeHtml((p.example_ad_name || '').slice(0, 70))}</td><td class="num">${mmN(p.count)}</td><td>${escapeHtml(p.old_product || '—')}</td><td>${p.proposed_product ? escapeHtml(p.proposed_product) : `<i>Needs review — ${escapeHtml(p.reason || '')}</i>`}</td><td>${escapeHtml(p.old_basis || '—')}</td><td>${escapeHtml(p.proposed_basis || '—')}</td></tr>`).join('')}</tbody></table>`;
+  };
+  document.getElementById('mm-preview-body').innerHTML = `
+    <div class="hint">Rules v${pv.rules_version} · ${mmN(pv.processed)} ads examined (${escapeHtml(pv.scope)}) · read-only: no ad, classification or suggestion was written.</div>
+    <table class="mp-table mm-pv-summary"><tbody>${rows}</tbody></table>
+    ${Object.keys(pv.protected_by_reason || {}).length ? `<div class="hint">Protected by reason: ${escapeHtml(JSON.stringify(pv.protected_by_reason))}</div>` : ''}
+    ${pv.error_samples.length ? `<div class="hint" style="color:var(--red)">Errors (sample): ${escapeHtml(JSON.stringify(pv.error_samples.slice(0, 3)))}</div>` : ''}
+    <h4>Auto-matched → DIFFERENT auto product</h4>${table('auto_to_different_auto')}
+    <h4>Auto-matched → Needs review</h4>${table('auto_to_review')}
+    <h4>Needs review → Auto-matched</h4>${table('review_to_auto')}`;
+  openModal('mm-preview-modal');
+}
 document.getElementById('mm-scope').addEventListener('change', (e) => {
   mmState.scope = e.target.value; mmState.page = 1; mmState.autoSuggested = false; loadMetaMatching();
 });
