@@ -13141,12 +13141,62 @@ function selectBfStage(stageId) {
   renderBfStageWorkspace();
 }
 
-// The primary Black Friday planning view (follow-up brief, items 3/4):
-// four stage tabs, each showing its creative-style guideline breakdown
-// directly -- never hidden behind a toggle. Every number is derived live
-// from real executions (progress.matrix / Needs Classification executions
-// loaded alongside it), never a stored counter and never a placeholder
-// record -- see the brief's explicit "do not create 180 placeholders".
+// The Black Friday stage workspace: each stage is a real creative-planning
+// space, not a report. It shows the stage target, how many creatives are
+// planned (only ones deliberately added to the CURRENT plan -- older planning
+// sheet records are kept but not counted), how many remain, the planned
+// creative cards and "+ Add Creative". Formats to consider are inspiration
+// chips only: no count, no quota, nothing generated from them.
+const BF_PLAN_STATUS_CLASS = { planning: 'planning', in_concept_dev: 'in-cd', ready: 'ready', completed: 'completed' };
+
+function bfPlanCardsForStage(stageId) {
+  const rows = [];
+  for (const idea of state.blackFriday.ideas) {
+    for (const ex of idea.executions || []) {
+      if (ex.promotion_stage_id === stageId && !ex.is_historical) rows.push({ idea, ex });
+    }
+  }
+  return rows.sort((a, b) => new Date(a.ex.plan_added_at || 0) - new Date(b.ex.plan_added_at || 0) || a.ex.id - b.ex.id);
+}
+
+function bfPlanKind({ idea, ex }) {
+  return ex.concept_kind || ((idea.inspiration || []).length ? 'tested' : 'new');
+}
+
+function bfPlanCardHtml(row) {
+  const { idea, ex } = row;
+  const kind = bfPlanKind(row);
+  const format = ex.creative_style_id ? bfFormatShortName((state.blackFriday.styles.find((x) => x.id === ex.creative_style_id) || {}).name || '') : '';
+  const evidence = kind === 'tested'
+    ? (state.blackFriday.inspiration.find((i) => i.id === ex.tested_inspiration_id) || (idea.inspiration || [])[0] || null)
+    : null;
+  const evidenceText = evidence ? [evidence.campaign_name, evidence.sale_stage_note, evidence.creator].filter(Boolean).join(' · ') : '';
+  const actions = [];
+  if (ex.shoot_plan_item_id && (ex.plan_status === 'in_concept_dev' || ex.plan_status === 'planning')) {
+    actions.push(`<button type="button" class="btn btn-primary btn-sm" onclick="openBfPlanInConceptDev(${ex.shoot_plan_item_id})">Open in Concept Dev &rarr;</button>`);
+  }
+  if (kind === 'tested' && !ex.effective_creative_asset_id) {
+    actions.push(`<button type="button" class="btn btn-ghost btn-sm" onclick="sendBfTestedPlanToProduction(${idea.id}, ${ex.id})">Send to production</button>`);
+  }
+  if (evidence && evidence.video_url) actions.push(`<a class="link-btn" href="${escapeHtml(evidence.video_url)}" target="_blank" rel="noopener">Previous ad</a>`);
+  actions.push(`<button type="button" class="link-btn" onclick="removeBfPlanItem(${ex.id})">Remove</button>`);
+  return `
+    <div class="bf-plan-card bf-plan-${BF_PLAN_STATUS_CLASS[ex.plan_status] || 'planning'}" data-exec-id="${ex.id}">
+      <div class="bf-plan-card-top">
+        <span class="bf-plan-kind ${kind}">${kind === 'tested' ? 'Tested' : 'New'}</span>
+        <span class="bf-plan-status ${BF_PLAN_STATUS_CLASS[ex.plan_status] || 'planning'}">${escapeHtml(ex.plan_status_label || 'Planning')}</span>
+      </div>
+      <div class="bf-plan-card-title">${escapeHtml(idea.title)}</div>
+      <div class="bf-plan-card-meta">
+        ${ex.product_text ? `<span class="bf-plan-product">${escapeHtml(ex.product_text)}</span>` : ''}
+        ${format ? `<span class="bf-format-chip small">${escapeHtml(format)}</span>` : ''}
+      </div>
+      ${ex.execution_note ? `<div class="bf-plan-card-note">${escapeHtml(ex.execution_note)}</div>` : ''}
+      ${evidenceText ? `<div class="bf-plan-card-evidence">Based on: ${escapeHtml(evidenceText)}</div>` : ''}
+      <div class="bf-plan-card-actions">${actions.join('')}</div>
+    </div>`;
+}
+
 function renderBfStageWorkspace() {
   const progress = state.blackFriday.progress;
   if (!progress) return;
@@ -13166,281 +13216,118 @@ function renderBfStageWorkspace() {
     return;
   }
 
-  // Every execution in this stage, newest-added last; the format is an optional label, never a requirement.
-  const inStage = [];
+  const cards = bfPlanCardsForStage(stageId);
+  const formats = stageTotal.formats_to_consider || [];
+  const historical = [];
   for (const idea of state.blackFriday.ideas) {
     for (const ex of idea.executions || []) {
-      if (ex.promotion_stage_id === stageId) inStage.push({ idea, ex });
+      if (ex.promotion_stage_id === stageId && ex.is_historical) historical.push({ idea, ex });
     }
   }
-  const formatLabel = (ex) => (ex.creative_style_id ? bfFormatShortName((state.blackFriday.styles.find((x) => x.id === ex.creative_style_id) || {}).name || '') : '');
-  const execRows = inStage.length
-    ? inStage.map((row) => `<div class="bf-exec-with-format">${formatLabel(row.ex) ? `<span class="bf-format-chip small">${escapeHtml(formatLabel(row.ex))}</span>` : '<span class="bf-format-chip small none">No format</span>'}${bfCellExecutionRowHtml(row)}</div>`).join('')
-    : '<div class="hint">Nothing planned for this stage yet. Use "+ Add Creative" to plan one.</div>';
-  const noFormat = inStage.filter(({ ex }) => !ex.creative_style_id);
-  const noFormatHtml = noFormat.length ? `
-    <div class="bf-style-row bf-style-row-unclassified">
-      <div class="bf-style-row-head">
-        <span class="bf-style-row-name">Optional: choose a format</span>
-        <span class="hint">${noFormat.length} planned creative${noFormat.length === 1 ? '' : 's'} without a format — they still count toward the stage target</span>
+  const historicalHtml = historical.length ? `
+    <details class="bf-historical-block">
+      <summary>Earlier planning records for this stage (${historical.length}) &mdash; kept for reference, not counted in the plan</summary>
+      <div class="bf-historical-list">
+        ${historical.map(({ idea, ex }) => `<div class="bf-historical-row"><button type="button" class="link-btn" onclick="openBfIdeaDetailModal(${idea.id})">${escapeHtml(idea.title)}</button><span class="hint">${escapeHtml(ex.production_stage_label)}</span></div>`).join('')}
       </div>
-      <div class="bf-unclassified-list">
-        ${noFormat.map(({ idea, ex }) => `
-          <div class="bf-unclassified-row">
-            <button type="button" class="link-btn bf-unclassified-title" onclick="openBfIdeaDetailModal(${idea.id})">${escapeHtml(idea.title)}</button>
-            <select onchange="classifyBfExecutionFromWorkspace(${idea.id}, ${ex.id}, this.value)">${bfStyleOptionsHtml('')}</select>
-          </div>`).join('')}
-      </div>
-    </div>` : '';
-  const formats = stageTotal.formats_to_consider || [];
+    </details>` : '';
 
   body.innerHTML = `
     <div class="bf-stage-workspace-summary">
-      <span>${escapeHtml(bfStageShortName(stageTotal.stage_name))} &mdash; <strong>${stageTotal.planned} / ${stageTotal.required}</strong> creatives planned &middot; ${stageTotal.completed} completed</span>
-      <span class="bf-style-row-status ${stageTotal.still_to_plan > 0 ? 'needs' : 'met'}">${bfRemainingText(stageTotal)}</span>
+      <span class="bf-stage-ws-line">${escapeHtml(bfStageShortName(stageTotal.stage_name))} &mdash; <strong>${stageTotal.planned} / ${stageTotal.required}</strong> planned &middot; ${bfRemainingText(stageTotal)}</span>
+      <button type="button" class="btn btn-primary btn-sm" onclick="openBfAddCreativeForActiveStage()">+ Add Creative</button>
     </div>
-    ${formats.length ? `<div class="bf-formats-block"><span class="bf-formats-label">Creative inspiration &mdash; formats to consider (optional)</span><div class="bf-format-chips">${bfFormatChipsHtml(formats)}</div></div>` : ''}
-    <div class="bf-stage-exec-list">${execRows}</div>
-    ${noFormatHtml}
+    ${formats.length ? `<div class="bf-formats-block"><span class="bf-formats-label">Formats to consider &mdash; inspiration only</span><div class="bf-format-chips">${bfFormatChipsHtml(formats)}</div></div>` : ''}
+    <div class="bf-plan-grid">
+      ${cards.length ? cards.map(bfPlanCardHtml).join('') : '<div class="hint bf-plan-empty">Nothing planned for this stage yet. Use "+ Add Creative" to plan the first one.</div>'}
+    </div>
+    ${historicalHtml}
   `;
 }
 
-
-// One compact row per real execution behind a Target/Planned count --
-// title, "Recreation" vs "New Concept" (only ever from a real linked
-// inspiration relationship -- never implies the 2026 piece itself is
-// proven/filmed), the execution's OWN current production status (derived
-// solely from its linked production record, never from the historical
-// reference), who's on it, and which historical winner inspired it where
-// one exists. A view of existing records only -- see the follow-up
-// brief's core distinction between a historical reference and a 2026
-// production status.
-function bfCellExecutionRowHtml({ idea, ex }) {
-  const isProven = (idea.inspiration || []).length > 0;
-  const winner = isProven ? idea.inspiration[0] : null;
-  const bucket = bfExecStatusBucket(ex);
-  return `
-    <div class="bf-cell-exec-row">
-      <div class="bf-cell-exec-main">
-        <span class="bf-cell-exec-title">${escapeHtml(idea.title)}</span>
-        <span class="bf-style-badge">${isProven ? 'Recreation' : 'New Concept'}</span>
-      </div>
-      <div class="bf-cell-exec-meta">
-        <span class="bf-status-badge ${bucket}">Status: ${escapeHtml(ex.production_stage_label)}</span>
-        ${idea.who ? `<span>${escapeHtml(idea.who)}</span>` : ''}
-        ${winner ? `<span>Inspired by ${escapeHtml(winner.campaign_name || winner.title)}</span>` : ''}
-      </div>
-      <div class="bf-cell-exec-actions">
-        <button type="button" class="link-btn" onclick="event.stopPropagation();openBfIdeaDetailModal(${idea.id})">View idea</button>
-        ${ex.effective_creative_asset_id ? `<button type="button" class="link-btn" onclick="event.stopPropagation();viewBfExecutionPipelineStatus(${idea.id}, ${ex.id})">${escapeHtml(ex.production_stage_label)} &rarr;</button>` : ''}
-      </div>
-    </div>`;
+function openBfPlanInConceptDev(shootPlanItemId) {
+  switchTab('concept-dev');
+  openConceptDevProductStandalone(shootPlanItemId);
 }
 
-// Execution-aware sibling of viewBfIdeaPipelineStatus -- an execution can
-// have its own separate asset (see the Recreate/override flow), so this
-// resolves the specific execution's effective asset rather than only the
-// master idea's shared one.
-function viewBfExecutionPipelineStatus(ideaId, execId) {
-  const idea = bfIdeaFindById(ideaId);
-  if (!idea) return;
-  const ex = (idea.executions || []).find((e) => e.id === execId);
-  if (!ex || !ex.effective_creative_asset_id) return;
-  if (ex.production_stage === 'concept_development' || ex.production_stage === 'tuesday_review') {
-    switchTab('concept-dev');
-    openConceptDevProductStandalone(ex.effective_creative_asset_id);
-  } else {
-    toast(`Currently in ${ex.production_stage_label} -- check the ${ex.production_stage_label} tab`);
-  }
-}
-
-async function classifyBfExecutionFromWorkspace(ideaId, execId, value) {
-  if (!value) return;
+async function removeBfPlanItem(execId) {
+  if (!confirm('Remove this creative from the plan? Any Concept Development record it created is kept.')) return;
   try {
-    const idea = await api(`/promotion-creative/ideas/${ideaId}/executions/${execId}`, { method: 'PATCH', body: JSON.stringify({ creative_style_id: Number(value) }) });
-    bfIdeaReplaceInState(idea);
-    await initBfProgressRefreshOnly();
-  } catch (e) {
-    toast(e.message, true);
-  }
-}
-
-// ---------------------------------------------------------------------
-// "+ Add Creative" -- New Concept vs Recreate a Proven Winner (follow-up
-// brief, items 10-12). Promotion/Stage/Creative Style are always known
-// from the style row the team clicked, so neither path ever re-asks for
-// them.
-// ---------------------------------------------------------------------
-function openBfAddCreativeModal(stageId, styleId, styleName) {
-  state.blackFriday.addCreativeContext = { stageId, styleId, styleName };
-  state.blackFriday.recreateShowAll = false;
-  document.getElementById('bf-add-creative-new-title').value = '';
-  document.getElementById('bf-add-creative-new-concept').value = '';
-  document.getElementById('bf-add-creative-new-who').value = '';
-  document.getElementById('bf-add-creative-new-where').value = '';
-  document.getElementById('bf-add-creative-new-reference').value = '';
-  document.getElementById('bf-recreate-search').value = '';
-  const pickerWrap = document.getElementById('bf-add-creative-style-picker-wrap');
-  if (styleId) {
-    pickerWrap.style.display = 'none';
-    document.getElementById('bf-add-creative-title').textContent = `Add Creative — ${styleName}`;
-  } else {
-    // Entered from the stage-level "+ Add Creative (other style)" button --
-    // no style is known yet, so the team picks one before either path.
-    pickerWrap.style.display = '';
-    document.getElementById('bf-add-creative-style-picker').innerHTML = bfStyleOptionsHtml('');
-    document.getElementById('bf-add-creative-title').textContent = 'Add Creative';
-  }
-  showBfAddCreativePanel('chooser');
-  openModal('bf-add-creative-modal');
-}
-
-function openBfAddCreativeForActiveStage() {
-  if (!state.blackFriday.activeStageId) return;
-  openBfAddCreativeModal(state.blackFriday.activeStageId, null, null);
-}
-
-function onBfAddCreativeStylePicked(value) {
-  const ctx = state.blackFriday.addCreativeContext;
-  ctx.styleId = value ? Number(value) : null;
-  const style = state.blackFriday.styles.find((s) => s.id === ctx.styleId);
-  ctx.styleName = style ? style.name : null;
-  document.getElementById('bf-add-creative-title').textContent = style ? `Add Creative — ${style.name}` : 'Add Creative';
-}
-
-function showBfAddCreativePanel(name) {
-  document.getElementById('bf-add-creative-panel-chooser').style.display = name === 'chooser' ? '' : 'none';
-  document.getElementById('bf-add-creative-panel-new').style.display = name === 'new' ? '' : 'none';
-  document.getElementById('bf-add-creative-panel-recreate').style.display = name === 'recreate' ? '' : 'none';
-}
-
-// The format is optional inspiration (Promotions V2): a creative can be planned without one.
-function chooseBfAddCreativeNew() {
-  showBfAddCreativePanel('new');
-}
-
-function chooseBfAddCreativeRecreate() {
-  showBfAddCreativePanel('recreate');
-  renderBfRecreatePicker();
-}
-
-// New Concept: always creates exactly one master idea + one stage
-// execution -- that alone is "Save as Planned" (follow-up brief, Part 4):
-// it counts toward Planned but creates no creative_assets/shoot_plan_items
-// row. Only when the team deliberately chooses "Save & Send to Concept
-// Development" does the SAME already-existing send-to-pipeline call run
-// afterward, using the SAME insertCreativeAsset/shoot_plan_items path
-// every other concept uses -- never a second/parallel workflow, and never
-// two master ideas or two executions for the one click.
-let bfSavingNewConcept = false;
-async function saveBfNewConceptFromWorkspace(sendToProduction) {
-  if (bfSavingNewConcept) return; // guards against a double-click creating two ideas
-  const ctx = state.blackFriday.addCreativeContext;
-  const title = document.getElementById('bf-add-creative-new-title').value.trim();
-  if (!title) return toast('Creative Idea is required', true);
-  const style = state.blackFriday.styles.find((s) => s.id === ctx.styleId);
-  const concept_script = document.getElementById('bf-add-creative-new-concept').value.trim();
-  const who = document.getElementById('bf-add-creative-new-who').value.trim();
-  const where_text = document.getElementById('bf-add-creative-new-where').value.trim();
-  const reference_note = document.getElementById('bf-add-creative-new-reference').value.trim();
-  bfSavingNewConcept = true;
-  try {
-    const idea = await api(`/promotion-creative/${state.currentPromotionId}/ideas`, {
-      method: 'POST',
-      body: JSON.stringify({
-        title, media_type: style ? style.media_type : 'video', stage_ids: [ctx.stageId], creative_style_id: ctx.styleId,
-        concept_script: concept_script || undefined, who: who || undefined, where_text: where_text || undefined, reference_note: reference_note || undefined,
-      }),
-    });
-    if (sendToProduction) {
-      await api(`/promotion-creative/ideas/${idea.id}/send-to-pipeline`, { method: 'POST' });
-      toast('Saved and sent to Concept Development');
-    } else {
-      toast('Saved as Planned');
-    }
-    closeModal('bf-add-creative-modal');
+    await api(`/promotion-creative/plan-items/${execId}`, { method: 'DELETE' });
+    toast('Removed from the plan');
     await loadBfIdeas();
     await initBfProgressRefreshOnly();
   } catch (e) {
     toast(e.message, true);
-  } finally {
-    bfSavingNewConcept = false;
   }
 }
 
-function bfRecreateSearchMatch(fields, query) {
+// Tested concepts skip Concept Development: the same "Recreate" route Black
+// Friday already uses (concept_origin = existing, straight to scheduling).
+async function sendBfTestedPlanToProduction(ideaId, execId) {
+  try {
+    await api(`/promotion-creative/ideas/${ideaId}/executions/${execId}/send-to-pipeline`, { method: 'POST', body: JSON.stringify({ production_route: 'recreate' }) });
+    toast('Sent to production');
+    await loadBfIdeas();
+    await initBfProgressRefreshOnly();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// ---------------------------------------------------------------------
+// "+ Add Creative" -- first question is always Tested or New.
+//   Tested: pick a previous winning ad (the evidence), then product + angle.
+//           Lightweight: it lands on the stage as a card, no Concept
+//           Development pass.
+//   New:    creates a Concept Development item linked to this stage and
+//           opens it in the proper Concept Development workflow.
+// The stage is always known from the tab, so it is never asked again.
+// ---------------------------------------------------------------------
+function openBfAddCreativeForActiveStage() {
+  if (!state.blackFriday.activeStageId) return;
+  state.blackFriday.addCreativeContext = { stageId: state.blackFriday.activeStageId, testedId: null };
+  ['bf-add-tested-search', 'bf-add-tested-product', 'bf-add-tested-note', 'bf-add-new-name', 'bf-add-new-idea', 'bf-add-new-product', 'bf-add-new-who', 'bf-add-new-note']
+    .forEach((id) => { document.getElementById(id).value = ''; });
+  document.getElementById('bf-add-tested-format').innerHTML = bfStyleOptionsHtml('');
+  document.getElementById('bf-add-new-format').innerHTML = bfStyleOptionsHtml('');
+  const stage = (state.currentPromotion.stages || []).find((s) => s.id === state.blackFriday.activeStageId);
+  document.getElementById('bf-add-creative-title').textContent = `Add Creative — ${stage ? bfStageShortName(stage.name) : ''}`;
+  showBfAddCreativePanel('chooser');
+  openModal('bf-add-creative-modal');
+}
+
+function showBfAddCreativePanel(name) {
+  ['chooser', 'tested-pick', 'tested-form', 'new'].forEach((p) => {
+    document.getElementById(`bf-add-creative-panel-${p}`).style.display = p === name ? '' : 'none';
+  });
+}
+
+function chooseBfAddCreativeTested() {
+  showBfAddCreativePanel('tested-pick');
+  renderBfTestedPicker();
+}
+
+function chooseBfAddCreativeNew() {
+  showBfAddCreativePanel('new');
+}
+
+function bfTestedSearchMatch(i, query) {
   if (!query) return true;
   const q = query.toLowerCase();
-  return fields.some((f) => f && String(f).toLowerCase().includes(q));
+  return [i.title, i.campaign_name, i.style_name, i.creator, i.sale_stage_note].some((f) => f && String(f).toLowerCase().includes(q));
 }
 
-// Recreate: pick either (a) one of the existing Proven Winner master ideas
-// that doesn't yet run in this stage -- adds an execution to it, no
-// duplicate master -- or (b) a historical winner not yet linked to any
-// 2026 idea -- creates a new master idea linked to that same inspiration
-// record (never a duplicate inspiration row). Contextually filtered by the
-// selected style's media type first (Relevant Results); everything else is
-// one click away via "Show All" or the search box (follow-up brief, Part
-// 2.1/2.2) -- nothing is ever permanently hidden.
-function renderBfRecreatePicker() {
-  const ctx = state.blackFriday.addCreativeContext;
-  const style = state.blackFriday.styles.find((s) => s.id === ctx.styleId);
-  const mediaType = style ? style.media_type : null;
-  const query = (document.getElementById('bf-recreate-search').value || '').trim();
-
-  const linkedInspirationIds = new Set();
-  const provenCandidates = [];
-  for (const idea of state.blackFriday.ideas) {
-    for (const insp of idea.inspiration || []) linkedInspirationIds.add(insp.id);
-    if (!idea.inspiration || !idea.inspiration.length) continue;
-    const hasStage = (idea.executions || []).some((e) => e.promotion_stage_id === ctx.stageId);
-    if (!hasStage) provenCandidates.push(idea);
-  }
-  const unlinkedHistorical = state.blackFriday.inspiration.filter((i) => !linkedInspirationIds.has(i.id));
-
-  const searchedIdeas = provenCandidates.filter((idea) => bfRecreateSearchMatch([idea.title, idea.who, idea.where_text], query));
-  const searchedHistorical = unlinkedHistorical.filter((i) => bfRecreateSearchMatch([i.title, i.campaign_name, i.style_name, i.creator, i.sale_stage_note], query));
-
-  const isRelevantIdea = (idea) => !mediaType || idea.media_type === mediaType;
-  const isRelevantHist = (i) => !mediaType || i.media_type === mediaType || i.media_type === 'mixed' || (style && i.style_name === style.name);
-
-  const showAll = state.blackFriday.recreateShowAll || !!query;
-  const ideasToShow = showAll ? searchedIdeas : searchedIdeas.filter(isRelevantIdea);
-  const histToShow = showAll ? searchedHistorical : searchedHistorical.filter(isRelevantHist);
-  const hiddenCount = (searchedIdeas.length - ideasToShow.length) + (searchedHistorical.length - histToShow.length);
-
-  const ideaRows = ideasToShow.map(bfRecreateIdeaRowHtml).join('');
-  const histGroups = groupHistoricalForPicker(histToShow).map(bfRecreateHistGroupHtml).join('');
-
-  document.getElementById('bf-recreate-picker-list').innerHTML = `
-    <div class="bf-recreate-list">
-      ${!showAll ? `<div class="bf-recreate-section-label">Relevant Results</div>` : ''}
-      ${ideaRows ? `<div class="bf-recreate-section-label">Existing Black Friday 2026 Ideas</div>${ideaRows}` : ''}
-      ${histGroups ? `<div class="bf-recreate-section-label">Previous Winners</div>${histGroups}` : ''}
-      ${!ideaRows && !histGroups ? `<div class="hint">${query ? 'No matches.' : 'Nothing relevant here yet.'}</div>` : ''}
-      ${!showAll && hiddenCount > 0 ? `<div class="bf-recreate-show-all"><button type="button" class="link-btn" onclick="state.blackFriday.recreateShowAll=true;renderBfRecreatePicker();">Show All Previous Winners (${hiddenCount} more)</button></div>` : ''}
-    </div>`;
+function renderBfTestedPicker() {
+  const query = (document.getElementById('bf-add-tested-search').value || '').trim();
+  const list = state.blackFriday.inspiration.filter((i) => bfTestedSearchMatch(i, query));
+  document.getElementById('bf-add-tested-list').innerHTML = list.length
+    ? `<div class="bf-recreate-list">${groupHistoricalForPicker(list).map(bfRecreateHistGroupHtml).join('')}</div>`
+    : `<div class="hint">${query ? 'No matches.' : 'No tested concepts in the Inspiration Library yet.'}</div>`;
 }
 
-function bfRecreateIdeaRowHtml(idea) {
-  const meta = [idea.media_type === 'graphic' ? 'Graphic' : 'Video', idea.who, 'existing idea'].filter(Boolean).join(' &middot; ');
-  return `
-    <div class="bf-recreate-row">
-      <div class="bf-recreate-row-body">
-        <div class="bf-recreate-row-title">${escapeHtml(idea.title)}</div>
-        <div class="bf-recreate-row-meta">${meta}</div>
-      </div>
-      <div class="bf-recreate-row-actions">
-        <button type="button" class="btn btn-primary btn-sm" onclick="recreateFromExistingIdea(${idea.id})">Use</button>
-      </div>
-    </div>`;
-}
-
-// Groups historical winners that share the exact same (trimmed,
-// case-insensitive) title -- presentation only, per the follow-up brief's
-// explicit "each historical record must remain its own underlying
-// inspiration record; if grouping cannot be done confidently, leave them
-// separate" (an exact-title match is the confident case).
+// Same exact-title grouping as the Inspiration Library -- presentation only;
+// every record stays its own underlying row.
 function groupHistoricalForPicker(records) {
   const groups = new Map();
   for (const r of records) {
@@ -13460,10 +13347,6 @@ function bfRecreateHistGroupHtml(group) {
     </div>`;
 }
 
-// One historical winner row -- title/campaign/stage/style/creator where
-// known (never invented), a safe provider-aware Play/Open Original, and a
-// Use action. Reuses the exact same preview logic as the Inspiration
-// Library -- a Facebook/Meta ad-preview link never gets a Play button.
 function bfRecreateHistRowHtml(i, showTitle) {
   const info = bfVideoPreviewInfo(i.video_url);
   const safeUrl = i.video_url ? escapeHtml(i.video_url).replace(/'/g, '&#39;') : '';
@@ -13474,7 +13357,7 @@ function bfRecreateHistRowHtml(i, showTitle) {
   const metaParts = [i.campaign_name, i.sale_stage_note, i.style_name].filter(Boolean).join(' &middot; ');
   const meta = [metaParts, i.creator].filter(Boolean).join(' &middot; ');
   return `
-    <div class="bf-recreate-row">
+    <div class="bf-recreate-row" data-inspiration-id="${i.id}">
       ${visual}
       <div class="bf-recreate-row-body">
         ${showTitle ? `<div class="bf-recreate-row-title">${escapeHtml(i.title)}</div>` : ''}
@@ -13482,62 +13365,60 @@ function bfRecreateHistRowHtml(i, showTitle) {
       </div>
       <div class="bf-recreate-row-actions">
         ${i.video_url ? `<a href="${escapeHtml(i.video_url)}" target="_blank" rel="noopener" class="link-btn" onclick="event.stopPropagation();">Open Original</a>` : ''}
-        <button type="button" class="btn btn-primary btn-sm" onclick="recreateFromHistorical(${i.id})">Use</button>
+        <button type="button" class="btn btn-primary btn-sm" onclick="selectBfTestedConcept(${i.id})">Select</button>
       </div>
     </div>`;
 }
 
-// Picking a proven winner only ever PLANS the 2026 recreation (follow-up
-// brief, Part 7) -- it never sends anything into production. The team
-// deliberately does that afterward from the idea's own "Send to Concept
-// Development" action, same as any other planned idea.
-let bfRecreateBusy = false;
-async function recreateFromExistingIdea(ideaId) {
-  if (bfRecreateBusy) return;
-  const ctx = state.blackFriday.addCreativeContext;
-  bfRecreateBusy = true;
-  try {
-    await api(`/promotion-creative/ideas/${ideaId}/executions`, {
-      method: 'POST',
-      body: JSON.stringify({ promotion_stage_id: ctx.stageId, creative_style_id: ctx.styleId }),
-    });
-    closeModal('bf-add-creative-modal');
-    toast('Planned -- review before sending to Concept Development');
-    await loadBfIdeas();
-    await initBfProgressRefreshOnly();
-    openBfIdeaModal(ideaId);
-  } catch (e) {
-    toast(e.message, true);
-  } finally {
-    bfRecreateBusy = false;
-  }
-}
-
-async function recreateFromHistorical(inspirationId) {
-  if (bfRecreateBusy) return;
-  const ctx = state.blackFriday.addCreativeContext;
+function selectBfTestedConcept(inspirationId) {
   const insp = state.blackFriday.inspiration.find((i) => i.id === inspirationId);
   if (!insp) return;
-  const style = state.blackFriday.styles.find((s) => s.id === ctx.styleId);
-  bfRecreateBusy = true;
-  try {
-    const idea = await api(`/promotion-creative/${state.currentPromotionId}/ideas`, {
-      method: 'POST',
-      body: JSON.stringify({
-        title: insp.title, media_type: style ? style.media_type : (insp.media_type === 'graphic' ? 'graphic' : 'video'),
-        who: insp.creator || '', stage_ids: [ctx.stageId], creative_style_id: ctx.styleId,
-      }),
+  state.blackFriday.addCreativeContext.testedId = inspirationId;
+  const meta = [insp.campaign_name, insp.sale_stage_note, insp.style_name, insp.creator].filter(Boolean).join(' · ');
+  document.getElementById('bf-add-tested-evidence').innerHTML = `
+    <div class="bf-recreate-row-title">${escapeHtml(insp.title)}</div>
+    ${meta ? `<div class="bf-recreate-row-meta">${escapeHtml(meta)}</div>` : ''}
+    ${insp.notes ? `<div class="bf-plan-card-note">${escapeHtml(insp.notes)}</div>` : ''}
+    ${insp.video_url ? `<a href="${escapeHtml(insp.video_url)}" target="_blank" rel="noopener" class="link-btn">Open previous ad</a>` : ''}`;
+  showBfAddCreativePanel('tested-form');
+}
+
+let bfAddingPlanItem = false;
+async function saveBfPlanItem(kind) {
+  if (bfAddingPlanItem) return; // a double-click must not plan two creatives
+  const ctx = state.blackFriday.addCreativeContext;
+  const val = (id) => document.getElementById(id).value.trim();
+  const body = { kind, stage_id: ctx.stageId };
+  if (kind === 'tested') {
+    if (!ctx.testedId) return toast('Choose a tested concept', true);
+    Object.assign(body, {
+      inspiration_id: ctx.testedId, product_text: val('bf-add-tested-product'), execution_note: val('bf-add-tested-note'),
+      creative_style_id: val('bf-add-tested-format') ? Number(val('bf-add-tested-format')) : null,
     });
-    await api(`/promotion-creative/ideas/${idea.id}/inspiration`, { method: 'POST', body: JSON.stringify({ creative_inspiration_id: inspirationId }) });
+  } else {
+    if (!val('bf-add-new-name')) return toast('Concept name is required', true);
+    Object.assign(body, {
+      concept_name: val('bf-add-new-name'), concept_script: val('bf-add-new-idea'), product_text: val('bf-add-new-product'),
+      who: val('bf-add-new-who'), execution_note: val('bf-add-new-note'),
+      creative_style_id: val('bf-add-new-format') ? Number(val('bf-add-new-format')) : null,
+    });
+  }
+  bfAddingPlanItem = true;
+  try {
+    const result = await api(`/promotion-creative/${state.currentPromotionId}/plan-items`, { method: 'POST', body: JSON.stringify(body) });
     closeModal('bf-add-creative-modal');
-    toast('Planned -- review before sending to Concept Development');
     await loadBfIdeas();
     await initBfProgressRefreshOnly();
-    openBfIdeaModal(idea.id);
+    if (kind === 'new' && result.shoot_plan_item_id) {
+      toast('Added — opening in Concept Development');
+      openBfPlanInConceptDev(result.shoot_plan_item_id);
+    } else {
+      toast('Added to the plan');
+    }
   } catch (e) {
     toast(e.message, true);
   } finally {
-    bfRecreateBusy = false;
+    bfAddingPlanItem = false;
   }
 }
 

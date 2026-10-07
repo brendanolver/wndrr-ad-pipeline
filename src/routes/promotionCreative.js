@@ -58,6 +58,18 @@ function deriveIdeaStage(concept, shootSchedule) {
   return 'concept_development';
 }
 
+// The four plan-card statuses the stage workspace shows. Derived from the
+// same production stage as everything else -- never stored: Planning (no
+// Concept Development record yet), In Concept Dev, Ready (approved and into
+// scheduling/shooting/editing), Completed.
+const PLAN_STATUS_LABELS = { planning: 'Planning', in_concept_dev: 'In Concept Dev', ready: 'Ready', completed: 'Completed' };
+function derivePlanStatus(productionStage) {
+  if (productionStage === 'completed') return 'completed';
+  if (productionStage === 'concept_development' || productionStage === 'tuesday_review') return 'in_concept_dev';
+  if (productionStage === 'planned') return 'planning';
+  return 'ready';
+}
+
 // One shared loader for every idea-list endpoint: master ideas + their
 // stage executions + each execution's EFFECTIVE linked concept's real
 // pipeline signals + inspiration links, all in a handful of batched
@@ -100,7 +112,7 @@ async function loadIdeasForPromotion(promotionId) {
   if (assetIds.size) {
     const idArray = [...assetIds];
     const conceptsResult = await pool.query(
-      `SELECT id, concept_name, status, concept_dev_status, editing_submitted_at, final_approval_status
+      `SELECT id, concept_name, status, concept_dev_status, editing_submitted_at, final_approval_status, shoot_plan_item_id
        FROM creative_assets WHERE id = ANY($1::int[])`,
       [idArray]
     );
@@ -159,6 +171,16 @@ async function loadIdeasForPromotion(promotionId) {
         production_stage: stage,
         production_stage_label: IDEA_STAGE_LABELS[stage],
         is_completed: stage === 'completed',
+        // Current-plan fields (see the workspace section of db/schema.sql).
+        is_historical: !!exec.is_historical,
+        concept_kind: exec.concept_kind || null,
+        tested_inspiration_id: exec.tested_inspiration_id || null,
+        product_text: exec.product_text || null,
+        execution_note: exec.execution_note || null,
+        plan_added_at: exec.plan_added_at || null,
+        shoot_plan_item_id: concept ? concept.shoot_plan_item_id : null,
+        plan_status: derivePlanStatus(stage),
+        plan_status_label: PLAN_STATUS_LABELS[derivePlanStatus(stage)],
       };
     });
     return {
@@ -476,8 +498,8 @@ router.post('/ideas/:id/executions/:execId/send-to-pipeline', async (req, res, n
     });
     const itemResult = await client.query(
       `INSERT INTO shoot_plan_items (product_code, product_name, stock_status, creator, initial_idea, asset_id, source, promotion_stage_id, week_start, created_by_user_id)
-       VALUES (NULL, NULL, 'in_office', $1, $2, $3, 'promotion', $4, date_trunc('week', now())::date, $5) RETURNING id`,
-      [exec.who || 'Unassigned', exec.concept_script || null, asset.id, exec.promotion_stage_id, req.user.id]
+       VALUES (NULL, $6, 'in_office', $1, $2, $3, 'promotion', $4, date_trunc('week', now())::date, $5) RETURNING id`,
+      [exec.who || 'Unassigned', exec.concept_script || exec.execution_note || null, asset.id, exec.promotion_stage_id, req.user.id, exec.product_text || null]
     );
     await client.query('UPDATE creative_assets SET shoot_plan_item_id = $1 WHERE id = $2', [itemResult.rows[0].id, asset.id]);
     await client.query('UPDATE promotion_creative_idea_executions SET linked_creative_asset_id = $1, updated_at = now() WHERE id = $2', [asset.id, req.params.execId]);
@@ -497,6 +519,135 @@ router.post('/ideas/:id/executions/:execId/send-to-pipeline', async (req, res, n
     next(err);
   } finally {
     client.release();
+  }
+});
+
+// ---------------------------------------------------------------------
+// Stage workspace plan items -- the ONLY way a creative joins the CURRENT
+// Black Friday plan and so counts toward a stage target. One plan item = one
+// master idea + one execution (plan_added_at set, is_historical false), so
+// every existing table, the derived pipeline status and the Concept
+// Development link are reused as they are.
+//   Tested Concept: a lightweight card pointing at a previous winning ad
+//     (creative_inspiration) with a product + angle note. No Concept
+//     Development item is created -- it can be sent straight to production
+//     later through the existing Recreate route.
+//   New Concept: also creates the Concept Development item (the same
+//     creative_assets + shoot_plan_items records Send to Pipeline makes) and
+//     links it to this stage, so the card follows it through the pipeline.
+// A format is optional inspiration only and never required.
+// ---------------------------------------------------------------------
+router.post('/:promotionId/plan-items', async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const promotionId = Number(req.params.promotionId);
+    const {
+      stage_id, kind, concept_name, inspiration_id, product_text, execution_note, concept_script, who, creative_style_id,
+    } = req.body || {};
+    if (!['tested', 'new'].includes(kind)) return res.status(400).json({ error: 'kind must be tested or new' });
+    const stageCheck = await client.query('SELECT id FROM promotion_stages WHERE id = $1 AND promotion_id = $2', [stage_id, promotionId]);
+    if (!stageCheck.rows.length) return res.status(400).json({ error: 'stage_id does not belong to this promotion' });
+
+    let style = null;
+    if (creative_style_id) {
+      const styleResult = await client.query('SELECT id, media_type FROM creative_styles WHERE id = $1', [creative_style_id]);
+      if (!styleResult.rows.length) return res.status(400).json({ error: 'creative_style_id does not reference a real format' });
+      style = styleResult.rows[0];
+    }
+
+    let title;
+    let mediaType = style ? style.media_type : 'video';
+    let creator = who && who.trim() ? who.trim() : null;
+    let inspiration = null;
+    if (kind === 'tested') {
+      if (!inspiration_id) return res.status(400).json({ error: 'Choose the tested concept to reuse' });
+      const inspResult = await client.query('SELECT * FROM creative_inspiration WHERE id = $1', [inspiration_id]);
+      if (!inspResult.rows.length) return res.status(400).json({ error: 'inspiration_id does not reference a real tested concept' });
+      inspiration = inspResult.rows[0];
+      title = inspiration.title;
+      if (!style && ['graphic', 'video'].includes(inspiration.media_type)) mediaType = inspiration.media_type;
+      if (!creator) creator = inspiration.creator || null;
+    } else {
+      if (!concept_name || !concept_name.trim()) return res.status(400).json({ error: 'Concept name is required' });
+      title = concept_name.trim();
+    }
+    const product = product_text && product_text.trim() ? product_text.trim().slice(0, 255) : null;
+    const note = execution_note && execution_note.trim() ? execution_note.trim() : null;
+
+    await client.query('BEGIN');
+    const ideaResult = await client.query(
+      `INSERT INTO promotion_creative_ideas (promotion_id, title, who, concept_script, media_type, created_by_user_id)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+      [promotionId, title, creator, concept_script && concept_script.trim() ? concept_script.trim() : null, mediaType, req.user.id]
+    );
+    const ideaId = ideaResult.rows[0].id;
+    if (inspiration) {
+      await client.query(
+        `INSERT INTO promotion_creative_idea_inspirations (promotion_creative_idea_id, creative_inspiration_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
+        [ideaId, inspiration.id]
+      );
+    }
+    const execResult = await client.query(
+      `INSERT INTO promotion_creative_idea_executions
+         (promotion_creative_idea_id, promotion_stage_id, creative_style_id, is_historical, plan_added_at, plan_added_by_user_id,
+          concept_kind, tested_inspiration_id, product_text, execution_note)
+       VALUES ($1,$2,$3,false,now(),$4,$5,$6,$7,$8) RETURNING id`,
+      [ideaId, stage_id, style ? style.id : null, req.user.id, kind, inspiration ? inspiration.id : null, product, note]
+    );
+    const execId = execResult.rows[0].id;
+
+    let shootPlanItemId = null;
+    if (kind === 'new') {
+      const asset = await insertCreativeAsset(client, {
+        concept_name: title,
+        format: mediaType === 'graphic' ? 'static' : 'video',
+        status: 'awaiting_concept_development',
+        created_by_user_id: req.user.id,
+      });
+      const itemResult = await client.query(
+        `INSERT INTO shoot_plan_items (product_code, product_name, stock_status, creator, initial_idea, asset_id, source, promotion_stage_id, week_start, created_by_user_id)
+         VALUES (NULL, $1, 'in_office', $2, $3, $4, 'promotion', $5, date_trunc('week', now())::date, $6) RETURNING id`,
+        [product, creator || 'Unassigned', [concept_script, note].filter((x) => x && x.trim()).join('\n\n') || null, asset.id, stage_id, req.user.id]
+      );
+      shootPlanItemId = itemResult.rows[0].id;
+      await client.query('UPDATE creative_assets SET shoot_plan_item_id = $1 WHERE id = $2', [shootPlanItemId, asset.id]);
+      await client.query('UPDATE promotion_creative_idea_executions SET linked_creative_asset_id = $1 WHERE id = $2', [asset.id, execId]);
+    }
+    await client.query('COMMIT');
+
+    const idea = await loadOneIdea(promotionId, ideaId);
+    res.status(201).json({ idea, execution_id: execId, shoot_plan_item_id: shootPlanItemId });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    next(err);
+  } finally {
+    client.release();
+  }
+});
+
+// Removes ONE creative from the current plan (so its planned count drops).
+// Only deliberately-added plan items can be removed here -- a historical
+// record is never deleted through this route. The master idea goes with it
+// only when this was its sole execution; a linked Concept Development
+// record (creative_assets/shoot_plan_items) is never touched.
+router.delete('/plan-items/:execId', async (req, res, next) => {
+  try {
+    const execResult = await pool.query(
+      `SELECT id, promotion_creative_idea_id, is_historical, plan_added_at FROM promotion_creative_idea_executions WHERE id = $1`,
+      [req.params.execId]
+    );
+    if (!execResult.rows.length) return res.status(404).json({ error: 'Plan item not found' });
+    const exec = execResult.rows[0];
+    if (exec.is_historical || !exec.plan_added_at) return res.status(400).json({ error: 'Historical planning records cannot be removed from here' });
+    await pool.query('DELETE FROM promotion_creative_idea_executions WHERE id = $1', [exec.id]);
+    await pool.query(
+      `DELETE FROM promotion_creative_ideas pci WHERE pci.id = $1
+         AND NOT EXISTS (SELECT 1 FROM promotion_creative_idea_executions e WHERE e.promotion_creative_idea_id = pci.id)`,
+      [exec.promotion_creative_idea_id]
+    );
+    res.status(204).end();
+  } catch (err) {
+    next(err);
   }
 });
 
@@ -566,8 +717,15 @@ router.get('/:promotionId/progress', async (req, res, next) => {
     }
 
     let needsClassificationCount = 0;
+    const historicalByStage = new Map();
     for (const idea of ideas) {
       for (const exec of idea.executions) {
+        // Older planning-sheet records are preserved but are NOT the current
+        // plan -- only a creative someone deliberately added counts.
+        if (exec.is_historical) {
+          historicalByStage.set(exec.promotion_stage_id, (historicalByStage.get(exec.promotion_stage_id) || 0) + 1);
+          continue;
+        }
         if (!stageTotalsMap.has(exec.promotion_stage_id)) {
           stageTotalsMap.set(exec.promotion_stage_id, {
             promotion_stage_id: exec.promotion_stage_id, stage_name: exec.stage_name, stage_sort_order: exec.stage_sort_order,
@@ -625,6 +783,7 @@ router.get('/:promotionId/progress', async (req, res, next) => {
       ...s,
       still_to_plan: Math.max(0, s.required - s.planned),
       over_target: Math.max(0, s.planned - s.required),
+      historical_records: historicalByStage.get(s.promotion_stage_id) || 0,
       formats_to_consider: formatsByStage.get(s.promotion_stage_id) || [],
     })).sort((a, b) => a.stage_sort_order - b.stage_sort_order);
 

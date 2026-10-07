@@ -2650,3 +2650,30 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .cp-low-size{background:var(--amber-light);font-weight:700;}
 .cp-warn{color:#92400e;font-weight:700;}
 .cp-stock-unavail{margin:10px 0;}
+
+/* Black Friday stage workspace: planned-creative cards (Promotions workspace round) */
+.bf-stage-workspace-summary{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px;}
+.bf-stage-ws-line{font-size:15px;}
+.bf-plan-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px;margin-top:12px;}
+.bf-plan-empty{grid-column:1/-1;padding:18px;text-align:center;background:var(--surface2);border-radius:var(--r);}
+.bf-plan-card{background:var(--surface2);border-radius:var(--r);padding:12px 14px;display:flex;flex-direction:column;gap:6px;border-left:4px solid var(--border);}
+.bf-plan-card.bf-plan-in-cd{border-left-color:#b9770e;}
+.bf-plan-card.bf-plan-ready{border-left-color:#2e7d32;}
+.bf-plan-card.bf-plan-completed{border-left-color:#1b5e20;opacity:.85;}
+.bf-plan-card-top{display:flex;justify-content:space-between;align-items:center;gap:8px;}
+.bf-plan-kind,.bf-plan-status{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:2px 8px;border-radius:999px;background:var(--surface);}
+.bf-plan-kind.tested{color:#1565c0;}
+.bf-plan-kind.new{color:#6a1b9a;}
+.bf-plan-status.in-cd{color:#b9770e;}
+.bf-plan-status.ready,.bf-plan-status.completed{color:#2e7d32;}
+.bf-plan-card-title{font-weight:700;font-size:15px;}
+.bf-plan-card-meta{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12.5px;}
+.bf-plan-product{font-weight:600;}
+.bf-plan-card-note{font-size:12.5px;color:var(--text-muted,inherit);white-space:pre-wrap;}
+.bf-plan-card-evidence{font-size:12px;opacity:.75;}
+.bf-plan-card-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:4px;}
+.bf-historical-block{margin-top:18px;font-size:13px;}
+.bf-historical-block summary{cursor:pointer;opacity:.75;}
+.bf-historical-list{display:flex;flex-direction:column;gap:4px;margin-top:8px;}
+.bf-historical-row{display:flex;justify-content:space-between;gap:8px;}
+.bf-add-evidence{background:var(--surface2);border-radius:var(--r);padding:10px 12px;margin-bottom:10px;}

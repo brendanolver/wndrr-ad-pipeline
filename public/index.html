@@ -623,7 +623,6 @@
           <div id="bf-stage-workspace" style="display:none;">
             <div class="planning-section-header">
               <h2>Stage Workspace</h2>
-              <button type="button" class="btn btn-ghost btn-sm" onclick="openBfAddCreativeForActiveStage()">+ Add Creative</button>
             </div>
             <div class="bf-stage-tabs" id="bf-stage-tabs"></div>
             <div id="bf-stage-workspace-body"></div>
@@ -3313,12 +3312,11 @@
   </div>
 </div>
 
-<!-- Black Friday Stage Workspace's "+ Add Creative" -- New Concept vs
-     Recreate a Proven Winner (see the follow-up brief, items 10-12).
-     Promotion/Stage/Creative Style are always known from where the team
-     clicked, so neither path ever asks for them again. Three panels
-     swapped in place rather than three separate modals -- see
-     openBfAddCreativeModal/showBfAddCreativePanel in app.js. -->
+<!-- Black Friday Stage Workspace "+ Add Creative": first question is Tested
+     or New. Tested = pick a previous winning ad, then product + angle -- no
+     Concept Development pass. New = creates a Concept Development item linked
+     to the stage and opens it. The stage is known from the tab. Panels are
+     swapped in place (see openBfAddCreativeForActiveStage in app.js). -->
 <div id="bf-add-creative-modal" class="modal-backdrop">
   <div class="modal promo-chooser-modal bf-add-creative-modal-box">
     <div class="modal-header">
@@ -3326,56 +3324,66 @@
       <button class="modal-close" onclick="closeModal('bf-add-creative-modal')">&times;</button>
     </div>
     <div class="modal-body">
-      <!-- Only shown when opened without a specific style (the stage-level
-           "+ Add Creative (other style)" entry point) -- every other entry
-           point already knows the style from the card the team clicked. -->
-      <div id="bf-add-creative-style-picker-wrap" style="display:none;">
-        <label>Format <span class="hint">(optional — inspiration only)</span>
-          <select id="bf-add-creative-style-picker" onchange="onBfAddCreativeStylePicked(this.value)"></select>
-        </label>
-      </div>
       <div id="bf-add-creative-panel-chooser">
         <div class="hint">What are you adding?</div>
         <div class="promo-chooser-options">
+          <button type="button" class="promo-chooser-card" onclick="chooseBfAddCreativeTested()">
+            <span class="promo-chooser-card-title">Tested Concept</span>
+            <span class="promo-chooser-card-desc">Reuse a concept that has already run &mdash; pick the previous ad, product and angle</span>
+          </button>
           <button type="button" class="promo-chooser-card" onclick="chooseBfAddCreativeNew()">
             <span class="promo-chooser-card-title">New Concept</span>
-            <span class="promo-chooser-card-desc">Develop a brand new creative idea</span>
+            <span class="promo-chooser-card-desc">Develop a brand new idea in Concept Development</span>
           </button>
-          <button type="button" class="promo-chooser-card" onclick="chooseBfAddCreativeRecreate()">
-            <span class="promo-chooser-card-title">Recreate a Proven Winner</span>
-            <span class="promo-chooser-card-desc">Adapt an existing idea or a previous winning ad</span>
-          </button>
+        </div>
+      </div>
+      <div id="bf-add-creative-panel-tested-pick" style="display:none;">
+        <input type="text" id="bf-add-tested-search" class="bf-recreate-search" placeholder="Search tested concepts by title, campaign, format, creator..." oninput="renderBfTestedPicker()">
+        <div id="bf-add-tested-list"></div>
+        <div class="modal-footer" style="padding:12px 0 0;">
+          <button class="btn btn-ghost" onclick="showBfAddCreativePanel('chooser')">&larr; Back</button>
+        </div>
+      </div>
+      <div id="bf-add-creative-panel-tested-form" style="display:none;">
+        <div id="bf-add-tested-evidence" class="bf-add-evidence"></div>
+        <label>Product / product group
+          <input type="text" id="bf-add-tested-product" placeholder="e.g. Rugs, Olive Linen Dress">
+        </label>
+        <label>Variation / angle / execution note
+          <textarea id="bf-add-tested-note" rows="2" placeholder="What is different this time?"></textarea>
+        </label>
+        <label>Format <span class="hint">(optional &mdash; inspiration only)</span>
+          <select id="bf-add-tested-format"></select>
+        </label>
+        <div class="modal-footer" style="padding:12px 0 0;">
+          <button class="btn btn-ghost" onclick="showBfAddCreativePanel('tested-pick')">&larr; Back</button>
+          <button class="btn btn-primary" onclick="saveBfPlanItem('tested')">Add to stage</button>
         </div>
       </div>
       <div id="bf-add-creative-panel-new" style="display:none;">
-        <label>Creative Idea<span class="cd-req-mark">*</span>
-          <input type="text" id="bf-add-creative-new-title" placeholder="e.g. New Hype teaser">
+        <label>Concept name<span class="cd-req-mark">*</span>
+          <input type="text" id="bf-add-new-name" placeholder="e.g. Hype teaser">
         </label>
-        <label>Concept / What
-          <textarea id="bf-add-creative-new-concept" rows="2" placeholder="What's the idea?"></textarea>
+        <label>Idea
+          <textarea id="bf-add-new-idea" rows="2" placeholder="What's the idea?"></textarea>
         </label>
         <div class="promo-shoot-2col">
-          <label>Who
-            <input type="text" id="bf-add-creative-new-who" placeholder="e.g. Mark">
+          <label>Product / product group
+            <input type="text" id="bf-add-new-product" placeholder="e.g. Rugs">
           </label>
-          <label>Where
-            <input type="text" id="bf-add-creative-new-where" placeholder="e.g. Studio">
+          <label>Who
+            <input type="text" id="bf-add-new-who" placeholder="e.g. Mark">
           </label>
         </div>
-        <label>Inspiration / Reference URL
-          <input type="text" id="bf-add-creative-new-reference" placeholder="https://...">
+        <label>Angle / execution note
+          <textarea id="bf-add-new-note" rows="2"></textarea>
+        </label>
+        <label>Format <span class="hint">(optional &mdash; inspiration only)</span>
+          <select id="bf-add-new-format"></select>
         </label>
         <div class="modal-footer" style="padding:12px 0 0;">
           <button class="btn btn-ghost" onclick="showBfAddCreativePanel('chooser')">&larr; Back</button>
-          <button class="btn btn-ghost" onclick="saveBfNewConceptFromWorkspace(false)">Save as Planned</button>
-          <button class="btn btn-primary" onclick="saveBfNewConceptFromWorkspace(true)">Save &amp; Send to Concept Development</button>
-        </div>
-      </div>
-      <div id="bf-add-creative-panel-recreate" style="display:none;">
-        <input type="text" id="bf-recreate-search" class="bf-recreate-search" placeholder="Search by title, campaign, style, creator..." oninput="renderBfRecreatePicker()">
-        <div id="bf-recreate-picker-list"></div>
-        <div class="modal-footer" style="padding:12px 0 0;">
-          <button class="btn btn-ghost" onclick="showBfAddCreativePanel('chooser')">&larr; Back</button>
+          <button class="btn btn-primary" onclick="saveBfPlanItem('new')">Create &amp; open in Concept Development</button>
         </div>
       </div>
     </div>
