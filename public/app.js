@@ -957,8 +957,8 @@ const mmState = {
   reqId: 0, autoSuggested: false, options: null,
 };
 const MM_FILTERS = [
-  ['needs', 'To do'], ['suggested', 'Needs review'], ['unmatched', 'Unmatched'], ['auto', 'Auto-matched'],
-  ['confirmed', 'Confirmed'], ['not_product_specific', 'Not product-specific'], ['excluded', 'Excluded'],
+  ['needs', 'To do'], ['suggested', 'Needs review'], ['unmatched', 'Unmatched'], ['matched', 'Matched'],
+  ['not_product_specific', 'Not product-specific'], ['excluded', 'Excluded'],
 ];
 
 function loadMetaPerformanceArea() {
@@ -1385,6 +1385,7 @@ function renderCorePlan() {
       <span><b>${c.recommendations}</b> worth acting on</span>
       <span>${c.hold} on hold</span>
       <span>${c.held_low_stock} held back (low stock)</span>
+      ${c.stock_unavailable ? `<span class="cp-warn">${c.stock_unavailable} withheld (stock unavailable)</span>` : ''}
       <span>${c.no_action} need no action</span>
       <span class="co-subnav" id="cp-state-nav" role="tablist">
         <button type="button" class="co-subnav-btn ${f === 'active' ? 'active' : ''}" data-cp-state="active">To act on</button>
@@ -1392,10 +1393,11 @@ function renderCorePlan() {
         <button type="button" class="co-subnav-btn ${f === 'dismissed' ? 'active' : ''}" data-cp-state="dismissed">Dismissed</button>
       </span>
     </div>
-    <div class="co-list">${shown.length ? shown.map(cpCardHtml).join('') : `<div class="co-empty">${f === 'active' ? (ds.sales.available && ds.stock.available ? 'Nothing needs a shoot right now.' : 'Waiting for data to load.') : 'Nothing here.'}</div>`}</div>
+    <div class="co-list">${shown.length ? shown.map(cpCardHtml).join('') : `<div class="co-empty">${f === 'active' ? (ds.sales.available && ds.stock.available ? (c.stock_unavailable ? 'Nothing can be recommended until stock is available for some products (see below).' : 'Nothing needs a shoot right now.') : 'Waiting for data to load.') : 'Nothing here.'}</div>`}</div>
     ${f === 'active' && list.length > CP_VISIBLE ? `<button type="button" class="btn btn-ghost btn-sm" id="cp-show-all">${cpState.showAll ? 'Show fewer' : `Show ${list.length - CP_VISIBLE} more`}</button>` : ''}
     ${f === 'active' && d.hold.length ? `<h4 class="cp-h">Hold off — don't shoot more yet</h4><div class="co-list">${d.hold.map(cpCardHtml).join('')}</div>` : ''}
-    ${f === 'active' && low.length ? `<details class="co-how"><summary>Not recommended: low stock (${low.length})</summary><div class="cp-low">${low.map((p) => `<div><b>${escapeHtml(p.product_name)}</b> — ${p.known ? `${cpNum(p.units)} units` : 'stock unknown'}${p.would_have_been ? ` <span class="hint">(would otherwise suggest: ${escapeHtml(p.would_have_been)})</span>` : ''}</div>`).join('')}</div></details>` : ''}
+    ${f === 'active' && d.stock_unavailable.length ? `<div class="co-banner cp-stock-unavail"><b>Stock unavailable — recommendation withheld (${d.stock_unavailable.length})</b><div class="cp-low">${d.stock_unavailable.map((p) => `<div><b>${escapeHtml(p.product_name)}</b> — ${p.reason === 'no_stock_record' ? 'no inventory record in ApparelMagic' : 'stock data not loaded'}${p.would_have_been ? ` <span class="hint">(would otherwise suggest: ${escapeHtml(p.would_have_been)})</span>` : ''}</div>`).join('')}</div><div class="hint">This is a data problem, not low stock: these products are not shown as shoot recommendations until their stock can be read.</div></div>` : ''}
+    ${f === 'active' && low.length ? `<details class="co-how"><summary>Not recommended: low stock (${low.length})</summary><div class="cp-low">${low.map((p) => `<div><b>${escapeHtml(p.product_name)}</b> — ${cpNum(p.units)} units${p.would_have_been ? ` <span class="hint">(would otherwise suggest: ${escapeHtml(p.would_have_been)})</span>` : ''}</div>`).join('')}</div></details>` : ''}
     ${f === 'active' && d.no_action.length ? `<details class="co-how"><summary>No action needed (${d.no_action.length})</summary><div class="cp-low hint">${d.no_action.map(escapeHtml).join(' · ')}</div></details>` : ''}
     <details class="co-how"><summary>About this data</summary><ul class="co-how-list">${notes.map((n) => `<li>${escapeHtml(n)}</li>`).join('')}</ul></details>`;
 }

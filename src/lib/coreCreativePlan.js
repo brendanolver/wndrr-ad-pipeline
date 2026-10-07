@@ -109,8 +109,13 @@ function sizeHealth(run, z = cfg.SIZE) {
 }
 
 // stock: Map(style -> qty) | null (unknown); sizesByStyle: Map(style -> Map(size -> qty)) | null
+// Stock is UNAVAILABLE (known:false) when the stock data hasn't loaded, or when ApparelMagic has no
+// inventory record at all for any of the family's styles -- that is a data problem, not "0 units", and
+// is reported separately from genuine low stock (units < the minimum).
 function familyStock(f, stock, sizesByStyle, preferredSizes) {
-  if (!stock) return { known: false, units: null, pass: false, size: { available: false, level: null, warning: null, run: [] } };
+  const noSize = { available: false, level: null, warning: null, run: [] };
+  if (!stock) return { known: false, units: null, pass: false, reason: 'stock_not_loaded', size: noSize };
+  if (!f.style_codes.some((sc) => stock.has(sc))) return { known: false, units: null, pass: false, reason: 'no_stock_record', size: noSize };
   let units = 0;
   const sizeMap = new Map();
   f.style_codes.forEach((sc) => {
@@ -298,6 +303,7 @@ function buildPlan({ families, codeToFamily, snapshot, demand, stock, sizesBySty
   const benchmarkCpa = concepts.benchmark.cpa;
 
   const heldLowStock = [];
+  const stockUnavailable = [];
   const noAction = [];
   const cards = [];
   const stockByFamily = new Map();
@@ -311,7 +317,9 @@ function buildPlan({ families, codeToFamily, snapshot, demand, stock, sizesBySty
     const rec = recommendFamily({ family: f, ps, facts, stock: st, benchmarkCpa, salesAvailable });
     if (!rec) { noAction.push(f.name); return; }
     if (rec.type === 'hold') { cards.push(rec); return; } // a "do not shoot" insight: not a shoot recommendation, so the gate doesn't apply
-    if (!st.pass) { heldLowStock.push({ product_code: f.product_code, product_name: f.name, units: st.units, known: st.known, would_have_been: rec.headline }); return; }
+    // Only a KNOWN count under the minimum is "low stock"; no count at all is "stock unavailable".
+    if (!st.known) { stockUnavailable.push({ product_code: f.product_code, product_name: f.name, reason: st.reason, would_have_been: rec.headline }); return; }
+    if (!st.pass) { heldLowStock.push({ product_code: f.product_code, product_name: f.name, units: st.units, known: true, would_have_been: rec.headline }); return; }
     cards.push(rec);
   });
 
@@ -360,11 +368,13 @@ function buildPlan({ families, codeToFamily, snapshot, demand, stock, sizesBySty
     dismissed: split.dismissed.sort(sortFn),
     acted_on: split.acted_on.sort(sortFn),
     held_low_stock: heldLowStock.sort((a, b) => (b.units || 0) - (a.units || 0) || a.product_name.localeCompare(b.product_name)),
+    stock_unavailable: stockUnavailable.sort((a, b) => a.product_name.localeCompare(b.product_name)),
     no_action: noAction.sort(),
     counts: {
       core_products: families.length,
       eligible: families.filter((f) => stockByFamily.get(f.key) && stockByFamily.get(f.key).pass).length,
       held_low_stock: heldLowStock.length,
+      stock_unavailable: stockUnavailable.length,
       recommendations: active.filter((c) => c.type !== 'hold').length,
       hold: active.filter((c) => c.type === 'hold').length,
       no_action: noAction.length,
@@ -473,7 +483,7 @@ async function computePlan({ now = new Date(), isAdmin = false } = {}, deps = {}
     ...plan,
     data_status: {
       catalogue: true,
-      stock: { available: !!stockObj, note: stockObj ? null : 'Stock has not loaded yet, so no shoot can be recommended until it does.' },
+      stock: { available: !!stockObj, note: stockObj ? null : 'Stock has not loaded yet: recommendations are withheld until it does.', unavailable_products: plan.stock_unavailable.length },
       sizes: { available: !!stockObj && !!sizeField, note: stockObj && !sizeField ? 'ApparelMagic did not expose stock by size, so size warnings are off.' : null },
       sales: { available: salesAvailable, note: salesAvailable ? null : `${(demand && demand.reason) || 'Sales data unavailable'}: sales-based recommendations are paused.` },
       meta: {
