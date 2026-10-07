@@ -36,6 +36,43 @@ const { pool } = require('../db');
 
 const METHOD = 'creative_inherited';
 const ELIGIBLE_STATUSES = ['unmatched', 'suggested', 'auto_matched'];
+const STATUS_LIST_SQL = ELIGIBLE_STATUSES.map((x) => `'${x}'`).join(', ');
+
+// THE inheritance-eligibility rule -- the single definition used by the Apply action (applyToAd /
+// previewGroup), the Review workload panel and the queue counts, so they can never disagree about which
+// ads will take a creative's classification. Aliases: m = meta_ads, c = meta_ad_classifications (LEFT JOIN).
+// An ad is eligible when its status is unmatched / suggested / auto_matched AND no person owns it (the
+// matcher's HUMAN_OWNED_SQL: confirmed, excluded, manually confirmed, linked to an Ad Setup, skipped,
+// human-classified incl. a creative style or partial values) AND no person has rejected/cleared it.
+function eligibleSql(humanOwnedSql) {
+  return `(m.match_status IN (${STATUS_LIST_SQL}) AND (${humanOwnedSql}) IS NULL AND c.auto_match_blocked_at IS NULL)`;
+}
+// Why an ad is NOT eligible (NULL when it is).
+function ineligibleReasonSql(humanOwnedSql) {
+  return `(CASE WHEN m.match_status NOT IN (${STATUS_LIST_SQL}) THEN 'confirmed'
+                WHEN (${humanOwnedSql}) IS NOT NULL THEN (${humanOwnedSql})
+                WHEN c.auto_match_blocked_at IS NOT NULL THEN 'rejected_by_person' END)`;
+}
+
+// Creatives whose HUMAN-confirmed ads disagree (product set / "not product-specific" decision / concept).
+// SQL twin of evaluateGroup's conflict test (kept side by side so they cannot drift; the suites check parity).
+const CONFLICT_SELECT = `
+    SELECT m.meta_creative_id,
+           count(DISTINCT (COALESCE(c.not_product_specific, false)::text || '|' ||
+                           COALESCE((SELECT string_agg(p.product_code, ',' ORDER BY p.product_code) FROM meta_ad_products p WHERE p.meta_ad_id = m.meta_ad_id), ''))) AS psigs,
+           count(DISTINCT NULLIF(lower(btrim(COALESCE(c.concept_label, ''))), '')) AS csigs
+      FROM meta_ads m JOIN meta_ad_classifications c ON c.meta_ad_id = m.meta_ad_id
+     WHERE m.meta_creative_id IS NOT NULL AND m.match_status = 'confirmed' AND NOT COALESCE(c.excluded_from_intelligence, false)
+     GROUP BY m.meta_creative_id`;
+
+// Pure: what Apply does with one sibling row carrying { eligible, ineligible_reason, match_method, auto_fields }.
+function decide(row, group) {
+  if (!row.eligible) return { action: 'skip', reason: row.ineligible_reason || 'confirmed' };
+  const s = group.source;
+  const prior = row.auto_fields && row.auto_fields.inherited;
+  if (row.match_method === METHOD && prior && prior.signature === s.signature && prior.from_meta_ad_id === s.from_meta_ad_id) return { action: 'unchanged' };
+  return { action: 'apply' };
+}
 
 const conceptKey = (row) => String(row.concept_label || '').trim().toLowerCase();
 
@@ -90,19 +127,16 @@ async function resolveGroup(db, creativeId) {
 // this takes) the row lock; every protection is re-checked under it.
 async function applyToAd(client, adId, creativeId, group, { humanOwnedSql, rulesVersion }) {
   const locked = await client.query(
-    `SELECT m.match_status, m.match_method, c.auto_match_blocked_at, c.auto_fields, ${humanOwnedSql} AS human_owned
+    `SELECT m.match_method, c.auto_fields, ${eligibleSql(humanOwnedSql)} AS eligible, ${ineligibleReasonSql(humanOwnedSql)} AS ineligible_reason
        FROM meta_ads m LEFT JOIN meta_ad_classifications c ON c.meta_ad_id = m.meta_ad_id
       WHERE m.meta_ad_id = $1 AND m.meta_creative_id = $2 FOR UPDATE OF m`,
     [adId, creativeId]
   );
   if (!locked.rows.length) return { skipped: 'missing' };
-  const ad = locked.rows[0];
-  if (!ELIGIBLE_STATUSES.includes(ad.match_status)) return { skipped: 'confirmed' };
-  if (ad.human_owned) return { skipped: ad.human_owned };
-  if (ad.auto_match_blocked_at) return { skipped: 'rejected_by_person' };
+  const decision = decide(locked.rows[0], group);
+  if (decision.action === 'skip') return { skipped: decision.reason };
   const s = group.source;
-  const prior = ad.auto_fields && ad.auto_fields.inherited;
-  if (ad.match_method === METHOD && prior && prior.signature === s.signature && prior.from_meta_ad_id === s.from_meta_ad_id) {
+  if (decision.action === 'unchanged') {
     // Same decision: nothing to rewrite, but keep the version stamp current.
     await client.query('UPDATE meta_ads SET match_rules_version = $2 WHERE meta_ad_id = $1 AND COALESCE(match_rules_version, 0) < $2', [adId, rulesVersion]);
     return { unchanged: true };
@@ -150,6 +184,47 @@ async function revertAd(client, adId) {
     [adId]
   );
   return true;
+}
+
+// Whole-database dry run of the Apply action. Set-based (a few queries, whatever the size of the backlog) and
+// exact: it applies the same eligibility rule and the same decide() Apply uses.
+//   * eligible siblings (not yet inherited) of a creative that has a person's decision and no conflict -> would apply
+//   * siblings already inherited -> re-checked one creative at a time with decide() (only creatives Apply has touched)
+//   * inherited siblings of a creative with no usable decision any more (conflict / cleared) -> would be released
+async function previewAll({ humanOwnedSql }, db = pool) {
+  const eligible = eligibleSql(humanOwnedSql);
+  const why = ineligibleReasonSql(humanOwnedSql);
+  const base = `
+    WITH conf AS (SELECT meta_creative_id FROM (${CONFLICT_SELECT}) g WHERE g.psigs > 1 OR g.csigs > 1),
+    src AS (
+      SELECT DISTINCT m.meta_creative_id FROM meta_ads m JOIN meta_ad_classifications c ON c.meta_ad_id = m.meta_ad_id
+       WHERE m.meta_creative_id IS NOT NULL AND m.match_status = 'confirmed' AND NOT COALESCE(c.excluded_from_intelligence, false)
+         AND m.meta_creative_id NOT IN (SELECT meta_creative_id FROM conf)
+    ),
+    sib AS (
+      SELECT m.meta_ad_id, m.meta_creative_id, m.match_method, c.auto_fields, ${eligible} AS eligible, ${why} AS reason,
+             (m.meta_creative_id IN (SELECT meta_creative_id FROM src)) AS has_source
+        FROM meta_ads m LEFT JOIN meta_ad_classifications c ON c.meta_ad_id = m.meta_ad_id
+       WHERE m.meta_creative_id IS NOT NULL AND m.match_status IN (${STATUS_LIST_SQL})
+    )`;
+  const [tot, skipped, inherited] = await Promise.all([
+    db.query(`${base} SELECT
+        count(*) FILTER (WHERE has_source AND eligible AND match_method IS DISTINCT FROM '${METHOD}')::int AS would_apply_new,
+        count(*) FILTER (WHERE NOT has_source AND match_method = '${METHOD}')::int AS would_release,
+        count(DISTINCT meta_creative_id) FILTER (WHERE has_source)::int AS creatives_with_a_decision
+      FROM sib`),
+    db.query(`${base} SELECT reason, count(*)::int AS n FROM sib WHERE has_source AND NOT eligible GROUP BY reason`),
+    db.query(`${base} SELECT meta_ad_id, meta_creative_id, match_method, auto_fields, eligible FROM sib WHERE has_source AND eligible AND match_method = '${METHOD}'`),
+  ]);
+  const out = { creatives: tot.rows[0].creatives_with_a_decision, would_apply: tot.rows[0].would_apply_new, unchanged: 0, would_release: tot.rows[0].would_release, skipped: {}, complete: true };
+  skipped.rows.forEach((r) => { out.skipped[r.reason] = r.n; });
+  const groups = new Map();
+  for (const r of inherited.rows) {
+    if (!groups.has(r.meta_creative_id)) groups.set(r.meta_creative_id, await resolveGroup(db, r.meta_creative_id));
+    const d = decide({ eligible: r.eligible, match_method: r.match_method, auto_fields: r.auto_fields }, groups.get(r.meta_creative_id));
+    if (d.action === 'apply') out.would_apply += 1; else out.unchanged += 1;
+  }
+  return out;
 }
 
 // Used inside the matcher's per-ad evaluation (already in a transaction with the
@@ -226,4 +301,4 @@ async function applyAllGroups(opts, { limit = 2000, after = '' } = {}, db = pool
   return total;
 }
 
-module.exports = { METHOD, evaluateGroup, resolveGroup, applyToAd, revertAd, inheritForAd, syncCreativeGroup, applyAllGroups };
+module.exports = { METHOD, ELIGIBLE_STATUSES, CONFLICT_SELECT, eligibleSql, ineligibleReasonSql, decide, evaluateGroup, resolveGroup, applyToAd, revertAd, previewAll, inheritForAd, syncCreativeGroup, applyAllGroups };
