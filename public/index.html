@@ -56,7 +56,6 @@
            admin-gated server-side, so this hiding is a convenience, not the
            enforcement). A real top-level page, not a Settings tab. -->
       <button class="tab-btn" data-tab="meta-performance" id="sidebar-meta-performance" style="display:none;"><span class="sidebar-nav-icon">📊</span>Meta Performance</button>
-      <button class="tab-btn" data-tab="creative-opportunities" id="sidebar-creative-opportunities" style="display:none;"><span class="sidebar-nav-icon">🎯</span>Creative Opportunities</button>
       <button class="tab-btn" data-tab="planning"><span class="sidebar-nav-icon">🗓</span>Planning</button>
 
       <!-- Production-readiness follow-up (item 1): Create & Review and
@@ -171,30 +170,6 @@
       </div>
     </section>
 
-    <!-- Creative Opportunities V1 (admin-only): a ranked, explainable action
-         list computed on read from LOCAL data (confirmed + auto-matched Meta
-         ads, sales, creative history) by /api/creative-opportunities. Never
-         calls Meta. Shoot This opens the existing Shoot This Week modal
-         pre-filled for review -- nothing is created until it is confirmed. -->
-    <section id="tab-creative-opportunities" class="tab-panel">
-      <div class="co-top">
-        <div>
-          <h2>Creative Opportunities</h2>
-          <div class="hint">What creative should WNDRR make next — and why. Built from confirmed and auto-matched Meta ads, sales and creative history.</div>
-        </div>
-        <div class="co-subnav" id="co-state-nav" role="tablist">
-          <button type="button" class="co-subnav-btn active" data-co-state="active">To act on</button>
-          <button type="button" class="co-subnav-btn" data-co-state="acted_on">Acted on</button>
-          <button type="button" class="co-subnav-btn" data-co-state="dismissed">Dismissed</button>
-        </div>
-      </div>
-      <div id="co-data-status"></div>
-      <div id="co-summary" class="co-summary"></div>
-      <div id="co-list" class="co-list"></div>
-      <details class="co-how" id="co-how"><summary>How recommendations are decided</summary><div id="co-how-body"></div></details>
-      <details class="co-how" id="co-concepts"><summary>Concept evidence</summary><div id="co-concepts-body"></div></details>
-    </section>
-
     <!-- Meta Performance V1: reads ONLY the local Meta tables via
          /api/meta-performance/* (admin-only, never calls Meta). Compact KPI
          row + a paged table of ads with activity in the selected dates;
@@ -248,6 +223,8 @@
         <div class="mp-kpis" id="mp-kpis"></div>
         <div class="mp-compare-line" id="mp-compare-line"></div>
 
+        <!-- Reach & Frequency are unique-people figures (never summed from daily rows): loaded from Meta on request for the selected period. -->
+        <div class="mp-reach-bar" id="mp-reach-bar"></div>
         <div class="mp-table-toolbar">
           <input type="search" id="mp-search" placeholder="Search ad name or Meta Ad ID" autocomplete="off">
           <select id="mp-status" aria-label="Status filter">
@@ -269,12 +246,14 @@
               <th class="num" data-sort="add_to_cart">Adds to Cart</th>
               <th class="num" data-sort="cost_per_atc">Cost / ATC</th>
               <th class="num" data-sort="outbound_ctr">Outbound CTR</th>
+              <th class="num" data-sort="reach">Reach</th>
+              <th class="num" data-sort="frequency">Frequency</th>
             </tr>
           </thead>
           <tbody id="mp-ads-body"></tbody>
         </table>
         <div class="mp-pager" id="mp-pager"></div>
-        <div class="mp-footnote">Attribution: 7-day click + 1-day view (provisional). Not shown yet: Reach &amp; Frequency (need exact range-level data from Meta &mdash; they can't be summed from daily rows), and Thumbstop &amp; Hold Rate (formulas not yet confirmed).</div>
+        <div class="mp-footnote">Attribution: 7-day click + 1-day view (provisional). Reach &amp; Frequency are unique-people figures: they are loaded from Meta on request for the selected period and are never summed from daily rows. Not shown yet: Thumbstop &amp; Hold Rate (formulas not yet confirmed).</div>
       </div>
       </div><!-- /#mp-view-performance -->
 
@@ -335,6 +314,9 @@
         <div class="planning-shoot-summary" id="planning-shoot-summary">0 products selected · 0 samples required</div>
 
         <div class="planning-step-panel active" data-step="core" id="planning-step-core">
+          <!-- Core creative plan: what to make next for CORE products, and why (see loadCorePlan). -->
+          <div id="core-plan" class="core-plan"></div>
+          <details class="co-how core-browse"><summary>Browse all Core products and plan a shoot manually</summary>
           <div class="core-shoot-planning-title">Core Shoot Planning</div>
           <div class="core-shoot-planning-subtitle">Which Core products should we shoot this week?</div>
           <div class="core-shoot-category-header">
@@ -358,6 +340,8 @@
             </div>
             <div id="core-products-list" class="core-products-list"></div>
           </div>
+
+          </details>
 
           <div class="planning-step-footer">
             <span id="core-step-footer-count">0 Core products selected</span>
@@ -639,7 +623,7 @@
           <div id="bf-stage-workspace" style="display:none;">
             <div class="planning-section-header">
               <h2>Stage Workspace</h2>
-              <button type="button" class="btn btn-ghost btn-sm" onclick="openBfAddCreativeForActiveStage()">+ Add Creative (other style)</button>
+              <button type="button" class="btn btn-ghost btn-sm" onclick="openBfAddCreativeForActiveStage()">+ Add Creative</button>
             </div>
             <div class="bf-stage-tabs" id="bf-stage-tabs"></div>
             <div id="bf-stage-workspace-body"></div>
@@ -1513,13 +1497,24 @@
      Ad Matching view's own workspace). -->
 <!-- Creative Opportunities evidence: facts only (sales signal, Meta performance,
      creative dates, mix, ads, concept benchmark) -- no free-form prose. -->
-<div id="co-evidence-modal" class="modal-backdrop">
+<div id="cp-evidence-modal" class="modal-backdrop">
   <div class="modal co-drawer-modal">
     <div class="modal-header">
-      <h3 id="co-evidence-title">Evidence</h3>
-      <button class="modal-close" onclick="closeModal('co-evidence-modal')">&times;</button>
+      <h3 id="cp-evidence-title">Evidence</h3>
+      <button class="modal-close" onclick="closeModal('cp-evidence-modal')">&times;</button>
     </div>
-    <div class="modal-body" id="co-evidence-body"></div>
+    <div class="modal-body" id="cp-evidence-body"></div>
+  </div>
+</div>
+
+<!-- Ad preview: plays / shows the creative behind a Meta ad (media fetched read-only from Meta, cached). Shared by Meta Performance and the Core creative plan. -->
+<div id="ad-preview-modal" class="modal-backdrop">
+  <div class="modal ap-modal">
+    <div class="modal-header">
+      <h3 id="ap-title">Ad preview</h3>
+      <button class="modal-close" onclick="closeAdPreview()">&times;</button>
+    </div>
+    <div class="modal-body" id="ap-body"></div>
   </div>
 </div>
 
@@ -3321,7 +3316,7 @@
            "+ Add Creative (other style)" entry point) -- every other entry
            point already knows the style from the card the team clicked. -->
       <div id="bf-add-creative-style-picker-wrap" style="display:none;">
-        <label>Creative Style<span class="cd-req-mark">*</span>
+        <label>Format <span class="hint">(optional — inspiration only)</span>
           <select id="bf-add-creative-style-picker" onchange="onBfAddCreativeStylePicked(this.value)"></select>
         </label>
       </div>

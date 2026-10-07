@@ -322,4 +322,4 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-module.exports = { router, computeCoreProducts };
+module.exports = { router, computeCoreProducts, syncCoreStylesFromAm };

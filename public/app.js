@@ -226,9 +226,6 @@ function applySidebarModuleAccess() {
   // would otherwise un-hide every [data-tab] button not in the deny-list.
   const metaPerfBtn = document.getElementById('sidebar-meta-performance');
   if (metaPerfBtn) metaPerfBtn.style.display = state.currentUser && state.currentUser.role === 'admin' ? '' : 'none';
-  // Creative Opportunities: admin-only in V1 (the API enforces it too).
-  const coBtn = document.getElementById('sidebar-creative-opportunities');
-  if (coBtn) coBtn.style.display = state.currentUser && state.currentUser.role === 'admin' ? '' : 'none';
 }
 
 // Production follow-up pass, round 2: the static index.html already ships
@@ -337,7 +334,7 @@ function switchTab(name) {
     toast("You don't have access to this module.", true);
     return;
   }
-  if ((name === 'meta-performance' || name === 'creative-opportunities') && !(state.currentUser && state.currentUser.role === 'admin')) {
+  if (name === 'meta-performance' && !(state.currentUser && state.currentUser.role === 'admin')) {
     toast("You don't have access to this module.", true);
     return;
   }
@@ -352,8 +349,6 @@ function switchTab(name) {
   if (name === 'reference-library') loadReferenceLibraryPage();
   // Meta Performance reads stored data only (never Meta) -- refetched on every visit so a sync just run from Settings shows up.
   if (name === 'meta-performance') loadMetaPerformanceArea();
-  // Creative Opportunities is computed on read from local data -- refetched on every visit so a sync / matching just done is reflected.
-  if (name === 'creative-opportunities') loadCreativeOpportunities();
   // Same reasoning as Shooting above -- Editing is the direct downstream
   // consumer of Shooting's Mark as Shot action, so it needs a fresh fetch
   // on every visit too.
@@ -424,10 +419,11 @@ document.querySelectorAll('.settings-subnav-btn').forEach((btn) => {
 // used for "today"/"this week"); the server's resolved range is what's
 // shown and what the table/detail requests reuse.
 //
-// Reach/Frequency and Thumbstop/Hold Rate are deliberately NOT displayed:
-// reach isn't additive across days/ads (summary.reach_frequency carries the
-// placeholder for a future exact range-level pull) and the Thumbstop/Hold
-// Rate formulas aren't confirmed. See src/lib/metaPerformance.js.
+// Reach/Frequency are unique-people figures, never summed from daily rows:
+// they come from an exact range-level Meta pull the admin triggers on request
+// (POST /meta-performance/reach/load, cached per range) -- see mpRenderReachBar.
+// Thumbstop/Hold Rate stay undisplayed (formulas not confirmed).
+// See src/lib/metaPerformance.js.
 const MP_TZ = 'Australia/Sydney';
 const MP_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const mpState = {
@@ -445,6 +441,10 @@ const mpState = {
   currency: null,
   reqId: 0,
   adsReqId: 0,
+  reach: null, // summary.reach_frequency for the current range
+  adsReach: null, // ads response reach_info
+  adsById: new Map(),
+  reachTimer: null,
 };
 // better: which direction is an improvement (costs: lower; volumes/CTR: higher).
 // Amount Spent is neutral -- spending more or less isn't inherently good or bad.
@@ -564,11 +564,14 @@ function mpRenderSummary(sum) {
       <div class="mp-kpi-value">${mpFmt(sum.totals[def.key], def.fmt)}</div>
       ${cmp ? (mpDelta(def, sum.totals[def.key], cmp.totals[def.key], bothComplete) || '<div class="mp-kpi-delta"></div>') : ''}
     </div>`).join('') +
+    mpReachTilesHtml(sum.reach_frequency) +
     `<div class="mp-secondary" style="grid-column:1 / -1;">
        <span>Purchase Value <b>${mpFmt(sum.totals.purchase_value, 'money')}</b></span>
        <span>Ads with activity <b>${Number(sum.totals.ads_with_activity).toLocaleString('en-AU')}</b></span>
      </div>`;
 
+  mpState.reach = sum.reach_frequency;
+  mpRenderReachBar();
   const cl = document.getElementById('mp-compare-line');
   if (!cmp) {
     cl.textContent = '';
@@ -591,13 +594,16 @@ function mpRenderAds(res) {
   });
   document.getElementById('mp-table-count').textContent =
     `${res.total.toLocaleString('en-AU')} ad${res.total === 1 ? '' : 's'} with activity`;
+  mpState.adsReach = res.reach_info || null;
+  mpState.adsById = new Map((res.ads || []).map((a) => [a.meta_ad_id, a]));
+  mpRenderReachBar();
   if (!res.ads.length) {
-    body.innerHTML = `<tr><td colspan="8" class="mp-table-empty">${
+    body.innerHTML = `<tr><td colspan="10" class="mp-table-empty">${
       res.q || res.status !== 'all' ? 'No ads match this search or filter.' : 'No ads had spend or impressions in this period.'}</td></tr>`;
   } else {
     body.innerHTML = res.ads.map((a) => `
       <tr data-ad-id="${escapeHtml(a.meta_ad_id)}">
-        <td class="mp-name" title="${escapeHtml(a.ad_name || a.meta_ad_id)}">${escapeHtml(a.ad_name || '(unnamed ad)')}</td>
+        <td class="mp-name" title="${escapeHtml(a.ad_name || a.meta_ad_id)}"><button type="button" class="mp-preview-btn" data-preview-ad="${escapeHtml(a.meta_ad_id)}" title="Preview the creative" aria-label="Preview creative">&#9654;</button> <span class="mp-name-text" data-preview-ad="${escapeHtml(a.meta_ad_id)}">${escapeHtml(a.ad_name || '(unnamed ad)')}</span></td>
         <td>${mpStatusChip(a.effective_status)}</td>
         <td class="num">${mpFmt(a.spend, 'money')}</td>
         <td class="num">${mpFmt(a.purchases, 'int')}</td>
@@ -605,6 +611,8 @@ function mpRenderAds(res) {
         <td class="num">${mpFmt(a.add_to_cart, 'int')}</td>
         <td class="num">${mpFmt(a.cost_per_atc, 'money')}</td>
         <td class="num">${mpFmt(a.outbound_ctr, 'pct')}</td>
+        <td class="num">${mpReachCell(a.reach, 'int')}</td>
+        <td class="num">${mpReachCell(a.frequency, 'freq')}</td>
       </tr>`).join('');
   }
   const pager = document.getElementById('mp-pager');
@@ -630,7 +638,7 @@ async function loadMetaPerformanceAds() {
     mpRenderAds(res);
   } catch (e) {
     if (id !== mpState.adsReqId) return;
-    document.getElementById('mp-ads-body').innerHTML = `<tr><td colspan="8" class="mp-table-empty">${escapeHtml(e.message)}</td></tr>`;
+    document.getElementById('mp-ads-body').innerHTML = `<tr><td colspan="10" class="mp-table-empty">${escapeHtml(e.message)}</td></tr>`;
   }
 }
 
@@ -761,9 +769,182 @@ document.getElementById('mp-pager').addEventListener('click', (e) => {
   loadMetaPerformanceAds();
 });
 document.getElementById('mp-ads-body').addEventListener('click', (e) => {
+  // the creative preview control / ad name opens the Ad Preview; the rest of the row opens the daily detail
+  const pv = e.target.closest('[data-preview-ad]');
+  if (pv) { mpOpenPreview(pv.dataset.previewAd); return; }
   const row = e.target.closest('tr[data-ad-id]');
   if (row) openMetaAdDetail(row.dataset.adId);
 });
+
+
+// ── Reach & Frequency (exact for the selected period; loaded from Meta on request) ─────────
+const mpFreq = (v) => (v === null || v === undefined ? '<span class="mp-na">—</span>' : Number(v).toFixed(2));
+function mpReachCell(v, kind) {
+  if (v === null || v === undefined) return '<span class="mp-na" title="Load Reach &amp; Frequency for this period">—</span>';
+  return kind === 'freq' ? mpFreq(v) : Number(v).toLocaleString('en-AU');
+}
+function mpReachTilesHtml(rf) {
+  const val = (v, kind) => (rf && rf.available ? (kind === 'freq' ? mpFreq(v) : Number(v).toLocaleString('en-AU')) : '<span class="mp-na">—</span>');
+  const sub = !rf ? '' : rf.available ? (rf.stale ? 'as of ' + escapeHtml(mpDateTime(rf.pulled_at)) + ' (may have changed)' : 'as of ' + escapeHtml(mpDateTime(rf.pulled_at)))
+    : rf.state === 'loading' ? 'loading from Meta…' : rf.state === 'failed' ? 'unavailable' : 'not loaded';
+  return `<div class="mp-kpi"><div class="mp-kpi-label">Reach</div><div class="mp-kpi-value">${val(rf && rf.reach, 'int')}</div><div class="mp-kpi-delta">${sub}</div></div>
+    <div class="mp-kpi"><div class="mp-kpi-label">Frequency</div><div class="mp-kpi-value">${val(rf && rf.frequency, 'freq')}</div><div class="mp-kpi-delta">${sub}</div></div>`;
+}
+function mpRenderReachBar() {
+  const bar = document.getElementById('mp-reach-bar');
+  if (!bar) return;
+  const rf = mpState.reach;
+  if (!rf) { bar.innerHTML = ''; return; }
+  const single = mpState.range && mpState.range.since === mpState.range.until;
+  let html;
+  if (rf.state === 'loading') {
+    html = '<span class="mp-reach-state loading">Loading Reach &amp; Frequency from Meta…</span>';
+  } else if (rf.available) {
+    html = `<span class="mp-reach-state ok">Reach &amp; Frequency loaded from Meta ${escapeHtml(mpDateTime(rf.pulled_at))}${rf.includes_today ? ' · includes today (still in progress)' : ''}${rf.stale ? ' · may have changed since' : ''}.</span>
+      <button type="button" class="btn btn-ghost btn-sm" id="mp-reach-load" data-force="1">Refresh</button>`;
+    if (rf.last_error) html += `<span class="mp-reach-state warn">Last refresh failed: ${escapeHtml(rf.last_error.message || '')}</span>`;
+  } else if (rf.state === 'failed') {
+    html = `<span class="mp-reach-state warn">Reach &amp; Frequency unavailable: ${escapeHtml(rf.reason || 'the last attempt failed')}</span>
+      <button type="button" class="btn btn-ghost btn-sm" id="mp-reach-load">Try again</button>`;
+  } else {
+    html = `<span class="mp-reach-state">${single ? 'Per-ad Reach &amp; Frequency are exact for this day. ' : ''}Reach &amp; Frequency for ${single ? 'the account on' : ''} this period are loaded from Meta on request (they can't be added up from daily numbers).</span>
+      <button type="button" class="btn btn-primary btn-sm" id="mp-reach-load">Load Reach &amp; Frequency</button>`;
+  }
+  bar.innerHTML = html;
+  const btn = document.getElementById('mp-reach-load');
+  if (btn) btn.addEventListener('click', () => mpLoadReach(btn.dataset.force === '1'));
+  if (rf.state === 'loading' && !mpState.reachTimer) mpState.reachTimer = setInterval(mpPollReach, 3000);
+  if (rf.state !== 'loading' && mpState.reachTimer) { clearInterval(mpState.reachTimer); mpState.reachTimer = null; }
+}
+async function mpLoadReach(force) {
+  const body = mpState.preset === 'custom' ? { preset: 'custom', since: mpState.customSince, until: mpState.customUntil } : { preset: mpState.preset };
+  if (force) body.force = true;
+  const btn = document.getElementById('mp-reach-load');
+  if (btn) btn.disabled = true;
+  try {
+    const st = await api('/meta-performance/reach/load', { method: 'POST', body: JSON.stringify(body) });
+    if (st.state === 'loading') {
+      mpState.reach = { ...(mpState.reach || {}), state: 'loading', available: false };
+      mpRenderReachBar();
+      if (!mpState.reachTimer) mpState.reachTimer = setInterval(mpPollReach, 2000);
+    } else {
+      loadMetaPerformance(); // already finished (or served from the fresh cache): show it now
+    }
+  } catch (e) { toast(e.message, true); if (btn) btn.disabled = false; }
+}
+async function mpPollReach() {
+  try {
+    const st = await api(`/meta-performance/reach?${mpRangeQuery()}`);
+    if (st.state !== 'loading') {
+      clearInterval(mpState.reachTimer); mpState.reachTimer = null;
+      loadMetaPerformance(); // re-read summary + ads: the cache now has the exact figures (or the failure)
+    }
+  } catch (e) { /* keep polling; the bar still says loading */ }
+}
+
+// ── Ad preview (creative behind a Meta ad) ─────────────────────────────
+// Opens from the Performance table and from Core plan evidence. The media is
+// fetched read-only from Meta on first open and cached; spend/CPA/reach context is
+// only shown to admins (passed in by the caller from admin-only data).
+const apState = { adId: null, ctx: null, data: null, card: 0, retried: false, showMeta: false };
+function mpOpenPreview(adId) {
+  const a = mpState.adsById.get(adId);
+  openAdPreview(adId, a ? { metrics: { spend: a.spend, purchases: a.purchases, cpa: a.cpa, outbound_ctr: a.outbound_ctr, reach: a.reach, frequency: a.frequency }, range: mpState.range } : null);
+}
+function closeAdPreview() {
+  const body = document.getElementById('ap-body');
+  body.querySelectorAll('video').forEach((v) => { try { v.pause(); } catch (e) { /* ignore */ } });
+  body.innerHTML = '';
+  closeModal('ad-preview-modal');
+}
+async function openAdPreview(adId, ctx, refresh) {
+  apState.adId = adId; apState.ctx = ctx || null; apState.card = 0; apState.showMeta = false;
+  if (!refresh) apState.retried = false;
+  const body = document.getElementById('ap-body');
+  document.getElementById('ap-title').textContent = 'Ad preview';
+  body.innerHTML = '<div class="mp-table-empty">Loading creative…</div>';
+  openModal('ad-preview-modal');
+  try {
+    apState.data = await api(`/ad-creative/${encodeURIComponent(adId)}${refresh ? '?refresh=1' : ''}`);
+    renderAdPreview();
+  } catch (e) {
+    body.innerHTML = `<div class="mp-table-empty">${escapeHtml(e.message)}</div>`;
+  }
+}
+function apMediaHtml(m, idx) {
+  if (!m) return '';
+  if (m.type === 'video' && m.video_url) {
+    return `<video class="ap-video" controls playsinline preload="metadata" ${m.poster_url ? `poster="${escapeHtml(m.poster_url)}"` : ''} src="${escapeHtml(m.video_url)}" onerror="apMediaFailed()"></video>`;
+  }
+  const img = m.image_url || m.poster_url;
+  return img ? `<img class="ap-img" src="${escapeHtml(img)}" referrerpolicy="no-referrer" alt="Ad creative" onerror="apMediaFailed()">` : '';
+}
+function apGoCard(delta) {
+  const cards = (apState.data.creative.cards || []);
+  apState.card = (apState.card + delta + cards.length) % cards.length;
+  renderAdPreview();
+}
+function apToggleMeta() { apState.showMeta = !apState.showMeta; renderAdPreview(); }
+function apMediaFailed() {
+  // Meta's signed media links expire: reload once automatically, then explain.
+  if (!apState.retried) { apState.retried = true; openAdPreview(apState.adId, apState.ctx, true); return; }
+  const m = document.getElementById('ap-media');
+  if (m) m.insertAdjacentHTML('beforeend', '<div class="ap-note">This preview could not be played in the app. Use "Open in Meta" or try Reload.</div>');
+}
+function renderAdPreview() {
+  const d = apState.data;
+  const c = d.creative;
+  const ad = d.ad;
+  document.getElementById('ap-title').textContent = ad.ad_name || '(unnamed ad)';
+  let media = '';
+  const playable = c.kind === 'carousel' ? (c.cards || []).length > 0 : !!(c.main && (c.main.video_url || c.main.image_url));
+  if (apState.showMeta && c.preview_iframe_src) {
+    media = `<iframe class="ap-iframe" src="${escapeHtml(c.preview_iframe_src)}" sandbox="allow-scripts allow-same-origin allow-popups" allow="autoplay; fullscreen" loading="lazy"></iframe>`;
+  } else if (c.kind === 'carousel' && (c.cards || []).length) {
+    const card = c.cards[apState.card] || c.cards[0];
+    media = `<div class="ap-carousel">${apMediaHtml(card)}
+      <div class="ap-carousel-nav"><button type="button" class="btn btn-ghost btn-sm" onclick="apGoCard(-1)">&larr;</button>
+        <span>Card ${apState.card + 1} of ${c.cards.length}${card.title ? ' · ' + escapeHtml(card.title) : ''}</span>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="apGoCard(1)">&rarr;</button></div></div>`;
+  } else if (playable) {
+    media = apMediaHtml(c.main);
+    if (c.kind === 'video' && !c.main.video_url) media += '<div class="ap-note">Meta did not provide a playable file for this video, so only the cover image is shown.</div>';
+  } else if (c.preview_iframe_src) {
+    media = `<iframe class="ap-iframe" src="${escapeHtml(c.preview_iframe_src)}" sandbox="allow-scripts allow-same-origin allow-popups" allow="autoplay; fullscreen" loading="lazy"></iframe>`;
+  } else if (c.thumbnail_url) {
+    media = `<img class="ap-img" src="${escapeHtml(c.thumbnail_url)}" referrerpolicy="no-referrer" alt="Ad creative thumbnail">`;
+  } else {
+    media = '<div class="ap-note">No preview is available for this ad from Meta.</div>';
+  }
+  const openLink = c.share_link || c.preview_iframe_src;
+  const x = apState.ctx && apState.ctx.metrics;
+  const dash = (v) => (v ? escapeHtml(v) : '—');
+  const products = (ad.products || []).length ? ad.products.map(escapeHtml).join(', ') : '—';
+  document.getElementById('ap-body').innerHTML = `
+    <div class="ap-layout">
+      <div class="ap-media" id="ap-media">${media}</div>
+      <div class="ap-context">
+        <dl class="mp-detail-grid">
+          <div><dt>Product</dt><dd>${products}</dd></div>
+          <div><dt>Concept</dt><dd>${dash(ad.concept)}</dd></div>
+          <div><dt>Creator</dt><dd>${dash(ad.creator)}</dd></div>
+          <div><dt>Status</dt><dd>${mpStatusChip(ad.effective_status)}</dd></div>
+        </dl>
+        ${x ? `<div class="mp-detail-h">${apState.ctx.range ? escapeHtml(mpRange(apState.ctx.range, true)) : 'Performance'}</div>
+        <div class="mp-detail-metrics">
+          ${[['Spend', mpFmt(x.spend, 'money')], ['Purchases', mpFmt(x.purchases, 'int')], ['CPA', mpFmt(x.cpa, 'money')], ['Outbound CTR', mpFmt(x.outbound_ctr, 'pct')],
+            ['Reach', mpReachCell(x.reach, 'int')], ['Frequency', mpReachCell(x.frequency, 'freq')]].map(([l, v]) => `<div class="mp-kpi"><div class="mp-kpi-label">${l}</div><div class="mp-kpi-value">${v}</div></div>`).join('')}
+        </div>` : ''}
+        <div class="ap-actions">
+          ${openLink ? `<a class="btn btn-ghost btn-sm" href="${escapeHtml(openLink)}" target="_blank" rel="noopener noreferrer">Open in Meta</a>` : ''}
+          ${c.preview_iframe_src && playable ? `<button type="button" class="btn btn-ghost btn-sm" onclick="apToggleMeta()">${apState.showMeta ? 'Show in app player' : "Show Meta's own preview"}</button>` : ''}
+          <button type="button" class="btn btn-ghost btn-sm" onclick="openAdPreview('${escapeHtml(apState.adId)}', apState.ctx, true)">Reload</button>
+        </div>
+        ${d.warning ? `<div class="ap-note">${escapeHtml(d.warning)}</div>` : ''}
+        <div class="hint">Loaded from Meta ${escapeHtml(mpDateTime(c.fetched_at))}${c.cached ? ' (saved copy)' : ''}. Media links expire; Reload fetches fresh ones.</div>
+      </div>
+    </div>`;
+}
 
 // ── Meta Performance: sub-navigation + Ad Matching ──────────────────────
 // "Performance | Ad Matching" live in the same top-level page. Ad Matching
@@ -843,7 +1024,7 @@ function mmRenderRows(res) {
       <td class="mm-cell">${con}</td>
       <td class="mm-cell">${media}</td>
       <td>${conf}</td></tr>`;
-  }).join('') : `<tr><td colspan="8" class="mp-table-empty">${
+  }).join('') : `<tr><td colspan="10" class="mp-table-empty">${
     mmState.q ? 'No ads match this search.' : mmState.filter === 'needs' ? 'Nothing left to do in this view — nice work.' : 'No ads in this view.'}</td></tr>`;
   const pager = document.getElementById('mm-pager');
   if (res.total_pages <= 1) {
@@ -880,7 +1061,7 @@ async function loadMetaMatching() {
     mmLoadBacklog();
   } catch (e) {
     if (id !== mmState.reqId) return;
-    document.getElementById('mm-body').innerHTML = `<tr><td colspan="8" class="mp-table-empty">${escapeHtml(e.message)}</td></tr>`;
+    document.getElementById('mm-body').innerHTML = `<tr><td colspan="10" class="mp-table-empty">${escapeHtml(e.message)}</td></tr>`;
   }
 }
 
@@ -1097,222 +1278,225 @@ document.getElementById('mm-refresh-suggestions').addEventListener('click', asyn
   }
 });
 
-// ── Creative Opportunities (admin-only) ─────────────────────────────────
-// Reads /api/creative-opportunities (local data only -- never Meta). The
-// server computes everything; this renders the ranked list, the evidence
-// drawer and wires Shoot This into the EXISTING Shoot This Week modal.
-const coState = { filter: 'active', data: null, loading: false };
-const CO_TYPE_LABEL = {
-  freshen_strong_seller: 'Strong seller · stale creative', refresh_before_deprioritising: 'Weak seller · old creative',
-  test_proven_concept: 'Proven concept · untested', increase_creative_coverage: 'Thin coverage', possible_fatigue: 'Possible fatigue',
-  diversify_concept: 'Concept concentration', diversify_creator: 'Creator concentration', diversify_media: 'Media concentration',
-};
-const coMoney = (v) => (v === null || v === undefined ? '—' : `$${Math.round(Number(v)).toLocaleString('en-AU')}`);
-const coNum = (v, d = 0) => (v === null || v === undefined ? '—' : Number(v).toLocaleString('en-AU', { maximumFractionDigits: d }));
+// ── Core creative plan (Planning → Core) ────────────────────────────────
+// "For our CORE products, what creative should we make next, and why?" Reads
+// /api/core-creative-plan (local data + cached ApparelMagic -- never Meta). The server
+// decides; this renders a short, prioritised list, the evidence behind each card (with
+// playable creative previews) and wires "Shoot this week" into the EXISTING shoot-plan
+// modal. Money (spend / CPA) only arrives for admins -- the server strips it for others.
+const cpState = { data: null, loading: false, loadedAt: 0, filter: 'active', showAll: false };
+const cpMoney = (v) => (v === null || v === undefined ? '—' : `$${Math.round(Number(v)).toLocaleString('en-AU')}`);
+const cpNum = (v, d = 0) => (v === null || v === undefined ? '—' : Number(v).toLocaleString('en-AU', { maximumFractionDigits: d }));
+const cpIsAdmin = () => !!(state.currentUser && state.currentUser.role === 'admin');
+const cpAge = (days) => (days === null || days === undefined ? '' : days >= 60 ? `${Math.round(days / 30)} months` : `${days} day${days === 1 ? '' : 's'}`);
+const cpDate = (ymd) => (ymd ? mpDate(ymd, true) : '—');
+const CP_VISIBLE = 12;
+const CP_TYPE_LABEL = { shoot_fresh: 'Shoot', test_new: 'Test', try_concept: 'Concept', hold: 'Hold' };
 
-async function loadCreativeOpportunities() {
-  if (coState.loading) return;
-  coState.loading = true;
-  const list = document.getElementById('co-list');
-  if (!coState.data) list.innerHTML = '<div class="co-empty">Working out what to make next…</div>';
+async function loadCorePlan(force) {
+  const host = document.getElementById('core-plan');
+  if (!host || cpState.loading) return;
+  if (!force && cpState.data && Date.now() - cpState.loadedAt < 5 * 60 * 1000) return;
+  cpState.loading = true;
+  if (!cpState.data) host.innerHTML = '<div class="co-empty">Working out what to make next…</div>';
   try {
-    coState.data = await api(`/creative-opportunities?state=${encodeURIComponent(coState.filter)}`);
-    renderCreativeOpportunities();
+    cpState.data = await api('/core-creative-plan');
+    cpState.loadedAt = Date.now();
+    renderCorePlan();
   } catch (e) {
-    list.innerHTML = `<div class="co-empty co-error">${escapeHtml(e.message)}</div>`;
+    host.innerHTML = `<div class="co-empty co-error">${escapeHtml(e.message)}</div>`;
   } finally {
-    coState.loading = false;
+    cpState.loading = false;
   }
 }
 
-function coCardHtml(o) {
-  const p = o.products[0];
-  const chips = (o.chips || []).map((c) => `<span class="co-chip ${escapeHtml(c.tone || 'neutral')}">${escapeHtml(c.text)}</span>`).join('');
-  const note = o.requalified
-    ? `<div class="co-note">Back on the list: ${o.requalified.previously_dismissed_at ? 'the evidence got materially worse since you dismissed it' : `acted on ${o.requalified.days_ago} days ago and it still applies`}.</div>`
-    : (o.state ? `<div class="co-note">${o.state.state === 'dismissed' ? 'Dismissed' : 'Marked acted on'} ${escapeHtml(o.state.acted_at.slice(0, 10))}${o.state.note ? ` — ${escapeHtml(o.state.note)}` : ''}</div>` : '');
-  const stateButtons = o.state
-    ? `<button type="button" class="btn btn-ghost btn-sm" data-co-act="reopen">Put back on the list</button>`
-    : `<button type="button" class="btn btn-ghost btn-sm" data-co-act="acted">Mark acted on</button>
-       <button type="button" class="btn btn-ghost btn-sm" data-co-act="dismiss">Dismiss</button>`;
+function cpFactsHtml(c) {
+  const facts = [];
+  const s = c.sales_status;
+  facts.push(`<span>Sales: <b>${s ? escapeHtml(s.label) : 'unknown'}</b>${s && s.tier ? ` (${escapeHtml(s.tier)})` : ''}${s && s.trend === 'up' ? ' ↑' : s && s.trend === 'down' ? ' ↓' : ''}</span>`);
+  facts.push(`<span>Stock: <b>${cpNum(c.stock.units)}</b> units</span>`);
+  const cr = c.creative;
+  const last = cr.last_new_creative;
+  facts.push(`<span>Last new creative: <b>${last ? `${escapeHtml(cpDate(last.date))}` : 'none found'}</b>${last ? ` (${escapeHtml(cpAge(last.days_ago))} ago)` : ''}${cr.recency_basis === 'older_than_window' ? ' <i class="hint">older matched history only</i>' : ''}</span>`);
+  facts.push(`<span>Creatives running: <b>${cr.running_creatives}</b></span>`);
+  facts.push(`<span>Meta: <b>${escapeHtml(c.meta_status)}</b></span>`);
+  return `<div class="cp-facts">${facts.join('')}</div>`;
+}
+
+function cpCardHtml(c) {
+  const canShoot = c.type !== 'hold';
+  const note = c.requalified
+    ? `<div class="co-note">Back on the list: ${c.requalified.previously_dismissed_at ? 'the evidence got materially worse since you dismissed it' : `acted on ${c.requalified.days_ago} days ago and it still applies`}.</div>`
+    : (c.state ? `<div class="co-note">${c.state.state === 'dismissed' ? 'Dismissed' : 'Marked done'} ${escapeHtml(c.state.acted_at.slice(0, 10))}${c.state.note ? ` — ${escapeHtml(c.state.note)}` : ''}</div>` : '');
+  const stateButtons = c.state
+    ? '<button type="button" class="btn btn-ghost btn-sm" data-cp-act="reopen">Put back on the list</button>'
+    : `<button type="button" class="btn btn-ghost btn-sm" data-cp-act="acted">Mark done</button>
+       <button type="button" class="btn btn-ghost btn-sm" data-cp-act="dismiss">Dismiss</button>`;
   return `
-    <article class="co-card pri-${o.priority.toLowerCase()}" data-co-key="${escapeHtml(o.key)}">
+    <article class="co-card pri-${escapeHtml((c.priority || 'info').toLowerCase())}" data-cp-key="${escapeHtml(c.key)}">
       <div class="co-card-head">
-        <span class="co-pri pri-${o.priority.toLowerCase()}">${escapeHtml(o.priority.toUpperCase())}</span>
-        <span class="co-product">${escapeHtml(p.product_name)}</span>
-        <span class="co-type">${escapeHtml(CO_TYPE_LABEL[o.type] || o.type)}</span>
+        ${c.product.image_url ? `<img class="cp-thumb" src="${escapeHtml(c.product.image_url)}" alt="" referrerpolicy="no-referrer">` : ''}
+        <span class="co-product">${escapeHtml(c.product.product_name)}</span>
+        ${c.product.category ? `<span class="co-type">${escapeHtml(c.product.category.toLowerCase())}</span>` : ''}
+        ${c.priority && c.priority !== 'Info' ? `<span class="co-pri pri-${c.priority.toLowerCase()}">${escapeHtml(c.priority.toUpperCase())}</span>` : ''}
       </div>
-      <h3 class="co-title">${escapeHtml(o.title)}</h3>
-      <p class="co-expl">${escapeHtml(o.explanation)}</p>
-      <div class="co-chips">${chips}</div>
+      <h3 class="co-title">${escapeHtml(c.headline)}</h3>
+      <p class="co-expl">${escapeHtml(c.why)}</p>
+      ${cpFactsHtml(c)}
+      ${c.stock.size_warning ? `<div class="co-note cp-size-warn">⚠ ${escapeHtml(c.stock.size_warning)}</div>` : ''}
       ${note}
       <div class="co-actions">
-        <button type="button" class="btn btn-ghost btn-sm" data-co-act="product">View Product</button>
-        <button type="button" class="btn btn-ghost btn-sm" data-co-act="evidence">View Evidence</button>
-        <button type="button" class="btn btn-primary btn-sm" data-co-act="shoot">Shoot This</button>
+        ${canShoot ? '<button type="button" class="btn btn-primary btn-sm" data-cp-act="shoot">Shoot this week</button>' : ''}
+        <button type="button" class="btn btn-ghost btn-sm" data-cp-act="evidence">See evidence</button>
         <span class="co-actions-spacer"></span>
         ${stateButtons}
       </div>
     </article>`;
 }
 
-function renderCreativeOpportunities() {
-  const d = coState.data;
-  document.querySelectorAll('#co-state-nav .co-subnav-btn').forEach((b) => b.classList.toggle('active', b.dataset.coState === coState.filter));
-  const status = document.getElementById('co-data-status');
-  status.innerHTML = d.data_status.sales_available ? '' : `<div class="co-banner">${escapeHtml(d.data_status.sales_note)}</div>`;
-  const c = d.counts;
-  const n = d.opportunities.length;
-  const label = coState.filter === 'active' ? `${n} thing${n === 1 ? '' : 's'} worth acting on` : coState.filter === 'acted_on' ? `${n} acted on` : `${n} dismissed`;
-  const split = coState.filter === 'active' ? ['Critical', 'High', 'Medium'].filter((k) => c.by_priority[k]).map((k) => `<span class="co-pri pri-${k.toLowerCase()}">${c.by_priority[k]} ${k.toUpperCase()}</span>`).join(' ') : '';
-  document.getElementById('co-summary').innerHTML = `<div class="co-summary-line"><strong>${escapeHtml(label)}</strong> ${split}</div>
-    <div class="hint">${d.data_status.classified_ads_used} classified ad${d.data_status.classified_ads_used === 1 ? '' : 's'} used (confirmed + auto-matched only) · Meta data through ${escapeHtml(d.data_status.meta_insights_through || 'n/a')} · windows end yesterday (Sydney)</div>`;
-  document.getElementById('co-list').innerHTML = n
-    ? d.opportunities.map(coCardHtml).join('')
-    : `<div class="co-empty">${coState.filter === 'active'
-      ? (d.data_status.classified_ads_used ? 'Nothing needs acting on right now.' : 'No classified Meta ads yet — confirm or auto-match ads in Meta Performance → Ad Matching and recommendations will appear here.')
-      : 'Nothing here.'}</div>`;
-  const t = d.thresholds;
-  document.getElementById('co-how-body').innerHTML = `<ul class="co-how-list">
-    <li><b>Only confirmed and auto-matched ads</b> count. Needs-review, unmatched and excluded ads never contribute.</li>
-    <li><b>Freshness</b> (days since the product's newest creative): Fresh &lt; ${t.freshness.fresh_lt} · Aging &lt; ${t.freshness.aging_lt} · Stale &lt; ${t.freshness.stale_lt} · Very stale ${t.freshness.stale_lt}+. The newest creative is the later of the newest Meta launch (first day with meaningful spend) and the newest WNDRR "went live" date.</li>
-    <li><b>Strong / weak seller</b> reuses the app's sales tiers (${escapeHtml(t.seller.strong_tiers.join(' / '))} = strong; ${escapeHtml(t.seller.weak_tiers.join(' / '))} with ${t.seller.weak_min_units_365d}+ units in a year = weak) and High Stock's sales trend.</li>
-    <li><b>Proven concept</b>: ≥ ${coMoney(t.concept.min_spend)} spend, ≥ ${t.concept.min_purchases} purchases, ≥ ${t.concept.min_creatives} creatives and CPA no worse than the account's, in the last ${t.windows.evidence_days} days. Suggested for a product only when proven on ≥ ${t.concept.test_min_products} products and that product has never run it.</li>
-    <li><b>Coverage</b>: fewer than ${t.coverage.min_creatives_90d} creatives with spend in ${t.windows.evidence_days} days. <b>Concentration</b>: one concept / creator / media type carries ≥ ${Math.round(t.concentration.share * 100)}% of spend (≥ ${t.concentration.min_creatives} creatives).</li>
-    <li><b>Possible fatigue</b>: same ads (running ${t.fatigue.min_run_days}+ days), last ${t.windows.fatigue_days} days vs the ${t.windows.fatigue_days} before — outbound CTR down ≥ ${t.fatigue.ctr_drop_pct}% and CPA up ≥ ${t.fatigue.cpa_rise_pct}%. Reach and frequency are never used.</li>
-    <li><b>Shared ads</b> (several products): spend and purchases are split equally between the products; creative presence counts for each.</li>
-    <li><b>Dismissed</b> items stay hidden until their priority or severity increases. <b>Acted on</b> items return after ${t.state.acted_on_review_days} days if the problem is still there.</li>
-  </ul>`;
-  const cs = d.concepts;
-  document.getElementById('co-concepts-body').innerHTML = cs.concepts.length
-    ? `<div class="hint">Account CPA (last ${t.windows.evidence_days}d): ${coMoney(cs.benchmark.cpa)} on ${coMoney(cs.benchmark.spend)} spend.</div>
-       <table class="co-table"><thead><tr><th>Concept</th><th>Status</th><th>Creatives</th><th>Spend</th><th>Purchases</th><th>CPA</th><th>Products</th></tr></thead><tbody>${
-  cs.concepts.slice(0, 25).map((x) => `<tr><td>${escapeHtml(x.label)}${x.legacy ? ' <span class="co-legacy">legacy</span>' : ''}</td><td><span class="co-status ${x.status}">${x.cross_product_winner ? 'cross-product winner' : x.status}</span></td><td>${x.creatives}</td><td>${coMoney(x.spend)}</td><td>${coNum(x.purchases)}</td><td>${coMoney(x.cpa)}</td><td>${x.products_used_on}</td></tr>`).join('')}</tbody></table>`
-    : '<div class="co-empty">No concept data yet.</div>';
-}
-
-function coFind(key) {
-  return coState.data && coState.data.opportunities.find((o) => o.key === key);
-}
-
-// "View Product": Planning is the only existing product-level view (there is
-// no standalone product page), so this opens Planning's Core / High Stock
-// step on that product when it is on this week's lists, and says so when not.
-function coViewProduct(code, name) {
-  const inCore = (state.coreProducts || []).some((p) => p.product_code === code);
-  const inHs = (state.highStockProducts || []).some((p) => p.product_code === code);
-  if (!inCore && !inHs) {
-    toast(`${name} isn't on this week's Core or High Stock lists. Planning has no standalone product page.`, true);
+function renderCorePlan() {
+  const host = document.getElementById('core-plan');
+  const d = cpState.data;
+  if (!host || !d) return;
+  if (!d.available) {
+    host.innerHTML = `<div class="core-shoot-planning-title">What to make next</div><div class="co-banner">${escapeHtml(d.reason || 'The Core plan is unavailable.')}</div>`;
     return;
   }
-  switchTab('planning');
-  setPlanningStep(inCore ? 'core' : 'high-stocks');
-  if (inCore && !state.coreExpandedProducts.has(code)) toggleCoreProduct(code);
-  setTimeout(() => {
-    const row = document.querySelector(`.planning-step-panel.active [data-product-code="${code}"]`);
-    if (row) { row.scrollIntoView({ block: 'center', behavior: 'smooth' }); row.classList.add('co-flash'); setTimeout(() => row.classList.remove('co-flash'), 1800); }
-  }, 120);
+  const f = cpState.filter;
+  const list = f === 'active' ? d.recommendations : f === 'acted_on' ? d.acted_on : d.dismissed;
+  const shown = f === 'active' && !cpState.showAll ? list.slice(0, CP_VISIBLE) : list;
+  const c = d.counts;
+  const ds = d.data_status;
+  const banners = [];
+  if (!ds.stock.available) banners.push(ds.stock.note);
+  if (!ds.sales.available) banners.push(ds.sales.note);
+  const notes = [
+    `Stock rule: a product needs ${d.stock_minimum}+ sellable units to be recommended for a shoot.`,
+    ds.sizes.note,
+    `Based on ${ds.matching.trusted_ads_used} confirmed + auto-matched ads. ${ds.matching.unreviewed_recent_ads ? `${ds.matching.unreviewed_recent_ads} ad${ds.matching.unreviewed_recent_ads === 1 ? '' : 's'} created in the last ${ds.matching.reliable_days} days still need review in Ad Matching, so creative recency may be understated.` : ''}`,
+    ds.meta.history_first_day ? `Daily Meta performance is stored from ${cpDate(ds.meta.history_first_day)}, so spend and CPA cover a short period; creative dates come from each ad's own Meta creation date.` : null,
+  ].filter(Boolean);
+  const low = d.held_low_stock;
+  host.innerHTML = `
+    <div class="core-shoot-planning-title">What to make next</div>
+    <div class="core-shoot-planning-subtitle">For our Core products: what creative should we make next, and why?</div>
+    ${banners.map((b) => `<div class="co-banner">${escapeHtml(b)}</div>`).join('')}
+    <div class="cp-summary">
+      <span><b>${c.recommendations}</b> worth acting on</span>
+      <span>${c.hold} on hold</span>
+      <span>${c.held_low_stock} held back (low stock)</span>
+      <span>${c.no_action} need no action</span>
+      <span class="co-subnav" id="cp-state-nav" role="tablist">
+        <button type="button" class="co-subnav-btn ${f === 'active' ? 'active' : ''}" data-cp-state="active">To act on</button>
+        <button type="button" class="co-subnav-btn ${f === 'acted_on' ? 'active' : ''}" data-cp-state="acted_on">Done</button>
+        <button type="button" class="co-subnav-btn ${f === 'dismissed' ? 'active' : ''}" data-cp-state="dismissed">Dismissed</button>
+      </span>
+    </div>
+    <div class="co-list">${shown.length ? shown.map(cpCardHtml).join('') : `<div class="co-empty">${f === 'active' ? (ds.sales.available && ds.stock.available ? 'Nothing needs a shoot right now.' : 'Waiting for data to load.') : 'Nothing here.'}</div>`}</div>
+    ${f === 'active' && list.length > CP_VISIBLE ? `<button type="button" class="btn btn-ghost btn-sm" id="cp-show-all">${cpState.showAll ? 'Show fewer' : `Show ${list.length - CP_VISIBLE} more`}</button>` : ''}
+    ${f === 'active' && d.hold.length ? `<h4 class="cp-h">Hold off — don't shoot more yet</h4><div class="co-list">${d.hold.map(cpCardHtml).join('')}</div>` : ''}
+    ${f === 'active' && low.length ? `<details class="co-how"><summary>Not recommended: low stock (${low.length})</summary><div class="cp-low">${low.map((p) => `<div><b>${escapeHtml(p.product_name)}</b> — ${p.known ? `${cpNum(p.units)} units` : 'stock unknown'}${p.would_have_been ? ` <span class="hint">(would otherwise suggest: ${escapeHtml(p.would_have_been)})</span>` : ''}</div>`).join('')}</div></details>` : ''}
+    ${f === 'active' && d.no_action.length ? `<details class="co-how"><summary>No action needed (${d.no_action.length})</summary><div class="cp-low hint">${d.no_action.map(escapeHtml).join(' · ')}</div></details>` : ''}
+    <details class="co-how"><summary>About this data</summary><ul class="co-how-list">${notes.map((n) => `<li>${escapeHtml(n)}</li>`).join('')}</ul></details>`;
 }
 
-function coEvidenceHtml(o) {
-  const e = o.evidence;
+function cpFind(key) {
+  const d = cpState.data;
+  return d && [...d.recommendations, ...d.hold, ...d.acted_on, ...d.dismissed].find((c) => c.key === key);
+}
+
+function cpEvidenceHtml(c) {
+  const e = c.evidence;
+  const admin = cpIsAdmin();
   const kv = (rows) => `<dl class="co-kv">${rows.filter(Boolean).map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${v}</dd>`).join('')}</dl>`;
   const sales = e.sales.available
-    ? kv([
-      ['Seller class', `${escapeHtml(e.sales.seller_class)} <span class="hint">(${escapeHtml(e.sales.basis)})</span>`],
-      ['Units 7d / 30d / 365d', `${coNum(e.sales.units_7d, 1)} / ${coNum(e.sales.units_30d, 1)} / ${coNum(e.sales.units_365d, 1)}`],
-      ['Weekly velocity 30d vs 365d', `${coNum(e.sales.vel30, 1)} vs ${coNum(e.sales.vel365, 1)} · ${escapeHtml(e.sales.trend.display)}`],
-    ])
+    ? kv([['Sales', `${escapeHtml(e.sales.label)}${e.sales.tier ? ` <span class="hint">(${escapeHtml(e.sales.tier)} tier)</span>` : ''}`], ['Units sold: last 7 / 30 / 365 days', `${cpNum(e.sales.units_7d, 1)} / ${cpNum(e.sales.units_30d, 1)} / ${cpNum(e.sales.units_365d, 1)}`], ['Trend', escapeHtml(e.sales.trend || '—')]])
     : '<div class="hint">Sales data unavailable.</div>';
-  const m30 = e.meta.last_30d; const m90 = e.meta.last_90d;
-  const meta = `<table class="co-table"><thead><tr><th></th><th>Spend</th><th>Purchases</th><th>CPA</th><th>Cost / ATC</th><th>Outbound CTR</th></tr></thead><tbody>
-    <tr><td>Last 30d</td><td>${coMoney(m30.spend)}</td><td>${coNum(m30.purchases, 1)}</td><td>${coMoney(m30.cpa)}</td><td>${coMoney(m30.cost_per_atc)}</td><td>${m30.outbound_ctr === null ? '—' : `${m30.outbound_ctr}%`}</td></tr>
-    <tr><td>Last 90d</td><td>${coMoney(m90.spend)}</td><td>${coNum(m90.purchases, 1)}</td><td>${coMoney(m90.cpa)}</td><td>${coMoney(m90.cost_per_atc)}</td><td>${m90.outbound_ctr === null ? '—' : `${m90.outbound_ctr}%`}</td></tr></tbody></table>`;
+  const sizes = e.stock.sizes && e.stock.sizes.length
+    ? `<table class="co-table"><thead><tr>${e.stock.sizes.map((s) => `<th>${escapeHtml(s.size)}</th>`).join('')}</tr></thead><tbody><tr>${e.stock.sizes.map((s) => `<td class="${s.qty < 3 ? 'cp-low-size' : ''}">${s.qty}</td>`).join('')}</tr></tbody></table>`
+    : '<div class="hint">Stock by size isn\'t available.</div>';
   const cr = e.creative;
   const creative = kv([
-    ['Freshness', `${escapeHtml(cr.freshness.label)}${cr.days_since_newest_creative === null ? ' (no creative on record)' : ` · ${cr.days_since_newest_creative} days`}`],
-    ['Newest creative', cr.newest_creative_date ? `${escapeHtml(cr.newest_creative_date)} <span class="hint">(${escapeHtml(cr.newest_creative_source)})</span>` : '—'],
-    ['Newest Meta launch', cr.newest_meta_launch ? `${escapeHtml(cr.newest_meta_launch)} · ${cr.days_since_meta_launch} days ago` : '—'],
-    ['WNDRR went live / final approved', `${escapeHtml(cr.wndrr_live || '—')} / ${escapeHtml(cr.wndrr_approved || '—')}`],
-    ['Creatives with spend (30d / 90d)', `${cr.creatives_30d} / ${cr.creatives_90d}`],
-    ['Active ads (30d)', String(e.meta.active_ads_30d)],
-    ['Spend on creative 120d+ old (30d)', `${coMoney(e.meta.old_creative_spend_30d)}${e.meta.old_creative_share_30d === null ? '' : ` (${Math.round(e.meta.old_creative_share_30d * 100)}%)`}`],
+    ['Last new creative', cr.last_new_creative ? `${escapeHtml(cpDate(cr.last_new_creative.date))} (${escapeHtml(cpAge(cr.last_new_creative.days_ago))} ago) <span class="hint">${escapeHtml(cr.last_new_creative.source)}</span>` : 'None found'],
+    ['Creatives running now', String(cr.running_creatives)],
+    ['New creatives in the last 90 days', String(cr.new_creatives_90d)],
+    ['Distinct creatives ever linked', `${cr.creatives_total} <span class="hint">(matched ads only)</span>`],
+    ['Age of running creatives', cr.newest_running_days === null ? '—' : `newest ${escapeHtml(cpAge(cr.newest_running_days))}, oldest ${escapeHtml(cpAge(cr.oldest_running_days))}`],
   ]);
-  const mix = (title, rows, cov) => `<div class="co-mix"><div class="co-mix-title">${title} <span class="hint">${cov === null ? '' : `${Math.round(cov * 100)}% of spend classified`}</span></div>${
-    rows.length ? rows.map((r) => `<div class="co-mix-row"><span>${escapeHtml(r.label)}</span><span class="co-mix-bar"><i style="width:${Math.round((r.share || 0) * 100)}%"></i></span><span>${r.share === null ? '—' : `${Math.round(r.share * 100)}%`} · ${coMoney(r.spend)}</span></div>`).join('') : '<div class="hint">None classified</div>'}</div>`;
-  const ads = e.ads.length
-    ? `<table class="co-table"><thead><tr><th>Ad</th><th>Launch</th><th>Spend</th><th>Purch.</th><th>Concept</th><th>Creator</th><th>Media</th></tr></thead><tbody>${e.ads.map((a) => `<tr><td title="${escapeHtml(a.ad_name || '')}">${escapeHtml((a.ad_name || a.meta_ad_id).slice(0, 48))}${a.shared_with_products ? ` <span class="co-legacy">shared ×${a.shared_with_products + 1}</span>` : ''}</td><td>${escapeHtml(a.launch || '—')}</td><td>${coMoney(a.spend)}</td><td>${coNum(a.purchases, 1)}</td><td>${escapeHtml(a.concept || '—')}</td><td>${escapeHtml(a.creator || '—')}</td><td>${escapeHtml(a.media || '—')}</td></tr>`).join('')}</tbody></table>`
-    : '<div class="hint">No ads with spend in the window.</div>';
+  const reliability = cr.recency_basis === 'older_than_window'
+    ? `The newest creative we know of is older than ${90} days. Dates before ${escapeHtml(cpDate(cr.reliable_since))} only include ads that were matched, so there may be older creative we can't see.`
+    : cr.recency_basis === 'none_found' ? `No matched creative found. Inside the last 90 days every ad has been reviewed, so a gap there is real.` : `Dates since ${escapeHtml(cpDate(cr.reliable_since))} are reliable: every ad created in that period has been reviewed.`;
+  const row = (a, kind) => `<tr>
+      <td><button type="button" class="mp-preview-btn" data-cp-preview="${escapeHtml(a.meta_ad_id)}" title="Preview the creative" aria-label="Preview creative">&#9654;</button></td>
+      <td title="${escapeHtml(a.ad_name || '')}">${escapeHtml((a.ad_name || '').slice(0, 64))}</td>
+      <td>${escapeHtml(cpDate(a.first_created || a.created))}${a.running ? ' <span class="co-status proven">running</span>' : ''}</td>
+      <td>${escapeHtml(a.concept || (a.products ? a.products.join(', ') : '') || '—')}</td>
+      <td>${escapeHtml(a.media || '—')}</td>
+      ${admin && a.admin ? `<td>${cpMoney(a.admin.spend)}</td><td>${cpNum(a.admin.purchases, 1)}</td>` : ''}
+    </tr>`;
+  const head = `<thead><tr><th></th><th>Ad</th><th>Created</th><th>${'Concept'}</th><th>Media</th>${admin ? '<th>Spend</th><th>Purch.</th>' : ''}</tr></thead>`;
+  const creatives = e.creatives.length ? `<table class="co-table">${head}<tbody>${e.creatives.map((a) => row(a)).join('')}</tbody></table>` : '<div class="hint">No matched creatives for this product.</div>';
   const concept = e.concept
-    ? `<h4>Concept benchmark — ${escapeHtml(e.concept.label)}</h4>${kv([
-      ['Status', escapeHtml(e.concept.cross_product_winner ? 'proven · cross-product winner' : e.concept.status)],
-      ['Creatives / spend / purchases', `${e.concept.creatives} / ${coMoney(e.concept.spend)} / ${coNum(e.concept.purchases)}`],
-      ['CPA vs account', `${coMoney(e.concept.cpa)} vs ${coMoney(e.concept.account_cpa)}`],
-      ['Worked on', escapeHtml(e.concept.products.map((x) => `${x.name} (${coMoney(x.spend)})`).join(', ') || '—')],
-    ])}`
+    ? `<h4>Where ${escapeHtml(e.concept.label)} is working</h4>${e.concept.ads.length ? `<table class="co-table">${head.replace('<th>Concept</th>', '<th>Products</th>')}<tbody>${e.concept.ads.map((a) => row(a)).join('')}</tbody></table>` : '<div class="hint">No example ads.</div>'}`
     : '';
-  const fat = e.fatigue
-    ? `<h4>Fatigue comparison</h4><table class="co-table"><thead><tr><th></th><th>Window</th><th>Spend</th><th>Purchases</th><th>CPA</th><th>Outbound CTR</th></tr></thead><tbody>
-       <tr><td>Prior</td><td>${escapeHtml(e.fatigue.prior.since)} → ${escapeHtml(e.fatigue.prior.until)}</td><td>${coMoney(e.fatigue.prior.spend)}</td><td>${coNum(e.fatigue.prior.purchases, 1)}</td><td>${coMoney(e.fatigue.prior.cpa)}</td><td>${e.fatigue.prior.outbound_ctr}%</td></tr>
-       <tr><td>Recent</td><td>${escapeHtml(e.fatigue.recent.since)} → ${escapeHtml(e.fatigue.recent.until)}</td><td>${coMoney(e.fatigue.recent.spend)}</td><td>${coNum(e.fatigue.recent.purchases, 1)}</td><td>${coMoney(e.fatigue.recent.cpa)}</td><td>${e.fatigue.recent.outbound_ctr}%</td></tr></tbody></table>
-       <div class="hint">${e.fatigue.ads_compared} ad${e.fatigue.ads_compared === 1 ? '' : 's'} compared · CTR ${e.fatigue.ctr_change_pct}% · CPA +${e.fatigue.cpa_change_pct}%</div>`
-    : '';
-  const rank = `<table class="co-table"><tbody>${o.rank.components.map((c) => `<tr><td>${escapeHtml(c.name)}</td><td>+${coNum(c.points, 1)}</td></tr>`).join('')}<tr><td><b>Strength (capped 0–100)</b></td><td><b>${o.rank.strength}</b></td></tr><tr><td><b>${escapeHtml(o.priority)} base + strength = rank score</b></td><td><b>${o.rank.score}</b></td></tr></tbody></table>`;
+  const meta = admin && e.meta.admin
+    ? kv([['Meta performance', escapeHtml(e.meta.label)], ['Spend (stored period)', cpMoney(e.meta.admin.spend_90d)], ['Purchases', cpNum(e.meta.admin.purchases_90d, 1)], ['CPA', cpMoney(e.meta.admin.cpa_90d)]])
+    : kv([['Meta performance', escapeHtml(e.meta.label)]]);
   return `
-    <div class="co-ev-head"><span class="co-pri pri-${o.priority.toLowerCase()}">${escapeHtml(o.priority.toUpperCase())}</span> <b>${escapeHtml(o.title)}</b><div class="hint">${escapeHtml(o.explanation)}</div></div>
-    <h4>Why this appeared</h4>${kv([['Rule', escapeHtml((e.reason && e.reason.rule) || '')], ['Evidence window', `${escapeHtml(e.window.since)} → ${escapeHtml(e.window.until)}`], ['Generated', escapeHtml(o.generated_at.slice(0, 16).replace('T', ' ') + ' UTC')]])}
-    <h4>Sales signal</h4>${sales}
-    <h4>Meta performance <span class="hint">(confirmed + auto-matched ads)</span></h4>${meta}
-    <h4>Creative freshness</h4>${creative}
-    <h4>Recent mix (last 90d)</h4>${mix('Concepts', e.mix.concept, e.mix.field_coverage.concept)}${mix('Creators', e.mix.creator, e.mix.field_coverage.creator)}${mix('Media', e.mix.media, e.mix.field_coverage.media)}
-    ${concept}${fat}
-    <h4>Relevant ads</h4>${ads}
-    <h4>How it was ranked</h4>${rank}
+    <div class="co-ev-head"><b>${escapeHtml(c.headline)}</b><div class="hint">${escapeHtml(c.why)}</div></div>
+    <h4>Sales</h4>${sales}
+    <h4>Stock ${e.stock.units === null ? '' : `<span class="hint">(${cpNum(e.stock.units)} sellable units · minimum ${e.stock.minimum})</span>`}</h4>${sizes}${e.stock.size_warning ? `<div class="co-note cp-size-warn">⚠ ${escapeHtml(e.stock.size_warning)}</div>` : ''}
+    <h4>Creative history</h4>${creative}<div class="hint">${reliability}</div>
+    <h4>Meta</h4>${meta}
+    <h4>Creatives <span class="hint">(click ▶ to play)</span></h4>${creatives}
+    ${concept}
     <div class="hint co-attrib">${escapeHtml(e.attribution)}</div>`;
 }
 
-async function coShoot(o) {
+async function cpShoot(c) {
   try {
-    const p = o.products[0];
-    const preset = await api(`/creative-opportunities/shoot-preset?product_code=${encodeURIComponent(p.product_code)}`);
-    preset.opportunity = {
-      key: o.key, title: o.title, explanation: o.explanation, priority: o.priority,
-      concept: o.recommended_concept ? o.recommended_concept.label : null,
-      media: o.recommended_media ? o.recommended_media.label : null,
-    };
+    const preset = await api(`/core-creative-plan/shoot-preset?product_code=${encodeURIComponent(c.product.product_code)}`);
+    preset.opportunity = { key: c.key, title: c.headline, explanation: c.why, priority: c.priority, concept: c.concept ? c.concept.label : null, media: c.concept ? c.concept.media : null };
     openShootPlanModal(preset);
   } catch (e) {
     toast(e.message, true);
   }
 }
 
-async function coSetOpportunityState(key, st, note, shootPlanItemId) {
-  await api('/creative-opportunities/state', { method: 'POST', body: JSON.stringify({ key, state: st, note: note || null, shoot_plan_item_id: shootPlanItemId || null }) });
+async function cpSetState(key, st, note, card) {
+  await api('/core-creative-plan/state', { method: 'POST', body: JSON.stringify({ key, state: st, note: note || null, card: card ? { priority: card.priority, severity: card.severity, headline: card.headline, why: card.why } : null }) });
 }
 
-document.getElementById('co-state-nav').addEventListener('click', (e) => {
-  const b = e.target.closest('[data-co-state]');
-  if (!b) return;
-  coState.filter = b.dataset.coState;
-  loadCreativeOpportunities();
-});
-document.getElementById('co-list').addEventListener('click', async (e) => {
-  const btn = e.target.closest('[data-co-act]');
-  const card = e.target.closest('[data-co-key]');
-  if (!btn || !card) return;
-  const o = coFind(card.dataset.coKey);
-  if (!o) return;
-  const act = btn.dataset.coAct;
+document.addEventListener('click', async (e) => {
+  const nav = e.target.closest('[data-cp-state]');
+  if (nav) { cpState.filter = nav.dataset.cpState; cpState.showAll = false; renderCorePlan(); return; }
+  if (e.target.closest('#cp-show-all')) { cpState.showAll = !cpState.showAll; renderCorePlan(); return; }
+  const pv = e.target.closest('[data-cp-preview]');
+  if (pv) {
+    const key = document.getElementById('cp-evidence-modal').dataset.cpKey;
+    const card = cpFind(key);
+    const adId = pv.dataset.cpPreview;
+    const all = card ? [...card.evidence.creatives, ...((card.evidence.concept && card.evidence.concept.ads) || [])] : [];
+    const a = all.find((x) => x.meta_ad_id === adId);
+    openAdPreview(adId, cpIsAdmin() && a && a.admin ? { metrics: { spend: a.admin.spend, purchases: a.admin.purchases, cpa: a.admin.cpa } } : null);
+    return;
+  }
+  const btn = e.target.closest('[data-cp-act]');
+  const cardEl = e.target.closest('[data-cp-key]');
+  if (!btn || !cardEl || !document.getElementById('core-plan').contains(cardEl)) return;
+  const c = cpFind(cardEl.dataset.cpKey);
+  if (!c) return;
+  const act = btn.dataset.cpAct;
   try {
-    if (act === 'product') coViewProduct(o.products[0].product_code, o.products[0].product_name);
-    else if (act === 'evidence') {
-      document.getElementById('co-evidence-title').textContent = `${o.products[0].product_name} — evidence`;
-      document.getElementById('co-evidence-body').innerHTML = coEvidenceHtml(o);
-      openModal('co-evidence-modal');
-    } else if (act === 'shoot') await coShoot(o);
-    else if (act === 'dismiss') { await coSetOpportunityState(o.key, 'dismissed'); toast('Dismissed — it stays hidden unless the evidence gets materially worse.'); await loadCreativeOpportunities(); }
-    else if (act === 'acted') { await coSetOpportunityState(o.key, 'acted_on'); toast('Marked as acted on.'); await loadCreativeOpportunities(); }
-    else if (act === 'reopen') { await coSetOpportunityState(o.key, 'open'); toast('Back on the list.'); await loadCreativeOpportunities(); }
+    if (act === 'evidence') {
+      document.getElementById('cp-evidence-title').textContent = `${c.product.product_name} — evidence`;
+      document.getElementById('cp-evidence-body').innerHTML = cpEvidenceHtml(c);
+      document.getElementById('cp-evidence-modal').dataset.cpKey = c.key;
+      openModal('cp-evidence-modal');
+    } else if (act === 'shoot') await cpShoot(c);
+    else if (act === 'dismiss') { await cpSetState(c.key, 'dismissed', null, c); toast('Dismissed — it stays hidden unless the evidence gets materially worse.'); await loadCorePlan(true); }
+    else if (act === 'acted') { await cpSetState(c.key, 'acted_on', null, c); toast('Marked done.'); await loadCorePlan(true); }
+    else if (act === 'reopen') { await cpSetState(c.key, 'open'); toast('Back on the list.'); await loadCorePlan(true); }
   } catch (err) {
     toast(err.message, true);
   }
@@ -4489,6 +4673,8 @@ function toggleCoreAllProducts() {
 }
 
 function renderCoreProducts() {
+  renderCorePlan();
+  loadCorePlan(); // no-op while the cached plan is fresh
   renderCoreWeeklyCard();
   renderCoreShootPlanning();
   renderCoreViewToggle();
@@ -4957,9 +5143,9 @@ async function saveShootPlanItem() {
     closeModal('shoot-plan-modal');
     toast('Added to Shoot Plan');
     if (fromOpportunity) {
-      // The person just confirmed the shoot from a recommendation -> record it as acted on (traceable to the shoot plan item).
-      try { await coSetOpportunityState(fromOpportunity.key, 'acted_on', 'Added to Shoot Plan', created && created.id); } catch (err) { /* best effort */ }
-      if (document.getElementById('tab-creative-opportunities').classList.contains('active')) loadCreativeOpportunities();
+      // The person just confirmed the shoot from a recommendation -> record it as done (traceable via the note).
+      try { await cpSetState(fromOpportunity.key, 'acted_on', 'Added to Shoot Plan', { priority: fromOpportunity.priority, severity: 0, headline: fromOpportunity.title, why: fromOpportunity.explanation }); } catch (err) { /* best effort */ }
+      loadCorePlan(true);
     }
     loadAll();
   } catch (e) {
@@ -5342,10 +5528,11 @@ function promotionOverviewHtmlForBf(p, progress) {
       </div>
       <div class="promo-overview-progress-track"><div class="promo-overview-progress-fill ${color}" style="width:${Math.min(100, pct)}%;"></div></div>
       <div class="promo-overview-pills">
-        <span class="promo-pill promo-pill-target">${grand.required} Guideline</span>
+        <span class="promo-pill promo-pill-target">${grand.required} Target</span>
         <span class="promo-pill promo-pill-planned">${grand.planned} Planned</span>
         <span class="promo-pill promo-pill-ready">${grand.completed} Completed</span>
-        ${grand.over_target ? `<span class="promo-pill promo-pill-over">+${grand.over_target} Above Guideline</span>` : ''}
+        ${grand.still_to_plan ? `<span class="promo-pill">${grand.still_to_plan} Remaining</span>` : ''}
+        ${grand.over_target ? `<span class="promo-pill promo-pill-over">+${grand.over_target} Extra</span>` : ''}
       </div>
     </div>`;
 }
@@ -12877,7 +13064,7 @@ async function loadBfStyles() {
 }
 
 function bfStyleOptionsHtml(selectedId) {
-  return '<option value="">Needs Classification</option>' + state.blackFriday.styles
+  return '<option value="">No format</option>' + state.blackFriday.styles
     .map((s) => `<option value="${s.id}" ${String(s.id) === String(selectedId) ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('');
 }
 
@@ -12888,34 +13075,41 @@ function bfStyleOptionsHtml(selectedId) {
 // can exceed Y. The full creative-style breakdown now lives in the Stage
 // Workspace below (the primary working view, item 3) rather than behind a
 // "Show breakdown" toggle -- clicking a stage tile jumps straight there.
+// Short, human labels for the creative formats (the creative_styles list).
+// Formats are optional INSPIRATION on the Black Friday page, never quotas.
+const BF_FORMAT_SHORT = {
+  'Graphic tile': 'Graphic Tile', 'GWP/Giveaway - Graphic': 'GWP / Giveaway (graphic)', 'GWP/Giveaway - Video': 'GWP / Giveaway (video)',
+  GIF: 'GIF', 'PNG frame (flat lay, e-comm) - single/carousel': 'PNG Frame / Flat Lay', 'Product Focused Video': 'Product Focused',
+  DPA: 'DPA', 'Price Strikethrough': 'Price Strikethrough', 'Founder Video': 'Founder', 'EGC Video': 'EGC', 'UGC Video': 'UGC',
+  'BAU Video': 'BAU Video', 'Campaign Video': 'Campaign Video', 'Other Video (eg. Humour, TikTok)': 'Other / Humour / TikTok',
+};
+const bfFormatShortName = (name) => BF_FORMAT_SHORT[name] || name || '';
+const bfFormatChipsHtml = (formats, max) => (formats || []).slice(0, max || 99).map((f) => `<span class="bf-format-chip">${escapeHtml(bfFormatShortName(f.style_name))}</span>`).join('');
+// "19 / 35 planned" + "16 remaining" -- the stage TARGET (promotion_stages.required_count) is a
+// planning target, not a cap: going over reads as "+N extra", never an error.
+const bfRemainingText = (t) => (t.over_target > 0 ? `&#10003; Target reached &middot; +${t.over_target} extra` : t.still_to_plan > 0 ? `${t.still_to_plan} remaining` : '&#10003; Target planned');
+
+// Black Friday creative progress (Promotions V2): per stage "planned / target", remaining, and the
+// formats to consider. The 180 total is the sum of the four stage targets.
 function renderBfProgressSection() {
   const progress = state.blackFriday.progress;
   if (!progress) return;
   const grand = progress.grand_total;
-  const grandOver = Math.max(0, grand.planned - grand.required);
-
-  const stageTiles = progress.stage_totals.map((s) => {
-    const statusLine = s.over_target > 0
-      ? `<span class="bf-stage-total-status over">&#10003; +${s.over_target} above guideline</span>`
-      : s.still_to_plan > 0
-        ? `<span class="bf-stage-total-status">${s.still_to_plan} still needed</span>`
-        : `<span class="bf-stage-total-status met">&#10003; Guideline met</span>`;
-    return `
+  const stageTiles = progress.stage_totals.map((s) => `
       <div class="bf-stage-total-tile" onclick="switchBfSubtab('stages');selectBfStage(${s.promotion_stage_id});">
         <div class="bf-stage-total-name">${escapeHtml(bfStageShortName(s.stage_name))}</div>
-        <div class="bf-stage-total-nums">${s.planned} <small>Planned &middot; ${s.required} Guideline</small></div>
-        ${statusLine}
-      </div>`;
-  }).join('');
+        <div class="bf-stage-total-nums">${s.planned} / ${s.required} <small>creatives planned</small></div>
+        <span class="bf-stage-total-status ${s.over_target > 0 || (s.still_to_plan === 0) ? 'met' : ''}">${bfRemainingText(s)}</span>
+        ${(s.formats_to_consider || []).length ? `<div class="bf-stage-total-formats"><span class="bf-formats-label">Formats to consider</span><div class="bf-format-chips">${bfFormatChipsHtml(s.formats_to_consider, 5)}</div></div>` : ''}
+      </div>`).join('');
 
   document.getElementById('bf-progress-section').innerHTML = `
     <div class="bf-progress-card">
       <div class="bf-progress-head">
         <span class="bf-progress-title">Black Friday 2026 Creative Progress</span>
-        <span class="bf-progress-total">${grand.planned} Planned &middot; ${grand.completed} Completed &middot; ${grand.required} Guideline Target${grandOver ? ` &middot; <span class="bf-over-badge">+${grandOver} above guideline</span>` : ''}</span>
+        <span class="bf-progress-total">${grand.planned} / ${grand.required} planned &middot; ${grand.still_to_plan} remaining &middot; ${grand.completed} completed${grand.over_target ? ` &middot; <span class="bf-over-badge">+${grand.over_target} extra</span>` : ''}</span>
       </div>
       <div class="bf-stage-totals-row">${stageTiles}</div>
-      ${progress.needs_classification_count ? `<div class="hint bf-needs-classification-hint">${progress.needs_classification_count} stage execution${progress.needs_classification_count === 1 ? '' : 's'} need${progress.needs_classification_count === 1 ? 's' : ''} classification &rarr; <a href="#" onclick="switchBfSubtab('stages');return false;">classify in the Stage Workspace</a></div>` : ''}
     </div>`;
 }
 
@@ -12949,126 +13143,45 @@ function renderBfStageWorkspace() {
     return;
   }
 
-  const cells = progress.matrix.filter((c) => c.promotion_stage_id === stageId);
-  // Target-0 styles with real planned work are valid extra creative, not a
-  // guideline miss -- kept out of the main grid so they never look like a
-  // required category (follow-up brief, Part 1.2).
-  const guidelineCells = cells.filter((c) => c.required > 0).sort((a, b) => (a.style_sort_order || 0) - (b.style_sort_order || 0));
-  const extraCells = cells.filter((c) => c.required === 0 && c.planned > 0).sort((a, b) => (a.style_sort_order || 0) - (b.style_sort_order || 0));
-  const styleRows = guidelineCells.map(bfStyleRowHtml).join('');
-  const additionalHtml = extraCells.length ? `
-    <div class="bf-additional-creative">
-      <div class="bf-additional-creative-label">Additional Creative -- not part of the guideline, still counts toward Planned</div>
-      ${extraCells.map(bfAdditionalCreativeRowHtml).join('')}
-    </div>` : '';
-
-  // Needs Classification executions in this stage -- real, already-planned
-  // work that just hasn't been assigned a style yet, so it can't count
-  // toward any one style row above. Classifying it here never creates a
-  // new record, only assigns the existing execution's style.
-  const unclassified = [];
+  // Every execution in this stage, newest-added last; the format is an optional label, never a requirement.
+  const inStage = [];
   for (const idea of state.blackFriday.ideas) {
     for (const ex of idea.executions || []) {
-      if (ex.promotion_stage_id === stageId && !ex.creative_style_id) unclassified.push({ idea, ex });
+      if (ex.promotion_stage_id === stageId) inStage.push({ idea, ex });
     }
   }
-  const unclassifiedHtml = unclassified.length ? `
+  const formatLabel = (ex) => (ex.creative_style_id ? bfFormatShortName((state.blackFriday.styles.find((x) => x.id === ex.creative_style_id) || {}).name || '') : '');
+  const execRows = inStage.length
+    ? inStage.map((row) => `<div class="bf-exec-with-format">${formatLabel(row.ex) ? `<span class="bf-format-chip small">${escapeHtml(formatLabel(row.ex))}</span>` : '<span class="bf-format-chip small none">No format</span>'}${bfCellExecutionRowHtml(row)}</div>`).join('')
+    : '<div class="hint">Nothing planned for this stage yet. Use "+ Add Creative" to plan one.</div>';
+  const noFormat = inStage.filter(({ ex }) => !ex.creative_style_id);
+  const noFormatHtml = noFormat.length ? `
     <div class="bf-style-row bf-style-row-unclassified">
       <div class="bf-style-row-head">
-        <span class="bf-style-row-name">Needs Classification</span>
-        <span class="hint">${unclassified.length} execution${unclassified.length === 1 ? '' : 's'} -- assign a style to count toward a target</span>
+        <span class="bf-style-row-name">Optional: choose a format</span>
+        <span class="hint">${noFormat.length} planned creative${noFormat.length === 1 ? '' : 's'} without a format — they still count toward the stage target</span>
       </div>
       <div class="bf-unclassified-list">
-        ${unclassified.map(({ idea, ex }) => `
+        ${noFormat.map(({ idea, ex }) => `
           <div class="bf-unclassified-row">
             <button type="button" class="link-btn bf-unclassified-title" onclick="openBfIdeaDetailModal(${idea.id})">${escapeHtml(idea.title)}</button>
             <select onchange="classifyBfExecutionFromWorkspace(${idea.id}, ${ex.id}, this.value)">${bfStyleOptionsHtml('')}</select>
           </div>`).join('')}
       </div>
     </div>` : '';
-
-  const overallStatus = stageTotal.over_target > 0
-    ? `<span class="bf-style-row-status over">&#10003; +${stageTotal.over_target} above guideline</span>`
-    : stageTotal.still_to_plan > 0
-      ? `<span class="bf-style-row-status">${stageTotal.still_to_plan} still needed</span>`
-      : `<span class="bf-style-row-status met">&#10003; Guideline met</span>`;
+  const formats = stageTotal.formats_to_consider || [];
 
   body.innerHTML = `
     <div class="bf-stage-workspace-summary">
-      <span>${escapeHtml(bfStageShortName(stageTotal.stage_name))} &mdash; ${stageTotal.planned} Planned &middot; ${stageTotal.completed} Completed &middot; ${stageTotal.required} Guideline</span>
-      ${overallStatus}
+      <span>${escapeHtml(bfStageShortName(stageTotal.stage_name))} &mdash; <strong>${stageTotal.planned} / ${stageTotal.required}</strong> creatives planned &middot; ${stageTotal.completed} completed</span>
+      <span class="bf-style-row-status ${stageTotal.still_to_plan > 0 ? 'needs' : 'met'}">${bfRemainingText(stageTotal)}</span>
     </div>
-    <div class="bf-style-rows">${styleRows}</div>
-    ${additionalHtml}
-    ${unclassifiedHtml}
+    ${formats.length ? `<div class="bf-formats-block"><span class="bf-formats-label">Creative inspiration &mdash; formats to consider (optional)</span><div class="bf-format-chips">${bfFormatChipsHtml(formats)}</div></div>` : ''}
+    <div class="bf-stage-exec-list">${execRows}</div>
+    ${noFormatHtml}
   `;
 }
 
-// One row per creative style guideline in the selected stage (follow-up
-// brief, item 6). Never blocks or errors when over target -- an exceeded
-// guideline is "Target met · +N extra", not a warning. Clicking expands the
-// row to show the actual executions behind the Planned count (Part 1.1) --
-// purely a view of the existing promotion_creative_idea_executions rows,
-// never a duplicate.
-function bfStyleRowHtml(c) {
-  const statusLine = c.over_target > 0
-    ? `<span class="bf-style-row-status over">&#10003; Target met &middot; +${c.over_target} extra</span>`
-    : c.still_to_plan > 0
-      ? `<span class="bf-style-row-status needs">${c.still_to_plan} still needed</span>`
-      : `<span class="bf-style-row-status met">&#10003; Target planned</span>`;
-  const safeStyleName = escapeHtml(c.style_name).replace(/'/g, '&#39;');
-  const cellKey = `${c.promotion_stage_id}:${c.creative_style_id}`;
-  const expanded = state.blackFriday.expandedCells.has(cellKey);
-  const executions = expanded ? bfExecutionsForCell(c.promotion_stage_id, c.creative_style_id) : [];
-  return `
-    <div class="bf-style-row">
-      <div class="bf-style-row-head">
-        <span class="bf-style-row-name">${escapeHtml(c.style_name)}</span>
-        <button type="button" class="btn btn-primary btn-sm" onclick="openBfAddCreativeModal(${c.promotion_stage_id}, ${c.creative_style_id}, '${safeStyleName}')">+ Add Creative</button>
-      </div>
-      <div class="bf-style-row-stats" ${c.planned > 0 ? `onclick="toggleBfStyleCell('${cellKey}')" style="cursor:pointer;"` : ''}>
-        <span>Target <strong>${c.required}</strong></span>
-        <span>Planned <strong>${c.planned}</strong></span>
-        <span>Completed <strong>${c.completed}</strong></span>
-        ${statusLine}
-        ${c.planned > 0 ? `<span class="link-btn bf-cell-toggle">${expanded ? 'Hide' : 'Show'} creatives &rarr;</span>` : ''}
-      </div>
-      ${expanded ? `<div class="bf-cell-executions">${executions.map(bfCellExecutionRowHtml).join('')}</div>` : ''}
-    </div>`;
-}
-
-// Target-0 style with real planned work -- Part 1.2's "Additional
-// Creative": same expand-to-see-creatives behaviour, just presented as a
-// single compact row instead of a full guideline card.
-function bfAdditionalCreativeRowHtml(c) {
-  const cellKey = `${c.promotion_stage_id}:${c.creative_style_id}`;
-  const expanded = state.blackFriday.expandedCells.has(cellKey);
-  const executions = expanded ? bfExecutionsForCell(c.promotion_stage_id, c.creative_style_id) : [];
-  return `
-    <div class="bf-additional-creative-row" onclick="toggleBfStyleCell('${cellKey}')">
-      <div class="bf-additional-creative-row-head">
-        <span>${escapeHtml(c.style_name)} &middot; <strong>${c.planned}</strong> planned${c.completed ? ` &middot; ${c.completed} completed` : ''}</span>
-        <span class="link-btn">${expanded ? 'Hide' : 'Show'}</span>
-      </div>
-      ${expanded ? `<div class="bf-cell-executions">${executions.map(bfCellExecutionRowHtml).join('')}</div>` : ''}
-    </div>`;
-}
-
-function toggleBfStyleCell(cellKey) {
-  if (state.blackFriday.expandedCells.has(cellKey)) state.blackFriday.expandedCells.delete(cellKey);
-  else state.blackFriday.expandedCells.add(cellKey);
-  renderBfStageWorkspace();
-}
-
-function bfExecutionsForCell(stageId, styleId) {
-  const result = [];
-  for (const idea of state.blackFriday.ideas) {
-    for (const ex of idea.executions || []) {
-      if (ex.promotion_stage_id === stageId && ex.creative_style_id === styleId) result.push({ idea, ex });
-    }
-  }
-  return result;
-}
 
 // One compact row per real execution behind a Target/Planned count --
 // title, "Recreation" vs "New Concept" (only ever from a real linked
@@ -13178,13 +13291,12 @@ function showBfAddCreativePanel(name) {
   document.getElementById('bf-add-creative-panel-recreate').style.display = name === 'recreate' ? '' : 'none';
 }
 
+// The format is optional inspiration (Promotions V2): a creative can be planned without one.
 function chooseBfAddCreativeNew() {
-  if (!state.blackFriday.addCreativeContext.styleId) return toast('Pick a Creative Style first', true);
   showBfAddCreativePanel('new');
 }
 
 function chooseBfAddCreativeRecreate() {
-  if (!state.blackFriday.addCreativeContext.styleId) return toast('Pick a Creative Style first', true);
   showBfAddCreativePanel('recreate');
   renderBfRecreatePicker();
 }
@@ -13532,7 +13644,7 @@ function bfIdeaCardHtml(idea) {
       ${executions.map((ex) => `
         <div class="bf-idea-execution-row">
           <span class="bf-stage-badge ${bfExecStatusBucket(ex)}">${escapeHtml(bfStageShortName(ex.stage_name))}</span>
-          <span class="bf-style-badge">${ex.style_name ? escapeHtml(ex.style_name) : 'Needs Classification'}</span>
+          <span class="bf-style-badge">${ex.style_name ? escapeHtml(ex.style_name) : 'No format'}</span>
           <span class="bf-status-badge ${bfExecStatusBucket(ex)}">Status: ${escapeHtml(ex.production_stage_label)}</span>
         </div>`).join('')}
     </div>` : '';
@@ -13627,7 +13739,7 @@ function openBfIdeaDetailModal(id) {
       ${executions.map((ex) => `
         <div class="bf-idea-execution-row">
           <span class="bf-stage-badge ${bfExecStatusBucket(ex)}">${escapeHtml(bfStageShortName(ex.stage_name))}</span>
-          <span class="bf-style-badge">${ex.style_name ? escapeHtml(ex.style_name) : 'Needs Classification'}</span>
+          <span class="bf-style-badge">${ex.style_name ? escapeHtml(ex.style_name) : 'No format'}</span>
           <span class="bf-status-badge ${bfExecStatusBucket(ex)}">Status: ${escapeHtml(ex.production_stage_label)}</span>
         </div>`).join('')}
     </div>` : '<div class="hint">No Black Friday stages added yet.</div>';

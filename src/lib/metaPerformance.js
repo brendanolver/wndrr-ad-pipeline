@@ -21,16 +21,18 @@
 //      Outbound CTR = SUM(outbound_clicks) / SUM(impressions) * 100
 //    A zero denominator yields null (shown as an em dash), never Infinity/NaN.
 //
-// ── Reach / Frequency: deliberately NOT computed ────────────────────────
+// ── Reach / Frequency: NEVER summed ─────────────────────────────────────
 // Reach is a unique-people count, so it is NOT additive across days or ads
 // (the same person reached on Monday and Tuesday is one person, not two),
 // and Frequency = impressions / reach inherits the problem. The stored
-// daily reach/frequency columns are correct per ad per day only; summing or
-// averaging them over a range would give a wrong number. V1 therefore
-// returns reach/frequency as explicit nulls with a status flag so the UI
-// can render nothing rather than something inaccurate. Exact range-level
-// values need a separate Meta Insights call per (level, date range) -- see
-// REACH_FREQUENCY below for the hook where that would plug in later.
+// daily reach/frequency columns are correct per ad per DAY only; summing or
+// averaging them over a range would give a wrong number.
+//   * a single-day range: per-ad values are exact from the stored daily rows;
+//   * any other range: exact values are pulled from Meta ON DEMAND for that
+//     exact range (src/lib/metaRangeReach.js, read-only, admin click) and
+//     cached (meta_reach_pulls / meta_ad_range_reach); this file only reads
+//     that cache (metaReachStore.js), so a page view never costs a Meta call.
+// Until a pull exists the value is an explicit null with a status, never a guess.
 //
 // ── Thumbstop / Hold Rate: deliberately NOT defined ─────────────────────
 // Lucy's Ads Manager Thumbstop is a custom metric whose exact formula has
@@ -38,6 +40,7 @@
 // guessed or displayed here until the formula is confirmed. The raw video
 // columns (video_plays, thruplays, video_p25 ...) remain stored untouched.
 const { pool } = require('../db');
+const reachStore = require('./metaReachStore'); // DB-only reads of the Reach/Frequency cache (no network)
 
 // The account reporting timezone. Insight dates in meta_ad_insights_daily
 // are calendar days in the Meta ad account's own timezone, so every
@@ -381,8 +384,8 @@ async function getSummary(parsed, now = new Date()) {
     totals,
     coverage,
     freshness,
-    // Stable slots for exact range-level Reach/Frequency (not built in V1).
-    reach_frequency: REACH_FREQUENCY,
+    // Exact range-level Reach/Frequency from the cache (null + status until loaded).
+    reach_frequency: reachStore.summaryFrom(await reachStore.getStatus(parsed.range, parsed.today, { now: now.getTime() })),
     compare: null,
   };
   if (parsed.compareRange) {
@@ -419,8 +422,11 @@ function escapeLike(s) {
   return s.replace(/[\\%_]/g, (c) => `\\${c}`);
 }
 
+// Reach / Frequency sort only when the Reach cache can supply them (see getAds).
+const REACH_SORTS = new Set(['reach', 'frequency']);
+
 function parseAdsQuery(query) {
-  const sort = SORT_SQL[query.sort] ? query.sort : 'spend';
+  const sort = SORT_SQL[query.sort] || REACH_SORTS.has(query.sort) ? query.sort : 'spend';
   const dir = String(query.dir).toLowerCase() === 'asc' ? 'asc' : 'desc';
   const status = Object.prototype.hasOwnProperty.call(STATUS_FILTERS, query.status) ? query.status : 'all';
   const q = String(query.q || '').trim().slice(0, 200);
@@ -434,6 +440,14 @@ function parseAdsQuery(query) {
 // 29k-ad inventory or raw daily rows.
 async function getAds(parsed, query) {
   const opts = parseAdsQuery(query);
+  // Where this range's per-ad Reach/Frequency can come from (never Meta, only the stored cache).
+  const reachStatus = await reachStore.getStatus(parsed.range, parsed.today);
+  const reachFrom = reachStatus.ad_values; // 'stored_daily' (one day) | 'meta_range' (cached pull) | null
+  const pullId = reachFrom === 'meta_range' ? Number(reachStatus.pull_id) : null; // integer from our own table
+  const reachJoin = pullId ? `LEFT JOIN meta_ad_range_reach rr ON rr.pull_id = ${pullId} AND rr.meta_ad_id = agg.meta_ad_id` : '';
+  const reachSel = pullId ? 'rr.reach AS rr_reach, rr.frequency AS rr_frequency' : 'NULL::bigint AS rr_reach, NULL::numeric AS rr_frequency';
+  const reachExpr = { reach: pullId ? 'rr.reach' : 'agg.day_reach', frequency: pullId ? 'rr.frequency' : 'agg.day_frequency' };
+  const sortSql = REACH_SORTS.has(opts.sort) ? (reachFrom ? reachExpr[opts.sort] : SORT_SQL.spend) : SORT_SQL[opts.sort];
   const params = [parsed.range.since, parsed.range.until];
   const where = [];
   if (STATUS_FILTERS[opts.status]) where.push(STATUS_FILTERS[opts.status]);
@@ -451,7 +465,7 @@ async function getAds(parsed, query) {
              SUM(d.spend) AS spend, SUM(d.purchases) AS purchases,
              SUM(d.purchase_value) AS purchase_value, SUM(d.add_to_cart) AS add_to_cart,
              SUM(d.outbound_clicks) AS outbound_clicks, SUM(d.impressions) AS impressions,
-             COUNT(*) AS days_active
+             COUNT(*) AS days_active, MAX(d.reach) AS day_reach, MAX(d.frequency) AS day_frequency
         FROM meta_ad_insights_daily d
        WHERE d.insight_date BETWEEN $1 AND $2
        GROUP BY d.meta_ad_id
@@ -468,10 +482,11 @@ async function getAds(parsed, query) {
   // (no ad can appear on two pages or be skipped).
   const { rows } = await pool.query(
     `${cte}
-     SELECT agg.*, a.ad_name, a.effective_status, a.match_status
+     SELECT agg.*, a.ad_name, a.effective_status, a.match_status, ${reachSel}
        FROM agg JOIN meta_ads a ON a.meta_ad_id = agg.meta_ad_id
+       ${reachJoin}
        ${whereSql}
-      ORDER BY ${SORT_SQL[opts.sort]} ${opts.dir} NULLS LAST, agg.spend DESC, agg.meta_ad_id ASC
+      ORDER BY ${sortSql} ${opts.dir} NULLS LAST, agg.spend DESC, agg.meta_ad_id ASC
       LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`,
     listParams
   );
@@ -492,8 +507,20 @@ async function getAds(parsed, query) {
       match_status: r.match_status,
       days_active: num(r.days_active),
       ...deriveMetrics(r),
+      ...adReach(reachFrom, r),
     })),
+    reach_info: {
+      state: reachFrom ? 'ready' : reachStatus.state, source: reachFrom, pulled_at: reachStatus.pulled_at, stale: reachFrom === 'meta_range' && reachStatus.stale,
+      includes_today: reachStatus.includes_today, last_error: reachStatus.last_error,
+    },
   };
+}
+
+// Per-ad Reach / Frequency for one row, from whichever exact source this range has (else null).
+function adReach(from, r) {
+  if (from === 'stored_daily') return { reach: r.day_reach === null ? null : num(r.day_reach), frequency: r.day_frequency === null ? null : round(num(r.day_frequency), 2) };
+  if (from === 'meta_range') return { reach: r.rr_reach === null || r.rr_reach === undefined ? null : num(r.rr_reach), frequency: r.rr_frequency === null || r.rr_frequency === undefined ? null : round(num(r.rr_frequency), 2) };
+  return { reach: null, frequency: null };
 }
 
 async function getAdDetail(metaAdId, parsed) {

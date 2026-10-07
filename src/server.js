@@ -47,6 +47,8 @@ const metaSyncRoutes = require('./routes/metaSync');
 const metaPerformanceRoutes = require('./routes/metaPerformance');
 const metaAdMatchingRoutes = require('./routes/metaAdMatching');
 const creativeOpportunitiesRoutes = require('./routes/creativeOpportunities');
+const adCreativeRoutes = require('./routes/adCreative');
+const coreCreativePlanRoutes = require('./routes/coreCreativePlan');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -107,6 +109,8 @@ app.use('/api/concept-types', requireAuth, conceptTypeRoutes);
 app.use('/api/shooting', requireAuth, requireModuleAccess('shooting'), shootingRoutes);
 app.use('/api/planning-settings', requireAuth, requireModuleAccess('planning'), planningSettingsRoutes);
 app.use('/api/core-products', requireAuth, requireModuleAccess('planning'), coreProductRoutes);
+// Core creative plan: Planning users; money is stripped server-side for non-admins; never calls Meta.
+app.use('/api/core-creative-plan', requireAuth, requireModuleAccess('planning'), coreCreativePlanRoutes);
 app.use('/api/shoot-plan', requireAuth, requireModuleAccess('planning'), shootPlanRoutes);
 app.use('/api/content-creators', requireAuth, contentCreatorRoutes);
 app.use('/api/high-stock-products', requireAuth, requireModuleAccess('planning'), highStockProductRoutes);
@@ -154,6 +158,8 @@ app.use('/api/meta-performance', requireAuth, metaPerformanceRoutes);
 app.use('/api/meta-ad-matching', requireAuth, metaAdMatchingRoutes);
 // Creative Opportunities V1: admin-only, computed on read from local data (no Meta calls).
 app.use('/api/creative-opportunities', requireAuth, creativeOpportunitiesRoutes);
+// Ad creative preview: admins + Planning users; media/context only, read-only Meta fetch, cached.
+app.use('/api/ad-creative', requireAuth, adCreativeRoutes);
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
 

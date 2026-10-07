@@ -167,4 +167,32 @@ router.get('/am/product/:styleCode', async (req, res, next) => {
   }
 });
 
+// Admin-only, read-only: how ApparelMagic exposes stock BY SIZE for one product (8-char
+// product code, e.g. W26AB001). Reads the cached stock crawl (it can take minutes on a cold
+// start) and reports which /inventory field carried the size plus the per-style size
+// quantities -- so the size-availability rule can be checked against real data.
+router.get('/am/sku-sizes/:productCode', requireAdmin, async (req, res, next) => {
+  try {
+    if (!apparelmagic.configured()) return res.status(503).json({ error: 'ApparelMagic is not configured' });
+    const code = String(req.params.productCode || '').toUpperCase();
+    if (!/^[A-Z0-9]{4,12}$/.test(code)) return res.status(400).json({ error: 'Invalid product code' });
+    const stock = await apparelmagic.getStockByStyle();
+    const styles = [];
+    for (const [style, qty] of stock.entries()) {
+      if (apparelmagic.deriveProductCode(style) !== code) continue;
+      const sz = stock.sizes && stock.sizes.get(style);
+      styles.push({ style_code: style, total_sellable: qty, sizes: sz ? Object.fromEntries(sz) : null });
+    }
+    res.json({
+      product_code: code,
+      size_field_detected: stock.sizeField || null,
+      inventory_row_fields: (stock.sample && stock.sample.inventoryKeys) || [],
+      sku_warehouse_row_fields: (stock.sample && stock.sample.skuWarehouseKeys) || [],
+      styles,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;
