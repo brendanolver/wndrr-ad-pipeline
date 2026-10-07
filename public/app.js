@@ -635,23 +635,27 @@ function mpRenderAds(res) {
   mpState.adsById = new Map((res.ads || []).map((a) => [a.meta_ad_id, a]));
   mpRenderReachBar();
   if (!res.ads.length) {
-    body.innerHTML = `<tr><td colspan="10" class="mp-table-empty">${
-      res.q || res.status !== 'all' ? 'No ads match this search or filter.' : 'No ads had spend or impressions in this period.'}</td></tr>`;
+    body.innerHTML = `<tr><td colspan="12" class="mp-table-empty">${
+      res.q || res.status !== 'all' || mpFiltered() ? 'No ads match this search or filter.' : 'No ads had spend or impressions in this period.'}</td></tr>`;
   } else {
+    const healthOn = !!(res.health && res.health.active);
+    const dot = (h) => (healthOn && h ? `<span class="mp-health mp-health-${escapeHtml(h)}" title="${h === 'green' ? 'Healthy' : h === 'orange' ? 'Watch' : 'Outside the desired range'} for this funnel"></span>` : '');
     body.innerHTML = res.ads.map((a) => `
       <tr data-ad-id="${escapeHtml(a.meta_ad_id)}">
+        <td class="mp-funnel-cell">${mpFunnelBadge(a.funnel)}</td>
+        <td class="mp-creative-cell">${ccThumbHtml(a.meta_ad_id)}</td>
         <td class="mp-name" title="${escapeHtml(`${a.ad_name || a.meta_ad_id}${a.campaign_name ? ' — ' + a.campaign_name : ''}`)}">
-          ${ccThumbHtml(a.meta_ad_id)}<span class="mp-name-stack"><span class="mp-name-text" data-preview-ad="${escapeHtml(a.meta_ad_id)}">${escapeHtml(a.ad_name || '(unnamed ad)')}</span>
-          <span class="mp-campaign-line">${mpFunnelBadge(a.funnel)}<span class="mp-campaign-name">${a.campaign_name ? escapeHtml(a.campaign_name) : (a.campaign_id ? 'Campaign ' + escapeHtml(a.campaign_id) : 'No campaign')}</span></span></span></td>
+          <span class="mp-name-stack"><span class="mp-name-text" data-preview-ad="${escapeHtml(a.meta_ad_id)}">${escapeHtml(a.ad_name || '(unnamed ad)')}</span>
+          <span class="mp-campaign-line"><span class="mp-campaign-name">${a.campaign_name ? escapeHtml(a.campaign_name) : (a.campaign_id ? 'Campaign ' + escapeHtml(a.campaign_id) : 'No campaign')}</span></span></span></td>
         <td>${mpStatusChip(a.effective_status)}</td>
         <td class="num">${mpFmt(a.spend, 'money')}</td>
         <td class="num">${mpFmt(a.purchases, 'int')}</td>
-        <td class="num">${mpFmt(a.cpa, 'money')}</td>
+        <td class="num">${dot(a.cpa_health)}${mpFmt(a.cpa, 'money')}</td>
         <td class="num">${mpFmt(a.add_to_cart, 'int')}</td>
         <td class="num">${mpFmt(a.cost_per_atc, 'money')}</td>
         <td class="num">${mpFmt(a.outbound_ctr, 'pct')}</td>
         <td class="num">${mpReachCell(a.reach, 'int')}</td>
-        <td class="num">${mpReachCell(a.frequency, 'freq')}</td>
+        <td class="num">${dot(a.frequency_health)}${mpReachCell(a.frequency, 'freq')}</td>
       </tr>`).join('');
     ccHydrateThumbs(body);
   }
@@ -678,7 +682,7 @@ async function loadMetaPerformanceAds() {
     mpRenderAds(res);
   } catch (e) {
     if (id !== mpState.adsReqId) return;
-    document.getElementById('mp-ads-body').innerHTML = `<tr><td colspan="10" class="mp-table-empty">${escapeHtml(e.message)}</td></tr>`;
+    document.getElementById('mp-ads-body').innerHTML = `<tr><td colspan="12" class="mp-table-empty">${escapeHtml(e.message)}</td></tr>`;
   }
 }
 
@@ -1028,15 +1032,60 @@ document.addEventListener('click', (e) => {
   if (t) { e.preventDefault(); e.stopPropagation(); ccOpenViewer(t.dataset.ccOpen); }
 });
 
+// ── Opening a preview: where the time goes, and what is reused ──────────────────
+// Cold open = our server asks Meta (creative + share link + Meta-native preview, now concurrently), THEN the browser loads
+// Meta's preview iframe, which Meta renders on request. Reused instead of repeated: (1) a preview already opened/warmed in this
+// browser session (apCache, 5 min -- Reload bypasses it); (2) one request per ad at a time (apInflight, so hover-warm-up +
+// click share a fetch); (3) the server's own cache, which now also serves the creative-level pieces to every other ad that
+// uses the exact same creative. A hover warm-up (apPrefetch) only asks the server to serve/fetch ONE ad's data, once, and the
+// server declines to reach Meta for it while automatic Meta refresh is off. No iframe or video is created until the modal opens.
+const apCache = new Map(); // adId -> { data, at }
+const apInflight = new Map(); // adId -> Promise
+const apPrefetched = new Set();
+const AP_CACHE_MS = 5 * 60 * 1000;
+function apFresh(adId) {
+  const c = apCache.get(adId);
+  return c && Date.now() - c.at < AP_CACHE_MS ? c.data : null;
+}
+function apFetch(adId, refresh) {
+  if (!refresh && apInflight.has(adId)) return apInflight.get(adId);
+  const p = api(`/ad-creative/${encodeURIComponent(adId)}${refresh ? '?refresh=1' : ''}`)
+    .then((d) => { apCache.set(adId, { data: d, at: Date.now() }); return d; })
+    .finally(() => apInflight.delete(adId));
+  apInflight.set(adId, p);
+  return p;
+}
+let apHoverTimer = null;
+function apPrefetch(adId) {
+  if (!adId || apPrefetched.has(adId) || apFresh(adId) || apInflight.has(adId)) return;
+  apPrefetched.add(adId);
+  api(`/ad-creative/${encodeURIComponent(adId)}?prefetch=1`).then((d) => { if (d && d.creative) apCache.set(adId, { data: d, at: Date.now() }); }).catch(() => {});
+}
+document.addEventListener('mouseover', (e) => {
+  const t = e.target.closest && e.target.closest('[data-cc-open],[data-cp-preview]');
+  if (!t) return;
+  const id = t.dataset.ccOpen || t.dataset.cpPreview;
+  clearTimeout(apHoverTimer);
+  apHoverTimer = setTimeout(() => apPrefetch(id), 250); // intent, not a mouse sweeping across the table
+});
+document.addEventListener('mouseout', (e) => { if (e.target.closest && e.target.closest('[data-cc-open],[data-cp-preview]')) clearTimeout(apHoverTimer); });
+
+function apSkeleton(adId) {
+  const t = ccThumbCache.get(adId);
+  return `<div class="ap-loading-state">${t && t.thumb_url ? `<img class="ap-loading-cover" src="${escapeHtml(t.thumb_url)}" alt="" referrerpolicy="no-referrer">` : ''}<div class="ap-loading-text">Loading creative…</div></div>`;
+}
 async function openAdPreview(adId, ctx, refresh) {
   apState.adId = adId; apState.ctx = ctx || null; apState.card = 0; apState.showMeta = false; apState.userToggled = false;
   if (!refresh) apState.retried = false;
   const body = document.getElementById('ap-body');
   document.getElementById('ap-title').textContent = 'Ad preview';
-  body.innerHTML = '<div class="mp-table-empty">Loading creative…</div>';
+  const warm = refresh ? null : apFresh(adId);
+  // open at once: with a cached/warmed copy the real preview renders immediately; otherwise the cover we already have + a spinner
+  if (!warm) body.innerHTML = apSkeleton(adId);
   openModal('ad-preview-modal');
   try {
-    apState.data = await api(`/ad-creative/${encodeURIComponent(adId)}${refresh ? '?refresh=1' : ''}`);
+    apState.data = warm || await apFetch(adId, refresh);
+    if (apState.adId !== adId) return; // the user opened something else meanwhile
     // Meta's own preview is the default full view whenever it is available
     apState.showMeta = !!apState.data.creative.preview_iframe_src;
     renderAdPreview();
@@ -1066,6 +1115,12 @@ function apMediaFailed() {
   const m = document.getElementById('ap-media');
   if (m) m.insertAdjacentHTML('beforeend', '<div class="ap-note">This preview could not be played in the app. Use "Open in Meta" or try Reload.</div>');
 }
+// Meta renders its preview on request, so the frame can take a moment: show the cover + a spinner until it has loaded.
+function apIframeHtml(c) {
+  const cover = c.thumbnail_url || (c.main && (c.main.poster_url || c.main.image_url)) || '';
+  return `<div class="ap-iframe-wrap">${cover ? `<img class="ap-iframe-cover" src="${escapeHtml(cover)}" alt="" referrerpolicy="no-referrer">` : ''}<div class="ap-iframe-loading">Loading Meta's preview…</div>
+    <iframe class="ap-iframe" src="${escapeHtml(c.preview_iframe_src)}" sandbox="allow-scripts allow-same-origin allow-popups" allow="autoplay; fullscreen" onload="this.parentNode.classList.add('loaded')"></iframe></div>`;
+}
 function renderAdPreview() {
   const d = apState.data;
   const c = d.creative;
@@ -1074,7 +1129,7 @@ function renderAdPreview() {
   let media = '';
   const playable = c.kind === 'carousel' ? (c.cards || []).length > 0 : !!(c.main && (c.main.video_url || c.main.image_url));
   if (apState.showMeta && c.preview_iframe_src) {
-    media = `<iframe class="ap-iframe" src="${escapeHtml(c.preview_iframe_src)}" sandbox="allow-scripts allow-same-origin allow-popups" allow="autoplay; fullscreen" loading="lazy"></iframe>`;
+    media = apIframeHtml(c);
   } else if (c.kind === 'carousel' && (c.cards || []).length) {
     const card = c.cards[apState.card] || c.cards[0];
     media = `<div class="ap-carousel">${apMediaHtml(card)}
@@ -1085,7 +1140,7 @@ function renderAdPreview() {
     media = apMediaHtml(c.main);
     if (c.kind === 'video' && !c.main.video_url) media += '<div class="ap-note">Meta did not provide a playable file for this video, so only the cover image is shown.</div>';
   } else if (c.preview_iframe_src) {
-    media = `<iframe class="ap-iframe" src="${escapeHtml(c.preview_iframe_src)}" sandbox="allow-scripts allow-same-origin allow-popups" allow="autoplay; fullscreen" loading="lazy"></iframe>`;
+    media = apIframeHtml(c);
   } else if (c.thumbnail_url) {
     media = `<img class="ap-img" src="${escapeHtml(c.thumbnail_url)}" referrerpolicy="no-referrer" alt="Ad creative thumbnail">`;
   } else {
@@ -1140,7 +1195,7 @@ const mmState = {
 const MM_FILTERS = [
   ['needs', 'To do', 'needs', 'creatives'], ['suggested', 'Needs review', 'suggested', 'creatives'], ['unmatched', 'Unmatched', 'unmatched', 'creatives'],
   ['inherit', 'Will inherit', 'will_inherit', 'creatives'], ['matched', 'Matched', 'matched', 'ads'],
-  ['historical', 'Historical', 'historical', 'creatives'], ['conflict', 'Creative conflicts', 'conflicts', 'creatives'],
+  ['historical', 'Historical', 'historical', 'creatives'], ['archived', 'Archived / pre-2026', 'archived', 'creatives'], ['conflict', 'Creative conflicts', 'conflicts', 'creatives'],
   ['not_product_specific', 'Not product-specific', 'not_product_specific', 'ads'], ['excluded', 'Excluded', 'excluded', 'ads'],
 ];
 
@@ -1190,7 +1245,8 @@ function mmRenderRows(res) {
   mmRenderChips(res.counts);
   const note = document.getElementById('mm-relevance-note');
   const noteParts = [];
-  if (res.filter === 'historical') noteParts.push('Historical: ads that point at products which are not current CORE apparel with sellable stock, and that are not running or recently active. They are kept and searchable, just out of the way of the main queue.');
+  if (res.filter === 'historical') noteParts.push('Historical: creatives that point at products which are not current CORE apparel with sellable stock, and that are not running or recently active — newest activity first. They are kept and searchable, just out of the way of the main queue.');
+  else if (res.filter === 'archived') noteParts.push(`Archived / pre-2026: creatives that provably have not delivered since ${mpDate(res.archive.cutoff, true)} (no ad of the creative is active, none was created in 2026, none delivered since). Nothing is deleted or reclassified; they just don't need a person. Newest activity first.`);
   else if (res.filter === 'conflict') noteParts.push('Creatives where people classified different ads of the same creative differently. Nothing is inherited for these until someone settles it.');
   else if (res.filter === 'inherit') noteParts.push('Creatives whose every unclassified copy will take the classification of an ad a person already classified on the exact same creative. Nothing is applied until you press "Apply" in the Review workload panel.');
   if (res.scope && res.scope !== 'all') noteParts.push('These chips count ads active in the selected window; the Review workload panel above counts all ads. Choose "All ads" to compare them directly.');
@@ -1212,12 +1268,13 @@ function mmRenderRows(res) {
       <td class="mp-name" title="${escapeHtml(a.ad_name || a.meta_ad_id)}">${ccThumbHtml(a.meta_ad_id)}<span class="mp-name-stack"><span class="mp-name-text">${escapeHtml(a.ad_name || '(unnamed ad)')}</span></span>${a.same_creative_ads > 1 ? ` <span class="mm-sibs" title="${a.same_creative_ads - 1} other ad${a.same_creative_ads === 2 ? '' : 's'} use this exact creative; classifying it covers them all">+${a.same_creative_ads - 1} same creative</span>` : ''}${a.creative_conflict ? ` <span class="mm-conflict" data-conflict-creative="${escapeHtml(a.meta_creative_id || '')}" title="People classified ads of this creative differently — click to compare and resolve">conflict</span>` : ''}</td>
       <td>${mpStatusChip(a.effective_status)}</td>
       <td class="num">${mpFmt(a.recent_spend, 'money')}</td>
+      <td class="mm-lastactive" title="${a.creative_ads > 1 ? `Across all ${a.creative_ads} ads that use this exact creative. ` : ''}Newest day it delivered in stored Insights">${a.creative_last_active ? escapeHtml(mpDate(a.creative_last_active, true)) : '<span class="mp-na" title="No delivery in the Insights we have stored">—</span>'}${a.creative_ads_running ? ' <span class="mm-live-dot" title="At least one ad using this creative is ACTIVE">●</span>' : ''}</td>
       <td>${mmStateChip(a)}</td>
       <td class="mm-cell">${prod}</td>
       <td class="mm-cell">${con}</td>
       <td class="mm-cell">${media}</td>
       <td>${conf}</td></tr>`;
-  }).join('') : `<tr><td colspan="10" class="mp-table-empty">${
+  }).join('') : `<tr><td colspan="11" class="mp-table-empty">${
     mmState.q ? 'No ads match this search.' : mmState.filter === 'needs' ? 'Nothing left to do in this view — nice work.' : 'No ads in this view.'}</td></tr>`;
   ccHydrateThumbs(document.getElementById('mm-body'));
   const pager = document.getElementById('mm-pager');
@@ -1234,6 +1291,61 @@ function mmRenderRows(res) {
 }
 
 // Review workload in unique creatives (read-only), with the explicit "apply to duplicates" action.
+// Pre-2026 archive evidence. A creative is archived only when it PROVABLY has not delivered since the cutoff; absence of a
+// stored 2026 row is not proof. This panel says whether the evidence is there, and offers the one bounded, read-only,
+// explicit Meta check when it is not. Nothing here classifies or deletes anything.
+let mmArchiveTimer = null;
+async function mmRenderArchivePanel(f) {
+  const host = document.getElementById('mm-archive');
+  if (!host) return;
+  try {
+    const st = await api('/meta-archive/status');
+    const pr = st.proof;
+    const n = (v) => Number(v || 0).toLocaleString('en-AU');
+    const running = st.last_pull && st.last_pull.state === 'running';
+    host.style.display = '';
+    if (pr.proven) {
+      host.innerHTML = `<div class="mm-archive-head"><strong>Archive evidence</strong> <span class="mm-ok">proven</span>
+        <span class="hint">Delivery since ${escapeHtml(mpDate(st.cutoff, true))} is covered up to ${escapeHtml(mpDate(pr.proof_to, true))} (${pr.basis === 'local_insights' ? 'stored Insights' : 'a Meta activity check'}). ${n(f.archived_creatives)} creative${f.archived_creatives === 1 ? '' : 's'} archived.</span></div>`;
+    } else {
+      const lp = st.last_pull;
+      host.innerHTML = `<div class="mm-archive-head"><strong>Archive evidence</strong> <span class="mm-warn">not proven — nothing is archived</span></div>
+        <div class="mm-muted-line">${escapeHtml(pr.reason || '')} Stored Insights run ${st.insights_depth.first_day ? `${escapeHtml(mpDate(st.insights_depth.first_day, true))} to ${escapeHtml(mpDate(st.insights_depth.last_day, true))}` : '(none)'}.</div>
+        ${lp && lp.state === 'failed' ? `<div class="mm-muted-line">The last check failed: ${escapeHtml(lp.error_message || '')}</div>` : ''}
+        <div class="mm-workload-actions"><button type="button" class="btn btn-ghost btn-sm" id="mm-archive-check" ${running ? 'disabled' : ''}>${running ? 'Checking with Meta…' : `Check Meta activity since ${escapeHtml(mpDate(st.cutoff, true))}…`}</button>
+        <button type="button" class="link-btn" id="mm-archive-preview">What would this archive?</button></div>`;
+      const pv = document.getElementById('mm-archive-preview');
+      if (pv) pv.onclick = async () => {
+        try {
+          const r = await api('/meta-archive/preview');
+          toast(`If proven: ${n(r.if_proven.archived)} archived, ${n(r.if_proven.historical)} historical, ${n(r.if_proven.needs_a_person)} need a person (now: ${n(r.now.archived)} / ${n(r.now.historical)} / ${n(r.now.needs_a_person)}).`);
+        } catch (e) { toast(e.message, true); }
+      };
+      const ck = document.getElementById('mm-archive-check');
+      if (ck && !running) ck.onclick = async () => {
+        const q = st.pull_request;
+        const ok = await confirmDialog(`This makes a read-only request to Meta: GET ${q.path} with level=ad, fields=${q.params.fields}, time_range ${q.params.time_range.since} to ${q.params.time_range.until}, limit ${q.params.limit} — one aggregate row per ad that delivered, ${q.calls}. It writes nothing to Meta and changes no ads, Insights or classifications; it only records which ads delivered.`, { okLabel: 'Run the check' });
+        if (!ok) return;
+        ck.disabled = true;
+        try { await api('/meta-archive/pull', { method: 'POST', body: '{}' }); toast('Checking with Meta…'); } catch (e) { toast(e.message, true); }
+        clearInterval(mmArchiveTimer);
+        mmArchiveTimer = setInterval(async () => {
+          try {
+            const s2 = await api('/meta-archive/status');
+            if (!s2.last_pull || s2.last_pull.state !== 'running') { clearInterval(mmArchiveTimer); mmLoadWorkload(); loadMetaMatching(); }
+          } catch (e) { clearInterval(mmArchiveTimer); }
+        }, 3000);
+        mmRenderArchivePanel(f);
+      };
+      if (running && !mmArchiveTimer) {
+        mmArchiveTimer = setInterval(async () => {
+          try { const s2 = await api('/meta-archive/status'); if (!s2.last_pull || s2.last_pull.state !== 'running') { clearInterval(mmArchiveTimer); mmArchiveTimer = null; mmLoadWorkload(); loadMetaMatching(); } } catch (e) { clearInterval(mmArchiveTimer); mmArchiveTimer = null; }
+        }, 3000);
+      }
+    }
+  } catch (e) { host.style.display = 'none'; }
+}
+
 async function mmLoadWorkload() {
   const host = document.getElementById('mm-workload');
   try {
@@ -1252,11 +1364,12 @@ async function mmLoadWorkload() {
         <span><b>${n(f.unique_creatives)}</b> unique creatives</span><span>&rarr;</span>
         <span><b>${n(f.creatives_that_will_inherit)}</b> creatives will inherit <span class="hint">(${n(f.ads_in_creatives_that_will_inherit)} ads)</span></span><span>&rarr;</span>
         <span class="mm-workload-key"><b>${n(f.actionable_creatives)}</b> creatives need a person now</span>
-        <span class="hint">+ ${n(f.historical_creatives)} historical${f.creatives_in_conflict ? ` &middot; ${n(f.creatives_in_conflict)} creative${f.creatives_in_conflict === 1 ? '' : 's'} in conflict` : ''}</span>
+        <span class="hint">+ ${n(f.historical_creatives)} historical${f.archived_creatives ? ` &middot; ${n(f.archived_creatives)} archived (pre-2026)` : ''}${f.creatives_in_conflict ? ` &middot; ${n(f.creatives_in_conflict)} creative${f.creatives_in_conflict === 1 ? '' : 's'} in conflict` : ''}</span>
       </div>
       ${f.copies_that_cannot_inherit ? `<div class="mm-muted-line">${n(f.creatives_with_copies_that_cannot_inherit)} creatives have a person's decision but ${n(f.copies_that_cannot_inherit)} cop${f.copies_that_cannot_inherit === 1 ? 'y' : 'ies'} can't inherit it (${escapeHtml(blockedText)}), so they stay in "need a person".</div>` : ''}
       ${f.ads_apply_would_change ? `<div class="mm-workload-actions"><button type="button" class="btn btn-ghost btn-sm" id="mm-apply-inheritance">Apply to ${n(f.ads_apply_would_change)} duplicate ad${f.ads_apply_would_change === 1 ? '' : 's'}</button>
         <span class="hint">Exactly the ads this will change. Each takes the classification of a person's decision on the exact same creative; ads a person owns, skipped or rejected are never touched. Local only.</span></div>` : ''}`;
+    mmRenderArchivePanel(f);
     const btn = document.getElementById('mm-apply-inheritance');
     if (btn) btn.onclick = async () => {
       btn.disabled = true; btn.textContent = 'Applying…';
@@ -1296,7 +1409,7 @@ async function loadMetaMatching() {
     mmLoadWorkload();
   } catch (e) {
     if (id !== mmState.reqId) return;
-    document.getElementById('mm-body').innerHTML = `<tr><td colspan="10" class="mp-table-empty">${escapeHtml(e.message)}</td></tr>`;
+    document.getElementById('mm-body').innerHTML = `<tr><td colspan="11" class="mp-table-empty">${escapeHtml(e.message)}</td></tr>`;
   }
 }
 
@@ -1596,6 +1709,17 @@ async function loadCorePlan(force) {
   }
 }
 
+// Front / back garment pictures from ApparelMagic. object-fit: contain, so the WHOLE garment is visible (never cropped).
+// basis 'position' = AM gave no front/back label, so the picture order is used (said in the tooltip, never hidden).
+function cpImagesHtml(c, size) {
+  const im = c.product.images || {};
+  const front = im.front || (c.product.image_url ? { url: c.product.image_url, basis: 'catalog' } : null);
+  const pane = (label, o) => (o
+    ? `<figure class="cp-img" title="${o.basis === 'position' ? 'ApparelMagic has no front/back label for these pictures; this is taken from their order.' : label}"><img src="${escapeHtml(o.url)}" alt="${escapeHtml(c.product.product_name)} — ${label.toLowerCase()}" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.parentNode.classList.add('cp-img-none');this.remove()"><figcaption>${label}</figcaption></figure>`
+    : `<figure class="cp-img cp-img-none"><span>No ${label.toLowerCase()} image</span><figcaption>${label}</figcaption></figure>`);
+  return `<div class="cp-imgs ${size === 'lg' ? 'cp-imgs-lg' : ''}">${pane('Front', front)}${pane('Back', im.back)}</div>`;
+}
+
 function cpFactsHtml(c) {
   const facts = [];
   const s = c.sales_status;
@@ -1603,13 +1727,41 @@ function cpFactsHtml(c) {
   facts.push(`<span>Stock: <b>${cpNum(c.stock.units)}</b> units</span>`);
   const cr = c.creative;
   const last = cr.last_new_creative;
-  facts.push(`<span>Last new creative: <b>${last ? `${escapeHtml(cpDate(last.date))}` : 'none found'}</b>${last ? ` (${escapeHtml(cpAge(last.days_ago))} ago)` : ''}${cr.recency_basis === 'older_than_window' ? ' <i class="hint">older matched history only</i>' : ''}</span>`);
-  facts.push(`<span>Creatives running: <b>${cr.running_creatives}</b></span>`);
+  facts.push(`<span title="${last ? escapeHtml(last.source) : ''}">Last new creative: <b>${last ? `${escapeHtml(cpDate(last.date))}` : 'none found'}</b>${last ? ` (${escapeHtml(cpAge(last.days_ago))} ago)` : ''}${cr.recency_basis === 'older_than_window' ? ' <i class="hint">older matched history only</i>' : ''}</span>`);
+  facts.push(`<span>Active unique creatives: <b>${cr.active_unique_creatives ?? cr.running_creatives}</b>${cr.active_ads > (cr.active_unique_creatives ?? 0) ? ` <span class="hint">· across ${cr.active_ads} active ads</span>` : ''}${cr.active_basis === 'status_only' ? ' <i class="hint" title="Stored Insights are stale, so this counts ads that are switched on rather than ads seen delivering">status only</i>' : ''}</span>`);
+  if (cr.historical_unique_creatives !== undefined) facts.push(`<span>Historical unique creatives: <b>${cr.historical_unique_creatives}</b></span>`);
   facts.push(`<span>Meta: <b>${escapeHtml(c.meta_status)}</b></span>`);
   return `<div class="cp-facts">${facts.join('')}</div>`;
 }
 
+// Compact tile for the weekly scan. The full explanation, evidence and actions are in the detail view (click the tile).
 function cpCardHtml(c) {
+  const cr = c.creative;
+  const last = cr.last_new_creative;
+  const s = c.sales_status;
+  const priority = c.priority && c.priority !== 'Info' ? c.priority : null;
+  return `
+    <article class="cp-tile pri-${escapeHtml((c.priority || 'info').toLowerCase())}" data-cp-key="${escapeHtml(c.key)}" data-cp-open="${escapeHtml(c.key)}" tabindex="0" role="button" aria-label="${escapeHtml(c.product.product_name)} — ${escapeHtml(c.headline)}">
+      ${cpImagesHtml(c)}
+      <div class="cp-tile-body">
+        <div class="cp-tile-head"><span class="cp-tile-name" title="${escapeHtml(c.product.product_name)}">${escapeHtml(c.product.product_name)}</span>${priority ? `<span class="co-pri pri-${priority.toLowerCase()}">${escapeHtml(priority.toUpperCase())}</span>` : ''}</div>
+        ${c.product.category ? `<div class="cp-tile-cat">${escapeHtml(c.product.category.toLowerCase())}</div>` : ''}
+        <div class="cp-tile-rec">${escapeHtml(c.headline)}</div>
+        <dl class="cp-tile-facts">
+          <div><dt>Stock</dt><dd>${cpNum(c.stock.units)}</dd></div>
+          <div><dt>Sales</dt><dd>${s ? escapeHtml(s.label.replace('Selling ', '')) : '—'}${s && s.tier ? ` <span class="hint">${escapeHtml(s.tier)}</span>` : ''}</dd></div>
+          <div title="${last ? escapeHtml(last.source) : ''}"><dt>Last new creative</dt><dd>${last ? `${escapeHtml(cpAge(last.days_ago))} ago` : 'none'}</dd></div>
+          <div title="Distinct Meta creatives with an ad delivering (the same creative duplicated into many ads counts once)"><dt>Active creatives</dt><dd>${cr.active_unique_creatives ?? cr.running_creatives}${cr.active_ads > (cr.active_unique_creatives ?? 0) ? ` <span class="hint">/ ${cr.active_ads} ads</span>` : ''}</dd></div>
+          <div><dt>Meta</dt><dd>${escapeHtml(c.meta_status)}</dd></div>
+        </dl>
+        ${c.stock.size_warning ? `<div class="cp-tile-warn" title="${escapeHtml(c.stock.size_warning)}">⚠ ${escapeHtml(c.stock.size_level === 'broken' ? 'Broken sizes' : 'Limited sizes')}</div>` : ''}
+        ${c.state ? `<div class="cp-tile-state">${c.state.state === 'dismissed' ? 'Dismissed' : 'Done'} ${escapeHtml(c.state.acted_at.slice(0, 10))}</div>` : ''}
+      </div>
+    </article>`;
+}
+
+// The full card (explanation, facts, evidence, actions) in a detail view.
+function cpDetailHtml(c) {
   const canShoot = c.type !== 'hold';
   const note = c.requalified
     ? `<div class="co-note">Back on the list: ${c.requalified.previously_dismissed_at ? 'the evidence got materially worse since you dismissed it' : `acted on ${c.requalified.days_ago} days ago and it still applies`}.</div>`
@@ -1619,25 +1771,25 @@ function cpCardHtml(c) {
     : `<button type="button" class="btn btn-ghost btn-sm" data-cp-act="acted">Mark done</button>
        <button type="button" class="btn btn-ghost btn-sm" data-cp-act="dismiss">Dismiss</button>`;
   return `
-    <article class="co-card pri-${escapeHtml((c.priority || 'info').toLowerCase())}" data-cp-key="${escapeHtml(c.key)}">
-      <div class="co-card-head">
-        ${c.product.image_url ? `<img class="cp-thumb" src="${escapeHtml(c.product.image_url)}" alt="" referrerpolicy="no-referrer">` : ''}
-        <span class="co-product">${escapeHtml(c.product.product_name)}</span>
-        ${c.product.category ? `<span class="co-type">${escapeHtml(c.product.category.toLowerCase())}</span>` : ''}
-        ${c.priority && c.priority !== 'Info' ? `<span class="co-pri pri-${c.priority.toLowerCase()}">${escapeHtml(c.priority.toUpperCase())}</span>` : ''}
+    <div class="cp-detail" data-cp-key="${escapeHtml(c.key)}">
+      <div class="cp-detail-media">${cpImagesHtml(c, 'lg')}</div>
+      <div class="cp-detail-main">
+        <div class="co-card-head"><span class="co-product">${escapeHtml(c.product.product_name)}</span>
+          ${c.product.category ? `<span class="co-type">${escapeHtml(c.product.category.toLowerCase())}</span>` : ''}
+          ${c.priority && c.priority !== 'Info' ? `<span class="co-pri pri-${c.priority.toLowerCase()}">${escapeHtml(c.priority.toUpperCase())}</span>` : ''}</div>
+        <h3 class="co-title">${escapeHtml(c.headline)}</h3>
+        <p class="co-expl">${escapeHtml(c.why)}</p>
+        ${cpFactsHtml(c)}
+        ${c.stock.size_warning ? `<div class="co-note cp-size-warn">⚠ ${escapeHtml(c.stock.size_warning)}</div>` : ''}
+        ${note}
+        <div class="co-actions">
+          ${canShoot ? '<button type="button" class="btn btn-primary btn-sm" data-cp-act="shoot">Shoot this week</button>' : ''}
+          <button type="button" class="btn btn-ghost btn-sm" data-cp-act="evidence">See evidence</button>
+          <span class="co-actions-spacer"></span>
+          ${stateButtons}
+        </div>
       </div>
-      <h3 class="co-title">${escapeHtml(c.headline)}</h3>
-      <p class="co-expl">${escapeHtml(c.why)}</p>
-      ${cpFactsHtml(c)}
-      ${c.stock.size_warning ? `<div class="co-note cp-size-warn">⚠ ${escapeHtml(c.stock.size_warning)}</div>` : ''}
-      ${note}
-      <div class="co-actions">
-        ${canShoot ? '<button type="button" class="btn btn-primary btn-sm" data-cp-act="shoot">Shoot this week</button>' : ''}
-        <button type="button" class="btn btn-ghost btn-sm" data-cp-act="evidence">See evidence</button>
-        <span class="co-actions-spacer"></span>
-        ${stateButtons}
-      </div>
-    </article>`;
+    </div>`;
 }
 
 function renderCorePlan() {
@@ -1679,9 +1831,9 @@ function renderCorePlan() {
         <button type="button" class="co-subnav-btn ${f === 'dismissed' ? 'active' : ''}" data-cp-state="dismissed">Dismissed</button>
       </span>
     </div>
-    <div class="co-list">${shown.length ? shown.map(cpCardHtml).join('') : `<div class="co-empty">${f === 'active' ? (ds.sales.available && ds.stock.available ? (c.stock_unavailable ? 'Nothing can be recommended until stock is available for some products (see below).' : 'Nothing needs a shoot right now.') : 'Waiting for data to load.') : 'Nothing here.'}</div>`}</div>
+    <div class="cp-grid">${shown.length ? shown.map(cpCardHtml).join('') : `<div class="co-empty">${f === 'active' ? (ds.sales.available && ds.stock.available ? (c.stock_unavailable ? 'Nothing can be recommended until stock is available for some products (see below).' : 'Nothing needs a shoot right now.') : 'Waiting for data to load.') : 'Nothing here.'}</div>`}</div>
     ${f === 'active' && list.length > CP_VISIBLE ? `<button type="button" class="btn btn-ghost btn-sm" id="cp-show-all">${cpState.showAll ? 'Show fewer' : `Show ${list.length - CP_VISIBLE} more`}</button>` : ''}
-    ${f === 'active' && d.hold.length ? `<h4 class="cp-h">Hold off — don't shoot more yet</h4><div class="co-list">${d.hold.map(cpCardHtml).join('')}</div>` : ''}
+    ${f === 'active' && d.hold.length ? `<h4 class="cp-h">Hold off — don't shoot more yet</h4><div class="cp-grid">${d.hold.map(cpCardHtml).join('')}</div>` : ''}
     ${f === 'active' && d.stock_unavailable.length ? `<div class="co-banner cp-stock-unavail"><b>Stock unavailable — recommendation withheld (${d.stock_unavailable.length})</b><div class="cp-low">${d.stock_unavailable.map((p) => `<div><b>${escapeHtml(p.product_name)}</b> — ${p.reason === 'no_stock_record' ? 'no inventory record in ApparelMagic' : 'stock data not loaded'}${p.would_have_been ? ` <span class="hint">(would otherwise suggest: ${escapeHtml(p.would_have_been)})</span>` : ''}</div>`).join('')}</div><div class="hint">This is a data problem, not low stock: these products are not shown as shoot recommendations until their stock can be read.</div></div>` : ''}
     ${f === 'active' && low.length ? `<details class="co-how"><summary>Not recommended: low stock (${low.length})</summary><div class="cp-low">${low.map((p) => `<div><b>${escapeHtml(p.product_name)}</b> — ${cpNum(p.units)} units${p.would_have_been ? ` <span class="hint">(would otherwise suggest: ${escapeHtml(p.would_have_been)})</span>` : ''}</div>`).join('')}</div></details>` : ''}
     ${f === 'active' && d.no_action.length ? `<details class="co-how"><summary>No action needed (${d.no_action.length})</summary><div class="cp-low hint">${d.no_action.map(escapeHtml).join(' · ')}</div></details>` : ''}
@@ -1705,10 +1857,11 @@ function cpEvidenceHtml(c) {
     : '<div class="hint">Stock by size isn\'t available.</div>';
   const cr = e.creative;
   const creative = kv([
-    ['Last new creative', cr.last_new_creative ? `${escapeHtml(cpDate(cr.last_new_creative.date))} (${escapeHtml(cpAge(cr.last_new_creative.days_ago))} ago) <span class="hint">${escapeHtml(cr.last_new_creative.source)}</span>` : 'None found'],
-    ['Creatives running now', String(cr.running_creatives)],
+    ['Last new creative', cr.last_new_creative ? `${escapeHtml(cpDate(cr.last_new_creative.date))} (${escapeHtml(cpAge(cr.last_new_creative.days_ago))} ago) <span class="hint">${escapeHtml(cr.last_new_creative.source)}. This is when the first ad using it was created in Meta; the creative file itself may be older.</span>` : 'None found'],
+    ['Active unique creatives', `${cr.active_unique_creatives ?? cr.running_creatives}${cr.active_ads > (cr.active_unique_creatives ?? 0) ? ` <span class="hint">· across ${cr.active_ads} active ads (the same creative duplicated into several ads counts once)</span>` : ''}`],
+    ['Historical unique creatives', cr.historical_unique_creatives === undefined ? '—' : String(cr.historical_unique_creatives)],
     ['New creatives in the last 90 days', String(cr.new_creatives_90d)],
-    ['Distinct creatives ever linked', `${cr.creatives_total} <span class="hint">(matched ads only)</span>`],
+    ['Distinct creatives ever linked', `${cr.creatives_total} <span class="hint">(exact Meta creatives with at least one matched ad)</span>`],
     ['Age of running creatives', cr.newest_running_days === null ? '—' : `newest ${escapeHtml(cpAge(cr.newest_running_days))}, oldest ${escapeHtml(cpAge(cr.oldest_running_days))}`],
   ]);
   const reliability = cr.recency_basis === 'older_than_window'
@@ -1717,7 +1870,7 @@ function cpEvidenceHtml(c) {
   const row = (a, kind) => `<tr>
       <td>${ccThumbHtml(a.meta_ad_id, { openAttr: 'data-cp-preview' })}</td>
       <td title="${escapeHtml(a.ad_name || '')}">${escapeHtml((a.ad_name || '').slice(0, 64))}</td>
-      <td>${escapeHtml(cpDate(a.first_created || a.created))}${a.running ? ' <span class="co-status proven">running</span>' : ''}</td>
+      <td>${escapeHtml(cpDate(a.first_created || a.created))}${a.running ? ' <span class="co-status proven">active</span>' : ''}${a.ads_using > 1 ? ` <span class="hint">${a.active_ads ? a.active_ads + ' of ' : ''}${a.ads_using} ads</span>` : ''}</td>
       <td>${escapeHtml(a.concept || (a.products ? a.products.join(', ') : '') || '—')}</td>
       <td>${escapeHtml(a.media || '—')}</td>
       ${admin && a.admin ? `<td>${cpMoney(a.admin.spend)}</td><td>${cpNum(a.admin.purchases, 1)}</td>` : ''}
@@ -1740,6 +1893,17 @@ function cpEvidenceHtml(c) {
     ${concept}
     <div class="hint co-attrib">${escapeHtml(e.attribution)}</div>`;
 }
+
+function cpOpenDetail(key) {
+  const c = cpFind(key);
+  if (!c) return;
+  document.getElementById('cp-detail-title').textContent = c.product.product_name;
+  document.getElementById('cp-detail-body').innerHTML = cpDetailHtml(c);
+  openModal('cp-detail-modal');
+}
+document.addEventListener('keydown', (e) => {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target && e.target.matches && e.target.matches('.cp-tile[data-cp-open]')) { e.preventDefault(); cpOpenDetail(e.target.dataset.cpOpen); }
+});
 
 async function cpShoot(c) {
   try {
@@ -1769,12 +1933,15 @@ document.addEventListener('click', async (e) => {
     openAdPreview(adId, cpIsAdmin() && a && a.admin ? { metrics: { spend: a.admin.spend, purchases: a.admin.purchases, cpa: a.admin.cpa } } : null);
     return;
   }
+  const tile = e.target.closest('[data-cp-open]');
+  if (tile && document.getElementById('core-plan').contains(tile)) { cpOpenDetail(tile.dataset.cpOpen); return; }
   const btn = e.target.closest('[data-cp-act]');
   const cardEl = e.target.closest('[data-cp-key]');
-  if (!btn || !cardEl || !document.getElementById('core-plan').contains(cardEl)) return;
+  if (!btn || !cardEl || !(document.getElementById('core-plan').contains(cardEl) || document.getElementById('cp-detail-modal').contains(cardEl))) return;
   const c = cpFind(cardEl.dataset.cpKey);
   if (!c) return;
   const act = btn.dataset.cpAct;
+  if (act !== 'evidence') closeModal('cp-detail-modal');
   try {
     if (act === 'evidence') {
       document.getElementById('cp-evidence-title').textContent = `${c.product.product_name} — evidence`;
@@ -14352,19 +14519,97 @@ function bfInspirationCardHtml(insp) {
         <button type="button" class="btn btn-ghost btn-sm" onclick="openBfInspirationModal(${insp.id})">Edit</button>
         ${insp.video_url ? `<a href="${escapeHtml(insp.video_url)}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Open Original &#8599;</a>` : ''}
         ${bfInspirationExtraUrlsHtml(insp)}
+        ${cpIsAdmin() && !insp.meta_ad_id ? `<button type="button" class="btn btn-ghost btn-sm" data-insp-link="${insp.id}" title="Choose the exact Meta creative yourself">Link to Meta creative</button>` : ''}
+        ${cpIsAdmin() && insp.meta_ad_id && insp.meta_link_basis === 'manual' ? `<button type="button" class="btn btn-ghost btn-sm" data-insp-unlink="${insp.id}" title="Remove the link you made">Unlink</button>` : ''}
       </div>
     </div>`;
+}
+
+// Stage folders. A reference's stage is free text on the record (sale_stage_note: "Live", "Hype / Live", "GWP"...). It belongs to
+// every primary stage it names; one that names none of the four goes to Other / Uncategorised. Nothing is dropped: "All" lists
+// every record once, and the folder counts can add up to more than the total only because a reference can name several stages.
+const BF_INSP_STAGES = [
+  { key: 'hype', label: 'Hype', re: /\bhype\b/i }, { key: 'live', label: 'Live', re: /\blive\b/i },
+  { key: 'mid_sale', label: 'Mid Sale', re: /\bmid[\s-]*sale\b/i }, { key: 'last_chance', label: 'Last Chance', re: /\blast[\s-]*chance\b/i },
+];
+let bfInspStage = 'all';
+function bfInspStageKeys(insp) {
+  const note = String(insp.sale_stage_note || '');
+  const keys = BF_INSP_STAGES.filter((st) => st.re.test(note)).map((st) => st.key);
+  return keys.length ? keys : ['other'];
+}
+function bfInspFolderCounts(items) {
+  const counts = { all: items.length, other: 0 };
+  BF_INSP_STAGES.forEach((st) => { counts[st.key] = 0; });
+  items.forEach((i) => bfInspStageKeys(i).forEach((k) => { counts[k] += 1; }));
+  return counts;
+}
+function bfInspFoldersHtml(items) {
+  const counts = bfInspFolderCounts(items);
+  const folders = [{ key: 'all', label: 'All' }, ...BF_INSP_STAGES.map((s2) => ({ key: s2.key, label: s2.label })), { key: 'other', label: 'Other / Uncategorised' }];
+  return `<div class="bf-insp-folders" role="tablist" aria-label="Inspiration stage">${folders.map((f) => `
+    <button type="button" role="tab" class="bf-insp-folder${bfInspStage === f.key ? ' active' : ''}" data-insp-stage="${f.key}" aria-selected="${bfInspStage === f.key}">
+      <span class="bf-insp-folder-name">${escapeHtml(f.label)}</span><span class="bf-insp-folder-n">${counts[f.key]}</span></button>`).join('')}</div>`;
 }
 
 function renderBfInspirationGrid() {
   const items = state.blackFriday.inspiration;
   const grid = document.getElementById('bf-inspiration-grid');
-  grid.innerHTML = items.length
-    ? items.map(bfInspirationCardHtml).join('')
-    : '<div class="attention-empty">No previous winning ads logged yet -- click + New Reference to add the first one.</div>';
+  const bar = document.getElementById('bf-insp-folders');
+  if (bar) bar.innerHTML = items.length ? bfInspFoldersHtml(items) : '';
+  const shown = bfInspStage === 'all' ? items : items.filter((i) => bfInspStageKeys(i).includes(bfInspStage));
+  grid.innerHTML = shown.length
+    ? shown.map(bfInspirationCardHtml).join('')
+    : (items.length ? '<div class="attention-empty">Nothing in this folder.</div>' : '<div class="attention-empty">No previous winning ads logged yet -- click + New Reference to add the first one.</div>');
   ccHydrateThumbs(grid);
   bfRenderRecoveryPanel();
 }
+let bfLinkTarget = null; let bfLinkTimer = null;
+async function bfLinkSearch() {
+  const q = document.getElementById('bf-insp-link-q').value.trim();
+  const host = document.getElementById('bf-insp-link-results');
+  if (q.length < 2) { host.innerHTML = '<div class="hint" style="margin-top:8px;">Type at least 2 characters.</div>'; return; }
+  try {
+    const r = await api(`/promotion-creative/inspiration/meta-search?q=${encodeURIComponent(q)}`);
+    host.innerHTML = r.results.length ? r.results.map((x) => `
+      <div class="insp-search-row">${ccThumbHtml(x.meta_ad_id)}
+        <div class="insp-search-meta"><b title="${escapeHtml(x.ad_name || '')}">${escapeHtml(x.ad_name || '(unnamed ad)')}</b>
+          ${x.ads > 1 ? `${x.ads} ads use this creative · ` : ''}${x.creative_last_active ? `last active ${escapeHtml(mpDate(x.creative_last_active, true))}` : 'no delivery stored'}${x.running ? ' · running' : ''}
+          <div class="hint">Ad ${escapeHtml(x.meta_ad_id)}${x.meta_creative_id ? ` · creative ${escapeHtml(x.meta_creative_id)}` : ''}</div></div>
+        <button type="button" class="btn btn-primary btn-sm" data-insp-do-link="${escapeHtml(x.meta_ad_id)}">Link</button></div>`).join('') : '<div class="hint" style="margin-top:8px;">No stored Meta ads match.</div>';
+    ccHydrateThumbs(host);
+  } catch (e) { host.innerHTML = `<div class="hint">${escapeHtml(e.message)}</div>`; }
+}
+document.getElementById('bf-insp-link-q').addEventListener('input', () => { clearTimeout(bfLinkTimer); bfLinkTimer = setTimeout(bfLinkSearch, 300); });
+document.addEventListener('click', async (e) => {
+  const open = e.target.closest('[data-insp-link]');
+  if (open) {
+    bfLinkTarget = Number(open.dataset.inspLink);
+    const insp = bfInspirationFindById(bfLinkTarget);
+    document.getElementById('bf-insp-link-title').textContent = `Link “${insp ? insp.title : 'reference'}” to a Meta creative`;
+    document.getElementById('bf-insp-link-q').value = '';
+    document.getElementById('bf-insp-link-results').innerHTML = '';
+    openModal('bf-insp-link-modal');
+    return;
+  }
+  const doLink = e.target.closest('[data-insp-do-link]');
+  if (doLink && bfLinkTarget) {
+    try {
+      await api(`/promotion-creative/inspiration/${bfLinkTarget}/meta-link`, { method: 'POST', body: JSON.stringify({ meta_ad_id: doLink.dataset.inspDoLink }) });
+      closeModal('bf-insp-link-modal'); toast('Linked.'); await loadBfInspiration();
+    } catch (err) { toast(err.message, true); }
+    return;
+  }
+  const un = e.target.closest('[data-insp-unlink]');
+  if (un) {
+    if (!(await confirmDialog('Remove the link you made between this reference and its Meta creative? The reference itself is kept.', { okLabel: 'Unlink' }))) return;
+    try { await api(`/promotion-creative/inspiration/${un.dataset.inspUnlink}/meta-link`, { method: 'DELETE' }); toast('Unlinked.'); await loadBfInspiration(); } catch (err) { toast(err.message, true); }
+  }
+});
+document.addEventListener('click', (e) => {
+  const f = e.target.closest('[data-insp-stage]');
+  if (f) { bfInspStage = f.dataset.inspStage; renderBfInspirationGrid(); }
+});
 
 // Admin-only: how many references can be tied to a real Meta ad, and the explicit buttons to do it. Matching is exact
 // (the reference's fb.me preview link equals an ad's own preview link, or the URL carries ad_id=<that ad>); never by name.
@@ -14377,7 +14622,8 @@ async function bfRenderRecoveryPanel(report) {
     const n = (v) => Number(v || 0).toLocaleString('en-AU');
     if (!r.total_references) { host.style.display = 'none'; return; }
     host.style.display = '';
-    host.innerHTML = `<strong>Meta link recovery</strong> <span class="hint">exact links only — never matched by name</span>
+    const keepOpen = host.hasAttribute('open');
+    host.innerHTML = `<summary>Meta link recovery <span class="hint">· ${n(r.already_linked_to_a_meta_ad)} of ${n(r.total_references)} linked · ${n(r.recoverable_now)} can be linked now · ${n(r.without_a_link)} have no link — exact links only, never matched by name</span></summary>
       <table>
         <tr><td>${n(r.total_references)}</td><td>references</td></tr>
         <tr><td>${n(r.already_linked_to_a_meta_ad)}</td><td>already linked to a Meta ad</td></tr>
@@ -14391,6 +14637,7 @@ async function bfRenderRecoveryPanel(report) {
         <button type="button" class="btn btn-ghost btn-sm" id="bf-recov-lookup" ${r.meta_share_link_not_yet_matched ? '' : 'disabled'} title="Reads Meta preview links (read-only, 50 ads per call, highest spend first)">Look up Meta preview links</button>
         <button type="button" class="btn btn-primary btn-sm" id="bf-recov-apply" ${r.recoverable_now ? '' : 'disabled'}>Link ${n(r.recoverable_now)} exact match${r.recoverable_now === 1 ? '' : 'es'}</button>
       </div>`;
+    if (keepOpen) host.setAttribute('open', '');
     document.getElementById('bf-recov-lookup').onclick = async (e) => {
       e.target.disabled = true; e.target.textContent = 'Reading from Meta…';
       try {

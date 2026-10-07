@@ -3000,3 +3000,43 @@ CREATE TABLE IF NOT EXISTS meta_conflict_resolutions (
   changes JSONB NOT NULL DEFAULT '[]'::jsonb
 );
 CREATE INDEX IF NOT EXISTS idx_meta_conflict_resolutions_creative ON meta_conflict_resolutions(meta_creative_id);
+
+-- =====================================================================
+-- Batch 3 (additive only): bounded "did this ever deliver since the cutoff?" evidence for the Pre-2026 archive,
+-- and a deliberate manual Inspiration -> Meta link.
+-- =====================================================================
+
+-- One row per explicit admin pull of Meta's own delivery record (GET <account>/insights, level=ad, ONE row per ad for
+-- the whole period, fields ad_id,spend,impressions -- read-only). state 'completed' means the paged answer was read to
+-- the end; anything else (running / failed / truncated) is never used as evidence.
+CREATE TABLE IF NOT EXISTS meta_activity_pulls (
+  id SERIAL PRIMARY KEY,
+  since_date DATE NOT NULL,
+  until_date DATE NOT NULL,
+  state VARCHAR(12) NOT NULL DEFAULT 'running' CHECK (state IN ('running', 'completed', 'failed')),
+  ads_with_delivery INTEGER,
+  calls INTEGER,
+  error_code VARCHAR(40),
+  error_message TEXT,
+  retry_after_seconds INTEGER,
+  requested_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_meta_activity_pulls_state ON meta_activity_pulls (state, since_date, until_date, id DESC);
+
+-- Ads Meta reports as having DELIVERED (spend or impressions) inside a completed pull's period. No FK: Meta may name an ad
+-- this app never stored. Rows are written only when the whole pull completed.
+CREATE TABLE IF NOT EXISTS meta_ad_delivery_since (
+  pull_id INTEGER NOT NULL REFERENCES meta_activity_pulls(id) ON DELETE CASCADE,
+  meta_ad_id VARCHAR(64) NOT NULL,
+  spend NUMERIC(14,2) NOT NULL DEFAULT 0,
+  impressions BIGINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (pull_id, meta_ad_id)
+);
+
+-- A person deliberately linked an Inspiration reference to a Meta ad (basis 'manual'); who did it.
+ALTER TABLE creative_inspiration ADD COLUMN IF NOT EXISTS meta_linked_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+
+-- Which stored creatives are the ones Meta Performance asks about most: speeds the per-creative activity roll-up.
+CREATE INDEX IF NOT EXISTS idx_meta_ads_status_creative ON meta_ads(match_status, meta_creative_id);

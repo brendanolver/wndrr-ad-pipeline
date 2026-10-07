@@ -309,6 +309,40 @@ function extractImage(row) {
   return (catalogImage || images[0]).img || null;
 }
 
+// Every picture AM holds for a style, with whatever front/back hint the record itself carries (a label-like field or the
+// file name). Nothing is inferred from the product: `role` is set only when the image object says so.
+const ROLE_LABEL_KEYS = ['name', 'title', 'description', 'caption', 'label', 'type', 'view', 'angle', 'position', 'alt', 'file_name', 'filename', 'tag'];
+function imageRole(img) {
+  const text = ROLE_LABEL_KEYS.map((k) => (typeof img[k] === 'string' ? img[k] : '')).join(' ').toLowerCase();
+  const fromLabel = /\bfront\b/.test(text) ? 'front' : /\b(back|rear)\b/.test(text) ? 'back' : null;
+  if (fromLabel) return { role: fromLabel, basis: 'label' };
+  let name = '';
+  try { name = new URL(String(img.img || '')).pathname.split('/').pop().toLowerCase(); } catch (e) { name = String(img.img || '').toLowerCase(); }
+  const fromName = /(^|[^a-z])front([^a-z]|$)/.test(name) ? 'front' : /(^|[^a-z])(back|rear)([^a-z]|$)/.test(name) ? 'back' : null;
+  return fromName ? { role: fromName, basis: 'filename' } : { role: null, basis: null };
+}
+function extractImages(row) {
+  const images = Array.isArray(row.images) ? row.images : [];
+  return images.filter((img) => img && typeof img.img === 'string' && img.img).map((img) => {
+    const r = imageRole(img);
+    return { url: img.img, catalog: img.is_catalog_image === '1' || img.is_catalog_image === 1, role: r.role, role_basis: r.basis };
+  });
+}
+// Front / back for display. front = an image that says "front", else the catalogue image, else the first. back = an image that
+// says "back"/"rear"; with no labels at all but two or more pictures, the next picture is offered as the back and the basis says
+// it is positional (so the UI can word it honestly). Never invented when there is only one picture.
+function pickFrontBack(images) {
+  const imgs = Array.isArray(images) ? images : [];
+  if (!imgs.length) return { front: null, back: null, count: 0 };
+  const labelled = imgs.some((i) => i.role);
+  const frontImg = imgs.find((i) => i.role === 'front') || imgs.find((i) => i.catalog && i.role !== 'back') || imgs.find((i) => i.role !== 'back') || imgs[0];
+  const frontBasis = frontImg.role === 'front' ? frontImg.role_basis : frontImg.catalog ? 'catalog' : 'position';
+  let backImg = imgs.find((i) => i.role === 'back' && i !== frontImg) || null;
+  let backBasis = backImg ? backImg.role_basis : null;
+  if (!backImg && !labelled && imgs.length >= 2) { backImg = imgs.find((i) => i !== frontImg); backBasis = 'position'; }
+  return { front: { url: frontImg.url, basis: frontBasis }, back: backImg ? { url: backImg.url, basis: backBasis } : null, count: imgs.length };
+}
+
 // WNDRR's AM account repurposes mid_code as Launch Date per style, and CORE
 // membership is the AM product group -- both confirmed in production
 // (demandplanning V2). '0' in mid_code means empty, not a real date.
@@ -368,6 +402,7 @@ async function fetchStyleCatalogueUncached() {
     map.set(style, {
       productName,
       imageUrl: extractImage(row),
+      images: extractImages(row),
       launchDateRaw,
       launchDate: parseLaunchDate(launchDateRaw),
       isCore: CORE_GROUPS.has(normGroupName(row.group)),
@@ -468,6 +503,8 @@ function getAmCacheStatus() {
 }
 
 module.exports = {
+  extractImages,
+  pickFrontBack,
   configured,
   getStockByStyle,
   getStockSizes,

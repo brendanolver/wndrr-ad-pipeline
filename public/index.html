@@ -23,6 +23,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
+<!-- the Meta-native ad preview loads in an iframe from here: open the connection before it is needed -->
+<link rel="preconnect" href="https://business.facebook.com" crossorigin>
 </head>
 <body>
 
@@ -244,6 +246,8 @@
         <table class="mp-table mp-perf">
           <thead>
             <tr>
+              <th class="mp-th-funnel" title="Funnel position, read from the literal TOF / TOM / MOF in the campaign name. Unknown is never guessed.">Funnel</th>
+              <th class="mp-th-creative">Creative</th>
               <th class="mp-th-name" data-sort="ad_name">Ad Name</th>
               <th data-sort="status">Status</th>
               <th class="num" data-sort="spend">Amount Spent</th>
@@ -285,11 +289,12 @@
         <div class="mm-backlog" id="mm-backlog" style="display:none;"></div>
         <!-- Review workload in unique creatives (ads that share a meta_creative_id are one piece of creative) -->
         <div class="mm-workload" id="mm-workload" style="display:none;"></div>
+        <div class="mm-archive" id="mm-archive" style="display:none;"></div>
         <div class="mm-chips" id="mm-chips" role="group" aria-label="Mapping state"></div>
         <div class="mm-relevance-note" id="mm-relevance-note" style="display:none;"></div>
         <table class="mp-table mm-table">
           <thead>
-            <tr><th class="mp-th-name">Ad Name</th><th>Status</th><th class="num">Recent spend</th><th>Mapping</th><th>Product</th><th>Concept</th><th>Media</th><th>Confidence</th></tr>
+            <tr><th class="mp-th-name">Ad Name</th><th>Status</th><th class="num">Recent spend</th><th title="Newest day ANY ad using this exact creative delivered, from stored Insights">Last active</th><th>Mapping</th><th>Product</th><th>Concept</th><th>Media</th><th>Confidence</th></tr>
           </thead>
           <tbody id="mm-body"></tbody>
         </table>
@@ -667,7 +672,8 @@
             </div>
             <button type="button" class="btn btn-primary btn-sm" onclick="openBfInspirationModal()">+ New Reference</button>
           </div>
-          <div id="bf-insp-recovery" class="insp-recovery" style="display:none;"></div>
+          <div id="bf-insp-folders" class="bf-insp-folder-bar"></div>
+          <details id="bf-insp-recovery" class="insp-recovery" style="display:none;"></details>
           <div id="bf-inspiration-grid" class="cd-product-grid"></div>
         </div>
 
@@ -1507,6 +1513,33 @@
      Ad Matching view's own workspace). -->
 <!-- Creative Opportunities evidence: facts only (sales signal, Meta performance,
      creative dates, mix, ads, concept benchmark) -- no free-form prose. -->
+<!-- Core plan: the full recommendation (explanation, facts, front/back images, actions) behind a compact tile. Declared BEFORE the
+     evidence modal so "See evidence" opens on top of it. -->
+<!-- Inspiration Library: a person deliberately chooses the Meta creative for a reference (never matched by name automatically). -->
+<div id="bf-insp-link-modal" class="modal-backdrop">
+  <div class="modal" style="width:min(640px,94vw);">
+    <div class="modal-header">
+      <h3 id="bf-insp-link-title">Link to Meta creative</h3>
+      <button class="modal-close" onclick="closeModal('bf-insp-link-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p class="hint" style="margin-top:0;">Search stored Meta ads by name, ad id or creative id, then choose the right one yourself. Nothing is linked until you press Link, and no name is matched automatically.</p>
+      <input type="search" id="bf-insp-link-q" placeholder="Search ad name, Meta Ad ID or creative ID" autocomplete="off" style="width:100%;">
+      <div id="bf-insp-link-results"></div>
+    </div>
+  </div>
+</div>
+
+<div id="cp-detail-modal" class="modal-backdrop">
+  <div class="modal cp-detail-modal">
+    <div class="modal-header">
+      <h3 id="cp-detail-title">Recommendation</h3>
+      <button class="modal-close" onclick="closeModal('cp-detail-modal')">&times;</button>
+    </div>
+    <div class="modal-body" id="cp-detail-body"></div>
+  </div>
+</div>
+
 <div id="cp-evidence-modal" class="modal-backdrop">
   <div class="modal co-drawer-modal">
     <div class="modal-header">
