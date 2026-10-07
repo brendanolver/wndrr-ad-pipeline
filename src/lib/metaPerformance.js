@@ -344,10 +344,31 @@ async function getFreshness() {
   };
 }
 
+// ── Campaign / funnel filter ────────────────────────────────────────────
+// ?funnel=TOF|TOM|MOF|multiple|unknown  and/or  ?campaign_id=<exact Meta campaign id>. Applied to the headline
+// metrics, the compare period AND the table alike, so the numbers always describe the same population of ads.
+const FUNNEL_FILTERS = new Set(['TOF', 'TOM', 'MOF', 'multiple', 'unknown']);
+const CAMPAIGN_ID_RE = /^[0-9]{1,32}$/;
+function parseFilter(query = {}) {
+  const funnel = FUNNEL_FILTERS.has(query.funnel) ? query.funnel : null;
+  const campaignId = CAMPAIGN_ID_RE.test(String(query.campaign_id || '')) ? String(query.campaign_id) : null;
+  return { funnel, campaignId, active: !!(funnel || campaignId) };
+}
+// Restricts an insights table (alias given) to the ads in the filter; params are appended to `params`.
+function adFilterSql(filter, params, alias = 'd') {
+  if (!filter || !filter.active) return '';
+  const conds = [];
+  if (filter.funnel) { params.push(filter.funnel); conds.push(`COALESCE(mc.funnel, 'unknown') = $${params.length}`); }
+  if (filter.campaignId) { params.push(filter.campaignId); conds.push(`fa.meta_campaign_id = $${params.length}`); }
+  return ` AND ${alias}.meta_ad_id IN (SELECT fa.meta_ad_id FROM meta_ads fa LEFT JOIN meta_campaigns mc ON mc.meta_campaign_id = fa.meta_campaign_id WHERE ${conds.join(' AND ')})`;
+}
+
 // ── Queries ─────────────────────────────────────────────────────────────
 const ACTIVITY = '(SUM(d.spend) > 0 OR SUM(d.impressions) > 0)';
 
-async function getTotals(range) {
+async function getTotals(range, filter) {
+  const params = [range.since, range.until];
+  const filterSql = adFilterSql(filter, params, 'd');
   const { rows } = await pool.query(
     `SELECT COALESCE(SUM(spend), 0) AS spend,
             COALESCE(SUM(purchases), 0) AS purchases,
@@ -357,9 +378,9 @@ async function getTotals(range) {
             COALESCE(SUM(impressions), 0) AS impressions,
             COUNT(DISTINCT meta_ad_id) FILTER (WHERE spend > 0 OR impressions > 0) AS ads_with_activity,
             COUNT(DISTINCT insight_date) AS days_with_rows
-       FROM meta_ad_insights_daily
-      WHERE insight_date BETWEEN $1 AND $2`,
-    [range.since, range.until]
+       FROM meta_ad_insights_daily d
+      WHERE d.insight_date BETWEEN $1 AND $2${filterSql}`,
+    params
   );
   const r = rows[0];
   return {
@@ -369,9 +390,9 @@ async function getTotals(range) {
   };
 }
 
-async function getSummary(parsed, now = new Date()) {
+async function getSummary(parsed, now = new Date(), filter = null) {
   const [totals, coverage, freshness] = await Promise.all([
-    getTotals(parsed.range),
+    getTotals(parsed.range, filter),
     getCoverage(parsed.range, now),
     getFreshness(),
   ]);
@@ -386,11 +407,18 @@ async function getSummary(parsed, now = new Date()) {
     freshness,
     // Exact range-level Reach/Frequency from the cache (null + status until loaded).
     reach_frequency: reachStore.summaryFrom(await reachStore.getStatus(parsed.range, parsed.today, { now: now.getTime() })),
+    filter: filter && filter.active ? { funnel: filter.funnel, campaign_id: filter.campaignId } : null,
     compare: null,
   };
+  if (filter && filter.active) {
+    // Exact Reach / Frequency is a unique-people figure Meta computes for the WHOLE account over the period; it cannot be
+    // derived for a funnel / campaign subset from daily rows or from per-ad reach, so it is withheld rather than faked.
+    out.reach_frequency = { available: false, state: 'filtered', reach: null, frequency: null, pulled_at: null, stale: false, includes_today: false, last_error: null, source: 'meta_range',
+      reason: 'Exact Reach and Frequency are only available for the whole account. Clear the funnel / campaign filter to see them.' };
+  }
   if (parsed.compareRange) {
     const [prevTotals, prevCoverage] = await Promise.all([
-      getTotals(parsed.compareRange),
+      getTotals(parsed.compareRange, filter),
       getCoverage(parsed.compareRange, now),
     ]);
     out.compare = { range: parsed.compareRange, totals: prevTotals, coverage: prevCoverage };
@@ -440,6 +468,7 @@ function parseAdsQuery(query) {
 // 29k-ad inventory or raw daily rows.
 async function getAds(parsed, query) {
   const opts = parseAdsQuery(query);
+  const filter = parseFilter(query);
   // Where this range's per-ad Reach/Frequency can come from (never Meta, only the stored cache).
   const reachStatus = await reachStore.getStatus(parsed.range, parsed.today);
   const reachFrom = reachStatus.ad_values; // 'stored_daily' (one day) | 'meta_range' (cached pull) | null
@@ -451,6 +480,8 @@ async function getAds(parsed, query) {
   const params = [parsed.range.since, parsed.range.until];
   const where = [];
   if (STATUS_FILTERS[opts.status]) where.push(STATUS_FILTERS[opts.status]);
+  if (filter.funnel) { params.push(filter.funnel); where.push(`COALESCE(mc.funnel, 'unknown') = $${params.length}`); }
+  if (filter.campaignId) { params.push(filter.campaignId); where.push(`a.meta_campaign_id = $${params.length}`); }
   if (opts.q) {
     params.push(`%${escapeLike(opts.q)}%`);
     const like = `$${params.length}`;
@@ -472,7 +503,7 @@ async function getAds(parsed, query) {
       HAVING ${ACTIVITY}
     )`;
   const countRes = await pool.query(
-    `${cte} SELECT COUNT(*) AS total FROM agg JOIN meta_ads a ON a.meta_ad_id = agg.meta_ad_id ${whereSql}`,
+    `${cte} SELECT COUNT(*) AS total FROM agg JOIN meta_ads a ON a.meta_ad_id = agg.meta_ad_id LEFT JOIN meta_campaigns mc ON mc.meta_campaign_id = a.meta_campaign_id ${whereSql}`,
     params
   );
   const total = num(countRes.rows[0].total);
@@ -482,8 +513,9 @@ async function getAds(parsed, query) {
   // (no ad can appear on two pages or be skipped).
   const { rows } = await pool.query(
     `${cte}
-     SELECT agg.*, a.ad_name, a.effective_status, a.match_status, ${reachSel}
+     SELECT agg.*, a.ad_name, a.effective_status, a.match_status, a.meta_campaign_id, mc.name AS campaign_name, COALESCE(mc.funnel, 'unknown') AS funnel, ${reachSel}
        FROM agg JOIN meta_ads a ON a.meta_ad_id = agg.meta_ad_id
+       LEFT JOIN meta_campaigns mc ON mc.meta_campaign_id = a.meta_campaign_id
        ${reachJoin}
        ${whereSql}
       ORDER BY ${sortSql} ${opts.dir} NULLS LAST, agg.spend DESC, agg.meta_ad_id ASC
@@ -500,11 +532,15 @@ async function getAds(parsed, query) {
     dir: opts.dir,
     status: opts.status,
     q: opts.q,
+    filter: filter.active ? { funnel: filter.funnel, campaign_id: filter.campaignId } : null,
     ads: rows.map((r) => ({
       meta_ad_id: r.meta_ad_id,
       ad_name: r.ad_name,
       effective_status: r.effective_status,
       match_status: r.match_status,
+      campaign_id: r.meta_campaign_id || null,
+      campaign_name: r.campaign_name || null,
+      funnel: r.funnel,
       days_active: num(r.days_active),
       ...deriveMetrics(r),
       ...adReach(reachFrom, r),
@@ -566,6 +602,8 @@ async function getAdDetail(metaAdId, parsed) {
 }
 
 module.exports = {
+  parseFilter,
+  adFilterSql,
   REPORTING_TIMEZONE,
   PRESETS,
   DEFAULT_PRESET,
@@ -574,6 +612,7 @@ module.exports = {
   ymdInZone,
   zonedDayStartUtc,
   addDays,
+  listDates,
   resolvePreset,
   previousPeriod,
   parseRangeParams,

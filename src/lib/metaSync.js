@@ -423,6 +423,9 @@ async function runSync({ since, until, runType = 'default', userId = null }) {
     await upsertAccountSettings(accountInfo);
     const insights = await fetchAndUpsertInsights(since, until, accountInfo.currency);
     const lookup = await lookupMissingAds(insights.needLookup);
+    // Campaign NAMES (one read-only paged call) -- best effort: a failure here never fails the performance sync.
+    let campaigns = null;
+    try { campaigns = await require('./metaCampaigns').refreshCampaigns(); } catch (e) { noteRateLimit(e); campaigns = { error: true }; }
 
     // ads_discovered / ads_inserted / ads_updated keep their column meaning
     // for the run log: ads whose metadata was needed, ads that gained a
@@ -443,6 +446,7 @@ async function runSync({ since, until, runType = 'default', userId = null }) {
       daily_rows_seen: insights.rowsSeen, daily_rows_inserted: insights.inserted, daily_rows_updated: insights.updated,
       new_ads_identified: insights.newIdentities,
       ad_metadata_lookups: { requested: lookup.requested, resolved: lookup.resolved, unresolved: lookup.unresolved, calls: lookup.calls },
+      campaigns,
     };
   } catch (err) {
     noteRateLimit(err);

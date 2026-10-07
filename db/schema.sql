@@ -2943,3 +2943,60 @@ WHERE pci.id = pcie.promotion_creative_idea_id
 -- review workload in unique creatives). Index only; no data changes. (Insights
 -- lookups by ad + date are already served by UNIQUE (meta_ad_id, insight_date).)
 CREATE INDEX IF NOT EXISTS idx_meta_ads_meta_creative_id ON meta_ads(meta_creative_id) WHERE meta_creative_id IS NOT NULL;
+
+-- =====================================================================
+-- Batch 2 (additive only): campaign context, creative thumbnails, share-link
+-- identity for Inspiration recovery, conflict-resolution audit trail.
+-- =====================================================================
+
+-- Campaign metadata from Meta (read-only fetch). ads.meta_campaign_id has always been stored; the NAME was not.
+-- funnel is derived ONLY from literal tokens in the name (see lib/metaCampaignFunnel.js); NULL/'unknown' stays unknown.
+CREATE TABLE IF NOT EXISTS meta_campaigns (
+  meta_campaign_id VARCHAR(64) PRIMARY KEY,
+  name TEXT,
+  objective VARCHAR(60),
+  status VARCHAR(30),
+  effective_status VARCHAR(30),
+  funnel VARCHAR(12),
+  funnel_rule_version INTEGER,
+  fetched_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Table thumbnails: one small cover per Meta CREATIVE (ads that reuse a creative share it). Signed CDN URLs
+-- expire, so expires_at drives a refetch; a failed lookup is remembered briefly (state 'unavailable') so a table
+-- of hundreds of ads never re-asks Meta for the same thing.
+CREATE TABLE IF NOT EXISTS meta_creative_thumbs (
+  meta_creative_id VARCHAR(64) PRIMARY KEY,
+  kind VARCHAR(12),
+  thumb_url TEXT,
+  object_type VARCHAR(40),
+  state VARCHAR(12) NOT NULL DEFAULT 'ok' CHECK (state IN ('ok', 'unavailable')),
+  expires_at TIMESTAMPTZ,
+  fetched_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Meta's own shareable preview link per ad (the fb.me/adspreview/... links the Inspiration Library holds).
+-- Looked up read-only on an explicit admin action; an EXACT URL match is the deterministic link back to the ad.
+CREATE TABLE IF NOT EXISTS meta_ad_share_links (
+  meta_ad_id VARCHAR(64) PRIMARY KEY REFERENCES meta_ads(meta_ad_id) ON DELETE CASCADE,
+  share_link TEXT,
+  fetched_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_meta_ad_share_links_link ON meta_ad_share_links(share_link);
+
+-- Deterministic Inspiration -> Meta ad link (never name-based). basis says how it was established.
+ALTER TABLE creative_inspiration ADD COLUMN IF NOT EXISTS meta_ad_id VARCHAR(64) REFERENCES meta_ads(meta_ad_id) ON DELETE SET NULL;
+ALTER TABLE creative_inspiration ADD COLUMN IF NOT EXISTS meta_link_basis VARCHAR(30);
+ALTER TABLE creative_inspiration ADD COLUMN IF NOT EXISTS meta_linked_at TIMESTAMPTZ;
+
+-- Audit of explicit "use this classification for this creative" conflict resolutions (what each ad had before).
+CREATE TABLE IF NOT EXISTS meta_conflict_resolutions (
+  id SERIAL PRIMARY KEY,
+  meta_creative_id VARCHAR(64) NOT NULL,
+  chosen_ad_id VARCHAR(64) NOT NULL,
+  resolved_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  resolved_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  changes JSONB NOT NULL DEFAULT '[]'::jsonb
+);
+CREATE INDEX IF NOT EXISTS idx_meta_conflict_resolutions_creative ON meta_conflict_resolutions(meta_creative_id);

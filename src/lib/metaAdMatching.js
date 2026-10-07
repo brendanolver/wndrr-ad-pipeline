@@ -51,6 +51,7 @@ const { buildMetaAdName, detectPromotionStageType } = require('./adSetupNaming')
 const { deriveProductCode } = require('./apparelmagic');
 const catalogueLib = require('./metaMatchingCatalogue');
 const creativeIdentity = require('./metaCreativeIdentity');
+const creativeConflict = require('./metaCreativeConflict');
 const relevanceLib = require('./metaMatchingRelevance');
 const {
   MEDIA_TYPES, MEDIA_KEYS, MEDIA_LABEL, buildFamilyIndex, matchProductPhrase, expandSet, hasSetWord,
@@ -1850,6 +1851,32 @@ async function getQueue(query = {}, deps = {}) {
 }
 
 
+
+// ── Creative conflicts: see every competing decision, then explicitly pick the authoritative one ──
+async function getCreativeConflict(creativeId) {
+  const detail = await creativeConflict.getConflictDetail(creativeId, { humanOwnedSql: HUMAN_OWNED_SQL });
+  if (!detail || !detail.decisions.length) throw new HttpError(404, 'No person-confirmed decisions for that creative');
+  return detail;
+}
+
+// The deliberate human action ("Use this classification for this creative"). Rewrites only the person-confirmed ads of
+// THIS exact creative id; afterwards the shared inheritance rule gives eligible unclassified copies the resolved decision.
+async function resolveCreativeConflict(creativeId, body, userId) {
+  const chooseAdId = body && body.choose_ad_id;
+  if (!chooseAdId) throw new HttpError(400, 'choose_ad_id is required');
+  let result;
+  try {
+    result = await creativeConflict.resolveConflict(creativeId, String(chooseAdId), userId);
+  } catch (err) {
+    if (err && err.code === 'NOT_IN_CONFLICT') throw new HttpError(409, err.message);
+    if (err && err.code === 'BAD_CHOICE') throw new HttpError(400, err.message);
+    throw err;
+  }
+  const info = await rulesInfo();
+  const sync = await creativeIdentity.syncCreativeGroup(creativeId, { humanOwnedSql: HUMAN_OWNED_SQL, rulesVersion: info.version });
+  return { ...result, copies_that_inherited: sync.applied, state_after: sync.state };
+}
+
 // ── Review workload (read-only) ─────────────────────────────────────────
 // The honest size of the human matching job: ad instances still needing a person ->
 // unique creatives -> minus creatives already covered by a human decision on the same
@@ -2480,6 +2507,8 @@ module.exports = {
   getQueue,
   getWorkload,
   applyCreativeInheritance,
+  getCreativeConflict,
+  resolveCreativeConflict,
   getAdWorkspace,
   confirmMapping,
   skipAd,

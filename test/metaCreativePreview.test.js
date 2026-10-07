@@ -65,7 +65,9 @@ test('Reach is never summed: summary is null + a reason until an exact pull exis
 });
 
 test('cache freshness: ranges that include recent days refresh sooner than past ranges', () => {
-  assert.equal(store.freshnessMs({ since: '2026-10-01', until: '2026-10-06' }, '2026-10-07'), store.FRESH_MS_RECENT);
+  // live rule: lib/metaFreshnessPolicy.reachTtlMs (today 30 min, recently ended 6 h, older 7 days)
+  assert.equal(store.freshnessMs({ since: '2026-10-01', until: '2026-10-07' }, '2026-10-07'), 30 * 60 * 1000);
+  assert.equal(store.freshnessMs({ since: '2026-10-01', until: '2026-10-06' }, '2026-10-07'), 6 * 60 * 60 * 1000);
   assert.equal(store.freshnessMs({ since: '2026-08-01', until: '2026-08-20' }, '2026-10-07'), store.FRESH_MS_PAST);
   assert.equal(store.addDaysYmd('2026-10-01', -1), '2026-09-30');
 });
