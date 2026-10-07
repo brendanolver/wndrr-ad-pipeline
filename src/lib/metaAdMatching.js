@@ -50,6 +50,8 @@ const { parseMetaAdName } = require('./metaProductMapping');
 const { buildMetaAdName, detectPromotionStageType } = require('./adSetupNaming');
 const { deriveProductCode } = require('./apparelmagic');
 const catalogueLib = require('./metaMatchingCatalogue');
+const creativeIdentity = require('./metaCreativeIdentity');
+const relevanceLib = require('./metaMatchingRelevance');
 const {
   MEDIA_TYPES, MEDIA_KEYS, MEDIA_LABEL, buildFamilyIndex, matchProductPhrase, expandSet, hasSetWord,
   coreTokens, mediaTokensFromName, parseLooseMetaName,
@@ -797,6 +799,12 @@ async function refreshSuggestionsForAd(client, ad, ctx, opts = {}) {
   // (a person may have acted since the batch was selected).
   if (opts.protectHumanState && prev.human_owned) return { skipped: prev.human_owned };
 
+  // Same exact meta_creative_id as an ad a person has already classified: take that
+  // classification (machine-owned, overridable, never over a human-owned ad) instead of
+  // re-deriving it from this copy's name. See metaCreativeIdentity.js.
+  const inherited = await creativeIdentity.inheritForAd(client, ad.meta_ad_id, { humanOwnedSql: HUMAN_OWNED_SQL, rulesVersion: ctx.rulesVersion || BASE_RULES_VERSION });
+  if (inherited.applied) return { suggestions: 0, auto_matched: true, status: 'auto_matched', inherited: true };
+
   const built = buildSuggestions(ad, ctx);
   const { suggestions } = built;
   await client.query('DELETE FROM meta_ad_suggestions WHERE meta_ad_id = $1', [ad.meta_ad_id]);
@@ -965,7 +973,7 @@ async function backlogDbStatus(db = pool, version) {
     db.query(
       `SELECT m.match_status, ${HUMAN_OWNED_SQL} AS human_owned, count(*)::int AS n
          FROM meta_ads m LEFT JOIN meta_ad_classifications c ON c.meta_ad_id = m.meta_ad_id
-        WHERE m.match_status <> 'confirmed' AND COALESCE(m.match_rules_version, 0) < $1
+        WHERE m.match_status <> 'confirmed' AND m.match_method IS DISTINCT FROM 'creative_inherited' AND COALESCE(m.match_rules_version, 0) < $1
         GROUP BY 1, 2`,
       [v]
     ),
@@ -1075,7 +1083,7 @@ async function runBacklog(job, lockClient, deps = {}) {
       const { rows } = await pool.query(
         `SELECT m.meta_ad_id, m.ad_name, ${HUMAN_OWNED_SQL} AS human_owned
            FROM meta_ads m LEFT JOIN meta_ad_classifications c ON c.meta_ad_id = m.meta_ad_id
-          WHERE m.match_status <> 'confirmed' AND COALESCE(m.match_rules_version, 0) < $1 AND m.meta_ad_id > $2
+          WHERE m.match_status <> 'confirmed' AND m.match_method IS DISTINCT FROM 'creative_inherited' AND COALESCE(m.match_rules_version, 0) < $1 AND m.meta_ad_id > $2
           ORDER BY m.meta_ad_id LIMIT $3`,
         [job.target_version, cursor, BACKLOG_BATCH]
       );
@@ -1227,10 +1235,14 @@ const AMBIGUOUS_PRODUCT_REASON = 'More than one plausible product family';
 const PREVIEW_CATEGORIES = ['auto_to_review', 'review_to_auto', 'auto_to_different_auto'];
 const DELTA_CATEGORIES = ['newly_auto', 'product_changed', 'lost_auto'];
 
+// Ads that took their classification from an exact same-creative human decision follow THAT
+// decision (metaCreativeIdentity.js), not the name-based rules, so a rules-version run or its dry
+// run must neither re-evaluate nor report them.
+const NOT_INHERITED = "m.match_method IS DISTINCT FROM 'creative_inherited'";
 function previewWhere(scope, version) {
-  if (scope === 'auto') return "m.match_status = 'auto_matched'";
-  if (scope === 'all') return "m.match_status <> 'confirmed'";
-  return `m.match_status <> 'confirmed' AND COALESCE(m.match_rules_version, 0) < ${Number(version)}`;
+  if (scope === 'auto') return `m.match_status = 'auto_matched' AND ${NOT_INHERITED}`;
+  if (scope === 'all') return `m.match_status <> 'confirmed' AND ${NOT_INHERITED}`;
+  return `m.match_status <> 'confirmed' AND ${NOT_INHERITED} AND COALESCE(m.match_rules_version, 0) < ${Number(version)}`;
 }
 
 function topEntries(map, n, mapper) {
@@ -1616,39 +1628,93 @@ function escapeLike(s) {
   return s.replace(/[\\%_]/g, (ch) => `\\${ch}`);
 }
 
-async function getQueue(query = {}) {
+// Needs-review work is counted in CREATIVES, not ad instances: ads that share one
+// meta_creative_id are one piece of creative (an ad without a creative id counts as
+// its own). `relevance` splits that work into what a person should look at now
+// (ACTIONABLE: current CORE product with sellable stock, or running / recent / unknown)
+// and HISTORICAL (see metaMatchingRelevance.js) -- nothing is hidden for good: the
+// Historical filter, `relevance=all` and the "all" filter still list everything.
+const NEEDS_FILTERS = new Set(['needs', 'unmatched', 'suggested', 'historical']);
+const UNIT = 'COALESCE(a.meta_creative_id, a.meta_ad_id)';
+
+// SQL for creatives whose HUMAN-confirmed ads disagree (see metaCreativeIdentity.evaluateGroup).
+const CONFLICT_SELECT = `
+    SELECT m.meta_creative_id,
+           count(DISTINCT (COALESCE(c.not_product_specific, false)::text || '|' ||
+                           COALESCE((SELECT string_agg(p.product_code, ',' ORDER BY p.product_code) FROM meta_ad_products p WHERE p.meta_ad_id = m.meta_ad_id), ''))) AS psigs,
+           count(DISTINCT NULLIF(lower(btrim(COALESCE(c.concept_label, ''))), '')) AS csigs
+      FROM meta_ads m JOIN meta_ad_classifications c ON c.meta_ad_id = m.meta_ad_id
+     WHERE m.meta_creative_id IS NOT NULL AND m.match_status = 'confirmed' AND NOT COALESCE(c.excluded_from_intelligence, false)
+     GROUP BY m.meta_creative_id`;
+const CONFLICT_CTE = `conf AS (SELECT meta_creative_id FROM (${CONFLICT_SELECT}) g WHERE g.psigs > 1 OR g.csigs > 1)`;
+
+let relevanceMemo = null;
+async function relevanceParams() {
+  // The ApparelMagic data behind this changes at most every few hours (cached upstream); a minute is plenty.
+  if (!relevanceMemo || Date.now() - relevanceMemo.at > 60 * 1000) relevanceMemo = { at: Date.now(), value: await relevanceLib.loadRelevantProducts() };
+  const rel = relevanceMemo.value;
+  const win = scopeWindow('30d');
+  return { rel, d7: addDays(win.until, -6), d30: win.since };
+}
+
+async function getQueue(query = {}, deps = {}) {
   const scope = Object.prototype.hasOwnProperty.call(SCOPES, query.scope) ? query.scope : '30d';
-  const filter = Object.prototype.hasOwnProperty.call(FILTERS, query.filter) ? query.filter : 'needs';
+  const filter = Object.prototype.hasOwnProperty.call(FILTERS, query.filter) || query.filter === 'historical' || query.filter === 'conflict' ? query.filter : 'needs';
   const q = String(query.q || '').trim().slice(0, 200);
   const pageSize = Math.min(100, Math.max(1, parseInt(query.page_size, 10) || 25));
   const page = Math.max(1, parseInt(query.page, 10) || 1);
   const win = scopeWindow(scope);
+  const showAllRelevance = query.relevance === 'all';
+  const perAd = query.group === 'ads';
 
   // Spend/activity is measured over the scope's window; for "all" it is the
   // last 30 days so the Recent spend column still means something. A windowed
   // scope only lists ads WITH activity in it (JOIN); "all" lists every stored ad.
   const actWin = win.since ? win : scopeWindow('30d');
-  const params = [actWin.since, actWin.until];
+  const rp = deps.relevance || await relevanceParams();
+  const params = [actWin.since, actWin.until, rp.rel.relevant_codes, !!rp.rel.known, rp.d7, rp.d30];
   const act = win.since ? 'JOIN act ON act.meta_ad_id = a.meta_ad_id' : 'LEFT JOIN act ON act.meta_ad_id = a.meta_ad_id';
-  const cte = `
-    WITH act AS (
-      SELECT d.meta_ad_id, SUM(d.spend) AS spend, SUM(d.purchases) AS purchases, MAX(d.insight_date) AS last_active
-        FROM meta_ad_insights_daily d
-       WHERE d.insight_date BETWEEN $1 AND $2
-       GROUP BY d.meta_ad_id
-      HAVING SUM(d.spend) > 0 OR SUM(d.impressions) > 0
-    )`;
+  // The activity / relevance / conflict sets are computed ONCE per request into temp tables (named act /
+  // rel / conf, which the queries below reference like tables) instead of once per query: at ~30k ads
+  // that is the difference between seconds and well under one.
+  const setup = [
+    ['CREATE TEMP TABLE act (meta_ad_id varchar(64) PRIMARY KEY, spend numeric, purchases numeric, last_active date) ON COMMIT DROP'],
+    [`INSERT INTO act SELECT d.meta_ad_id, SUM(d.spend), SUM(d.purchases), MAX(d.insight_date)
+         FROM meta_ad_insights_daily d
+        WHERE d.insight_date BETWEEN $1 AND $2
+        GROUP BY d.meta_ad_id
+       HAVING SUM(d.spend) > 0 OR SUM(d.impressions) > 0`, [params[0], params[1]]],
+    ['CREATE TEMP TABLE rel (meta_ad_id varchar(64) PRIMARY KEY, relevance text) ON COMMIT DROP'],
+    // Relevance is decided per CREATIVE: it is actionable if ANY ad that shares the creative is
+    // (so a creative is never split between the To do and Historical lists).
+    [`INSERT INTO rel SELECT meta_ad_id,
+              CASE WHEN bool_or(ad_relevance = 'actionable') OVER (PARTITION BY unit) THEN 'actionable' ELSE 'historical' END
+         FROM (
+           SELECT m.meta_ad_id, COALESCE(m.meta_creative_id, m.meta_ad_id) AS unit, ${relevanceLib.relevanceCase({ rel: '$1', known: '$2', d7: '$3::date', d30: '$4::date' })} AS ad_relevance
+             FROM meta_ads m ${relevanceLib.EVIDENCE_JOIN}
+            WHERE m.match_status IN ('unmatched', 'suggested')
+         ) per_ad`, [params[2], params[3], params[4], params[5]]],
+    ['CREATE TEMP TABLE conf (meta_creative_id varchar(64)) ON COMMIT DROP'],
+    [`INSERT INTO conf SELECT meta_creative_id FROM (${CONFLICT_SELECT}) g WHERE g.psigs > 1 OR g.csigs > 1`],
+    ['CREATE INDEX ON conf (meta_creative_id)'], ['ANALYZE act'], ['ANALYZE rel'], ['ANALYZE conf'],
+  ];
   const base = `
     FROM meta_ads a
     ${act}
-    LEFT JOIN meta_ad_classifications c ON c.meta_ad_id = a.meta_ad_id`;
+    LEFT JOIN meta_ad_classifications c ON c.meta_ad_id = a.meta_ad_id
+    LEFT JOIN rel ON rel.meta_ad_id = a.meta_ad_id`;
+  const isActionable = `COALESCE(rel.relevance, 'actionable') = 'actionable'`;
+  const inConflict = `(a.meta_creative_id IS NOT NULL AND a.meta_creative_id IN (SELECT meta_creative_id FROM conf))`;
 
-  // counts for the filter chips: scope only (not filter/search)
-  const countsRes = await pool.query(
-    `${cte}
-     SELECT count(*) FILTER (WHERE ${FILTERS.needs})::int AS needs,
-            count(*) FILTER (WHERE ${FILTERS.unmatched})::int AS unmatched,
-            count(*) FILTER (WHERE ${FILTERS.suggested})::int AS suggested,
+  // counts for the filter chips: scope only (not filter/search). The three "needs" counts are CREATIVES.
+  const countsSql = `
+     SELECT count(DISTINCT ${UNIT}) FILTER (WHERE ${FILTERS.needs} AND ${isActionable})::int AS needs,
+            count(DISTINCT ${UNIT}) FILTER (WHERE ${FILTERS.unmatched} AND ${isActionable})::int AS unmatched,
+            count(DISTINCT ${UNIT}) FILTER (WHERE ${FILTERS.suggested} AND ${isActionable})::int AS suggested,
+            count(*) FILTER (WHERE ${FILTERS.needs} AND ${isActionable})::int AS needs_ads,
+            count(DISTINCT ${UNIT}) FILTER (WHERE ${FILTERS.needs} AND NOT ${isActionable})::int AS historical,
+            count(*) FILTER (WHERE ${FILTERS.needs} AND NOT ${isActionable})::int AS historical_ads,
+            count(DISTINCT a.meta_creative_id) FILTER (WHERE ${inConflict})::int AS conflicts,
             count(*) FILTER (WHERE ${FILTERS.auto})::int AS auto,
             count(*) FILTER (WHERE ${FILTERS.matched})::int AS matched,
             count(*) FILTER (WHERE ${FILTERS.confirmed})::int AS confirmed,
@@ -1656,13 +1722,14 @@ async function getQueue(query = {}) {
             count(*) FILTER (WHERE ${FILTERS.excluded})::int AS excluded,
             count(*)::int AS all_ads,
             count(*) FILTER (WHERE a.match_status <> 'confirmed' AND NOT COALESCE(c.excluded_from_intelligence, false) AND a.match_suggestions_at IS NULL)::int AS pending_suggestions
-       ${base}`,
-    params
-  );
+       ${base}`;
 
   const where = [];
-  if (FILTERS[filter]) where.push(FILTERS[filter]);
-  const filterParams = [...params];
+  if (filter === 'historical') where.push(FILTERS.needs, `NOT ${isActionable}`);
+  else if (filter === 'conflict') where.push(inConflict);
+  else if (FILTERS[filter]) where.push(FILTERS[filter]);
+  if (['needs', 'unmatched', 'suggested'].includes(filter) && !showAllRelevance) where.push(isActionable);
+  const filterParams = []; // the activity/relevance/conflict sets are already in temp tables
   if (q) {
     filterParams.push(`%${escapeLike(q)}%`);
     const like = `$${filterParams.length}`;
@@ -1674,12 +1741,19 @@ async function getQueue(query = {}) {
       OR c.concept_label ILIKE ${like} ESCAPE '\\' OR c.creator_name ILIKE ${like} ESCAPE '\\')`);
   }
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  const total = (await pool.query(`${cte} SELECT count(*)::int AS n ${base} ${whereSql}`, filterParams)).rows[0].n;
-
+  // One row per creative for the needs-review views: the busiest ad of each creative
+  // represents it, with the number of ads that share it.
+  const collapse = NEEDS_FILTERS.has(filter) && !perAd;
+  const matched = `WITH matched AS (
+      SELECT a.meta_ad_id,
+             ${collapse ? `row_number() OVER (PARTITION BY ${UNIT} ORDER BY COALESCE(act.spend, 0) DESC, act.last_active DESC NULLS LAST, a.created_time DESC NULLS LAST, a.meta_ad_id ASC)` : '1'} AS rn,
+             ${collapse ? `count(*) OVER (PARTITION BY ${UNIT})` : '1'} AS gsize
+        ${base} ${whereSql})`;
   const listParams = [...filterParams, pageSize, (page - 1) * pageSize];
-  const { rows } = await pool.query(
-    `${cte}
-     SELECT a.meta_ad_id, a.ad_name, a.effective_status, a.created_time, a.match_status, a.matched_ad_setup_id, a.match_confidence,
+  const listSql = `${matched}
+     SELECT a.meta_ad_id, a.ad_name, a.effective_status, a.created_time, a.match_status, a.match_method, a.matched_ad_setup_id, a.match_confidence, a.meta_creative_id,
+            matched.gsize AS same_creative_ads, rel.relevance, ${inConflict} AS creative_conflict,
+            c.auto_fields -> 'inherited' ->> 'from_meta_ad_id' AS inherited_from,
             COALESCE(act.spend, 0) AS spend, act.last_active,
             c.skipped_at, COALESCE(c.excluded_from_intelligence, false) AS excluded,
             COALESCE(c.not_product_specific, false) AS not_product_specific,
@@ -1691,27 +1765,49 @@ async function getQueue(query = {}) {
             (SELECT s.value_label FROM meta_ad_suggestions s WHERE s.meta_ad_id = a.meta_ad_id AND s.field = 'media_type' ORDER BY s.confidence DESC LIMIT 1) AS suggested_media,
             (SELECT max(s.confidence) FROM meta_ad_suggestions s WHERE s.meta_ad_id = a.meta_ad_id) AS top_confidence
        ${base}
-       ${whereSql}
+       JOIN matched ON matched.meta_ad_id = a.meta_ad_id AND matched.rn = 1
       ORDER BY (c.skipped_at IS NOT NULL) ASC,
                COALESCE(act.spend, 0) DESC,
                act.last_active DESC NULLS LAST,
                CASE a.match_status WHEN 'unmatched' THEN 0 WHEN 'suggested' THEN 1 WHEN 'auto_matched' THEN 2 ELSE 3 END ASC,
                a.created_time DESC NULLS LAST,
                a.meta_ad_id ASC
-      LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`,
-    listParams
-  );
+      LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`;
+
+  let countsRes; let total; let rows;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (const [stmt, p] of setup) await client.query(stmt, p);
+    countsRes = await client.query(countsSql);
+    total = (await client.query(`${matched} SELECT count(*)::int AS n FROM matched WHERE rn = 1`, filterParams)).rows[0].n;
+    rows = (await client.query(listSql, listParams)).rows;
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
   return {
     scope, filter, q, page, page_size: pageSize, total, total_pages: Math.max(1, Math.ceil(total / pageSize)),
     window: { since: actWin.since, until: actWin.until },
     counts: countsRes.rows[0],
+    grouped_by_creative: collapse,
+    relevance: { known: !!rp.rel.known, reason: rp.rel.reason, core_families: rp.rel.core_families, relevant_families: rp.rel.relevant_families },
     ads: rows.map((r) => ({
       meta_ad_id: r.meta_ad_id,
       ad_name: r.ad_name,
       effective_status: r.effective_status,
       created_time: r.created_time ? r.created_time.toISOString() : null,
       match_status: r.match_status,
+      match_method: r.match_method,
       matched_ad_setup_id: r.matched_ad_setup_id,
+      meta_creative_id: r.meta_creative_id,
+      same_creative_ads: Number(r.same_creative_ads) || 1,
+      relevance: r.relevance || null,
+      creative_conflict: !!r.creative_conflict,
+      inherited_from: r.inherited_from || null,
       recent_spend: Number(r.spend),
       last_active: r.last_active ? new Date(r.last_active).toISOString().slice(0, 10) : null,
       skipped: !!r.skipped_at,
@@ -1734,6 +1830,107 @@ async function getQueue(query = {}) {
   };
 }
 
+
+// ── Review workload (read-only) ─────────────────────────────────────────
+// The honest size of the human matching job: ad instances still needing a person ->
+// unique creatives -> minus creatives already covered by a human decision on the same
+// creative -> split into actionable (current CORE product with sellable stock, running /
+// recent / unknown) and historical. Pure SELECTs; no Meta / ApparelMagic write.
+async function getWorkload(deps = {}) {
+  const rp = deps.relevance || await relevanceParams();
+  const params = [rp.rel.relevant_codes, !!rp.rel.known, rp.d7, rp.d30];
+  const relP = { rel: '$1', known: '$2', d7: '$3::date', d30: '$4::date' };
+  const sql = `
+    WITH ${CONFLICT_CTE},
+    needs AS (
+      SELECT m.meta_ad_id, m.meta_creative_id, m.ad_name, COALESCE(m.meta_creative_id, m.meta_ad_id) AS unit,
+             ${relevanceLib.relevanceCase(relP)} AS relevance, ${relevanceLib.relevanceReasonCase(relP)} AS reason
+        FROM meta_ads m LEFT JOIN meta_ad_classifications c ON c.meta_ad_id = m.meta_ad_id ${relevanceLib.EVIDENCE_JOIN}
+       WHERE m.match_status IN ('unmatched', 'suggested') AND NOT COALESCE(c.excluded_from_intelligence, false)
+    ),
+    human_ok AS (
+      SELECT DISTINCT m.meta_creative_id FROM meta_ads m JOIN meta_ad_classifications c ON c.meta_ad_id = m.meta_ad_id
+       WHERE m.meta_creative_id IS NOT NULL AND m.match_status = 'confirmed' AND NOT COALESCE(c.excluded_from_intelligence, false)
+         AND m.meta_creative_id NOT IN (SELECT meta_creative_id FROM conf)
+    ),
+    units AS (
+      SELECT unit, count(*)::int AS instances,
+             bool_or(relevance = 'actionable') AS actionable,
+             bool_or(reason = 'core_in_stock_product') AS core_evidence,
+             bool_or(meta_creative_id IS NOT NULL AND meta_creative_id IN (SELECT meta_creative_id FROM human_ok)) AS covered,
+             bool_or(meta_creative_id IS NOT NULL AND meta_creative_id IN (SELECT meta_creative_id FROM conf)) AS conflict
+        FROM needs GROUP BY unit
+    )
+    SELECT
+      (SELECT count(*)::int FROM needs) AS instances,
+      (SELECT count(*)::int FROM needs WHERE meta_creative_id IS NULL) AS instances_without_creative_id,
+      (SELECT count(*)::int FROM units) AS unique_creatives,
+      (SELECT count(*)::int FROM units WHERE instances > 1) AS creatives_used_in_several_ads,
+      (SELECT COALESCE(max(instances), 0)::int FROM units) AS largest_creative_group,
+      (SELECT count(*)::int FROM units WHERE covered) AS covered_creatives,
+      (SELECT COALESCE(sum(instances), 0)::int FROM units WHERE covered) AS covered_instances,
+      (SELECT count(*)::int FROM units WHERE conflict) AS conflict_creatives,
+      (SELECT COALESCE(sum(instances), 0)::int FROM units WHERE conflict) AS conflict_instances,
+      (SELECT count(*)::int FROM units WHERE core_evidence) AS creatives_with_core_in_stock_evidence,
+      (SELECT count(*)::int FROM units WHERE NOT covered AND actionable) AS review_creatives_actionable,
+      (SELECT COALESCE(sum(instances), 0)::int FROM units WHERE NOT covered AND actionable) AS review_instances_actionable,
+      (SELECT count(*)::int FROM units WHERE NOT covered AND NOT actionable) AS review_creatives_historical,
+      (SELECT COALESCE(sum(instances), 0)::int FROM units WHERE NOT covered AND NOT actionable) AS review_instances_historical,
+      (SELECT count(*)::int FROM (SELECT ad_name FROM needs WHERE ad_name IS NOT NULL GROUP BY ad_name HAVING count(DISTINCT unit) > 1) x) AS identical_names_with_different_creatives,
+      (SELECT COALESCE(json_object_agg(reason, n), '{}'::json) FROM (
+          SELECT n.reason, count(*)::int AS n FROM needs n JOIN units u ON u.unit = n.unit WHERE NOT u.covered GROUP BY n.reason) r) AS reasons_for_ads_to_review,
+      (SELECT COALESCE(json_agg(json_build_object('size', instances, 'creatives', cnt) ORDER BY instances DESC), '[]'::json)
+         FROM (SELECT instances, count(*)::int AS cnt FROM units WHERE instances > 1 GROUP BY instances ORDER BY instances DESC LIMIT 10) g) AS group_size_distribution`;
+  const r = (await pool.query(sql, params)).rows[0];
+  const [ads, ids, cached] = await Promise.all([
+    pool.query('SELECT count(*)::int AS n FROM meta_ads'),
+    pool.query('SELECT count(*)::int AS with_id, count(DISTINCT meta_creative_id)::int AS distinct_ids FROM meta_ads WHERE meta_creative_id IS NOT NULL'),
+    pool.query('SELECT count(*)::int AS n FROM meta_ad_creatives'),
+  ]);
+  return {
+    definition: 'Ads still needing a person = unmatched or suggested, not excluded (all time, any activity).',
+    funnel: {
+      remaining_ad_instances: r.instances,
+      unique_creatives: r.unique_creatives,
+      duplicate_ad_instances: r.instances - r.unique_creatives,
+      creatives_already_covered_by_a_human_decision: r.covered_creatives,
+      ad_instances_that_would_inherit: r.covered_instances,
+      creatives_in_conflict: r.conflict_creatives,
+      creatives_still_needing_a_person: r.review_creatives_actionable + r.review_creatives_historical,
+      actionable_creatives: r.review_creatives_actionable,
+      actionable_ad_instances: r.review_instances_actionable,
+      historical_creatives: r.review_creatives_historical,
+      historical_ad_instances: r.review_instances_historical,
+    },
+    creative_identity: {
+      identifier: 'meta_creative_id (exact)',
+      ads_in_database: ads.rows[0].n,
+      ads_with_creative_id: ids.rows[0].with_id,
+      distinct_creative_ids: ids.rows[0].distinct_ids,
+      remaining_instances_without_creative_id: r.instances_without_creative_id,
+      creatives_used_in_several_remaining_ads: r.creatives_used_in_several_ads,
+      largest_group: r.largest_creative_group,
+      group_size_distribution: r.group_size_distribution,
+      identical_ad_names_under_different_creative_ids: r.identical_names_with_different_creatives,
+      cached_creative_previews: cached.rows[0].n,
+    },
+    relevance: {
+      data_available: !!rp.rel.known, reason: rp.rel.reason,
+      core_families: rp.rel.core_families, relevant_families: rp.rel.relevant_families,
+      zero_stock_families: rp.rel.zero_stock_families, stock_unknown_families: rp.rel.stock_unknown_families,
+      creatives_with_core_in_stock_evidence: r.creatives_with_core_in_stock_evidence,
+      reasons_for_ads_to_review: r.reasons_for_ads_to_review,
+    },
+  };
+}
+
+// Explicit admin action: apply every creative's human decision to its not-yet-classified
+// duplicates. Idempotent, local only, batched (pass back next_after to continue).
+async function applyCreativeInheritance({ limit, after } = {}) {
+  const info = await rulesInfo();
+  return creativeIdentity.applyAllGroups({ humanOwnedSql: HUMAN_OWNED_SQL, rulesVersion: info.version }, { limit, after });
+}
+
 // ── Workspace ───────────────────────────────────────────────────────────
 function describeAdSetup(s) {
   if (!s) return null;
@@ -1747,6 +1944,23 @@ function describeAdSetup(s) {
     concept_label: s.concept_label,
     creative_asset_id: s.creative_asset_id,
     final_edit_id: s.final_edit_id,
+  };
+}
+
+
+// What the workspace shows about the ad's creative identity: how many other ads are
+// the exact same creative, the group's human state, and where an inherited
+// classification came from.
+async function creativeBlock(ad) {
+  if (!ad.meta_creative_id) return { meta_creative_id: null, other_ads: 0, state: 'none', inherited_from: null };
+  const [others, group] = await Promise.all([
+    pool.query('SELECT count(*)::int AS n FROM meta_ads WHERE meta_creative_id = $1 AND meta_ad_id <> $2', [ad.meta_creative_id, ad.meta_ad_id]),
+    creativeIdentity.resolveGroup(pool, ad.meta_creative_id),
+  ]);
+  const inherited = ad.match_method === creativeIdentity.METHOD && ad.auto_fields && ad.auto_fields.inherited ? ad.auto_fields.inherited.from_meta_ad_id : null;
+  return {
+    meta_creative_id: ad.meta_creative_id, other_ads: others.rows[0].n, state: group.state,
+    human_ads: group.human_ads || 0, conflict_on: group.conflict_on || null, inherited_from: inherited,
   };
 }
 
@@ -1829,6 +2043,7 @@ async function getAdWorkspace(metaAdId, { refresh = true } = {}) {
       first_active: life.rows[0].first_date,
       last_active: life.rows[0].last_date,
     },
+    creative: await creativeBlock(ad),
     parsed,
     classification: {
       confirmed,
@@ -1854,6 +2069,22 @@ async function getAdWorkspace(metaAdId, { refresh = true } = {}) {
 }
 
 // ── Human actions ───────────────────────────────────────────────────────
+
+// Brings every sibling of this ad's creative into line with the creative group's current
+// human state (inherit / revert). Best effort and local-only: it must never fail the
+// human action that triggered it.
+async function syncCreativeFor(metaAdId) {
+  try {
+    const own = await pool.query('SELECT meta_creative_id FROM meta_ads WHERE meta_ad_id = $1', [metaAdId]);
+    const creativeId = own.rows[0] && own.rows[0].meta_creative_id;
+    if (!creativeId) return null;
+    const info = await rulesInfo();
+    return await creativeIdentity.syncCreativeGroup(creativeId, { humanOwnedSql: HUMAN_OWNED_SQL, rulesVersion: info.version });
+  } catch (err) {
+    return null;
+  }
+}
+
 function trimText(v, max = 255) {
   const s = String(v == null ? '' : v).trim();
   return s ? s.slice(0, max) : null;
@@ -1942,12 +2173,16 @@ async function confirmMapping(metaAdId, body, userId) {
   } finally {
     client.release();
   }
+  // Every other ad that is the exact same creative takes this decision (never over a person's own
+  // decision; a disagreement between people on one creative is flagged, not resolved).
+  const creativeSync = await syncCreativeFor(metaAdId);
   let similarApplied = 0;
   if (!notProductSpecific && productCodes.length === 1) {
     try { similarApplied = await reapplyTrustedPair(metaAdId); } catch (err) { /* best effort */ }
   }
   const workspace = await getAdWorkspace(metaAdId, { refresh: false });
   workspace.auto_applied_to_similar = similarApplied;
+  workspace.applied_to_same_creative = creativeSync ? creativeSync.applied : 0;
   return workspace;
 }
 
@@ -2017,6 +2252,7 @@ async function setExcluded(metaAdId, excluded, reason, userId) {
        updated_at = now()`,
     [metaAdId, !!excluded, excluded ? trimText(reason) : null, userId || null]
   );
+  await syncCreativeFor(metaAdId); // an excluded ad is no longer a source for its creative
   return getAdWorkspace(metaAdId, { refresh: false });
 }
 
@@ -2052,6 +2288,7 @@ async function clearMapping(metaAdId) {
   } finally {
     client.release();
   }
+  await syncCreativeFor(metaAdId); // the cleared ad stops being a source; siblings that inherited from it are released
   return getAdWorkspace(metaAdId, { refresh: true });
 }
 
@@ -2186,6 +2423,8 @@ module.exports = {
   HUMAN_OWNED_SQL,
   AUTO_RULES_VERSION,
   getQueue,
+  getWorkload,
+  applyCreativeInheritance,
   getAdWorkspace,
   confirmMapping,
   skipAd,

@@ -260,11 +260,17 @@ function showApp() {
   applySidebarGroupDefaults();
   applySidebarModuleAccess();
   loadAll();
-  // Opens straight into the right sidebar tab for a deep link present at
-  // load time (e.g. #drops/5, or a pre-restructure #planning/drop/5) --
-  // doesn't need to wait on loadAll(), switchTab itself has no data
-  // dependency.
-  handleHashRoute();
+  // Dashboard is ALWAYS the landing screen -- a fresh visit and a full browser
+  // refresh alike. Previously the URL hash (#promotions/..., #drops/...) that
+  // switchTab/the promotion views write survived a refresh, and this startup
+  // route handler then re-opened that section, so refreshing "remembered"
+  // Promotions. The leftover hash is cleared (without adding a history entry)
+  // and nothing about the last section is restored. In-app navigation is
+  // unaffected: sidebar clicks and hashchange routing still work as before.
+  if (window.location.hash) {
+    try { window.history.replaceState(null, '', window.location.pathname + window.location.search); } catch (_) { /* non-fatal */ }
+  }
+  if (!(state.restrictedModules || []).includes('dashboard')) switchTab('dashboard');
 }
 
 async function checkSession() {
@@ -549,8 +555,8 @@ function mpRenderSummary(sum) {
     empty.style.display = '';
     empty.innerHTML = `<strong>No Meta data has been synced for this period yet</strong>
       ${escapeHtml(mpRange(sum.range, true))} isn't in WNDRR's stored Meta data, so there is nothing to report
-      (this isn't the same as zero spend). Recent days come in from Settings → Meta Sync; earlier periods need a
-      historical backfill, which is not run automatically.`;
+      (this isn't the same as zero spend). Recent days sync automatically every few hours (or run Settings → Meta Sync);
+      earlier periods need a historical backfill, which is never run automatically.`;
     return false;
   }
   empty.style.display = 'none';
@@ -956,8 +962,12 @@ const mmState = {
   view: 'performance', scope: '30d', filter: 'needs', q: '', page: 1, pageSize: 25,
   reqId: 0, autoSuggested: false, options: null,
 };
+// To do / Needs review / Unmatched / Historical are counted in unique CREATIVES (ads that share a
+// meta_creative_id are one); Historical = needs-review work that is not about a current CORE product
+// with sellable stock (still stored and searchable, just not in the way).
 const MM_FILTERS = [
   ['needs', 'To do'], ['suggested', 'Needs review'], ['unmatched', 'Unmatched'], ['matched', 'Matched'],
+  ['historical', 'Historical'], ['conflict', 'Creative conflicts'],
   ['not_product_specific', 'Not product-specific'], ['excluded', 'Excluded'],
 ];
 
@@ -988,6 +998,7 @@ function mmStateChip(a) {
   const skipped = a.skipped ? ' <span class="mm-skipped">skipped</span>' : '';
   if (a.excluded) return '<span class="mm-state excluded">Not relevant</span>';
   if (a.match_status === 'confirmed') return a.not_product_specific ? '<span class="mm-state confirmed">Not product-specific</span>' : '<span class="mm-state confirmed">Confirmed</span>';
+  if (a.match_status === 'auto_matched' && a.match_method === 'creative_inherited') return '<span class="mm-state auto" title="Same creative as an ad a person already classified">Same creative</span>';
   if (a.match_status === 'auto_matched') return '<span class="mm-state auto">Auto-matched</span>';
   if (a.match_status === 'suggested') return `<span class="mm-state suggested">Needs review</span>${skipped}`;
   return `<span class="mm-state unmatched">Unmatched</span>${skipped}`;
@@ -1004,6 +1015,13 @@ function mmRenderChips(counts) {
 
 function mmRenderRows(res) {
   mmRenderChips(res.counts);
+  const note = document.getElementById('mm-relevance-note');
+  const noteParts = [];
+  if (res.filter === 'historical') noteParts.push('Historical: ads that point at products which are not current CORE apparel with sellable stock, and that are not running or recently active. They are kept and searchable, just out of the way of the main queue.');
+  else if (res.filter === 'conflict') noteParts.push('Creatives where people classified different ads of the same creative differently. Nothing is inherited for these until someone settles it.');
+  if (res.relevance && !res.relevance.known) noteParts.push(`Product relevance isn't available yet (${res.relevance.reason || 'ApparelMagic data not loaded'}), so every ad is shown as actionable.`);
+  note.style.display = noteParts.length ? '' : 'none';
+  note.textContent = noteParts.join(' ');
   document.getElementById('mm-body').innerHTML = res.ads.length ? res.ads.map((a) => {
     const prod = mmHasValues(a)
       ? (a.not_product_specific ? '<em class="mm-muted">Not product-specific</em>' : escapeHtml(a.confirmed_products || '—'))
@@ -1016,7 +1034,7 @@ function mmRenderRows(res) {
       : (a.suggested_media ? `<span class="mm-guess" title="Suggestion — not confirmed">${escapeHtml(a.suggested_media)}</span>` : '<span class="mp-na">—</span>');
     const conf = a.match_status === 'confirmed' ? '<span class="mm-tick">✓</span>' : mmConfDot(a.confidence_label, a.match_status);
     return `<tr data-ad-id="${escapeHtml(a.meta_ad_id)}">
-      <td class="mp-name" title="${escapeHtml(a.ad_name || a.meta_ad_id)}">${escapeHtml(a.ad_name || '(unnamed ad)')}</td>
+      <td class="mp-name" title="${escapeHtml(a.ad_name || a.meta_ad_id)}">${escapeHtml(a.ad_name || '(unnamed ad)')}${a.same_creative_ads > 1 ? ` <span class="mm-sibs" title="${a.same_creative_ads - 1} other ad${a.same_creative_ads === 2 ? '' : 's'} use this exact creative; classifying it covers them all">+${a.same_creative_ads - 1} same creative</span>` : ''}${a.creative_conflict ? ' <span class="mm-conflict" title="People classified ads of this creative differently">conflict</span>' : ''}</td>
       <td>${mpStatusChip(a.effective_status)}</td>
       <td class="num">${mpFmt(a.recent_spend, 'money')}</td>
       <td>${mmStateChip(a)}</td>
@@ -1039,6 +1057,42 @@ function mmRenderRows(res) {
   }
 }
 
+// Review workload in unique creatives (read-only), with the explicit "apply to duplicates" action.
+async function mmLoadWorkload() {
+  const host = document.getElementById('mm-workload');
+  try {
+    const w = await api('/meta-ad-matching/workload');
+    const f = w.funnel;
+    const n = (v) => Number(v || 0).toLocaleString('en-AU');
+    host.style.display = '';
+    host.innerHTML = `
+      <div class="mm-workload-head"><strong>Review workload</strong>
+        <span class="hint">Ads that share a creative are one piece of creative; you classify it once.</span></div>
+      <div class="mm-workload-line">
+        <span><b>${n(f.remaining_ad_instances)}</b> ads need work</span><span>&rarr;</span>
+        <span><b>${n(f.unique_creatives)}</b> unique creatives</span><span>&rarr;</span>
+        <span><b>${n(f.creatives_already_covered_by_a_human_decision)}</b> already covered by a decision on the same creative</span><span>&rarr;</span>
+        <span class="mm-workload-key"><b>${n(f.actionable_creatives)}</b> need a person now</span>
+        <span class="hint">(${n(f.historical_creatives)} historical${f.creatives_in_conflict ? `, ${n(f.creatives_in_conflict)} in conflict` : ''})</span>
+      </div>
+      ${f.ad_instances_that_would_inherit ? `<div class="mm-workload-actions"><button type="button" class="btn btn-ghost btn-sm" id="mm-apply-inheritance">Apply to ${n(f.ad_instances_that_would_inherit)} duplicate ad${f.ad_instances_that_would_inherit === 1 ? '' : 's'}</button>
+        <span class="hint">Gives each not-yet-classified copy of an already-classified creative that creative's classification. Local only; people's own decisions are never changed.</span></div>` : ''}`;
+    const btn = document.getElementById('mm-apply-inheritance');
+    if (btn) btn.onclick = async () => {
+      btn.disabled = true; btn.textContent = 'Applying…';
+      try {
+        let after = null; let applied = 0;
+        do {
+          const r = await api('/meta-ad-matching/creative-inheritance/apply', { method: 'POST', body: JSON.stringify({ after }) });
+          applied += r.applied; after = r.next_after;
+        } while (after);
+        toast(`${applied} duplicate ad${applied === 1 ? '' : 's'} now carry their creative's classification`);
+        loadMetaMatching();
+      } catch (e) { toast(e.message, true); btn.disabled = false; }
+    };
+  } catch (e) { host.style.display = 'none'; }
+}
+
 async function loadMetaMatching() {
   if (!state.currentUser || state.currentUser.role !== 'admin') return;
   const id = ++mmState.reqId;
@@ -1059,6 +1113,7 @@ async function loadMetaMatching() {
     mmRenderRows(res);
     mmLoadCatalogue();
     mmLoadBacklog();
+    mmLoadWorkload();
   } catch (e) {
     if (id !== mmState.reqId) return;
     document.getElementById('mm-body').innerHTML = `<tr><td colspan="10" class="mp-table-empty">${escapeHtml(e.message)}</td></tr>`;
@@ -1649,9 +1704,12 @@ function renderMatchWorkspace(ws, options) {
   const reasons = cls.review_reasons || [];
   let stateNote = '';
   if (cls.confirmed) stateNote = '<span class="mm-note ok">Confirmed by a person — edits replace the mapping when you save.</span>';
+  else if (cls.auto_matched && ws.creative && ws.creative.inherited_from) {
+    stateNote = `<span class="mm-note auto" title="Inherited from ad ${escapeHtml(ws.creative.inherited_from)} (same meta_creative_id)">Same creative as an ad a person already classified — carried over automatically. Edit only if something is wrong.</span>`;
+  }
   else if (cls.auto_matched) {
     const AF = { product: 'Product', concept: 'Concept', creator: 'Creator', media_type: 'Media' };
-    const BASIS = { confirmed_pair: 'confirmed before', meta_mapping: 'Meta mapping', catalogue_exact: 'exact', catalogue_similar: 'best match', existing_concept: 'exact', legacy_text: 'legacy text', roster: 'roster', media_token: 'name', ad_type: 'ad type' };
+    const BASIS = { creative_inherited: 'same creative', confirmed_pair: 'confirmed before', meta_mapping: 'Meta mapping', catalogue_exact: 'exact', catalogue_similar: 'best match', existing_concept: 'exact', legacy_text: 'legacy text', roster: 'roster', media_token: 'name', ad_type: 'ad type' };
     const af = cls.auto_fields || {};
     const known = Object.keys(AF).filter((k) => af[k]).map((k) => `${AF[k]} (${BASIS[af[k].basis] || af[k].basis})`);
     const blank = (cls.left_blank || []).map((t) => t.replace(/ \(.*$/, ''));
@@ -1659,6 +1717,10 @@ function renderMatchWorkspace(ws, options) {
   }
   else if (ad.match_status === 'suggested') stateNote = `<span class="mm-note review" title="${escapeHtml(reasons.join('; '))}">Needs review${reasons.length ? ` — ${escapeHtml(reasons[0])}${reasons.length > 1 ? ` (+${reasons.length - 1} more)` : ''}` : ''}</span>`;
   else stateNote = '<span class="mm-note">Unmatched — not enough evidence in the name.</span>';
+  const cr = ws.creative || {};
+  const creativeNote = cr.state === 'conflict'
+    ? `<div class="mm-muted-line mm-conflict-line">This creative is used in ${cr.other_ads + 1} ads and people classified some of them differently (${escapeHtml((cr.conflict_on || []).join(' / '))}). Nothing is inherited until that is settled.</div>`
+    : cr.other_ads > 0 ? `<div class="mm-muted-line">This exact creative is used in ${cr.other_ads} other ad${cr.other_ads === 1 ? '' : 's'}${cr.state === 'source' && !cls.confirmed ? ' — a person has already classified it.' : '. Confirming this one covers the others that nobody has classified.'}</div>` : '';
 
   body.innerHTML = `
     <div class="mm-grid">
@@ -1676,6 +1738,7 @@ function renderMatchWorkspace(ws, options) {
           <div><b>${mpFmt(m.add_to_cart, 'int')}</b><span>adds to cart</span></div>
         </div>
         <div class="mm-muted-line">Lifetime ${mpFmt(perf.lifetime_spend, 'money')}${perf.first_active ? ` · ${escapeHtml(mpDate(perf.first_active, true))} – ${escapeHtml(mpDate(perf.last_active, true))}` : ''}</div>
+        ${creativeNote}
         <div class="mm-label">Parsed from the name</div>
         <div class="mm-pcs">${chips.join('') || ''}</div>
         ${parsedNote ? `<div class="mm-muted-line">${parsedNote}</div>` : ''}
@@ -1895,6 +1958,9 @@ async function loadMetaSyncPanel() {
     document.getElementById('meta-sync-unmatched').textContent = Number((status.match_counts && status.match_counts.unmatched) || 0).toLocaleString();
     const inv = status.last_inventory_refresh || null;
     document.getElementById('meta-sync-inventory-last').textContent = inv && inv.finished_at ? fmtWhen(inv.finished_at) : 'Never';
+    const auto = status.auto_sync || null;
+    document.getElementById('meta-sync-auto').textContent = auto && auto.enabled
+      ? `On — last ${auto.window_days} days every ${auto.refresh_every_hours} h` : 'Off';
     if (!status.configured && !metaSyncRunning) {
       setMetaSyncMessage('Meta is not configured on this server (META_AD_ACCOUNT_ID / META_ACCESS_TOKEN missing).', 'err');
     } else if (status.rate_limit_cooldown_seconds > 0 && !metaSyncRunning && !document.getElementById('meta-sync-message').textContent) {
@@ -13086,7 +13152,6 @@ const BF_FORMAT_SHORT = {
   'BAU Video': 'BAU Video', 'Campaign Video': 'Campaign Video', 'Other Video (eg. Humour, TikTok)': 'Other / Humour / TikTok',
 };
 const bfFormatShortName = (name) => BF_FORMAT_SHORT[name] || name || '';
-const bfFormatChipsHtml = (formats, max) => (formats || []).slice(0, max || 99).map((f) => `<span class="bf-format-chip">${escapeHtml(bfFormatShortName(f.style_name))}</span>`).join('');
 // "19 / 35 planned" + "16 remaining" -- the stage TARGET (promotion_stages.required_count) is a
 // planning target, not a cap: going over reads as "+N extra", never an error.
 const bfRemainingText = (t) => (t.over_target > 0 ? `&#10003; Target reached &middot; +${t.over_target} extra` : t.still_to_plan > 0 ? `${t.still_to_plan} remaining` : '&#10003; Target planned');
@@ -13097,13 +13162,14 @@ function renderBfProgressSection() {
   const progress = state.blackFriday.progress;
   if (!progress) return;
   const grand = progress.grand_total;
+  // The four tiles ARE the stage navigation: the whole card is the click target
+  // and the selected one gets a restrained highlight.
   const stageTiles = progress.stage_totals.map((s) => `
-      <div class="bf-stage-total-tile" onclick="switchBfSubtab('stages');selectBfStage(${s.promotion_stage_id});">
-        <div class="bf-stage-total-name">${escapeHtml(bfStageShortName(s.stage_name))}</div>
-        <div class="bf-stage-total-nums">${s.planned} / ${s.required} <small>creatives planned</small></div>
+      <button type="button" class="bf-stage-total-tile ${state.blackFriday.activeStageId === s.promotion_stage_id ? 'selected' : ''}" aria-pressed="${state.blackFriday.activeStageId === s.promotion_stage_id}" data-stage-id="${s.promotion_stage_id}" onclick="switchBfSubtab('stages');selectBfStage(${s.promotion_stage_id});">
+        <span class="bf-stage-total-name">${escapeHtml(bfStageShortName(s.stage_name))}</span>
+        <span class="bf-stage-total-nums">${s.planned} / ${s.required} <small>planned</small></span>
         <span class="bf-stage-total-status ${s.over_target > 0 || (s.still_to_plan === 0) ? 'met' : ''}">${bfRemainingText(s)}</span>
-        ${(s.formats_to_consider || []).length ? `<div class="bf-stage-total-formats"><span class="bf-formats-label">Formats to consider</span><div class="bf-format-chips">${bfFormatChipsHtml(s.formats_to_consider, 5)}</div></div>` : ''}
-      </div>`).join('');
+      </button>`).join('');
 
   document.getElementById('bf-progress-section').innerHTML = `
     <div class="bf-progress-card">
@@ -13117,6 +13183,7 @@ function renderBfProgressSection() {
 
 function selectBfStage(stageId) {
   state.blackFriday.activeStageId = stageId;
+  renderBfProgressSection();
   renderBfStageWorkspace();
 }
 
@@ -13124,8 +13191,9 @@ function selectBfStage(stageId) {
 // space, not a report. It shows the stage target, how many creatives are
 // planned (only ones deliberately added to the CURRENT plan -- older planning
 // sheet records are kept but not counted), how many remain, the planned
-// creative cards and "+ Add Creative". Formats to consider are inspiration
-// chips only: no count, no quota, nothing generated from them.
+// creative cards and "+ Add Creative". The stage is chosen from the four
+// progress tiles above (there is no second selector). Formats are not part of
+// this planning workflow.
 const BF_PLAN_STATUS_CLASS = { planning: 'planning', in_concept_dev: 'in-cd', ready: 'ready', completed: 'completed' };
 
 function bfPlanCardsForStage(stageId) {
@@ -13145,11 +13213,6 @@ function bfPlanKind({ idea, ex }) {
 function bfPlanCardHtml(row) {
   const { idea, ex } = row;
   const kind = bfPlanKind(row);
-  const format = ex.creative_style_id ? bfFormatShortName((state.blackFriday.styles.find((x) => x.id === ex.creative_style_id) || {}).name || '') : '';
-  const evidence = kind === 'tested'
-    ? (state.blackFriday.inspiration.find((i) => i.id === ex.tested_inspiration_id) || (idea.inspiration || [])[0] || null)
-    : null;
-  const evidenceText = evidence ? [evidence.campaign_name, evidence.sale_stage_note, evidence.creator].filter(Boolean).join(' · ') : '';
   const actions = [];
   if (ex.shoot_plan_item_id && (ex.plan_status === 'in_concept_dev' || ex.plan_status === 'planning')) {
     actions.push(`<button type="button" class="btn btn-primary btn-sm" onclick="openBfPlanInConceptDev(${ex.shoot_plan_item_id})">Open in Concept Dev &rarr;</button>`);
@@ -13157,7 +13220,6 @@ function bfPlanCardHtml(row) {
   if (kind === 'tested' && !ex.effective_creative_asset_id) {
     actions.push(`<button type="button" class="btn btn-ghost btn-sm" onclick="sendBfTestedPlanToProduction(${idea.id}, ${ex.id})">Send to production</button>`);
   }
-  if (evidence && evidence.video_url) actions.push(`<a class="link-btn" href="${escapeHtml(evidence.video_url)}" target="_blank" rel="noopener">Previous ad</a>`);
   actions.push(`<button type="button" class="link-btn" onclick="removeBfPlanItem(${ex.id})" title="Removes this card from the promotion plan only. Any Concept Development item stays.">Remove from plan</button>`);
   return `
     <div class="bf-plan-card bf-plan-${BF_PLAN_STATUS_CLASS[ex.plan_status] || 'planning'}" data-exec-id="${ex.id}">
@@ -13168,10 +13230,8 @@ function bfPlanCardHtml(row) {
       <div class="bf-plan-card-title">${escapeHtml(idea.title)}</div>
       <div class="bf-plan-card-meta">
         ${ex.product_text ? `<span class="bf-plan-product">${escapeHtml(ex.product_text)}</span>` : ''}
-        ${format ? `<span class="bf-format-chip small">${escapeHtml(format)}</span>` : ''}
       </div>
       ${ex.execution_note ? `<div class="bf-plan-card-note">${escapeHtml(ex.execution_note)}</div>` : ''}
-      ${evidenceText ? `<div class="bf-plan-card-evidence">Based on: ${escapeHtml(evidenceText)}</div>` : ''}
       <div class="bf-plan-card-actions">${actions.join('')}</div>
     </div>`;
 }
@@ -13179,14 +13239,6 @@ function bfPlanCardHtml(row) {
 function renderBfStageWorkspace() {
   const progress = state.blackFriday.progress;
   if (!progress) return;
-  const stages = (state.currentPromotion && state.currentPromotion.stages) || [];
-  const stageIdsWithTotals = new Set(progress.stage_totals.map((s) => s.promotion_stage_id));
-  const orderedStages = stages.filter((s) => stageIdsWithTotals.has(s.id));
-
-  document.getElementById('bf-stage-tabs').innerHTML = orderedStages.map((s) => `
-    <button type="button" class="bf-stage-tab ${state.blackFriday.activeStageId === s.id ? 'active' : ''}" onclick="selectBfStage(${s.id})">${escapeHtml(bfStageShortName(s.name))}</button>
-  `).join('');
-
   const stageId = state.blackFriday.activeStageId;
   const stageTotal = progress.stage_totals.find((s) => s.promotion_stage_id === stageId);
   const body = document.getElementById('bf-stage-workspace-body');
@@ -13196,7 +13248,6 @@ function renderBfStageWorkspace() {
   }
 
   const cards = bfPlanCardsForStage(stageId);
-  const formats = stageTotal.formats_to_consider || [];
   const historical = [];
   for (const idea of state.blackFriday.ideas) {
     for (const ex of idea.executions || []) {
@@ -13216,7 +13267,6 @@ function renderBfStageWorkspace() {
       <span class="bf-stage-ws-line">${escapeHtml(bfStageShortName(stageTotal.stage_name))} &mdash; <strong>${stageTotal.planned} / ${stageTotal.required}</strong> planned &middot; ${bfRemainingText(stageTotal)}</span>
       <button type="button" class="btn btn-primary btn-sm" onclick="openBfAddCreativeForActiveStage()">+ Add Creative</button>
     </div>
-    ${formats.length ? `<div class="bf-formats-block"><span class="bf-formats-label">Formats to consider &mdash; inspiration only</span><div class="bf-format-chips">${bfFormatChipsHtml(formats)}</div></div>` : ''}
     <div class="bf-plan-grid">
       ${cards.length ? cards.map(bfPlanCardHtml).join('') : '<div class="hint bf-plan-empty">Nothing planned for this stage yet. Use "+ Add Creative" to plan the first one.</div>'}
     </div>
@@ -13268,8 +13318,6 @@ function openBfAddCreativeForActiveStage() {
   state.blackFriday.addCreativeContext = { stageId: state.blackFriday.activeStageId, testedId: null };
   ['bf-add-tested-search', 'bf-add-tested-product', 'bf-add-tested-note', 'bf-add-new-name', 'bf-add-new-idea', 'bf-add-new-product', 'bf-add-new-who', 'bf-add-new-note']
     .forEach((id) => { document.getElementById(id).value = ''; });
-  document.getElementById('bf-add-tested-format').innerHTML = bfStyleOptionsHtml('');
-  document.getElementById('bf-add-new-format').innerHTML = bfStyleOptionsHtml('');
   const stage = (state.currentPromotion.stages || []).find((s) => s.id === state.blackFriday.activeStageId);
   document.getElementById('bf-add-creative-title').textContent = `Add Creative — ${stage ? bfStageShortName(stage.name) : ''}`;
   showBfAddCreativePanel('chooser');
@@ -13291,74 +13339,39 @@ function chooseBfAddCreativeNew() {
   showBfAddCreativePanel('new');
 }
 
-function bfTestedSearchMatch(i, query) {
-  if (!query) return true;
-  const q = query.toLowerCase();
-  return [i.title, i.campaign_name, i.style_name, i.creator, i.sale_stage_note].some((f) => f && String(f).toLowerCase().includes(q));
+// A tested concept is the REUSABLE idea ("Notes App"), not any one previous ad.
+// The Inspiration Library holds one record per previous execution, so several
+// records can share a title; they collapse here into ONE option per unique
+// concept (case/whitespace-insensitive). Which historical execution it came
+// from is irrelevant to this flow, so none of that is shown.
+function bfTestedConcepts() {
+  const byKey = new Map();
+  for (const r of state.blackFriday.inspiration) {
+    const title = (r.title || '').trim().replace(/\s+/g, ' ');
+    if (!title) continue;
+    const key = title.toLowerCase();
+    const existing = byKey.get(key);
+    // Lowest id = the stable representative record kept as the link.
+    if (!existing || r.id < existing.ref_id) byKey.set(key, { key, title, ref_id: r.id });
+  }
+  return [...byKey.values()].sort((a, b) => a.title.localeCompare(b.title));
 }
 
 function renderBfTestedPicker() {
-  const query = (document.getElementById('bf-add-tested-search').value || '').trim();
-  const list = state.blackFriday.inspiration.filter((i) => bfTestedSearchMatch(i, query));
+  const query = (document.getElementById('bf-add-tested-search').value || '').trim().toLowerCase();
+  const list = bfTestedConcepts().filter((c) => !query || c.title.toLowerCase().includes(query));
   document.getElementById('bf-add-tested-list').innerHTML = list.length
-    ? `<div class="bf-recreate-list">${groupHistoricalForPicker(list).map(bfRecreateHistGroupHtml).join('')}</div>`
-    : `<div class="hint">${query ? 'No matches.' : 'No tested concepts in the Inspiration Library yet.'}</div>`;
+    ? `<div class="bf-tested-list">${list.map((c) => `<button type="button" class="bf-tested-option" data-concept-key="${escapeHtml(c.key)}" onclick="selectBfTestedConcept('${escapeHtml(c.key).replace(/'/g, '&#39;')}')">${escapeHtml(c.title)}</button>`).join('')}</div>`
+    : `<div class="hint">${query ? 'No matching tested concepts.' : 'No tested concepts yet.'}</div>`;
 }
 
-// Same exact-title grouping as the Inspiration Library -- presentation only;
-// every record stays its own underlying row.
-function groupHistoricalForPicker(records) {
-  const groups = new Map();
-  for (const r of records) {
-    const key = r.title.trim().toLowerCase();
-    if (!groups.has(key)) groups.set(key, { title: r.title, items: [] });
-    groups.get(key).items.push(r);
-  }
-  return [...groups.values()];
-}
-
-function bfRecreateHistGroupHtml(group) {
-  if (group.items.length === 1) return bfRecreateHistRowHtml(group.items[0], true);
-  return `
-    <div class="bf-hist-group">
-      <div class="bf-hist-group-title">${escapeHtml(group.title)} <span class="hint">(${group.items.length} examples)</span></div>
-      ${group.items.map((i) => bfRecreateHistRowHtml(i, false)).join('')}
-    </div>`;
-}
-
-function bfRecreateHistRowHtml(i, showTitle) {
-  const info = bfVideoPreviewInfo(i.video_url);
-  const safeUrl = i.video_url ? escapeHtml(i.video_url).replace(/'/g, '&#39;') : '';
-  const safeTitle = escapeHtml(i.title).replace(/'/g, '&#39;');
-  const visual = info && info.embeddable
-    ? `<div class="bf-recreate-row-visual">${info.thumbnailUrl ? `<img src="${escapeHtml(info.thumbnailUrl)}" alt="" onerror="this.remove()">` : ''}<button type="button" class="bf-recreate-row-play" onclick="event.stopPropagation();openBfVideoModal('${safeUrl}', '${safeTitle}')">&#9658;</button></div>`
-    : `<div class="bf-recreate-row-visual"><span style="font-size:16px;">${i.video_url ? '&#128279;' : '&mdash;'}</span></div>`;
-  const metaParts = [i.campaign_name, i.sale_stage_note, i.style_name].filter(Boolean).join(' &middot; ');
-  const meta = [metaParts, i.creator].filter(Boolean).join(' &middot; ');
-  return `
-    <div class="bf-recreate-row" data-inspiration-id="${i.id}">
-      ${visual}
-      <div class="bf-recreate-row-body">
-        ${showTitle ? `<div class="bf-recreate-row-title">${escapeHtml(i.title)}</div>` : ''}
-        <div class="bf-recreate-row-meta">${meta}</div>
-      </div>
-      <div class="bf-recreate-row-actions">
-        ${i.video_url ? `<a href="${escapeHtml(i.video_url)}" target="_blank" rel="noopener" class="link-btn" onclick="event.stopPropagation();">Open Original</a>` : ''}
-        <button type="button" class="btn btn-primary btn-sm" onclick="selectBfTestedConcept(${i.id})">Select</button>
-      </div>
-    </div>`;
-}
-
-function selectBfTestedConcept(inspirationId) {
-  const insp = state.blackFriday.inspiration.find((i) => i.id === inspirationId);
-  if (!insp) return;
-  state.blackFriday.addCreativeContext.testedId = inspirationId;
-  const meta = [insp.campaign_name, insp.sale_stage_note, insp.style_name, insp.creator].filter(Boolean).join(' · ');
-  document.getElementById('bf-add-tested-evidence').innerHTML = `
-    <div class="bf-recreate-row-title">${escapeHtml(insp.title)}</div>
-    ${meta ? `<div class="bf-recreate-row-meta">${escapeHtml(meta)}</div>` : ''}
-    ${insp.notes ? `<div class="bf-plan-card-note">${escapeHtml(insp.notes)}</div>` : ''}
-    ${insp.video_url ? `<a href="${escapeHtml(insp.video_url)}" target="_blank" rel="noopener" class="link-btn">Open previous ad</a>` : ''}`;
+function selectBfTestedConcept(key) {
+  const concept = bfTestedConcepts().find((c) => c.key === key);
+  if (!concept) return;
+  state.blackFriday.addCreativeContext.testedId = concept.ref_id;
+  document.getElementById('bf-add-tested-evidence').innerHTML = `<span class="bf-add-tested-label">Tested concept</span> <strong>${escapeHtml(concept.title)}</strong>`;
+  const stage = (state.currentPromotion.stages || []).find((x) => x.id === state.blackFriday.addCreativeContext.stageId);
+  document.getElementById('bf-add-tested-submit').textContent = `Add to ${stage ? bfStageShortName(stage.name) : 'stage'}`;
   showBfAddCreativePanel('tested-form');
 }
 
@@ -13370,16 +13383,12 @@ async function saveBfPlanItem(kind) {
   const body = { kind, stage_id: ctx.stageId };
   if (kind === 'tested') {
     if (!ctx.testedId) return toast('Choose a tested concept', true);
-    Object.assign(body, {
-      inspiration_id: ctx.testedId, product_text: val('bf-add-tested-product'), execution_note: val('bf-add-tested-note'),
-      creative_style_id: val('bf-add-tested-format') ? Number(val('bf-add-tested-format')) : null,
-    });
+    Object.assign(body, { inspiration_id: ctx.testedId, product_text: val('bf-add-tested-product'), execution_note: val('bf-add-tested-note') });
   } else {
     if (!val('bf-add-new-name')) return toast('Concept name is required', true);
     Object.assign(body, {
       concept_name: val('bf-add-new-name'), concept_script: val('bf-add-new-idea'), product_text: val('bf-add-new-product'),
       who: val('bf-add-new-who'), execution_note: val('bf-add-new-note'),
-      creative_style_id: val('bf-add-new-format') ? Number(val('bf-add-new-format')) : null,
     });
   }
   bfAddingPlanItem = true;

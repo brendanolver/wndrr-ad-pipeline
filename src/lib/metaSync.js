@@ -6,10 +6,11 @@
 // touches an existing WNDRR production table (creative_assets,
 // final_edits, ad_setups are never written to by this file).
 //
-// Nothing in this file runs automatically. server.js does not call
-// anything here on boot -- every sync (default-window, backfill or
-// inventory refresh) is triggered by an explicit, admin-only API call
-// (src/routes/metaSync.js).
+// Nothing in this file schedules itself. The ONLY automatic caller is
+// lib/metaAutoSync.js, which runs the routine performance sync (Job A) over a
+// short rolling recent window and nothing else; backfill, the full inventory
+// refresh and everything else are triggered by an explicit, admin-only API
+// call (src/routes/metaSync.js).
 //
 // TWO separate jobs, deliberately never combined:
 //   A. Routine performance sync (runSync / runDefaultSync / runBackfill):
@@ -360,6 +361,48 @@ async function fetchAndUpsertInsights(since, until, currency) {
   return { rowsSeen, inserted, updated, newIdentities: counters.newIdentities, needLookup: [...needLookup] };
 }
 
+
+// Only ONE performance/inventory run may be active at a time. The check and
+// the INSERT happen under a transaction-scoped Postgres advisory lock, so two
+// callers (a manual click and the automatic scheduler, or two server
+// instances) can never both pass the check and start overlapping runs. A
+// 'running' row older than STALE_RUN_MINUTES is treated as a crashed run and
+// does not block (it is left in the log as it is).
+const SYNC_LOCK_KEY = 7310001;
+const STALE_RUN_MINUTES = 30;
+
+async function startRunExclusive({ runType, since, until, userId }) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock($1)', [SYNC_LOCK_KEY]);
+    const active = await client.query(
+      `SELECT id FROM meta_sync_runs
+       WHERE status = 'running' AND started_at > now() - ($1 || ' minutes')::interval LIMIT 1`,
+      [String(STALE_RUN_MINUTES)]
+    );
+    if (active.rows.length) {
+      await client.query('ROLLBACK');
+      const err = new Error('Another Meta sync is already running. Wait for it to finish, then try again.');
+      err.code = 'SYNC_IN_PROGRESS';
+      err.safe = true;
+      throw err;
+    }
+    const inserted = await client.query(
+      `INSERT INTO meta_sync_runs (run_type, range_since, range_until, started_by_user_id)
+       VALUES ($1,$2,$3,$4) RETURNING id`,
+      [runType, since, until, userId]
+    );
+    await client.query('COMMIT');
+    return inserted.rows[0].id;
+  } catch (err) {
+    if (err.code !== 'SYNC_IN_PROGRESS') await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 // Job A: routine performance sync for [since, until], logged start-to-
 // finish in meta_sync_runs regardless of outcome.
 //   account settings (1 call) -> daily ad-level Insights (paged) -> for ads
@@ -373,12 +416,7 @@ async function runSync({ since, until, runType = 'default', userId = null }) {
     throw new Error('Meta Ads is not configured (META_AD_ACCOUNT_ID / META_ACCESS_TOKEN missing)');
   }
   assertNotRateLimited();
-  const runInsert = await pool.query(
-    `INSERT INTO meta_sync_runs (run_type, range_since, range_until, started_by_user_id)
-     VALUES ($1,$2,$3,$4) RETURNING id`,
-    [runType, since, until, userId]
-  );
-  const runId = runInsert.rows[0].id;
+  const runId = await startRunExclusive({ runType, since, until, userId });
 
   try {
     const accountInfo = await fetchAccountSettings();
@@ -438,12 +476,7 @@ async function refreshInventory({ userId = null } = {}) {
   }
   assertNotRateLimited();
   const today = ymdInZone(new Date(), REPORTING_TIMEZONE);
-  const runInsert = await pool.query(
-    `INSERT INTO meta_sync_runs (run_type, range_since, range_until, started_by_user_id)
-     VALUES ('inventory',$1,$1,$2) RETURNING id`,
-    [today, userId]
-  );
-  const runId = runInsert.rows[0].id;
+  const runId = await startRunExclusive({ runType: 'inventory', since: today, until: today, userId });
   try {
     const discovery = await discoverAds();
     await pool.query(
@@ -549,6 +582,7 @@ async function getSyncStatus() {
     total_meta_ads: Object.values(matchCounts).reduce((a, b) => a + b, 0),
     match_counts: matchCounts,
     daily_insights: dailyRangeResult.rows[0] || null,
+    auto_sync: require('./metaAutoSync').describe(),
   };
 }
 
@@ -687,6 +721,7 @@ async function adInventoryDiagnostics() {
 }
 
 module.exports = {
+  startRunExclusive,
   runSync,
   runDefaultSync,
   refreshInventory,

@@ -2937,3 +2937,9 @@ WHERE pci.id = pcie.promotion_creative_idea_id
   AND pci.source_label = 'Black Friday 2026 Planning Sheet'
   AND pcie.plan_added_at IS NULL
   AND pcie.is_historical = false;
+
+-- Ad Matching: exact creative-level identity lookups (propagating a human
+-- classification to every ad that is the same meta_creative_id, and counting the
+-- review workload in unique creatives). Index only; no data changes. (Insights
+-- lookups by ad + date are already served by UNIQUE (meta_ad_id, insight_date).)
+CREATE INDEX IF NOT EXISTS idx_meta_ads_meta_creative_id ON meta_ads(meta_creative_id) WHERE meta_creative_id IS NOT NULL;
