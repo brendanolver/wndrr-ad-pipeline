@@ -37,6 +37,14 @@ function adId(req) {
 //   &q=&page=&page_size=
 router.get('/queue', handle((req) => matching.getQueue(req.query)));
 
+// The honest size of the human job (read-only): ad instances -> unique creatives ->
+// already covered by a human decision -> actionable (CORE, in stock) vs historical.
+router.get('/workload', handle(() => matching.getWorkload()));
+// Explicit admin action: give every not-yet-classified duplicate of a human-classified creative
+// (same exact meta_creative_id) that creative's classification. Local only; idempotent; resumable
+// via ?after= (the returned next_after).
+router.post('/creative-inheritance/apply', handle((req) => matching.applyCreativeInheritance({ limit: req.body && req.body.limit, after: req.body && req.body.after })));
+
 // Selector vocabularies (products / concepts / creative styles / creators).
 router.get('/options', handle(() => matching.listOptions()));
 

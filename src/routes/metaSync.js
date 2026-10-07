@@ -22,6 +22,9 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 // carries a sanitised message; anything else is URL-stripped and capped so
 // an unexpected error can never put a credential-bearing URL on screen.
 function sendMetaError(res, err) {
+  if (err && err.code === 'SYNC_IN_PROGRESS') {
+    return res.status(409).json({ error: err.message, sync_in_progress: true });
+  }
   if (err && err.rateLimited) {
     return res.status(429).json({
       error: err.message,
@@ -52,8 +55,9 @@ router.get('/status', requireAdmin, async (req, res, next) => {
 // Insights for an explicit range, or the safe default (Sydney today back 2
 // days) when no range is given, plus a metadata lookup for ONLY those ads in
 // the Insights that have no meta_ads row yet. It never lists or upserts the
-// ad inventory -- see /refresh-inventory for that. Always admin-triggered --
-// nothing calls this on a schedule or at server startup.
+// ad inventory -- see /refresh-inventory for that. This is the MANUAL
+// fallback; the safe recent-window automatic sync lives in lib/metaAutoSync.js
+// and shares the same one-run-at-a-time guard.
 router.post('/run', requireAdmin, async (req, res, next) => {
   try {
     if (!metaAds.configured()) {

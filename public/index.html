@@ -235,7 +235,8 @@
           </select>
           <span class="mp-table-count" id="mp-table-count"></span>
         </div>
-        <table class="mp-table">
+        <div class="mp-table-wrap">
+        <table class="mp-table mp-perf">
           <thead>
             <tr>
               <th class="mp-th-name" data-sort="ad_name">Ad Name</th>
@@ -252,6 +253,7 @@
           </thead>
           <tbody id="mp-ads-body"></tbody>
         </table>
+        </div>
         <div class="mp-pager" id="mp-pager"></div>
         <div class="mp-footnote">Attribution: 7-day click + 1-day view (provisional). Reach &amp; Frequency are unique-people figures: they are loaded from Meta on request for the selected period and are never summed from daily rows. Not shown yet: Thumbstop &amp; Hold Rate (formulas not yet confirmed).</div>
       </div>
@@ -276,7 +278,10 @@
         <!-- V4 matching catalogue (ApparelMagic snapshot): manual load / preview / activate -->
         <div class="mm-catalogue" id="mm-catalogue" style="display:none;"></div>
         <div class="mm-backlog" id="mm-backlog" style="display:none;"></div>
+        <!-- Review workload in unique creatives (ads that share a meta_creative_id are one piece of creative) -->
+        <div class="mm-workload" id="mm-workload" style="display:none;"></div>
         <div class="mm-chips" id="mm-chips" role="group" aria-label="Mapping state"></div>
+        <div class="mm-relevance-note" id="mm-relevance-note" style="display:none;"></div>
         <table class="mp-table mm-table">
           <thead>
             <tr><th class="mp-th-name">Ad Name</th><th>Status</th><th class="num">Recent spend</th><th>Mapping</th><th>Product</th><th>Concept</th><th>Media</th><th>Confidence</th></tr>
@@ -624,7 +629,6 @@
             <div class="planning-section-header">
               <h2>Stage Workspace</h2>
             </div>
-            <div class="bf-stage-tabs" id="bf-stage-tabs"></div>
             <div id="bf-stage-workspace-body"></div>
           </div>
           <div id="bf-legacy-stages-panel">
@@ -1409,7 +1413,7 @@
       <div class="settings-panel" id="settings-panel-meta-sync">
         <div class="planning-section-header">
           <h2>Meta Sync</h2>
-          <span class="admin-note">Pulls the last 3 days (Sydney dates) of Meta ad performance into WNDRR (read-only -- nothing is changed in Meta). Safe to re-run: existing rows are updated, never duplicated. It doesn't rescan the full ad inventory, so it's light enough to run daily.</span>
+          <span class="admin-note">Recent Meta ad performance now syncs automatically (see Automatic sync below). This page is the manual fallback: it pulls the last 3 days (Sydney dates) of Meta ad performance into WNDRR (read-only -- nothing is changed in Meta). Safe to re-run: existing rows are updated, never duplicated. It doesn't rescan the full ad inventory, so it's light enough to run daily.</span>
         </div>
         <div class="meta-sync-card">
           <dl class="meta-sync-stats">
@@ -1419,6 +1423,7 @@
             <div><dt>Daily insight rows stored</dt><dd id="meta-sync-rows">&mdash;</dd></div>
             <div><dt>Unmatched ads</dt><dd id="meta-sync-unmatched">&mdash;</dd></div>
             <div><dt>Last inventory refresh</dt><dd id="meta-sync-inventory-last">&mdash;</dd></div>
+            <div><dt>Automatic sync</dt><dd id="meta-sync-auto">&mdash;</dd></div>
           </dl>
           <div class="meta-sync-actions">
             <button type="button" class="btn btn-primary" id="meta-sync-run-btn">Run 3-Day Sync</button>
@@ -3338,7 +3343,7 @@
         </div>
       </div>
       <div id="bf-add-creative-panel-tested-pick" style="display:none;">
-        <input type="text" id="bf-add-tested-search" class="bf-recreate-search" placeholder="Search tested concepts by title, campaign, format, creator..." oninput="renderBfTestedPicker()">
+        <input type="text" id="bf-add-tested-search" class="bf-recreate-search" placeholder="Search tested concepts" oninput="renderBfTestedPicker()">
         <div id="bf-add-tested-list"></div>
         <div class="modal-footer" style="padding:12px 0 0;">
           <button class="btn btn-ghost" onclick="showBfAddCreativePanel('chooser')">&larr; Back</button>
@@ -3346,18 +3351,15 @@
       </div>
       <div id="bf-add-creative-panel-tested-form" style="display:none;">
         <div id="bf-add-tested-evidence" class="bf-add-evidence"></div>
-        <label>Product / product group
+        <label>Product / product group <span class="hint">(optional)</span>
           <input type="text" id="bf-add-tested-product" placeholder="e.g. Rugs, Olive Linen Dress">
         </label>
         <label>Variation / angle / execution note
           <textarea id="bf-add-tested-note" rows="2" placeholder="What is different this time?"></textarea>
         </label>
-        <label>Format <span class="hint">(optional &mdash; inspiration only)</span>
-          <select id="bf-add-tested-format"></select>
-        </label>
         <div class="modal-footer" style="padding:12px 0 0;">
           <button class="btn btn-ghost" onclick="showBfAddCreativePanel('tested-pick')">&larr; Back</button>
-          <button class="btn btn-primary" onclick="saveBfPlanItem('tested')">Add to stage</button>
+          <button class="btn btn-primary" id="bf-add-tested-submit" onclick="saveBfPlanItem('tested')">Add to stage</button>
         </div>
       </div>
       <div id="bf-add-creative-panel-new" style="display:none;">
@@ -3377,9 +3379,6 @@
         </div>
         <label>Angle / execution note
           <textarea id="bf-add-new-note" rows="2"></textarea>
-        </label>
-        <label>Format <span class="hint">(optional &mdash; inspiration only)</span>
-          <select id="bf-add-new-format"></select>
         </label>
         <div class="modal-footer" style="padding:12px 0 0;">
           <button class="btn btn-ghost" onclick="showBfAddCreativePanel('chooser')">&larr; Back</button>

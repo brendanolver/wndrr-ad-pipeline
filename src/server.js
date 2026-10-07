@@ -1,6 +1,7 @@
 require('dotenv').config();
 const path = require('path');
 const express = require('express');
+const metaAutoSync = require('./lib/metaAutoSync');
 const cookieParser = require('cookie-parser');
 const { runMigrations } = require('./db');
 const { requireAuth } = require('./auth');
@@ -176,6 +177,9 @@ async function start() {
   warmMetaAdsCache(); // fire-and-forget -- same reasoning, for Meta's live ad list
   app.listen(PORT, () => {
     console.log(`WNDRR Ad Pipeline listening on port ${PORT}`);
+    // Automatic RECENT Meta performance sync (read-only, rolling window, never a
+    // backfill/matching job) -- see lib/metaAutoSync.js. META_AUTO_SYNC=off disables it.
+    metaAutoSync.startScheduler();
   });
 }
 
