@@ -13158,7 +13158,7 @@ function bfPlanCardHtml(row) {
     actions.push(`<button type="button" class="btn btn-ghost btn-sm" onclick="sendBfTestedPlanToProduction(${idea.id}, ${ex.id})">Send to production</button>`);
   }
   if (evidence && evidence.video_url) actions.push(`<a class="link-btn" href="${escapeHtml(evidence.video_url)}" target="_blank" rel="noopener">Previous ad</a>`);
-  actions.push(`<button type="button" class="link-btn" onclick="removeBfPlanItem(${ex.id})">Remove</button>`);
+  actions.push(`<button type="button" class="link-btn" onclick="removeBfPlanItem(${ex.id})" title="Removes this card from the promotion plan only. Any Concept Development item stays.">Remove from plan</button>`);
   return `
     <div class="bf-plan-card bf-plan-${BF_PLAN_STATUS_CLASS[ex.plan_status] || 'planning'}" data-exec-id="${ex.id}">
       <div class="bf-plan-card-top">
@@ -13230,10 +13230,10 @@ function openBfPlanInConceptDev(shootPlanItemId) {
 }
 
 async function removeBfPlanItem(execId) {
-  if (!confirm('Remove this creative from the plan? Any Concept Development record it created is kept.')) return;
+  if (!confirm('Remove this card from the Black Friday plan?\n\nThis only removes the card from the promotion plan. Any linked Concept Development item is NOT deleted and stays where it is.')) return;
   try {
     await api(`/promotion-creative/plan-items/${execId}`, { method: 'DELETE' });
-    toast('Removed from the plan');
+    toast('Removed from the plan — any Concept Development item was kept');
     await loadBfIdeas();
     await initBfProgressRefreshOnly();
   } catch (e) {

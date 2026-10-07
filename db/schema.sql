@@ -2888,25 +2888,7 @@ CREATE TABLE IF NOT EXISTS meta_ad_creatives (
 -- from those historical records, which are preserved untouched but no longer
 -- counted. Nothing is deleted; the old style matrix and execution rows stay.
 -- =====================================================================
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_name = 'promotion_creative_idea_executions' AND column_name = 'is_historical'
-  ) THEN
-    ALTER TABLE promotion_creative_idea_executions ADD COLUMN is_historical BOOLEAN NOT NULL DEFAULT false;
-    -- One-time: every execution that exists when this column is first added
-    -- predates the workspace -- for any promotion that has a creative-style
-    -- matrix (Black Friday 2026) it becomes a historical record. A promotion
-    -- with no matrix (Black Friday 2027) is left exactly as it was.
-    UPDATE promotion_creative_idea_executions pcie SET is_historical = true
-    WHERE EXISTS (
-      SELECT 1 FROM promotion_creative_ideas pci
-      JOIN promotion_creative_targets pct ON pct.promotion_id = pci.promotion_id
-      WHERE pci.id = pcie.promotion_creative_idea_id
-    );
-  END IF;
-END $$;
+ALTER TABLE promotion_creative_idea_executions ADD COLUMN IF NOT EXISTS is_historical BOOLEAN NOT NULL DEFAULT false;
 
 -- Set only by the stage workspace's "+ Add Creative". A row with
 -- plan_added_at IS NULL was never deliberately added to the current plan.
@@ -2920,12 +2902,21 @@ ALTER TABLE promotion_creative_idea_executions ADD COLUMN IF NOT EXISTS tested_i
 ALTER TABLE promotion_creative_idea_executions ADD COLUMN IF NOT EXISTS product_text VARCHAR(255);
 ALTER TABLE promotion_creative_idea_executions ADD COLUMN IF NOT EXISTS execution_note TEXT;
 
--- Re-asserted every boot: a planning-sheet seed row (idea has a source_key)
--- that was never deliberately added is historical even if the seed above
--- re-created it after someone removed it.
+-- The historical reset is deliberately narrow: only the Black Friday 2026
+-- planning-sheet IMPORT records. They are identified by their import
+-- provenance -- the idea's source_key ('bf2026-...'), its source_label and
+-- the Black Friday 2026 promotion -- never by "has a style matrix", so Black
+-- Friday 2027 and any future promotion are never touched. An idea added by
+-- hand in the app has no source_key and keeps counting, and a row someone
+-- deliberately added to the plan (plan_added_at set) is never flagged.
+-- Re-asserted every boot (idempotent) so the seed above re-creating a
+-- removed import row cannot make it count again.
 UPDATE promotion_creative_idea_executions pcie SET is_historical = true
 FROM promotion_creative_ideas pci
+JOIN promotions p ON p.id = pci.promotion_id
 WHERE pci.id = pcie.promotion_creative_idea_id
-  AND pci.source_key IS NOT NULL
+  AND p.name = 'Black Friday 2026'
+  AND pci.source_key LIKE 'bf2026-%'
+  AND pci.source_label = 'Black Friday 2026 Planning Sheet'
   AND pcie.plan_added_at IS NULL
   AND pcie.is_historical = false;

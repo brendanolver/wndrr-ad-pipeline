@@ -626,8 +626,8 @@ router.post('/:promotionId/plan-items', async (req, res, next) => {
 });
 
 // Removes ONE creative from the current plan (so its planned count drops).
-// Only deliberately-added plan items can be removed here -- a historical
-// record is never deleted through this route. The master idea goes with it
+// Any row that counts toward the plan can be removed; a historical record is
+// never deleted through this route. The master idea goes with it
 // only when this was its sole execution; a linked Concept Development
 // record (creative_assets/shoot_plan_items) is never touched.
 router.delete('/plan-items/:execId', async (req, res, next) => {
@@ -638,7 +638,7 @@ router.delete('/plan-items/:execId', async (req, res, next) => {
     );
     if (!execResult.rows.length) return res.status(404).json({ error: 'Plan item not found' });
     const exec = execResult.rows[0];
-    if (exec.is_historical || !exec.plan_added_at) return res.status(400).json({ error: 'Historical planning records cannot be removed from here' });
+    if (exec.is_historical) return res.status(400).json({ error: 'Historical planning records cannot be removed from here' });
     await pool.query('DELETE FROM promotion_creative_idea_executions WHERE id = $1', [exec.id]);
     await pool.query(
       `DELETE FROM promotion_creative_ideas pci WHERE pci.id = $1
