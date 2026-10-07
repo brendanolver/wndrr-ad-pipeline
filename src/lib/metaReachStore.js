@@ -13,7 +13,8 @@
 //                       COMPLETED pull for exactly that range (source 'meta_range')
 const { pool } = require('../db');
 
-const FRESH_MS_RECENT = 3 * 60 * 60 * 1000; // ranges that include yesterday/today still change
+const policy = require('./metaFreshnessPolicy');
+const FRESH_MS_RECENT = 6 * 60 * 60 * 1000; // (kept for importers) -- the live rule is metaFreshnessPolicy.reachTtlMs
 const FRESH_MS_PAST = 7 * 24 * 60 * 60 * 1000;
 const RUNNING_STALE_MS = 15 * 60 * 1000; // a 'running' row this old is a crashed pull, not a live one
 
@@ -26,7 +27,7 @@ const num = (v) => (v === null || v === undefined ? null : Number(v));
 
 // today: 'YYYY-MM-DD' in the reporting timezone (the caller knows it).
 function freshnessMs(range, today) {
-  return range.until >= addDaysYmd(today, -1) ? FRESH_MS_RECENT : FRESH_MS_PAST;
+  return policy.reachTtlMs(range, today);
 }
 
 // Status of the cache for one exact range. Never touches Meta.

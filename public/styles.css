@@ -2713,3 +2713,59 @@ main{flex:1;min-width:0;padding:20px 24px;}
 
 .mm-chip-unit{margin-left:4px;font-size:10px;font-weight:600;color:var(--text-muted);text-transform:lowercase;}
 .mm-chip.active .mm-chip-unit{color:inherit;opacity:.8;}
+
+/* ── Shared creative thumbnails (table rows, queue rows, cards) ───────── */
+.cc-thumb{position:relative;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;width:34px;height:34px;padding:0;border:1px solid var(--border);border-radius:6px;background:var(--surface2);overflow:hidden;cursor:pointer;vertical-align:middle;}
+.cc-thumb:hover{border-color:var(--teal);}
+.cc-thumb img{width:100%;height:100%;object-fit:cover;display:block;}
+.cc-thumb-lg{width:96px;height:96px;border-radius:8px;}
+.cc-thumb-ph{width:100%;height:100%;background:linear-gradient(90deg,var(--surface2),var(--surface),var(--surface2));}
+.cc-thumb-none .cc-thumb-ph{background:var(--surface2);}
+.cc-thumb-none::after{content:"\25A3";position:absolute;color:var(--text-muted);font-size:13px;opacity:.7;}
+.cc-thumb-badge{position:absolute;right:2px;bottom:2px;min-width:14px;height:14px;border-radius:7px;background:rgba(0,0,0,.65);color:#fff;font-size:8px;line-height:14px;text-align:center;padding:0 2px;}
+.cc-thumb-lg .cc-thumb-badge{min-width:22px;height:22px;line-height:22px;font-size:11px;border-radius:11px;}
+.mp-table.mp-perf td.mp-name{display:table-cell;}
+.mp-table.mp-perf td.mp-name .cc-thumb{margin-right:8px;}
+.mp-name-stack{display:inline-flex;flex-direction:column;vertical-align:middle;max-width:calc(100% - 46px);min-width:0;line-height:1.25;}
+.mp-name-stack .mp-name-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.mp-campaign-line{display:flex;align-items:center;gap:5px;font-size:11px;font-weight:400;color:var(--text-muted);min-width:0;}
+.mp-campaign-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
+.mp-funnel{flex:0 0 auto;font-size:9.5px;font-weight:700;letter-spacing:.04em;border-radius:4px;padding:1px 5px;border:1px solid var(--border);background:var(--surface2);color:var(--text-muted);}
+.mp-funnel-TOF{background:#e6f3f1;color:#0e6b62;border-color:#b7dcd6;}
+.mp-funnel-TOM{background:#fdf1dc;color:#8a5a00;border-color:#ecd29b;}
+.mp-funnel-MOF{background:#efe7f8;color:#5b3a8c;border-color:#d1bfe8;}
+.mp-funnel-multiple{background:#fbe9e7;color:#a23b2a;border-color:#efc4bd;}
+.mp-filter-note{font-size:12.5px;margin:8px 0 2px;padding:6px 10px;border-radius:var(--r);background:var(--teal-light);color:var(--teal-dark);}
+.mp-campaign-hint{font-size:12px;color:var(--text-muted);margin:2px 0;}
+.mp-campaign-hint:empty{display:none;}
+.mp-fresh{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;font-size:12.5px;color:var(--text-muted);}
+.mp-fresh-busy{color:var(--teal-dark);font-weight:600;}
+.mp-fresh-off{color:var(--amber);}
+#mp-funnel,#mp-campaign{max-width:200px;}
+
+/* ── Conflict resolution modal ─────────────────────────────────────────── */
+.cf-intro{font-size:13px;color:var(--text-muted);margin:0 0 10px;}
+.cf-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;}
+.cf-card{border:1px solid var(--border);border-radius:var(--r-lg);padding:12px;background:var(--surface);display:flex;flex-direction:column;gap:8px;}
+.cf-card-head{display:flex;gap:10px;align-items:flex-start;}
+.cf-fields{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;font-size:12.5px;margin:0;}
+.cf-fields dt{color:var(--text-muted);}
+.cf-fields dd{margin:0;font-weight:600;word-break:break-word;}
+.cf-ads{font-size:12px;color:var(--text-muted);}
+.cf-ads li{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.cf-after{font-size:12.5px;margin-top:10px;padding:8px 10px;border-radius:var(--r);background:var(--surface2);}
+
+/* ── Inspiration Library recovery + visual cards ───────────────────────── */
+.insp-vis{position:relative;display:block;width:100%;aspect-ratio:4/3;border:0;padding:0;background:var(--surface2);border-radius:var(--r) var(--r) 0 0;overflow:hidden;cursor:pointer;}
+.insp-vis img{width:100%;height:100%;object-fit:cover;display:block;}
+.insp-vis-ph{display:flex;align-items:center;justify-content:center;width:100%;height:100%;font-size:12px;color:var(--text-muted);text-align:center;padding:8px;}
+.insp-vis-badge{position:absolute;right:8px;bottom:8px;border-radius:12px;background:rgba(0,0,0,.65);color:#fff;font-size:11px;font-weight:600;padding:3px 9px;}
+.insp-recovery{margin:10px 0;padding:10px 12px;border:1px solid var(--border);border-radius:var(--r-lg);background:var(--surface);font-size:13px;}
+.insp-recovery table{border-collapse:collapse;margin:6px 0;}
+.insp-recovery td{padding:2px 12px 2px 0;}
+.mm-ws-thumb{margin-bottom:8px;}
+.bf-insp-card-meta .cc-thumb{width:100%;height:100%;border:0;border-radius:0;}
+.bf-insp-card-meta .cc-thumb-badge{right:8px;bottom:8px;}
+/* the shared creative viewer and the confirm dialog open FROM other modals (conflict resolver, workspace): keep them on top */
+#ad-preview-modal.modal-backdrop{z-index:120;}
+#confirm-modal.modal-backdrop{z-index:130;}

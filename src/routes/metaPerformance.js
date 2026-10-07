@@ -1,13 +1,17 @@
 // Meta Performance -- admin-only endpoints. Every GET reads the LOCAL Meta
 // tables only, so the page works from stored data alone (even if Meta is
 // down) and a page view can never spend a Meta API call or touch a
-// credential. The single exception is the explicit POST /reach/load, which
-// makes read-only Insights GETs for the chosen range (see metaRangeReach.js).
+// credential. Only the POSTs below make (read-only) Meta calls: /reach/load,
+// /refresh (stale additive sync / exact range reach / campaign names; page-triggered
+// calls are gated by the same META_AUTO_SYNC switch as the scheduler) and
+// /campaigns/refresh. See lib/metaFreshness.js and metaRangeReach.js.
 // See src/lib/metaPerformance.js for the aggregation rules.
 const express = require('express');
 const { requireAdmin } = require('../lib/permissions');
 const perf = require('../lib/metaPerformance');
 const reachLib = require('../lib/metaRangeReach');
+const freshness = require('../lib/metaFreshness');
+const campaigns = require('../lib/metaCampaigns');
 
 const router = express.Router();
 router.use(requireAdmin);
@@ -27,7 +31,7 @@ function handle(fn) {
 
 // Headline KPIs + coverage/freshness (+ optional previous-period compare).
 // GET /api/meta-performance/summary?preset=last_7|since=&until=&compare=1
-router.get('/summary', handle((req) => perf.getSummary(perf.parseRangeParams(req.query))));
+router.get('/summary', handle((req) => perf.getSummary(perf.parseRangeParams(req.query), new Date(), perf.parseFilter(req.query))));
 
 // One page of ads that had activity in the range.
 // GET /api/meta-performance/ads?preset=&since=&until=&q=&status=all|active|paused|other
@@ -49,6 +53,27 @@ router.get('/reach', handle((req) => reachLib.getStatus(perf.parseRangeParams(re
 router.post('/reach/load', handle((req) => {
   const parsed = perf.parseRangeParams(req.body || {});
   return reachLib.startPull(parsed.range, { userId: req.user && req.user.id, force: !!(req.body && req.body.force) });
+}));
+
+// Campaign / funnel context. GET /campaigns?preset|since,until -> campaigns that ran in the period (name, funnel, ads, spend)
+// for the filter dropdowns. GET /campaign-patterns -> how the stored campaign names are built (for defining the real mapping).
+// POST /campaigns/refresh -> one explicit read-only Meta read of the campaign list.
+router.get('/campaigns', handle(async (req) => {
+  const parsed = perf.parseRangeParams(req.query);
+  const list = await campaigns.listForRange(parsed.range);
+  const f = await campaigns.lastFetchedAt();
+  return { range: parsed.range, ...list, names_fetched_at: f.at ? f.at.toISOString() : null };
+}));
+router.get('/campaign-patterns', handle(() => campaigns.patternCensus()));
+router.post('/campaigns/refresh', handle(async () => ({ ...(await campaigns.refreshCampaigns()) })));
+
+// Automatic freshness. GET /freshness?preset|since,until -> stored/cached ages + what is stale + whether automatic refresh is
+// allowed (DB only, no Meta call). POST /refresh {preset|since,until, auto?, force?} -> start whatever is stale in the background
+// (auto: page-triggered, needs META_AUTO_SYNC on; force: the manual "Refresh now" button). See lib/metaFreshness.js.
+router.get('/freshness', handle((req) => freshness.getFreshness(perf.parseRangeParams(req.query).range)));
+router.post('/refresh', handle((req) => {
+  const parsed = perf.parseRangeParams(req.body || {});
+  return freshness.startRefresh(parsed.range, { userId: req.user && req.user.id, auto: !!(req.body && req.body.auto), force: !!(req.body && req.body.force) });
 }));
 
 module.exports = router;

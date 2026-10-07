@@ -224,7 +224,9 @@
         <div class="mp-compare-line" id="mp-compare-line"></div>
 
         <!-- Reach & Frequency are unique-people figures (never summed from daily rows): loaded from Meta on request for the selected period. -->
+        <div class="mp-filter-note" id="mp-filter-note" style="display:none;"></div>
         <div class="mp-reach-bar" id="mp-reach-bar"></div>
+        <div class="mp-campaign-hint" id="mp-campaign-hint"></div>
         <div class="mp-table-toolbar">
           <input type="search" id="mp-search" placeholder="Search ad name or Meta Ad ID" autocomplete="off">
           <select id="mp-status" aria-label="Status filter">
@@ -233,6 +235,9 @@
             <option value="paused">Paused</option>
             <option value="other">Other</option>
           </select>
+          <!-- Campaign / funnel context: filters the table AND the headline metrics (see mpFilterQuery) -->
+          <select id="mp-funnel" aria-label="Funnel filter"><option value="all">All funnels</option></select>
+          <select id="mp-campaign" aria-label="Campaign filter"><option value="">All campaigns</option></select>
           <span class="mp-table-count" id="mp-table-count"></span>
         </div>
         <div class="mp-table-wrap">
@@ -662,6 +667,7 @@
             </div>
             <button type="button" class="btn btn-primary btn-sm" onclick="openBfInspirationModal()">+ New Reference</button>
           </div>
+          <div id="bf-insp-recovery" class="insp-recovery" style="display:none;"></div>
           <div id="bf-inspiration-grid" class="cd-product-grid"></div>
         </div>
 
@@ -1542,6 +1548,17 @@
       <button class="modal-close" onclick="closeModal('mm-preview-modal')">&times;</button>
     </div>
     <div class="modal-body" id="mm-preview-body"></div>
+  </div>
+</div>
+
+<!-- Creative conflict: every competing person's classification of ONE exact meta_creative_id, with an explicit choose action. -->
+<div id="mm-conflict-modal" class="modal-backdrop">
+  <div class="modal" style="width:80vw;min-width:640px;max-width:1100px;">
+    <div class="modal-header">
+      <h3>Resolve creative conflict</h3>
+      <button class="modal-close" onclick="closeModal('mm-conflict-modal')">&times;</button>
+    </div>
+    <div class="modal-body" id="mm-conflict-body"></div>
   </div>
 </div>
 

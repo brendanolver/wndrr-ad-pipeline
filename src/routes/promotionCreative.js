@@ -16,6 +16,8 @@ const { pool } = require('../db');
 const { STATUSES } = require('../lib/statuses');
 const { insertCreativeAsset } = require('../lib/assets');
 const { ensureShootScheduleForApprovedConcept } = require('./conceptDevelopment');
+const { requireAdmin } = require('../lib/permissions');
+const inspMeta = require('../lib/inspirationMetaLink');
 
 const router = express.Router();
 
@@ -810,6 +812,18 @@ router.get('/:promotionId/progress', async (req, res, next) => {
 // Sale winner is useful reference for Black Friday, Boxing Day, or any
 // future sale alike.
 // ---------------------------------------------------------------------
+// Meta recovery for references (admin only). report = local read; lookup = explicit read-only Meta call (preview links, 50 ads
+// per call); apply = writes only deterministic links (exact share link / explicit ad_id) into empty meta_ad_id fields.
+router.get('/inspiration/meta-recovery', requireAdmin, async (req, res, next) => {
+  try { const r = await inspMeta.report(); res.json({ ...r, records: req.query.records === '1' ? r.records : undefined }); } catch (err) { next(err); }
+});
+router.post('/inspiration/meta-recovery/lookup', requireAdmin, async (req, res, next) => {
+  try { res.json(await inspMeta.lookupShareLinks({ limit: req.body && req.body.limit })); } catch (err) { if (err && err.status) return res.status(err.status).json({ error: err.message }); next(err); }
+});
+router.post('/inspiration/meta-recovery/apply', requireAdmin, async (req, res, next) => {
+  try { res.json(await inspMeta.applyLinks()); } catch (err) { next(err); }
+});
+
 router.get('/inspiration', async (req, res, next) => {
   try {
     const result = await pool.query(

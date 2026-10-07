@@ -26,6 +26,10 @@ function handle(fn) {
     }
   };
 }
+function creativeIdParam(req) {
+  if (!AD_ID_RE.test(req.params.creativeId)) throw new HttpError(400, 'Invalid creative id');
+  return req.params.creativeId;
+}
 function adId(req) {
   if (!AD_ID_RE.test(req.params.metaAdId)) throw new HttpError(400, 'Invalid ad id');
   return req.params.metaAdId;
@@ -44,6 +48,11 @@ router.get('/workload', handle(() => matching.getWorkload()));
 // (same exact meta_creative_id) that creative's classification. Local only; idempotent; resumable
 // via ?after= (the returned next_after).
 router.post('/creative-inheritance/apply', handle((req) => matching.applyCreativeInheritance({ limit: req.body && req.body.limit, after: req.body && req.body.after })));
+
+// Creative conflicts: every competing person-confirmed decision for ONE exact creative, and the explicit action that
+// makes one of them authoritative for that creative (the only thing that ever rewrites a person's decision).
+router.get('/conflicts/:creativeId', handle((req) => matching.getCreativeConflict(creativeIdParam(req))));
+router.post('/conflicts/:creativeId/resolve', handle((req) => matching.resolveCreativeConflict(creativeIdParam(req), req.body, req.user && req.user.id)));
 
 // Selector vocabularies (products / concepts / creative styles / creators).
 router.get('/options', handle(() => matching.listOptions()));

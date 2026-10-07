@@ -418,16 +418,17 @@ document.querySelectorAll('.settings-subnav-btn').forEach((btn) => {
 });
 
 // ── Meta Performance V1 (admin-only page) ──────────────────────────────
-// Reads ONLY /api/meta-performance/* (summary, ads, ads/:id), which query
-// the local Meta tables -- nothing on this page ever calls Meta, so it
-// keeps working from stored data if Meta is down. Date presets are resolved
+// Reads /api/meta-performance/* (summary, ads, ads/:id, freshness), which query
+// the local Meta tables, so the page renders from stored data immediately and keeps
+// working if Meta is down. Stale data is refreshed in the background by the server
+// (POST /refresh, gated by META_AUTO_SYNC) and the page re-reads when it lands. Date presets are resolved
 // SERVER-side in Australia/Sydney (the browser's own timezone is never
 // used for "today"/"this week"); the server's resolved range is what's
 // shown and what the table/detail requests reuse.
 //
 // Reach/Frequency are unique-people figures, never summed from daily rows:
-// they come from an exact range-level Meta pull the admin triggers on request
-// (POST /meta-performance/reach/load, cached per range) -- see mpRenderReachBar.
+// they come from an exact range-level Meta pull (cached per range, refreshed
+// automatically when stale, or on "Refresh now") -- see mpRenderReachBar / mpCheckFreshness.
 // Thumbstop/Hold Rate stay undisplayed (formulas not confirmed).
 // See src/lib/metaPerformance.js.
 const MP_TZ = 'Australia/Sydney';
@@ -451,7 +452,21 @@ const mpState = {
   adsReach: null, // ads response reach_info
   adsById: new Map(),
   reachTimer: null,
+  funnel: 'all', // all | TOF | TOM | MOF | multiple | unknown
+  campaign: '', // exact Meta campaign id or ''
+  fresh: null, // last /freshness answer
+  lastAutoAt: {}, // range key -> ms of the last automatic refresh request from this page
+  freshPoll: null,
+  freshTimer: null,
+  campaignsFor: '', // range key the campaign dropdown was loaded for
 };
+const mpFilterQuery = () => `${mpState.funnel && mpState.funnel !== 'all' ? `&funnel=${encodeURIComponent(mpState.funnel)}` : ''}${mpState.campaign ? `&campaign_id=${encodeURIComponent(mpState.campaign)}` : ''}`;
+const mpFiltered = () => (mpState.funnel && mpState.funnel !== 'all') || !!mpState.campaign;
+const MP_FUNNEL_LABEL = { TOF: 'TOF', TOM: 'TOM', MOF: 'MOF', multiple: 'Mixed', unknown: 'Unknown' };
+function mpFunnelBadge(f) {
+  const k = f || 'unknown';
+  return `<span class="mp-funnel mp-funnel-${escapeHtml(k)}" title="${k === 'unknown' ? 'No TOF / TOM / MOF in the campaign name (not guessed)' : k === 'multiple' ? 'More than one funnel token in the campaign name' : 'Read from the campaign name'}">${escapeHtml(MP_FUNNEL_LABEL[k] || k)}</span>`;
+}
 // better: which direction is an improvement (costs: lower; volumes/CTR: higher).
 // Amount Spent is neutral -- spending more or less isn't inherently good or bad.
 const MP_KPIS = [
@@ -578,6 +593,14 @@ function mpRenderSummary(sum) {
 
   mpState.reach = sum.reach_frequency;
   mpRenderReachBar();
+  const fnote = document.getElementById('mp-filter-note');
+  if (mpFiltered()) {
+    const bits = [];
+    if (mpState.funnel !== 'all') bits.push(`funnel: ${MP_FUNNEL_LABEL[mpState.funnel] || mpState.funnel}`);
+    if (mpState.campaign) { const o = document.querySelector(`#mp-campaign option[value="${mpState.campaign}"]`); bits.push(`campaign: ${o ? o.textContent.split(' · ')[0] : mpState.campaign}`); }
+    fnote.style.display = '';
+    fnote.innerHTML = `Filtered to ${escapeHtml(bits.join(' · '))} — the numbers above and the table cover only these ads. <button type="button" class="link-btn" id="mp-filter-clear">Clear filter</button>`;
+  } else { fnote.style.display = 'none'; fnote.innerHTML = ''; }
   const cl = document.getElementById('mp-compare-line');
   if (!cmp) {
     cl.textContent = '';
@@ -609,7 +632,9 @@ function mpRenderAds(res) {
   } else {
     body.innerHTML = res.ads.map((a) => `
       <tr data-ad-id="${escapeHtml(a.meta_ad_id)}">
-        <td class="mp-name" title="${escapeHtml(a.ad_name || a.meta_ad_id)}"><button type="button" class="mp-preview-btn" data-preview-ad="${escapeHtml(a.meta_ad_id)}" title="Preview the creative" aria-label="Preview creative">&#9654;</button> <span class="mp-name-text" data-preview-ad="${escapeHtml(a.meta_ad_id)}">${escapeHtml(a.ad_name || '(unnamed ad)')}</span></td>
+        <td class="mp-name" title="${escapeHtml(`${a.ad_name || a.meta_ad_id}${a.campaign_name ? ' — ' + a.campaign_name : ''}`)}">
+          ${ccThumbHtml(a.meta_ad_id)}<span class="mp-name-stack"><span class="mp-name-text" data-preview-ad="${escapeHtml(a.meta_ad_id)}">${escapeHtml(a.ad_name || '(unnamed ad)')}</span>
+          <span class="mp-campaign-line">${mpFunnelBadge(a.funnel)}<span class="mp-campaign-name">${a.campaign_name ? escapeHtml(a.campaign_name) : (a.campaign_id ? 'Campaign ' + escapeHtml(a.campaign_id) : 'No campaign')}</span></span></span></td>
         <td>${mpStatusChip(a.effective_status)}</td>
         <td class="num">${mpFmt(a.spend, 'money')}</td>
         <td class="num">${mpFmt(a.purchases, 'int')}</td>
@@ -620,6 +645,7 @@ function mpRenderAds(res) {
         <td class="num">${mpReachCell(a.reach, 'int')}</td>
         <td class="num">${mpReachCell(a.frequency, 'freq')}</td>
       </tr>`).join('');
+    ccHydrateThumbs(body);
   }
   const pager = document.getElementById('mp-pager');
   if (res.total_pages <= 1) {
@@ -637,7 +663,7 @@ function mpRenderAds(res) {
 async function loadMetaPerformanceAds() {
   const id = ++mpState.adsReqId;
   const qs = `${mpRangeQuery()}&q=${encodeURIComponent(mpState.q)}&status=${mpState.status}` +
-    `&sort=${mpState.sort}&dir=${mpState.dir}&page=${mpState.page}&page_size=${mpState.pageSize}`;
+    `&sort=${mpState.sort}&dir=${mpState.dir}&page=${mpState.page}&page_size=${mpState.pageSize}${mpFilterQuery()}`;
   try {
     const res = await api(`/meta-performance/ads?${qs}`);
     if (id !== mpState.adsReqId) return; // a newer request superseded this one
@@ -651,11 +677,13 @@ async function loadMetaPerformanceAds() {
 async function loadMetaPerformance() {
   if (!state.currentUser || state.currentUser.role !== 'admin') return;
   const id = ++mpState.reqId;
-  const qs = `${mpRangeQuery()}${mpState.compare ? '&compare=1' : ''}`;
+  const qs = `${mpRangeQuery()}${mpState.compare ? '&compare=1' : ''}${mpFilterQuery()}`;
   try {
     const sum = await api(`/meta-performance/summary?${qs}`);
     if (id !== mpState.reqId) return;
     const hasData = mpRenderSummary(sum);
+    mpLoadCampaignFilter();
+    mpCheckFreshness();
     if (hasData) await loadMetaPerformanceAds();
   } catch (e) {
     if (id !== mpState.reqId) return;
@@ -776,6 +804,7 @@ document.getElementById('mp-pager').addEventListener('click', (e) => {
 });
 document.getElementById('mp-ads-body').addEventListener('click', (e) => {
   // the creative preview control / ad name opens the Ad Preview; the rest of the row opens the daily detail
+  if (e.target.closest('[data-cc-open]')) return; // the thumbnail opens the shared creative viewer
   const pv = e.target.closest('[data-preview-ad]');
   if (pv) { mpOpenPreview(pv.dataset.previewAd); return; }
   const row = e.target.closest('tr[data-ad-id]');
@@ -792,61 +821,143 @@ function mpReachCell(v, kind) {
 function mpReachTilesHtml(rf) {
   const val = (v, kind) => (rf && rf.available ? (kind === 'freq' ? mpFreq(v) : Number(v).toLocaleString('en-AU')) : '<span class="mp-na">—</span>');
   const sub = !rf ? '' : rf.available ? (rf.stale ? 'as of ' + escapeHtml(mpDateTime(rf.pulled_at)) + ' (may have changed)' : 'as of ' + escapeHtml(mpDateTime(rf.pulled_at)))
-    : rf.state === 'loading' ? 'loading from Meta…' : rf.state === 'failed' ? 'unavailable' : 'not loaded';
+    : rf.state === 'filtered' ? 'whole account only' : rf.state === 'loading' ? 'loading from Meta…' : rf.state === 'failed' ? 'unavailable' : 'not loaded';
   return `<div class="mp-kpi"><div class="mp-kpi-label">Reach</div><div class="mp-kpi-value">${val(rf && rf.reach, 'int')}</div><div class="mp-kpi-delta">${sub}</div></div>
     <div class="mp-kpi"><div class="mp-kpi-label">Frequency</div><div class="mp-kpi-value">${val(rf && rf.frequency, 'freq')}</div><div class="mp-kpi-delta">${sub}</div></div>`;
 }
+function mpRangeBody() {
+  return mpState.preset === 'custom' ? { preset: 'custom', since: mpState.customSince, until: mpState.customUntil } : { preset: mpState.preset };
+}
+const mpRangeKey = () => `${mpState.preset}|${mpState.customSince}|${mpState.customUntil}`;
+
+// Reach & Frequency line. The numbers are exact Meta range-level figures (never summed from daily rows) and now refresh
+// automatically when stale; the button is a manual fallback.
 function mpRenderReachBar() {
   const bar = document.getElementById('mp-reach-bar');
   if (!bar) return;
   const rf = mpState.reach;
   if (!rf) { bar.innerHTML = ''; return; }
   const single = mpState.range && mpState.range.since === mpState.range.until;
+  const f = mpState.fresh;
+  const auto = !!(f && f.auto_enabled);
   let html;
-  if (rf.state === 'loading') {
-    html = '<span class="mp-reach-state loading">Loading Reach &amp; Frequency from Meta…</span>';
+  if (rf.state === 'filtered') {
+    html = `<span class="mp-reach-state">${escapeHtml(rf.reason)}</span>`;
+  } else if (rf.state === 'loading') {
+    html = '<span class="mp-reach-state loading">Updating Reach &amp; Frequency from Meta…</span>';
   } else if (rf.available) {
-    html = `<span class="mp-reach-state ok">Reach &amp; Frequency loaded from Meta ${escapeHtml(mpDateTime(rf.pulled_at))}${rf.includes_today ? ' · includes today (still in progress)' : ''}${rf.stale ? ' · may have changed since' : ''}.</span>
-      <button type="button" class="btn btn-ghost btn-sm" id="mp-reach-load" data-force="1">Refresh</button>`;
+    html = `<span class="mp-reach-state ok">Reach &amp; Frequency from Meta, updated ${escapeHtml(mpDateTime(rf.pulled_at))}${rf.includes_today ? ' · today is still in progress' : ''}${rf.stale ? (auto ? ' · refreshing automatically' : ' · may have changed since') : ''}.</span>`;
     if (rf.last_error) html += `<span class="mp-reach-state warn">Last refresh failed: ${escapeHtml(rf.last_error.message || '')}</span>`;
   } else if (rf.state === 'failed') {
-    html = `<span class="mp-reach-state warn">Reach &amp; Frequency unavailable: ${escapeHtml(rf.reason || 'the last attempt failed')}</span>
-      <button type="button" class="btn btn-ghost btn-sm" id="mp-reach-load">Try again</button>`;
+    html = `<span class="mp-reach-state warn">Reach &amp; Frequency unavailable: ${escapeHtml(rf.reason || 'the last attempt failed')}</span>`;
   } else {
-    html = `<span class="mp-reach-state">${single ? 'Per-ad Reach &amp; Frequency are exact for this day. ' : ''}Reach &amp; Frequency for ${single ? 'the account on' : ''} this period are loaded from Meta on request (they can't be added up from daily numbers).</span>
-      <button type="button" class="btn btn-primary btn-sm" id="mp-reach-load">Load Reach &amp; Frequency</button>`;
+    html = `<span class="mp-reach-state">${single ? 'Per-ad Reach &amp; Frequency are exact for this day. ' : ''}${auto ? 'Reach &amp; Frequency for this period load automatically (they can\'t be added up from daily numbers).' : 'Reach &amp; Frequency for this period are not loaded, and automatic refresh is off — use Refresh now.'}</span>`;
   }
   bar.innerHTML = html;
-  const btn = document.getElementById('mp-reach-load');
-  if (btn) btn.addEventListener('click', () => mpLoadReach(btn.dataset.force === '1'));
-  if (rf.state === 'loading' && !mpState.reachTimer) mpState.reachTimer = setInterval(mpPollReach, 3000);
-  if (rf.state !== 'loading' && mpState.reachTimer) { clearInterval(mpState.reachTimer); mpState.reachTimer = null; }
+  if (rf.state === 'loading') mpStartFreshPoll();
 }
-async function mpLoadReach(force) {
-  const body = mpState.preset === 'custom' ? { preset: 'custom', since: mpState.customSince, until: mpState.customUntil } : { preset: mpState.preset };
-  if (force) body.force = true;
-  const btn = document.getElementById('mp-reach-load');
+
+// ── Automatic freshness ─────────────────────────────────────────────────
+// Stored/cached numbers are shown immediately; this asks the server what is stale (DB only), refreshes it in the background
+// when automatic refresh is allowed (the SAME META_AUTO_SYNC switch as the scheduler: off => stored data + manual button
+// only), and re-renders when fresh data lands. A manual "Refresh now" always works.
+function mpRenderFreshness() {
+  const el = document.getElementById('mp-fresh');
+  const f = mpState.fresh;
+  if (!el || !f) return;
+  const when = (iso) => (iso ? mpDateTime(iso) : null);
+  const parts = [];
+  const stats = when(f.additive.last_synced_at);
+  parts.push(stats ? `Stats updated ${stats}` : 'Stats not synced yet');
+  if (f.reach.pulled_at) parts.push(`Reach updated ${when(f.reach.pulled_at)}`);
+  if (f.today_in_progress) parts.push('Today is still in progress');
+  let note = '';
+  if (f.is_refreshing) note = '<span class="mp-fresh-busy">Refreshing…</span>';
+  else if (!f.auto_enabled) note = `<span class="mp-fresh-off" title="${escapeHtml(f.auto_disabled_reason || '')}">Automatic refresh is off</span>`;
+  else if (f.additive.needs_backfill) note = '<span class="mp-fresh-off" title="Older days in this period were never synced; only a manual backfill can fill them.">Older days need a manual backfill</span>';
+  el.innerHTML = `<span>${parts.map(escapeHtml).join(' · ')}</span> ${note} <button type="button" class="btn btn-ghost btn-sm" id="mp-refresh-now" ${f.is_refreshing ? 'disabled' : ''}>Refresh now</button>`;
+}
+async function mpCheckFreshness() {
+  try {
+    const f = await api(`/meta-performance/freshness?${mpRangeQuery()}`);
+    mpState.fresh = f;
+    mpRenderFreshness();
+    mpRenderReachBar();
+    const needs = f.needs_refresh.additive || f.needs_refresh.reach || f.needs_refresh.campaigns;
+    const key = mpRangeKey();
+    if (f.auto_enabled && needs && !f.is_refreshing && Date.now() - (mpState.lastAutoAt[key] || 0) > 3 * 60 * 1000) {
+      mpState.lastAutoAt[key] = Date.now();
+      await api('/meta-performance/refresh', { method: 'POST', body: JSON.stringify({ ...mpRangeBody(), auto: true }) });
+      mpStartFreshPoll();
+    } else if (f.is_refreshing) {
+      mpStartFreshPoll();
+    }
+    // a period that includes today keeps checking while the page is open (the server decides if anything is actually due)
+    if (f.includes_today && !mpState.freshTimer) {
+      mpState.freshTimer = setInterval(() => {
+        const open = document.getElementById('tab-meta-performance').classList.contains('active') && mmState.view === 'performance' && document.visibilityState === 'visible';
+        if (open) mpCheckFreshness();
+      }, 60 * 1000);
+    }
+    if (!f.includes_today && mpState.freshTimer) { clearInterval(mpState.freshTimer); mpState.freshTimer = null; }
+  } catch (e) { /* freshness is a convenience: the stored numbers are already on screen */ }
+}
+function mpStartFreshPoll() {
+  if (mpState.freshPoll) return;
+  let n = 0;
+  mpState.freshPoll = setInterval(async () => {
+    n += 1;
+    try {
+      const f = await api(`/meta-performance/freshness?${mpRangeQuery()}`);
+      mpState.fresh = f; mpRenderFreshness(); mpRenderReachBar();
+      if (!f.is_refreshing || n > 60) {
+        clearInterval(mpState.freshPoll); mpState.freshPoll = null;
+        loadMetaPerformance(); // re-read summary + table: the stored data / cache now has the fresh figures
+      }
+    } catch (e) { /* keep polling */ }
+  }, 3000);
+}
+async function mpRefreshNow() {
+  const btn = document.getElementById('mp-refresh-now');
   if (btn) btn.disabled = true;
   try {
-    const st = await api('/meta-performance/reach/load', { method: 'POST', body: JSON.stringify(body) });
-    if (st.state === 'loading') {
-      mpState.reach = { ...(mpState.reach || {}), state: 'loading', available: false };
-      mpRenderReachBar();
-      if (!mpState.reachTimer) mpState.reachTimer = setInterval(mpPollReach, 2000);
-    } else {
-      loadMetaPerformance(); // already finished (or served from the fresh cache): show it now
-    }
+    const r = await api('/meta-performance/refresh', { method: 'POST', body: JSON.stringify({ ...mpRangeBody(), force: true }) });
+    if (!(r.started || []).length) toast(`Nothing to refresh right now (${Object.values(r.skipped || {}).join(', ') || 'already up to date'}).`);
+    mpStartFreshPoll();
+    mpCheckFreshness();
   } catch (e) { toast(e.message, true); if (btn) btn.disabled = false; }
 }
-async function mpPollReach() {
+document.addEventListener('click', (e) => {
+  const cfb = e.target.closest('#mm-modal-body [data-conflict-creative]');
+  if (cfb && cfb.dataset.conflictCreative) { closeModal('meta-match-modal'); openConflictModal(cfb.dataset.conflictCreative); return; }
+  if (e.target.id === 'mp-refresh-now') mpRefreshNow();
+  if (e.target.id === 'mp-filter-clear') { mpState.funnel = 'all'; mpState.campaign = ''; mpState.page = 1; document.getElementById('mp-funnel').value = 'all'; document.getElementById('mp-campaign').value = ''; loadMetaPerformance(); }
+});
+
+// Campaign / funnel filter. Funnel comes only from literal TOF / TOM / MOF tokens in the campaign name; anything else is
+// "Unknown" (never guessed). The campaign list is whatever ran in the period, by exact Meta campaign id.
+async function mpLoadCampaignFilter() {
+  const key = mpRangeKey();
+  if (mpState.campaignsFor === key) return;
   try {
-    const st = await api(`/meta-performance/reach?${mpRangeQuery()}`);
-    if (st.state !== 'loading') {
-      clearInterval(mpState.reachTimer); mpState.reachTimer = null;
-      loadMetaPerformance(); // re-read summary + ads: the cache now has the exact figures (or the failure)
-    }
-  } catch (e) { /* keep polling; the bar still says loading */ }
+    const r = await api(`/meta-performance/campaigns?${mpRangeQuery()}`);
+    mpState.campaignsFor = key;
+    const fsel = document.getElementById('mp-funnel');
+    const csel = document.getElementById('mp-campaign');
+    const fCount = (k) => (r.funnels[k] ? ` (${r.funnels[k].campaigns})` : '');
+    fsel.innerHTML = `<option value="all">All funnels</option>${['TOF', 'TOM', 'MOF', 'multiple', 'unknown'].map((k) => `<option value="${k}">${MP_FUNNEL_LABEL[k]}${fCount(k)}</option>`).join('')}`;
+    fsel.value = mpState.funnel;
+    csel.innerHTML = `<option value="">All campaigns</option>${r.campaigns.map((c) => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name || `Campaign ${c.id}`)} · ${escapeHtml(MP_FUNNEL_LABEL[c.funnel] || c.funnel)}</option>`).join('')}`;
+    csel.value = mpState.campaign;
+    const hint = document.getElementById('mp-campaign-hint');
+    const more = r.truncated ? `Showing the ${r.campaigns.length} biggest of ${r.campaigns_total} campaigns (the funnel filter covers all of them). ` : '';
+    hint.innerHTML = more + (r.names_fetched_at ? '' : 'Campaign names haven\'t been loaded yet — they come in with the next refresh. <button type="button" class="link-btn" id="mp-load-campaigns">Load now</button>');
+    const b = document.getElementById('mp-load-campaigns');
+    if (b) b.onclick = async () => { b.disabled = true; try { await api('/meta-performance/campaigns/refresh', { method: 'POST', body: '{}' }); mpState.campaignsFor = ''; loadMetaPerformance(); } catch (e) { toast(e.message, true); b.disabled = false; } };
+  } catch (e) { /* the filter is optional */ }
 }
+document.getElementById('mp-funnel').addEventListener('change', (e) => { mpState.funnel = e.target.value; mpState.page = 1; loadMetaPerformance(); });
+document.getElementById('mp-campaign').addEventListener('change', (e) => { mpState.campaign = e.target.value; mpState.page = 1; loadMetaPerformance(); });
 
 // ── Ad preview (creative behind a Meta ad) ─────────────────────────────
 // Opens from the Performance table and from Core plan evidence. The media is
@@ -863,8 +974,54 @@ function closeAdPreview() {
   body.innerHTML = '';
   closeModal('ad-preview-modal');
 }
+// ONE creative viewer for the whole app (Meta Performance, Ad Matching, conflict resolution, Inspiration Library,
+// Planning evidence). Meta's own preview (the real ad: creative, copy, CTA) is the default whenever Meta supplied it;
+// the in-app image/video player is the fallback; "Open in Meta" is always offered.
+function ccOpenViewer(adId, ctx) {
+  const a = mpState.adsById && mpState.adsById.get(adId);
+  const metrics = ctx !== undefined ? ctx : (a ? { metrics: { spend: a.spend, purchases: a.purchases, cpa: a.cpa, outbound_ctr: a.outbound_ctr, reach: a.reach, frequency: a.frequency }, range: mpState.range } : null);
+  return openAdPreview(adId, metrics);
+}
+
+// ── Table / card thumbnails (lazy, batched, never autoplay) ─────────────
+const ccThumbCache = new Map(); // adId -> { state, kind, thumb_url }
+const ccThumbAsked = new Set();
+function ccThumbHtml(adId, opts = {}) {
+  const id = escapeHtml(adId);
+  return `<button type="button" class="cc-thumb ${opts.large ? 'cc-thumb-lg' : ''}" ${opts.openAttr || 'data-cc-open'}="${id}" data-thumb-ad="${id}" title="Preview this creative" aria-label="Preview creative"><span class="cc-thumb-ph"></span></button>`;
+}
+function ccThumbFill(el, t) {
+  if (!t || t.state !== 'ok' || !t.thumb_url) { el.classList.toggle('cc-thumb-none', !!(t && t.state === 'unavailable')); return; }
+  const badge = t.kind === 'video' ? '<span class="cc-thumb-badge">&#9654;</span>' : (t.kind === 'carousel' || t.kind === 'dynamic') ? '<span class="cc-thumb-badge cc-thumb-badge-multi">&#9638;</span>' : '';
+  el.innerHTML = `<img src="${escapeHtml(t.thumb_url)}" loading="lazy" decoding="async" referrerpolicy="no-referrer" alt="" onerror="this.parentNode.classList.add('cc-thumb-none');this.remove()">${badge}`;
+}
+async function ccHydrateThumbs(root) {
+  const els = [...(root || document).querySelectorAll('[data-thumb-ad]')];
+  if (!els.length) return;
+  els.forEach((el) => { if (ccThumbCache.has(el.dataset.thumbAd)) ccThumbFill(el, ccThumbCache.get(el.dataset.thumbAd)); });
+  const ask = [...new Set(els.map((el) => el.dataset.thumbAd))].filter((id) => !ccThumbCache.has(id) && !ccThumbAsked.has(id));
+  if (!ask.length) return;
+  ask.forEach((id) => ccThumbAsked.add(id));
+  for (let i = 0; i < ask.length; i += 100) {
+    try {
+      const r = await api('/ad-creative/thumbnails', { method: 'POST', body: JSON.stringify({ ad_ids: ask.slice(i, i + 100) }) });
+      Object.entries(r.thumbs || {}).forEach(([id, t]) => { if (t.state === 'ok') ccThumbCache.set(id, t); else ccThumbAsked.delete(id); });
+      els.forEach((el) => {
+        const t = (r.thumbs || {})[el.dataset.thumbAd];
+        if (t) ccThumbFill(el, t);
+        // lookups paused by the server (automatic Meta refresh is off): no endless shimmer; a click still opens the preview
+        if (t && t.state === 'pending' && r.paused) { el.classList.add('cc-thumb-none'); el.title = 'Cover not loaded yet — click to open the preview'; }
+      });
+    } catch (e) { ask.slice(i, i + 100).forEach((id) => ccThumbAsked.delete(id)); }
+  }
+}
+document.addEventListener('click', (e) => {
+  const t = e.target.closest('[data-cc-open]');
+  if (t) { e.preventDefault(); e.stopPropagation(); ccOpenViewer(t.dataset.ccOpen); }
+});
+
 async function openAdPreview(adId, ctx, refresh) {
-  apState.adId = adId; apState.ctx = ctx || null; apState.card = 0; apState.showMeta = false;
+  apState.adId = adId; apState.ctx = ctx || null; apState.card = 0; apState.showMeta = false; apState.userToggled = false;
   if (!refresh) apState.retried = false;
   const body = document.getElementById('ap-body');
   document.getElementById('ap-title').textContent = 'Ad preview';
@@ -872,6 +1029,8 @@ async function openAdPreview(adId, ctx, refresh) {
   openModal('ad-preview-modal');
   try {
     apState.data = await api(`/ad-creative/${encodeURIComponent(adId)}${refresh ? '?refresh=1' : ''}`);
+    // Meta's own preview is the default full view whenever it is available
+    apState.showMeta = !!apState.data.creative.preview_iframe_src;
     renderAdPreview();
   } catch (e) {
     body.innerHTML = `<div class="mp-table-empty">${escapeHtml(e.message)}</div>`;
@@ -890,9 +1049,11 @@ function apGoCard(delta) {
   apState.card = (apState.card + delta + cards.length) % cards.length;
   renderAdPreview();
 }
-function apToggleMeta() { apState.showMeta = !apState.showMeta; renderAdPreview(); }
+function apToggleMeta() { apState.showMeta = !apState.showMeta; apState.userToggled = true; renderAdPreview(); }
 function apMediaFailed() {
-  // Meta's signed media links expire: reload once automatically, then explain.
+  // The in-app media failed: prefer Meta's own preview when there is one; otherwise Meta's signed media links may have
+  // expired -- reload once automatically, then explain.
+  if (!apState.showMeta && apState.data && apState.data.creative.preview_iframe_src) { apState.showMeta = true; renderAdPreview(); return; }
   if (!apState.retried) { apState.retried = true; openAdPreview(apState.adId, apState.ctx, true); return; }
   const m = document.getElementById('ap-media');
   if (m) m.insertAdjacentHTML('beforeend', '<div class="ap-note">This preview could not be played in the app. Use "Open in Meta" or try Reload.</div>');
@@ -943,7 +1104,7 @@ function renderAdPreview() {
         </div>` : ''}
         <div class="ap-actions">
           ${openLink ? `<a class="btn btn-ghost btn-sm" href="${escapeHtml(openLink)}" target="_blank" rel="noopener noreferrer">Open in Meta</a>` : ''}
-          ${c.preview_iframe_src && playable ? `<button type="button" class="btn btn-ghost btn-sm" onclick="apToggleMeta()">${apState.showMeta ? 'Show in app player' : "Show Meta's own preview"}</button>` : ''}
+          ${c.preview_iframe_src && playable ? `<button type="button" class="btn btn-ghost btn-sm" onclick="apToggleMeta()">${apState.showMeta ? 'Show in-app player' : "Show Meta's own preview"}</button>` : ''}
           <button type="button" class="btn btn-ghost btn-sm" onclick="openAdPreview('${escapeHtml(apState.adId)}', apState.ctx, true)">Reload</button>
         </div>
         ${d.warning ? `<div class="ap-note">${escapeHtml(d.warning)}</div>` : ''}
@@ -1040,7 +1201,7 @@ function mmRenderRows(res) {
       : (a.suggested_media ? `<span class="mm-guess" title="Suggestion — not confirmed">${escapeHtml(a.suggested_media)}</span>` : '<span class="mp-na">—</span>');
     const conf = a.match_status === 'confirmed' ? '<span class="mm-tick">✓</span>' : mmConfDot(a.confidence_label, a.match_status);
     return `<tr data-ad-id="${escapeHtml(a.meta_ad_id)}">
-      <td class="mp-name" title="${escapeHtml(a.ad_name || a.meta_ad_id)}">${escapeHtml(a.ad_name || '(unnamed ad)')}${a.same_creative_ads > 1 ? ` <span class="mm-sibs" title="${a.same_creative_ads - 1} other ad${a.same_creative_ads === 2 ? '' : 's'} use this exact creative; classifying it covers them all">+${a.same_creative_ads - 1} same creative</span>` : ''}${a.creative_conflict ? ' <span class="mm-conflict" title="People classified ads of this creative differently">conflict</span>' : ''}</td>
+      <td class="mp-name" title="${escapeHtml(a.ad_name || a.meta_ad_id)}">${ccThumbHtml(a.meta_ad_id)}<span class="mp-name-stack"><span class="mp-name-text">${escapeHtml(a.ad_name || '(unnamed ad)')}</span></span>${a.same_creative_ads > 1 ? ` <span class="mm-sibs" title="${a.same_creative_ads - 1} other ad${a.same_creative_ads === 2 ? '' : 's'} use this exact creative; classifying it covers them all">+${a.same_creative_ads - 1} same creative</span>` : ''}${a.creative_conflict ? ` <span class="mm-conflict" data-conflict-creative="${escapeHtml(a.meta_creative_id || '')}" title="People classified ads of this creative differently — click to compare and resolve">conflict</span>` : ''}</td>
       <td>${mpStatusChip(a.effective_status)}</td>
       <td class="num">${mpFmt(a.recent_spend, 'money')}</td>
       <td>${mmStateChip(a)}</td>
@@ -1050,6 +1211,7 @@ function mmRenderRows(res) {
       <td>${conf}</td></tr>`;
   }).join('') : `<tr><td colspan="10" class="mp-table-empty">${
     mmState.q ? 'No ads match this search.' : mmState.filter === 'needs' ? 'Nothing left to do in this view — nice work.' : 'No ads in this view.'}</td></tr>`;
+  ccHydrateThumbs(document.getElementById('mm-body'));
   const pager = document.getElementById('mm-pager');
   if (res.total_pages <= 1) {
     pager.innerHTML = res.total ? `<span>${res.total.toLocaleString('en-AU')} ad${res.total === 1 ? '' : 's'}</span>` : '';
@@ -1326,9 +1488,60 @@ document.getElementById('mm-pager').addEventListener('click', (e) => {
   loadMetaMatching();
 });
 document.getElementById('mm-body').addEventListener('click', (e) => {
+  if (e.target.closest('[data-cc-open]')) return; // the thumbnail opens the shared creative viewer
+  const badge = e.target.closest('[data-conflict-creative]');
   const row = e.target.closest('tr[data-ad-id]');
+  if (badge && badge.dataset.conflictCreative) { openConflictModal(badge.dataset.conflictCreative); return; }
+  if (row && mmState.filter === 'conflict' && row.querySelector('[data-conflict-creative]')) { openConflictModal(row.querySelector('[data-conflict-creative]').dataset.conflictCreative); return; }
   if (row) openMatchWorkspace(row.dataset.adId);
 });
+
+// ── Creative conflict resolution ────────────────────────────────────────
+// Shows EVERY competing person's classification of one exact meta_creative_id and lets an admin explicitly choose which
+// one is right for the whole creative. This is a deliberate human action -- automatic inheritance never does it.
+async function openConflictModal(creativeId) {
+  const body = document.getElementById('mm-conflict-body');
+  body.innerHTML = '<div class="mp-table-empty">Loading…</div>';
+  openModal('mm-conflict-modal');
+  try {
+    const d = await api(`/meta-ad-matching/conflicts/${encodeURIComponent(creativeId)}`);
+    const none = '<span class="mp-na">—</span>';
+    const cards = d.decisions.map((x) => `
+      <div class="cf-card">
+        <div class="cf-card-head">${ccThumbHtml(x.representative_ad_id, { large: true })}
+          <div><div class="cf-ad-name" title="${escapeHtml(x.representative_ad_name || '')}"><b>${escapeHtml(x.representative_ad_name || '(unnamed ad)')}</b></div>
+          <div class="hint">${x.ad_count} ad${x.ad_count === 1 ? '' : 's'} carry${x.ad_count === 1 ? 'es' : ''} this decision${x.confirmed_by ? ` · confirmed by ${escapeHtml(x.confirmed_by)}` : ''}</div></div></div>
+        <dl class="cf-fields">
+          <dt>Product</dt><dd>${x.not_product_specific ? '<em>Not product-specific</em>' : (x.products.length ? x.products.map((p) => escapeHtml(p.product_name || p.product_code)).join(', ') : none)}</dd>
+          <dt>Concept</dt><dd>${x.concept ? escapeHtml(x.concept) : none}</dd>
+          <dt>Creator</dt><dd>${x.creator ? escapeHtml(x.creator) : none}</dd>
+          <dt>Media</dt><dd>${x.media_type ? escapeHtml(x.media_type) : none}</dd>
+          <dt>Creative style</dt><dd>${x.creative_style ? escapeHtml(x.creative_style) : none}</dd>
+        </dl>
+        <details class="cf-ads"><summary>${x.ad_count} ad${x.ad_count === 1 ? '' : 's'} using this decision</summary><ul>${x.ads.map((a) => `<li title="${escapeHtml(a.ad_name || '')}">${escapeHtml(a.ad_name || a.meta_ad_id)}</li>`).join('')}${x.ad_count > x.ads.length ? `<li>…and ${x.ad_count - x.ads.length} more</li>` : ''}</ul></details>
+        ${d.state === 'conflict' ? `<button type="button" class="btn btn-primary btn-sm" data-cf-choose="${escapeHtml(x.representative_ad_id)}">Use this classification for this creative</button>` : ''}
+      </div>`).join('');
+    body.innerHTML = `
+      <p class="cf-intro">${d.state === 'conflict'
+        ? `One creative (<code>${escapeHtml(d.meta_creative_id)}</code>, ${d.total_ads_in_creative} ad${d.total_ads_in_creative === 1 ? '' : 's'}) has been classified in ${d.decisions.length} different ways by people (they differ on ${escapeHtml((d.conflict_on || []).join(' / '))}). Pick the one that is right for the whole creative.`
+        : 'This creative no longer has a conflict — its person-confirmed ads agree.'}</p>
+      <div class="cf-grid">${cards}</div>
+      <div class="cf-after">${d.unclassified_copies ? `${d.copies_that_would_inherit} of the ${d.unclassified_copies} unclassified cop${d.unclassified_copies === 1 ? 'y' : 'ies'} of this creative can take the chosen classification afterwards (skipped, rejected or Ad Setup-linked copies never do).` : 'There are no unclassified copies of this creative waiting.'} Only ads with this exact creative ID are changed.</div>`;
+    ccHydrateThumbs(body);
+    body.querySelectorAll('[data-cf-choose]').forEach((btn) => btn.addEventListener('click', async () => {
+      const ok = await confirmDialog(`Use this classification for all ${d.total_ads_in_creative} ad${d.total_ads_in_creative === 1 ? '' : 's'} of this creative? The other person-confirmed ads of this exact creative will be changed to match. This is recorded and only affects this creative.`, { okLabel: 'Use this classification' });
+      if (!ok) return;
+      body.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+      try {
+        const r = await api(`/meta-ad-matching/conflicts/${encodeURIComponent(d.meta_creative_id)}/resolve`, { method: 'POST', body: JSON.stringify({ choose_ad_id: btn.dataset.cfChoose }) });
+        closeModal('mm-conflict-modal');
+        toast(`Resolved: ${r.ads_updated} ad${r.ads_updated === 1 ? '' : 's'} updated, ${r.copies_that_inherited} cop${r.copies_that_inherited === 1 ? 'y' : 'ies'} now inherit it.`);
+        loadMetaMatching();
+        mmLoadWorkload();
+      } catch (e) { toast(e.message, true); body.querySelectorAll('button').forEach((b) => { b.disabled = false; }); }
+    }));
+  } catch (e) { body.innerHTML = `<div class="mp-table-empty">${escapeHtml(e.message)}</div>`; }
+}
 document.getElementById('mm-refresh-suggestions').addEventListener('click', async () => {
   const btn = document.getElementById('mm-refresh-suggestions');
   btn.disabled = true; btn.textContent = 'Refreshing…';
@@ -1494,7 +1707,7 @@ function cpEvidenceHtml(c) {
     ? `The newest creative we know of is older than ${90} days. Dates before ${escapeHtml(cpDate(cr.reliable_since))} only include ads that were matched, so there may be older creative we can't see.`
     : cr.recency_basis === 'none_found' ? `No matched creative found. Inside the last 90 days every ad has been reviewed, so a gap there is real.` : `Dates since ${escapeHtml(cpDate(cr.reliable_since))} are reliable: every ad created in that period has been reviewed.`;
   const row = (a, kind) => `<tr>
-      <td><button type="button" class="mp-preview-btn" data-cp-preview="${escapeHtml(a.meta_ad_id)}" title="Preview the creative" aria-label="Preview creative">&#9654;</button></td>
+      <td>${ccThumbHtml(a.meta_ad_id, { openAttr: 'data-cp-preview' })}</td>
       <td title="${escapeHtml(a.ad_name || '')}">${escapeHtml((a.ad_name || '').slice(0, 64))}</td>
       <td>${escapeHtml(cpDate(a.first_created || a.created))}${a.running ? ' <span class="co-status proven">running</span>' : ''}</td>
       <td>${escapeHtml(a.concept || (a.products ? a.products.join(', ') : '') || '—')}</td>
@@ -1558,6 +1771,7 @@ document.addEventListener('click', async (e) => {
     if (act === 'evidence') {
       document.getElementById('cp-evidence-title').textContent = `${c.product.product_name} — evidence`;
       document.getElementById('cp-evidence-body').innerHTML = cpEvidenceHtml(c);
+      ccHydrateThumbs(document.getElementById('cp-evidence-body'));
       document.getElementById('cp-evidence-modal').dataset.cpKey = c.key;
       openModal('cp-evidence-modal');
     } else if (act === 'shoot') await cpShoot(c);
@@ -1729,12 +1943,13 @@ function renderMatchWorkspace(ws, options) {
   else stateNote = '<span class="mm-note">Unmatched — not enough evidence in the name.</span>';
   const cr = ws.creative || {};
   const creativeNote = cr.state === 'conflict'
-    ? `<div class="mm-muted-line mm-conflict-line">This creative is used in ${cr.other_ads + 1} ads and people classified some of them differently (${escapeHtml((cr.conflict_on || []).join(' / '))}). Nothing is inherited until that is settled.</div>`
+    ? `<div class="mm-muted-line mm-conflict-line">This creative is used in ${cr.other_ads + 1} ads and people classified some of them differently (${escapeHtml((cr.conflict_on || []).join(' / '))}). Nothing is inherited until that is settled. <button type="button" class="link-btn" data-conflict-creative="${escapeHtml(cr.meta_creative_id || '')}">Compare &amp; resolve</button></div>`
     : cr.other_ads > 0 ? `<div class="mm-muted-line">This exact creative is used in ${cr.other_ads} other ad${cr.other_ads === 1 ? '' : 's'}${cr.state === 'source' && !cls.confirmed ? ' — a person has already classified it.' : '. Confirming this one covers the others that nobody has classified.'}</div>` : '';
 
   body.innerHTML = `
     <div class="mm-grid">
       <section class="mm-evidence">
+        <div class="mm-ws-thumb">${ccThumbHtml(ad.meta_ad_id, { large: true })}</div>
         <div class="mm-adname" title="${escapeHtml(ad.ad_name || '')}">${escapeHtml(ad.ad_name || '(unnamed ad)')}</div>
         <div class="mm-metaline">
           <span class="mm-idtag" title="Meta Ad ID">${escapeHtml(ad.meta_ad_id)}</span>
@@ -1791,6 +2006,7 @@ function renderMatchWorkspace(ws, options) {
       <button type="button" class="btn btn-primary" id="mm-confirm">${cls.auto_matched ? 'Confirm' : 'Confirm Mapping'}</button>
     </div>`;
 
+  ccHydrateThumbs(body);
   // ---- pickers ----
   const adSetupPicker = mmPicker(document.getElementById('mm-f-adsetup'), {
     multi: false, placeholder: 'Search Ad Setups by name or ID…',
@@ -13984,6 +14200,12 @@ function bfVideoPreviewInfo(url) {
 }
 
 function bfInspirationVisualHtml(insp) {
+  // A reference linked to a Meta ad (exact link / ad id only -- never by name) shows that ad's real cover and opens the
+  // shared in-app Meta-native preview. Anything else keeps the previous behaviour (YouTube/Vimeo/file embeds, or a clean
+  // placeholder that says why there is no picture).
+  if (insp.meta_ad_id) {
+    return `<div class="bf-insp-card-visual bf-insp-card-meta">${ccThumbHtml(insp.meta_ad_id, { large: true })}</div>`;
+  }
   const info = bfVideoPreviewInfo(insp.video_url);
   if (!info) {
     return `<div class="bf-insp-card-visual"><div class="bf-insp-placeholder"><span class="bf-insp-placeholder-icon">🖼</span>No link yet</div></div>`;
@@ -14049,9 +14271,56 @@ function bfInspirationCardHtml(insp) {
 
 function renderBfInspirationGrid() {
   const items = state.blackFriday.inspiration;
-  document.getElementById('bf-inspiration-grid').innerHTML = items.length
+  const grid = document.getElementById('bf-inspiration-grid');
+  grid.innerHTML = items.length
     ? items.map(bfInspirationCardHtml).join('')
     : '<div class="attention-empty">No previous winning ads logged yet -- click + New Reference to add the first one.</div>';
+  ccHydrateThumbs(grid);
+  bfRenderRecoveryPanel();
+}
+
+// Admin-only: how many references can be tied to a real Meta ad, and the explicit buttons to do it. Matching is exact
+// (the reference's fb.me preview link equals an ad's own preview link, or the URL carries ad_id=<that ad>); never by name.
+async function bfRenderRecoveryPanel(report) {
+  const host = document.getElementById('bf-insp-recovery');
+  if (!host) return;
+  if (!state.currentUser || state.currentUser.role !== 'admin') { host.style.display = 'none'; return; }
+  try {
+    const r = report || await api('/promotion-creative/inspiration/meta-recovery');
+    const n = (v) => Number(v || 0).toLocaleString('en-AU');
+    if (!r.total_references) { host.style.display = 'none'; return; }
+    host.style.display = '';
+    host.innerHTML = `<strong>Meta link recovery</strong> <span class="hint">exact links only — never matched by name</span>
+      <table>
+        <tr><td>${n(r.total_references)}</td><td>references</td></tr>
+        <tr><td>${n(r.already_linked_to_a_meta_ad)}</td><td>already linked to a Meta ad</td></tr>
+        <tr><td>${n(r.recoverable_now)}</td><td>can be linked now (exact match)</td></tr>
+        <tr><td>${n(r.meta_share_link_not_yet_matched)}</td><td>have a Meta preview link we haven't matched to an ad yet</td></tr>
+        <tr><td>${n(r.ambiguous)}</td><td>ambiguous (more than one ad) — left alone</td></tr>
+        <tr><td>${n(r.other_link_type)}</td><td>have a non-Meta link</td></tr>
+        <tr><td>${n(r.without_a_link)}</td><td>have no link at all — can't be recovered</td></tr>
+      </table>
+      <div class="bf-idea-actions">
+        <button type="button" class="btn btn-ghost btn-sm" id="bf-recov-lookup" ${r.meta_share_link_not_yet_matched ? '' : 'disabled'} title="Reads Meta preview links (read-only, 50 ads per call, highest spend first)">Look up Meta preview links</button>
+        <button type="button" class="btn btn-primary btn-sm" id="bf-recov-apply" ${r.recoverable_now ? '' : 'disabled'}>Link ${n(r.recoverable_now)} exact match${r.recoverable_now === 1 ? '' : 'es'}</button>
+      </div>`;
+    document.getElementById('bf-recov-lookup').onclick = async (e) => {
+      e.target.disabled = true; e.target.textContent = 'Reading from Meta…';
+      try {
+        const o = await api('/promotion-creative/inspiration/meta-recovery/lookup', { method: 'POST', body: JSON.stringify({}) });
+        toast(`Read ${o.asked} ad${o.asked === 1 ? '' : 's'} (${o.calls} Meta call${o.calls === 1 ? '' : 's'}), stored ${o.stored} preview link${o.stored === 1 ? '' : 's'}${o.rate_limited ? ' — Meta asked us to slow down; press again later' : ''}.`);
+        bfRenderRecoveryPanel();
+      } catch (err) { toast(err.message, true); e.target.disabled = false; }
+    };
+    document.getElementById('bf-recov-apply').onclick = async (e) => {
+      e.target.disabled = true;
+      try {
+        const o = await api('/promotion-creative/inspiration/meta-recovery/apply', { method: 'POST', body: JSON.stringify({}) });
+        toast(`Linked ${o.linked} reference${o.linked === 1 ? '' : 's'} to their Meta ad.`);
+        await loadBfInspiration();
+      } catch (err) { toast(err.message, true); e.target.disabled = false; }
+    };
+  } catch (e) { host.style.display = 'none'; }
 }
 
 function bfInspirationFindById(id) {
