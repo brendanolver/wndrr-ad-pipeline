@@ -1604,6 +1604,8 @@ const FILTERS = {
   unmatched: `a.match_status = 'unmatched' AND NOT COALESCE(c.excluded_from_intelligence, false)`,
   suggested: `a.match_status = 'suggested' AND NOT COALESCE(c.excluded_from_intelligence, false)`,
   auto: `a.match_status = 'auto_matched' AND NOT COALESCE(c.excluded_from_intelligence, false)`,
+  // Presentation only: both statuses mean "successfully mapped, no action needed". The stored statuses stay separate.
+  matched: `a.match_status IN ('auto_matched','confirmed') AND NOT COALESCE(c.excluded_from_intelligence, false)`,
   confirmed: `a.match_status = 'confirmed' AND NOT COALESCE(c.excluded_from_intelligence, false)`,
   not_product_specific: `a.match_status = 'confirmed' AND COALESCE(c.not_product_specific, false) AND NOT COALESCE(c.excluded_from_intelligence, false)`,
   excluded: `COALESCE(c.excluded_from_intelligence, false)`,
@@ -1648,6 +1650,7 @@ async function getQueue(query = {}) {
             count(*) FILTER (WHERE ${FILTERS.unmatched})::int AS unmatched,
             count(*) FILTER (WHERE ${FILTERS.suggested})::int AS suggested,
             count(*) FILTER (WHERE ${FILTERS.auto})::int AS auto,
+            count(*) FILTER (WHERE ${FILTERS.matched})::int AS matched,
             count(*) FILTER (WHERE ${FILTERS.confirmed})::int AS confirmed,
             count(*) FILTER (WHERE ${FILTERS.not_product_specific})::int AS not_product_specific,
             count(*) FILTER (WHERE ${FILTERS.excluded})::int AS excluded,

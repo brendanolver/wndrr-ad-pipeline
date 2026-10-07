@@ -67,11 +67,37 @@ test('STOCK GATE: 30 passes, 29 and 20 do not; below the gate means no shoot rec
   assert.ok(!names(P.recommendations).some((nme) => /ECHO|GOLF/.test(nme)));
 });
 
-test('stock UNKNOWN: never a shoot recommendation', () => {
+test('stock UNKNOWN: never a shoot recommendation, and shown as "stock unavailable" (NOT as low stock)', () => {
   const U = build({ stock: null, sizesByStyle: null });
   assert.equal(U.recommendations.length, 0);
   assert.equal(U.counts.stock_known, false);
-  assert.ok(U.held_low_stock.every((x) => x.known === false));
+  assert.equal(U.held_low_stock.length, 0, 'an inventory-data problem is not reported as low stock');
+  assert.ok(U.stock_unavailable.length >= 4);
+  assert.ok(U.stock_unavailable.every((x) => x.reason === 'stock_not_loaded' && x.would_have_been));
+});
+
+test('a CORE product with NO inventory record is "stock unavailable", distinct from genuine low stock and from 0 units', () => {
+  const partial = new Map([...stock.entries()].filter(([code]) => !code.startsWith('W26FF001'))); // FOXTROT has no record at all
+  partial.sizes = stock.sizes;
+  const R = build({ stock: partial });
+  assert.deepEqual(R.stock_unavailable.map((x) => x.product_name), ['FOXTROT SHORT']);
+  assert.equal(R.stock_unavailable[0].reason, 'no_stock_record');
+  assert.ok(!R.held_low_stock.some((x) => x.product_name === 'FOXTROT SHORT'));
+  assert.ok(!names(R.recommendations).includes('FOXTROT SHORT'));
+  // a record with 0 units is genuinely low stock, not unavailable
+  const zero = new Map(stock); zero.set('W26FF001BLK', 0); zero.sizes = stock.sizes;
+  const Z = build({ stock: zero });
+  assert.ok(Z.held_low_stock.some((x) => x.product_name === 'FOXTROT SHORT' && x.units === 0));
+  assert.ok(!Z.stock_unavailable.some((x) => x.product_name === 'FOXTROT SHORT'));
+});
+
+test('the only blockers are < 30 known units and unavailable stock; sizes (even all sold out) never block', () => {
+  const noSizes = new Map(stock); noSizes.sizes = new Map([['W26BB001BLK', new Map(Object.entries({ S: 0, M: 0, L: 0, XL: 0 }))], ['W26AA001BLK', new Map(Object.entries({ S: 0, M: 0, L: 0, XL: 0 }))]]);
+  const R = build({ stock: noSizes, sizesByStyle: noSizes.sizes });
+  const alpha = R.recommendations.find((c) => c.product.product_name === 'ALPHA HEAVY WEIGHT TEE' && c.type === 'shoot_fresh');
+  assert.ok(alpha, 'ALPHA is still recommended with every size sold out');
+  assert.match(alpha.stock.size_warning, /Broken sizes/);
+  assert.equal(R.stock_unavailable.length, 0);
 });
 
 test('stock is summed across colourways AND old season codes of the family', () => {
