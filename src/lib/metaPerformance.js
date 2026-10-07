@@ -41,7 +41,7 @@
 // columns (video_plays, thruplays, video_p25 ...) remain stored untouched.
 const { pool } = require('../db');
 const reachStore = require('./metaReachStore'); // DB-only reads of the Reach/Frequency cache (no network)
-const funnelHealth = require('./metaFunnelHealth'); // inactive until WNDRR supplies targets
+const funnelHealth = require('./metaFunnelHealth'); // confirmed WNDRR benchmarks only
 
 // The account reporting timezone. Insight dates in meta_ad_insights_daily
 // are calendar days in the Meta ad account's own timezone, so every
@@ -470,6 +470,7 @@ function parseAdsQuery(query) {
 async function getAds(parsed, query) {
   const opts = parseAdsQuery(query);
   const filter = parseFilter(query);
+  const healthDays = funnelHealth.rangeDays(parsed.range);
   // Where this range's per-ad Reach/Frequency can come from (never Meta, only the stored cache).
   const reachStatus = await reachStore.getStatus(parsed.range, parsed.today);
   const reachFrom = reachStatus.ad_values; // 'stored_daily' (one day) | 'meta_range' (cached pull) | null
@@ -547,11 +548,12 @@ async function getAds(parsed, query) {
       ...adReach(reachFrom, r),
     })).map((a) => ({
       ...a,
-      // Inactive until WNDRR supplies targets (lib/metaFunnelHealth.js): null for every row. Unknown funnel is never judged.
-      cpa_health: funnelHealth.classify(a.funnel, 'cpa', a.cpa),
-      frequency_health: funnelHealth.classify(a.funnel, 'frequency', a.frequency),
+      // Only WNDRR-confirmed benchmarks (lib/metaFunnelHealth.js); null = neutral. Frequency is judged only for ~4-day ranges.
+      cpa_health: funnelHealth.classify(a.funnel, 'cpa', a.cpa, { days: healthDays }),
+      frequency_health: funnelHealth.classify(a.funnel, 'frequency', a.frequency, { days: healthDays }),
+      reach_health: funnelHealth.classify(a.funnel, 'reach', a.reach, { days: healthDays }), // no confirmed Reach benchmark: always null today
     })),
-    health: funnelHealth.status(),
+    health: funnelHealth.status({ range: parsed.range }),
     reach_info: {
       state: reachFrom ? 'ready' : reachStatus.state, source: reachFrom, pulled_at: reachStatus.pulled_at, stale: reachFrom === 'meta_range' && reachStatus.stale,
       includes_today: reachStatus.includes_today, last_error: reachStatus.last_error,

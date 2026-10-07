@@ -2851,3 +2851,5 @@ td.mp-name > .mp-name-stack{vertical-align:middle;max-width:calc(100% - 46px);}
 .mp-table.mp-perf th.mp-th-creative{padding-left:6px;padding-right:4px;}
 .insp-recovery summary{cursor:pointer;font-weight:600;}
 .insp-recovery[open]{padding-bottom:12px;}
+.mp-health-note{font-size:11.5px;color:var(--text-secondary);background:var(--surface2);border-radius:var(--r);padding:6px 10px;margin:0 0 8px;}
+.mp-table.mp-perf td.mp-reach-key{font-weight:700;color:var(--text);background:#f1f6f5;}
