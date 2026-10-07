@@ -2878,3 +2878,54 @@ CREATE TABLE IF NOT EXISTS meta_ad_creatives (
   error_code VARCHAR(40),
   error_message TEXT
 );
+
+-- =====================================================================
+-- Black Friday 2026 creative-planning workspaces (Promotions-only round).
+-- A promotion_creative_idea_executions row used to mean "planned" no matter
+-- how it got there, so the older planning-sheet records (seeded above) all
+-- counted toward the stage targets. These additive columns separate the
+-- CURRENT plan (rows someone deliberately added in the stage workspace)
+-- from those historical records, which are preserved untouched but no longer
+-- counted. Nothing is deleted; the old style matrix and execution rows stay.
+-- =====================================================================
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'promotion_creative_idea_executions' AND column_name = 'is_historical'
+  ) THEN
+    ALTER TABLE promotion_creative_idea_executions ADD COLUMN is_historical BOOLEAN NOT NULL DEFAULT false;
+    -- One-time: every execution that exists when this column is first added
+    -- predates the workspace -- for any promotion that has a creative-style
+    -- matrix (Black Friday 2026) it becomes a historical record. A promotion
+    -- with no matrix (Black Friday 2027) is left exactly as it was.
+    UPDATE promotion_creative_idea_executions pcie SET is_historical = true
+    WHERE EXISTS (
+      SELECT 1 FROM promotion_creative_ideas pci
+      JOIN promotion_creative_targets pct ON pct.promotion_id = pci.promotion_id
+      WHERE pci.id = pcie.promotion_creative_idea_id
+    );
+  END IF;
+END $$;
+
+-- Set only by the stage workspace's "+ Add Creative". A row with
+-- plan_added_at IS NULL was never deliberately added to the current plan.
+ALTER TABLE promotion_creative_idea_executions ADD COLUMN IF NOT EXISTS plan_added_at TIMESTAMPTZ;
+ALTER TABLE promotion_creative_idea_executions ADD COLUMN IF NOT EXISTS plan_added_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE promotion_creative_idea_executions ADD COLUMN IF NOT EXISTS concept_kind VARCHAR(10)
+  CHECK (concept_kind IS NULL OR concept_kind IN ('tested', 'new'));
+-- Tested Concept: the previous winning ad (Inspiration Library record) this
+-- execution reuses -- the evidence shown on the card.
+ALTER TABLE promotion_creative_idea_executions ADD COLUMN IF NOT EXISTS tested_inspiration_id INTEGER REFERENCES creative_inspiration(id) ON DELETE SET NULL;
+ALTER TABLE promotion_creative_idea_executions ADD COLUMN IF NOT EXISTS product_text VARCHAR(255);
+ALTER TABLE promotion_creative_idea_executions ADD COLUMN IF NOT EXISTS execution_note TEXT;
+
+-- Re-asserted every boot: a planning-sheet seed row (idea has a source_key)
+-- that was never deliberately added is historical even if the seed above
+-- re-created it after someone removed it.
+UPDATE promotion_creative_idea_executions pcie SET is_historical = true
+FROM promotion_creative_ideas pci
+WHERE pci.id = pcie.promotion_creative_idea_id
+  AND pci.source_key IS NOT NULL
+  AND pcie.plan_added_at IS NULL
+  AND pcie.is_historical = false;
