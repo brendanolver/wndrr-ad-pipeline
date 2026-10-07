@@ -96,3 +96,51 @@ test('Ad Matching queue stays local: no Meta client, no ApparelMagic WRITE', () 
   assert.doesNotMatch(code('lib/metaAdMatching.js'), /require\(['"]\.\/(metaAds|metaSync)['"]\)/);
   assert.doesNotMatch(code('routes/metaAdMatching.js'), /metaAds|metaSync/);
 });
+
+// ---- ONE shared inheritance-eligibility rule ----
+const human = "(CASE WHEN m.match_status = 'confirmed' THEN 'confirmed' END)";
+
+test('decide(): eligible + new decision -> apply; already in line -> unchanged; not eligible -> skip with the reason', () => {
+  const group = { source: { signature: 'sig1', from_meta_ad_id: 'src' } };
+  assert.deepEqual(id.decide({ eligible: true, match_method: null, auto_fields: null }, group), { action: 'apply' });
+  assert.deepEqual(id.decide({ eligible: true, match_method: 'creative_inherited', auto_fields: { inherited: { signature: 'sig1', from_meta_ad_id: 'src' } } }, group), { action: 'unchanged' });
+  assert.deepEqual(id.decide({ eligible: true, match_method: 'creative_inherited', auto_fields: { inherited: { signature: 'OLD', from_meta_ad_id: 'src' } } }, group), { action: 'apply' }, 'a changed decision is re-applied');
+  assert.deepEqual(id.decide({ eligible: false, ineligible_reason: 'skipped' }, group), { action: 'skip', reason: 'skipped' });
+  assert.deepEqual(id.decide({ eligible: false, ineligible_reason: 'rejected_by_person' }, group), { action: 'skip', reason: 'rejected_by_person' });
+});
+
+test('the eligibility SQL = right status AND not person-owned AND not rejected; reasons mirror it', () => {
+  const sql = id.eligibleSql(human);
+  assert.match(sql, /match_status IN \('unmatched', 'suggested', 'auto_matched'\)/);
+  assert.match(sql, /\(CASE WHEN m\.match_status = 'confirmed' THEN 'confirmed' END\)\) IS NULL/);
+  assert.match(sql, /c\.auto_match_blocked_at IS NULL/);
+  const why = id.ineligibleReasonSql(human);
+  assert.match(why, /'confirmed'/);
+  assert.match(why, /'rejected_by_person'/);
+});
+
+test('Apply, the workload panel and the queue all use that one rule (no second definition)', () => {
+  const read = (f) => fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', f), 'utf8');
+  const identity = read('metaCreativeIdentity.js');
+  const matching = read('metaAdMatching.js');
+  // Apply (applyToAd) and its dry run (previewGroup) take eligibility from the shared helper
+  assert.equal((identity.match(/eligibleSql\(humanOwnedSql\)/g) || []).length >= 2, true);
+  const codeOnly = identity.replace(/\/\/.*$/gm, '');
+  assert.equal((codeOnly.match(/auto_match_blocked_at/g) || []).length, 2, 'the rejected-by-person test lives only inside the two shared helpers');
+  // workload + queue (via the covered-units SELECT) use the same helper
+  assert.match(matching, /creativeIdentity\.eligibleSql\(HUMAN_OWNED_SQL\)/);
+  assert.equal((matching.match(/coveredUnitsSelect\(\)/g) || []).length, 2, 'queue and workload share one covered-units definition');
+  assert.match(matching, /creativeIdentity\.previewAll\(/, 'the panel\'s "Apply to N" is the real dry run of Apply');
+});
+
+test('every filter chip reads a count field the queue returns, and says its unit', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  const matching = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'metaAdMatching.js'), 'utf8');
+  const chips = [...app.matchAll(/\['([a-z_]+)', '([^']+)', '([a-z_]+)', '(creatives|ads)'\]/g)];
+  assert.equal(chips.length, 9);
+  chips.forEach(([, , , field]) => assert.match(matching, new RegExp(`AS ${field}\\b`), `counts.${field} exists`));
+  const unit = Object.fromEntries(chips.map((m) => [m[2], m[4]]));
+  ['To do', 'Needs review', 'Unmatched', 'Will inherit', 'Historical', 'Creative conflicts'].forEach((l) => assert.equal(unit[l], 'creatives', l));
+  ['Matched', 'Not product-specific', 'Excluded'].forEach((l) => assert.equal(unit[l], 'ads', l));
+  assert.equal(chips.find((m) => m[1] === 'conflict')[3], 'conflicts', 'the conflict chip reads `conflicts` (it used to read an undefined `conflict`)');
+});

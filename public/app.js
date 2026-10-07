@@ -970,13 +970,17 @@ const mmState = {
   view: 'performance', scope: '30d', filter: 'needs', q: '', page: 1, pageSize: 25,
   reqId: 0, autoSuggested: false, options: null,
 };
-// To do / Needs review / Unmatched / Historical are counted in unique CREATIVES (ads that share a
-// meta_creative_id are one); Historical = needs-review work that is not about a current CORE product
-// with sellable stock (still stored and searchable, just not in the way).
+// Every chip says what it counts. To do / Needs review / Unmatched / Will inherit / Historical / Creative
+// conflicts count unique CREATIVES (ads that share a meta_creative_id are one); Matched / Not product-specific /
+// Excluded count individual ADS. Entries: [filter, label, field in counts, unit].
+//   To do + Historical + Will inherit together are every unique creative still needing work (all scope).
+//   Historical = needs-review work that is not about a current CORE product with sellable stock (kept, searchable).
+//   Will inherit = every outstanding copy of the creative will take a person's decision when "Apply" is pressed.
 const MM_FILTERS = [
-  ['needs', 'To do'], ['suggested', 'Needs review'], ['unmatched', 'Unmatched'], ['matched', 'Matched'],
-  ['historical', 'Historical'], ['conflict', 'Creative conflicts'],
-  ['not_product_specific', 'Not product-specific'], ['excluded', 'Excluded'],
+  ['needs', 'To do', 'needs', 'creatives'], ['suggested', 'Needs review', 'suggested', 'creatives'], ['unmatched', 'Unmatched', 'unmatched', 'creatives'],
+  ['inherit', 'Will inherit', 'will_inherit', 'creatives'], ['matched', 'Matched', 'matched', 'ads'],
+  ['historical', 'Historical', 'historical', 'creatives'], ['conflict', 'Creative conflicts', 'conflicts', 'creatives'],
+  ['not_product_specific', 'Not product-specific', 'not_product_specific', 'ads'], ['excluded', 'Excluded', 'excluded', 'ads'],
 ];
 
 function loadMetaPerformanceArea() {
@@ -1016,9 +1020,9 @@ const mmHasValues = (a) => (a.match_status === 'confirmed' || a.match_status ===
 
 function mmRenderChips(counts) {
   const chips = document.getElementById('mm-chips');
-  chips.innerHTML = MM_FILTERS.map(([key, label]) => `
-    <button type="button" class="mm-chip${mmState.filter === key ? ' active' : ''}" data-filter="${key}">${label}
-      <span class="mm-chip-n">${Number((counts && counts[key]) || 0).toLocaleString('en-AU')}</span></button>`).join('');
+  chips.innerHTML = MM_FILTERS.map(([key, label, field, unit]) => `
+    <button type="button" class="mm-chip${mmState.filter === key ? ' active' : ''}" data-filter="${key}" title="${label}: ${unit}">${label}
+      <span class="mm-chip-n">${Number((counts && counts[field]) || 0).toLocaleString('en-AU')}</span> <span class="mm-chip-unit">${unit}</span></button>`).join('');
 }
 
 function mmRenderRows(res) {
@@ -1027,6 +1031,8 @@ function mmRenderRows(res) {
   const noteParts = [];
   if (res.filter === 'historical') noteParts.push('Historical: ads that point at products which are not current CORE apparel with sellable stock, and that are not running or recently active. They are kept and searchable, just out of the way of the main queue.');
   else if (res.filter === 'conflict') noteParts.push('Creatives where people classified different ads of the same creative differently. Nothing is inherited for these until someone settles it.');
+  else if (res.filter === 'inherit') noteParts.push('Creatives whose every unclassified copy will take the classification of an ad a person already classified on the exact same creative. Nothing is applied until you press "Apply" in the Review workload panel.');
+  if (res.scope && res.scope !== 'all') noteParts.push('These chips count ads active in the selected window; the Review workload panel above counts all ads. Choose "All ads" to compare them directly.');
   if (res.relevance && !res.relevance.known) noteParts.push(`Product relevance isn't available yet (${res.relevance.reason || 'ApparelMagic data not loaded'}), so every ad is shown as actionable.`);
   note.style.display = noteParts.length ? '' : 'none';
   note.textContent = noteParts.join(' ');
@@ -1072,19 +1078,23 @@ async function mmLoadWorkload() {
     const w = await api('/meta-ad-matching/workload');
     const f = w.funnel;
     const n = (v) => Number(v || 0).toLocaleString('en-AU');
+    const blocked = f.copies_that_cannot_inherit_by_reason || {};
+    const BLOCK_LABEL = { skipped: 'skipped by a person', rejected_by_person: 'rejected/cleared by a person', linked_ad_setup: 'linked to an Ad Setup', human_classification: 'partly or fully classified by a person', manually_confirmed: 'manually confirmed', unexpected_classification_values: 'carries a person\'s values', confirmed: 'already confirmed' };
+    const blockedText = Object.entries(blocked).map(([k, v]) => `${n(v)} ${BLOCK_LABEL[k] || k}`).join(', ');
     host.style.display = '';
     host.innerHTML = `
       <div class="mm-workload-head"><strong>Review workload</strong>
-        <span class="hint">Ads that share a creative are one piece of creative; you classify it once.</span></div>
+        <span class="hint">All ads, all time. Ads that share a creative are one piece of creative; you classify it once. Matches the chips below when "All ads" is selected.</span></div>
       <div class="mm-workload-line">
         <span><b>${n(f.remaining_ad_instances)}</b> ads need work</span><span>&rarr;</span>
         <span><b>${n(f.unique_creatives)}</b> unique creatives</span><span>&rarr;</span>
-        <span><b>${n(f.creatives_already_covered_by_a_human_decision)}</b> already covered by a decision on the same creative</span><span>&rarr;</span>
-        <span class="mm-workload-key"><b>${n(f.actionable_creatives)}</b> need a person now</span>
-        <span class="hint">(${n(f.historical_creatives)} historical${f.creatives_in_conflict ? `, ${n(f.creatives_in_conflict)} in conflict` : ''})</span>
+        <span><b>${n(f.creatives_that_will_inherit)}</b> creatives will inherit <span class="hint">(${n(f.ads_in_creatives_that_will_inherit)} ads)</span></span><span>&rarr;</span>
+        <span class="mm-workload-key"><b>${n(f.actionable_creatives)}</b> creatives need a person now</span>
+        <span class="hint">+ ${n(f.historical_creatives)} historical${f.creatives_in_conflict ? ` &middot; ${n(f.creatives_in_conflict)} creative${f.creatives_in_conflict === 1 ? '' : 's'} in conflict` : ''}</span>
       </div>
-      ${f.ad_instances_that_would_inherit ? `<div class="mm-workload-actions"><button type="button" class="btn btn-ghost btn-sm" id="mm-apply-inheritance">Apply to ${n(f.ad_instances_that_would_inherit)} duplicate ad${f.ad_instances_that_would_inherit === 1 ? '' : 's'}</button>
-        <span class="hint">Gives each not-yet-classified copy of an already-classified creative that creative's classification. Local only; people's own decisions are never changed.</span></div>` : ''}`;
+      ${f.copies_that_cannot_inherit ? `<div class="mm-muted-line">${n(f.creatives_with_copies_that_cannot_inherit)} creatives have a person's decision but ${n(f.copies_that_cannot_inherit)} cop${f.copies_that_cannot_inherit === 1 ? 'y' : 'ies'} can't inherit it (${escapeHtml(blockedText)}), so they stay in "need a person".</div>` : ''}
+      ${f.ads_apply_would_change ? `<div class="mm-workload-actions"><button type="button" class="btn btn-ghost btn-sm" id="mm-apply-inheritance">Apply to ${n(f.ads_apply_would_change)} duplicate ad${f.ads_apply_would_change === 1 ? '' : 's'}</button>
+        <span class="hint">Exactly the ads this will change. Each takes the classification of a person's decision on the exact same creative; ads a person owns, skipped or rejected are never touched. Local only.</span></div>` : ''}`;
     const btn = document.getElementById('mm-apply-inheritance');
     if (btn) btn.onclick = async () => {
       btn.disabled = true; btn.textContent = 'Applying…';
