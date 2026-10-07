@@ -1,11 +1,13 @@
-// Meta Performance V1 -- admin-only, READ-ONLY endpoints over the local
-// Meta tables. Nothing here imports metaAds.js or issues any Meta request,
-// so the page works from stored data alone (even if Meta is down) and a
-// page view can never spend a Meta API call or touch a credential. See
-// src/lib/metaPerformance.js for the aggregation rules.
+// Meta Performance -- admin-only endpoints. Every GET reads the LOCAL Meta
+// tables only, so the page works from stored data alone (even if Meta is
+// down) and a page view can never spend a Meta API call or touch a
+// credential. The single exception is the explicit POST /reach/load, which
+// makes read-only Insights GETs for the chosen range (see metaRangeReach.js).
+// See src/lib/metaPerformance.js for the aggregation rules.
 const express = require('express');
 const { requireAdmin } = require('../lib/permissions');
 const perf = require('../lib/metaPerformance');
+const reachLib = require('../lib/metaRangeReach');
 
 const router = express.Router();
 router.use(requireAdmin);
@@ -37,6 +39,16 @@ router.get('/ads', handle((req) => perf.getAds(perf.parseRangeParams(req.query),
 router.get('/ads/:metaAdId', handle((req) => {
   if (!AD_ID_RE.test(req.params.metaAdId)) throw new perf.HttpError(400, 'Invalid ad id');
   return perf.getAdDetail(req.params.metaAdId, perf.parseRangeParams(req.query));
+}));
+
+// Range-level Reach / Frequency (unique people: never summed from daily rows).
+// GET  /api/meta-performance/reach?preset=|since=&until=   -> cache status (DB only, no Meta call)
+// POST /api/meta-performance/reach/load {preset|since,until, force?} -> start an ON-DEMAND, read-only
+//      Meta pull for exactly that range (background); repeat while loading/fresh makes no Meta call.
+router.get('/reach', handle((req) => reachLib.getStatus(perf.parseRangeParams(req.query).range)));
+router.post('/reach/load', handle((req) => {
+  const parsed = perf.parseRangeParams(req.body || {});
+  return reachLib.startPull(parsed.range, { userId: req.user && req.user.id, force: !!(req.body && req.body.force) });
 }));
 
 module.exports = router;

@@ -94,8 +94,13 @@ async function fetchAllPages(endpoint, params, maxPages = 500) {
 }
 
 // Total Stock On Hand per style, summed across configured warehouses (or all
-// warehouses if AM_WAREHOUSE_IDS is unset). Style-level only, per the
-// Planning brief -- never size/SKU-level.
+// warehouses if AM_WAREHOUSE_IDS is unset). The returned Map is style-level
+// (what every existing caller reads). The SAME crawl also records stock per SIZE
+// -- no extra AM requests -- on the Map's `.sizes` property (style -> Map(size ->
+// qty)), used only by the Core creative plan's size-availability warning. The
+// size field name on /inventory rows is read defensively (see SIZE_FIELDS) and
+// reported on `.sizeField` / `.sample` so it can be verified in production
+// (GET /api/debug/am/sku-sizes/:productCode) rather than assumed.
 //
 // Field is `qty_avail_sell` from /sku_warehouse, not `qty_inventory` --
 // verified in production (demandplanning's V2 branch, AM data migration):
@@ -109,12 +114,33 @@ async function getStockByStyle() {
   return getCached('stock', STOCK_TTL, fetchStockByStyleUncached);
 }
 
+// Candidate /inventory fields that may carry a SKU's size (UNVERIFIED against the live
+// account: the first one present on a row wins; none present = size data unavailable).
+const SIZE_FIELDS = ['size', 'size_name', 'size_label', 'sku_size', 'attr_3'];
+function rowSize(row) {
+  for (const f of SIZE_FIELDS) {
+    const v = row[f];
+    if (v !== undefined && v !== null && String(v).trim() !== '') return { size: String(v).trim().toUpperCase(), field: f };
+  }
+  return null;
+}
+
+// style -> Map(size -> qty) from the same cached crawl; empty when AM exposes no size field.
+async function getStockSizes() {
+  const stock = await getStockByStyle();
+  return { sizes: stock.sizes || new Map(), sizeField: stock.sizeField || null };
+}
+
 async function fetchStockByStyleUncached() {
   const skuRows = await fetchAllPages('inventory', {});
   const styleBySku = new Map();
+  const sizeBySku = new Map();
+  let sizeField = null;
   for (const row of skuRows) {
     if (row.sku_id != null && row.style_number) {
       styleBySku.set(String(row.sku_id), row.style_number);
+      const sz = rowSize(row);
+      if (sz) { sizeBySku.set(String(row.sku_id), sz.size); if (!sizeField) sizeField = sz.field; }
     }
   }
 
@@ -122,14 +148,23 @@ async function fetchStockByStyleUncached() {
   const whRows = await fetchAllPages('sku_warehouse', whParams);
 
   const stockByStyle = new Map();
+  const sizes = new Map(); // style -> Map(size -> qty)
   for (const row of whRows) {
     if (WAREHOUSE_IDS.length > 1 && !WAREHOUSE_IDS.includes(String(row.warehouse_id))) continue;
     const style = styleBySku.get(String(row.sku_id));
     if (!style) continue;
     const qty = parseFloat(row.qty_avail_sell) || 0;
     stockByStyle.set(style, (stockByStyle.get(style) || 0) + qty);
+    const size = sizeBySku.get(String(row.sku_id));
+    if (size) {
+      if (!sizes.has(style)) sizes.set(style, new Map());
+      sizes.get(style).set(size, (sizes.get(style).get(size) || 0) + qty);
+    }
   }
-  return stockByStyle; // Map<style_code, total SOH>
+  stockByStyle.sizes = sizes;
+  stockByStyle.sizeField = sizeField; // null = no size field found on /inventory rows
+  stockByStyle.sample = { inventoryKeys: skuRows[0] ? Object.keys(skuRows[0]) : [], skuWarehouseKeys: whRows[0] ? Object.keys(whRows[0]) : [] };
+  return stockByStyle; // Map<style_code, total SOH> (+ .sizes / .sizeField / .sample)
 }
 
 // Units currently on order from suppliers (open purchase orders, not yet
@@ -435,6 +470,7 @@ function getAmCacheStatus() {
 module.exports = {
   configured,
   getStockByStyle,
+  getStockSizes,
   getStyleCatalogue,
   getOnOrderByStyle,
   getSalesByStyle,

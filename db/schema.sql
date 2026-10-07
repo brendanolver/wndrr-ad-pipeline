@@ -2825,3 +2825,56 @@ CREATE INDEX IF NOT EXISTS idx_meta_match_changes_ad ON meta_match_changes (meta
 -- same-name product group is represented by the code the app already links to.
 -- Additive and idempotent (no existing data is changed).
 ALTER TABLE meta_catalogue_families ADD COLUMN IF NOT EXISTS in_local BOOLEAN NOT NULL DEFAULT false;
+
+-- ---------------------------------------------------------------------------
+-- Meta Performance V2 (additive): range-level Reach / Frequency cache and the
+-- ad-creative preview cache. Nothing existing is altered.
+--
+-- Reach is a unique-people count, so it is NOT additive across days or ads.
+-- Exact period figures can only come from Meta itself, per (account/ad, date
+-- range). They are pulled ON DEMAND (admin click, read-only GETs) and cached
+-- here per exact range; a page view never calls Meta.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS meta_reach_pulls (
+  id SERIAL PRIMARY KEY,
+  since_date DATE NOT NULL,
+  until_date DATE NOT NULL,
+  state VARCHAR(12) NOT NULL DEFAULT 'running' CHECK (state IN ('running', 'completed', 'failed')),
+  ads_total INTEGER,
+  account_reach BIGINT,
+  account_frequency NUMERIC(10,4),
+  account_impressions BIGINT,
+  error_code VARCHAR(40),
+  error_message TEXT,
+  retry_after_seconds INTEGER,
+  requested_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_meta_reach_pulls_range ON meta_reach_pulls (since_date, until_date, id DESC);
+
+-- No FK on meta_ad_id: Meta may return an ad this app has not stored. Rows
+-- are only ever written when a pull COMPLETES in full (never partially).
+CREATE TABLE IF NOT EXISTS meta_ad_range_reach (
+  pull_id INTEGER NOT NULL REFERENCES meta_reach_pulls(id) ON DELETE CASCADE,
+  meta_ad_id VARCHAR(64) NOT NULL,
+  reach BIGINT NOT NULL DEFAULT 0,
+  frequency NUMERIC(10,4),
+  impressions BIGINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (pull_id, meta_ad_id)
+);
+
+-- One cached creative preview per ad (media metadata fetched read-only from
+-- Meta when someone opens a preview). Meta's media URLs are signed CDN links
+-- that expire, so expires_at drives a refetch; no access token is ever stored
+-- (URLs containing one are rejected before they get here).
+CREATE TABLE IF NOT EXISTS meta_ad_creatives (
+  meta_ad_id VARCHAR(64) PRIMARY KEY REFERENCES meta_ads(meta_ad_id) ON DELETE CASCADE,
+  meta_creative_id VARCHAR(64),
+  kind VARCHAR(12),
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  expires_at TIMESTAMPTZ,
+  fetched_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  error_code VARCHAR(40),
+  error_message TEXT
+);

@@ -174,6 +174,7 @@ async function loadSnapshot(now = new Date(), db = pool) {
     return {
       id: r.meta_ad_id,
       name: r.ad_name,
+      effective_status: r.effective_status,
       creative_key: r.meta_creative_id || r.meta_ad_id,
       status: r.match_status,
       products: r.products,
@@ -810,4 +811,5 @@ async function setState({ key, state, note, shootPlanItemId, userId }, deps = {}
 module.exports = {
   providers, INCLUDED_ADS_SQL, buildWindows, loadSnapshot, loadDemand, classifySellers, buildProductSignals, analyseConcepts,
   generateOpportunities, applyStates, computeAll, listOpportunities, setState, freshnessBand, launchDateOf, daysBetween,
+  recTestConcepts, // reused by the Core creative plan (src/lib/coreCreativePlan.js)
 };

@@ -513,13 +513,18 @@ router.get('/styles', async (req, res, next) => {
 });
 
 // ---------------------------------------------------------------------
-// Progress: the derived required/planned/completed matrix + stage totals
-// (see the brief, items 2/8/9). Never a stored counter -- computed fresh
-// from promotion_creative_targets + every idea's stage EXECUTIONS + each
-// execution's effective linked concept's real pipeline state, on every
-// call. Stage totals count every execution regardless of whether it has a
-// style yet (an unclassified execution is still real planned work); the
-// per-style matrix only breaks out the ones that do.
+// Progress: the derived stage totals + per-format breakdown. Never a stored
+// counter -- computed fresh on every call from every idea's stage EXECUTIONS
+// + each execution's effective linked concept's real pipeline state.
+//
+// Simplified model (Promotions V2): a stage's TARGET is the stage's own
+// promotion_stages.required_count (Black Friday 2026: 35/50/75/20 = 180) and
+// is independent of the creative-style matrix. The matrix
+// (promotion_creative_targets) is NO LONGER a quota: its non-zero cells are
+// returned only as `formats_to_consider` -- optional inspiration, ordered by the
+// old spreadsheet's emphasis -- and the table is left untouched. A format is never
+// required, and an execution with no format is just as real as any other.
+// Stage totals count every execution regardless of whether it has a format.
 // ---------------------------------------------------------------------
 router.get('/:promotionId/progress', async (req, res, next) => {
   try {
@@ -535,15 +540,17 @@ router.get('/:promotionId/progress', async (req, res, next) => {
 
     const ideas = await loadIdeasForPromotion(promotionId);
 
+    // Stage targets come from the stages themselves, not from summing the matrix.
+    const stageRows = await pool.query(
+      'SELECT id, name, sort_order, required_count FROM promotion_stages WHERE promotion_id = $1',
+      [promotionId]
+    );
     const stageTotalsMap = new Map();
-    for (const t of targetsResult.rows) {
-      if (!stageTotalsMap.has(t.promotion_stage_id)) {
-        stageTotalsMap.set(t.promotion_stage_id, {
-          promotion_stage_id: t.promotion_stage_id, stage_name: t.stage_name, stage_sort_order: t.stage_sort_order,
-          required: 0, planned: 0, completed: 0,
-        });
-      }
-      stageTotalsMap.get(t.promotion_stage_id).required += t.required_count;
+    for (const st of stageRows.rows) {
+      stageTotalsMap.set(st.id, {
+        promotion_stage_id: st.id, stage_name: st.name, stage_sort_order: st.sort_order,
+        required: st.required_count, planned: 0, completed: 0,
+      });
     }
 
     // Cell key: "stageId:styleId" -- unions target-matrix cells with any
@@ -600,10 +607,25 @@ router.get('/:promotionId/progress', async (req, res, next) => {
       over_target: Math.max(0, c.planned - c.required),
     })).sort((a, b) => a.stage_sort_order - b.stage_sort_order || (a.style_sort_order || 0) - (b.style_sort_order || 0));
 
+    // Optional inspiration per stage: the formats the old matrix leaned on (most
+    // emphasised first), plus any format that already has real work in the stage.
+    // `suggested` is the legacy matrix number, informational only -- never a quota.
+    const formatsByStage = new Map();
+    for (const c of cells.values()) {
+      if (!(c.required > 0 || c.planned > 0)) continue;
+      if (!formatsByStage.has(c.promotion_stage_id)) formatsByStage.set(c.promotion_stage_id, []);
+      formatsByStage.get(c.promotion_stage_id).push({
+        creative_style_id: c.creative_style_id, style_name: c.style_name, media_type: c.media_type,
+        suggested: c.required, planned: c.planned, completed: c.completed, style_sort_order: c.style_sort_order || 0,
+      });
+    }
+    formatsByStage.forEach((list) => list.sort((a, b) => b.suggested - a.suggested || a.style_sort_order - b.style_sort_order));
+
     const stageTotals = [...stageTotalsMap.values()].map((s) => ({
       ...s,
       still_to_plan: Math.max(0, s.required - s.planned),
       over_target: Math.max(0, s.planned - s.required),
+      formats_to_consider: formatsByStage.get(s.promotion_stage_id) || [],
     })).sort((a, b) => a.stage_sort_order - b.stage_sort_order);
 
     // Summed from each stage's OWN still_to_plan/over_target rather than
