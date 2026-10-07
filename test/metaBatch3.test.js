@@ -16,34 +16,121 @@ const pullLib = require('../src/lib/metaActivityPull');
 const read = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
 const code = (f) => read(f).replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
 
-// ── funnel health: prepared, inactive, never guessed ──────────────────
-test('health: inactive by default -- no colour for any funnel, any number', () => {
-  assert.equal(health.ENABLED, false);
-  for (const f of ['TOF', 'TOM', 'MOF', 'unknown', 'multiple', null]) {
-    for (const m of ['cpa', 'frequency']) assert.equal(health.classify(f, m, 12.5), null, `${f}/${m}`);
+// ── funnel health: ONLY the WNDRR-confirmed rules ──────────────────────────
+const D4 = { days: 4 }; // a 4-calendar-day range
+const c = (f, m, v, ctx = D4) => health.classify(f, m, v, ctx);
+test('health: TOF CPA over $200 is red; $200 or less is neutral; no invented bands', () => {
+  assert.equal(c('TOF', 'cpa', 200.01), 'red');
+  assert.equal(c('TOF', 'cpa', 350), 'red');
+  assert.equal(c('TOF', 'cpa', 200), null);
+  assert.equal(c('TOF', 'cpa', 150), null);
+  assert.equal(c('TOF', 'cpa', 12), null);
+  for (const v of [10, 100, 149, 150, 175, 199, 200]) assert.notEqual(c('TOF', 'cpa', v), 'green', `TOF CPA ${v} must not be green`);
+  for (const v of [10, 100, 149, 150, 175, 199, 200]) assert.notEqual(c('TOF', 'cpa', v), 'orange', `TOF CPA ${v} must not be orange`);
+  assert.deepEqual(Object.keys(health.RULES.TOF.cpa).sort(), ['period', 'red'], 'the only TOF CPA state is red');
+});
+test('health: TOF CPA guidance carries no period, so it applies to any range length', () => {
+  for (const days of [1, 4, 7, 30]) assert.equal(c('TOF', 'cpa', 250, { days }), 'red', `${days} days`);
+});
+test('health: TOF Frequency under 2 is green in a ~4-day period; 2 and above stays neutral (no red/orange invented)', () => {
+  assert.equal(c('TOF', 'frequency', 1.99), 'green');
+  assert.equal(c('TOF', 'frequency', 1.2), 'green');
+  assert.equal(c('TOF', 'frequency', 2), null);
+  assert.equal(c('TOF', 'frequency', 2.4), null);
+  assert.equal(c('TOF', 'frequency', 5), null);
+  assert.deepEqual(Object.keys(health.RULES.TOF.frequency).sort(), ['green', 'period']);
+});
+test('health: TOF Reach has NO benchmark -- never classified', () => {
+  assert.equal(health.RULES.TOF.reach, null);
+  for (const v of [0, 1000, 50000, 1e7]) assert.equal(c('TOF', 'reach', v), null);
+  assert.equal(health.status().defined.TOF.reach, null);
+});
+test('health: TOM CPA is never classified (no approved benchmark; not inferred from TOF or MOF)', () => {
+  assert.equal(health.RULES.TOM.cpa, null);
+  for (const v of [5, 40, 50, 60, 150, 250, 500]) assert.equal(c('TOM', 'cpa', v), null, `TOM CPA ${v}`);
+});
+test('health: TOM Frequency 2 to 3 inclusive is green in a ~4-day period; outside it is neutral', () => {
+  assert.equal(c('TOM', 'frequency', 2), 'green');
+  assert.equal(c('TOM', 'frequency', 2.5), 'green');
+  assert.equal(c('TOM', 'frequency', 3), 'green');
+  assert.equal(c('TOM', 'frequency', 1.99), null);
+  assert.equal(c('TOM', 'frequency', 3.01), null);
+  assert.equal(c('TOM', 'frequency', 6), null);
+  assert.deepEqual(Object.keys(health.RULES.TOM.frequency).sort(), ['green', 'period']);
+});
+test('health: MOF CPA $40 to $60 inclusive is green; below $40 and above $60 stay neutral', () => {
+  assert.equal(c('MOF', 'cpa', 40), 'green');
+  assert.equal(c('MOF', 'cpa', 50), 'green');
+  assert.equal(c('MOF', 'cpa', 60), 'green');
+  assert.equal(c('MOF', 'cpa', 39.99), null);
+  assert.equal(c('MOF', 'cpa', 30), null, 'a $30 CPA is not bad merely because it is outside the range');
+  assert.equal(c('MOF', 'cpa', 60.01), null);
+  assert.equal(c('MOF', 'cpa', 120), null);
+  assert.deepEqual(Object.keys(health.RULES.MOF.cpa).sort(), ['green', 'period']);
+  for (const days of [1, 4, 7, 30]) assert.equal(c('MOF', 'cpa', 50, { days }), 'green', `${days} days`);
+});
+test('health: MOF Frequency is never classified', () => {
+  assert.equal(health.RULES.MOF.frequency, null);
+  for (const v of [0.5, 1, 2, 3, 8]) assert.equal(c('MOF', 'frequency', v), null);
+});
+test('health: Unknown / Mixed / missing funnel gets nothing, whatever the number', () => {
+  for (const f of ['unknown', 'multiple', null, undefined, 'BOF', '028']) {
+    for (const m of ['cpa', 'frequency', 'reach']) for (const v of [1, 50, 250]) assert.equal(c(f, m, v), null, `${f}/${m}/${v}`);
   }
-  assert.equal(health.status().active, false);
 });
-test('health: NO thresholds are guessed -- every shipped target is null', () => {
-  for (const f of health.JUDGED_FUNNELS) for (const m of ['cpa', 'frequency']) assert.equal(health.TARGETS[f][m], null, `${f}/${m}`);
-  assert.equal(health.status().defined.TOF.cpa, false);
+test('health: no value / no purchases -> neutral (never judged)', () => {
+  for (const v of [null, undefined, '', NaN]) { assert.equal(c('TOF', 'cpa', v), null); assert.equal(c('MOF', 'cpa', v), null); assert.equal(c('TOM', 'frequency', v), null); }
 });
-test('health: once enabled with supplied targets it classifies; Unknown / Mixed are never judged; bad targets are ignored', () => {
-  const targets = { TOF: { cpa: { green: [null, 20], orange: [null, 30] }, frequency: { green: [1, 2], orange: [0.5, 3] } }, TOM: { cpa: null, frequency: null }, MOF: { cpa: { green: [null, 10], orange: [null, 15] }, frequency: null } };
-  const on = { targets, enabled: true };
-  assert.equal(health.classify('TOF', 'cpa', 18, on), 'green');
-  assert.equal(health.classify('TOF', 'cpa', 25, on), 'orange');
-  assert.equal(health.classify('TOF', 'cpa', 40, on), 'red');
-  assert.equal(health.classify('TOF', 'frequency', 1.5, on), 'green');
-  assert.equal(health.classify('TOF', 'frequency', 2.5, on), 'orange');
-  assert.equal(health.classify('TOF', 'frequency', 4, on), 'red');
-  assert.equal(health.classify('MOF', 'cpa', 12, on), 'orange'); // funnels differ
-  assert.equal(health.classify('TOM', 'cpa', 5, on), null); // no target for this funnel yet -> uncoloured on its own
-  assert.equal(health.classify('unknown', 'cpa', 5, on), null);
-  assert.equal(health.classify('multiple', 'cpa', 5, on), null);
-  assert.equal(health.classify('TOF', 'cpa', null, on), null);
-  assert.equal(health.classify('TOF', 'cpa', 18, { targets: { TOF: { cpa: { green: [30, 40], orange: [35, 45] } } }, enabled: true }), null); // orange must contain green
-  assert.equal(health.classify('TOF', 'cpa', 18, { targets, enabled: false }), null);
+test('health: there are NO orange ranges anywhere in the shipped rules', () => {
+  for (const f of health.JUDGED_FUNNELS) for (const m of health.METRICS) {
+    const r = health.RULES[f][m];
+    if (r) assert.equal(r.orange, undefined, `${f}/${m}`);
+  }
+  for (const f of ['TOF', 'TOM', 'MOF']) for (const m of ['cpa', 'frequency', 'reach']) for (const v of [0.5, 1, 1.5, 2, 2.5, 3, 4, 10, 30, 40, 50, 60, 100, 150, 200, 201, 500]) {
+    assert.notEqual(c(f, m, v), 'orange');
+  }
+});
+test('health: Frequency is judged ONLY for a ~4-day period (3-5 calendar days); other lengths are neutral', () => {
+  assert.deepEqual(health.APPROX_4_DAYS, { target_days: 4, min_days: 3, max_days: 5 });
+  for (const days of [3, 4, 5]) { assert.equal(c('TOF', 'frequency', 1.5, { days }), 'green', `${days}d TOF`); assert.equal(c('TOM', 'frequency', 2.5, { days }), 'green', `${days}d TOM`); }
+  for (const days of [1, 2, 6, 7, 8, 14, 30, 90, null, undefined]) { assert.equal(c('TOF', 'frequency', 1.5, { days }), null, `${days}d TOF`); assert.equal(c('TOM', 'frequency', 2.5, { days }), null, `${days}d TOM`); }
+  assert.equal(health.classify('TOF', 'frequency', 1.5), null, 'no period given -> not judged');
+});
+test('health: Frequency benchmarks are NOT scaled or extrapolated to other lengths', () => {
+  // if "TOF < 2 over 4 days" were scaled to 8 days, 3.9 would be green; it must stay neutral
+  assert.equal(c('TOF', 'frequency', 3.9, { days: 8 }), null);
+  assert.equal(c('TOF', 'frequency', 1.0, { days: 8 }), null);
+  assert.equal(c('TOF', 'frequency', 0.9, { days: 2 }), null);
+  assert.equal(c('TOM', 'frequency', 5, { days: 8 }), null);
+  const src = code('src/lib/metaFunnelHealth.js');
+  assert.doesNotMatch(src, /days\s*\/\s*4|\*\s*\(?days|target_days\s*\*|scale/i, 'no scaling arithmetic on the period');
+});
+test('health: the period is counted from the real dates (an actual 4-day custom range qualifies, a preset name does not matter)', () => {
+  assert.equal(health.rangeDays({ since: '2026-10-01', until: '2026-10-04' }), 4);
+  assert.equal(health.rangeDays({ since: '2026-10-01', until: '2026-10-01' }), 1);
+  assert.equal(health.rangeDays({ since: '2026-09-01', until: '2026-09-30' }), 30);
+  assert.equal(health.isApprox4Days(health.rangeDays({ since: '2026-10-01', until: '2026-10-04' })), true);
+  assert.equal(health.isApprox4Days(health.rangeDays({ since: '2026-10-01', until: '2026-10-07' })), false, 'Last 7 days is not ~4 days');
+  assert.equal(health.status({ range: { since: '2026-10-01', until: '2026-10-04' } }).period.frequency_judged, true);
+  assert.equal(health.status({ range: { since: '2026-10-01', until: '2026-10-30' } }).period.frequency_judged, false);
+});
+test('health: only confirmed rules are described, and the system is active', () => {
+  const st = health.status();
+  assert.equal(st.active, true);
+  assert.equal(st.defined.TOF.cpa, 'red over 200');
+  assert.match(st.defined.TOF.frequency, /green under 2 \(about 4 days\)/);
+  assert.equal(st.defined.TOF.reach, null);
+  assert.equal(st.defined.TOM.cpa, null);
+  assert.match(st.defined.TOM.frequency, /green 2–3 \(about 4 days\)/);
+  assert.match(st.defined.MOF.cpa, /green 40–60/);
+  assert.equal(st.defined.MOF.frequency, null);
+});
+test('health: a future rule (e.g. a TOF Reach benchmark, a watch band) can be added through RULES alone; bad rules are ignored', () => {
+  const rules = { TOF: { reach: { period: null, green: { gte: 10000 } }, cpa: { period: null, red: { gt: 200 }, orange: { gt: 150, lte: 200 } } }, TOM: {}, MOF: { cpa: { period: null, green: { min: 60, max: 40 } } } };
+  assert.equal(health.classify('TOF', 'reach', 12000, D4, { rules }), 'green');
+  assert.equal(health.classify('TOF', 'cpa', 180, D4, { rules }), 'orange');
+  assert.equal(health.classify('MOF', 'cpa', 50, D4, { rules }), null, 'a malformed rule is ignored, not guessed');
+  assert.equal(health.classify('TOF', 'cpa', 300, D4, { rules, enabled: false }), null);
 });
 
 // ── unique creative activity ──────────────────────────────────────────
@@ -103,6 +190,25 @@ test('activity: an ad with no creative id can only count as itself and is report
   const ps = { code: 'P', entries: [adRow('lonely', 'lonely')] };
   const facts = plan.creativeFacts(ps, TODAY, null, { byCreative: new Map(), insights_last_day: '2026-10-06' });
   assert.equal(facts.unidentified_creatives, 1);
+});
+test('activity: the same creative in several AD SETS still counts once', () => {
+  const ps = { code: 'P', entries: ['a1', 'a2', 'a3'].map((i, n) => adRow(i, 'CR1', { extra: { adset: `set${n}` } })) };
+  const facts = plan.creativeFacts(ps, TODAY, null, { byCreative: new Map([['CR1', act({ ads_total: 3, ads_delivering: 3 })]]), insights_last_day: '2026-10-06' });
+  assert.equal(facts.active_unique_creatives, 1);
+  assert.equal(facts.active_ads, 3);
+});
+test('planning: the creative-volume recommendation follows UNIQUE creatives -- 9 active ads of 1 creative still asks for more', () => {
+  const family = { key: 'P', product_code: 'P', name: 'Test Tee', category: 'TEES', image_url: null };
+  const ps = { sales: { seller_class: 'strong', tier_label: 'platinum', vel30: 5, trend: null, units_7d: 5, units_30d: 20, units_365d: 200 }, e: { spend: 100, purchases: 5 }, m: { spend: 50 } };
+  const stock = { known: true, units: 100, pass: true, size: { available: false, warning: null, level: null } };
+  const facts = (unique, ads) => ({ active_unique_creatives: unique, running_creatives: unique, active_ads: ads, creatives_total: unique, new_creatives_90d: 2, last_new_creative: { date: '2026-09-25', source: 'x', days_ago: 12 }, recency_basis: 'known', newest_running_days: 12, oldest_running_days: 40, active_basis: 'delivery', historical_unique_creatives: 0 });
+  const few = plan.recommendFamily({ family, ps, facts: facts(1, 9), stock, benchmarkCpa: 40, salesAvailable: true });
+  assert.ok(few && few.type === 'shoot_fresh', 'one unique creative across 9 ads is NOT enough');
+  assert.match(few.why, /only 1 unique creative is active \(across 9 ads\)/);
+  const enough = plan.recommendFamily({ family, ps, facts: facts(3, 3), stock, benchmarkCpa: 40, salesAvailable: true });
+  assert.equal(enough, null, 'three unique creatives (3 ads) IS enough for a strong, fresh product');
+  const enoughFewAds = plan.recommendFamily({ family, ps, facts: facts(3, 3), stock, benchmarkCpa: 40, salesAvailable: true });
+  assert.equal(enoughFewAds, null);
 });
 test('planning: the shoot recommendation is driven by active UNIQUE creatives, not ads', () => {
   const src = code('src/lib/coreCreativePlan.js');

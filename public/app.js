@@ -631,7 +631,15 @@ function mpRenderAds(res) {
       res.q || res.status !== 'all' || mpFiltered() ? 'No ads match this search or filter.' : 'No ads had spend or impressions in this period.'}</td></tr>`;
   } else {
     const healthOn = !!(res.health && res.health.active);
-    const dot = (h) => (healthOn && h ? `<span class="mp-health mp-health-${escapeHtml(h)}" title="${h === 'green' ? 'Healthy' : h === 'orange' ? 'Watch' : 'Outside the desired range'} for this funnel"></span>` : '');
+    const dot = (h) => (healthOn && h ? `<span class="mp-health mp-health-${escapeHtml(h)}" title="${h === 'green' ? 'Within the confirmed healthy range' : h === 'orange' ? 'Watch range' : 'Beyond the confirmed concern level'} for this funnel"></span>` : '');
+    const hn = document.getElementById('mp-health-note');
+    if (hn) {
+      if (healthOn) {
+        const per = res.health.period || {};
+        hn.style.display = '';
+        hn.innerHTML = `Colour dots use only benchmarks WNDRR has confirmed: <b>TOF</b> CPA over $200 is red and Frequency under 2 is green; <b>TOM</b> Frequency 2–3 is green; <b>MOF</b> CPA $40–$60 is green. Everything else is left neutral. Frequency colours apply only to a period of about 4 days (${per.approx_4_days ? `${per.approx_4_days.min_days}–${per.approx_4_days.max_days} days` : '3–5 days'}); this period is ${per.days || '?'} day${per.days === 1 ? '' : 's'}${per.frequency_judged ? '' : ', so Frequency is shown without colour'}.`;
+      } else hn.style.display = 'none';
+    }
     body.innerHTML = res.ads.map((a) => `
       <tr data-ad-id="${escapeHtml(a.meta_ad_id)}">
         <td class="mp-funnel-cell">${mpFunnelBadge(a.funnel)}</td>
@@ -646,7 +654,7 @@ function mpRenderAds(res) {
         <td class="num">${mpFmt(a.add_to_cart, 'int')}</td>
         <td class="num">${mpFmt(a.cost_per_atc, 'money')}</td>
         <td class="num">${mpFmt(a.outbound_ctr, 'pct')}</td>
-        <td class="num">${mpReachCell(a.reach, 'int')}</td>
+        <td class="num${a.funnel === 'TOF' ? ' mp-reach-key' : ''}"${a.funnel === 'TOF' ? ' title="Reach is the key measure for TOF"' : ''}>${mpReachCell(a.reach, 'int')}</td>
         <td class="num">${dot(a.frequency_health)}${mpReachCell(a.frequency, 'freq')}</td>
       </tr>`).join('');
     ccHydrateThumbs(body);
