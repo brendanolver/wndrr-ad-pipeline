@@ -33,6 +33,7 @@ const apparelmagic = require('./apparelmagic');
 const { canonicalKey } = require('./metaMatchingCatalogue');
 const { MEDIA_LABEL } = require('./metaNameParsing');
 const { ymdInZone, addDays, REPORTING_TIMEZONE } = require('./metaPerformance');
+const creativeActivity = require('./metaCreativeActivity');
 
 const num = (v) => Number(v) || 0;
 const round = (v, d = 1) => (v === null || v === undefined ? null : Number(Number(v).toFixed(d)));
@@ -61,6 +62,8 @@ function buildCoreFamilies(amDetails) {
     const first = core.filter((s) => s.productCode === rep).sort((a, b) => a.styleCode.localeCompare(b.styleCode))[0];
     families.push({
       key: rep, product_code: rep, name: first.d.productName, category: first.d.category || null, image_url: first.d.imageUrl || null,
+      // every picture ApparelMagic holds for the representative colourway (front / back chosen by apparelmagic.pickFrontBack)
+      images: apparelmagic.pickFrontBack((first.d.images && first.d.images.length ? first.d.images : (core.find((x) => x.d.images && x.d.images.length) || { d: {} }).d.images) || []),
       codes: [...new Set(styles.map((s) => s.productCode))].sort(),
       core_codes: [...perCode.keys()].sort(),
       style_codes: styles.map((s) => s.styleCode).sort(),
@@ -169,23 +172,45 @@ function foldDemand(demand, codeToFamily) {
 }
 
 // ── creative facts for one family (pure) ────────────────────────────────
-// A "creative" is a distinct Meta creative id; its first appearance is the earliest creation
-// date of any ad that uses it (a duplicated ad re-uses its creative, so is not "new").
-function creativeFacts(ps, today, wndrr) {
+// A "creative" is a distinct Meta creative id (exact identity; never a name). WNDRR duplicates the same creative into many
+// campaigns / ad sets, so everything that drives Planning counts UNIQUE creatives:
+//   * first_created  the earliest creation date of ANY ad that uses the creative (a duplicate re-uses its creative, so is
+//                    not "new"). With `activity` this looks at every ad of the exact creative id, classified or not.
+//   * active         at least one ad of the creative is delivering / newly live (see metaCreativeActivity.verdict). Without
+//                    `activity` (pure tests, no database) the older rule applies: an included ad is ACTIVE or has recent spend.
+// The number of ads behind the active creatives (`active_ads`) is context only.
+// `activity` = { byCreative: Map(id -> row), insights_last_day } from metaCreativeActivity.loadCreativeActivity.
+function creativeFacts(ps, today, wndrr, activity) {
   const days = co.daysBetween; // (fromYmd, toYmd) -> whole days
   const by = new Map();
   ps.entries.forEach(({ ad }) => {
-    const c = by.get(ad.creative_key) || { key: ad.creative_key, first_created: null, ads: [], running: false };
+    const c = by.get(ad.creative_key) || { key: ad.creative_key, first_created: null, ads: [], running: false, unidentified: ad.creative_key === ad.id };
     if (ad.created && (!c.first_created || ad.created < c.first_created)) c.first_created = ad.created;
     c.ads.push(ad);
     if (ad.effective_status === 'ACTIVE' || num(ad.w.m.spend) > 0) c.running = true;
     by.set(ad.creative_key, c);
   });
   const creatives = [...by.values()];
+  let activeAds = 0;
+  creatives.forEach((c) => {
+    const act = activity && !c.unidentified ? activity.byCreative.get(c.key) : null;
+    if (act) {
+      // exact creative identity: the facts cover every ad that shares this creative id, not just the ones matched to this product
+      if (act.first_created && (!c.first_created || act.first_created < c.first_created)) c.first_created = act.first_created;
+      c.ads_total = act.ads_total;
+      const v = creativeActivity.verdict(act, { today, insights_last_day: activity.insights_last_day });
+      c.running = v.active; c.active_ads = v.active_ads; c.active_basis = v.basis; c.last_delivery = act.last_delivery || null;
+    } else {
+      c.ads_total = c.ads.length;
+      c.active_ads = c.running ? c.ads.filter((a) => a.effective_status === 'ACTIVE' || num(a.w.m.spend) > 0).length : 0;
+      c.active_basis = 'matched_ads_only';
+    }
+    if (c.running) activeAds += c.active_ads;
+  });
   const dated = creatives.filter((c) => c.first_created);
   const newestMeta = dated.length ? dated.map((c) => c.first_created).sort().pop() : null;
   const w = (wndrr && wndrr.get(ps.code)) || { live: null };
-  const cands = [newestMeta ? { date: newestMeta, source: 'Meta ad created' } : null, w.live ? { date: w.live, source: 'WNDRR creative went live' } : null]
+  const cands = [newestMeta ? { date: newestMeta, source: 'Earliest Meta ad created with that exact creative' } : null, w.live ? { date: w.live, source: 'WNDRR creative went live' } : null]
     .filter(Boolean).sort((a, b) => (a.date < b.date ? 1 : -1));
   const newest = cands[0] || null;
   const since = addDays(today, -cfg.HISTORY.reliable_days);
@@ -194,7 +219,13 @@ function creativeFacts(ps, today, wndrr) {
   return {
     creatives,
     creatives_total: creatives.length,
+    // the number that drives Planning: UNIQUE creatives with an ad delivering now. `running_creatives` is the legacy name.
+    active_unique_creatives: running.length,
     running_creatives: running.length,
+    active_ads: activeAds,
+    historical_unique_creatives: creatives.length - running.length,
+    unidentified_creatives: creatives.filter((c) => c.unidentified).length, // ads with no creative id: each can only count as itself
+    active_basis: !activity ? 'matched_ads_only' : (running.some((c) => c.active_basis === 'status_only') ? 'status_only' : 'delivery'),
     new_creatives_90d: dated.filter((c) => c.first_created >= since).length,
     last_new_creative: newest ? { date: newest.date, source: newest.source, days_ago: Math.max(0, days(newest.date, today)) } : null,
     // inside the reliable window a gap is real; beyond it, "none" only means none that we matched
@@ -235,11 +266,13 @@ function cardBase({ type, family, ps, facts, stock, priority, severity, headline
   return {
     key: `core:${type}:${family.key}`,
     type, headline, why, priority, severity, score,
-    product: { product_code: family.product_code, product_name: family.name, category: family.category, image_url: family.image_url },
+    product: { product_code: family.product_code, product_name: family.name, category: family.category, image_url: family.image_url, images: family.images || { front: null, back: null, count: 0 } },
     sales_status: sales ? { label: SALES_LABEL[sales.seller_class] || 'Selling steadily', seller_class: sales.seller_class, tier: sales.tier_label, trend: sales.trend ? sales.trend.direction : null } : null,
     stock: { units: stock.units, size_warning: stock.size.warning, size_level: stock.size.level },
     creative: {
       last_new_creative: facts.last_new_creative, recency_basis: facts.recency_basis, running_creatives: facts.running_creatives,
+      active_unique_creatives: facts.active_unique_creatives, active_ads: facts.active_ads, historical_unique_creatives: facts.historical_unique_creatives,
+      active_basis: facts.active_basis,
       creatives_total: facts.creatives_total, new_creatives_90d: facts.new_creatives_90d,
       newest_running_days: facts.newest_running_days, oldest_running_days: facts.oldest_running_days,
     },
@@ -255,7 +288,7 @@ function recommendFamily({ family, ps, facts, stock, benchmarkCpa, salesAvailabl
   const band = freshnessBandOf(facts.last_new_creative ? facts.last_new_creative.days_ago : null);
   const days = facts.last_new_creative ? facts.last_new_creative.days_ago : null;
   const fresh = band === 'fresh' || band === 'aging';
-  const enough = facts.running_creatives >= cfg.USABLE_MIN_CREATIVES;
+  const enough = facts.active_unique_creatives >= cfg.USABLE_MIN_CREATIVES;
   const vel = ps.sales.vel30 || 0;
   const salesBasis = `${ps.sales.tier_label ? `${ps.sales.tier_label} tier` : 'strong recent sales'}${ps.sales.trend && ps.sales.trend.direction === 'up' ? ', sales rising' : ''}`;
   const common = { family, ps, facts, stock, benchmarkCpa };
@@ -266,7 +299,7 @@ function recommendFamily({ family, ps, facts, stock, benchmarkCpa, salesAvailabl
     let why;
     if (days === null) why = `${family.name} is selling strongly (${salesBasis}) and we have no creative on record for it.`;
     else if (!fresh) why = `${family.name} is selling strongly (${salesBasis}) but its newest creative is ${ageText(days)} old.`;
-    else why = `${family.name} is selling strongly (${salesBasis}) and its creative is recent, but only ${plural(facts.running_creatives, 'creative')} ${facts.running_creatives === 1 ? 'is' : 'are'} running (we want ${cfg.USABLE_MIN_CREATIVES}+).`;
+    else why = `${family.name} is selling strongly (${salesBasis}) and its creative is recent, but only ${plural(facts.active_unique_creatives, 'unique creative')} ${facts.active_unique_creatives === 1 ? 'is' : 'are'} active${facts.active_ads > facts.active_unique_creatives ? ` (across ${plural(facts.active_ads, 'ad')})` : ''} (we want ${cfg.USABLE_MIN_CREATIVES}+ distinct creatives).`;
     return cardBase({ ...common, type: 'shoot_fresh', priority: veryStale ? 'Critical' : 'High', severity: days === null ? 99 : Math.floor(days / 60), headline: 'Shoot fresh creative', why,
       strength: (days === null ? 60 : Math.min(60, days / 2)) + Math.min(25, vel) + (ps.sales.trend && ps.sales.trend.direction === 'up' ? 15 : 0) });
   }
@@ -293,7 +326,7 @@ function recommendFamily({ family, ps, facts, stock, benchmarkCpa, salesAvailabl
 }
 
 // ── the plan (pure core; orchestration below feeds it) ──────────────────
-function buildPlan({ families, codeToFamily, snapshot, demand, stock, sizesByStyle, sizeOrderFor, now = new Date(), stateRows = [], salesAvailable }) {
+function buildPlan({ families, codeToFamily, snapshot, demand, stock, sizesByStyle, sizeOrderFor, now = new Date(), stateRows = [], salesAvailable, activity }) {
   const folded = foldSnapshot(snapshot, codeToFamily);
   const foldedDemand = foldDemand(demand, codeToFamily);
   const sellers = co.classifySellers(foldedDemand);
@@ -312,7 +345,7 @@ function buildPlan({ families, codeToFamily, snapshot, demand, stock, sizesBySty
     const st = familyStock(f, stock, sizesByStyle, sizeOrderFor ? sizeOrderFor(f.size_range_style) : []);
     stockByFamily.set(f.key, st);
     const ps = signals.get(f.key) || null;
-    const facts = creativeFacts(ps || { entries: [], code: f.key }, today, folded.wndrr);
+    const facts = creativeFacts(ps || { entries: [], code: f.key }, today, folded.wndrr, activity);
     factsByFamily.set(f.key, facts);
     const rec = recommendFamily({ family: f, ps, facts, stock: st, benchmarkCpa, salesAvailable });
     if (!rec) { noAction.push(f.name); return; }
@@ -395,7 +428,8 @@ function buildEvidence({ card, family, ps, facts, stock, today }) {
       const purchases = c.ads.reduce((s, a) => s + num(a.w.e.purchases), 0);
       return {
         meta_ad_id: rep.id, ad_name: rep.name, first_created: c.first_created, running: c.running, concept: rep.concept_label || null,
-        media: rep.media_key ? MEDIA_LABEL[rep.media_key] || rep.media_key : null, ads_using: c.ads.length,
+        media: rep.media_key ? MEDIA_LABEL[rep.media_key] || rep.media_key : null, ads_using: c.ads_total || c.ads.length, active_ads: c.active_ads || 0,
+        last_delivery: c.last_delivery || null,
         admin: { spend: round(spend, 2), purchases: round(purchases, 1), cpa: purchases > 0 ? round(spend / purchases, 2) : null },
       };
     })
@@ -407,6 +441,8 @@ function buildEvidence({ card, family, ps, facts, stock, today }) {
     stock: { units: stock.units, minimum: cfg.STOCK.min_sellable_units, sizes: stock.size.available ? stock.size.run : null, size_warning: stock.size.warning },
     creative: {
       last_new_creative: facts.last_new_creative, recency_basis: facts.recency_basis, running_creatives: facts.running_creatives, creatives_total: facts.creatives_total,
+      active_unique_creatives: facts.active_unique_creatives, active_ads: facts.active_ads, historical_unique_creatives: facts.historical_unique_creatives,
+      unidentified_creatives: facts.unidentified_creatives, active_basis: facts.active_basis,
       new_creatives_90d: facts.new_creatives_90d, newest_running_days: facts.newest_running_days, oldest_running_days: facts.oldest_running_days,
       reliable_since: addDays(today, -cfg.HISTORY.reliable_days),
     },
@@ -470,9 +506,14 @@ async function computePlan({ now = new Date(), isAdmin = false } = {}, deps = {}
     deps.quality ? Promise.resolve(deps.quality) : dataQuality(now),
   ]);
   const salesAvailable = !!(demand && demand.available);
+  // Unique-creative activity over EVERY ad that shares an included creative's exact id (classified or not). One set-based read.
+  const activity = deps.activity !== undefined ? deps.activity : await creativeActivity.loadCreativeActivity(
+    snapshot.ads.filter((a) => a.creative_key !== a.id).map((a) => a.creative_key),
+    { today: snapshot.win.today, recentDays: coCfg.WINDOWS.recent_days }
+  );
   const plan = buildPlan({
     families, codeToFamily, snapshot, demand, stock: stockObj || null, sizesByStyle: stockObj ? stockObj.sizes : null,
-    sizeOrderFor, now, stateRows: stateRes.rows, salesAvailable,
+    sizeOrderFor, now, stateRows: stateRes.rows, salesAvailable, activity,
   });
   const sizeField = stockObj ? stockObj.sizeField : null;
   const out = {
@@ -489,6 +530,7 @@ async function computePlan({ now = new Date(), isAdmin = false } = {}, deps = {}
       meta: {
         history_first_day: snapshot.coverage.first_day, history_last_day: snapshot.coverage.last_day,
         note: 'Daily Meta performance is only stored from the first synced day, so spend and CPA cover a short period. Creative dates come from each ad\'s own Meta creation date.',
+        creative_activity: activity ? { basis: activity.insights_last_day && activity.insights_last_day >= addDays(snapshot.win.today, -creativeActivity.INSIGHTS_STALE_DAYS) ? 'delivery' : 'status_only', insights_last_day: activity.insights_last_day } : null,
       },
       matching: { trusted_ads_used: snapshot.ads.length, unreviewed_recent_ads: quality.unreviewed_recent_ads, reliable_days: cfg.HISTORY.reliable_days, ads_included: 'confirmed + auto-matched only' },
     },

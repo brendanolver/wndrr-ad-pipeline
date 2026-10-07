@@ -52,6 +52,7 @@ const { deriveProductCode } = require('./apparelmagic');
 const catalogueLib = require('./metaMatchingCatalogue');
 const creativeIdentity = require('./metaCreativeIdentity');
 const creativeConflict = require('./metaCreativeConflict');
+const creativeArchive = require('./metaCreativeArchive');
 const relevanceLib = require('./metaMatchingRelevance');
 const {
   MEDIA_TYPES, MEDIA_KEYS, MEDIA_LABEL, buildFamilyIndex, matchProductPhrase, expandSet, hasSetWord,
@@ -1635,7 +1636,7 @@ function escapeLike(s) {
 // (ACTIONABLE: current CORE product with sellable stock, or running / recent / unknown)
 // and HISTORICAL (see metaMatchingRelevance.js) -- nothing is hidden for good: the
 // Historical filter, `relevance=all` and the "all" filter still list everything.
-const NEEDS_FILTERS = new Set(['needs', 'unmatched', 'suggested', 'historical', 'inherit', 'conflict']);
+const NEEDS_FILTERS = new Set(['needs', 'unmatched', 'suggested', 'historical', 'archived', 'inherit', 'conflict']);
 const UNIT = 'COALESCE(a.meta_creative_id, a.meta_ad_id)';
 
 // SQL for creatives whose HUMAN-confirmed ads disagree (see metaCreativeIdentity.evaluateGroup).
@@ -1669,7 +1670,7 @@ async function relevanceParams() {
 
 async function getQueue(query = {}, deps = {}) {
   const scope = Object.prototype.hasOwnProperty.call(SCOPES, query.scope) ? query.scope : '30d';
-  const filter = Object.prototype.hasOwnProperty.call(FILTERS, query.filter) || query.filter === 'historical' || query.filter === 'conflict' || query.filter === 'inherit' ? query.filter : 'needs';
+  const filter = Object.prototype.hasOwnProperty.call(FILTERS, query.filter) || ['historical', 'archived', 'conflict', 'inherit'].includes(query.filter) ? query.filter : 'needs';
   const q = String(query.q || '').trim().slice(0, 200);
   const pageSize = Math.min(100, Math.max(1, parseInt(query.page_size, 10) || 25));
   const page = Math.max(1, parseInt(query.page, 10) || 1);
@@ -1682,6 +1683,7 @@ async function getQueue(query = {}, deps = {}) {
   // scope only lists ads WITH activity in it (JOIN); "all" lists every stored ad.
   const actWin = win.since ? win : scopeWindow('30d');
   const rp = deps.relevance || await relevanceParams();
+  const proof = deps.archiveProof || await creativeArchive.getProof();
   const params = [actWin.since, actWin.until, rp.rel.relevant_codes, !!rp.rel.known, rp.d7, rp.d30];
   const act = win.since ? 'JOIN act ON act.meta_ad_id = a.meta_ad_id' : 'LEFT JOIN act ON act.meta_ad_id = a.meta_ad_id';
   // The activity / relevance / conflict sets are computed ONCE per request into temp tables (named act /
@@ -1709,17 +1711,24 @@ async function getQueue(query = {}, deps = {}) {
     ['CREATE INDEX ON conf (meta_creative_id)'],
     ['CREATE TEMP TABLE cov (unit varchar(64) PRIMARY KEY) ON COMMIT DROP'],
     [`INSERT INTO cov ${coveredUnitsSelect()}`],
-    ['ANALYZE act'], ['ANALYZE rel'], ['ANALYZE conf'], ['ANALYZE cov'],
+    // per-creative activity (over ALL ads sharing the exact creative id) + the provable Pre-2026 archive set
+    ...creativeArchive.setupStatements(proof),
+    ['ANALYZE act'], ['ANALYZE rel'], ['ANALYZE conf'], ['ANALYZE cov'], ['ANALYZE arch'],
   ];
   const base = `
     FROM meta_ads a
     ${act}
     LEFT JOIN meta_ad_classifications c ON c.meta_ad_id = a.meta_ad_id
     LEFT JOIN rel ON rel.meta_ad_id = a.meta_ad_id
-    LEFT JOIN cov ON cov.unit = ${UNIT}`;
+    LEFT JOIN cov ON cov.unit = ${UNIT}
+    LEFT JOIN arch ON arch.unit = ${UNIT}
+    LEFT JOIN cfacts cf ON cf.unit = ${UNIT}`;
   // "Will inherit": a needs-review ad whose creative is fully covered (see coveredUnitsSelect).
   const willInherit = 'cov.unit IS NOT NULL';
-  const isActionable = `COALESCE(rel.relevance, 'actionable') = 'actionable'`;
+  // Provably pre-2026 creatives leave the manual workload entirely (see metaCreativeArchive.js); they are neither "to do" nor "historical".
+  const isArchived = 'arch.unit IS NOT NULL';
+  const isActionable = `(COALESCE(rel.relevance, 'actionable') = 'actionable' AND NOT ${isArchived})`;
+  const isHistorical = `(COALESCE(rel.relevance, 'actionable') <> 'actionable' AND NOT ${isArchived})`;
   const inConflict = `(a.meta_creative_id IS NOT NULL AND a.meta_creative_id IN (SELECT meta_creative_id FROM conf))`;
 
   // counts for the filter chips: scope only (not filter/search). The three "needs" counts are CREATIVES.
@@ -1728,8 +1737,10 @@ async function getQueue(query = {}, deps = {}) {
             count(DISTINCT ${UNIT}) FILTER (WHERE ${FILTERS.unmatched} AND NOT ${willInherit} AND ${isActionable})::int AS unmatched,
             count(DISTINCT ${UNIT}) FILTER (WHERE ${FILTERS.suggested} AND NOT ${willInherit} AND ${isActionable})::int AS suggested,
             count(*) FILTER (WHERE ${FILTERS.needs} AND NOT ${willInherit} AND ${isActionable})::int AS needs_ads,
-            count(DISTINCT ${UNIT}) FILTER (WHERE ${FILTERS.needs} AND NOT ${willInherit} AND NOT ${isActionable})::int AS historical,
-            count(*) FILTER (WHERE ${FILTERS.needs} AND NOT ${willInherit} AND NOT ${isActionable})::int AS historical_ads,
+            count(DISTINCT ${UNIT}) FILTER (WHERE ${FILTERS.needs} AND NOT ${willInherit} AND ${isHistorical})::int AS historical,
+            count(*) FILTER (WHERE ${FILTERS.needs} AND NOT ${willInherit} AND ${isHistorical})::int AS historical_ads,
+            count(DISTINCT ${UNIT}) FILTER (WHERE ${FILTERS.needs} AND NOT ${willInherit} AND ${isArchived})::int AS archived,
+            count(*) FILTER (WHERE ${FILTERS.needs} AND NOT ${willInherit} AND ${isArchived})::int AS archived_ads,
             count(DISTINCT ${UNIT}) FILTER (WHERE ${FILTERS.needs} AND ${willInherit})::int AS will_inherit,
             count(*) FILTER (WHERE ${FILTERS.needs} AND ${willInherit})::int AS will_inherit_ads,
             count(DISTINCT a.meta_creative_id) FILTER (WHERE ${inConflict})::int AS conflicts,
@@ -1743,7 +1754,8 @@ async function getQueue(query = {}, deps = {}) {
        ${base}`;
 
   const where = [];
-  if (filter === 'historical') where.push(FILTERS.needs, `NOT ${isActionable}`, `NOT ${willInherit}`);
+  if (filter === 'historical') where.push(FILTERS.needs, isHistorical, `NOT ${willInherit}`);
+  else if (filter === 'archived') where.push(FILTERS.needs, isArchived, `NOT ${willInherit}`);
   else if (filter === 'inherit') where.push(FILTERS.needs, willInherit);
   else if (filter === 'conflict') where.push(inConflict);
   else if (FILTERS[filter]) where.push(FILTERS[filter]);
@@ -1775,6 +1787,8 @@ async function getQueue(query = {}, deps = {}) {
             matched.gsize AS same_creative_ads, rel.relevance, ${inConflict} AS creative_conflict,
             c.auto_fields -> 'inherited' ->> 'from_meta_ad_id' AS inherited_from,
             COALESCE(act.spend, 0) AS spend, act.last_active,
+            to_char(cf.last_delivery, 'YYYY-MM-DD') AS creative_last_active, cf.first_created AS creative_first_created, cf.ads_total AS creative_ads,
+            (arch.unit IS NOT NULL) AS archived, cf.ads_active AS creative_ads_active,
             c.skipped_at, COALESCE(c.excluded_from_intelligence, false) AS excluded,
             COALESCE(c.not_product_specific, false) AS not_product_specific,
             c.concept_label AS confirmed_concept, c.creator_name AS confirmed_creator, c.media_type AS confirmed_media,
@@ -1786,7 +1800,8 @@ async function getQueue(query = {}, deps = {}) {
             (SELECT max(s.confidence) FROM meta_ad_suggestions s WHERE s.meta_ad_id = a.meta_ad_id) AS top_confidence
        ${base}
        JOIN matched ON matched.meta_ad_id = a.meta_ad_id AND matched.rn = 1
-      ORDER BY (c.skipped_at IS NOT NULL) ASC,
+      ORDER BY ${['historical', 'archived'].includes(filter) ? 'cf.last_delivery DESC NULLS LAST, cf.first_created DESC NULLS LAST,' : ''}
+               (c.skipped_at IS NOT NULL) ASC,
                COALESCE(act.spend, 0) DESC,
                act.last_active DESC NULLS LAST,
                CASE a.match_status WHEN 'unmatched' THEN 0 WHEN 'suggested' THEN 1 WHEN 'auto_matched' THEN 2 ELSE 3 END ASC,
@@ -1815,6 +1830,7 @@ async function getQueue(query = {}, deps = {}) {
     counts: countsRes.rows[0],
     grouped_by_creative: collapse,
     relevance: { known: !!rp.rel.known, reason: rp.rel.reason, core_families: rp.rel.core_families, relevant_families: rp.rel.relevant_families },
+    archive: { cutoff: creativeArchive.ARCHIVE_CUTOFF, proven: !!proof.proven, basis: proof.basis || null, proof_to: proof.proof_to || null, reason: proof.reason || null },
     ads: rows.map((r) => ({
       meta_ad_id: r.meta_ad_id,
       ad_name: r.ad_name,
@@ -1830,6 +1846,13 @@ async function getQueue(query = {}, deps = {}) {
       inherited_from: r.inherited_from || null,
       recent_spend: Number(r.spend),
       last_active: r.last_active ? new Date(r.last_active).toISOString().slice(0, 10) : null,
+      // Creative-level facts over EVERY ad sharing the exact meta_creative_id (not just the listed ad, not just the window):
+      // creative_last_active = the newest day any of them delivered according to stored Insights (null = none stored).
+      creative_last_active: r.creative_last_active || null,
+      creative_first_created: r.creative_first_created ? r.creative_first_created.toISOString() : null,
+      creative_ads: Number(r.creative_ads) || 1,
+      creative_ads_running: Number(r.creative_ads_active) || 0,
+      archived: !!r.archived,
       skipped: !!r.skipped_at,
       excluded: r.excluded,
       not_product_specific: r.not_product_specific,
@@ -1884,6 +1907,7 @@ async function resolveCreativeConflict(creativeId, body, userId) {
 // recent / unknown) and historical. Pure SELECTs; no Meta / ApparelMagic write.
 async function getWorkload(deps = {}) {
   const rp = deps.relevance || await relevanceParams();
+  const proof = deps.archiveProof || await creativeArchive.getProof();
   const params = [rp.rel.relevant_codes, !!rp.rel.known, rp.d7, rp.d30];
   const relP = { rel: '$1', known: '$2', d7: '$3::date', d30: '$4::date' };
   const eligible = creativeIdentity.eligibleSql(HUMAN_OWNED_SQL);
@@ -1906,11 +1930,12 @@ async function getWorkload(deps = {}) {
     ['CREATE TEMP TABLE covered_units (unit varchar(64) PRIMARY KEY) ON COMMIT DROP'],
     [`INSERT INTO covered_units ${coveredUnitsSelect()}`],
     ['CREATE INDEX ON needs (unit)'], ['ANALYZE needs'], ['ANALYZE covered_units'],
-    ['CREATE TEMP TABLE units (unit varchar(64) PRIMARY KEY, instances int, actionable boolean, core_evidence boolean, covered boolean, has_source boolean) ON COMMIT DROP'],
+    ...creativeArchive.setupStatements(proof),
+    ['CREATE TEMP TABLE units (unit varchar(64) PRIMARY KEY, instances int, actionable boolean, core_evidence boolean, covered boolean, has_source boolean, archived boolean) ON COMMIT DROP'],
     [`INSERT INTO units
       SELECT n.unit, count(*)::int, bool_or(n.relevance = 'actionable'), bool_or(n.reason = 'core_in_stock_product'),
-             bool_or(cu.unit IS NOT NULL), bool_or(n.meta_creative_id IS NOT NULL AND h.meta_creative_id IS NOT NULL)
-        FROM needs n LEFT JOIN covered_units cu ON cu.unit = n.unit LEFT JOIN human_ok h ON h.meta_creative_id = n.meta_creative_id
+             bool_or(cu.unit IS NOT NULL), bool_or(n.meta_creative_id IS NOT NULL AND h.meta_creative_id IS NOT NULL), bool_or(ar.unit IS NOT NULL)
+        FROM needs n LEFT JOIN covered_units cu ON cu.unit = n.unit LEFT JOIN human_ok h ON h.meta_creative_id = n.meta_creative_id LEFT JOIN arch ar ON ar.unit = n.unit
        GROUP BY n.unit`],
     ['ANALYZE units'],
   ];
@@ -1930,10 +1955,12 @@ async function getWorkload(deps = {}) {
           SELECT n.ineligible_reason AS reason, count(*)::int AS n FROM needs n JOIN units u ON u.unit = n.unit
            WHERE u.has_source AND NOT u.covered AND NOT n.eligible GROUP BY 1) b) AS blocked_copies_by_reason,
       (SELECT count(*)::int FROM units WHERE core_evidence) AS creatives_with_core_in_stock_evidence,
-      (SELECT count(*)::int FROM units WHERE NOT covered AND actionable) AS review_creatives_actionable,
-      (SELECT COALESCE(sum(instances), 0)::int FROM units WHERE NOT covered AND actionable) AS review_instances_actionable,
-      (SELECT count(*)::int FROM units WHERE NOT covered AND NOT actionable) AS review_creatives_historical,
-      (SELECT COALESCE(sum(instances), 0)::int FROM units WHERE NOT covered AND NOT actionable) AS review_instances_historical,
+      (SELECT count(*)::int FROM units WHERE NOT covered AND NOT archived AND actionable) AS review_creatives_actionable,
+      (SELECT COALESCE(sum(instances), 0)::int FROM units WHERE NOT covered AND NOT archived AND actionable) AS review_instances_actionable,
+      (SELECT count(*)::int FROM units WHERE NOT covered AND NOT archived AND NOT actionable) AS review_creatives_historical,
+      (SELECT COALESCE(sum(instances), 0)::int FROM units WHERE NOT covered AND NOT archived AND NOT actionable) AS review_instances_historical,
+      (SELECT count(*)::int FROM units WHERE NOT covered AND archived) AS review_creatives_archived,
+      (SELECT COALESCE(sum(instances), 0)::int FROM units WHERE NOT covered AND archived) AS review_instances_archived,
       (SELECT count(*)::int FROM (SELECT ad_name FROM needs WHERE ad_name IS NOT NULL GROUP BY ad_name HAVING count(DISTINCT unit) > 1) x) AS identical_names_with_different_creatives,
       (SELECT COALESCE(json_object_agg(reason, n), '{}'::json) FROM (
           SELECT n.reason, count(*)::int AS n FROM needs n JOIN units u ON u.unit = n.unit WHERE NOT u.covered GROUP BY n.reason) r) AS reasons_for_ads_to_review,
@@ -1976,6 +2003,13 @@ async function getWorkload(deps = {}) {
       actionable_ad_instances: r.review_instances_actionable,
       historical_creatives: r.review_creatives_historical,
       historical_ad_instances: r.review_instances_historical,
+      // Provably pre-2026 (see metaCreativeArchive.js): out of the manual workload, still stored and searchable. 0 until
+      // coverage of the period since the cutoff is proven.
+      archived_creatives: r.review_creatives_archived,
+      archived_ad_instances: r.review_instances_archived,
+      archive_cutoff: creativeArchive.ARCHIVE_CUTOFF,
+      archive_proven: !!proof.proven,
+      archive_reason: proof.reason || null,
       // Creatives where people disagree (shown separately; they also still need a person if they have outstanding copies).
       creatives_in_conflict: r.conflict_creatives,
       // Creatives that HAVE a person's decision but keep a copy that cannot inherit (so they stay in "need a person").

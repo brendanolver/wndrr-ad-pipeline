@@ -47,6 +47,7 @@ const promotionCreativeRoutes = require('./routes/promotionCreative');
 const metaSyncRoutes = require('./routes/metaSync');
 const metaPerformanceRoutes = require('./routes/metaPerformance');
 const metaAdMatchingRoutes = require('./routes/metaAdMatching');
+const metaArchiveRoutes = require('./routes/metaArchive');
 const creativeOpportunitiesRoutes = require('./routes/creativeOpportunities');
 const adCreativeRoutes = require('./routes/adCreative');
 const coreCreativePlanRoutes = require('./routes/coreCreativePlan');
@@ -157,6 +158,8 @@ app.use('/api/meta-sync', requireAuth, metaSyncRoutes);
 app.use('/api/meta-performance', requireAuth, metaPerformanceRoutes);
 // Meta Ad Matching V1: admin-only, local-DB-only classification workflow.
 app.use('/api/meta-ad-matching', requireAuth, metaAdMatchingRoutes);
+// Pre-2026 archive evidence; the one Meta call is the explicit POST /pull (see routes/metaArchive.js).
+app.use('/api/meta-archive', requireAuth, metaArchiveRoutes);
 // Creative Opportunities V1: admin-only, computed on read from local data (no Meta calls).
 app.use('/api/creative-opportunities', requireAuth, creativeOpportunitiesRoutes);
 // Ad creative preview: admins + Planning users; media/context only, read-only Meta fetch, cached.

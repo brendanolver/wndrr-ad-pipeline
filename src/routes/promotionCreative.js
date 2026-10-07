@@ -18,6 +18,7 @@ const { insertCreativeAsset } = require('../lib/assets');
 const { ensureShootScheduleForApprovedConcept } = require('./conceptDevelopment');
 const { requireAdmin } = require('../lib/permissions');
 const inspMeta = require('../lib/inspirationMetaLink');
+const inspManual = require('../lib/inspirationManualLink');
 
 const router = express.Router();
 
@@ -822,6 +823,25 @@ router.post('/inspiration/meta-recovery/lookup', requireAdmin, async (req, res, 
 });
 router.post('/inspiration/meta-recovery/apply', requireAdmin, async (req, res, next) => {
   try { res.json(await inspMeta.applyLinks()); } catch (err) { next(err); }
+});
+
+// Which references still show "No link yet", exactly what is stored for each, and whether an exact match is recoverable.
+router.get('/inspiration/unlinked', requireAdmin, async (req, res, next) => {
+  try { res.json({ records: await inspMeta.unlinkedDetail() }); } catch (err) { next(err); }
+});
+// The deliberate "Link to Meta creative" workflow: search (a person is choosing), then link / unlink by hand.
+router.get('/inspiration/meta-search', requireAdmin, async (req, res, next) => {
+  try { res.json({ results: await inspManual.searchMetaCreatives(req.query.q) }); } catch (err) { next(err); }
+});
+router.post('/inspiration/:id/meta-link', requireAdmin, async (req, res, next) => {
+  try {
+    const adId = req.body && req.body.meta_ad_id;
+    if (!adId || !/^[A-Za-z0-9_]{1,64}$/.test(String(adId))) return res.status(400).json({ error: 'meta_ad_id is required' });
+    res.json(await inspManual.manualLink(req.params.id, String(adId), req.user && req.user.id));
+  } catch (err) { if (err && err.status) return res.status(err.status).json({ error: err.message }); next(err); }
+});
+router.delete('/inspiration/:id/meta-link', requireAdmin, async (req, res, next) => {
+  try { res.json({ unlinked: await inspManual.manualUnlink(req.params.id) }); } catch (err) { next(err); }
 });
 
 router.get('/inspiration', async (req, res, next) => {

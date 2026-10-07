@@ -137,10 +137,10 @@ test('every filter chip reads a count field the queue returns, and says its unit
   const app = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
   const matching = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'metaAdMatching.js'), 'utf8');
   const chips = [...app.matchAll(/\['([a-z_]+)', '([^']+)', '([a-z_]+)', '(creatives|ads)'\]/g)];
-  assert.equal(chips.length, 9);
+  assert.equal(chips.length, 10); // + Archived / pre-2026
   chips.forEach(([, , , field]) => assert.match(matching, new RegExp(`AS ${field}\\b`), `counts.${field} exists`));
   const unit = Object.fromEntries(chips.map((m) => [m[2], m[4]]));
-  ['To do', 'Needs review', 'Unmatched', 'Will inherit', 'Historical', 'Creative conflicts'].forEach((l) => assert.equal(unit[l], 'creatives', l));
+  ['To do', 'Needs review', 'Unmatched', 'Will inherit', 'Historical', 'Archived / pre-2026', 'Creative conflicts'].forEach((l) => assert.equal(unit[l], 'creatives', l));
   ['Matched', 'Not product-specific', 'Excluded'].forEach((l) => assert.equal(unit[l], 'ads', l));
   assert.equal(chips.find((m) => m[1] === 'conflict')[3], 'conflicts', 'the conflict chip reads `conflicts` (it used to read an undefined `conflict`)');
 });

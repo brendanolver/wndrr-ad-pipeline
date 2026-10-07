@@ -1,6 +1,6 @@
 // Ad creative preview (video / image / carousel + Meta share link).
 //
-// Available to admins and to anyone with Planning access: the Core creative plan
+// Available to admins and to anyone with Planning or Promotions access: the Core creative plan and the Inspiration Library
 // links its evidence here. It returns ONLY the creative and its descriptive
 // context (name, product, concept) -- never spend / CPA / reach, which stay on the
 // admin-only Meta Performance endpoints. Fetches from Meta are read-only and
@@ -17,7 +17,8 @@ const AD_ID_RE = /^[A-Za-z0-9_]{1,64}$/;
 router.use(async (req, res, next) => {
   try {
     if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
-    if (req.user.role === 'admin' || await canAccessModule(req.user.id, 'planning')) return next();
+    // Planning (Core evidence) and Promotions (linked Inspiration cards) both show the creative; neither sees spend / CPA / reach here.
+    if (req.user.role === 'admin' || await canAccessModule(req.user.id, 'planning') || await canAccessModule(req.user.id, 'promotions')) return next();
     return res.status(403).json({ error: 'You do not have access to this module.' });
   } catch (err) { return next(err); }
 });
@@ -38,7 +39,10 @@ router.post('/thumbnails', async (req, res, next) => {
 router.get('/:metaAdId', async (req, res, next) => {
   try {
     if (!AD_ID_RE.test(req.params.metaAdId)) throw new HttpError(400, 'Invalid ad id');
-    res.json(await creatives.getCreative(req.params.metaAdId, { refresh: req.query.refresh === '1' }));
+    const prefetch = req.query.prefetch === '1';
+    const out = await creatives.getCreative(req.params.metaAdId, { refresh: req.query.refresh === '1', prefetch });
+    // A warm-up that would have needed Meta while automatic Meta refresh is off: nothing was fetched, and that is fine.
+    res.json(out === null ? { prefetched: false, reason: 'not cached and automatic Meta refresh is off' } : out);
   } catch (err) {
     if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });
     return next(err);

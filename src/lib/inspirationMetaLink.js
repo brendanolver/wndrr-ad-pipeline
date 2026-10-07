@@ -124,4 +124,32 @@ async function applyLinks(db = pool) {
   return { linked, skipped_ambiguous: rep.ambiguous, still_unlinked: rep.total_references - rep.already_linked_to_a_meta_ad - linked };
 }
 
-module.exports = { report, lookupShareLinks, applyLinks, classifyAll, urlsOf, adIdInUrl, shareLinkIndex };
+// ── the references that still show "No link yet": exactly what is stored and whether an exact Meta match can be recovered ──
+// Deterministic only. A reference with no URL, no explicit ad id and no Meta identifier has nothing to match on; the title,
+// promotion, stage and creator are NOT identifiers (matching on them would be a name guess), so such a record stays unlinked.
+async function unlinkedDetail(db = pool) {
+  const rows = (await db.query(
+    `SELECT id, title, campaign_name, sale_stage_note, creator, media_type, source_key, source_label, video_url, additional_urls, notes, created_at
+       FROM creative_inspiration WHERE meta_ad_id IS NULL AND btrim(COALESCE(video_url, '')) = '' ORDER BY id`)).rows;
+  const adIds = new Set((await db.query('SELECT meta_ad_id FROM meta_ads')).rows.map((r) => r.meta_ad_id));
+  const idx = await shareLinkIndex(db);
+  return rows.map((r) => {
+    const urls = urlsOf(r);
+    const noteLinks = (String(r.notes || '').match(/https?:\/\/[^\s)]+/g) || []).map(norm);
+    const noteHits = noteLinks.flatMap((u) => [...(idx.get(u) || [])].concat(adIdInUrl(u) && adIds.has(adIdInUrl(u)) ? [adIdInUrl(u)] : []));
+    const identifiers = {
+      video_url: !!norm(r.video_url), additional_urls: urls.length > (norm(r.video_url) ? 1 : 0), links_in_notes: noteLinks.length,
+      internal_source_key: r.source_key || null, // a row label from the planning sheet, not a Meta identifier
+    };
+    let recoverable = false; let reason;
+    if (new Set(noteHits).size === 1) { recoverable = true; reason = 'A link in the notes matches exactly one stored ad (move it into the URL field, then Apply).'; }
+    else if (urls.length || noteLinks.length) reason = 'It carries a link, but none that matches a stored ad exactly.';
+    else reason = 'No URL, no ad id and no Meta identifier is stored. The only other fields are the title, promotion, stage and creator, and matching on those would be a name guess, so it is left unlinked. Use "Link to Meta creative" to choose the right one yourself.';
+    return {
+      id: r.id, title: r.title, promotion: r.campaign_name, stage: r.sale_stage_note, creator: r.creator, media_type: r.media_type,
+      source: r.source_label, identifiers, exact_match_recoverable: recoverable, reason,
+    };
+  });
+}
+
+module.exports = { report, lookupShareLinks, applyLinks, classifyAll, urlsOf, adIdInUrl, shareLinkIndex, unlinkedDetail };

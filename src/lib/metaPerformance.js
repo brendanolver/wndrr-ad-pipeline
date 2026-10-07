@@ -41,6 +41,7 @@
 // columns (video_plays, thruplays, video_p25 ...) remain stored untouched.
 const { pool } = require('../db');
 const reachStore = require('./metaReachStore'); // DB-only reads of the Reach/Frequency cache (no network)
+const funnelHealth = require('./metaFunnelHealth'); // inactive until WNDRR supplies targets
 
 // The account reporting timezone. Insight dates in meta_ad_insights_daily
 // are calendar days in the Meta ad account's own timezone, so every
@@ -544,7 +545,13 @@ async function getAds(parsed, query) {
       days_active: num(r.days_active),
       ...deriveMetrics(r),
       ...adReach(reachFrom, r),
+    })).map((a) => ({
+      ...a,
+      // Inactive until WNDRR supplies targets (lib/metaFunnelHealth.js): null for every row. Unknown funnel is never judged.
+      cpa_health: funnelHealth.classify(a.funnel, 'cpa', a.cpa),
+      frequency_health: funnelHealth.classify(a.funnel, 'frequency', a.frequency),
     })),
+    health: funnelHealth.status(),
     reach_info: {
       state: reachFrom ? 'ready' : reachStatus.state, source: reachFrom, pulled_at: reachStatus.pulled_at, stale: reachFrom === 'meta_range' && reachStatus.stale,
       includes_today: reachStatus.includes_today, last_error: reachStatus.last_error,

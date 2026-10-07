@@ -131,12 +131,20 @@ function normalise({ creative, shareLink, previewBody, videos, imageUrls }) {
 }
 
 // The Meta fetch. deps.metaGet / deps.accountPath are injectable for tests.
-async function fetchFromMeta(adId, creativeId, deps = {}) {
+//   opts.knownShareLink  an already-stored preview_shareable_link for this ad: reused, so that call is skipped
+//   opts.base            the normalised creative-level payload (kind / main / cards / thumbnail) of ANOTHER ad that uses the
+//                        exact same meta_creative_id: those pieces are identical for every copy, so the creative + video +
+//                        image-hash calls are skipped and only the ad-specific preview (the Meta-native iframe) is fetched.
+// The independent calls run concurrently (they used to run one after another), and each step's time is recorded so the
+// real bottleneck is visible in the response (`timings_ms`).
+async function fetchFromMeta(adId, creativeId, deps = {}, opts = {}) {
   const get = deps.metaGet || metaAds.metaGet;
   const accountPath = deps.accountPath || metaAds.accountPath;
   const diagnostics = {};
+  const timings = {};
   let firstErr = null;
   const ok = async (step, fn) => {
+    const t0 = Date.now();
     try {
       const r = await fn();
       if (r.status !== 200) throw metaAds.buildMetaApiError(r, `Meta ${step}`);
@@ -147,17 +155,39 @@ async function fetchFromMeta(adId, creativeId, deps = {}) {
       diagnostics[step] = diag(e);
       if (e && e.rateLimited && step === 'creative') throw e; // nothing else will work either
       return null;
+    } finally {
+      timings[step] = Date.now() - t0;
     }
   };
 
-  const creative = creativeId ? await ok('creative', () => get(`/${encodeURIComponent(creativeId)}`, {
+  const shareStep = opts.knownShareLink
+    ? Promise.resolve({ preview_shareable_link: opts.knownShareLink })
+    : ok('share_link', () => get(`/${encodeURIComponent(adId)}`, { fields: 'preview_shareable_link' }));
+  if (opts.knownShareLink) diagnostics.share_link = 'reused';
+  const previewStep = ok('preview', () => get(`/${encodeURIComponent(adId)}/previews`, { ad_format: 'MOBILE_FEED_STANDARD' }));
+
+  if (opts.base) {
+    // creative-level pieces come from a sibling ad of the exact same creative; only the ad-specific preview is fetched
+    const [adNode, previews] = await Promise.all([shareStep, previewStep]);
+    if (!Object.values(diagnostics).some((v) => v === 'ok' || v === 'reused')) throw firstErr || new Error('Meta returned nothing');
+    const b = opts.base;
+    return {
+      kind: b.kind, object_type: b.object_type || null, thumbnail_url: b.thumbnail_url || null, main: b.main || null, cards: b.cards || [],
+      share_link: safeUrl(adNode && adNode.preview_shareable_link),
+      preview_iframe_src: iframeSrcFrom(previews && previews.data && previews.data[0] && previews.data[0].body),
+      urls: [b.thumbnail_url, b.main && b.main.image_url, b.main && b.main.video_url, b.main && b.main.poster_url]
+        .concat((b.cards || []).flatMap((x) => [x.image_url, x.video_url, x.poster_url])).filter(Boolean),
+      diagnostics, timings_ms: timings, source: 'meta_sibling',
+    };
+  }
+
+  const creativeStep = creativeId ? ok('creative', () => get(`/${encodeURIComponent(creativeId)}`, {
     fields: 'id,object_type,thumbnail_url,image_url,video_id,effective_object_story_id,instagram_permalink_url,object_story_spec,asset_feed_spec',
     thumbnail_width: '600', thumbnail_height: '600',
-  })) : null;
-  const adNode = await ok('share_link', () => get(`/${encodeURIComponent(adId)}`, { fields: 'preview_shareable_link' }));
-  const previews = await ok('preview', () => get(`/${encodeURIComponent(adId)}/previews`, { ad_format: 'MOBILE_FEED_STANDARD' }));
+  })) : Promise.resolve(null);
+  const [creative, adNode, previews] = await Promise.all([creativeStep, shareStep, previewStep]);
 
-  // every video this creative can play (single, story video_data, carousel cards, dynamic feed)
+  // every video this creative can play (single, story video_data, carousel cards, dynamic feed) -- fetched concurrently
   const spec = (creative && creative.object_story_spec) || {};
   const vids = new Set();
   if (creative && creative.video_id) vids.add(String(creative.video_id));
@@ -165,29 +195,32 @@ async function fetchFromMeta(adId, creativeId, deps = {}) {
   ((spec.link_data || {}).child_attachments || []).forEach((ch) => { if (ch.video_id) vids.add(String(ch.video_id)); });
   (((creative && creative.asset_feed_spec) || {}).videos || []).forEach((v) => { if (v.video_id) vids.add(String(v.video_id)); });
   const videos = {};
-  for (const vid of [...vids].slice(0, MAX_VIDEOS)) {
-    const v = await ok(`video_${vid}`, () => get(`/${encodeURIComponent(vid)}`, { fields: 'source,picture,length,permalink_url' }));
-    if (v) videos[vid] = v;
-  }
   // carousel cards that carry only an image hash
   const hashes = new Set();
   ((spec.link_data || {}).child_attachments || []).forEach((ch) => { if (!ch.picture && ch.image_hash) hashes.add(ch.image_hash); });
   if ((spec.link_data || {}).image_hash && !(creative && creative.image_url)) hashes.add(spec.link_data.image_hash);
   (((creative && creative.asset_feed_spec) || {}).images || []).forEach((im) => { if (!im.url && im.hash) hashes.add(im.hash); });
   const imageUrls = {};
-  if (hashes.size) {
-    const imgs = await ok('image_hashes', () => get(`${accountPath()}/adimages`, { hashes: JSON.stringify([...hashes].slice(0, MAX_HASHES)), fields: 'hash,url' }));
-    ((imgs && imgs.data) || []).forEach((i) => { if (i.hash && i.url) imageUrls[i.hash] = i.url; });
-  }
+  await Promise.all([
+    ...[...vids].slice(0, MAX_VIDEOS).map(async (vid) => {
+      const v = await ok(`video_${vid}`, () => get(`/${encodeURIComponent(vid)}`, { fields: 'source,picture,length,permalink_url' }));
+      if (v) videos[vid] = v;
+    }),
+    (async () => {
+      if (!hashes.size) return;
+      const imgs = await ok('image_hashes', () => get(`${accountPath()}/adimages`, { hashes: JSON.stringify([...hashes].slice(0, MAX_HASHES)), fields: 'hash,url' }));
+      ((imgs && imgs.data) || []).forEach((i) => { if (i.hash && i.url) imageUrls[i.hash] = i.url; });
+    })(),
+  ]);
 
   // Every step failed: that is an outage / permission problem, not "this ad has no creative" --
   // surface it so a saved copy is kept instead of being replaced by an empty one.
-  if (!Object.values(diagnostics).some((v) => v === 'ok')) throw firstErr || new Error('Meta returned nothing');
+  if (!Object.values(diagnostics).some((v) => v === 'ok' || v === 'reused')) throw firstErr || new Error('Meta returned nothing');
   const norm = normalise({
     creative, shareLink: adNode && adNode.preview_shareable_link,
     previewBody: previews && previews.data && previews.data[0] && previews.data[0].body, videos, imageUrls,
   });
-  return { ...norm, diagnostics };
+  return { ...norm, diagnostics, timings_ms: timings, source: 'meta' };
 }
 
 // Ad + the context shown beside the creative (product/concept; money is added by the caller for admins only).
@@ -202,9 +235,15 @@ async function adContext(adId, db = pool) {
   return r.rows[0] || null;
 }
 
+const SHARE_LINK_REUSE_MS = 7 * 24 * 60 * 60 * 1000;
+const inflight = new Map(); // adId -> Promise: simultaneous requests (hover prefetch + click) share ONE Meta fetch
+
 // Cached creative for one ad. Fetches from Meta only when there is no usable cache (or refresh).
-async function getCreative(adId, { refresh = false, now = Date.now() } = {}, deps = {}) {
+//   opts.prefetch  a hover/focus warm-up: serves the cache, and only reaches Meta when automatic Meta refresh is allowed
+//                  (the same META_AUTO_SYNC switch as everything else that runs without a click); otherwise returns null.
+async function getCreative(adId, { refresh = false, prefetch = false, now = Date.now() } = {}, deps = {}) {
   const db = deps.db || pool;
+  const t0 = Date.now();
   const ad = await adContext(adId, db);
   if (!ad) throw new HttpError(404, 'Ad not found');
   const cached = (await db.query('SELECT * FROM meta_ad_creatives WHERE meta_ad_id = $1', [adId])).rows[0] || null;
@@ -216,17 +255,39 @@ async function getCreative(adId, { refresh = false, now = Date.now() } = {}, dep
     },
     creative: payload,
     ...extra,
+    timings_ms: { total: Date.now() - t0, ...(extra.timings_ms || {}) },
   });
-  if (usable && !refresh) return respond({ ...cached.payload, fetched_at: new Date(cached.fetched_at).toISOString(), cached: true });
+  if (usable && !refresh) return respond({ ...cached.payload, fetched_at: new Date(cached.fetched_at).toISOString(), cached: true }, { source: 'cache' });
 
   const configured = deps.configured ? deps.configured() : metaAds.configured();
+  if (prefetch) {
+    const autoOn = deps.autoEnabled ? deps.autoEnabled() : require('./metaAutoSync').enabled();
+    if (!configured || !autoOn) return null; // a warm-up never starts Meta traffic the operator switched off
+  }
   if (!configured) {
     if (cached && cached.payload && cached.payload.kind) return respond({ ...cached.payload, fetched_at: new Date(cached.fetched_at).toISOString(), cached: true, stale: true }, { warning: 'Meta is not configured here; showing the last saved preview, which may have expired.' });
     throw new HttpError(409, 'Meta is not configured in this environment, so the creative cannot be loaded.');
   }
   let fresh;
   try {
-    fresh = await fetchFromMeta(adId, ad.meta_creative_id, deps);
+    if (!inflight.has(adId)) {
+      const job = (async () => {
+        // already-fetched pieces are reused instead of asked for again:
+        //   * a stored preview link for this ad (meta_ad_share_links, e.g. from an Inspiration lookup or an earlier open)
+        //   * the creative-level payload of another ad that uses the exact same meta_creative_id and is still unexpired
+        const [link, sibling] = await Promise.all([
+          db.query('SELECT share_link, fetched_at FROM meta_ad_share_links WHERE meta_ad_id = $1 AND share_link IS NOT NULL', [adId]),
+          ad.meta_creative_id && !refresh ? db.query(
+            `SELECT payload FROM meta_ad_creatives WHERE meta_creative_id = $1 AND meta_ad_id <> $2 AND expires_at > $3 AND payload ? 'kind' AND payload->>'kind' <> 'unknown'
+              ORDER BY fetched_at DESC LIMIT 1`, [ad.meta_creative_id, adId, new Date(now + 5 * 60 * 1000)]) : Promise.resolve({ rows: [] }),
+        ]);
+        const known = link.rows[0] && now - new Date(link.rows[0].fetched_at).getTime() < SHARE_LINK_REUSE_MS && !refresh ? link.rows[0].share_link : null;
+        return fetchFromMeta(adId, ad.meta_creative_id, deps, { knownShareLink: known, base: sibling.rows[0] ? sibling.rows[0].payload : null });
+      })();
+      inflight.set(adId, job);
+      job.finally(() => inflight.delete(adId)).catch(() => {});
+    }
+    fresh = await inflight.get(adId);
   } catch (err) {
     if (cached && cached.payload && cached.payload.kind) return respond({ ...cached.payload, fetched_at: new Date(cached.fetched_at).toISOString(), cached: true, stale: true }, { warning: 'Could not refresh from Meta; showing the last saved preview.' });
     const rate = err && err.rateLimited;
@@ -236,16 +297,22 @@ async function getCreative(adId, { refresh = false, now = Date.now() } = {}, dep
     // a refresh that found LESS than we already have (e.g. the creative read failed) never replaces the saved copy
     return respond({ ...cached.payload, fetched_at: new Date(cached.fetched_at).toISOString(), cached: true, stale: true }, { warning: 'Could not refresh the creative from Meta; showing the last saved preview.' });
   }
-  const { urls, ...payload } = fresh;
+  const { urls, timings_ms: stepTimings, source, diagnostics, ...payload } = fresh;
   const expires = expiresAtFor(urls, now);
   await db.query(
     `INSERT INTO meta_ad_creatives (meta_ad_id, meta_creative_id, kind, payload, expires_at, fetched_at, error_code, error_message)
      VALUES ($1, $2, $3, $4, $5, now(), NULL, NULL)
      ON CONFLICT (meta_ad_id) DO UPDATE SET meta_creative_id = EXCLUDED.meta_creative_id, kind = EXCLUDED.kind, payload = EXCLUDED.payload,
             expires_at = EXCLUDED.expires_at, fetched_at = now(), error_code = NULL, error_message = NULL`,
-    [adId, ad.meta_creative_id, payload.kind, JSON.stringify(payload), expires]
+    [adId, ad.meta_creative_id, payload.kind, JSON.stringify({ ...payload, diagnostics }), expires]
   );
-  return respond({ ...payload, fetched_at: new Date().toISOString(), cached: false });
+  // remember the preview link so the Inspiration recovery (and the next open) never has to ask Meta for it again
+  if (payload.share_link) {
+    await db.query(
+      `INSERT INTO meta_ad_share_links (meta_ad_id, share_link, fetched_at) VALUES ($1,$2, now())
+       ON CONFLICT (meta_ad_id) DO UPDATE SET share_link = EXCLUDED.share_link, fetched_at = now()`, [adId, payload.share_link]).catch(() => {});
+  }
+  return respond({ ...payload, diagnostics, fetched_at: new Date().toISOString(), cached: false }, { source, timings_ms: stepTimings });
 }
 
 module.exports = { getCreative, fetchFromMeta, normalise, safeUrl, expiryOf, expiresAtFor, iframeSrcFrom, adContext };
