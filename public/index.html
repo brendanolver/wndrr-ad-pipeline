@@ -285,6 +285,7 @@
           </select>
           <input type="search" id="mm-search" placeholder="Search ad name, Meta Ad ID or product" autocomplete="off">
           <button type="button" class="btn btn-ghost btn-sm" id="mm-refresh-suggestions">Refresh suggestions</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="mm-open-inventory" title="Read-only list of every concept in use, with counts and spelling variants">Concept inventory</button>
         </div>
         <!-- Historical backlog: ads still on older matching rules (explicit, resumable, background) -->
         <!-- V4 matching catalogue (ApparelMagic snapshot): manual load / preview / activate -->
@@ -295,9 +296,17 @@
         <div class="mm-archive" id="mm-archive" style="display:none;"></div>
         <div class="mm-chips" id="mm-chips" role="group" aria-label="Mapping state"></div>
         <div class="mm-relevance-note" id="mm-relevance-note" style="display:none;"></div>
+        <!-- Rapid review: progress + keyboard help + live feedback (works in every view; reviewable rows get a tick) -->
+        <div class="mm-rv-bar" id="mm-rv-bar">
+          <button type="button" class="btn btn-primary btn-sm" id="mm-rv-start">Start reviewing</button>
+          <span class="mm-rv-keys"><kbd>Enter</kbd> confirm · <kbd>↑</kbd><kbd>↓</kbd> move · <kbd>E</kbd> edit · <kbd>Esc</kbd> close — with a row selected</span>
+          <span class="mm-rv-prog" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" title="Confirmed this session versus still to review"><i></i></span>
+          <span class="mm-rv-count"></span>
+          <span class="mm-rv-status" id="mm-rv-status" role="status" aria-live="polite"></span>
+        </div>
         <table class="mp-table mm-table">
           <thead>
-            <tr><th class="mp-th-name">Ad Name</th><th>Status</th><th class="num">Recent spend</th><th title="Newest day ANY ad using this exact creative delivered, from stored Insights">Last active</th><th>Mapping</th><th>Product</th><th>Concept</th><th>Media</th><th>Confidence</th></tr>
+            <tr><th class="mp-th-name">Ad Name</th><th>Status</th><th class="num">Recent spend</th><th title="Newest day ANY ad using this exact creative delivered, from stored Insights">Last active</th><th>Mapping</th><th>Product</th><th>Concept</th><th>Media</th><th>Creator</th><th>Confidence</th><th class="mm-th-tick" title="Confirm the suggested classification">✓</th></tr>
           </thead>
           <tbody id="mm-body"></tbody>
         </table>
@@ -1595,6 +1604,16 @@
       <button class="modal-close" onclick="closeModal('mm-conflict-modal')">&times;</button>
     </div>
     <div class="modal-body" id="mm-conflict-body"></div>
+  </div>
+</div>
+
+<div id="mm-inventory-modal" class="modal-backdrop">
+  <div class="modal" style="width:90vw;min-width:680px;max-width:1200px;">
+    <div class="modal-header">
+      <h3>Concept inventory <small class="hint">(read-only — nothing is merged, renamed or approved here)</small></h3>
+      <button class="modal-close" onclick="closeModal('mm-inventory-modal')">&times;</button>
+    </div>
+    <div class="modal-body" id="mm-inventory-body"></div>
   </div>
 </div>
 
