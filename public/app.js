@@ -1267,6 +1267,32 @@ function mmRenderChips(counts) {
       <span class="mm-chip-n">${Number((counts && counts[field]) || 0).toLocaleString('en-AU')}</span> <span class="mm-chip-unit">${unit}</span></button>`).join('');
 }
 
+function mmRowHtml(a) {
+  const prod = mmHasValues(a)
+    ? (a.not_product_specific ? '<em class="mm-muted">Not product-specific</em>' : escapeHtml(a.confirmed_products || '—'))
+    : (a.suggested_product ? `<span class="mm-guess" title="Suggestion — not confirmed">${escapeHtml(a.suggested_product)}</span>` : '<span class="mp-na">—</span>');
+  const con = mmHasValues(a)
+    ? escapeHtml(a.confirmed_concept || '—')
+    : (a.suggested_concept ? `<span class="mm-guess" title="Suggestion — not confirmed">${escapeHtml(a.suggested_concept)}</span>` : '<span class="mp-na">—</span>');
+  const media = mmHasValues(a)
+    ? escapeHtml(a.confirmed_media || '—')
+    : (a.suggested_media ? `<span class="mm-guess" title="Suggestion — not confirmed">${escapeHtml(a.suggested_media)}</span>` : '<span class="mp-na">—</span>');
+  const creator = mmHasValues(a) && a.confirmed_creator ? escapeHtml(a.confirmed_creator) : '<span class="mp-na">—</span>';
+  const conf = a.match_status === 'confirmed' ? '<span class="mm-tick">✓</span>' : mmConfDot(a.confidence_label, a.match_status);
+  return `<tr data-ad-id="${escapeHtml(a.meta_ad_id)}">
+    <td class="mp-name" title="${escapeHtml(a.ad_name || a.meta_ad_id)}">${ccThumbHtml(a.meta_ad_id)}<span class="mp-name-stack"><span class="mp-name-text">${escapeHtml(a.ad_name || '(unnamed ad)')}</span></span>${a.same_creative_ads > 1 ? ` <span class="mm-sibs" title="${a.same_creative_ads - 1} other ad${a.same_creative_ads === 2 ? '' : 's'} use this exact creative; classifying it covers them all">+${a.same_creative_ads - 1} same creative</span>` : ''}${a.creative_conflict ? ` <span class="mm-conflict" data-conflict-creative="${escapeHtml(a.meta_creative_id || '')}" title="People classified ads of this creative differently — click to compare and resolve">conflict</span>` : ''}</td>
+    <td>${mpStatusChip(a.effective_status)}</td>
+    <td class="num">${mpFmt(a.recent_spend, 'money')}</td>
+    <td class="mm-lastactive" title="${a.creative_ads > 1 ? `Across all ${a.creative_ads} ads that use this exact creative. ` : ''}Newest day it delivered in stored Insights">${a.creative_last_active ? escapeHtml(mpDate(a.creative_last_active, true)) : '<span class="mp-na" title="No delivery in the Insights we have stored">—</span>'}${a.creative_ads_running ? ' <span class="mm-live-dot" title="At least one ad using this creative is ACTIVE">●</span>' : ''}</td>
+    <td>${mmStateChip(a)}</td>
+    <td class="mm-cell">${prod}</td>
+    <td class="mm-cell">${con}</td>
+    <td class="mm-cell">${media}</td>
+    <td class="mm-cell mm-creator-cell" data-rv-creator>${creator}</td>
+    <td>${conf}</td>
+    <td class="mm-tickcell" data-rv-tickcell></td></tr>`;
+}
+
 function mmRenderRows(res) {
   mmRenderChips(res.counts);
   const note = document.getElementById('mm-relevance-note');
@@ -1279,28 +1305,8 @@ function mmRenderRows(res) {
   if (res.relevance && !res.relevance.known) noteParts.push(`Product relevance isn't available yet (${res.relevance.reason || 'ApparelMagic data not loaded'}), so every ad is shown as actionable.`);
   note.style.display = noteParts.length ? '' : 'none';
   note.textContent = noteParts.join(' ');
-  document.getElementById('mm-body').innerHTML = res.ads.length ? res.ads.map((a) => {
-    const prod = mmHasValues(a)
-      ? (a.not_product_specific ? '<em class="mm-muted">Not product-specific</em>' : escapeHtml(a.confirmed_products || '—'))
-      : (a.suggested_product ? `<span class="mm-guess" title="Suggestion — not confirmed">${escapeHtml(a.suggested_product)}</span>` : '<span class="mp-na">—</span>');
-    const con = mmHasValues(a)
-      ? escapeHtml(a.confirmed_concept || '—')
-      : (a.suggested_concept ? `<span class="mm-guess" title="Suggestion — not confirmed">${escapeHtml(a.suggested_concept)}</span>` : '<span class="mp-na">—</span>');
-    const media = mmHasValues(a)
-      ? escapeHtml(a.confirmed_media || '—')
-      : (a.suggested_media ? `<span class="mm-guess" title="Suggestion — not confirmed">${escapeHtml(a.suggested_media)}</span>` : '<span class="mp-na">—</span>');
-    const conf = a.match_status === 'confirmed' ? '<span class="mm-tick">✓</span>' : mmConfDot(a.confidence_label, a.match_status);
-    return `<tr data-ad-id="${escapeHtml(a.meta_ad_id)}">
-      <td class="mp-name" title="${escapeHtml(a.ad_name || a.meta_ad_id)}">${ccThumbHtml(a.meta_ad_id)}<span class="mp-name-stack"><span class="mp-name-text">${escapeHtml(a.ad_name || '(unnamed ad)')}</span></span>${a.same_creative_ads > 1 ? ` <span class="mm-sibs" title="${a.same_creative_ads - 1} other ad${a.same_creative_ads === 2 ? '' : 's'} use this exact creative; classifying it covers them all">+${a.same_creative_ads - 1} same creative</span>` : ''}${a.creative_conflict ? ` <span class="mm-conflict" data-conflict-creative="${escapeHtml(a.meta_creative_id || '')}" title="People classified ads of this creative differently — click to compare and resolve">conflict</span>` : ''}</td>
-      <td>${mpStatusChip(a.effective_status)}</td>
-      <td class="num">${mpFmt(a.recent_spend, 'money')}</td>
-      <td class="mm-lastactive" title="${a.creative_ads > 1 ? `Across all ${a.creative_ads} ads that use this exact creative. ` : ''}Newest day it delivered in stored Insights">${a.creative_last_active ? escapeHtml(mpDate(a.creative_last_active, true)) : '<span class="mp-na" title="No delivery in the Insights we have stored">—</span>'}${a.creative_ads_running ? ' <span class="mm-live-dot" title="At least one ad using this creative is ACTIVE">●</span>' : ''}</td>
-      <td>${mmStateChip(a)}</td>
-      <td class="mm-cell">${prod}</td>
-      <td class="mm-cell">${con}</td>
-      <td class="mm-cell">${media}</td>
-      <td>${conf}</td></tr>`;
-  }).join('') : `<tr><td colspan="11" class="mp-table-empty">${
+  mmRv.rows = new Map(res.ads.map((a) => [a.meta_ad_id, a]));
+  document.getElementById('mm-body').innerHTML = res.ads.length ? res.ads.map(mmRowHtml).join('') : `<tr><td colspan="11" class="mp-table-empty">${
     mmState.q ? 'No ads match this search.' : mmState.filter === 'needs' ? 'Nothing left to do in this view — nice work.' : 'No ads in this view.'}</td></tr>`;
   ccHydrateThumbs(document.getElementById('mm-body'));
   const pager = document.getElementById('mm-pager');
@@ -1314,6 +1320,7 @@ function mmRenderRows(res) {
       <span>${from.toLocaleString('en-AU')}–${to.toLocaleString('en-AU')} of ${res.total.toLocaleString('en-AU')} · page ${res.page} of ${res.total_pages}</span>
       <button type="button" class="btn btn-ghost btn-sm" id="mm-next" ${res.page >= res.total_pages ? 'disabled' : ''}>Next →</button>`;
   }
+  mmRvAfterRender(res);
 }
 
 // Review workload in unique creatives (read-only), with the explicit "apply to duplicates" action.
@@ -1651,8 +1658,417 @@ document.getElementById('mm-body').addEventListener('click', (e) => {
   const row = e.target.closest('tr[data-ad-id]');
   if (badge && badge.dataset.conflictCreative) { openConflictModal(badge.dataset.conflictCreative); return; }
   if (row && mmState.filter === 'conflict' && row.querySelector('[data-conflict-creative]')) { openConflictModal(row.querySelector('[data-conflict-creative]').dataset.conflictCreative); return; }
+  const tick = e.target.closest('[data-rv-tick]');
+  if (tick) { mmRvOnTick(tick.dataset.rvTick); return; }
+  if (row && mmRvReviewable(row.dataset.adId) && mmState.filter !== 'conflict') { mmRvSelect(row.dataset.adId, { focus: true }); return; }
   if (row) openMatchWorkspace(row.dataset.adId);
 });
+
+// ── Rapid review: confirm suggested classifications from inside the table ───────────────────────
+// Works in every view (All ads, Needs review, To do, …) without a separate screen or dialog:
+//   - a reviewable row (Unmatched / Needs review, not excluded, and whose exact creative nobody has classified or argued about) gets a
+//     ✓ button; clicking the row selects it and opens an inline editor under it, pre-filled from the suggestions already stored for it;
+//   - ✓ (or Enter, when the row itself is selected) confirms it through the SAME endpoint as the full editor, which gives the decision to
+//     every unclassified copy of the exact same meta_creative_id using the existing, protected creative inheritance -- nothing new;
+//   - the next reviewable row is then selected and focused.
+// Safety: Enter is ignored while typing in any field, while any dialog is open, on key-repeat, for 400 ms after a confirmation, while a
+// confirmation is in flight, and unless the classification is complete (a product -- or Not product-specific -- and a concept).
+const mmRv = {
+  rows: new Map(), batch: new Map(), forms: new Map(), skipped: new Set(),
+  selectedId: null, busy: false, cooldownUntil: 0, wantFirst: false, batchSeq: 0,
+  done: 0, left: null, leftLabel: 'Needs review', page: 1, totalPages: 1, countsTimer: null, statusTimer: null,
+};
+const MM_RV_COOLDOWN_MS = 400;
+const MM_RV_NEEDS_FILTERS = ['needs', 'suggested', 'unmatched'];
+
+const mmRvInfo = (id) => mmRv.batch.get(id) || null;
+const mmRvReviewable = (id) => { const i = mmRvInfo(id); return !!(i && i.reviewable && mmRv.rows.has(id)); };
+const mmRvRow = (id) => document.querySelector(`#mm-body tr[data-ad-id="${CSS.escape(id)}"]`);
+const mmRvIds = () => [...document.querySelectorAll('#mm-body tr[data-ad-id]')].map((r) => r.dataset.adId);
+
+// the editable draft for a row, seeded once from the stored suggestions
+function mmRvForm(id) {
+  if (mmRv.forms.has(id)) return mmRv.forms.get(id);
+  const d = (mmRvInfo(id) || {}).draft || {};
+  const f = {
+    products: (d.products || []).map((p) => ({ key: p.key, label: p.label })),
+    nps: !!d.not_product_specific,
+    concept: d.concept ? { ...d.concept } : null,
+    creator: d.creator ? d.creator.label : null,
+    media: d.media ? { key: d.media.key, label: d.media.label } : null,
+    style: d.style ? { key: d.style.key, label: d.style.label } : null,
+  };
+  mmRv.forms.set(id, f);
+  return f;
+}
+// THE rule for "ready to confirm" (the server enforces the same one when require_complete is sent)
+function mmRvReadiness(f) {
+  if (!f.nps && !f.products.length) return { ready: false, why: 'Choose a product, or mark it Not product-specific' };
+  if (!f.nps && !f.concept) return { ready: false, why: 'Choose a concept' };
+  return { ready: true, why: '' };
+}
+function mmRvPayload(f) {
+  return {
+    product_codes: f.nps ? [] : f.products.map((x) => x.key),
+    not_product_specific: !!f.nps,
+    concept: f.nps ? null : mmConceptPayload(f.concept),
+    creative_style_id: f.style ? f.style.key : null,
+    creator_name: f.creator || null,
+    media_type: f.media ? f.media.key : null,
+    ad_setup_id: null,
+    require_complete: true,
+  };
+}
+
+function mmRvStatus(msg, kind) {
+  const el = document.getElementById('mm-rv-status');
+  if (!el) return;
+  clearTimeout(mmRv.statusTimer);
+  el.textContent = msg || '';
+  el.className = `mm-rv-status${kind ? ` ${kind}` : ''}`;
+  if (msg && kind === 'ok') mmRv.statusTimer = setTimeout(() => { el.textContent = ''; el.className = 'mm-rv-status'; }, 7000);
+}
+
+function mmRvUpdateBar() {
+  const bar = document.getElementById('mm-rv-bar');
+  if (!bar) return;
+  const left = mmRv.left === null ? null : mmRv.left;
+  const total = (left || 0) + mmRv.done;
+  const pct = total ? Math.round((mmRv.done / total) * 100) : 0;
+  const reviewable = [...mmRv.batch.values()].filter((i) => i.reviewable).length;
+  bar.querySelector('.mm-rv-count').innerHTML = left === null ? '' :
+    `<b>${mmRv.done.toLocaleString('en-AU')}</b> confirmed this session · <b>${left.toLocaleString('en-AU')}</b> creative${left === 1 ? '' : 's'} left in ${escapeHtml(mmRv.leftLabel)}`;
+  bar.querySelector('.mm-rv-prog > i').style.width = `${pct}%`;
+  bar.querySelector('.mm-rv-prog').setAttribute('aria-valuenow', String(pct));
+  const start = document.getElementById('mm-rv-start');
+  start.disabled = !reviewable;
+  start.title = reviewable ? '' : 'No row on this page can be reviewed here';
+}
+
+// decorate one row: tick button + creator suggestion
+function mmRvDecorateRow(id) {
+  const tr = mmRvRow(id);
+  if (!tr) return;
+  const info = mmRvInfo(id);
+  const tickCell = tr.querySelector('[data-rv-tickcell]');
+  tr.classList.toggle('mm-rv-able', mmRvReviewable(id));
+  if (!tickCell) return;
+  if (!mmRvReviewable(id)) { tickCell.innerHTML = ''; return; }
+  const rd = mmRvReadiness(mmRvForm(id));
+  tickCell.innerHTML = `<button type="button" class="mm-rv-tick${rd.ready ? ' ready' : ''}" data-rv-tick="${escapeHtml(id)}" aria-label="Confirm this classification" title="${escapeHtml(rd.ready ? 'Confirm this classification (applies to unclassified copies of the same creative)' : `Not ready: ${rd.why}`)}">✓</button>`;
+  const cc = tr.querySelector('[data-rv-creator]');
+  const f = mmRvForm(id);
+  if (cc && !tr.classList.contains('mm-row-done')) cc.innerHTML = f.creator ? `<span class="mm-guess" title="Suggestion — not confirmed">${escapeHtml(f.creator)}</span>` : '<span class="mp-na">—</span>';
+  // the suggested concept the editor would use (the list column only shows the top stored suggestion label)
+  void info;
+}
+
+function mmRvRerenderRow(id, cls) {
+  const tr = mmRvRow(id);
+  const a = mmRv.rows.get(id);
+  if (!tr || !a) return;
+  const wasSel = mmRv.selectedId === id;
+  const holder = document.createElement('tbody');
+  holder.innerHTML = mmRowHtml(a).trim();
+  const fresh = holder.firstElementChild;
+  if (cls) fresh.classList.add(cls);
+  if (mmRv.skipped.has(id)) fresh.classList.add('mm-row-skipped');
+  tr.replaceWith(fresh);
+  ccHydrateThumbs(fresh);
+  if (wasSel) { fresh.classList.add('mm-row-sel'); fresh.tabIndex = 0; }
+  mmRvDecorateRow(id);
+}
+
+async function mmRvLoadBatch(res) {
+  const seq = ++mmRv.batchSeq;
+  const ids = res.ads.filter((a) => (a.match_status === 'unmatched' || a.match_status === 'suggested') && !a.excluded && !a.creative_conflict).map((a) => a.meta_ad_id);
+  mmRv.batch = new Map();
+  if (!ids.length) { mmRvUpdateBar(); return; }
+  try {
+    const r = await api(`/meta-ad-matching/review-batch?ids=${encodeURIComponent(ids.join(','))}`);
+    if (seq !== mmRv.batchSeq) return; // a newer page superseded this one
+    for (const id of ids) if (r.ads[id]) mmRv.batch.set(id, r.ads[id]);
+    ids.forEach(mmRvDecorateRow);
+    mmRvUpdateBar();
+    if (mmRv.wantFirst) { mmRv.wantFirst = false; const first = mmRvIds().find(mmRvReviewable); if (first) mmRvSelect(first, { focus: true }); else mmRvStatus('Nothing on this page can be reviewed here.', 'warn'); }
+  } catch (e) {
+    mmRvStatus(`Couldn’t load suggestions for review: ${e.message}`, 'error');
+  }
+}
+
+function mmRvAfterRender(res) {
+  mmRv.selectedId = null; mmRv.forms = new Map(); mmRv.skipped = new Set();
+  mmRv.page = res.page; mmRv.totalPages = res.total_pages;
+  const field = res.filter === 'unmatched' ? 'unmatched' : res.filter === 'needs' ? 'needs' : 'suggested';
+  mmRv.leftLabel = field === 'unmatched' ? 'Unmatched' : field === 'needs' ? 'To do' : 'Needs review';
+  mmRv.left = Number((res.counts && res.counts[field]) || 0);
+  mmRvUpdateBar();
+  mmRvLoadBatch(res);
+}
+
+// debounced background refresh of the chips + remaining count (does not touch the rows or the selection)
+function mmRvScheduleCounts() {
+  clearTimeout(mmRv.countsTimer);
+  mmRv.countsTimer = setTimeout(async () => {
+    if (mmRv.busy) return mmRvScheduleCounts();
+    try {
+      const res = await api(`/meta-ad-matching/queue?scope=${mmState.scope}&filter=${mmState.filter}&q=${encodeURIComponent(mmState.q)}&page=1&page_size=1`);
+      mmRenderChips(res.counts);
+      const field = mmState.filter === 'unmatched' ? 'unmatched' : mmState.filter === 'needs' ? 'needs' : 'suggested';
+      mmRv.left = Number((res.counts && res.counts[field]) || 0);
+      mmRvUpdateBar();
+    } catch (e) { /* the bar keeps its local count */ }
+  }, 2500);
+}
+
+function mmRvClosePanel() {
+  document.querySelectorAll('#mm-body tr.mm-rv-panel').forEach((r) => r.remove());
+  document.querySelectorAll('#mm-body tr.mm-row-sel').forEach((r) => { r.classList.remove('mm-row-sel'); r.removeAttribute('tabindex'); });
+  mmRv.selectedId = null;
+}
+
+async function mmRvSelect(id, { focus = true } = {}) {
+  if (!mmRvReviewable(id)) return;
+  const tr = mmRvRow(id);
+  if (!tr) return;
+  mmRvClosePanel();
+  mmRv.selectedId = id;
+  tr.classList.add('mm-row-sel');
+  tr.tabIndex = 0;
+  if (focus) tr.focus({ preventScroll: true });
+  const info = mmRvInfo(id);
+  const f = mmRvForm(id);
+  const panel = document.createElement('tr');
+  panel.className = 'mm-rv-panel';
+  panel.dataset.rvFor = id;
+  const others = info.other_ads || 0;
+  panel.innerHTML = `<td colspan="11"><div class="mm-rv-grid">
+      <div class="mm-rv-f mm-rv-f-prod"><div class="mm-rv-lab"><span>Product(s)</span><label class="mm-check"><input type="checkbox" class="mm-rv-nps"> Not product-specific</label></div><div data-rvp="products"></div></div>
+      <div class="mm-rv-f"><div class="mm-rv-lab"><span>Concept</span></div><div data-rvp="concept"></div></div>
+      <div class="mm-rv-f"><div class="mm-rv-lab"><span>Media</span></div><div data-rvp="media"></div></div>
+      <div class="mm-rv-f"><div class="mm-rv-lab"><span>Creator</span></div><div data-rvp="creator"></div></div>
+      <div class="mm-rv-f"><div class="mm-rv-lab"><span>Creative style</span></div><div data-rvp="style"></div></div>
+      <div class="mm-rv-actions">
+        <button type="button" class="btn btn-primary btn-sm mm-rv-confirm">✓ Confirm</button>
+        <button type="button" class="btn btn-ghost btn-sm mm-rv-skip">Skip</button>
+        <button type="button" class="btn btn-ghost btn-sm mm-rv-full">Full editor</button>
+      </div>
+      <div class="mm-rv-msg" role="status"></div>
+      <div class="mm-rv-note">Confirming ${others > 0 ? `also gives this decision to the ${others} other ad${others === 1 ? '' : 's'} that use the exact same creative and that nobody has classified` : 'covers this ad'}. Ads a person already classified, skipped, excluded or linked to an Ad Setup are never changed.</div>
+    </div></td>`;
+  tr.after(panel);
+  panel.querySelector('.mm-rv-full').addEventListener('click', () => openMatchWorkspace(id));
+  panel.querySelector('.mm-rv-confirm').addEventListener('click', () => mmRvConfirm(id));
+  panel.querySelector('.mm-rv-skip').addEventListener('click', () => mmRvSkip(id));
+  const refreshState = () => {
+    const rd = mmRvReadiness(f);
+    const btn = panel.querySelector('.mm-rv-confirm');
+    btn.disabled = !rd.ready;
+    btn.title = rd.ready ? 'Confirm (or press Enter with this row selected)' : `Not ready: ${rd.why}`;
+    panel.querySelector('.mm-rv-msg').textContent = rd.ready ? '' : `Not ready: ${rd.why}.`;
+    panel.classList.toggle('not-ready', !rd.ready);
+    mmRvDecorateRow(id);
+    if (mmRv.selectedId === id) { const r = mmRvRow(id); if (r) { r.classList.add('mm-row-sel'); r.tabIndex = 0; } }
+  };
+  const options = await mmLoadOptions();
+  if (mmRv.selectedId !== id) return; // moved on while the lists loaded
+  const host = (k) => panel.querySelector(`[data-rvp="${k}"]`);
+  const nps = panel.querySelector('.mm-rv-nps');
+  nps.checked = f.nps;
+  const prod = mmPicker(host('products'), {
+    multi: true, placeholder: 'Search products…', options: options.products.map((x) => ({ key: x.key, label: x.label, hint: x.key })),
+    selected: f.products.slice(), onChange: (sel) => { f.products = sel.map((x) => ({ key: x.key, label: x.label })); if (f.products.length) { f.nps = false; nps.checked = false; } refreshState(); },
+  });
+  const mediaOpts = options.media_types.map((x) => ({ key: x.key, label: x.label }));
+  mmPicker(host('media'), { multi: false, placeholder: 'Video, Image…', options: mediaOpts, selected: f.media ? [f.media] : [], onChange: (sel) => { f.media = sel[0] ? { key: sel[0].key, label: sel[0].label } : null; refreshState(); } });
+  mmPicker(host('concept'), {
+    multi: false, addNew: mmAddConcept, addLabel: 'concept', placeholder: 'Search or add a concept…', options: options.concepts.map(mmConceptItem),
+    selected: f.concept ? [{ key: f.concept.concept_type_id ? `ct:${f.concept.concept_type_id}` : (f.concept.vocab_id ? `cv:${f.concept.vocab_id}` : `free:${f.concept.label}`), label: f.concept.label, free: !!f.concept.legacy, concept_type_id: f.concept.concept_type_id || null, vocab_id: f.concept.vocab_id || null }] : [],
+    onChange: (sel) => { f.concept = sel[0] ? { label: sel[0].label, concept_type_id: sel[0].concept_type_id || null, vocab_id: sel[0].vocab_id || null, legacy: !!sel[0].free } : null; refreshState(); },
+  });
+  mmPicker(host('creator'), {
+    multi: false, addNew: mmAddCreator, addLabel: 'creator', placeholder: 'Search or add a creator…', options: options.creators.map((x) => ({ key: x, label: x })),
+    selected: f.creator ? [{ key: f.creator, label: f.creator }] : [], onChange: (sel) => { f.creator = sel[0] ? sel[0].label : null; refreshState(); },
+  });
+  mmPicker(host('style'), {
+    multi: false, placeholder: 'Optional', options: options.creative_styles.map((x) => ({ key: x.id, label: x.label })),
+    selected: f.style ? [f.style] : [], onChange: (sel) => { f.style = sel[0] ? { key: sel[0].key, label: sel[0].label } : null; refreshState(); },
+  });
+  nps.addEventListener('change', () => { f.nps = nps.checked; if (nps.checked) { prod.set([]); f.products = []; } prod.setDisabled(nps.checked); refreshState(); });
+  prod.setDisabled(f.nps);
+  refreshState();
+  tr.scrollIntoView({ block: 'nearest' });
+}
+
+function mmRvNext(fromId, dir = 1) {
+  const ids = mmRvIds();
+  for (let i = ids.indexOf(fromId) + dir; i >= 0 && i < ids.length; i += dir) {
+    if (mmRvReviewable(ids[i]) && !mmRv.skipped.has(ids[i])) return ids[i];
+  }
+  return null;
+}
+
+// after a confirmation / skip: the next reviewable row, else (this page is finished) the next batch of work
+async function mmRvAdvance(fromId) {
+  let next = mmRvNext(fromId, 1) || mmRvIds().find((x) => x !== fromId && mmRvReviewable(x) && !mmRv.skipped.has(x)) || null;
+  if (next) { await mmRvSelect(next, { focus: true }); return; }
+  mmRvClosePanel();
+  const pagedOut = MM_RV_NEEDS_FILTERS.includes(mmState.filter);
+  if (pagedOut && mmRv.left > 0) { mmState.page = 1; mmRv.wantFirst = true; mmRvStatus('Page finished — loading the next creatives…', 'ok'); await loadMetaMatching(); return; }
+  if (!pagedOut && mmRv.page < mmRv.totalPages) { mmState.page = mmRv.page + 1; mmRv.wantFirst = true; mmRvStatus('Page finished — loading the next page…', 'ok'); await loadMetaMatching(); return; }
+  mmRvStatus('Nothing left to review on this page.', 'ok');
+}
+
+async function mmRvRefreshStates(ids) {
+  if (!ids.length) return;
+  const r = await api(`/meta-ad-matching/review-batch?ids=${encodeURIComponent(ids.join(','))}`);
+  for (const id of ids) {
+    const st = r.ads[id]; const a = mmRv.rows.get(id);
+    if (!st || !a) continue;
+    Object.assign(a, {
+      match_status: st.match_status, match_method: st.match_method, excluded: st.excluded, skipped: st.skipped, not_product_specific: st.not_product_specific,
+      confirmed_products: st.confirmed_products, confirmed_concept: st.confirmed_concept, confirmed_creator: st.confirmed_creator, confirmed_media: st.confirmed_media,
+    });
+    mmRv.batch.set(id, st);
+    mmRvRerenderRow(id, st.match_status === 'auto_matched' ? 'mm-row-done' : '');
+  }
+}
+
+async function mmRvConfirm(id) {
+  const info = mmRvInfo(id);
+  const a = mmRv.rows.get(id);
+  if (!info || !info.reviewable || !a) return false;
+  if (mmRv.busy || Date.now() < mmRv.cooldownUntil) return false; // never a double confirmation
+  const f = mmRvForm(id);
+  const rd = mmRvReadiness(f);
+  if (!rd.ready) {
+    mmRvStatus(`Not confirmed — ${rd.why.toLowerCase()}.`, 'warn');
+    if (mmRv.selectedId !== id) await mmRvSelect(id, { focus: true });
+    return false;
+  }
+  mmRv.busy = true;
+  const tr = mmRvRow(id);
+  if (tr) { tr.classList.add('mm-row-busy'); tr.classList.remove('mm-row-error'); }
+  document.querySelectorAll('#mm-body .mm-rv-panel button').forEach((b) => { b.disabled = true; });
+  let ok = false;
+  try {
+    const ws = await api(`/meta-ad-matching/ads/${encodeURIComponent(id)}/confirm`, { method: 'POST', body: JSON.stringify(mmRvPayload(f)) });
+    ok = true;
+    const dup = Number(ws.applied_to_same_creative) || 0;
+    const sim = Number(ws.auto_applied_to_similar) || 0;
+    Object.assign(a, {
+      match_status: 'confirmed', match_method: 'manual', skipped: false, excluded: false, not_product_specific: !!f.nps,
+      confirmed_products: f.nps ? null : f.products.map((x) => x.label).join(', '), confirmed_concept: f.nps || !f.concept ? null : f.concept.label,
+      confirmed_creator: f.creator || null, confirmed_media: f.media ? f.media.label : null,
+    });
+    info.reviewable = false; info.match_status = 'confirmed'; info.blocked_reason = 'confirmed';
+    mmRv.forms.delete(id);
+    mmRv.done += 1;
+    if (mmRv.left !== null) mmRv.left = Math.max(0, mmRv.left - 1);
+    mmRvClosePanel();
+    mmRvRerenderRow(id, 'mm-row-done');
+    // copies of this exact creative that are on this page changed too (they inherit through the existing protected path)
+    const sibs = mmRvIds().filter((x) => x !== id && (mmRv.rows.get(x) || {}).meta_creative_id && mmRv.rows.get(x).meta_creative_id === a.meta_creative_id);
+    if (sibs.length) { try { await mmRvRefreshStates(sibs); } catch (e) { /* the next reload shows them */ } }
+    const parts = [`Confirmed${a.ad_name ? ` “${a.ad_name.length > 48 ? `${a.ad_name.slice(0, 47)}…` : a.ad_name}”` : ''}.`];
+    parts.push(dup ? `Also applied to ${dup} other ad${dup === 1 ? '' : 's'} using the same creative.` : 'No other unclassified ads use this exact creative.');
+    if (sim) parts.push(`${sim} similar ad${sim === 1 ? ' was' : 's were'} also auto-matched by the existing product rule.`);
+    mmRvStatus(`✓ ${parts.join(' ')}`, 'ok');
+    toast(`✓ ${parts[0]}${dup ? ` +${dup} same-creative ad${dup === 1 ? '' : 's'}` : ''}`);
+    mmRvUpdateBar();
+    mmRvScheduleCounts();
+    await mmRvAdvance(id);
+  } catch (e) {
+    const msg = e && e.message ? e.message : 'Unknown error';
+    if (!ok) {
+      mmRvStatus(`✗ Couldn’t confirm: ${msg}`, 'error');
+      toast(`Couldn’t confirm: ${msg}`, true);
+      const t2 = mmRvRow(id);
+      if (t2) { t2.classList.remove('mm-row-busy'); t2.classList.add('mm-row-error'); }
+      const m = document.querySelector('#mm-body .mm-rv-panel .mm-rv-msg');
+      if (m) m.textContent = msg;
+    }
+  } finally {
+    mmRv.busy = false;
+    if (ok) mmRv.cooldownUntil = Date.now() + MM_RV_COOLDOWN_MS;
+    document.querySelectorAll('#mm-body .mm-rv-panel .mm-rv-actions button').forEach((b) => { b.disabled = false; });
+    const done = mmRvRow(id); if (done) done.classList.remove('mm-row-busy');
+    if (!ok && mmRv.selectedId) { const rd2 = mmRvReadiness(mmRvForm(mmRv.selectedId)); const cb = document.querySelector('#mm-body .mm-rv-panel .mm-rv-confirm'); if (cb) cb.disabled = !rd2.ready; }
+  }
+  return ok;
+}
+
+async function mmRvSkip(id) {
+  if (mmRv.busy || !mmRvReviewable(id)) return;
+  mmRv.busy = true;
+  try {
+    await api(`/meta-ad-matching/ads/${encodeURIComponent(id)}/skip`, { method: 'POST' });
+    mmRv.skipped.add(id);
+    const a = mmRv.rows.get(id); if (a) a.skipped = true;
+    mmRvClosePanel();
+    mmRvRerenderRow(id, 'mm-row-skipped');
+    mmRvStatus('Skipped for now — nothing was classified.', 'ok');
+    await mmRvAdvance(id);
+  } catch (e) { mmRvStatus(`✗ Couldn’t skip: ${e.message}`, 'error'); toast(e.message, true); } finally { mmRv.busy = false; }
+}
+
+// the ✓ button in a row
+async function mmRvOnTick(id) {
+  if (!mmRvReviewable(id)) return;
+  await mmRvConfirm(id);
+}
+
+document.getElementById('mm-rv-start').addEventListener('click', () => {
+  const first = mmRvIds().find((x) => mmRvReviewable(x) && !mmRv.skipped.has(x)) || mmRvIds().find(mmRvReviewable);
+  if (first) mmRvSelect(first, { focus: true });
+});
+
+// Keyboard. Every guard below is deliberate: Enter confirms ONLY when the selected row itself has focus.
+document.addEventListener('keydown', (e) => {
+  if (mmState.view !== 'matching' || !mmRv.selectedId) return;
+  if (e.defaultPrevented || e.isComposing) return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (document.querySelector('.modal-backdrop.show')) return; // a dialog is open
+  const row = mmRvRow(mmRv.selectedId);
+  if (!row || e.target !== row) return; // typing in a field, or focus is on a button / link / anywhere else: not ours
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    if (e.repeat || e.shiftKey) return; // a held key never confirms twice
+    mmRvConfirm(mmRv.selectedId);
+  } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const n = mmRvNext(mmRv.selectedId, e.key === 'ArrowDown' ? 1 : -1);
+    if (n) mmRvSelect(n, { focus: true });
+  } else if (e.key === 'e' || e.key === 'E') {
+    e.preventDefault();
+    const inp = document.querySelector('#mm-body .mm-rv-panel .mm-picker-input');
+    if (inp) inp.focus();
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    mmRvClosePanel(); row.blur();
+  }
+});
+
+// ── Concept inventory (read-only): every concept in use, unique creatives vs Meta ads, spelling variants side by side ───
+async function mmOpenInventory() {
+  const body = document.getElementById('mm-inventory-body');
+  body.innerHTML = '<div class="mp-table-empty">Loading…</div>';
+  openModal('mm-inventory-modal');
+  try {
+    const inv = await api('/meta-ad-matching/concept-inventory');
+    const n = (v) => Number(v || 0).toLocaleString('en-AU');
+    const cell = (x) => (x.creatives || x.ads ? `${n(x.creatives)} <small>/ ${n(x.ads)}</small>` : '<span class="mp-na">—</span>');
+    const vocabLabel = (v) => (v.match === 'exact' ? `In list${v.active === false ? ' (inactive)' : ''}` : v.match === 'case_insensitive' ? `Case variant of “${escapeHtml(v.name)}”` : 'Not in list');
+    body.innerHTML = `
+      <p class="hint">${inv.notes.map(escapeHtml).join(' ')}</p>
+      <p><b>${n(inv.totals.distinct_concepts)}</b> distinct concepts as stored · <b>${n(inv.totals.distinct_after_ignoring_case_and_punctuation)}</b> ignoring case and punctuation · <b>${n(inv.totals.variant_groups)}</b> spelling-variant group${inv.totals.variant_groups === 1 ? '' : 's'} · <b>${n(inv.totals.not_in_vocabulary)}</b> not in today’s concept list ·
+        <a href="/api/meta-ad-matching/concept-inventory?format=csv" target="_blank" rel="noopener">Download CSV</a></p>
+      ${inv.variant_groups.length ? `<details class="mm-inv-variants" open><summary>Spelling / capitalisation variants (${inv.variant_groups.length})</summary><ul>${inv.variant_groups.map((g) => `<li>${g.variants.map((v) => `“${escapeHtml(v.concept)}” <small>(${n(v.total_creatives)} creatives / ${n(v.total_ads)} ads)</small>`).join(' · ')}</li>`).join('')}</ul></details>` : '<p class="hint">No spelling or capitalisation variants found.</p>'}
+      <div class="mm-inv-wrap"><table class="mp-table mm-inv"><thead><tr><th>Concept (exact text)</th><th class="num" title="Unique creatives (exact meta_creative_id) / Meta ads">All sources</th><th class="num">Confirmed</th><th class="num">Auto-matched</th><th class="num" title="Copies of a person’s decision on the same exact creative">Inherited</th><th class="num">Suggested</th><th class="num" title="Ad Setups naming it / Meta ads linked to them">Ad Setups</th><th>Concept list</th><th>Variants</th></tr></thead>
+      <tbody>${inv.concepts.map((c) => `<tr><td><b>${escapeHtml(c.concept)}</b></td><td class="num">${cell({ creatives: c.total_creatives, ads: c.total_ads })}</td><td class="num">${cell(c.sources.confirmed)}</td><td class="num">${cell(c.sources.auto_matched)}</td><td class="num">${cell(c.sources.inherited)}</td><td class="num">${cell(c.sources.suggested)}</td><td class="num">${cell({ creatives: c.ad_setups.setups, ads: c.ad_setups.linked_ads })}</td><td>${vocabLabel(c.vocabulary)}</td><td>${(c.variants_of || []).map((x) => `“${escapeHtml(x)}”`).join(' · ') || '<span class="mp-na">—</span>'}</td></tr>`).join('')}</tbody></table></div>`;
+  } catch (e) { body.innerHTML = `<div class="mp-table-empty">${escapeHtml(e.message)}</div>`; }
+}
+document.getElementById('mm-open-inventory').addEventListener('click', mmOpenInventory);
 
 // ── Creative conflict resolution ────────────────────────────────────────
 // Shows EVERY competing person's classification of one exact meta_creative_id and lets an admin explicitly choose which
@@ -2034,6 +2450,8 @@ function mmPicker(host, opts) {
     const exact = options.some((o) => o.label.toLowerCase() === term.toLowerCase()) || selected.some((s) => s.label.toLowerCase() === term.toLowerCase());
     let html = rows.map((o, i) => `<div class="mm-opt" data-i="${i}">${escapeHtml(o.label)}${o.hint ? `<small>${escapeHtml(o.hint)}</small>` : ''}</div>`).join('');
     if (opts.allowFree && term && !exact) html += `<div class="mm-opt free" data-free="1">Use “${escapeHtml(term)}” as legacy / free text</div>`;
+    // an EXPLICIT option to add a brand-new name to the saved list (never shown for a name that already exists in any capitalisation)
+    if (opts.addNew && term && !exact) html += `<div class="mm-opt add" data-add="1">+ Add “${escapeHtml(term)}” as a new ${escapeHtml(opts.addLabel || 'item')}</div>`;
     if (!html) html = '<div class="mm-opt none">No matches</div>';
     list.innerHTML = html;
     list.style.display = open ? '' : 'none';
@@ -2042,6 +2460,17 @@ function mmPicker(host, opts) {
   const pick = (item) => {
     selected = opts.multi ? [...selected, item] : [item];
     input.value = ''; open = false; renderSel(); renderList(); emit();
+  };
+  // save the typed name to the persistent list (server trims it and resolves case-insensitive duplicates to the existing spelling), then select it
+  let adding = false;
+  const addTyped = async () => {
+    const term = input.value.trim();
+    if (!opts.addNew || !term || adding) return;
+    adding = true;
+    try {
+      const item = await opts.addNew(term);
+      if (item) { if (!options.some((o) => String(o.key) === String(item.key))) options.push(item); pick(item); }
+    } catch (e) { toast(e.message, true); } finally { adding = false; }
   };
   const refetch = () => {
     if (!opts.fetch) return renderList();
@@ -2062,6 +2491,7 @@ function mmPicker(host, opts) {
       const rows = list._rows || [];
       const term = input.value.trim();
       if (rows.length) pick(rows[0]);
+      else if (opts.addNew && term) addTyped();
       else if (opts.allowFree && term) pick({ key: `free:${term}`, label: term, free: true });
     }
   });
@@ -2069,7 +2499,8 @@ function mmPicker(host, opts) {
     e.preventDefault();
     const o = e.target.closest('.mm-opt');
     if (!o || o.classList.contains('none')) return;
-    if (o.dataset.free) pick({ key: `free:${input.value.trim()}`, label: input.value.trim(), free: true });
+    if (o.dataset.add) addTyped();
+    else if (o.dataset.free) pick({ key: `free:${input.value.trim()}`, label: input.value.trim(), free: true });
     else pick(list._rows[Number(o.dataset.i)]);
   });
   input.addEventListener('blur', () => { open = false; setTimeout(renderList, 0); });
@@ -2087,6 +2518,28 @@ async function mmLoadOptions() {
   if (!mmState.options) mmState.options = await api('/meta-ad-matching/options');
   return mmState.options;
 }
+
+// Concept / creator choices come from the saved lists. concept_types rows are saved by id; a concept a person added in Ad Matching is
+// saved as its label (vocab_id only identifies the list entry).
+const mmConceptItem = (x) => (x.id
+  ? { key: `ct:${x.id}`, label: x.label, concept_type_id: x.id }
+  : { key: `cv:${x.vocab_id}`, label: x.label, concept_type_id: null, vocab_id: x.vocab_id });
+async function mmAddConcept(term) {
+  const r = await api('/meta-ad-matching/vocab/concepts', { method: 'POST', body: JSON.stringify({ name: term }) });
+  const o = await mmLoadOptions();
+  const entry = { id: r.concept_type_id || null, vocab_id: r.vocab_id || null, label: r.name, source: r.source };
+  if (!o.concepts.some((c) => c.label.toLowerCase() === r.name.toLowerCase())) o.concepts.push(entry);
+  toast(r.created ? `Added “${r.name}” to the concept list.` : `“${r.name}” is already in the concept list — selected it.`);
+  return mmConceptItem(entry);
+}
+async function mmAddCreator(term) {
+  const r = await api('/meta-ad-matching/vocab/creators', { method: 'POST', body: JSON.stringify({ name: term }) });
+  const o = await mmLoadOptions();
+  if (!o.creators.some((c) => c.toLowerCase() === r.name.toLowerCase())) o.creators.push(r.name);
+  toast(r.created ? `Added “${r.name}” to the creator list.` : `“${r.name}” is already in the creator list — selected it.`);
+  return { key: r.name, label: r.name };
+}
+const mmConceptPayload = (c) => (c ? (c.concept_type_id ? { concept_type_id: c.concept_type_id } : { label: c.label }) : null);
 
 // Compact suggestion chips: the label is plain language (Exact / Likely / Weak),
 // the full reason is one truncated line under the chips (full text on hover).
@@ -2243,12 +2696,12 @@ function renderMatchWorkspace(ws, options) {
     selected: cls.media_type ? mediaOpts.filter((x) => x.key === cls.media_type) : [],
   });
   const conceptPicker = mmPicker(document.getElementById('mm-f-concept'), {
-    multi: false, allowFree: true, placeholder: 'Search concepts…',
-    options: options.concepts.map((x) => ({ key: `ct:${x.id}`, label: x.label, concept_type_id: x.id })),
+    multi: false, addNew: mmAddConcept, addLabel: 'concept', placeholder: 'Search or add a concept…',
+    options: options.concepts.map(mmConceptItem),
     selected: cls.concept ? [{ key: cls.concept.concept_type_id ? `ct:${cls.concept.concept_type_id}` : `free:${cls.concept.label}`, label: cls.concept.label, free: cls.concept.legacy, concept_type_id: cls.concept.concept_type_id }] : [],
   });
   const creatorPicker = mmPicker(document.getElementById('mm-f-creator'), {
-    multi: false, allowFree: true, placeholder: 'Search creators…', options: options.creators.map((x) => ({ key: x, label: x })),
+    multi: false, addNew: mmAddCreator, addLabel: 'creator', placeholder: 'Search or add a creator…', options: options.creators.map((x) => ({ key: x, label: x })),
     selected: cls.creator_name ? [{ key: cls.creator_name, label: cls.creator_name }] : [],
   });
   const stylePicker = mmPicker(document.getElementById('mm-f-style'), {
@@ -2267,7 +2720,7 @@ function renderMatchWorkspace(ws, options) {
   const applySuggestion = (field, x) => {
     if (field === 'product') { nps.checked = false; productPicker.setDisabled(false); productPicker.add({ key: x.value_key, label: x.value_label }); }
     else if (field === 'scope') { nps.checked = true; syncNps(); }
-    else if (field === 'concept') conceptPicker.set([{ key: x.value_ref ? `ct:${x.value_ref}` : `free:${x.value_label}`, label: x.value_label, free: !x.value_ref, concept_type_id: x.value_ref || null }]);
+    else if (field === 'concept') conceptPicker.set([{ key: x.value_ref ? `ct:${x.value_ref}` : `free:${x.value_label}`, label: x.value_label, free: !x.value_ref && !options.concepts.some((c) => c.label.toLowerCase() === String(x.value_label).toLowerCase()), concept_type_id: x.value_ref || null }]);
     else if (field === 'creative_style') stylePicker.set([{ key: x.value_ref, label: x.value_label }]);
     else if (field === 'creator') creatorPicker.set([{ key: x.value_label, label: x.value_label }]);
     else if (field === 'media_type') mediaPicker.set(mediaOpts.filter((o) => o.key === x.value_key));
@@ -2337,7 +2790,7 @@ function renderMatchWorkspace(ws, options) {
         ad_setup_id: setup ? setup.key : null,
         product_codes: productPicker.get().map((x) => x.key),
         not_product_specific: nps.checked,
-        concept: concept ? (concept.free ? { label: concept.label } : { concept_type_id: concept.concept_type_id }) : null,
+        concept: mmConceptPayload(concept),
         creative_style_id: style ? style.key : null,
         creator_name: creator ? creator.label : null,
         media_type: mediaPicker.get()[0] ? mediaPicker.get()[0].key : null,

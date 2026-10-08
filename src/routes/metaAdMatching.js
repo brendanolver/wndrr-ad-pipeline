@@ -7,6 +7,8 @@
 const express = require('express');
 const { requireAdmin } = require('../lib/permissions');
 const matching = require('../lib/metaAdMatching');
+const vocab = require('../lib/metaMatchingVocab');
+const conceptInventory = require('../lib/metaConceptInventory');
 const { HttpError } = require('../lib/metaPerformance');
 
 const router = express.Router();
@@ -56,6 +58,24 @@ router.post('/conflicts/:creativeId/resolve', handle((req) => matching.resolveCr
 
 // Selector vocabularies (products / concepts / creative styles / creators).
 router.get('/options', handle(() => matching.listOptions()));
+
+// Names a person adds from the pickers ("Add 'X' as a new creator / concept"): one row each in meta_matching_vocab, case-insensitive
+// duplicates resolve to the existing spelling, no classification is touched. Explicit action only.
+router.post('/vocab/creators', handle((req) => vocab.addName('creator', req.body && req.body.name, req.user && req.user.id)));
+router.post('/vocab/concepts', handle((req) => vocab.addName('concept', req.body && req.body.name, req.user && req.user.id)));
+
+// Rapid review: live state + draft (built from stored suggestions) for a page of ads, in one read. ?ids=a,b,c (max 100). Read-only.
+router.get('/review-batch', handle((req) => matching.getReviewBatch(req.query.ids)));
+
+// Every concept in use with unique-creative and Meta-ad counts per source, and spelling variants side by side. Read-only, nothing is
+// merged or approved. ?format=csv downloads it.
+router.get('/concept-inventory', async (req, res, next) => {
+  try {
+    const inv = await conceptInventory.getInventory();
+    if (req.query.format === 'csv') return res.type('text/csv').attachment('concept-inventory.csv').send(conceptInventory.inventoryCsv(inv));
+    return res.json(inv);
+  } catch (err) { return next(err); }
+});
 
 // Ad Setup search for the Link-to-Ad-Setup selector, and the values an Ad
 // Setup would pre-fill (never auto-applied).

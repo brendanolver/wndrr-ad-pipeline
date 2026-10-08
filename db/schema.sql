@@ -3040,3 +3040,28 @@ ALTER TABLE creative_inspiration ADD COLUMN IF NOT EXISTS meta_linked_by_user_id
 
 -- Which stored creatives are the ones Meta Performance asks about most: speeds the per-creative activity roll-up.
 CREATE INDEX IF NOT EXISTS idx_meta_ads_status_creative ON meta_ads(match_status, meta_creative_id);
+
+-- =====================================================================
+-- Ad Matching vocabulary (creators + concepts added by people)
+-- =====================================================================
+-- Names a person explicitly adds from the Ad Matching pickers ("Add 'X' as a new creator / concept"). Kept SEPARATE from
+-- content_creators (which drives Shooting / filming pickers) and concept_types (shared with Concept Development), so adding a
+-- name here can never change those screens. Ad Matching offers (content_creators + this) for creators and (concept_types +
+-- this) for concepts. name_key is the lower-cased, whitespace-collapsed name: UNIQUE per kind, so case-insensitive duplicates
+-- cannot exist. Adding a row never touches an existing classification, and nothing here is deleted or merged automatically.
+CREATE TABLE IF NOT EXISTS meta_matching_vocab (
+  id SERIAL PRIMARY KEY,
+  kind VARCHAR(16) NOT NULL CHECK (kind IN ('creator', 'concept')),
+  name VARCHAR(255) NOT NULL,
+  name_key VARCHAR(255) NOT NULL,
+  created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (kind, name_key)
+);
+-- JAMES is an available creator from day one (skipped when the filming roster already has a James under any capitalisation,
+-- in which case that spelling is the one offered). Idempotent: a deployment never re-adds a name a person later removed
+-- because there is no remove action; ON CONFLICT keeps the existing row.
+INSERT INTO meta_matching_vocab (kind, name, name_key)
+SELECT 'creator', 'JAMES', 'james'
+WHERE NOT EXISTS (SELECT 1 FROM content_creators WHERE lower(btrim(name)) = 'james')
+ON CONFLICT (kind, name_key) DO NOTHING;

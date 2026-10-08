@@ -54,6 +54,7 @@ const creativeIdentity = require('./metaCreativeIdentity');
 const creativeConflict = require('./metaCreativeConflict');
 const creativeArchive = require('./metaCreativeArchive');
 const relevanceLib = require('./metaMatchingRelevance');
+const vocab = require('./metaMatchingVocab');
 const {
   MEDIA_TYPES, MEDIA_KEYS, MEDIA_LABEL, buildFamilyIndex, matchProductPhrase, expandSet, hasSetWord,
   coreTokens, mediaTokensFromName, parseLooseMetaName,
@@ -2195,7 +2196,8 @@ async function getAdWorkspace(metaAdId, { refresh = true } = {}) {
       skipped: !!ad.skipped_at,
       not_product_specific: !!ad.not_product_specific,
       products: products.rows,
-      concept: ad.concept_label ? { concept_type_id: ad.concept_type_id, label: ad.concept_label, legacy: ad.concept_type_id === null } : null,
+      // 'legacy' = free text that is not in the offered vocabulary (a concept a person added from the picker is not legacy)
+      concept: ad.concept_label ? { concept_type_id: ad.concept_type_id, label: ad.concept_label, legacy: ad.concept_type_id === null && !(await vocab.canonicalConcept(ad.concept_label)) } : null,
       creative_style_id: ad.creative_style_id,
       creator_name: ad.creator_name,
       media_type: ad.media_type || null,
@@ -2252,9 +2254,12 @@ async function confirmMapping(metaAdId, body, userId) {
       conceptTypeId = r.rows[0].id;
       conceptLabel = r.rows[0].name;
     } else {
-      // Legacy / free-text classification: kept ONLY on this ad's
+      // A label typed in any capitalisation resolves to the offered concept (concept_types, or one a person added to the
+      // Ad Matching vocabulary); anything else is a legacy / free-text classification, kept ONLY on this ad's
       // classification -- never inserted into concept_types.
-      conceptLabel = trimText(input.concept.label);
+      const typed = trimText(input.concept.label);
+      const known = typed ? await vocab.canonicalConcept(typed) : null;
+      if (known) { conceptTypeId = known.concept_type_id; conceptLabel = known.name; } else conceptLabel = typed;
     }
   }
   let styleId = null;
@@ -2269,12 +2274,19 @@ async function confirmMapping(metaAdId, body, userId) {
     if (!r.rows.length) throw new HttpError(400, 'Unknown Ad Setup');
     adSetupId = r.rows[0].id;
   }
-  const creator = trimText(input.creator_name);
+  // a creator typed in any capitalisation is stored in the offered spelling (no case variants of one name)
+  const creatorTyped = trimText(vocab.cleanName(input.creator_name));
+  const creator = creatorTyped ? ((await vocab.canonicalCreator(creatorTyped)) || creatorTyped) : null;
   // Media Type is optional; 'unknown' is a deliberate human answer, NULL = undecided.
   let mediaType = null;
   if (input.media_type !== undefined && input.media_type !== null && input.media_type !== '') {
     if (!MEDIA_KEYS.has(input.media_type)) throw new HttpError(400, 'Unknown media type');
     mediaType = input.media_type;
+  }
+  // Rapid review sends require_complete: the SAME rule the screen uses to enable the tick, enforced here too so a stray request can
+  // never approve a half-filled classification. (The full editor does not send it, so its behaviour is unchanged.)
+  if (input.require_complete === true) {
+    if (!notProductSpecific && !(conceptTypeId || conceptLabel)) throw new HttpError(400, 'Not ready to confirm: choose a concept (or mark the ad Not product-specific)');
   }
 
   const client = await pool.connect();
@@ -2433,17 +2445,103 @@ async function clearMapping(metaAdId) {
 async function listOptions() {
   const [families, concepts, styles, creators] = await Promise.all([
     catalogueLib.loadPickerFamilies(),
-    pool.query('SELECT id, name, format FROM concept_types WHERE active ORDER BY sort_order, name'),
+    vocab.listConcepts(),
     pool.query('SELECT id, name, media_type FROM creative_styles ORDER BY sort_order, name'),
-    pool.query('SELECT name FROM content_creators ORDER BY name'),
+    vocab.listCreators(),
   ]);
   return {
     products: families.map((f) => ({ key: f.product_code, label: f.product_name })),
-    concepts: concepts.rows.map((c) => ({ id: c.id, label: c.name, format: c.format })),
+    // concept_types rows carry id (saved as the concept id); names a person added carry vocab_id and id null (saved as their label)
+    concepts: concepts.map((c) => ({ id: c.concept_type_id || null, vocab_id: c.vocab_id || null, label: c.name, format: c.format || null, source: c.source })),
     creative_styles: styles.rows.map((s) => ({ id: s.id, label: s.name, media_type: s.media_type })),
-    creators: creators.rows.map((c) => c.name),
+    creators: creators.map((c) => c.name),
+    creator_sources: Object.fromEntries(creators.map((c) => [c.name, c.source])),
     media_types: MEDIA_TYPES,
   };
+}
+
+// ── Rapid review: one cheap read for a page of ads ─────────────────────────────────────────────
+// For each listed ad: its live state (so the screen can update a row after a confirmation without reloading the page) and, when a
+// person could confirm it right now, a DRAFT built from the suggestions already stored for it (nothing is recomputed or written):
+// the same values "Fill from suggestions" would load (top product + its set group, concept, creator, media, style) minus the Ad Setup
+// link, which stays a deliberate manual choice. An ad is only reviewable here when
+//   - it is Unmatched / Needs review (not matched, confirmed, excluded), and
+//   - no person has already classified or disagreed about its exact creative (state 'source' = it will inherit through the explicit
+//     Apply action; state 'conflict' = it belongs to the conflict screen). Confirming over either would create a disagreement.
+// Local database only; read-only.
+const REVIEW_BATCH_MAX = 100;
+async function getReviewBatch(idsInput) {
+  const raw = Array.isArray(idsInput) ? idsInput : String(idsInput || '').split(',');
+  const ids = [...new Set(raw.map((x) => String(x).trim()).filter((x) => /^[A-Za-z0-9_]{1,64}$/.test(x)))].slice(0, REVIEW_BATCH_MAX);
+  if (!ids.length) return { ads: {} };
+  const [adsQ, suggQ, concepts] = await Promise.all([
+    pool.query(
+      `SELECT a.meta_ad_id, a.meta_creative_id, a.match_status, a.match_method, a.matched_ad_setup_id,
+              COALESCE(c.excluded_from_intelligence, false) AS excluded, c.skipped_at, c.not_product_specific, c.concept_label, c.creator_name, c.media_type,
+              (SELECT string_agg(p.product_name, ', ' ORDER BY p.product_name) FROM meta_ad_products p WHERE p.meta_ad_id = a.meta_ad_id) AS confirmed_products,
+              CASE WHEN a.meta_creative_id IS NULL THEN 0 ELSE (SELECT count(*)::int FROM meta_ads s WHERE s.meta_creative_id = a.meta_creative_id AND s.meta_ad_id <> a.meta_ad_id) END AS other_ads
+         FROM meta_ads a LEFT JOIN meta_ad_classifications c ON c.meta_ad_id = a.meta_ad_id
+        WHERE a.meta_ad_id = ANY($1::text[])`, [ids]),
+    pool.query(
+      `SELECT meta_ad_id, field, value_key, value_label, value_ref, confidence, evidence FROM meta_ad_suggestions
+        WHERE meta_ad_id = ANY($1::text[]) ORDER BY confidence DESC, id`, [ids]),
+    vocab.listConcepts(),
+  ]);
+  const conceptByKey = new Map(concepts.map((c) => [vocab.keyOf(c.name), c]));
+  const sugg = new Map();
+  for (const r of suggQ.rows) { if (!sugg.has(r.meta_ad_id)) sugg.set(r.meta_ad_id, []); sugg.get(r.meta_ad_id).push(r); }
+  const creativeIds = [...new Set(adsQ.rows.map((r) => r.meta_creative_id).filter(Boolean))];
+  const groupState = new Map();
+  await Promise.all(creativeIds.map(async (cid) => { groupState.set(cid, (await creativeIdentity.resolveGroup(pool, cid)).state); }));
+  const out = {};
+  for (const r of adsQ.rows) {
+    const cs = r.meta_creative_id ? (groupState.get(r.meta_creative_id) || 'none') : 'none';
+    let blocked = null;
+    if (r.excluded) blocked = 'excluded';
+    else if (r.match_status === 'confirmed') blocked = 'confirmed';
+    else if (r.match_status === 'auto_matched') blocked = 'auto_matched';
+    else if (r.matched_ad_setup_id) blocked = 'linked_ad_setup';
+    else if (cs === 'conflict') blocked = 'creative_conflict';
+    else if (cs === 'source') blocked = 'creative_already_classified';
+    const list = sugg.get(r.meta_ad_id) || [];
+    const top = (field) => list.find((x) => x.field === field) || null;
+    let draft = null;
+    if (!blocked) {
+      const topProduct = top('product');
+      const group = topProduct && topProduct.evidence && topProduct.evidence.set_group;
+      const products = topProduct
+        ? (group ? list.filter((x) => x.field === 'product' && x.evidence && x.evidence.set_group === group) : [topProduct]).map((x) => ({ key: x.value_key, label: x.value_label || x.value_key }))
+        : [];
+      const scope = top('scope');
+      const c = top('concept');
+      let concept = null;
+      if (c) {
+        const known = c.value_ref ? { name: c.value_label, concept_type_id: c.value_ref, vocab_id: null } : conceptByKey.get(vocab.keyOf(c.value_label));
+        concept = known
+          ? { label: known.name || known.label, concept_type_id: known.concept_type_id || null, vocab_id: known.vocab_id || null, legacy: false }
+          : { label: c.value_label, concept_type_id: null, vocab_id: null, legacy: true };
+      }
+      const m = top('media_type');
+      const st = top('creative_style');
+      const cr = top('creator');
+      draft = {
+        products, not_product_specific: !products.length && !!scope,
+        concept,
+        creator: cr ? { label: vocab.cleanName(cr.value_label) } : null,
+        media: m ? { key: m.value_key, label: m.value_label } : null,
+        style: st && st.value_ref ? { key: st.value_ref, label: st.value_label } : null,
+        confidence: topProduct ? Number(topProduct.confidence) : null,
+      };
+    }
+    out[r.meta_ad_id] = {
+      meta_ad_id: r.meta_ad_id, meta_creative_id: r.meta_creative_id, match_status: r.match_status, match_method: r.match_method,
+      excluded: r.excluded, skipped: !!r.skipped_at, not_product_specific: !!r.not_product_specific,
+      confirmed_products: r.confirmed_products, confirmed_concept: r.concept_label, confirmed_creator: r.creator_name,
+      confirmed_media: r.media_type ? MEDIA_LABEL[r.media_type] : null,
+      other_ads: r.other_ads, creative_state: cs, reviewable: !blocked, blocked_reason: blocked, draft,
+    };
+  }
+  return { ads: out };
 }
 
 async function searchAdSetups(q) {
@@ -2531,6 +2629,7 @@ async function performanceBy(query = {}) {
 }
 
 module.exports = {
+  getReviewBatch,
   confidenceLevel,
   norm,
   parseStructuredMetaName,
