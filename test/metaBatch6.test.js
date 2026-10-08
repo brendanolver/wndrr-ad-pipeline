@@ -94,7 +94,10 @@ test('rapid review uses the existing confirm endpoint and the existing creative 
   const lib = code('src/lib/metaAdMatching.js');
   const confirm = lib.slice(lib.indexOf('async function confirmMapping'), lib.indexOf('async function reapplyTrustedPair'));
   assert.match(confirm, /syncCreativeFor\(metaAdId\)/, 'confirming still hands the decision to the protected creative-group sync');
-  assert.match(confirm, /require_complete/);
+  assert.match(confirm, /const rapid = input\.rapid === true/);
+  assert.match(confirm, /if \(!rapid && !notProductSpecific && productCodes\.length === 1\)[\s\S]{0,120}reapplyTrustedPair/, 'trusted-pair re-evaluation of OTHER creatives runs for the full editor only, never for rapid confirms');
+  assert.doesNotMatch(confirm, /require_complete/, 'no concept (or other) completeness rule is enforced beyond the product / Not product-specific rule');
+  assert.match(confirm, /Choose at least one product, or mark the ad "Not product-specific"/, 'the one required-field rule keeps its wording');
   const app = code('public/app.js');
   const rv = app.slice(app.indexOf('const mmRv = {'), app.indexOf('async function mmOpenInventory'));
   assert.match(rv, /\/meta-ad-matching\/ads\/\$\{encodeURIComponent\(id\)\}\/confirm/);
@@ -127,27 +130,32 @@ function frontEndFn(name) {
   for (let k = j; k < app.length; k++) { if (app[k] === '{') depth++; else if (app[k] === '}') { depth--; if (!depth) { j = k; break; } } }
   return app.slice(i, j + 1);
 }
-test('readiness: a product (or Not product-specific) AND a concept are required; nothing else is', () => {
+test('readiness: a valid product OR Not product-specific is the only requirement; concept / creator / media / style are optional', () => {
   // eslint-disable-next-line no-new-func
   const ready = new Function(`${frontEndFn('mmRvReadiness')}; return mmRvReadiness;`)();
   const p = [{ key: 'P1', label: 'Tee' }]; const c = { label: 'Try On' };
   assert.equal(ready({ nps: false, products: p, concept: c }).ready, true);
-  assert.equal(ready({ nps: false, products: [], concept: c }).ready, false);
-  assert.equal(ready({ nps: false, products: p, concept: null }).ready, false);
-  assert.match(ready({ nps: false, products: p, concept: null }).why, /concept/i);
+  assert.equal(ready({ nps: false, products: p, concept: null }).ready, true, 'a product with no concept is confirmable');
+  assert.equal(ready({ nps: false, products: p, concept: null, creator: null, media: null, style: null }).ready, true);
   assert.equal(ready({ nps: true, products: [], concept: null }).ready, true, 'Not product-specific needs no concept');
-  assert.equal(ready({ nps: false, products: [], concept: null }).ready, false);
-  assert.equal(ready({ nps: false, products: p, concept: c, creator: null, media: null }).ready, true, 'creator / media / style stay optional');
+  assert.equal(ready({ nps: false, products: [], concept: c }).ready, false, 'a concept alone is not enough');
+  assert.equal(ready({ nps: false, products: [], concept: null }).ready, false, 'no product and not Not product-specific cannot be confirmed');
+  assert.match(ready({ nps: false, products: [], concept: null }).why, /product/i);
 });
-test('the confirm payload asks the server to enforce the same completeness rule, links no Ad Setup, and trims nothing silently', () => {
+test('the rapid payload carries rapid:true, links no Ad Setup, and sends no concept when none was chosen', () => {
   // eslint-disable-next-line no-new-func
   const payload = new Function('mmConceptPayload', `${frontEndFn('mmRvPayload')}; return mmRvPayload;`)((x) => (x ? (x.concept_type_id ? { concept_type_id: x.concept_type_id } : { label: x.label }) : null));
   const out = payload({ nps: false, products: [{ key: 'P1', label: 'Tee' }], concept: { label: 'B', concept_type_id: null }, creator: 'JAMES', media: { key: 'video' }, style: null });
-  assert.deepEqual(out, { product_codes: ['P1'], not_product_specific: false, concept: { label: 'B' }, creative_style_id: null, creator_name: 'JAMES', media_type: 'video', ad_setup_id: null, require_complete: true });
-  const nps = payload({ nps: true, products: [{ key: 'P1' }], concept: { label: 'B' }, creator: null, media: null, style: null });
+  assert.deepEqual(out, { product_codes: ['P1'], not_product_specific: false, concept: { label: 'B' }, creative_style_id: null, creator_name: 'JAMES', media_type: 'video', ad_setup_id: null, rapid: true });
+  const bare = payload({ nps: false, products: [{ key: 'P1' }], concept: null, creator: null, media: null, style: null });
+  assert.equal(bare.concept, null, 'no placeholder concept is invented');
+  assert.equal(bare.creator_name, null);
+  assert.equal(bare.media_type, null);
+  const nps = payload({ nps: true, products: [{ key: 'P1' }], concept: null, creator: null, media: null, style: null });
   assert.equal(nps.not_product_specific, true);
   assert.deepEqual(nps.product_codes, []);
   assert.equal(nps.concept, null);
+  assert.equal(nps.rapid, true);
 });
 test('keyboard safety: Enter acts only on the selected row itself, never repeats, never with a dialog open or modifiers', () => {
   const app = code('public/app.js');
@@ -164,10 +172,11 @@ test('keyboard safety: Enter acts only on the selected row itself, never repeats
   const confirm = code('public/app.js');
   const fn = confirm.slice(confirm.indexOf('async function mmRvConfirm'), confirm.indexOf('async function mmRvSkip'));
   assert.match(fn, /mmRv\.busy \|\| Date\.now\(\) < mmRv\.cooldownUntil/, 'in-flight and cooldown guards');
-  assert.match(fn, /mmRvReadiness\(f\)/, 'incomplete classifications are refused before any request');
+  assert.match(fn, /mmRvReadiness\(f\)/, 'a classification with no product (and not Not product-specific) is refused before any request');
   assert.match(fn, /mmRv\.cooldownUntil = Date\.now\(\) \+ MM_RV_COOLDOWN_MS/);
   assert.match(app, /MM_RV_COOLDOWN_MS = 400/);
   assert.match(fn, /mmRvAdvance\(id\)/, 'moves on to the next reviewable creative');
+  assert.match(fn, /if \(mmRv\.selectedId\) \{ const rd2 = mmRvReadiness\(mmRvForm\(mmRv\.selectedId\)\)[\s\S]{0,160}cb\.disabled = !rd2\.ready/, 'after a confirmation the NEXT row\'s Confirm button stays disabled while that row is not ready');
 });
 test('the full editor and the rapid editor offer an explicit Add for new creators / concepts (no silent free text for these)', () => {
   const app = code('public/app.js');

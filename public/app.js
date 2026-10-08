@@ -1672,7 +1672,7 @@ document.getElementById('mm-body').addEventListener('click', (e) => {
 //     every unclassified copy of the exact same meta_creative_id using the existing, protected creative inheritance -- nothing new;
 //   - the next reviewable row is then selected and focused.
 // Safety: Enter is ignored while typing in any field, while any dialog is open, on key-repeat, for 400 ms after a confirmation, while a
-// confirmation is in flight, and unless the classification is complete (a product -- or Not product-specific -- and a concept).
+// confirmation is in flight, and unless the classification is ready (a valid product, or Not product-specific; the rest is optional).
 const mmRv = {
   rows: new Map(), batch: new Map(), forms: new Map(), skipped: new Set(),
   selectedId: null, busy: false, cooldownUntil: 0, wantFirst: false, batchSeq: 0,
@@ -1701,22 +1701,22 @@ function mmRvForm(id) {
   mmRv.forms.set(id, f);
   return f;
 }
-// THE rule for "ready to confirm" (the server enforces the same one when require_complete is sent)
+// THE rule for "ready to confirm": a valid product, or an explicit Not product-specific. Concept, creator, media and style are optional.
+// (The server enforces the same rule for every confirmation.)
 function mmRvReadiness(f) {
   if (!f.nps && !f.products.length) return { ready: false, why: 'Choose a product, or mark it Not product-specific' };
-  if (!f.nps && !f.concept) return { ready: false, why: 'Choose a concept' };
   return { ready: true, why: '' };
 }
 function mmRvPayload(f) {
   return {
     product_codes: f.nps ? [] : f.products.map((x) => x.key),
     not_product_specific: !!f.nps,
-    concept: f.nps ? null : mmConceptPayload(f.concept),
+    concept: mmConceptPayload(f.concept),
     creative_style_id: f.style ? f.style.key : null,
     creator_name: f.creator || null,
     media_type: f.media ? f.media.key : null,
     ad_setup_id: null,
-    require_complete: true,
+    rapid: true, // confirm only this creative (+ its protected exact-creative copies); no trusted-pair re-evaluation of others
   };
 }
 
@@ -1854,7 +1854,7 @@ async function mmRvSelect(id, { focus = true } = {}) {
         <button type="button" class="btn btn-ghost btn-sm mm-rv-full">Full editor</button>
       </div>
       <div class="mm-rv-msg" role="status"></div>
-      <div class="mm-rv-note">Confirming ${others > 0 ? `also gives this decision to the ${others} other ad${others === 1 ? '' : 's'} that use the exact same creative and that nobody has classified` : 'covers this ad'}. Ads a person already classified, skipped, excluded or linked to an Ad Setup are never changed.</div>
+      <div class="mm-rv-note">Confirming ${others > 0 ? `also gives this decision to the ${others} other ad${others === 1 ? '' : 's'} that use the exact same creative and that nobody has classified` : 'covers this ad'}. Ads a person already classified, skipped, excluded or linked to an Ad Setup are never changed, and no other creative is auto-matched because of it.</div>
     </div></td>`;
   tr.after(panel);
   panel.querySelector('.mm-rv-full').addEventListener('click', () => openMatchWorkspace(id));
@@ -1955,7 +1955,6 @@ async function mmRvConfirm(id) {
     const ws = await api(`/meta-ad-matching/ads/${encodeURIComponent(id)}/confirm`, { method: 'POST', body: JSON.stringify(mmRvPayload(f)) });
     ok = true;
     const dup = Number(ws.applied_to_same_creative) || 0;
-    const sim = Number(ws.auto_applied_to_similar) || 0;
     Object.assign(a, {
       match_status: 'confirmed', match_method: 'manual', skipped: false, excluded: false, not_product_specific: !!f.nps,
       confirmed_products: f.nps ? null : f.products.map((x) => x.label).join(', '), confirmed_concept: f.nps || !f.concept ? null : f.concept.label,
@@ -1972,7 +1971,6 @@ async function mmRvConfirm(id) {
     if (sibs.length) { try { await mmRvRefreshStates(sibs); } catch (e) { /* the next reload shows them */ } }
     const parts = [`Confirmed${a.ad_name ? ` “${a.ad_name.length > 48 ? `${a.ad_name.slice(0, 47)}…` : a.ad_name}”` : ''}.`];
     parts.push(dup ? `Also applied to ${dup} other ad${dup === 1 ? '' : 's'} using the same creative.` : 'No other unclassified ads use this exact creative.');
-    if (sim) parts.push(`${sim} similar ad${sim === 1 ? ' was' : 's were'} also auto-matched by the existing product rule.`);
     mmRvStatus(`✓ ${parts.join(' ')}`, 'ok');
     toast(`✓ ${parts[0]}${dup ? ` +${dup} same-creative ad${dup === 1 ? '' : 's'}` : ''}`);
     mmRvUpdateBar();
@@ -1991,9 +1989,10 @@ async function mmRvConfirm(id) {
   } finally {
     mmRv.busy = false;
     if (ok) mmRv.cooldownUntil = Date.now() + MM_RV_COOLDOWN_MS;
+    // re-enable the buttons of whichever editor is open NOW (after a success that is the NEXT row's), keeping Confirm disabled while that row is not ready
     document.querySelectorAll('#mm-body .mm-rv-panel .mm-rv-actions button').forEach((b) => { b.disabled = false; });
     const done = mmRvRow(id); if (done) done.classList.remove('mm-row-busy');
-    if (!ok && mmRv.selectedId) { const rd2 = mmRvReadiness(mmRvForm(mmRv.selectedId)); const cb = document.querySelector('#mm-body .mm-rv-panel .mm-rv-confirm'); if (cb) cb.disabled = !rd2.ready; }
+    if (mmRv.selectedId) { const rd2 = mmRvReadiness(mmRvForm(mmRv.selectedId)); const cb = document.querySelector('#mm-body .mm-rv-panel .mm-rv-confirm'); if (cb) cb.disabled = !rd2.ready; }
   }
   return ok;
 }

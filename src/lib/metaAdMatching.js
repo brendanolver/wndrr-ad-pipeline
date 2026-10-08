@@ -2283,11 +2283,12 @@ async function confirmMapping(metaAdId, body, userId) {
     if (!MEDIA_KEYS.has(input.media_type)) throw new HttpError(400, 'Unknown media type');
     mediaType = input.media_type;
   }
-  // Rapid review sends require_complete: the SAME rule the screen uses to enable the tick, enforced here too so a stray request can
-  // never approve a half-filled classification. (The full editor does not send it, so its behaviour is unchanged.)
-  if (input.require_complete === true) {
-    if (!notProductSpecific && !(conceptTypeId || conceptLabel)) throw new HttpError(400, 'Not ready to confirm: choose a concept (or mark the ad Not product-specific)');
-  }
+  // Rapid review (rapid: true) confirms ONLY the selected creative: its exact-creative copies still inherit through the protected creative
+  // sync below, but the trusted-pair re-evaluation of OTHER creatives (same structured Product + Category) is skipped. Its only required
+  // field is the one every confirmation already needs -- a valid product, or an explicit "Not product-specific" (checked above, with the
+  // same wording as the full editor). Concept, creator, media and style stay optional; nothing is invented to fill a gap. The full editor
+  // does not send the flag, so its behaviour is exactly as before.
+  const rapid = input.rapid === true;
 
   const client = await pool.connect();
   try {
@@ -2326,7 +2327,7 @@ async function confirmMapping(metaAdId, body, userId) {
   // decision; a disagreement between people on one creative is flagged, not resolved).
   const creativeSync = await syncCreativeFor(metaAdId);
   let similarApplied = 0;
-  if (!notProductSpecific && productCodes.length === 1) {
+  if (!rapid && !notProductSpecific && productCodes.length === 1) {
     try { similarApplied = await reapplyTrustedPair(metaAdId); } catch (err) { /* best effort */ }
   }
   const workspace = await getAdWorkspace(metaAdId, { refresh: false });
