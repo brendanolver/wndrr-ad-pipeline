@@ -1787,8 +1787,8 @@ async function getQueue(query = {}, deps = {}) {
             matched.gsize AS same_creative_ads, rel.relevance, ${inConflict} AS creative_conflict,
             c.auto_fields -> 'inherited' ->> 'from_meta_ad_id' AS inherited_from,
             COALESCE(act.spend, 0) AS spend, act.last_active,
-            COALESCE(to_char(cf.last_delivery, 'YYYY-MM-DD'), fb.last_delivery) AS creative_last_active, COALESCE(cf.first_created, fb.first_created) AS creative_first_created,
-            COALESCE(cf.ads_total, fb.ads) AS creative_ads, (arch.unit IS NOT NULL) AS archived, COALESCE(cf.ads_active, fb.ads_active) AS creative_ads_active,
+            to_char(cf.last_delivery, 'YYYY-MM-DD') AS creative_last_active, cf.first_created AS creative_first_created, cf.ads_total AS creative_ads,
+            (arch.unit IS NOT NULL) AS archived, cf.ads_active AS creative_ads_active, (cf.unit IS NOT NULL) AS has_cfacts,
             c.skipped_at, COALESCE(c.excluded_from_intelligence, false) AS excluded,
             COALESCE(c.not_product_specific, false) AS not_product_specific,
             c.concept_label AS confirmed_concept, c.creator_name AS confirmed_creator, c.media_type AS confirmed_media,
@@ -1799,14 +1799,6 @@ async function getQueue(query = {}, deps = {}) {
             (SELECT s.value_label FROM meta_ad_suggestions s WHERE s.meta_ad_id = a.meta_ad_id AND s.field = 'media_type' ORDER BY s.confidence DESC LIMIT 1) AS suggested_media,
             (SELECT max(s.confidence) FROM meta_ad_suggestions s WHERE s.meta_ad_id = a.meta_ad_id) AS top_confidence
        ${base}
-       -- creatives with no outstanding ad (matched / confirmed ones) are not in cfacts: derive the same creative-level facts for just
-       -- the listed rows, so Last active is visible in the All ads view for every ad
-       LEFT JOIN LATERAL (
-         SELECT to_char(max(d.insight_date) FILTER (WHERE d.spend > 0 OR d.impressions > 0), 'YYYY-MM-DD') AS last_delivery, min(x.created_time) AS first_created,
-                count(DISTINCT x.meta_ad_id)::int AS ads, (count(DISTINCT x.meta_ad_id) FILTER (WHERE x.effective_status = 'ACTIVE'))::int AS ads_active
-           FROM meta_ads x LEFT JOIN meta_ad_insights_daily d ON d.meta_ad_id = x.meta_ad_id
-          WHERE cf.unit IS NULL AND (x.meta_creative_id = a.meta_creative_id OR (a.meta_creative_id IS NULL AND x.meta_ad_id = a.meta_ad_id))
-       ) fb ON true
        JOIN matched ON matched.meta_ad_id = a.meta_ad_id AND matched.rn = 1
       ORDER BY ${['historical', 'archived'].includes(filter) ? 'cf.last_delivery DESC NULLS LAST, cf.first_created DESC NULLS LAST,' : ''}
                (c.skipped_at IS NOT NULL) ASC,
@@ -1825,6 +1817,27 @@ async function getQueue(query = {}, deps = {}) {
     countsRes = await client.query(countsSql);
     total = (await client.query(`${matched} SELECT count(*)::int AS n FROM matched WHERE rn = 1`, filterParams)).rows[0].n;
     rows = (await client.query(listSql, listParams)).rows;
+    // Creatives with no outstanding ad (matched / confirmed ones) are not in cfacts. Derive the same creative-level facts for
+    // just the rows on this page (at most one page of ads), so Last active shows for every ad in the All ads view without
+    // touching the rest of the table.
+    const lack = rows.filter((r) => !r.has_cfacts);
+    if (lack.length) {
+      const cids = [...new Set(lack.map((r) => r.meta_creative_id).filter(Boolean))];
+      const aids = [...new Set(lack.filter((r) => !r.meta_creative_id).map((r) => r.meta_ad_id))];
+      const fb = await client.query(
+        `SELECT COALESCE(x.meta_creative_id, x.meta_ad_id) AS unit,
+                to_char(max(d.insight_date) FILTER (WHERE d.spend > 0 OR d.impressions > 0), 'YYYY-MM-DD') AS last_delivery,
+                min(x.created_time) AS first_created, count(DISTINCT x.meta_ad_id)::int AS ads,
+                (count(DISTINCT x.meta_ad_id) FILTER (WHERE x.effective_status = 'ACTIVE'))::int AS ads_active
+           FROM meta_ads x LEFT JOIN meta_ad_insights_daily d ON d.meta_ad_id = x.meta_ad_id
+          WHERE x.meta_creative_id = ANY($1::text[]) OR x.meta_ad_id = ANY($2::text[])
+          GROUP BY 1`, [cids, aids]);
+      const byUnit = new Map(fb.rows.map((f) => [f.unit, f]));
+      for (const r of lack) {
+        const f = byUnit.get(r.meta_creative_id || r.meta_ad_id);
+        if (f) { r.creative_last_active = f.last_delivery; r.creative_first_created = f.first_created; r.creative_ads = f.ads; r.creative_ads_active = f.ads_active; }
+      }
+    }
     await client.query('COMMIT');
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
