@@ -637,24 +637,25 @@ function mpRenderAds(res) {
     const per0 = (res.health && res.health.period) || {};
     const why = (a, metric, h) => {
       if (!healthOn) return '';
-      if (h) return h === 'green' ? 'Within the confirmed healthy range for this funnel' : 'Beyond the confirmed concern level for this funnel';
-      if (a.funnel !== 'TOF' && a.funnel !== 'TOM' && a.funnel !== 'MOF') return 'Funnel is unknown or mixed (campaign name has no single TOF / TOM / MOF), so no health judgement';
-      if (metric === 'cpa') {
-        if (a.cpa === null || a.cpa === undefined) return 'No purchases in this period, so no CPA to judge';
-        if (a.funnel === 'TOF') return 'TOF CPA is only flagged above $200';
-        if (a.funnel === 'TOM') return 'No approved CPA benchmark for TOM';
-        return 'Outside the confirmed healthy range ($40–$60); no watch or poor threshold has been defined';
-      }
-      if (a.funnel === 'MOF') return 'Frequency is not a MOF measure';
-      if (!per0.frequency_judged) return `Frequency is judged only for a period of about 4 days (3–5); this period is ${per0.days || '?'} day${per0.days === 1 ? '' : 's'}`;
-      if (a.frequency === null || a.frequency === undefined) return 'Frequency for this period has not been loaded (Refresh now loads exact Reach & Frequency)';
-      return a.funnel === 'TOF' ? 'TOF Frequency is healthy only below 2' : 'TOM Frequency is healthy only from 2 to 3';
+      const hh = res.health;
+      const fn = a.funnel;
+      const label = { cpa: 'CPA', frequency: 'Frequency', reach: 'Reach' }[metric];
+      if (h) return h === 'green' ? `Within the confirmed healthy range for ${fn} ${label}` : `Beyond the confirmed concern level for ${fn} ${label}`;
+      if (fn !== 'TOF' && fn !== 'TOM' && fn !== 'MOF') return 'Funnel is unknown or mixed (campaign name has no single TOF / TOM / MOF), so no health judgement';
+      if (!((hh.colour_coded && hh.colour_coded[fn]) || []).includes(metric)) return `${label} is not a colour-coded ${fn} measure`;
+      const rule = hh.defined && hh.defined[fn] && hh.defined[fn][metric];
+      if (!rule) return `No confirmed benchmark for ${fn} ${label} yet, so it shows uncoloured`;
+      const v = metric === 'cpa' ? a.cpa : metric === 'reach' ? a.reach : a.frequency;
+      if (metric === 'cpa' && (v === null || v === undefined)) return 'No purchases in this period, so no CPA to judge';
+      if (/about 4 days/.test(rule) && !per0.frequency_judged) return `${label} is judged only for a period of about 4 days (3–5); this period is ${per0.days || '?'} day${per0.days === 1 ? '' : 's'}`;
+      if (v === null || v === undefined) return `${label} for this period has not been loaded${metric === 'frequency' ? ' (Refresh now loads exact Reach & Frequency)' : ''}`;
+      return `Outside the confirmed healthy range (${rule})`;
     };
     if (hn) {
       if (healthOn) {
         const per = res.health.period || {};
         hn.style.display = '';
-        hn.innerHTML = `Colour dots use only benchmarks WNDRR has confirmed: <b>TOF</b> CPA over $200 is red and Frequency under 2 is green; <b>TOM</b> Frequency 2–3 is green; <b>MOF</b> CPA $40–$60 is green. Everything else is left neutral. Frequency colours apply only to a period of about 4 days (${per.approx_4_days ? `${per.approx_4_days.min_days}–${per.approx_4_days.max_days} days` : '3–5 days'}); this period is ${per.days || '?'} day${per.days === 1 ? '' : 's'}${per.frequency_judged ? '' : ', so Frequency is shown without colour'}.`;
+        hn.innerHTML = `Colour dots are used on <b>TOF</b> Frequency and Reach, <b>TOM</b> CPA and Reach, and <b>MOF</b> CPA and Reach, using only benchmarks WNDRR has confirmed: TOF Frequency under 2 and MOF CPA $40–$60 are green. ${(res.health.pending_benchmarks || []).length ? `Awaiting a benchmark (shown without colour): ${res.health.pending_benchmarks.map((x) => x.replace(/^(\w+) (\w+)$/, (m, f, k) => `${f} ${({ cpa: 'CPA', reach: 'Reach', frequency: 'Frequency' })[k] || k}`)).join(', ')}. ` : ''}Every other measure is left neutral. Frequency colours apply only to a period of about 4 days (${per.approx_4_days ? `${per.approx_4_days.min_days}–${per.approx_4_days.max_days} days` : '3–5 days'}); this period is ${per.days || '?'} day${per.days === 1 ? '' : 's'}${per.frequency_judged ? '' : ', so Frequency is shown without colour'}.`;
       } else hn.style.display = 'none';
     }
     body.innerHTML = res.ads.map((a) => `
@@ -671,7 +672,7 @@ function mpRenderAds(res) {
         <td class="num">${mpFmt(a.add_to_cart, 'int')}</td>
         <td class="num">${mpFmt(a.cost_per_atc, 'money')}</td>
         <td class="num">${mpFmt(a.outbound_ctr, 'pct')}</td>
-        <td class="num${a.funnel === 'TOF' ? ' mp-reach-key' : ''}"${a.funnel === 'TOF' ? ' title="Reach is the key measure for TOF"' : ''}>${mpReachCell(a.reach, 'int')}</td>
+        <td class="num${a.funnel === 'TOF' ? ' mp-reach-key' : ''}" title="${escapeHtml(why(a, 'reach', a.reach_health) || (a.funnel === 'TOF' ? 'Reach is the key measure for TOF' : ''))}">${dot(a.reach_health)}${mpReachCell(a.reach, 'int')}</td>
         <td class="num" title="${escapeHtml(why(a, 'frequency', a.frequency_health))}">${dot(a.frequency_health)}${mpReachCell(a.frequency, 'freq')}</td>
       </tr>`).join('');
     ccHydrateThumbs(body);
