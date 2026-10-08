@@ -328,19 +328,26 @@ function extractImages(row) {
     return { url: img.img, catalog: img.is_catalog_image === '1' || img.is_catalog_image === 1, role: r.role, role_basis: r.basis };
   });
 }
-// Front / back for display. front = an image that says "front", else the catalogue image, else the first. back = an image that
-// says "back"/"rear"; with no labels at all but two or more pictures, the next picture is offered as the back and the basis says
-// it is positional (so the UI can word it honestly). Never invented when there is only one picture.
+// What to show for a product. WNDRR's normal catalogue case is ONE ApparelMagic picture (the catalogue image) that already
+// contains the front and back views side by side, so the default is a SINGLE image shown once: layout 'single', main = the
+// catalogue image (else the first picture that is not labelled "back"). Two separate pictures are used ONLY when the records
+// themselves say so -- one labelled front and a different one labelled back (label field or file name): layout 'front_back'.
+// Nothing is inferred from picture order (an unlabelled second picture is never assumed to be a back view), the same
+// picture is never put in two slots, and a missing back is simply not shown. `basis` says how the main picture was chosen
+// ('catalog' | 'label' | 'filename' | 'position') so a surprising choice can be debugged from /api/debug/am/product/<code>.
 function pickFrontBack(images) {
   const imgs = Array.isArray(images) ? images : [];
-  if (!imgs.length) return { front: null, back: null, count: 0 };
-  const labelled = imgs.some((i) => i.role);
-  const frontImg = imgs.find((i) => i.role === 'front') || imgs.find((i) => i.catalog && i.role !== 'back') || imgs.find((i) => i.role !== 'back') || imgs[0];
-  const frontBasis = frontImg.role === 'front' ? frontImg.role_basis : frontImg.catalog ? 'catalog' : 'position';
-  let backImg = imgs.find((i) => i.role === 'back' && i !== frontImg) || null;
-  let backBasis = backImg ? backImg.role_basis : null;
-  if (!backImg && !labelled && imgs.length >= 2) { backImg = imgs.find((i) => i !== frontImg); backBasis = 'position'; }
-  return { front: { url: frontImg.url, basis: frontBasis }, back: backImg ? { url: backImg.url, basis: backBasis } : null, count: imgs.length };
+  if (!imgs.length) return { layout: 'none', main: null, front: null, back: null, count: 0 };
+  const frontLabelled = imgs.find((i) => i.role === 'front');
+  const backLabelled = imgs.find((i) => i.role === 'back' && i !== frontLabelled);
+  if (frontLabelled && backLabelled) {
+    const front = { url: frontLabelled.url, basis: frontLabelled.role_basis };
+    return { layout: 'front_back', main: front, front, back: { url: backLabelled.url, basis: backLabelled.role_basis }, count: imgs.length };
+  }
+  const mainImg = frontLabelled || imgs.find((i) => i.catalog && i.role !== 'back') || imgs.find((i) => i.role !== 'back') || imgs[0];
+  const basis = mainImg.role === 'front' ? mainImg.role_basis : mainImg.catalog ? 'catalog' : 'position';
+  const main = { url: mainImg.url, basis };
+  return { layout: 'single', main, front: main, back: null, count: imgs.length };
 }
 
 // WNDRR's AM account repurposes mid_code as Launch Date per style, and CORE

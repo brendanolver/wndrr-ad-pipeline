@@ -638,9 +638,26 @@ function mpRenderAds(res) {
     body.innerHTML = `<tr><td colspan="12" class="mp-table-empty">${
       res.q || res.status !== 'all' || mpFiltered() ? 'No ads match this search or filter.' : 'No ads had spend or impressions in this period.'}</td></tr>`;
   } else {
+    const hn = document.getElementById('mp-health-note');
     const healthOn = !!(res.health && res.health.active);
     const dot = (h) => (healthOn && h ? `<span class="mp-health mp-health-${escapeHtml(h)}" title="${h === 'green' ? 'Within the confirmed healthy range' : h === 'orange' ? 'Watch range' : 'Beyond the confirmed concern level'} for this funnel"></span>` : '');
-    const hn = document.getElementById('mp-health-note');
+    // Hover text on every CPA / Frequency cell says WHY it has (or has no) colour, so a neutral cell is never a mystery.
+    const per0 = (res.health && res.health.period) || {};
+    const why = (a, metric, h) => {
+      if (!healthOn) return '';
+      if (h) return h === 'green' ? 'Within the confirmed healthy range for this funnel' : 'Beyond the confirmed concern level for this funnel';
+      if (a.funnel !== 'TOF' && a.funnel !== 'TOM' && a.funnel !== 'MOF') return 'Funnel is unknown or mixed (campaign name has no single TOF / TOM / MOF), so no health judgement';
+      if (metric === 'cpa') {
+        if (a.cpa === null || a.cpa === undefined) return 'No purchases in this period, so no CPA to judge';
+        if (a.funnel === 'TOF') return 'TOF CPA is only flagged above $200';
+        if (a.funnel === 'TOM') return 'No approved CPA benchmark for TOM';
+        return 'Outside the confirmed healthy range ($40–$60); no watch or poor threshold has been defined';
+      }
+      if (a.funnel === 'MOF') return 'Frequency is not a MOF measure';
+      if (!per0.frequency_judged) return `Frequency is judged only for a period of about 4 days (3–5); this period is ${per0.days || '?'} day${per0.days === 1 ? '' : 's'}`;
+      if (a.frequency === null || a.frequency === undefined) return 'Frequency for this period has not been loaded (Refresh now loads exact Reach & Frequency)';
+      return a.funnel === 'TOF' ? 'TOF Frequency is healthy only below 2' : 'TOM Frequency is healthy only from 2 to 3';
+    };
     if (hn) {
       if (healthOn) {
         const per = res.health.period || {};
@@ -658,12 +675,12 @@ function mpRenderAds(res) {
         <td>${mpStatusChip(a.effective_status)}</td>
         <td class="num">${mpFmt(a.spend, 'money')}</td>
         <td class="num">${mpFmt(a.purchases, 'int')}</td>
-        <td class="num">${dot(a.cpa_health)}${mpFmt(a.cpa, 'money')}</td>
+        <td class="num" title="${escapeHtml(why(a, 'cpa', a.cpa_health))}">${dot(a.cpa_health)}${mpFmt(a.cpa, 'money')}</td>
         <td class="num">${mpFmt(a.add_to_cart, 'int')}</td>
         <td class="num">${mpFmt(a.cost_per_atc, 'money')}</td>
         <td class="num">${mpFmt(a.outbound_ctr, 'pct')}</td>
         <td class="num${a.funnel === 'TOF' ? ' mp-reach-key' : ''}"${a.funnel === 'TOF' ? ' title="Reach is the key measure for TOF"' : ''}>${mpReachCell(a.reach, 'int')}</td>
-        <td class="num">${dot(a.frequency_health)}${mpReachCell(a.frequency, 'freq')}</td>
+        <td class="num" title="${escapeHtml(why(a, 'frequency', a.frequency_health))}">${dot(a.frequency_health)}${mpReachCell(a.frequency, 'freq')}</td>
       </tr>`).join('');
     ccHydrateThumbs(body);
   }
@@ -1191,7 +1208,7 @@ function renderAdPreview() {
 // "Confirm Mapping" button persists a classification (see
 // src/lib/metaAdMatching.js).
 const mmState = {
-  view: 'performance', scope: '30d', filter: 'needs', q: '', page: 1, pageSize: 25,
+  view: 'performance', scope: '30d', filter: 'needs', q: '', page: 1, pageSize: 50,
   reqId: 0, autoSuggested: false, options: null,
 };
 // Every chip says what it counts. To do / Needs review / Unmatched / Will inherit / Historical / Creative
@@ -1201,7 +1218,7 @@ const mmState = {
 //   Historical = needs-review work that is not about a current CORE product with sellable stock (kept, searchable).
 //   Will inherit = every outstanding copy of the creative will take a person's decision when "Apply" is pressed.
 const MM_FILTERS = [
-  ['needs', 'To do', 'needs', 'creatives'], ['suggested', 'Needs review', 'suggested', 'creatives'], ['unmatched', 'Unmatched', 'unmatched', 'creatives'],
+  ['all', 'All ads', 'all_ads', 'ads'], ['needs', 'To do', 'needs', 'creatives'], ['suggested', 'Needs review', 'suggested', 'creatives'], ['unmatched', 'Unmatched', 'unmatched', 'creatives'],
   ['inherit', 'Will inherit', 'will_inherit', 'creatives'], ['matched', 'Matched', 'matched', 'ads'],
   ['historical', 'Historical', 'historical', 'creatives'], ['archived', 'Archived / pre-2026', 'archived', 'creatives'], ['conflict', 'Creative conflicts', 'conflicts', 'creatives'],
   ['not_product_specific', 'Not product-specific', 'not_product_specific', 'ads'], ['excluded', 'Excluded', 'excluded', 'ads'],
@@ -1597,8 +1614,19 @@ function mmShowPreview(pv) {
     <h4>Top unresolved phrases</h4>${(pv.unresolved_phrases || []).length ? `<table class="mp-table mm-pv-table"><thead><tr><th>Phrase</th><th class="num">Ads</th><th>Why</th><th>Nearest family</th></tr></thead><tbody>${pv.unresolved_phrases.slice(0, 25).map((r) => `<tr><td>${escapeHtml(r.phrase)}</td><td class="num">${mmN(r.ads)}</td><td>${escapeHtml(r.reason || '')}</td><td>${escapeHtml(r.nearest_family || '—')}</td></tr>`).join('')}</tbody></table>` : '<div class="hint">None.</div>'}`;
   openModal('mm-preview-modal');
 }
+// The working view (which ads + which chip) is remembered per browser, so "All ads" stays the main workspace once chosen.
+const MM_VIEW_KEY = 'wndrr.matching.view';
+function mmSaveView() { try { localStorage.setItem(MM_VIEW_KEY, JSON.stringify({ scope: mmState.scope, filter: mmState.filter })); } catch (e) { /* storage unavailable: nothing is lost but the memory */ } }
+(function mmRestoreView() {
+  try {
+    const v = JSON.parse(localStorage.getItem(MM_VIEW_KEY) || 'null');
+    if (v && ['30d', '90d', 'all'].includes(v.scope)) mmState.scope = v.scope;
+    if (v && MM_FILTERS.some((f) => f[0] === v.filter)) mmState.filter = v.filter;
+    document.getElementById('mm-scope').value = mmState.scope;
+  } catch (e) { /* default view */ }
+})();
 document.getElementById('mm-scope').addEventListener('change', (e) => {
-  mmState.scope = e.target.value; mmState.page = 1; mmState.autoSuggested = false; loadMetaMatching();
+  mmState.scope = e.target.value; mmSaveView(); mmState.page = 1; mmState.autoSuggested = false; loadMetaMatching();
 });
 let mmSearchTimer = null;
 document.getElementById('mm-search').addEventListener('input', (e) => {
@@ -1608,7 +1636,7 @@ document.getElementById('mm-search').addEventListener('input', (e) => {
 document.getElementById('mm-chips').addEventListener('click', (e) => {
   const chip = e.target.closest('.mm-chip');
   if (!chip) return;
-  mmState.filter = chip.dataset.filter; mmState.page = 1; loadMetaMatching();
+  mmState.filter = chip.dataset.filter; mmSaveView(); mmState.page = 1; loadMetaMatching();
 });
 document.getElementById('mm-pager').addEventListener('click', (e) => {
   if (e.target.id === 'mm-prev' && mmState.page > 1) mmState.page -= 1;
@@ -1717,15 +1745,20 @@ async function loadCorePlan(force) {
   }
 }
 
-// Front / back garment pictures from ApparelMagic. object-fit: contain, so the WHOLE garment is visible (never cropped).
-// basis 'position' = AM gave no front/back label, so the picture order is used (said in the tooltip, never hidden).
+// Product picture(s) from ApparelMagic. WNDRR's normal case is ONE catalogue picture that already holds the front and back
+// views, so it is shown ONCE across the whole image area (object-fit: contain, never cropped, never split into slots, never
+// duplicated). Two panes (Front | Back) appear only when ApparelMagic itself labels one picture "front" and another "back".
 function cpImagesHtml(c, size) {
   const im = c.product.images || {};
-  const front = im.front || (c.product.image_url ? { url: c.product.image_url, basis: 'catalog' } : null);
-  const pane = (label, o) => (o
-    ? `<figure class="cp-img" title="${o.basis === 'position' ? 'ApparelMagic has no front/back label for these pictures; this is taken from their order.' : label}"><img src="${escapeHtml(o.url)}" alt="${escapeHtml(c.product.product_name)} — ${label.toLowerCase()}" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.parentNode.classList.add('cp-img-none');this.remove()"><figcaption>${label}</figcaption></figure>`
-    : `<figure class="cp-img cp-img-none"><span>No ${label.toLowerCase()} image</span><figcaption>${label}</figcaption></figure>`);
-  return `<div class="cp-imgs ${size === 'lg' ? 'cp-imgs-lg' : ''}">${pane('Front', front)}${pane('Back', im.back)}</div>`;
+  const alt = escapeHtml(c.product.product_name);
+  const img = (o, label) => `<img src="${escapeHtml(o.url)}" alt="${alt}${label ? ` — ${label.toLowerCase()}` : ''}" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.parentNode.classList.add('cp-img-none');this.remove()">`;
+  const cls = `cp-imgs${size === 'lg' ? ' cp-imgs-lg' : ''}`;
+  if (im.layout === 'front_back' && im.front && im.back) {
+    return `<div class="${cls}"><figure class="cp-img">${img(im.front, 'Front')}<figcaption>Front</figcaption></figure><figure class="cp-img">${img(im.back, 'Back')}<figcaption>Back</figcaption></figure></div>`;
+  }
+  const main = im.main || im.front || (c.product.image_url ? { url: c.product.image_url } : null);
+  if (main) return `<div class="${cls} cp-imgs-single"><figure class="cp-img" title="${im.main && im.main.basis === 'position' ? 'ApparelMagic has no catalogue flag or front/back label; this is its first picture.' : 'ApparelMagic product image'}">${img(main)}</figure></div>`;
+  return `<div class="${cls} cp-imgs-single"><figure class="cp-img cp-img-none"><span>No product image</span></figure></div>`;
 }
 
 function cpFactsHtml(c) {
@@ -1736,7 +1769,8 @@ function cpFactsHtml(c) {
   const cr = c.creative;
   const last = cr.last_new_creative;
   facts.push(`<span title="${last ? escapeHtml(last.source) : ''}">Last new creative: <b>${last ? `${escapeHtml(cpDate(last.date))}` : 'none found'}</b>${last ? ` (${escapeHtml(cpAge(last.days_ago))} ago)` : ''}${cr.recency_basis === 'older_than_window' ? ' <i class="hint">older matched history only</i>' : ''}</span>`);
-  facts.push(`<span>Active unique creatives: <b>${cr.active_unique_creatives ?? cr.running_creatives}</b>${cr.active_ads > (cr.active_unique_creatives ?? 0) ? ` <span class="hint">· across ${cr.active_ads} active ads</span>` : ''}${cr.active_basis === 'status_only' ? ' <i class="hint" title="Stored Insights are stale, so this counts ads that are switched on rather than ads seen delivering">status only</i>' : ''}</span>`);
+  const u = cr.active_unique_creatives ?? cr.running_creatives;
+  facts.push(`<span>Unique creatives running: <b>${u}</b> <span class="hint">· ${u} unique creative${u === 1 ? '' : 's'} running across ${cr.active_ads} Meta ad${cr.active_ads === 1 ? '' : 's'} (the same creative duplicated into several campaigns / ad sets counts once)</span>${cr.active_basis === 'status_only' ? ' <i class="hint" title="Stored Insights are stale, so this counts ads that are switched on rather than ads seen delivering">status only</i>' : ''}</span>`);
   if (cr.historical_unique_creatives !== undefined) facts.push(`<span>Historical unique creatives: <b>${cr.historical_unique_creatives}</b></span>`);
   facts.push(`<span>Meta: <b>${escapeHtml(c.meta_status)}</b></span>`);
   return `<div class="cp-facts">${facts.join('')}</div>`;
@@ -1748,18 +1782,18 @@ function cpCardHtml(c) {
   const last = cr.last_new_creative;
   const s = c.sales_status;
   const priority = c.priority && c.priority !== 'Info' ? c.priority : null;
+  const u = cr.active_unique_creatives ?? cr.running_creatives;
   return `
     <article class="cp-tile pri-${escapeHtml((c.priority || 'info').toLowerCase())}" data-cp-key="${escapeHtml(c.key)}" data-cp-open="${escapeHtml(c.key)}" tabindex="0" role="button" aria-label="${escapeHtml(c.product.product_name)} — ${escapeHtml(c.headline)}">
       ${cpImagesHtml(c)}
       <div class="cp-tile-body">
         <div class="cp-tile-head"><span class="cp-tile-name" title="${escapeHtml(c.product.product_name)}">${escapeHtml(c.product.product_name)}</span>${priority ? `<span class="co-pri pri-${priority.toLowerCase()}">${escapeHtml(priority.toUpperCase())}</span>` : ''}</div>
-        ${c.product.category ? `<div class="cp-tile-cat">${escapeHtml(c.product.category.toLowerCase())}</div>` : ''}
-        <div class="cp-tile-rec">${escapeHtml(c.headline)}</div>
+        <div class="cp-tile-rec">${escapeHtml(c.headline)}${c.product.category ? ` <span class="cp-tile-cat">· ${escapeHtml(c.product.category.toLowerCase())}</span>` : ''}</div>
         <dl class="cp-tile-facts">
           <div><dt>Stock</dt><dd>${cpNum(c.stock.units)}</dd></div>
           <div><dt>Sales</dt><dd>${s ? escapeHtml(s.label.replace('Selling ', '')) : '—'}${s && s.tier ? ` <span class="hint">${escapeHtml(s.tier)}</span>` : ''}</dd></div>
           <div title="${last ? escapeHtml(last.source) : ''}"><dt>Last new creative</dt><dd>${last ? `${escapeHtml(cpAge(last.days_ago))} ago` : 'none'}</dd></div>
-          <div title="Distinct Meta creatives with an ad delivering (the same creative duplicated into many ads counts once)"><dt>Active creatives</dt><dd>${cr.active_unique_creatives ?? cr.running_creatives}${cr.active_ads > (cr.active_unique_creatives ?? 0) ? ` <span class="hint">/ ${cr.active_ads} ads</span>` : ''}</dd></div>
+          <div class="cp-tile-uc" title="Entirely different pieces of creative (distinct Meta creative ids) with an ad delivering. The same creative duplicated into several campaigns / ad sets counts once."><dt>Unique creatives running</dt><dd><b>${u}</b> <span class="hint">· ${cr.active_ads} Meta ad${cr.active_ads === 1 ? '' : 's'} using ${u === 1 ? 'it' : 'them'}</span></dd></div>
           <div><dt>Meta</dt><dd>${escapeHtml(c.meta_status)}</dd></div>
         </dl>
         ${c.stock.size_warning ? `<div class="cp-tile-warn" title="${escapeHtml(c.stock.size_warning)}">⚠ ${escapeHtml(c.stock.size_level === 'broken' ? 'Broken sizes' : 'Limited sizes')}</div>` : ''}
@@ -1866,7 +1900,7 @@ function cpEvidenceHtml(c) {
   const cr = e.creative;
   const creative = kv([
     ['Last new creative', cr.last_new_creative ? `${escapeHtml(cpDate(cr.last_new_creative.date))} (${escapeHtml(cpAge(cr.last_new_creative.days_ago))} ago) <span class="hint">${escapeHtml(cr.last_new_creative.source)}. This is when the first ad using it was created in Meta; the creative file itself may be older.</span>` : 'None found'],
-    ['Active unique creatives', `${cr.active_unique_creatives ?? cr.running_creatives}${cr.active_ads > (cr.active_unique_creatives ?? 0) ? ` <span class="hint">· across ${cr.active_ads} active ads (the same creative duplicated into several ads counts once)</span>` : ''}`],
+    ['Unique creatives running', `${cr.active_unique_creatives ?? cr.running_creatives} <span class="hint">· ${cr.active_unique_creatives ?? cr.running_creatives} unique creative${(cr.active_unique_creatives ?? cr.running_creatives) === 1 ? '' : 's'} running across ${cr.active_ads} Meta ad${cr.active_ads === 1 ? '' : 's'}. The same creative duplicated into several campaigns or ad sets counts once; this number (not the ad count) drives the recommendation.</span>`],
     ['Historical unique creatives', cr.historical_unique_creatives === undefined ? '—' : String(cr.historical_unique_creatives)],
     ['New creatives in the last 90 days', String(cr.new_creatives_90d)],
     ['Distinct creatives ever linked', `${cr.creatives_total} <span class="hint">(exact Meta creatives with at least one matched ad)</span>`],
