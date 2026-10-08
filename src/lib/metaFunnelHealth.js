@@ -1,51 +1,54 @@
-// Funnel-specific CPA / Frequency "health" (green / orange / red) -- built ONLY from the guidance WNDRR has confirmed.
+// Funnel-specific "health" colours for Meta Performance -- built ONLY from the guidance WNDRR has confirmed.
 //
-// Source: Max's directional internal benchmarks (not universal Meta rules):
-//   TOF  CPA        over $200 is a concern; TOF is about Reach, so no tighter CPA target exists
-//   TOF  Frequency  under 2, over roughly a 4-day period
-//   TOF  Reach      matters most, but NO numeric benchmark has been supplied
-//   TOM  CPA        no approved benchmark
-//   TOM  Frequency  2 to 3 (inclusive), over roughly a 4-day period
-//   MOF  CPA        about $40 to $60
-//   MOF  Frequency  not relevant
+// TWO separate things are configured here, so a missing benchmark is easy to add later:
+//   COLOUR_CODED  WHICH metrics WNDRR evaluates per funnel (this decides where a colour can ever appear)
+//   RULES         the numeric benchmark for each of those metrics -- null until WNDRR supplies one (null = neutral)
 //
-// Rules are deliberately PARTIAL. A state exists only where WNDRR confirmed it:
-//   TOF CPA        red above $200, otherwise neutral
-//   TOF Frequency  green below 2 (4-day period), otherwise neutral
-//   TOM Frequency  green from 2 to 3 inclusive (4-day period), otherwise neutral
-//   MOF CPA        green from $40 to $60 inclusive, otherwise neutral (a $30 CPA is NOT bad; $70 is not judged)
-//   everything else, and every Unknown / Mixed funnel: neutral (null = no colour)
-// There are NO orange ranges: none has been confirmed, so none is invented. Colour is only ever an extra signal beside the
-// real number, which is always still shown.
+// WNDRR evaluates:                              benchmark today
+//   TOF  Frequency                              green under 2, over roughly a 3-5 day period
+//   TOF  Reach                                  none yet -> neutral
+//   TOM  CPA                                    none yet -> neutral
+//   TOM  Reach                                  none yet -> neutral
+//   MOF  CPA                                    green $40 to $60 inclusive (any range)
+//   MOF  Reach                                  none yet -> neutral
+// Every other metric (TOF CPA, TOM Frequency, MOF Frequency, spend, purchases, ...) is NOT colour-coded and always displays
+// neutral, as does every Unknown / Mixed funnel. The real numbers are always shown; colour is only ever an extra signal.
+// There are NO orange ranges and no invented thresholds.
 //
-// FREQUENCY IS PERIOD-AWARE. Max's frequency guidance is for about 4 days; a Frequency of 2 over 30 days is not the same
-// thing. It is judged only when the SELECTED range is APPROX_4_DAYS.min_days .. max_days calendar days long (inclusive of both
-// end dates, counted from the real dates, not from the preset's name). Any other length shows the number with no colour. The
-// thresholds are never scaled or extrapolated to other lengths. CPA guidance carries no period qualifier and applies to any range.
+// FREQUENCY IS PERIOD-AWARE. The frequency guidance is for about 4 days; a Frequency of 2 over 30 days is not the same thing.
+// A rule with period 'approx_4_days' is judged only when the SELECTED range is APPROX_4_DAYS.min_days .. max_days calendar days
+// long (inclusive of both end dates, counted from the real dates, not from the preset's name). Any other length shows the number
+// with no colour. Thresholds are never scaled or extrapolated.
 //
-// To add a rule later (e.g. a TOF Reach benchmark, a TOM CPA band, an orange range) edit RULES only: each rule is
-//   { period: 'approx_4_days' | null, green?: {min?,max?,lt?,lte?}, orange?: {...}, red?: {...} }
-// evaluated red -> orange -> green; a value matching none is neutral.
+// TO ADD A BENCHMARK LATER, edit RULES only (the metric is already colour-coded, so nothing else changes), e.g.
+//   TOF: { reach: { period: null, green: { min: 50000 } } }
+// A rule is { period: 'approx_4_days' | null, green?: {min?,max?,lt?,lte?}, orange?: {...}, red?: {...} }, evaluated
+// red -> orange -> green; a value matching none is neutral. To start colour-coding a new metric, add it to COLOUR_CODED too.
 const ENABLED = true;
-const RULES_VERSION = 1;
+const RULES_VERSION = 2;
 
 const APPROX_4_DAYS = { target_days: 4, min_days: 3, max_days: 5 };
 
+// which metrics WNDRR colour-codes for each funnel
+const COLOUR_CODED = {
+  TOF: ['frequency', 'reach'],
+  TOM: ['cpa', 'reach'],
+  MOF: ['cpa', 'reach'],
+};
+
+// benchmarks for the colour-coded metrics (null = WNDRR has not supplied one yet: the value shows, uncoloured)
 const RULES = {
   TOF: {
-    cpa: { period: null, red: { gt: 200 } },
     frequency: { period: 'approx_4_days', green: { lt: 2 } },
-    reach: null, // important for TOF, but no numeric benchmark yet -- intentionally unclassified
+    reach: null, // colour-coded, but no benchmark supplied yet
   },
   TOM: {
-    cpa: null, // no approved benchmark (never inferred from TOF / MOF)
-    frequency: { period: 'approx_4_days', green: { min: 2, max: 3 } },
-    reach: null,
+    cpa: null, // colour-coded, but no benchmark supplied yet (never inferred from TOF / MOF)
+    reach: null, // colour-coded, but no benchmark supplied yet
   },
   MOF: {
     cpa: { period: null, green: { min: 40, max: 60 } },
-    frequency: null, // "not particularly relevant"
-    reach: null,
+    reach: null, // colour-coded, but no benchmark supplied yet
   },
 };
 const JUDGED_FUNNELS = ['TOF', 'TOM', 'MOF'];
@@ -75,9 +78,10 @@ function validRule(r) {
 
 // 'green' | 'orange' | 'red' | null (null = neutral / not judged). ctx.days = calendar days of the selected range.
 // `rules` / `enabled` are injectable for tests only.
-function classify(funnel, metric, value, ctx = {}, { rules = RULES, enabled = ENABLED } = {}) {
+function classify(funnel, metric, value, ctx = {}, { rules = RULES, enabled = ENABLED, coded = COLOUR_CODED } = {}) {
   if (!enabled) return null;
   if (!JUDGED_FUNNELS.includes(funnel) || !METRICS.includes(metric)) return null; // Unknown / Mixed / anything else: neutral
+  if (!(coded[funnel] || []).includes(metric)) return null; // not a colour-coded metric for this funnel: always neutral
   if (value === null || value === undefined || value === '' || !Number.isFinite(Number(value))) return null;
   const rule = rules[funnel] && rules[funnel][metric];
   if (!validRule(rule)) return null;
@@ -92,16 +96,25 @@ function describe(rule) {
   return STATES.filter((s) => rule[s] !== undefined).map((s) => `${s} ${part(rule[s])}`).join('; ');
 }
 
-function status({ rules = RULES, enabled = ENABLED, range = null } = {}) {
+function status({ rules = RULES, enabled = ENABLED, coded = COLOUR_CODED, range = null } = {}) {
   const days = rangeDays(range);
-  const defined = {};
-  JUDGED_FUNNELS.forEach((f) => { defined[f] = {}; METRICS.forEach((m) => { const r = rules[f] && rules[f][m]; defined[f][m] = validRule(r) ? describe(r) + (r.period ? ' (about 4 days)' : '') : null; }); });
+  const defined = {}; // colour-coded metric -> described benchmark, or null when none has been supplied yet
+  const colourCoded = {};
+  const pending = []; // colour-coded but waiting for a benchmark, e.g. 'TOF reach'
+  JUDGED_FUNNELS.forEach((f) => {
+    defined[f] = {}; colourCoded[f] = (coded[f] || []).filter((m) => METRICS.includes(m));
+    colourCoded[f].forEach((m) => {
+      const r = rules[f] && rules[f][m];
+      defined[f][m] = validRule(r) ? describe(r) + (r.period ? ' (about 4 days)' : '') : null;
+      if (!defined[f][m]) pending.push(`${f} ${m}`);
+    });
+  });
   return {
-    enabled: !!enabled, rules_version: RULES_VERSION, judged_funnels: JUDGED_FUNNELS, defined,
-    active: !!enabled && JUDGED_FUNNELS.some((f) => METRICS.some((m) => defined[f][m])),
+    enabled: !!enabled, rules_version: RULES_VERSION, judged_funnels: JUDGED_FUNNELS, colour_coded: colourCoded, defined, pending_benchmarks: pending,
+    active: !!enabled && JUDGED_FUNNELS.some((f) => colourCoded[f].some((m) => defined[f][m])),
     period: { days, approx_4_days: { ...APPROX_4_DAYS }, frequency_judged: isApprox4Days(days) },
     note: 'Colours use only WNDRR-confirmed benchmarks; everything else is neutral. Frequency is judged only for a period of about 4 days.',
   };
 }
 
-module.exports = { ENABLED, RULES_VERSION, APPROX_4_DAYS, RULES, JUDGED_FUNNELS, METRICS, rangeDays, isApprox4Days, validRule, classify, status };
+module.exports = { ENABLED, RULES_VERSION, APPROX_4_DAYS, COLOUR_CODED, RULES, JUDGED_FUNNELS, METRICS, rangeDays, isApprox4Days, validRule, classify, status };
