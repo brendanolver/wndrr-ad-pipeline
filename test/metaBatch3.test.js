@@ -204,7 +204,7 @@ test('planning: the creative-volume recommendation follows UNIQUE creatives -- 9
   const facts = (unique, ads) => ({ active_unique_creatives: unique, running_creatives: unique, active_ads: ads, creatives_total: unique, new_creatives_90d: 2, last_new_creative: { date: '2026-09-25', source: 'x', days_ago: 12 }, recency_basis: 'known', newest_running_days: 12, oldest_running_days: 40, active_basis: 'delivery', historical_unique_creatives: 0 });
   const few = plan.recommendFamily({ family, ps, facts: facts(1, 9), stock, benchmarkCpa: 40, salesAvailable: true });
   assert.ok(few && few.type === 'shoot_fresh', 'one unique creative across 9 ads is NOT enough');
-  assert.match(few.why, /only 1 unique creative is active \(across 9 ads\)/);
+  assert.match(few.why, /only 1 unique creative is running \(across 9 Meta ads\)/);
   const enough = plan.recommendFamily({ family, ps, facts: facts(3, 3), stock, benchmarkCpa: 40, salesAvailable: true });
   assert.equal(enough, null, 'three unique creatives (3 ads) IS enough for a strong, fresh product');
   const enoughFewAds = plan.recommendFamily({ family, ps, facts: facts(3, 3), stock, benchmarkCpa: 40, salesAvailable: true });
@@ -297,30 +297,44 @@ test('the archive never touches matching rules, the rules version or relevance',
   assert.doesNotMatch(code('src/lib/metaMatchingRelevance.js'), /archive/i, 'relevance logic is unchanged by the archive');
 });
 
-// ── ApparelMagic front / back pictures ──────────────────────────────────
-test('images: labelled front/back are used as labelled', () => {
-  const r = am.pickFrontBack(am.extractImages({ images: [{ img: 'https://x/2.jpg', description: 'Back view' }, { img: 'https://x/1.jpg', description: 'Front', is_catalog_image: '1' }] }));
-  assert.equal(r.front.url, 'https://x/1.jpg'); assert.equal(r.front.basis, 'label');
-  assert.equal(r.back.url, 'https://x/2.jpg'); assert.equal(r.back.basis, 'label');
+// ── ApparelMagic product pictures: ONE composite image is the normal case ──────────────
+test('images: one catalogue picture (the normal WNDRR case) is a single image, shown once, with no back slot', () => {
+  const r = am.pickFrontBack(am.extractImages({ images: [{ img: 'https://x/composite.jpg', is_catalog_image: '1' }] }));
+  assert.equal(r.layout, 'single');
+  assert.equal(r.main.url, 'https://x/composite.jpg');
+  assert.equal(r.back, null);
+  assert.equal(r.count, 1);
 });
-test('images: file names that say front/back are used', () => {
-  const r = am.pickFrontBack(am.extractImages({ images: [{ img: 'https://x/style_front.jpg' }, { img: 'https://x/style_back.jpg' }] }));
-  assert.deepEqual([r.front.basis, r.back.basis], ['filename', 'filename']);
+test('images: several UNLABELLED pictures -> the catalogue image only; order never makes a second one a "back"', () => {
+  const r = am.pickFrontBack(am.extractImages({ images: [{ img: 'https://x/1.jpg', is_catalog_image: '1' }, { img: 'https://x/2.jpg' }, { img: 'https://x/3.jpg' }] }));
+  assert.equal(r.layout, 'single');
+  assert.equal(r.main.url, 'https://x/1.jpg');
+  assert.equal(r.main.basis, 'catalog');
+  assert.equal(r.back, null);
 });
-test('images: unlabelled pictures -> catalogue image as front, the next as back, marked positional; a single picture has no back', () => {
-  const two = am.pickFrontBack(am.extractImages({ images: [{ img: 'https://x/1.jpg', is_catalog_image: '1' }, { img: 'https://x/2.jpg' }] }));
-  assert.equal(two.front.basis, 'catalog'); assert.equal(two.back.basis, 'position');
-  const one = am.pickFrontBack(am.extractImages({ images: [{ img: 'https://x/1.jpg' }] }));
-  assert.equal(one.back, null);
-  assert.deepEqual(am.pickFrontBack([]), { front: null, back: null, count: 0 });
+test('images: separate front + back are used only when the records say so (label or file name)', () => {
+  const byLabel = am.pickFrontBack(am.extractImages({ images: [{ img: 'https://x/2.jpg', description: 'Back view' }, { img: 'https://x/1.jpg', description: 'Front', is_catalog_image: '1' }] }));
+  assert.deepEqual([byLabel.layout, byLabel.front.url, byLabel.front.basis, byLabel.back.url, byLabel.back.basis], ['front_back', 'https://x/1.jpg', 'label', 'https://x/2.jpg', 'label']);
+  const byName = am.pickFrontBack(am.extractImages({ images: [{ img: 'https://x/style_front.jpg' }, { img: 'https://x/style_back.jpg' }] }));
+  assert.deepEqual([byName.layout, byName.front.basis, byName.back.basis], ['front_back', 'filename', 'filename']);
 });
-test('planning tile renders FRONT and BACK panes with the whole garment (contain, not crop)', () => {
+test('images: a lone "front" label or a lone "back" label does not create a two-pane layout or duplicate an image', () => {
+  const onlyFront = am.pickFrontBack(am.extractImages({ images: [{ img: 'https://x/a_front.jpg' }, { img: 'https://x/b.jpg' }] }));
+  assert.equal(onlyFront.layout, 'single'); assert.equal(onlyFront.main.url, 'https://x/a_front.jpg'); assert.equal(onlyFront.back, null);
+  const onlyBack = am.pickFrontBack(am.extractImages({ images: [{ img: 'https://x/a_back.jpg' }, { img: 'https://x/b.jpg' }] }));
+  assert.equal(onlyBack.layout, 'single'); assert.equal(onlyBack.main.url, 'https://x/b.jpg');
+  for (const r of [onlyFront, onlyBack]) assert.ok(!r.back || r.back.url !== r.main.url);
+  assert.deepEqual(am.pickFrontBack([]), { layout: 'none', main: null, front: null, back: null, count: 0 });
+});
+test('planning tile: a composite image renders ONCE across the image area, never as Front | No back image', () => {
   const app = read('public/app.js');
   assert.match(app, /function cpImagesHtml/);
-  assert.match(app, /pane\('Front', front\)\}\$\{pane\('Back', im\.back\)/);
-  assert.match(read('public/styles.css'), /\.cp-img img\{[^}]*object-fit:contain/);
-  assert.doesNotMatch(read('public/styles.css'), /\.cp-img img\{[^}]*object-fit:cover/);
-  assert.match(app, /No \$\{label\.toLowerCase\(\)\} image/);
+  assert.match(app, /im\.layout === 'front_back' && im\.front && im\.back/);
+  assert.doesNotMatch(app, /No \$\{label\.toLowerCase\(\)\} image/, 'no per-slot "No back image" placeholder exists any more');
+  assert.match(app, /No product image/);
+  const css = read('public/styles.css');
+  assert.match(css, /\.cp-img img\{[^}]*object-fit:contain/);
+  assert.doesNotMatch(css, /\.cp-img img\{[^}]*object-fit:cover/);
 });
 
 // ── preview fetch economy ────────────────────────────────────────────────
@@ -400,4 +414,81 @@ test('Inspiration: deterministic recovery has no name search; the manual workflo
 test('conflict resolution and matching rules are untouched by this batch', () => {
   assert.match(code('src/lib/metaCreativeConflict.js'), /resolveConflict/);
   assert.equal(require('../src/lib/metaCreativeIdentity').METHOD, 'creative_inherited');
+});
+
+// ── batch 4: Last 3 / Last 4 Days, composite regression for unique creatives ───────────────────
+const perf = require('../src/lib/metaPerformance');
+test('presets: Last 3 Days and Last 4 Days exist and are the N COMPLETE days ending yesterday (inclusive, same convention as Last 7)', () => {
+  assert.ok(perf.PRESETS.includes('last_3') && perf.PRESETS.includes('last_4'));
+  assert.deepEqual(perf.resolvePreset('last_3', '2026-10-08'), { since: '2026-10-05', until: '2026-10-07' });
+  assert.deepEqual(perf.resolvePreset('last_4', '2026-10-08'), { since: '2026-10-04', until: '2026-10-07' });
+  assert.deepEqual(perf.resolvePreset('last_7', '2026-10-08'), { since: '2026-10-01', until: '2026-10-07' });
+  assert.equal(health.rangeDays(perf.resolvePreset('last_3', '2026-10-08')), 3);
+  assert.equal(health.rangeDays(perf.resolvePreset('last_4', '2026-10-08')), 4);
+  assert.equal(perf.parseRangeParams({ preset: 'last_3' }).label, 'Last 3 Days');
+  assert.equal(perf.parseRangeParams({ preset: 'last_4' }).label, 'Last 4 Days');
+  assert.equal(perf.parseRangeParams({ preset: 'last_4', compare: '1' }).compareRange.until, perf.addDays(perf.parseRangeParams({ preset: 'last_4' }).range.since, -1));
+});
+test('presets: Last 3 and Last 4 Days qualify for the Frequency rules; Last 7 does not; the thresholds are unchanged', () => {
+  const day = (name) => health.rangeDays(perf.resolvePreset(name, '2026-10-08'));
+  for (const name of ['last_3', 'last_4']) {
+    assert.equal(health.classify('TOF', 'frequency', 1.5, { days: day(name) }), 'green', `${name} TOF`);
+    assert.equal(health.classify('TOM', 'frequency', 2.5, { days: day(name) }), 'green', `${name} TOM`);
+    assert.equal(health.classify('TOM', 'frequency', 2, { days: day(name) }), 'green');
+    assert.equal(health.classify('TOM', 'frequency', 3, { days: day(name) }), 'green');
+  }
+  assert.equal(health.classify('TOF', 'frequency', 1.5, { days: day('last_7') }), null);
+  assert.equal(health.classify('TOM', 'frequency', 2.5, { days: day('last_7') }), null, 'TOM Frequency 2-3 is neutral on Last 7 Days');
+  assert.equal(health.classify('TOF', 'cpa', 250, { days: day('last_7') }), 'red', 'TOF CPA over $200 stays red on Last 7 Days');
+  assert.equal(health.classify('MOF', 'cpa', 50, { days: day('last_7') }), 'green', 'MOF CPA $40-$60 is green on Last 7 Days');
+  assert.equal(health.classify('MOF', 'cpa', 40, { days: day('last_7') }), 'green');
+  assert.equal(health.classify('MOF', 'cpa', 60, { days: day('last_7') }), 'green');
+  assert.deepEqual(health.RULES.TOF.cpa, { period: null, red: { gt: 200 } });
+  assert.deepEqual(health.RULES.MOF.cpa, { period: null, green: { min: 40, max: 60 } });
+  assert.deepEqual(health.RULES.TOM.frequency, { period: 'approx_4_days', green: { min: 2, max: 3 } });
+  assert.deepEqual(health.RULES.TOF.frequency, { period: 'approx_4_days', green: { lt: 2 } });
+  assert.deepEqual(health.APPROX_4_DAYS, { target_days: 4, min_days: 3, max_days: 5 });
+});
+test('the Last 3 / Last 4 buttons exist in the date bar', () => {
+  const html = read('public/index.html');
+  assert.match(html, /data-preset="last_3">Last 3 Days</);
+  assert.match(html, /data-preset="last_4">Last 4 Days</);
+});
+test('planning: 3 unique creatives across 13 Meta ads = 3 pieces of creative (counts, wording and recommendation)', () => {
+  // Creative A in 5 ads, B in 4, C in 4: the active ads are 13 but the creatives are 3
+  const mk = (key, n) => Array.from({ length: n }, (_, i) => adRow(`${key}${i}`, key, { extra: { adset: `set${i}`, campaign: `camp${i}` } }));
+  const ps = { code: 'P', entries: [...mk('CRA', 5), ...mk('CRB', 4), ...mk('CRC', 4)] };
+  const activity = { byCreative: new Map([['CRA', act({ ads_total: 5, ads_delivering: 5 })], ['CRB', act({ ads_total: 4, ads_delivering: 4 })], ['CRC', act({ ads_total: 4, ads_delivering: 4 })]]), insights_last_day: '2026-10-07' };
+  const facts = plan.creativeFacts(ps, '2026-10-08', null, activity);
+  assert.equal(facts.active_unique_creatives, 3);
+  assert.equal(facts.active_ads, 13);
+  const family = { key: 'P', product_code: 'P', name: 'Test Tee', category: 'TEES', image_url: null };
+  const sales = { sales: { seller_class: 'strong', tier_label: 'platinum', vel30: 5, trend: null, units_7d: 5, units_30d: 20, units_365d: 200 }, e: { spend: 100, purchases: 5 }, m: { spend: 50 } };
+  const stock = { known: true, units: 100, pass: true, size: { available: false, warning: null, level: null } };
+  const withFresh = (f) => ({ ...f, last_new_creative: { date: '2026-09-25', source: 'x', days_ago: 13 }, recency_basis: 'known' });
+  assert.equal(plan.recommendFamily({ family, ps: sales, facts: withFresh(facts), stock, benchmarkCpa: 40, salesAvailable: true }), null, '3 unique creatives (13 ads) is treated as 3 pieces of creative: enough');
+  const two = plan.recommendFamily({ family, ps: sales, facts: withFresh({ ...facts, active_unique_creatives: 2, running_creatives: 2 }), stock, benchmarkCpa: 40, salesAvailable: true });
+  assert.ok(two && two.type === 'shoot_fresh' && /only 2 unique creatives are running \(across 13 Meta ads\)/.test(two.why), '2 unique creatives across the same 13 ads still asks for more');
+  // wording in the UI
+  const app = read('public/app.js');
+  assert.match(app, /Unique creatives running/);
+  assert.match(app, /Meta ad\$\{cr\.active_ads === 1 \? '' : 's'\} using/);
+  assert.match(app, /unique creative\$\{[^}]*\} running across \$\{cr\.active_ads\} Meta ad/);
+  assert.doesNotMatch(app, /ACTIVE CREATIVES|Active creatives<\/dt>/i);
+});
+test('ad matching: All ads is a chip, the working view is remembered, and the table is compact', () => {
+  const app = read('public/app.js');
+  assert.match(app, /\['all', 'All ads', 'all_ads', 'ads'\]/);
+  assert.match(app, /wndrr\.matching\.view/);
+  assert.match(app, /pageSize: 50/);
+  const css = read('public/styles.css');
+  assert.match(css, /\.mm-table td\{padding:2px 8px/);
+  assert.match(css, /\.mm-table td\.mp-name \.cc-thumb\{width:28px;height:28px/);
+});
+test('the archive activity check is only ever started by its explicit button', () => {
+  const app = read('public/app.js');
+  const posts = [...app.matchAll(/meta-archive\/pull/g)].length;
+  assert.equal(posts, 1, 'one call site');
+  assert.match(app, /const ok = await confirmDialog\(`This makes a read-only request to Meta[\s\S]{0,900}?\n\s+if \(!ok\) return;[\s\S]{0,200}?meta-archive\/pull/);
+  assert.doesNotMatch(code('src/server.js'), /metaActivityPull|startPull\(/);
 });

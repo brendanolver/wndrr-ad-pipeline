@@ -50,12 +50,12 @@ const funnelHealth = require('./metaFunnelHealth'); // confirmed WNDRR benchmark
 const REPORTING_TIMEZONE = 'Australia/Sydney';
 
 const PRESETS = [
-  'today', 'yesterday', 'last_7', 'last_14', 'last_30',
+  'today', 'yesterday', 'last_3', 'last_4', 'last_7', 'last_14', 'last_30',
   'this_week', 'last_week', 'this_month', 'custom',
 ];
 const DEFAULT_PRESET = 'last_7';
 const PRESET_LABELS = {
-  today: 'Today', yesterday: 'Yesterday', last_7: 'Last 7 Days', last_14: 'Last 14 Days',
+  today: 'Today', yesterday: 'Yesterday', last_3: 'Last 3 Days', last_4: 'Last 4 Days', last_7: 'Last 7 Days', last_14: 'Last 14 Days',
   last_30: 'Last 30 Days', this_week: 'This Week', last_week: 'Last Week',
   this_month: 'This Month', custom: 'Custom',
 };
@@ -163,6 +163,8 @@ function resolvePreset(preset, today) {
   switch (preset) {
     case 'today': return { since: today, until: today };
     case 'yesterday': { const y = addDays(today, -1); return { since: y, until: y }; }
+    case 'last_3': return { since: addDays(today, -3), until: addDays(today, -1) };
+    case 'last_4': return { since: addDays(today, -4), until: addDays(today, -1) };
     case 'last_7': return { since: addDays(today, -7), until: addDays(today, -1) };
     case 'last_14': return { since: addDays(today, -14), until: addDays(today, -1) };
     case 'last_30': return { since: addDays(today, -30), until: addDays(today, -1) };

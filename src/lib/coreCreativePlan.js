@@ -266,7 +266,7 @@ function cardBase({ type, family, ps, facts, stock, priority, severity, headline
   return {
     key: `core:${type}:${family.key}`,
     type, headline, why, priority, severity, score,
-    product: { product_code: family.product_code, product_name: family.name, category: family.category, image_url: family.image_url, images: family.images || { front: null, back: null, count: 0 } },
+    product: { product_code: family.product_code, product_name: family.name, category: family.category, image_url: family.image_url, images: family.images || { layout: 'none', main: null, front: null, back: null, count: 0 } },
     sales_status: sales ? { label: SALES_LABEL[sales.seller_class] || 'Selling steadily', seller_class: sales.seller_class, tier: sales.tier_label, trend: sales.trend ? sales.trend.direction : null } : null,
     stock: { units: stock.units, size_warning: stock.size.warning, size_level: stock.size.level },
     creative: {
@@ -299,7 +299,7 @@ function recommendFamily({ family, ps, facts, stock, benchmarkCpa, salesAvailabl
     let why;
     if (days === null) why = `${family.name} is selling strongly (${salesBasis}) and we have no creative on record for it.`;
     else if (!fresh) why = `${family.name} is selling strongly (${salesBasis}) but its newest creative is ${ageText(days)} old.`;
-    else why = `${family.name} is selling strongly (${salesBasis}) and its creative is recent, but only ${plural(facts.active_unique_creatives, 'unique creative')} ${facts.active_unique_creatives === 1 ? 'is' : 'are'} active${facts.active_ads > facts.active_unique_creatives ? ` (across ${plural(facts.active_ads, 'ad')})` : ''} (we want ${cfg.USABLE_MIN_CREATIVES}+ distinct creatives).`;
+    else why = `${family.name} is selling strongly (${salesBasis}) and its creative is recent, but only ${plural(facts.active_unique_creatives, 'unique creative')} ${facts.active_unique_creatives === 1 ? 'is' : 'are'} running${facts.active_ads > facts.active_unique_creatives ? ` (across ${plural(facts.active_ads, 'Meta ad')})` : ''} (we want ${cfg.USABLE_MIN_CREATIVES}+ entirely different creatives).`;
     return cardBase({ ...common, type: 'shoot_fresh', priority: veryStale ? 'Critical' : 'High', severity: days === null ? 99 : Math.floor(days / 60), headline: 'Shoot fresh creative', why,
       strength: (days === null ? 60 : Math.min(60, days / 2)) + Math.min(25, vel) + (ps.sales.trend && ps.sales.trend.direction === 'up' ? 15 : 0) });
   }
