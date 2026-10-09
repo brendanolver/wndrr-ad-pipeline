@@ -50,19 +50,28 @@ async function listCreators(db = pool) {
 // that row's id, so a classification made from it stays in the same concept as the app's existing concept record; concept_types rows
 // that are not approved are NOT offered here.
 async function listConcepts(db = pool) {
-  const added = await db.query("SELECT id, name FROM meta_matching_vocab WHERE kind = 'concept' ORDER BY name");
+  // approved baseline first, in the approved group + position order; concepts a person added later (no group) follow, alphabetically
+  const added = await db.query("SELECT id, name, group_name, group_order, sort_order FROM meta_matching_vocab WHERE kind = 'concept' ORDER BY group_order NULLS LAST, sort_order NULLS LAST, name");
   const types = await db.query('SELECT id, name, format FROM concept_types WHERE active ORDER BY sort_order, id');
   const typeByKey = new Map();
   for (const t of types.rows) { const k = keyOf(t.name); if (k && !typeByKey.has(k)) typeByKey.set(k, t); }
   return dedupe(added.rows.map((r) => {
     const t = typeByKey.get(keyOf(r.name));
-    return { name: cleanName(r.name), source: 'approved', vocab_id: r.id, concept_type_id: t ? t.id : null, format: t ? t.format : null };
+    return { name: cleanName(r.name), source: 'approved', vocab_id: r.id, concept_type_id: t ? t.id : null, format: t ? t.format : null, group: r.group_name || null, group_order: r.group_order || null };
   }));
 }
 
 // Historical spelling -> approved concept. Pure lookup built once per request; never writes. status:
 //   approved  the text IS an approved concept (any capitalisation)       alias     a known historical spelling of one
 //   removed   a historical concept that was deliberately dropped         unlisted  anything else (stays legacy text, never guessed)
+// approved concept key -> its known historical spellings (for SEARCH only: typing a historical spelling finds the approved concept)
+async function listConceptAliases(db = pool) {
+  const rows = (await db.query('SELECT alias, approved_name FROM meta_matching_concept_aliases WHERE NOT removed ORDER BY alias')).rows;
+  const out = new Map();
+  for (const r of rows) { const k = keyOf(r.approved_name); if (!out.has(k)) out.set(k, []); out.get(k).push(r.alias); }
+  return out;
+}
+
 function makeConceptResolver(approved, aliasRows) {
   const byKey = new Map(approved.map((c) => [keyOf(c.name), c]));
   const aliases = new Map(aliasRows.map((a) => [a.alias_key, a]));
@@ -151,4 +160,4 @@ async function canonicalConcept(raw, db = pool) {
   return hit ? { name: hit.name, concept_type_id: hit.concept_type_id || null, vocab_id: hit.vocab_id || null } : null;
 }
 
-module.exports = { MAX_NAME, KINDS, cleanName, keyOf, dedupe, listCreators, listConcepts, makeConceptResolver, loadConceptResolver, addName, canonicalCreator, canonicalConcept };
+module.exports = { MAX_NAME, KINDS, cleanName, keyOf, dedupe, listCreators, listConcepts, listConceptAliases, makeConceptResolver, loadConceptResolver, addName, canonicalCreator, canonicalConcept };

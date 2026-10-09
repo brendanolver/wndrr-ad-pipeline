@@ -2906,3 +2906,10 @@ td.mp-name > .mp-name-stack{vertical-align:middle;max-width:calc(100% - 46px);}
 .mm-inv-wrap{max-height:56vh;overflow:auto;margin-top:8px;}
 .mm-inv small{color:var(--text-muted);}
 .mm-inv-variants ul{margin:4px 0 8px 18px;font-size:12px;}
+
+/* ── Grouped concept picker (full editor + rapid review): headings are organisational, never options ─────────────── */
+.mm-picker-list.grouped{max-height:300px;}
+.mm-opt-group{position:sticky;top:0;z-index:1;padding:5px 9px 3px;font-size:9.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);background:var(--surface2);border-top:1px solid var(--border);cursor:default;user-select:none;}
+.mm-opt-group:first-child{border-top:none;}
+.mm-opt.active{background:var(--teal-light);box-shadow:inset 3px 0 0 var(--teal);}
+.mm-legacy{display:inline-block;padding:0 5px;border-radius:99px;background:var(--amber-light);color:var(--amber);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;}

@@ -1264,7 +1264,7 @@ function mmRowHtml(a) {
     ? (a.not_product_specific ? '<em class="mm-muted">Not product-specific</em>' : escapeHtml(a.confirmed_products || '—'))
     : (a.suggested_product ? `<span class="mm-guess" title="Suggestion — not confirmed">${escapeHtml(a.suggested_product)}</span>` : '<span class="mp-na">—</span>');
   const con = mmHasValues(a)
-    ? escapeHtml(a.confirmed_concept || '—')
+    ? (a.confirmed_concept ? `${escapeHtml(a.confirmed_concept)}${a.confirmed_concept_legacy ? ' <small class="mm-legacy" title="Not on the approved concept list — kept exactly as stored">legacy</small>' : ''}${a.confirmed_concept_stored ? ` <small class="mm-legacy" title="Stored on the ad as “${escapeHtml(a.confirmed_concept_stored)}”; shown as its approved concept">≈</small>` : ''}` : '—')
     : (a.suggested_concept ? `<span class="mm-guess" title="Suggestion — not confirmed">${escapeHtml(a.suggested_concept)}</span>` : '<span class="mp-na">—</span>');
   const media = mmHasValues(a)
     ? escapeHtml(a.confirmed_media || '—')
@@ -1874,8 +1874,8 @@ async function mmRvSelect(id, { focus = true } = {}) {
   const mediaOpts = options.media_types.map((x) => ({ key: x.key, label: x.label }));
   mmPicker(host('media'), { multi: false, placeholder: 'Video, Image…', options: mediaOpts, selected: f.media ? [f.media] : [], onChange: (sel) => { f.media = sel[0] ? { key: sel[0].key, label: sel[0].label } : null; refreshState(); } });
   mmPicker(host('concept'), {
-    multi: false, addNew: mmAddConcept, addLabel: 'concept', placeholder: 'Search or add a concept…', options: options.concepts.map(mmConceptItem),
-    selected: f.concept ? [{ key: f.concept.concept_type_id ? `ct:${f.concept.concept_type_id}` : (f.concept.vocab_id ? `cv:${f.concept.vocab_id}` : `free:${f.concept.label}`), label: f.concept.label, free: !!f.concept.legacy, concept_type_id: f.concept.concept_type_id || null, vocab_id: f.concept.vocab_id || null }] : [],
+    multi: false, addNew: mmAddConcept, addLabel: 'concept', placeholder: 'Search or add a concept…', options: options.concepts.map(mmConceptItem), groupOf: (x) => x.group,
+    selected: f.concept ? [mmConceptPill(f.concept, options)] : [],
     onChange: (sel) => { f.concept = sel[0] ? { label: sel[0].label, concept_type_id: sel[0].concept_type_id || null, vocab_id: sel[0].vocab_id || null, legacy: !!sel[0].free } : null; refreshState(); },
   });
   mmPicker(host('creator'), {
@@ -2056,9 +2056,9 @@ async function mmOpenInventory() {
       <p><b>${n(inv.totals.distinct_concepts)}</b> distinct concepts as stored · <b>${n(inv.totals.distinct_after_ignoring_case_and_punctuation)}</b> ignoring case and punctuation · <b>${n(inv.totals.variant_groups)}</b> spelling-variant group${inv.totals.variant_groups === 1 ? '' : 's'} · <b>${n(inv.totals.not_in_vocabulary)}</b> not in today’s concept list ·
         <a href="/api/meta-ad-matching/concept-inventory?format=csv" target="_blank" rel="noopener">Download CSV</a></p>
       <details class="mm-inv-variants" open><summary>Approved concepts — creatives / ads across all their spellings (${n(inv.totals.approved_concepts)} approved · ${n(inv.totals.spellings_mapped_to_approved)} historical spellings mapped · ${n(inv.totals.spellings_removed)} removed · ${n(inv.totals.spellings_unmapped)} in use but not mapped)</summary>
-        <div class="mm-inv-wrap" style="max-height:30vh"><table class="mp-table mm-inv"><thead><tr><th>Approved concept</th><th class="num">Unique creatives</th><th class="num">Meta ads</th><th>Spellings found</th></tr></thead><tbody>${inv.approved_rollup.map((r) => `<tr><td><b>${escapeHtml(r.concept)}</b></td><td class="num">${n(r.creatives)}</td><td class="num">${n(r.ads)}</td><td>${r.spellings.map((x) => `“${escapeHtml(x)}”`).join(' · ') || '<span class="mp-na">—</span>'}</td></tr>`).join('')}
-        <tr><td><em>Removed (not merged)</em></td><td class="num">${n(inv.removed_rollup.creatives)}</td><td class="num">${n(inv.removed_rollup.ads)}</td><td>${inv.removed_rollup.spellings.map((x) => `“${escapeHtml(x)}”`).join(' · ') || '<span class="mp-na">—</span>'}</td></tr>
-        <tr><td><em>Not mapped yet</em></td><td class="num">${n(inv.unmapped_rollup.creatives)}</td><td class="num">${n(inv.unmapped_rollup.ads)}</td><td>${inv.unmapped_rollup.spellings.map((x) => `“${escapeHtml(x)}”`).join(' · ') || '<span class="mp-na">—</span>'}</td></tr></tbody></table></div></details>
+        <div class="mm-inv-wrap" style="max-height:30vh"><table class="mp-table mm-inv"><thead><tr><th>Approved concept</th><th>Group</th><th class="num">Unique creatives</th><th class="num">Meta ads</th><th>Spellings found</th></tr></thead><tbody>${inv.approved_rollup.map((r) => `<tr><td><b>${escapeHtml(r.concept)}</b></td><td><small>${escapeHtml(r.group || 'Added in Ad Matching')}</small></td><td class="num">${n(r.creatives)}</td><td class="num">${n(r.ads)}</td><td>${r.spellings.map((x) => `“${escapeHtml(x)}”`).join(' · ') || '<span class="mp-na">—</span>'}</td></tr>`).join('')}
+        <tr><td><em>Removed (not merged)</em></td><td></td><td class="num">${n(inv.removed_rollup.creatives)}</td><td class="num">${n(inv.removed_rollup.ads)}</td><td>${inv.removed_rollup.spellings.map((x) => `“${escapeHtml(x)}”`).join(' · ') || '<span class="mp-na">—</span>'}</td></tr>
+        <tr><td><em>Not mapped yet</em></td><td></td><td class="num">${n(inv.unmapped_rollup.creatives)}</td><td class="num">${n(inv.unmapped_rollup.ads)}</td><td>${inv.unmapped_rollup.spellings.map((x) => `“${escapeHtml(x)}”`).join(' · ') || '<span class="mp-na">—</span>'}</td></tr></tbody></table></div></details>
       ${inv.variant_groups.length ? `<details class="mm-inv-variants"><summary>Spelling / capitalisation variants (${inv.variant_groups.length})</summary><ul>${inv.variant_groups.map((g) => `<li>${g.variants.map((v) => `“${escapeHtml(v.concept)}” <small>(${n(v.total_creatives)} creatives / ${n(v.total_ads)} ads)</small>`).join(' · ')}</li>`).join('')}</ul></details>` : '<p class="hint">No spelling or capitalisation variants found.</p>'}
       <div class="mm-inv-wrap"><table class="mp-table mm-inv"><thead><tr><th>Concept (exact text)</th><th class="num" title="Unique creatives (exact meta_creative_id) / Meta ads">All sources</th><th class="num">Confirmed</th><th class="num">Auto-matched</th><th class="num" title="Copies of a person’s decision on the same exact creative">Inherited</th><th class="num">Suggested</th><th class="num" title="Ad Setups naming it / Meta ads linked to them">Ad Setups</th><th>Concept list</th><th>Approved as</th><th>Variants</th></tr></thead>
       <tbody>${inv.concepts.map((c) => `<tr><td><b>${escapeHtml(c.concept)}</b></td><td class="num">${cell({ creatives: c.total_creatives, ads: c.total_ads })}</td><td class="num">${cell(c.sources.confirmed)}</td><td class="num">${cell(c.sources.auto_matched)}</td><td class="num">${cell(c.sources.inherited)}</td><td class="num">${cell(c.sources.suggested)}</td><td class="num">${cell({ creatives: c.ad_setups.setups, ads: c.ad_setups.linked_ads })}</td><td>${vocabLabel(c.vocabulary)}</td><td>${approvedAs(c.approved_as)}</td><td>${(c.variants_of || []).map((x) => `“${escapeHtml(x)}”`).join(' · ') || '<span class="mp-na">—</span>'}</td></tr>`).join('')}</tbody></table></div>`;
@@ -2421,41 +2421,75 @@ function mmPicker(host, opts) {
   let options = opts.options || [];
   let open = false;
   let timer = null;
+  let active = 0; // keyboard-highlighted entry (index into entries)
   host.classList.add('mm-picker');
-  host.innerHTML = '<div class="mm-picker-sel"></div><input type="text" class="mm-picker-input" autocomplete="off"><div class="mm-picker-list" style="display:none;"></div>';
+  host.innerHTML = '<div class="mm-picker-sel"></div><input type="text" class="mm-picker-input" autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list"><div class="mm-picker-list" role="listbox" style="display:none;"></div>';
   const selEl = host.querySelector('.mm-picker-sel');
   const input = host.querySelector('.mm-picker-input');
   const list = host.querySelector('.mm-picker-list');
   input.placeholder = opts.placeholder || 'Search…';
+  const grouped = !!opts.groupOf;
+  if (grouped) list.classList.add('grouped');
 
   const emit = () => { if (opts.onChange) opts.onChange(selected.slice()); };
   const renderSel = () => {
-    selEl.innerHTML = selected.map((s, i) => `<span class="mm-pill${s.free ? ' free' : ''}">${escapeHtml(s.label)}${s.free ? '<small>legacy</small>' : ''}<button type="button" data-i="${i}" aria-label="Remove">×</button></span>`).join('');
+    selEl.innerHTML = selected.map((s, i) => `<span class="mm-pill${s.free ? ' free' : ''}"${s.title ? ` title="${escapeHtml(s.title)}"` : ''}>${escapeHtml(s.label)}${s.free ? `<small>${escapeHtml(s.tag || 'legacy')}</small>` : ''}<button type="button" data-i="${i}" aria-label="Remove">×</button></span>`).join('');
     input.style.display = !opts.multi && selected.length ? 'none' : '';
     input.disabled = !!host.dataset.disabled;
+  };
+  // a match on the label, the hint, or (for grouped lists) a known historical spelling of the item; grouped lists show EVERY match
+  const matchOf = (o, term) => {
+    if (!term) return { ok: true, via: null };
+    if (o.label.toLowerCase().includes(term) || String(o.hint || '').toLowerCase().includes(term)) return { ok: true, via: null };
+    const al = (o.aliases || []).find((a) => a.toLowerCase().includes(term));
+    return al ? { ok: true, via: al } : { ok: false };
   };
   const filtered = () => {
     const term = input.value.trim().toLowerCase();
     const taken = new Set(selected.map((s) => String(s.key)));
-    const rows = options.filter((o) => !taken.has(String(o.key)) && (!term || o.label.toLowerCase().includes(term) || String(o.hint || '').toLowerCase().includes(term)));
-    return rows.slice(0, 8);
+    const rows = [];
+    for (const o of options) {
+      if (taken.has(String(o.key))) continue;
+      const m = matchOf(o, term);
+      if (m.ok) rows.push(m.via ? { ...o, _via: m.via } : o);
+    }
+    return grouped ? rows : rows.slice(0, 8);
   };
+  // entries = what the keyboard can land on: the options, then the explicit Add / legacy rows. Group headings are NOT entries.
+  let entries = [];
   const renderList = () => {
     const rows = filtered();
     const term = input.value.trim();
     const exact = options.some((o) => o.label.toLowerCase() === term.toLowerCase()) || selected.some((s) => s.label.toLowerCase() === term.toLowerCase());
-    let html = rows.map((o, i) => `<div class="mm-opt" data-i="${i}">${escapeHtml(o.label)}${o.hint ? `<small>${escapeHtml(o.hint)}</small>` : ''}</div>`).join('');
-    if (opts.allowFree && term && !exact) html += `<div class="mm-opt free" data-free="1">Use “${escapeHtml(term)}” as legacy / free text</div>`;
+    entries = rows.map((o) => ({ kind: 'opt', item: o }));
     // an EXPLICIT option to add a brand-new name to the saved list (never shown for a name that already exists in any capitalisation)
-    if (opts.addNew && term && !exact) html += `<div class="mm-opt add" data-add="1">+ Add “${escapeHtml(term)}” as a new ${escapeHtml(opts.addLabel || 'item')}</div>`;
+    if (opts.allowFree && term && !exact) entries.push({ kind: 'free' });
+    if (opts.addNew && term && !exact) entries.push({ kind: 'add' });
+    if (active >= entries.length) active = Math.max(0, entries.length - 1);
+    let html = ''; let lastGroup = Symbol('none');
+    entries.forEach((e, i) => {
+      const cls = `${i === active ? ' active' : ''}`;
+      if (e.kind === 'opt') {
+        if (grouped) {
+          const g = opts.groupOf(e.item) || '';
+          if (g !== lastGroup) { html += `<div class="mm-opt-group" role="presentation">${escapeHtml(g)}</div>`; lastGroup = g; }
+        }
+        const via = e.item._via ? `<small>matches “${escapeHtml(e.item._via)}”</small>` : (e.item.hint ? `<small>${escapeHtml(e.item.hint)}</small>` : '');
+        html += `<div class="mm-opt${cls}" role="option" aria-selected="${i === active}" data-e="${i}">${escapeHtml(e.item.label)}${via}</div>`;
+      } else if (e.kind === 'free') html += `<div class="mm-opt free${cls}" role="option" data-e="${i}">Use “${escapeHtml(term)}” as legacy / free text</div>`;
+      else html += `<div class="mm-opt add${cls}" role="option" data-e="${i}">+ Add “${escapeHtml(term)}” as a new ${escapeHtml(opts.addLabel || 'item')}</div>`;
+    });
     if (!html) html = '<div class="mm-opt none">No matches</div>';
     list.innerHTML = html;
     list.style.display = open ? '' : 'none';
+    input.setAttribute('aria-expanded', open ? 'true' : 'false');
     list._rows = rows;
+    const el = list.querySelector('.mm-opt.active');
+    if (open && el && el.scrollIntoView) { const lt = list.getBoundingClientRect(); const r = el.getBoundingClientRect(); if (r.top < lt.top) list.scrollTop -= (lt.top - r.top) + 28; else if (r.bottom > lt.bottom) list.scrollTop += (r.bottom - lt.bottom) + 4; }
   };
   const pick = (item) => {
     selected = opts.multi ? [...selected, item] : [item];
-    input.value = ''; open = false; renderSel(); renderList(); emit();
+    input.value = ''; open = false; active = 0; renderSel(); renderList(); emit();
   };
   // save the typed name to the persistent list (server trims it and resolves case-insensitive duplicates to the existing spelling), then select it
   let adding = false;
@@ -2468,6 +2502,12 @@ function mmPicker(host, opts) {
       if (item) { if (!options.some((o) => String(o.key) === String(item.key))) options.push(item); pick(item); }
     } catch (e) { toast(e.message, true); } finally { adding = false; }
   };
+  const choose = (e) => {
+    if (!e) return;
+    if (e.kind === 'opt') pick(e.item);
+    else if (e.kind === 'add') addTyped();
+    else pick({ key: `free:${input.value.trim()}`, label: input.value.trim(), free: true });
+  };
   const refetch = () => {
     if (!opts.fetch) return renderList();
     clearTimeout(timer);
@@ -2478,26 +2518,27 @@ function mmPicker(host, opts) {
     if (!b) return;
     selected.splice(Number(b.dataset.i), 1); renderSel(); renderList(); emit();
   });
-  input.addEventListener('focus', () => { open = true; refetch(); renderList(); });
-  input.addEventListener('input', () => { open = true; refetch(); renderList(); });
+  input.addEventListener('focus', () => { open = true; active = 0; refetch(); renderList(); });
+  input.addEventListener('input', () => { open = true; active = 0; refetch(); renderList(); });
   input.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') { open = false; renderList(); }
+    if (e.key === 'Escape') { open = false; renderList(); return; }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!open) { open = true; renderList(); return; }
+      if (entries.length) { active = (active + (e.key === 'ArrowDown' ? 1 : -1) + entries.length) % entries.length; renderList(); }
+      return;
+    }
     if (e.key === 'Enter') {
       e.preventDefault();
-      const rows = list._rows || [];
-      const term = input.value.trim();
-      if (rows.length) pick(rows[0]);
-      else if (opts.addNew && term) addTyped();
-      else if (opts.allowFree && term) pick({ key: `free:${term}`, label: term, free: true });
+      // Enter takes the highlighted entry (the first match until the arrows move it): same as before for a typed search
+      choose(entries[active] || null);
     }
   });
   list.addEventListener('mousedown', (e) => {
     e.preventDefault();
     const o = e.target.closest('.mm-opt');
-    if (!o || o.classList.contains('none')) return;
-    if (o.dataset.add) addTyped();
-    else if (o.dataset.free) pick({ key: `free:${input.value.trim()}`, label: input.value.trim(), free: true });
-    else pick(list._rows[Number(o.dataset.i)]);
+    if (!o || o.classList.contains('none') || o.dataset.e === undefined) return; // group headings and "No matches" are never choices
+    choose(entries[Number(o.dataset.e)]);
   });
   input.addEventListener('blur', () => { open = false; setTimeout(renderList, 0); });
   renderSel(); renderList();
@@ -2517,13 +2558,24 @@ async function mmLoadOptions() {
 
 // Concept / creator choices come from the saved lists. concept_types rows are saved by id; a concept a person added in Ad Matching is
 // saved as its label (vocab_id only identifies the list entry).
+const MM_ADDED_GROUP = 'ADDED IN AD MATCHING';
+const mmConceptGroup = (x) => x.group || MM_ADDED_GROUP;
 const mmConceptItem = (x) => (x.id
-  ? { key: `ct:${x.id}`, label: x.label, concept_type_id: x.id }
-  : { key: `cv:${x.vocab_id}`, label: x.label, concept_type_id: null, vocab_id: x.vocab_id });
+  ? { key: `ct:${x.id}`, label: x.label, concept_type_id: x.id, vocab_id: x.vocab_id || null, group: mmConceptGroup(x), aliases: x.aliases || [] }
+  : { key: `cv:${x.vocab_id}`, label: x.label, concept_type_id: null, vocab_id: x.vocab_id, group: mmConceptGroup(x), aliases: x.aliases || [] });
+// the pill for a concept ALREADY assigned: approved / alias -> its approved concept (option key), anything else -> visible legacy text
+function mmConceptPill(c, options) {
+  if (!c) return null;
+  if (!c.legacy) {
+    const opt = options.concepts.find((o) => o.label.toLowerCase() === String(c.label).toLowerCase());
+    if (opt) return { ...mmConceptItem(opt), title: c.mapped_from ? `Stored on this ad as “${c.mapped_from}”; shown as its approved concept` : '' };
+  }
+  return { key: c.concept_type_id ? `ct:${c.concept_type_id}` : `free:${c.label}`, label: c.label, free: true, tag: c.removed ? 'legacy · removed' : 'legacy', concept_type_id: c.concept_type_id || null, title: 'Not on the approved concept list — kept exactly as stored' };
+}
 async function mmAddConcept(term) {
   const r = await api('/meta-ad-matching/vocab/concepts', { method: 'POST', body: JSON.stringify({ name: term }) });
   const o = await mmLoadOptions();
-  const entry = { id: r.concept_type_id || null, vocab_id: r.vocab_id || null, label: r.name, source: r.source };
+  const entry = { id: r.concept_type_id || null, vocab_id: r.vocab_id || null, label: r.name, source: r.source, group: null, aliases: [] };
   if (!o.concepts.some((c) => c.label.toLowerCase() === r.name.toLowerCase())) o.concepts.push(entry);
   toast(r.created ? `Added “${r.name}” to the concept list.` : `“${r.name}” is already in the concept list — selected it.`);
   return mmConceptItem(entry);
@@ -2652,7 +2704,7 @@ function renderMatchWorkspace(ws, options) {
             ${(sg.scope || []).length ? `<div class="mm-sugg"><button type="button" class="mm-sugg-chip ${MM_LABEL_CLASS[sg.scope[0].confidence_label]}" data-field="scope" data-i="0" title="${escapeHtml(sg.scope[0].reason)}">+ Not product-specific<span>${sg.scope[0].confidence_label}</span></button></div>` : ''}</div>
           <div class="mm-field"><div class="mm-lab"><span>Media Type</span></div>
             <div id="mm-f-media"></div>${mmSuggChips(sg.media_type, 'media_type')}</div>
-          <div class="mm-field"><div class="mm-lab"><span>Concept</span><small>legacy text allowed</small></div>
+          <div class="mm-field"><div class="mm-lab"><span>Concept</span><small>approved list — or add one</small></div>
             <div id="mm-f-concept"></div>${mmSuggChips(sg.concept, 'concept')}</div>
           <div class="mm-field"><div class="mm-lab"><span>Creator</span></div>
             <div id="mm-f-creator"></div>${mmSuggChips(sg.creator, 'creator')}</div>
@@ -2692,9 +2744,9 @@ function renderMatchWorkspace(ws, options) {
     selected: cls.media_type ? mediaOpts.filter((x) => x.key === cls.media_type) : [],
   });
   const conceptPicker = mmPicker(document.getElementById('mm-f-concept'), {
-    multi: false, addNew: mmAddConcept, addLabel: 'concept', placeholder: 'Search or add a concept…',
+    multi: false, addNew: mmAddConcept, addLabel: 'concept', placeholder: 'Search or add a concept…', groupOf: (x) => x.group,
     options: options.concepts.map(mmConceptItem),
-    selected: cls.concept ? [{ key: cls.concept.concept_type_id ? `ct:${cls.concept.concept_type_id}` : `free:${cls.concept.label}`, label: cls.concept.label, free: cls.concept.legacy, concept_type_id: cls.concept.concept_type_id }] : [],
+    selected: cls.concept ? [mmConceptPill(cls.concept, options)] : [],
   });
   const creatorPicker = mmPicker(document.getElementById('mm-f-creator'), {
     multi: false, addNew: mmAddCreator, addLabel: 'creator', placeholder: 'Search or add a creator…', options: options.creators.map((x) => ({ key: x, label: x })),
@@ -2716,7 +2768,7 @@ function renderMatchWorkspace(ws, options) {
   const applySuggestion = (field, x) => {
     if (field === 'product') { nps.checked = false; productPicker.setDisabled(false); productPicker.add({ key: x.value_key, label: x.value_label }); }
     else if (field === 'scope') { nps.checked = true; syncNps(); }
-    else if (field === 'concept') conceptPicker.set([{ key: x.value_ref ? `ct:${x.value_ref}` : `free:${x.value_label}`, label: x.value_label, free: !x.value_ref && !options.concepts.some((c) => c.label.toLowerCase() === String(x.value_label).toLowerCase()), concept_type_id: x.value_ref || null }]);
+    else if (field === 'concept') conceptPicker.set([mmConceptPill({ label: x.value_label, legacy: !options.concepts.some((c) => c.label.toLowerCase() === String(x.value_label).toLowerCase()), concept_type_id: x.value_ref || null, mapped_from: x.mapped_from || null }, options)]);
     else if (field === 'creative_style') stylePicker.set([{ key: x.value_ref, label: x.value_label }]);
     else if (field === 'creator') creatorPicker.set([{ key: x.value_label, label: x.value_label }]);
     else if (field === 'media_type') mediaPicker.set(mediaOpts.filter((o) => o.key === x.value_key));
