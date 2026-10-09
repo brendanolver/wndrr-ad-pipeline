@@ -3065,3 +3065,73 @@ INSERT INTO meta_matching_vocab (kind, name, name_key)
 SELECT 'creator', 'JAMES', 'james'
 WHERE NOT EXISTS (SELECT 1 FROM content_creators WHERE lower(btrim(name)) = 'james')
 ON CONFLICT (kind, name_key) DO NOTHING;
+
+-- =====================================================================
+-- Approved Ad Matching concepts + historical-spelling aliases
+-- =====================================================================
+-- The concept list Ad Matching offers is the people-approved vocabulary: meta_matching_vocab rows of kind 'concept'. The approved
+-- concepts below are seeded here (idempotent: ON CONFLICT keeps whatever is already there, including concepts a person added later).
+-- Aliases map a historical SPELLING to its approved concept so suggestions and the concept inventory read as one concept; an alias with
+-- removed = true is a historical concept that was deliberately dropped (never offered, never merged into another). NOTHING existing is
+-- rewritten: ads keep the concept text they have, and aliases are applied only when a suggestion / inventory row is READ.
+CREATE TABLE IF NOT EXISTS meta_matching_concept_aliases (
+  id SERIAL PRIMARY KEY,
+  alias VARCHAR(255) NOT NULL,
+  alias_key VARCHAR(255) NOT NULL UNIQUE,
+  approved_name VARCHAR(255),
+  removed BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK ((removed AND approved_name IS NULL) OR (NOT removed AND approved_name IS NOT NULL))
+);
+INSERT INTO meta_matching_vocab (kind, name, name_key) VALUES
+  ('concept', 'BTS VS THE SHOT', 'bts vs the shot'),
+  ('concept', 'CAMPAIGN', 'campaign'),
+  ('concept', 'CONCRETE FLATLAY', 'concrete flatlay'),
+  ('concept', 'E-COMM', 'e-comm'),
+  ('concept', 'FIT CHECK', 'fit check'),
+  ('concept', 'FLAT LAY', 'flat lay'),
+  ('concept', 'GREEN SCREEN', 'green screen'),
+  ('concept', 'GWP', 'gwp'),
+  ('concept', 'HATE COMMENT', 'hate comment'),
+  ('concept', 'IN THE WILD', 'in the wild'),
+  ('concept', 'MEME TRANSITION', 'meme transition'),
+  ('concept', 'NOTES APP', 'notes app'),
+  ('concept', 'POSTER', 'poster'),
+  ('concept', 'RUG DROP', 'rug drop'),
+  ('concept', 'SNAPCHAT', 'snapchat'),
+  ('concept', 'STYLING', 'styling'),
+  ('concept', 'TALK THROUGH', 'talk through'),
+  ('concept', 'UGC', 'ugc')
+ON CONFLICT (kind, name_key) DO NOTHING;
+INSERT INTO meta_matching_concept_aliases (alias, alias_key, approved_name, removed) VALUES
+  ('AESTHETIC STYLING', 'aesthetic styling', 'STYLING', false),
+  ('AESTHETIC STYLNG', 'aesthetic stylng', 'STYLING', false),
+  ('WHITE WALL STYLING', 'white wall styling', 'STYLING', false),
+  ('INTERVIEW FIT CHECK', 'interview fit check', 'FIT CHECK', false),
+  ('WAREHOUSE TALK THROUGH', 'warehouse talk through', NULL, true),
+  ('REPLY TO COMMENT', 'reply to comment', 'HATE COMMENT', false),
+  ('E-COMM GRAPHIC', 'e-comm graphic', 'E-COMM', false),
+  ('E-COMM SPLIT', 'e-comm split', 'E-COMM', false),
+  ('CONCRETE FLAT LAY', 'concrete flat lay', 'CONCRETE FLATLAY', false),
+  ('CONCRETE FLAT LAYS', 'concrete flat lays', 'CONCRETE FLATLAY', false),
+  ('*CONCRETE FLATLAY', '*concrete flatlay', 'CONCRETE FLATLAY', false),
+  ('CONCRETE FLAT LAY VIDEO', 'concrete flat lay video', 'CONCRETE FLATLAY', false),
+  ('POSTER DROP', 'poster drop', 'POSTER', false),
+  ('CAMPAIGN VIDEO', 'campaign video', 'CAMPAIGN', false),
+  ('GWP - GRAPHIC', 'gwp - graphic', 'GWP', false),
+  ('GWP - VIDEO', 'gwp - video', 'GWP', false),
+  ('NOTES', 'notes', 'NOTES APP', false),
+  ('GREEN SCREEN VIDEO', 'green screen video', 'GREEN SCREEN', false),
+  ('GREEN SCREEN TALK THROUGH', 'green screen talk through', 'GREEN SCREEN', false),
+  ('UGC VIDEO', 'ugc video', 'UGC', false),
+  ('EGC VIDEO', 'egc video', 'UGC', false),
+  ('ITW', 'itw', 'IN THE WILD', false),
+  ('AESTHETIC IN THE WILD', 'aesthetic in the wild', 'IN THE WILD', false),
+  ('SNAPCHAT FILTER', 'snapchat filter', 'SNAPCHAT', false),
+  ('TRANSITION', 'transition', 'MEME TRANSITION', false),
+  ('RUG DROP TRY-ON', 'rug drop try-on', 'RUG DROP', false),
+  ('RUG DROP TRY ON', 'rug drop try on', 'RUG DROP', false),
+  ('BTS VS THE SHOOT', 'bts vs the shoot', 'BTS VS THE SHOT', false),
+  ('TALKTHROUGH', 'talkthrough', 'TALK THROUGH', false),
+  ('FLATLAY PHOTO', 'flatlay photo', 'FLAT LAY', false)
+ON CONFLICT (alias_key) DO NOTHING;

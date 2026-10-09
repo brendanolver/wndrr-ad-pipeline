@@ -2,11 +2,12 @@
 //
 //   creators  = content_creators (the filming roster)  +  meta_matching_vocab 'creator' rows (added here, JAMES seeded)
 //               +  creator names already used by existing classifications (computed, never copied anywhere)
-//   concepts  = concept_types (active)                 +  meta_matching_vocab 'concept' rows (added here)
-//               Historical concept text is deliberately NOT offered: the approved list is decided by a person.
+//   concepts  = the APPROVED concept list: meta_matching_vocab 'concept' rows (the people-approved concepts, seeded, plus any a person
+//               adds later). concept_types rows that are not approved are NOT offered. Historical spellings map to an approved concept
+//               through meta_matching_concept_aliases, applied only when a suggestion / inventory row is READ (nothing is rewritten).
 //
 // Names are compared case-insensitively on trimmed, whitespace-collapsed text, so "james", " James " and "JAMES" are one name. The
-// first spelling offered wins (roster / concept_types, then names added here, then names already in use). Adding a name writes ONE
+// first spelling offered wins (roster, then names added here, then names already in use). Adding a name writes ONE
 // row to meta_matching_vocab; it never edits a classification, never merges or renames anything, and never touches content_creators
 // or concept_types. Local database only.
 const { pool } = require('../db');
@@ -44,14 +45,45 @@ async function listCreators(db = pool) {
   ]);
 }
 
-// concepts keep their ids: concept_types rows carry concept_type_id; added ones carry vocab_id (their label is saved on the classification)
+// The concept list Ad Matching OFFERS is the approved vocabulary (meta_matching_vocab, kind 'concept': the people-approved concepts plus
+// any a person adds later). When an approved concept has the same name (any capitalisation) as an active concept_types row it carries
+// that row's id, so a classification made from it stays in the same concept as the app's existing concept record; concept_types rows
+// that are not approved are NOT offered here.
 async function listConcepts(db = pool) {
-  const types = await db.query('SELECT id, name, format FROM concept_types WHERE active ORDER BY sort_order, name');
   const added = await db.query("SELECT id, name FROM meta_matching_vocab WHERE kind = 'concept' ORDER BY name");
-  return dedupe([
-    ...types.rows.map((r) => ({ name: cleanName(r.name), source: 'concept_types', concept_type_id: r.id, format: r.format })),
-    ...added.rows.map((r) => ({ name: cleanName(r.name), source: 'added', vocab_id: r.id })),
-  ]);
+  const types = await db.query('SELECT id, name, format FROM concept_types WHERE active ORDER BY sort_order, id');
+  const typeByKey = new Map();
+  for (const t of types.rows) { const k = keyOf(t.name); if (k && !typeByKey.has(k)) typeByKey.set(k, t); }
+  return dedupe(added.rows.map((r) => {
+    const t = typeByKey.get(keyOf(r.name));
+    return { name: cleanName(r.name), source: 'approved', vocab_id: r.id, concept_type_id: t ? t.id : null, format: t ? t.format : null };
+  }));
+}
+
+// Historical spelling -> approved concept. Pure lookup built once per request; never writes. status:
+//   approved  the text IS an approved concept (any capitalisation)       alias     a known historical spelling of one
+//   removed   a historical concept that was deliberately dropped         unlisted  anything else (stays legacy text, never guessed)
+function makeConceptResolver(approved, aliasRows) {
+  const byKey = new Map(approved.map((c) => [keyOf(c.name), c]));
+  const aliases = new Map(aliasRows.map((a) => [a.alias_key, a]));
+  const ids = (c) => ({ name: c.name, concept_type_id: c.concept_type_id || null, vocab_id: c.vocab_id || null });
+  const resolve = (label) => {
+    const k = keyOf(label);
+    if (!k) return { status: 'empty', name: null, concept_type_id: null, vocab_id: null };
+    const hit = byKey.get(k);
+    if (hit) return { status: 'approved', ...ids(hit) };
+    const al = aliases.get(k);
+    if (al && al.removed) return { status: 'removed', name: null, concept_type_id: null, vocab_id: null };
+    if (al) { const t = byKey.get(keyOf(al.approved_name)); if (t) return { status: 'alias', from: cleanName(label), ...ids(t) }; }
+    return { status: 'unlisted', name: cleanName(label), concept_type_id: null, vocab_id: null };
+  };
+  resolve.approved = approved;
+  return resolve;
+}
+async function loadConceptResolver(db = pool) {
+  const approved = await listConcepts(db);
+  const aliasRows = (await db.query('SELECT alias, alias_key, approved_name, removed FROM meta_matching_concept_aliases')).rows;
+  return makeConceptResolver(approved, aliasRows);
 }
 
 // Add a name (or return the one that already exists under any capitalisation). Never throws for a duplicate: it reports
@@ -74,9 +106,16 @@ async function addName(kind, raw, userId, db = pool) {
       return { kind, created: false, name: existing.name, source: existing.source, concept_type_id: existing.concept_type_id || null, vocab_id: existing.vocab_id || null };
     }
     if (kind === 'concept') {
-      // an INACTIVE concept_types row of that name is still a taken name: never create a second spelling beside it
-      const inactive = await client.query('SELECT name FROM concept_types WHERE NOT active AND lower(btrim(name)) = $1', [key]);
-      if (inactive.rows.length) throw new HttpError(409, `“${inactive.rows[0].name}” already exists as an inactive concept, so it can't be added again here.`);
+      // a known historical spelling of an approved concept resolves to that concept; a removed one is not silently re-added
+      const al = await client.query('SELECT alias, approved_name, removed FROM meta_matching_concept_aliases WHERE alias_key = $1', [key]);
+      if (al.rows.length && al.rows[0].removed) throw new HttpError(409, `“${al.rows[0].alias}” was removed from the approved concept list, so it can't be added again here.`);
+      if (al.rows.length) {
+        const target = list.find((x) => keyOf(x.name) === keyOf(al.rows[0].approved_name));
+        if (target) {
+          await client.query('COMMIT');
+          return { kind, created: false, name: target.name, source: target.source, concept_type_id: target.concept_type_id || null, vocab_id: target.vocab_id || null, alias_of: al.rows[0].approved_name };
+        }
+      }
     }
     const ins = await client.query(
       `INSERT INTO meta_matching_vocab (kind, name, name_key, created_by_user_id) VALUES ($1,$2,$3,$4)
@@ -112,4 +151,4 @@ async function canonicalConcept(raw, db = pool) {
   return hit ? { name: hit.name, concept_type_id: hit.concept_type_id || null, vocab_id: hit.vocab_id || null } : null;
 }
 
-module.exports = { MAX_NAME, KINDS, cleanName, keyOf, dedupe, listCreators, listConcepts, addName, canonicalCreator, canonicalConcept };
+module.exports = { MAX_NAME, KINDS, cleanName, keyOf, dedupe, listCreators, listConcepts, makeConceptResolver, loadConceptResolver, addName, canonicalCreator, canonicalConcept };
