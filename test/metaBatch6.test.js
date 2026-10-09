@@ -157,26 +157,28 @@ test('the rapid payload carries rapid:true, links no Ad Setup, and sends no conc
   assert.equal(nps.concept, null);
   assert.equal(nps.rapid, true);
 });
-test('keyboard safety: Enter acts only on the selected row itself, never repeats, never with a dialog open or modifiers', () => {
+test('keyboard safety (review modal): Enter confirms only outside a field / dropdown, never repeats, never with another dialog open or modifiers', () => {
   const app = code('public/app.js');
-  const kb = app.slice(app.indexOf("document.addEventListener('keydown', (e) => {\n  if (mmState.view !== 'matching' || !mmRv.selectedId) return;"));
+  const kb = app.slice(app.indexOf("document.addEventListener('keydown', (e) => {\n  const s = mmRv.sess;"));
   assert.ok(kb.length > 100, 'handler found');
   const handler = kb.slice(0, kb.indexOf('\n});') + 4);
-  assert.match(handler, /mmState\.view !== 'matching'/);
-  assert.match(handler, /e\.target !== row/, 'only when the selected row itself has focus (typing in a field or a focused button is never ours)');
-  assert.match(handler, /modal-backdrop\.show/, 'a dialog stops it');
+  assert.match(handler, /e\.key !== 'Enter'/);
+  assert.match(handler, /const typing = /, 'a text field / dropdown is detected');
+  assert.match(handler, /if \(typing\) \{ if \(modal\.contains\(t\)\) s\.enterBlockedUntil = Date\.now\(\) \+ MM_RV_ENTER_GUARD_MS; return; \}/, 'an Enter used by a field or dropdown never confirms, and blocks the next 500 ms');
+  assert.match(handler, /modal-backdrop\.show/, 'another dialog on top stops it');
   assert.match(handler, /e\.ctrlKey \|\| e\.metaKey \|\| e\.altKey/);
   assert.match(handler, /e\.repeat/, 'a held key never confirms twice');
   assert.match(handler, /e\.isComposing/);
-  assert.match(handler, /mmRvConfirm\(mmRv\.selectedId\)/);
-  const confirm = code('public/app.js');
-  const fn = confirm.slice(confirm.indexOf('async function mmRvConfirm'), confirm.indexOf('async function mmRvSkip'));
+  assert.match(handler, /t\.closest\('button, a, \[role="button"\]'\)/, 'a focused button acts natively, not twice');
+  assert.match(handler, /mmSessConfirm\(\)/);
+  const fn = app.slice(app.indexOf('async function mmSessConfirm'), app.indexOf('async function mmSessSkip'));
   assert.match(fn, /mmRv\.busy \|\| Date\.now\(\) < mmRv\.cooldownUntil/, 'in-flight and cooldown guards');
   assert.match(fn, /mmRvReadiness\(f\)/, 'a classification with no product (and not Not product-specific) is refused before any request');
+  assert.match(fn, /return false;\s*\}\s*mmRv\.busy = true/, 'a refused confirmation stays on the same creative (no advance)');
   assert.match(fn, /mmRv\.cooldownUntil = Date\.now\(\) \+ MM_RV_COOLDOWN_MS/);
   assert.match(app, /MM_RV_COOLDOWN_MS = 400/);
-  assert.match(fn, /mmRvAdvance\(id\)/, 'moves on to the next reviewable creative');
-  assert.match(fn, /if \(mmRv\.selectedId\) \{ const rd2 = mmRvReadiness\(mmRvForm\(mmRv\.selectedId\)\)[\s\S]{0,160}cb\.disabled = !rd2\.ready/, 'after a confirmation the NEXT row\'s Confirm button stays disabled while that row is not ready');
+  assert.match(fn, /await mmSessNext\(id\)/, 'moves on to the next unique creative only after a successful confirmation');
+  assert.match(fn, /if \(!ok\) \{\s*if \(ctx\.errEl\) ctx\.errEl\.textContent = msg/, 'a failed confirmation keeps the creative and explains');
 });
 test('the full editor and the rapid editor offer an explicit Add for new creators / concepts (no silent free text for these)', () => {
   const app = code('public/app.js');
