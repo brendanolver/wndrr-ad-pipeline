@@ -1677,6 +1677,15 @@ function mapConceptLabel(resolve, label) {
   if (m.status === 'removed') return null;
   return m.status === 'approved' || m.status === 'alias' ? m.name : label;
 }
+// How a concept ALREADY ASSIGNED to an ad is shown (display only; the stored text is never changed): an approved concept or a known
+// historical spelling shows as the approved concept; a removed or unlisted concept stays visible exactly as stored, flagged legacy.
+function displayAssignedConcept(resolve, stored) {
+  if (!stored) return { label: null, legacy: false, mapped_from: null, removed: false };
+  const m = resolve(stored);
+  if (m.status === 'approved') return { label: m.name, legacy: false, mapped_from: null, removed: false };
+  if (m.status === 'alias') return { label: m.name, legacy: false, mapped_from: stored, removed: false };
+  return { label: stored, legacy: true, mapped_from: null, removed: m.status === 'removed' };
+}
 function mapConceptSuggestions(resolve, items) {
   const out = []; const seen = new Set();
   for (const it of items) { // items arrive highest confidence first
@@ -1903,7 +1912,9 @@ async function getQueue(query = {}, deps = {}) {
       excluded: r.excluded,
       not_product_specific: r.not_product_specific,
       confirmed_products: r.confirmed_products,
-      confirmed_concept: r.confirmed_concept,
+      confirmed_concept: displayAssignedConcept(conceptResolve, r.confirmed_concept).label,
+      confirmed_concept_legacy: displayAssignedConcept(conceptResolve, r.confirmed_concept).legacy,
+      confirmed_concept_stored: displayAssignedConcept(conceptResolve, r.confirmed_concept).mapped_from,
       confirmed_creator: r.confirmed_creator,
       confirmed_media: r.confirmed_media ? MEDIA_LABEL[r.confirmed_media] : null,
       suggested_media: r.suggested_media,
@@ -2181,7 +2192,8 @@ async function getAdWorkspace(metaAdId, { refresh = true } = {}) {
     if (s.field === 'ad_setup') item.ad_setup = describeAdSetup(ctx.adSetupById.get(s.value_ref));
     suggestions[s.field].push(item);
   });
-  suggestions.concept = mapConceptSuggestions(await vocab.loadConceptResolver(), suggestions.concept);
+  const conceptResolve = await vocab.loadConceptResolver();
+  suggestions.concept = mapConceptSuggestions(conceptResolve, suggestions.concept);
 
   const structuredParse = parseStructuredMetaName(ad.ad_name);
   const parsed = { legacy: parseMetaAdName(ad.ad_name), structured: structuredParse, loose: structuredParse ? null : parseLooseMetaName(ad.ad_name, ctx) };
@@ -2222,7 +2234,10 @@ async function getAdWorkspace(metaAdId, { refresh = true } = {}) {
       not_product_specific: !!ad.not_product_specific,
       products: products.rows,
       // 'legacy' = free text that is not in the offered vocabulary (a concept a person added from the picker is not legacy)
-      concept: ad.concept_label ? { concept_type_id: ad.concept_type_id, label: ad.concept_label, legacy: ad.concept_type_id === null && !(await vocab.canonicalConcept(ad.concept_label)) } : null,
+      concept: ad.concept_label ? (() => {
+        const d = displayAssignedConcept(conceptResolve, ad.concept_label);
+        return { concept_type_id: ad.concept_type_id, label: d.label, stored_label: ad.concept_label, mapped_from: d.mapped_from, removed: d.removed, legacy: d.legacy };
+      })() : null,
       creative_style_id: ad.creative_style_id,
       creator_name: ad.creator_name,
       media_type: ad.media_type || null,
@@ -2477,10 +2492,12 @@ async function listOptions() {
     pool.query('SELECT id, name, media_type FROM creative_styles ORDER BY sort_order, name'),
     vocab.listCreators(),
   ]);
+  const conceptAliases = await vocab.listConceptAliases();
   return {
     products: families.map((f) => ({ key: f.product_code, label: f.product_name })),
     // concept_types rows carry id (saved as the concept id); names a person added carry vocab_id and id null (saved as their label)
-    concepts: concepts.map((c) => ({ id: c.concept_type_id || null, vocab_id: c.vocab_id || null, label: c.name, format: c.format || null, source: c.source })),
+    // in the approved order; `group` is a heading only (never a choice); `aliases` are historical spellings, used only so typing one finds the concept
+    concepts: concepts.map((c) => ({ id: c.concept_type_id || null, vocab_id: c.vocab_id || null, label: c.name, format: c.format || null, source: c.source, group: c.group || null, group_order: c.group_order || null, aliases: conceptAliases.get(vocab.keyOf(c.name)) || [] })),
     creative_styles: styles.rows.map((s) => ({ id: s.id, label: s.name, media_type: s.media_type })),
     creators: creators.map((c) => c.name),
     creator_sources: Object.fromEntries(creators.map((c) => [c.name, c.source])),
@@ -2566,7 +2583,7 @@ async function getReviewBatch(idsInput) {
     out[r.meta_ad_id] = {
       meta_ad_id: r.meta_ad_id, meta_creative_id: r.meta_creative_id, match_status: r.match_status, match_method: r.match_method,
       excluded: r.excluded, skipped: !!r.skipped_at, not_product_specific: !!r.not_product_specific,
-      confirmed_products: r.confirmed_products, confirmed_concept: r.concept_label, confirmed_creator: r.creator_name,
+      confirmed_products: r.confirmed_products, confirmed_concept: displayAssignedConcept(conceptResolve, r.concept_label).label, confirmed_concept_legacy: displayAssignedConcept(conceptResolve, r.concept_label).legacy, confirmed_creator: r.creator_name,
       confirmed_media: r.media_type ? MEDIA_LABEL[r.media_type] : null,
       other_ads: r.other_ads, creative_state: cs, reviewable: !blocked, blocked_reason: blocked, draft,
     };

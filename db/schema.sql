@@ -3069,8 +3069,8 @@ ON CONFLICT (kind, name_key) DO NOTHING;
 -- =====================================================================
 -- Approved Ad Matching concepts + historical-spelling aliases
 -- =====================================================================
--- The concept list Ad Matching offers is the people-approved vocabulary: meta_matching_vocab rows of kind 'concept'. The approved
--- concepts below are seeded here (idempotent: ON CONFLICT keeps whatever is already there, including concepts a person added later).
+-- The concept list Ad Matching offers is the people-approved vocabulary: meta_matching_vocab rows of kind 'concept'. The 40 approved
+-- baseline concepts below are seeded here (idempotent), together with concepts a person adds later.
 -- Aliases map a historical SPELLING to its approved concept so suggestions and the concept inventory read as one concept; an alias with
 -- removed = true is a historical concept that was deliberately dropped (never offered, never merged into another). NOTHING existing is
 -- rewritten: ads keep the concept text they have, and aliases are applied only when a suggestion / inventory row is READ.
@@ -3083,26 +3083,55 @@ CREATE TABLE IF NOT EXISTS meta_matching_concept_aliases (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CHECK ((removed AND approved_name IS NULL) OR (NOT removed AND approved_name IS NOT NULL))
 );
-INSERT INTO meta_matching_vocab (kind, name, name_key) VALUES
-  ('concept', 'BTS VS THE SHOT', 'bts vs the shot'),
-  ('concept', 'CAMPAIGN', 'campaign'),
-  ('concept', 'CONCRETE FLATLAY', 'concrete flatlay'),
-  ('concept', 'E-COMM', 'e-comm'),
-  ('concept', 'FIT CHECK', 'fit check'),
-  ('concept', 'FLAT LAY', 'flat lay'),
-  ('concept', 'GREEN SCREEN', 'green screen'),
-  ('concept', 'GWP', 'gwp'),
-  ('concept', 'HATE COMMENT', 'hate comment'),
-  ('concept', 'IN THE WILD', 'in the wild'),
-  ('concept', 'MEME TRANSITION', 'meme transition'),
-  ('concept', 'NOTES APP', 'notes app'),
-  ('concept', 'POSTER', 'poster'),
-  ('concept', 'RUG DROP', 'rug drop'),
-  ('concept', 'SNAPCHAT', 'snapchat'),
-  ('concept', 'STYLING', 'styling'),
-  ('concept', 'TALK THROUGH', 'talk through'),
-  ('concept', 'UGC', 'ugc')
-ON CONFLICT (kind, name_key) DO NOTHING;
+-- Display grouping of the approved baseline: group_name / group_order / sort_order are ORGANISATIONAL ONLY (headings in the pickers, never
+-- selectable). Concepts a person adds later have no group and are listed after the baseline under "Added in Ad Matching".
+ALTER TABLE meta_matching_vocab ADD COLUMN IF NOT EXISTS group_name VARCHAR(80);
+ALTER TABLE meta_matching_vocab ADD COLUMN IF NOT EXISTS group_order INTEGER;
+ALTER TABLE meta_matching_vocab ADD COLUMN IF NOT EXISTS sort_order INTEGER;
+-- The 40 approved baseline concepts in 7 groups, in the approved order. Idempotent: a row that already exists (including one a person
+-- added with the same name) keeps its name and only receives its group and position.
+INSERT INTO meta_matching_vocab (kind, name, name_key, group_name, group_order, sort_order) VALUES
+  ('concept', 'STYLING', 'styling', 'STYLING & TRY-ONS', 1, 1),
+  ('concept', 'TRY ON', 'try on', 'STYLING & TRY-ONS', 1, 2),
+  ('concept', 'FACELESS TRY ON', 'faceless try on', 'STYLING & TRY-ONS', 1, 3),
+  ('concept', 'RUG TRY ON', 'rug try on', 'STYLING & TRY-ONS', 1, 4),
+  ('concept', 'IKEA STORE TRY ON', 'ikea store try on', 'STYLING & TRY-ONS', 1, 5),
+  ('concept', 'FLAT LAY TO TRY ON', 'flat lay to try on', 'STYLING & TRY-ONS', 1, 6),
+  ('concept', 'FIT CHECK', 'fit check', 'STYLING & TRY-ONS', 1, 7),
+  ('concept', 'TALK THROUGH', 'talk through', 'TALK THROUGHS & SPEAKING', 2, 8),
+  ('concept', 'ROLL BAR TALK THROUGH', 'roll bar talk through', 'TALK THROUGHS & SPEAKING', 2, 9),
+  ('concept', 'HATE COMMENT', 'hate comment', 'TALK THROUGHS & SPEAKING', 2, 10),
+  ('concept', 'VOICEOVER', 'voiceover', 'TALK THROUGHS & SPEAKING', 2, 11),
+  ('concept', 'FOUNDER VIDEO', 'founder video', 'TALK THROUGHS & SPEAKING', 2, 12),
+  ('concept', 'CONCRETE FLATLAY', 'concrete flatlay', 'FLAT LAYS & PRODUCT IMAGERY', 3, 13),
+  ('concept', 'FLAT LAY', 'flat lay', 'FLAT LAYS & PRODUCT IMAGERY', 3, 14),
+  ('concept', 'CONCRETE DROP', 'concrete drop', 'FLAT LAYS & PRODUCT IMAGERY', 3, 15),
+  ('concept', 'CLOTHES DROP', 'clothes drop', 'FLAT LAYS & PRODUCT IMAGERY', 3, 16),
+  ('concept', 'RUG DROP', 'rug drop', 'FLAT LAYS & PRODUCT IMAGERY', 3, 17),
+  ('concept', 'E-COMM', 'e-comm', 'FLAT LAYS & PRODUCT IMAGERY', 3, 18),
+  ('concept', 'TOP PICKS', 'top picks', 'GRAPHICS & STATIC CREATIVES', 4, 19),
+  ('concept', 'RANGE LAYOUT', 'range layout', 'GRAPHICS & STATIC CREATIVES', 4, 20),
+  ('concept', 'GRAPHIC', 'graphic', 'GRAPHICS & STATIC CREATIVES', 4, 21),
+  ('concept', 'GIF', 'gif', 'GRAPHICS & STATIC CREATIVES', 4, 22),
+  ('concept', 'BILLBOARD', 'billboard', 'GRAPHICS & STATIC CREATIVES', 4, 23),
+  ('concept', 'POSTER', 'poster', 'GRAPHICS & STATIC CREATIVES', 4, 24),
+  ('concept', 'NOTES APP', 'notes app', 'CAMPAIGNS & PROMOTIONS', 5, 25),
+  ('concept', 'DPA', 'dpa', 'CAMPAIGNS & PROMOTIONS', 5, 26),
+  ('concept', 'CAMPAIGN', 'campaign', 'CAMPAIGNS & PROMOTIONS', 5, 27),
+  ('concept', 'GWP', 'gwp', 'CAMPAIGNS & PROMOTIONS', 5, 28),
+  ('concept', 'AD BREAK', 'ad break', 'CAMPAIGNS & PROMOTIONS', 5, 29),
+  ('concept', 'APOLOGY', 'apology', 'CAMPAIGNS & PROMOTIONS', 5, 30),
+  ('concept', 'HUMOUR', 'humour', 'CAMPAIGNS & PROMOTIONS', 5, 31),
+  ('concept', 'UGC', 'ugc', 'UGC, ORGANIC & LIFESTYLE', 6, 32),
+  ('concept', 'ORGANIC REEL', 'organic reel', 'UGC, ORGANIC & LIFESTYLE', 6, 33),
+  ('concept', 'IN THE WILD', 'in the wild', 'UGC, ORGANIC & LIFESTYLE', 6, 34),
+  ('concept', 'GREEN SCREEN', 'green screen', 'UGC, ORGANIC & LIFESTYLE', 6, 35),
+  ('concept', 'SNAPCHAT', 'snapchat', 'UGC, ORGANIC & LIFESTYLE', 6, 36),
+  ('concept', 'KMART', 'kmart', 'UGC, ORGANIC & LIFESTYLE', 6, 37),
+  ('concept', 'MEME TRANSITION', 'meme transition', 'TRANSITIONS & VIDEO CONCEPTS', 7, 38),
+  ('concept', 'BTS VS THE SHOT', 'bts vs the shot', 'TRANSITIONS & VIDEO CONCEPTS', 7, 39),
+  ('concept', 'AI ADS', 'ai ads', 'TRANSITIONS & VIDEO CONCEPTS', 7, 40)
+ON CONFLICT (kind, name_key) DO UPDATE SET group_name = EXCLUDED.group_name, group_order = EXCLUDED.group_order, sort_order = EXCLUDED.sort_order;
 INSERT INTO meta_matching_concept_aliases (alias, alias_key, approved_name, removed) VALUES
   ('AESTHETIC STYLING', 'aesthetic styling', 'STYLING', false),
   ('AESTHETIC STYLNG', 'aesthetic stylng', 'STYLING', false),
