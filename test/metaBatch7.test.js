@@ -163,29 +163,35 @@ test('inventory: each spelling shows its approved concept, spellings stay separa
 });
 
 // ── grouped dropdowns (both editors), search, keyboard, legacy display ──
-test('both editors use the SAME grouped concept picker and the same vocabulary source', () => {
+test('every concept selector uses the SAME continuous (heading-free) picker and the same vocabulary source', () => {
   const app = code('public/app.js');
   const full = app.slice(app.indexOf('const conceptPicker = mmPicker'), app.indexOf('const creatorPicker = mmPicker'));
-  const rapid = app.slice(app.indexOf("mmPicker(host('concept')"), app.indexOf("mmPicker(host('creator')"));
-  for (const [name, src] of [['full editor', full], ['rapid editor', rapid]]) {
-    assert.match(src, /groupOf: \(x\) => x\.group/, `${name}: grouped`);
-    assert.match(src, /options: options\.concepts\.map\(mmConceptItem\)/, `${name}: the same options list`);
-    assert.match(src, /addNew: mmAddConcept/, `${name}: can still add a concept`);
-    assert.match(src, /mmConceptPill\(/, `${name}: assigned concept shown through the same display rule`);
-  }
+  assert.match(full, /longList: true/, 'a long, continuous, searchable list');
+  assert.match(full, /options: options\.concepts\.map\(mmConceptItem\)/, 'the approved list, in the approved order');
+  assert.match(full, /addNew: mmAddConcept/, 'can still add a concept');
+  assert.match(full, /mmConceptPill\(/, 'assigned concept shown through the same display rule');
+  assert.doesNotMatch(app, /groupOf/, 'no grouping hook is left anywhere');
+  assert.equal((app.match(/conceptPicker = mmPicker\(/g) || []).length, 1, 'one concept selector (the inline rapid editor is gone)');
   assert.equal((app.match(/await api\('\/meta-ad-matching\/options'\)|api\('\/meta-ad-matching\/options'\)/g) || []).length, 1, 'one options source');
+  const item = app.slice(app.indexOf('const mmConceptItem'), app.indexOf('const mmConceptItem') + 400);
+  assert.doesNotMatch(item, /group/, 'the concept item no longer carries a category');
 });
-test('picker: group headings are never options; search covers every concept and historical spellings; arrows + Enter work', () => {
+test('picker: no group headings anywhere; search covers every concept and historical spellings; arrows + Enter work', () => {
   const app = code('public/app.js');
-  const picker = app.slice(app.indexOf('function mmPicker'), app.indexOf('// ── Matching workspace'));
-  assert.match(picker, /class="mm-opt-group" role="presentation"/, 'headings are presentational');
-  assert.doesNotMatch(picker.slice(picker.indexOf('class="mm-opt-group"'), picker.indexOf('class="mm-opt-group"') + 160), /data-e=/, 'a heading carries no entry index, so it cannot be chosen');
-  assert.match(picker, /o\.dataset\.e === undefined\) return/, 'a click on a heading does nothing');
-  assert.match(picker, /return grouped \? rows : rows\.slice\(0, 8\)/, 'a grouped list shows every match (not capped at 8)');
+  const picker = app.slice(app.indexOf('function mmPicker'), app.indexOf('async function mmLoadOptions'));
+  assert.doesNotMatch(picker, /mm-opt-group|grouped|groupOf|role="presentation"/, 'the picker has no heading code');
+  assert.match(picker, /return longList \? rows : rows\.slice\(0, 8\)/, 'the long list shows every match (not capped at 8)');
   assert.match(picker, /\(o\.aliases \|\| \[\]\)\.find/, 'a historical spelling finds its approved concept');
   assert.match(picker, /e\.key === 'ArrowDown' \|\| e\.key === 'ArrowUp'/);
   assert.match(picker, /choose\(entries\[active\] \|\| null\)/);
   assert.match(picker, /role="combobox"/);
+  const css = read('public/styles.css');
+  assert.doesNotMatch(css, /mm-opt-group/, 'no heading styles remain');
+  const html = read('public/index.html');
+  assert.doesNotMatch(html, /mm-opt-group/);
+  // the saved order is the approved order, group by group, with no heading data needed to show it
+  const vsrc = read('src/lib/metaMatchingVocab.js');
+  assert.match(vsrc, /ORDER BY group_order NULLS LAST, sort_order NULLS LAST, name/, 'order preserved');
 });
 test('assigned concepts: aliases display as the approved concept, unmapped / removed stay visible as legacy; nothing is rewritten', () => {
   const lib = code('src/lib/metaAdMatching.js');
@@ -238,10 +244,10 @@ test('placement: opens DOWN when it fits below, UP when it does not and there is
   // exact boundary: fits below exactly -> down
   assert.equal(place({ baseMax: 300, naturalH: 300, hostTop: 100, hostBottom: 130, viewportH: 130 + 8 + 300 }).up, false);
 });
-test('placement is wired into the ONE shared picker (so both editors get it), keeps search + keyboard, and cleans up its listeners', () => {
+test('placement is wired into the ONE shared picker, keeps search + keyboard, and cleans up its listeners', () => {
   const app = code('public/app.js');
-  const picker = app.slice(app.indexOf('function mmPicker'), app.indexOf('// ── Matching workspace'));
-  assert.match(picker, /const baseMax = grouped \? 300 : 176/);
+  const picker = app.slice(app.indexOf('function mmPicker'), app.indexOf('async function mmLoadOptions'));
+  assert.match(picker, /const baseMax = longList \? 300 : 176/);
   assert.match(picker, /mmDropdownPlacement\(\{ hostTop: hr\.top, hostBottom: hr\.bottom, viewportH: window\.innerHeight, naturalH: list\.scrollHeight, baseMax/);
   assert.match(picker, /host\.classList\.toggle\('mm-flip', d\.up\)/);
   assert.match(picker, /if \(open\) place\(lockedUp === null\)/, 'direction decided when it opens, kept while typing');
@@ -252,7 +258,7 @@ test('placement is wired into the ONE shared picker (so both editors get it), ke
   const css = read('public/styles.css');
   assert.match(css, /\.mm-picker\.mm-flip \.mm-picker-list\{top:auto;bottom:100%/);
   assert.doesNotMatch(css, /\.mm-dropup \.mm-picker-list/, 'no fixed "always up" rule is left');
-  assert.match(css, /\.mm-picker-list\.grouped\{max-height:300px;\}/, 'the 300px maximum is kept');
+  assert.match(css, /\.mm-picker-list\.long\{max-height:300px/, 'the 300px maximum is kept');
   // both editors build their concept dropdown through that same function
   assert.equal((app.match(/mmPicker\(/g) || []).length >= 6, true);
 });

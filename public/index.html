@@ -296,17 +296,17 @@
         <div class="mm-archive" id="mm-archive" style="display:none;"></div>
         <div class="mm-chips" id="mm-chips" role="group" aria-label="Mapping state"></div>
         <div class="mm-relevance-note" id="mm-relevance-note" style="display:none;"></div>
-        <!-- Rapid review: progress + keyboard help + live feedback (works in every view; reviewable rows get a tick) -->
+        <!-- Review session: starts the full Match Meta ad modal (progress + live feedback; any reviewable row also starts it) -->
         <div class="mm-rv-bar" id="mm-rv-bar">
           <button type="button" class="btn btn-primary btn-sm" id="mm-rv-start">Start reviewing</button>
-          <span class="mm-rv-keys"><kbd>Enter</kbd> confirm · <kbd>↑</kbd><kbd>↓</kbd> move · <kbd>E</kbd> edit · <kbd>Esc</kbd> close — with a row selected</span>
+          <span class="mm-rv-keys">Opens each creative in the full editor with reliable suggestions filled in — <kbd>Enter</kbd> confirms and loads the next one</span>
           <span class="mm-rv-prog" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" title="Confirmed this session versus still to review"><i></i></span>
           <span class="mm-rv-count"></span>
           <span class="mm-rv-status" id="mm-rv-status" role="status" aria-live="polite"></span>
         </div>
         <table class="mp-table mm-table">
           <thead>
-            <tr><th class="mp-th-name">Ad Name</th><th>Status</th><th class="num">Recent spend</th><th title="Newest day ANY ad using this exact creative delivered, from stored Insights">Last active</th><th>Mapping</th><th>Product</th><th>Concept</th><th>Media</th><th>Creator</th><th>Confidence</th><th class="mm-th-tick" title="Confirm the suggested classification">✓</th></tr>
+            <tr><th class="mp-th-name">Ad Name</th><th>Status</th><th class="num">Recent spend</th><th title="Newest day ANY ad using this exact creative delivered, from stored Insights">Last active</th><th>Mapping</th><th>Product</th><th>Concept</th><th>Media</th><th>Creator</th><th>Confidence</th></tr>
           </thead>
           <tbody id="mm-body"></tbody>
         </table>

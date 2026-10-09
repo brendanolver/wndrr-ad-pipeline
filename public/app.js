@@ -1281,8 +1281,7 @@ function mmRowHtml(a) {
     <td class="mm-cell">${con}</td>
     <td class="mm-cell">${media}</td>
     <td class="mm-cell mm-creator-cell" data-rv-creator>${creator}</td>
-    <td>${conf}</td>
-    <td class="mm-tickcell" data-rv-tickcell></td></tr>`;
+    <td>${conf}</td></tr>`;
 }
 
 function mmRenderRows(res) {
@@ -1298,7 +1297,7 @@ function mmRenderRows(res) {
   note.style.display = noteParts.length ? '' : 'none';
   note.textContent = noteParts.join(' ');
   mmRv.rows = new Map(res.ads.map((a) => [a.meta_ad_id, a]));
-  document.getElementById('mm-body').innerHTML = res.ads.length ? res.ads.map(mmRowHtml).join('') : `<tr><td colspan="11" class="mp-table-empty">${
+  document.getElementById('mm-body').innerHTML = res.ads.length ? res.ads.map(mmRowHtml).join('') : `<tr><td colspan="10" class="mp-table-empty">${
     mmState.q ? 'No ads match this search.' : mmState.filter === 'needs' ? 'Nothing left to do in this view — nice work.' : 'No ads in this view.'}</td></tr>`;
   ccHydrateThumbs(document.getElementById('mm-body'));
   const pager = document.getElementById('mm-pager');
@@ -1434,7 +1433,7 @@ async function loadMetaMatching() {
     mmLoadWorkload();
   } catch (e) {
     if (id !== mmState.reqId) return;
-    document.getElementById('mm-body').innerHTML = `<tr><td colspan="11" class="mp-table-empty">${escapeHtml(e.message)}</td></tr>`;
+    document.getElementById('mm-body').innerHTML = `<tr><td colspan="10" class="mp-table-empty">${escapeHtml(e.message)}</td></tr>`;
   }
 }
 
@@ -1650,49 +1649,39 @@ document.getElementById('mm-body').addEventListener('click', (e) => {
   const row = e.target.closest('tr[data-ad-id]');
   if (badge && badge.dataset.conflictCreative) { openConflictModal(badge.dataset.conflictCreative); return; }
   if (row && mmState.filter === 'conflict' && row.querySelector('[data-conflict-creative]')) { openConflictModal(row.querySelector('[data-conflict-creative]').dataset.conflictCreative); return; }
-  const tick = e.target.closest('[data-rv-tick]');
-  if (tick) { mmRvOnTick(tick.dataset.rvTick); return; }
-  if (row && mmRvReviewable(row.dataset.adId) && mmState.filter !== 'conflict') { mmRvSelect(row.dataset.adId, { focus: true }); return; }
-  if (row) openMatchWorkspace(row.dataset.adId);
+  // a reviewable creative opens the full modal as a REVIEW SESSION (suggestions filled in, Enter confirms, then the next creative);
+  // anything else opens the modal exactly as before
+  if (row && mmRvReviewable(row.dataset.adId) && mmState.filter !== 'conflict' && !mmRv.sess) { mmSessStart(row.dataset.adId); return; }
+  if (row && !mmRv.sess) openMatchWorkspace(row.dataset.adId);
 });
 
-// ── Rapid review: confirm suggested classifications from inside the table ───────────────────────
-// Works in every view (All ads, Needs review, To do, …) without a separate screen or dialog:
-//   - a reviewable row (Unmatched / Needs review, not excluded, and whose exact creative nobody has classified or argued about) gets a
-//     ✓ button; clicking the row selects it and opens an inline editor under it, pre-filled from the suggestions already stored for it;
-//   - ✓ (or Enter, when the row itself is selected) confirms it through the SAME endpoint as the full editor, which gives the decision to
-//     every unclassified copy of the exact same meta_creative_id using the existing, protected creative inheritance -- nothing new;
-//   - the next reviewable row is then selected and focused.
-// Safety: Enter is ignored while typing in any field, while any dialog is open, on key-repeat, for 400 ms after a confirmation, while a
-// confirmation is in flight, and unless the classification is ready (a valid product, or Not product-specific; the rest is optional).
+// ── Review session: the full "Match Meta ad" modal, one UNIQUE creative at a time ───────────────────────
+// "Start reviewing" (or clicking a reviewable row) opens the full Match Meta ad modal for the first reviewable creative. The modal
+// opens with every field already filled from the stored suggestions that are reliable enough (Exact / Likely; a Weak hint stays a
+// clickable chip), nothing is invented, and nothing is confirmed until a person acts. Enter -- or Confirm & Next -- confirms through
+// the SAME endpoint and validation as before (rapid: a valid product, or Not product-specific; concept / creator / media / style are
+// optional; no trusted-pair re-evaluation of other creatives; exact-creative copies inherit through the existing protected sync), then
+// the SAME modal loads the next creative. Skip & Next and Close Review end or advance the session. A creative is reviewed once: ads that
+// share a meta_creative_id are one creative, and copies that just inherited are never shown again.
+// Safety: Enter confirms only when no text field / dropdown has focus, no other dialog is open, it is not a key-repeat, nothing is in
+// flight, not within 400 ms of a confirmation, and not within 500 ms of an Enter that a field or dropdown consumed.
 const mmRv = {
-  rows: new Map(), batch: new Map(), forms: new Map(), skipped: new Set(),
-  selectedId: null, busy: false, cooldownUntil: 0, wantFirst: false, batchSeq: 0,
+  rows: new Map(), batch: new Map(), batchSeq: 0, batchPromise: Promise.resolve(),
+  busy: false, cooldownUntil: 0,
   done: 0, left: null, leftLabel: 'Needs review', page: 1, totalPages: 1, countsTimer: null, statusTimer: null,
+  sess: null,
 };
 const MM_RV_COOLDOWN_MS = 400;
+const MM_RV_ENTER_GUARD_MS = 500;
 const MM_RV_NEEDS_FILTERS = ['needs', 'suggested', 'unmatched'];
+const MM_AUTOFILL_MIN = 0.6; // Exact (>= 0.90) and Likely (>= 0.60) fill a field; Weak (< 0.60, "a hint only") never does
 
 const mmRvInfo = (id) => mmRv.batch.get(id) || null;
 const mmRvReviewable = (id) => { const i = mmRvInfo(id); return !!(i && i.reviewable && mmRv.rows.has(id)); };
 const mmRvRow = (id) => document.querySelector(`#mm-body tr[data-ad-id="${CSS.escape(id)}"]`);
 const mmRvIds = () => [...document.querySelectorAll('#mm-body tr[data-ad-id]')].map((r) => r.dataset.adId);
+const mmRvKey = (id) => (mmRv.rows.get(id) || {}).meta_creative_id || id; // one creative = one exact meta_creative_id (an ad without one is its own)
 
-// the editable draft for a row, seeded once from the stored suggestions
-function mmRvForm(id) {
-  if (mmRv.forms.has(id)) return mmRv.forms.get(id);
-  const d = (mmRvInfo(id) || {}).draft || {};
-  const f = {
-    products: (d.products || []).map((p) => ({ key: p.key, label: p.label })),
-    nps: !!d.not_product_specific,
-    concept: d.concept ? { ...d.concept } : null,
-    creator: d.creator ? d.creator.label : null,
-    media: d.media ? { key: d.media.key, label: d.media.label } : null,
-    style: d.style ? { key: d.style.key, label: d.style.label } : null,
-  };
-  mmRv.forms.set(id, f);
-  return f;
-}
 // THE rule for "ready to confirm": a valid product, or an explicit Not product-specific. Concept, creator, media and style are optional.
 // (The server enforces the same rule for every confirmation.)
 function mmRvReadiness(f) {
@@ -1718,7 +1707,7 @@ function mmRvStatus(msg, kind) {
   clearTimeout(mmRv.statusTimer);
   el.textContent = msg || '';
   el.className = `mm-rv-status${kind ? ` ${kind}` : ''}`;
-  if (msg && kind === 'ok') mmRv.statusTimer = setTimeout(() => { el.textContent = ''; el.className = 'mm-rv-status'; }, 7000);
+  if (msg && kind === 'ok') mmRv.statusTimer = setTimeout(() => { el.textContent = ''; el.className = 'mm-rv-status'; }, 9000);
 }
 
 function mmRvUpdateBar() {
@@ -1734,40 +1723,29 @@ function mmRvUpdateBar() {
   bar.querySelector('.mm-rv-prog').setAttribute('aria-valuenow', String(pct));
   const start = document.getElementById('mm-rv-start');
   start.disabled = !reviewable;
-  start.title = reviewable ? '' : 'No row on this page can be reviewed here';
+  start.title = reviewable ? '' : 'No creative on this page can be reviewed here';
 }
 
-// decorate one row: tick button + creator suggestion
+// the row behind the modal: marks reviewable rows and shows the suggested creator
 function mmRvDecorateRow(id) {
   const tr = mmRvRow(id);
   if (!tr) return;
-  const info = mmRvInfo(id);
-  const tickCell = tr.querySelector('[data-rv-tickcell]');
   tr.classList.toggle('mm-rv-able', mmRvReviewable(id));
-  if (!tickCell) return;
-  if (!mmRvReviewable(id)) { tickCell.innerHTML = ''; return; }
-  const rd = mmRvReadiness(mmRvForm(id));
-  tickCell.innerHTML = `<button type="button" class="mm-rv-tick${rd.ready ? ' ready' : ''}" data-rv-tick="${escapeHtml(id)}" aria-label="Confirm this classification" title="${escapeHtml(rd.ready ? 'Confirm this classification (applies to unclassified copies of the same creative)' : `Not ready: ${rd.why}`)}">✓</button>`;
+  const d = (mmRvInfo(id) || {}).draft;
   const cc = tr.querySelector('[data-rv-creator]');
-  const f = mmRvForm(id);
-  if (cc && !tr.classList.contains('mm-row-done')) cc.innerHTML = f.creator ? `<span class="mm-guess" title="Suggestion — not confirmed">${escapeHtml(f.creator)}</span>` : '<span class="mp-na">—</span>';
-  // the suggested concept the editor would use (the list column only shows the top stored suggestion label)
-  void info;
+  if (cc && d && d.creator && d.creator.label && !tr.classList.contains('mm-row-done')) cc.innerHTML = `<span class="mm-guess" title="Suggestion — not confirmed">${escapeHtml(d.creator.label)}</span>`;
 }
 
 function mmRvRerenderRow(id, cls) {
   const tr = mmRvRow(id);
   const a = mmRv.rows.get(id);
   if (!tr || !a) return;
-  const wasSel = mmRv.selectedId === id;
   const holder = document.createElement('tbody');
   holder.innerHTML = mmRowHtml(a).trim();
   const fresh = holder.firstElementChild;
   if (cls) fresh.classList.add(cls);
-  if (mmRv.skipped.has(id)) fresh.classList.add('mm-row-skipped');
   tr.replaceWith(fresh);
   ccHydrateThumbs(fresh);
-  if (wasSel) { fresh.classList.add('mm-row-sel'); fresh.tabIndex = 0; }
   mmRvDecorateRow(id);
 }
 
@@ -1782,23 +1760,21 @@ async function mmRvLoadBatch(res) {
     for (const id of ids) if (r.ads[id]) mmRv.batch.set(id, r.ads[id]);
     ids.forEach(mmRvDecorateRow);
     mmRvUpdateBar();
-    if (mmRv.wantFirst) { mmRv.wantFirst = false; const first = mmRvIds().find(mmRvReviewable); if (first) mmRvSelect(first, { focus: true }); else mmRvStatus('Nothing on this page can be reviewed here.', 'warn'); }
   } catch (e) {
-    mmRvStatus(`Couldn’t load suggestions for review: ${e.message}`, 'error');
+    mmRvStatus(`Couldn’t load review state: ${e.message}`, 'error');
   }
 }
 
 function mmRvAfterRender(res) {
-  mmRv.selectedId = null; mmRv.forms = new Map(); mmRv.skipped = new Set();
   mmRv.page = res.page; mmRv.totalPages = res.total_pages;
   const field = res.filter === 'unmatched' ? 'unmatched' : res.filter === 'needs' ? 'needs' : 'suggested';
   mmRv.leftLabel = field === 'unmatched' ? 'Unmatched' : field === 'needs' ? 'To do' : 'Needs review';
   mmRv.left = Number((res.counts && res.counts[field]) || 0);
   mmRvUpdateBar();
-  mmRvLoadBatch(res);
+  mmRv.batchPromise = mmRvLoadBatch(res);
 }
 
-// debounced background refresh of the chips + remaining count (does not touch the rows or the selection)
+// debounced background refresh of the chips + remaining count (does not touch the rows)
 function mmRvScheduleCounts() {
   clearTimeout(mmRv.countsTimer);
   mmRv.countsTimer = setTimeout(async () => {
@@ -1813,104 +1789,6 @@ function mmRvScheduleCounts() {
   }, 2500);
 }
 
-function mmRvClosePanel() {
-  document.querySelectorAll('#mm-body tr.mm-rv-panel').forEach((r) => r.remove());
-  document.querySelectorAll('#mm-body tr.mm-row-sel').forEach((r) => { r.classList.remove('mm-row-sel'); r.removeAttribute('tabindex'); });
-  mmRv.selectedId = null;
-}
-
-async function mmRvSelect(id, { focus = true } = {}) {
-  if (!mmRvReviewable(id)) return;
-  const tr = mmRvRow(id);
-  if (!tr) return;
-  mmRvClosePanel();
-  mmRv.selectedId = id;
-  tr.classList.add('mm-row-sel');
-  tr.tabIndex = 0;
-  if (focus) tr.focus({ preventScroll: true });
-  const info = mmRvInfo(id);
-  const f = mmRvForm(id);
-  const panel = document.createElement('tr');
-  panel.className = 'mm-rv-panel';
-  panel.dataset.rvFor = id;
-  const others = info.other_ads || 0;
-  panel.innerHTML = `<td colspan="11"><div class="mm-rv-grid">
-      <div class="mm-rv-f mm-rv-f-prod"><div class="mm-rv-lab"><span>Product(s)</span><label class="mm-check"><input type="checkbox" class="mm-rv-nps"> Not product-specific</label></div><div data-rvp="products"></div></div>
-      <div class="mm-rv-f"><div class="mm-rv-lab"><span>Concept</span></div><div data-rvp="concept"></div></div>
-      <div class="mm-rv-f"><div class="mm-rv-lab"><span>Media</span></div><div data-rvp="media"></div></div>
-      <div class="mm-rv-f"><div class="mm-rv-lab"><span>Creator</span></div><div data-rvp="creator"></div></div>
-      <div class="mm-rv-f"><div class="mm-rv-lab"><span>Creative style</span></div><div data-rvp="style"></div></div>
-      <div class="mm-rv-actions">
-        <button type="button" class="btn btn-primary btn-sm mm-rv-confirm">✓ Confirm</button>
-        <button type="button" class="btn btn-ghost btn-sm mm-rv-skip">Skip</button>
-        <button type="button" class="btn btn-ghost btn-sm mm-rv-full">Full editor</button>
-      </div>
-      <div class="mm-rv-msg" role="status"></div>
-      <div class="mm-rv-note">Confirming ${others > 0 ? `also gives this decision to the ${others} other ad${others === 1 ? '' : 's'} that use the exact same creative and that nobody has classified` : 'covers this ad'}. Ads a person already classified, skipped, excluded or linked to an Ad Setup are never changed, and no other creative is auto-matched because of it.</div>
-    </div></td>`;
-  tr.after(panel);
-  panel.querySelector('.mm-rv-full').addEventListener('click', () => openMatchWorkspace(id));
-  panel.querySelector('.mm-rv-confirm').addEventListener('click', () => mmRvConfirm(id));
-  panel.querySelector('.mm-rv-skip').addEventListener('click', () => mmRvSkip(id));
-  const refreshState = () => {
-    const rd = mmRvReadiness(f);
-    const btn = panel.querySelector('.mm-rv-confirm');
-    btn.disabled = !rd.ready;
-    btn.title = rd.ready ? 'Confirm (or press Enter with this row selected)' : `Not ready: ${rd.why}`;
-    panel.querySelector('.mm-rv-msg').textContent = rd.ready ? '' : `Not ready: ${rd.why}.`;
-    panel.classList.toggle('not-ready', !rd.ready);
-    mmRvDecorateRow(id);
-    if (mmRv.selectedId === id) { const r = mmRvRow(id); if (r) { r.classList.add('mm-row-sel'); r.tabIndex = 0; } }
-  };
-  const options = await mmLoadOptions();
-  if (mmRv.selectedId !== id) return; // moved on while the lists loaded
-  const host = (k) => panel.querySelector(`[data-rvp="${k}"]`);
-  const nps = panel.querySelector('.mm-rv-nps');
-  nps.checked = f.nps;
-  const prod = mmPicker(host('products'), {
-    multi: true, placeholder: 'Search products…', options: options.products.map((x) => ({ key: x.key, label: x.label, hint: x.key })),
-    selected: f.products.slice(), onChange: (sel) => { f.products = sel.map((x) => ({ key: x.key, label: x.label })); if (f.products.length) { f.nps = false; nps.checked = false; } refreshState(); },
-  });
-  const mediaOpts = options.media_types.map((x) => ({ key: x.key, label: x.label }));
-  mmPicker(host('media'), { multi: false, placeholder: 'Video, Image…', options: mediaOpts, selected: f.media ? [f.media] : [], onChange: (sel) => { f.media = sel[0] ? { key: sel[0].key, label: sel[0].label } : null; refreshState(); } });
-  mmPicker(host('concept'), {
-    multi: false, addNew: mmAddConcept, addLabel: 'concept', placeholder: 'Search or add a concept…', options: options.concepts.map(mmConceptItem), groupOf: (x) => x.group,
-    selected: f.concept ? [mmConceptPill(f.concept, options)] : [],
-    onChange: (sel) => { f.concept = sel[0] ? { label: sel[0].label, concept_type_id: sel[0].concept_type_id || null, vocab_id: sel[0].vocab_id || null, legacy: !!sel[0].free } : null; refreshState(); },
-  });
-  mmPicker(host('creator'), {
-    multi: false, addNew: mmAddCreator, addLabel: 'creator', placeholder: 'Search or add a creator…', options: options.creators.map((x) => ({ key: x, label: x })),
-    selected: f.creator ? [{ key: f.creator, label: f.creator }] : [], onChange: (sel) => { f.creator = sel[0] ? sel[0].label : null; refreshState(); },
-  });
-  mmPicker(host('style'), {
-    multi: false, placeholder: 'Optional', options: options.creative_styles.map((x) => ({ key: x.id, label: x.label })),
-    selected: f.style ? [f.style] : [], onChange: (sel) => { f.style = sel[0] ? { key: sel[0].key, label: sel[0].label } : null; refreshState(); },
-  });
-  nps.addEventListener('change', () => { f.nps = nps.checked; if (nps.checked) { prod.set([]); f.products = []; } prod.setDisabled(nps.checked); refreshState(); });
-  prod.setDisabled(f.nps);
-  refreshState();
-  tr.scrollIntoView({ block: 'nearest' });
-}
-
-function mmRvNext(fromId, dir = 1) {
-  const ids = mmRvIds();
-  for (let i = ids.indexOf(fromId) + dir; i >= 0 && i < ids.length; i += dir) {
-    if (mmRvReviewable(ids[i]) && !mmRv.skipped.has(ids[i])) return ids[i];
-  }
-  return null;
-}
-
-// after a confirmation / skip: the next reviewable row, else (this page is finished) the next batch of work
-async function mmRvAdvance(fromId) {
-  let next = mmRvNext(fromId, 1) || mmRvIds().find((x) => x !== fromId && mmRvReviewable(x) && !mmRv.skipped.has(x)) || null;
-  if (next) { await mmRvSelect(next, { focus: true }); return; }
-  mmRvClosePanel();
-  const pagedOut = MM_RV_NEEDS_FILTERS.includes(mmState.filter);
-  if (pagedOut && mmRv.left > 0) { mmState.page = 1; mmRv.wantFirst = true; mmRvStatus('Page finished — loading the next creatives…', 'ok'); await loadMetaMatching(); return; }
-  if (!pagedOut && mmRv.page < mmRv.totalPages) { mmState.page = mmRv.page + 1; mmRv.wantFirst = true; mmRvStatus('Page finished — loading the next page…', 'ok'); await loadMetaMatching(); return; }
-  mmRvStatus('Nothing left to review on this page.', 'ok');
-}
-
 async function mmRvRefreshStates(ids) {
   if (!ids.length) return;
   const r = await api(`/meta-ad-matching/review-batch?ids=${encodeURIComponent(ids.join(','))}`);
@@ -1919,125 +1797,211 @@ async function mmRvRefreshStates(ids) {
     if (!st || !a) continue;
     Object.assign(a, {
       match_status: st.match_status, match_method: st.match_method, excluded: st.excluded, skipped: st.skipped, not_product_specific: st.not_product_specific,
-      confirmed_products: st.confirmed_products, confirmed_concept: st.confirmed_concept, confirmed_creator: st.confirmed_creator, confirmed_media: st.confirmed_media,
+      confirmed_products: st.confirmed_products, confirmed_concept: st.confirmed_concept, confirmed_concept_legacy: st.confirmed_concept_legacy, confirmed_creator: st.confirmed_creator, confirmed_media: st.confirmed_media,
     });
     mmRv.batch.set(id, st);
     mmRvRerenderRow(id, st.match_status === 'auto_matched' ? 'mm-row-done' : '');
   }
 }
 
-async function mmRvConfirm(id) {
-  const info = mmRvInfo(id);
-  const a = mmRv.rows.get(id);
-  if (!info || !info.reviewable || !a) return false;
+// ── the session ──────────────────────────────────────────────────────────
+// reviewable creatives not yet shown this session: the rows after the current one first, then earlier rows
+function mmSessCandidates(fromId) {
+  const s = mmRv.sess;
+  const ids = mmRvIds();
+  const i = fromId ? ids.indexOf(fromId) : -1;
+  const ordered = [...ids.slice(i + 1), ...ids.slice(0, Math.max(0, i + 1))];
+  return ordered.filter((id) => mmRvReviewable(id) && !s.seen.has(mmRvKey(id)));
+}
+
+function mmSessBarHtml() {
+  const s = mmRv.sess;
+  const handled = s.done + s.skipped;
+  const total = Math.max(s.startLeft || 0, handled + 1);
+  const pct = Math.min(100, Math.round((handled / total) * 100));
+  return `<div class="mm-sess-bar" id="mm-sess-bar"><span class="mm-sess-count"><b>Creative ${Math.min(handled + 1, total)} of ${total}</b> · ${s.done} confirmed · ${s.skipped} skipped · ${Math.max(0, total - handled - (s.finished ? 0 : 1))} to go</span><span class="mm-rv-prog" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><i style="width:${pct}%"></i></span></div>`;
+}
+
+async function mmSessStart(fromId) {
+  if (mmRv.sess) return;
+  mmRv.sess = { seen: new Set(), done: 0, skipped: 0, startLeft: mmRv.left || 0, current: null, ctx: null, enterBlockedUntil: 0, token: 0, ended: false, finished: false };
+  const first = fromId && mmRvReviewable(fromId) ? fromId : mmSessCandidates(null)[0];
+  if (!first) { mmRv.sess = null; mmRvStatus('Nothing on this page can be reviewed here.', 'warn'); return; }
+  await mmSessOpen(first);
+}
+
+async function mmSessOpen(id) {
+  const s = mmRv.sess;
+  if (!s || s.ended) return;
+  s.current = id; s.ctx = null; s.finished = false; s.seen.add(mmRvKey(id));
+  const tok = ++s.token;
+  document.querySelectorAll('#mm-body tr.mm-row-cur').forEach((r) => r.classList.remove('mm-row-cur'));
+  const tr = mmRvRow(id); if (tr) tr.classList.add('mm-row-cur');
+  await openMatchWorkspace(id, { review: true, token: tok });
+}
+
+// every reliable stored suggestion fills its own field; nothing is invented, Ad Setup is never linked, and a field that already has a
+// value is left alone. Returns the labels of the fields that were filled.
+function mmAutofill(ws, c) {
+  const sg = ws.suggestions || {};
+  const good = (x) => x && Number(x.confidence) >= MM_AUTOFILL_MIN;
+  const filled = [];
+  const top = sg.product && sg.product[0];
+  if (!c.productPicker.get().length && !c.nps.checked && good(top)) {
+    const group = top.evidence && top.evidence.set_group;
+    (group ? sg.product.filter((x) => x.evidence && x.evidence.set_group === group && good(x)) : [top]).forEach((x) => c.apply('product', x));
+    filled.push('Product');
+  }
+  for (const [field, picker, label] of [['concept', c.conceptPicker, 'Concept'], ['media_type', c.mediaPicker, 'Media'], ['creator', c.creatorPicker, 'Creator'], ['creative_style', c.stylePicker, 'Creative style']]) {
+    const x = sg[field] && sg[field][0];
+    if (!picker.get().length && good(x)) { c.apply(field, x); filled.push(label); }
+  }
+  return filled;
+}
+
+async function mmSessNext(fromId) {
+  const s = mmRv.sess;
+  if (!s || s.ended) return;
+  let c = mmSessCandidates(fromId);
+  if (!c.length) {
+    // this page is used up: page forward. Needs-review style lists shrink as creatives are confirmed, so they restart at page 1.
+    const pagedOut = MM_RV_NEEDS_FILTERS.includes(mmState.filter);
+    const body = document.getElementById('mm-modal-body');
+    body.innerHTML = `${mmSessBarHtml()}<div class="mp-table-empty">Loading more creatives…</div>`;
+    let p = pagedOut ? 1 : mmRv.page + 1;
+    const tried = new Set();
+    while (!c.length && !tried.has(p) && (p <= Math.max(1, mmRv.totalPages) || (pagedOut && !tried.size))) {
+      tried.add(p); mmState.page = p;
+      await loadMetaMatching(); await mmRv.batchPromise;
+      if (!mmRv.sess || mmRv.sess.ended) return;
+      c = mmSessCandidates(null);
+      if (!c.length) p += 1;
+    }
+  }
+  if (!c.length) { mmSessFinish(); return; }
+  await mmSessOpen(c[0]);
+}
+
+function mmSessFinish() {
+  const s = mmRv.sess;
+  if (!s) return;
+  s.ctx = null; s.finished = true;
+  document.getElementById('mm-modal-title').textContent = 'Review finished';
+  document.getElementById('mm-modal-body').innerHTML = `${mmSessBarHtml()}
+    <div class="mm-sess-done"><h4>You’re all caught up</h4><p>No more creatives to review here. This session: <b>${s.done}</b> confirmed, <b>${s.skipped}</b> skipped.</p>
+    <button type="button" class="btn btn-primary" id="mm-sess-close">Close review</button></div>`;
+  document.getElementById('mm-sess-close').addEventListener('click', mmSessClose);
+  document.getElementById('mm-sess-close').focus();
+}
+
+function mmSessClose() { closeModal('meta-match-modal'); }
+// called by closeModal for the review modal: ends the session and refreshes the table behind it
+function mmSessOnClosed() {
+  const s = mmRv.sess;
+  if (!s) return;
+  s.ended = true; mmRv.sess = null;
+  document.querySelectorAll('#mm-body tr.mm-row-cur').forEach((r) => r.classList.remove('mm-row-cur'));
+  mmRvStatus(`Review closed — ${s.done} confirmed, ${s.skipped} skipped.`, 'ok');
+  loadMetaMatching();
+}
+
+function mmSessSetBusy(b) {
+  document.querySelectorAll('#mm-sess-confirm, #mm-sess-skip, #mm-sess-close-btn').forEach((x) => { x.disabled = b; });
+}
+
+async function mmSessConfirm() {
+  const s = mmRv.sess;
+  if (!s || !s.ctx || s.ended || s.finished) return false;
   if (mmRv.busy || Date.now() < mmRv.cooldownUntil) return false; // never a double confirmation
-  const f = mmRvForm(id);
+  const ctx = s.ctx; const id = ctx.adId;
+  const f = ctx.readForm();
   const rd = mmRvReadiness(f);
+  ctx.errEl.textContent = '';
   if (!rd.ready) {
-    mmRvStatus(`Not confirmed — ${rd.why.toLowerCase()}.`, 'warn');
-    if (mmRv.selectedId !== id) await mmRvSelect(id, { focus: true });
+    ctx.errEl.textContent = `${rd.why}.`;
+    toast(`${rd.why}.`, true);
+    const inp = document.querySelector('#mm-f-products .mm-picker-input'); if (inp) inp.focus();
     return false;
   }
-  mmRv.busy = true;
-  const tr = mmRvRow(id);
-  if (tr) { tr.classList.add('mm-row-busy'); tr.classList.remove('mm-row-error'); }
-  document.querySelectorAll('#mm-body .mm-rv-panel button').forEach((b) => { b.disabled = true; });
+  mmRv.busy = true; mmSessSetBusy(true);
   let ok = false;
   try {
-    const ws = await api(`/meta-ad-matching/ads/${encodeURIComponent(id)}/confirm`, { method: 'POST', body: JSON.stringify(mmRvPayload(f)) });
+    const payload = mmRvPayload(f);
+    payload.ad_setup_id = f.adSetupId || null; // only if a person linked one in this modal
+    const ws = await api(`/meta-ad-matching/ads/${encodeURIComponent(id)}/confirm`, { method: 'POST', body: JSON.stringify(payload) });
     ok = true;
     const dup = Number(ws.applied_to_same_creative) || 0;
-    Object.assign(a, {
+    const a = mmRv.rows.get(id); const info = mmRvInfo(id);
+    if (a) Object.assign(a, {
       match_status: 'confirmed', match_method: 'manual', skipped: false, excluded: false, not_product_specific: !!f.nps,
-      confirmed_products: f.nps ? null : f.products.map((x) => x.label).join(', '), confirmed_concept: f.nps || !f.concept ? null : f.concept.label,
+      confirmed_products: f.nps ? null : f.products.map((x) => x.label).join(', '), confirmed_concept: f.concept ? f.concept.label : null, confirmed_concept_legacy: !!(f.concept && f.concept.legacy),
       confirmed_creator: f.creator || null, confirmed_media: f.media ? f.media.label : null,
     });
-    info.reviewable = false; info.match_status = 'confirmed'; info.blocked_reason = 'confirmed';
-    mmRv.forms.delete(id);
-    mmRv.done += 1;
+    if (info) { info.reviewable = false; info.match_status = 'confirmed'; info.blocked_reason = 'confirmed'; }
+    s.done += 1; mmRv.done += 1;
     if (mmRv.left !== null) mmRv.left = Math.max(0, mmRv.left - 1);
-    mmRvClosePanel();
     mmRvRerenderRow(id, 'mm-row-done');
     // copies of this exact creative that are on this page changed too (they inherit through the existing protected path)
-    const sibs = mmRvIds().filter((x) => x !== id && (mmRv.rows.get(x) || {}).meta_creative_id && mmRv.rows.get(x).meta_creative_id === a.meta_creative_id);
-    if (sibs.length) { try { await mmRvRefreshStates(sibs); } catch (e) { /* the next reload shows them */ } }
-    const parts = [`Confirmed${a.ad_name ? ` “${a.ad_name.length > 48 ? `${a.ad_name.slice(0, 47)}…` : a.ad_name}”` : ''}.`];
-    parts.push(dup ? `Also applied to ${dup} other ad${dup === 1 ? '' : 's'} using the same creative.` : 'No other unclassified ads use this exact creative.');
-    mmRvStatus(`✓ ${parts.join(' ')}`, 'ok');
-    toast(`✓ ${parts[0]}${dup ? ` +${dup} same-creative ad${dup === 1 ? '' : 's'}` : ''}`);
-    mmRvUpdateBar();
-    mmRvScheduleCounts();
-    await mmRvAdvance(id);
+    const sibs = mmRvIds().filter((x) => x !== id && mmRvKey(x) === mmRvKey(id));
+    if (sibs.length) { try { await mmRvRefreshStates(sibs); } catch (e) { /* the closing refresh shows them */ } }
+    const nm = a && a.ad_name ? ` “${a.ad_name.length > 40 ? `${a.ad_name.slice(0, 39)}…` : a.ad_name}”` : '';
+    mmRvStatus(`✓ Confirmed${nm}.${dup ? ` Also applied to ${dup} other ad${dup === 1 ? '' : 's'} using the same creative.` : ''}`, 'ok');
+    toast(`✓ Confirmed${dup ? ` (+${dup} same-creative ad${dup === 1 ? '' : 's'})` : ''}`);
+    mmRvUpdateBar(); mmRvScheduleCounts();
+    mmRv.cooldownUntil = Date.now() + MM_RV_COOLDOWN_MS;
+    await mmSessNext(id);
   } catch (e) {
     const msg = e && e.message ? e.message : 'Unknown error';
-    if (!ok) {
+    if (!ok) { // the confirmation failed: stay on this creative and say what needs correcting
+      if (ctx.errEl) ctx.errEl.textContent = msg;
       mmRvStatus(`✗ Couldn’t confirm: ${msg}`, 'error');
       toast(`Couldn’t confirm: ${msg}`, true);
-      const t2 = mmRvRow(id);
-      if (t2) { t2.classList.remove('mm-row-busy'); t2.classList.add('mm-row-error'); }
-      const m = document.querySelector('#mm-body .mm-rv-panel .mm-rv-msg');
-      if (m) m.textContent = msg;
+    } else {
+      mmRvStatus(`Confirmed, but couldn’t load the next creative: ${msg}`, 'error');
+      toast(msg, true);
     }
   } finally {
     mmRv.busy = false;
-    if (ok) mmRv.cooldownUntil = Date.now() + MM_RV_COOLDOWN_MS;
-    // re-enable the buttons of whichever editor is open NOW (after a success that is the NEXT row's), keeping Confirm disabled while that row is not ready
-    document.querySelectorAll('#mm-body .mm-rv-panel .mm-rv-actions button').forEach((b) => { b.disabled = false; });
-    const done = mmRvRow(id); if (done) done.classList.remove('mm-row-busy');
-    if (mmRv.selectedId) { const rd2 = mmRvReadiness(mmRvForm(mmRv.selectedId)); const cb = document.querySelector('#mm-body .mm-rv-panel .mm-rv-confirm'); if (cb) cb.disabled = !rd2.ready; }
+    mmSessSetBusy(false);
   }
   return ok;
 }
 
-async function mmRvSkip(id) {
-  if (mmRv.busy || !mmRvReviewable(id)) return;
-  mmRv.busy = true;
+async function mmSessSkip() {
+  const s = mmRv.sess;
+  if (!s || !s.ctx || s.ended || s.finished || mmRv.busy) return;
+  const id = s.ctx.adId;
+  mmRv.busy = true; mmSessSetBusy(true);
   try {
     await api(`/meta-ad-matching/ads/${encodeURIComponent(id)}/skip`, { method: 'POST' });
-    mmRv.skipped.add(id);
+    s.skipped += 1;
     const a = mmRv.rows.get(id); if (a) a.skipped = true;
-    mmRvClosePanel();
-    mmRvRerenderRow(id, 'mm-row-skipped');
     mmRvStatus('Skipped for now — nothing was classified.', 'ok');
-    await mmRvAdvance(id);
-  } catch (e) { mmRvStatus(`✗ Couldn’t skip: ${e.message}`, 'error'); toast(e.message, true); } finally { mmRv.busy = false; }
+    await mmSessNext(id);
+  } catch (e) {
+    if (s.ctx && s.ctx.errEl) s.ctx.errEl.textContent = e.message;
+    mmRvStatus(`✗ Couldn’t skip: ${e.message}`, 'error'); toast(e.message, true);
+  } finally { mmRv.busy = false; mmSessSetBusy(false); }
 }
 
-// the ✓ button in a row
-async function mmRvOnTick(id) {
-  if (!mmRvReviewable(id)) return;
-  await mmRvConfirm(id);
-}
+document.getElementById('mm-rv-start').addEventListener('click', () => { mmSessStart(null); });
 
-document.getElementById('mm-rv-start').addEventListener('click', () => {
-  const first = mmRvIds().find((x) => mmRvReviewable(x) && !mmRv.skipped.has(x)) || mmRvIds().find(mmRvReviewable);
-  if (first) mmRvSelect(first, { focus: true });
-});
-
-// Keyboard. Every guard below is deliberate: Enter confirms ONLY when the selected row itself has focus.
+// Keyboard. Enter confirms ONLY when focus is not in a text field / dropdown (and not on a button or link, which act natively).
 document.addEventListener('keydown', (e) => {
-  if (mmState.view !== 'matching' || !mmRv.selectedId) return;
-  if (e.defaultPrevented || e.isComposing) return;
-  if (e.ctrlKey || e.metaKey || e.altKey) return;
-  if (document.querySelector('.modal-backdrop.show')) return; // a dialog is open
-  const row = mmRvRow(mmRv.selectedId);
-  if (!row || e.target !== row) return; // typing in a field, or focus is on a button / link / anywhere else: not ours
-  if (e.key === 'Enter') {
-    e.preventDefault();
-    if (e.repeat || e.shiftKey) return; // a held key never confirms twice
-    mmRvConfirm(mmRv.selectedId);
-  } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-    e.preventDefault();
-    const n = mmRvNext(mmRv.selectedId, e.key === 'ArrowDown' ? 1 : -1);
-    if (n) mmRvSelect(n, { focus: true });
-  } else if (e.key === 'e' || e.key === 'E') {
-    e.preventDefault();
-    const inp = document.querySelector('#mm-body .mm-rv-panel .mm-picker-input');
-    if (inp) inp.focus();
-  } else if (e.key === 'Escape') {
-    e.preventDefault();
-    mmRvClosePanel(); row.blur();
-  }
+  const s = mmRv.sess;
+  if (!s || !s.ctx || e.key !== 'Enter') return;
+  const modal = document.getElementById('meta-match-modal');
+  if (!modal.classList.contains('show')) return;
+  const t = e.target;
+  const typing = !!(t && t.matches && t.matches('textarea, select, [contenteditable=""], [contenteditable="true"], input:not([type="checkbox"]):not([type="radio"]):not([type="button"])'));
+  if (typing) { if (modal.contains(t)) s.enterBlockedUntil = Date.now() + MM_RV_ENTER_GUARD_MS; return; } // a field or dropdown used this Enter
+  if (e.defaultPrevented || e.isComposing || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+  if ([...document.querySelectorAll('.modal-backdrop.show')].some((m) => m !== modal)) return; // another dialog is on top
+  if (t && t.closest && t.closest('button, a, [role="button"]')) return; // native activation of the focused control
+  if (!(t === document.body || (t && modal.contains(t)))) return;
+  e.preventDefault();
+  if (e.repeat || Date.now() < s.enterBlockedUntil) return; // a held key never confirms twice
+  mmSessConfirm();
 });
 
 // ── Concept inventory (read-only): every concept in use, unique creatives vs Meta ads, spelling variants side by side ───
@@ -2417,7 +2381,7 @@ document.addEventListener('click', async (e) => {
 // opts: { options:[{key,label,hint}] | fetch:async(q)->options, multi, allowFree,
 //         placeholder, selected:[{key,label,...}], onChange(selected) }
 // Where a picker's dropdown opens. Down when it fits below the field; otherwise up when there is more room above; always capped at
-// baseMax (300 px grouped, 176 px plain) and, when the chosen side is tighter than that, shrunk to the room that side has so the
+// baseMax (300 px long list, 176 px plain) and, when the chosen side is tighter than that, shrunk to the room that side has so the
 // whole list stays inside the visible viewport (it scrolls internally). Pure: inputs are measurements, output is the decision.
 function mmDropdownPlacement({ hostTop, hostBottom, viewportH, naturalH, baseMax, margin = 8, minH = 72, keepUp = null }) {
   const below = viewportH - hostBottom - margin;
@@ -2441,9 +2405,9 @@ function mmPicker(host, opts) {
   const input = host.querySelector('.mm-picker-input');
   const list = host.querySelector('.mm-picker-list');
   input.placeholder = opts.placeholder || 'Search…';
-  const grouped = !!opts.groupOf;
-  if (grouped) list.classList.add('grouped');
-  const baseMax = grouped ? 300 : 176; // the dropdown's maximum height (internal scrolling beyond it)
+  const longList = !!opts.longList; // a long, searchable, continuous list (the concept list): every match is shown, up to 300px tall
+  if (longList) list.classList.add('long');
+  const baseMax = longList ? 300 : 176; // the dropdown's maximum height (internal scrolling beyond it)
   // open downwards when there is room, upwards when there is not, and never outside the viewport
   let tracking = false;
   let lockedUp = null; // direction chosen when this dropdown opened (null = closed)
@@ -2466,7 +2430,7 @@ function mmPicker(host, opts) {
     input.style.display = !opts.multi && selected.length ? 'none' : '';
     input.disabled = !!host.dataset.disabled;
   };
-  // a match on the label, the hint, or (for grouped lists) a known historical spelling of the item; grouped lists show EVERY match
+  // a match on the label, the hint, or a known historical spelling of the item; long lists show EVERY match
   const matchOf = (o, term) => {
     if (!term) return { ok: true, via: null };
     if (o.label.toLowerCase().includes(term) || String(o.hint || '').toLowerCase().includes(term)) return { ok: true, via: null };
@@ -2482,9 +2446,9 @@ function mmPicker(host, opts) {
       const m = matchOf(o, term);
       if (m.ok) rows.push(m.via ? { ...o, _via: m.via } : o);
     }
-    return grouped ? rows : rows.slice(0, 8);
+    return longList ? rows : rows.slice(0, 8);
   };
-  // entries = what the keyboard can land on: the options, then the explicit Add / legacy rows. Group headings are NOT entries.
+  // entries = what the keyboard can land on: the options, then the explicit Add / legacy rows.
   let entries = [];
   const renderList = () => {
     const rows = filtered();
@@ -2495,14 +2459,10 @@ function mmPicker(host, opts) {
     if (opts.allowFree && term && !exact) entries.push({ kind: 'free' });
     if (opts.addNew && term && !exact) entries.push({ kind: 'add' });
     if (active >= entries.length) active = Math.max(0, entries.length - 1);
-    let html = ''; let lastGroup = Symbol('none');
+    let html = '';
     entries.forEach((e, i) => {
       const cls = `${i === active ? ' active' : ''}`;
       if (e.kind === 'opt') {
-        if (grouped) {
-          const g = opts.groupOf(e.item) || '';
-          if (g !== lastGroup) { html += `<div class="mm-opt-group" role="presentation">${escapeHtml(g)}</div>`; lastGroup = g; }
-        }
         const via = e.item._via ? `<small>matches “${escapeHtml(e.item._via)}”</small>` : (e.item.hint ? `<small>${escapeHtml(e.item.hint)}</small>` : '');
         html += `<div class="mm-opt${cls}" role="option" aria-selected="${i === active}" data-e="${i}">${escapeHtml(e.item.label)}${via}</div>`;
       } else if (e.kind === 'free') html += `<div class="mm-opt free${cls}" role="option" data-e="${i}">Use “${escapeHtml(term)}” as legacy / free text</div>`;
@@ -2521,6 +2481,7 @@ function mmPicker(host, opts) {
   const pick = (item) => {
     selected = opts.multi ? [...selected, item] : [item];
     input.value = ''; open = false; active = 0; renderSel(); renderList(); emit();
+    if (opts.blurOnPick) input.blur(); // review modal: leave the field so the next Enter belongs to the modal, not to the picker
   };
   // save the typed name to the persistent list (server trims it and resolves case-insensitive duplicates to the existing spelling), then select it
   let adding = false;
@@ -2552,7 +2513,7 @@ function mmPicker(host, opts) {
   input.addEventListener('focus', () => { open = true; active = 0; refetch(); renderList(); });
   input.addEventListener('input', () => { open = true; active = 0; refetch(); renderList(); });
   input.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') { open = false; renderList(); return; }
+    if (e.key === 'Escape') { if (opts.blurOnPick && !open) input.blur(); open = false; renderList(); return; }
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
       if (!open) { open = true; renderList(); return; }
@@ -2568,7 +2529,7 @@ function mmPicker(host, opts) {
   list.addEventListener('mousedown', (e) => {
     e.preventDefault();
     const o = e.target.closest('.mm-opt');
-    if (!o || o.classList.contains('none') || o.dataset.e === undefined) return; // group headings and "No matches" are never choices
+    if (!o || o.classList.contains('none') || o.dataset.e === undefined) return; // "No matches" is never a choice
     choose(entries[Number(o.dataset.e)]);
   });
   input.addEventListener('blur', () => { open = false; setTimeout(renderList, 0); });
@@ -2589,11 +2550,10 @@ async function mmLoadOptions() {
 
 // Concept / creator choices come from the saved lists. concept_types rows are saved by id; a concept a person added in Ad Matching is
 // saved as its label (vocab_id only identifies the list entry).
-const MM_ADDED_GROUP = 'ADDED IN AD MATCHING';
-const mmConceptGroup = (x) => x.group || MM_ADDED_GROUP;
+// (the approved list arrives in its approved order, similar concepts together; it is shown as ONE continuous list)
 const mmConceptItem = (x) => (x.id
-  ? { key: `ct:${x.id}`, label: x.label, concept_type_id: x.id, vocab_id: x.vocab_id || null, group: mmConceptGroup(x), aliases: x.aliases || [] }
-  : { key: `cv:${x.vocab_id}`, label: x.label, concept_type_id: null, vocab_id: x.vocab_id, group: mmConceptGroup(x), aliases: x.aliases || [] });
+  ? { key: `ct:${x.id}`, label: x.label, concept_type_id: x.id, vocab_id: x.vocab_id || null, aliases: x.aliases || [] }
+  : { key: `cv:${x.vocab_id}`, label: x.label, concept_type_id: null, vocab_id: x.vocab_id, aliases: x.aliases || [] });
 // the pill for a concept ALREADY assigned: approved / alias -> its approved concept (option key), anything else -> visible legacy text
 function mmConceptPill(c, options) {
   if (!c) return null;
@@ -2606,7 +2566,7 @@ function mmConceptPill(c, options) {
 async function mmAddConcept(term) {
   const r = await api('/meta-ad-matching/vocab/concepts', { method: 'POST', body: JSON.stringify({ name: term }) });
   const o = await mmLoadOptions();
-  const entry = { id: r.concept_type_id || null, vocab_id: r.vocab_id || null, label: r.name, source: r.source, group: null, aliases: [] };
+  const entry = { id: r.concept_type_id || null, vocab_id: r.vocab_id || null, label: r.name, source: r.source, aliases: [] };
   if (!o.concepts.some((c) => c.label.toLowerCase() === r.name.toLowerCase())) o.concepts.push(entry);
   toast(r.created ? `Added “${r.name}” to the concept list.` : `“${r.name}” is already in the concept list — selected it.`);
   return mmConceptItem(entry);
@@ -2630,21 +2590,29 @@ function mmSuggChips(items, field, limit = 2) {
     <div class="mm-reason" title="${escapeHtml(items[0].reason)}">${escapeHtml(items[0].reason)}</div></div>`;
 }
 
-async function openMatchWorkspace(adId) {
+async function openMatchWorkspace(adId, opts = {}) {
+  const review = !!opts.review;
   const title = document.getElementById('mm-modal-title');
   const body = document.getElementById('mm-modal-body');
-  title.textContent = 'Match Meta ad';
-  body.innerHTML = '<div class="mp-table-empty">Loading…</div>';
+  title.textContent = review ? 'Review creative' : 'Match Meta ad';
+  body.innerHTML = `${review && mmRv.sess ? mmSessBarHtml() : ''}<div class="mp-table-empty">Loading…</div>`;
   openModal('meta-match-modal');
   try {
-    const [ws, options] = await Promise.all([api(`/meta-ad-matching/ads/${encodeURIComponent(adId)}`), mmLoadOptions()]);
-    renderMatchWorkspace(ws, options);
+    // a review reads the STORED suggestions only (?refresh=0): opening a creative recomputes and writes nothing
+    const [ws, options] = await Promise.all([api(`/meta-ad-matching/ads/${encodeURIComponent(adId)}${review ? '?refresh=0' : ''}`), mmLoadOptions()]);
+    if (review && (!mmRv.sess || mmRv.sess.token !== opts.token)) return; // the session moved on or ended while this loaded
+    renderMatchWorkspace(ws, options, review ? mmRv.sess : null);
   } catch (e) {
-    body.innerHTML = `<div class="mp-table-empty">${escapeHtml(e.message)}</div>`;
+    if (review && mmRv.sess && mmRv.sess.token === opts.token) {
+      body.innerHTML = `${mmSessBarHtml()}<div class="mp-table-empty">${escapeHtml(e.message)}</div>
+        <div class="mm-actions"><button type="button" class="btn btn-ghost" id="mm-sess-close-btn">Close review</button><button type="button" class="btn btn-primary" id="mm-sess-skip">Skip & Next</button></div>`;
+      document.getElementById('mm-sess-close-btn').addEventListener('click', mmSessClose);
+      document.getElementById('mm-sess-skip').addEventListener('click', () => { const s = mmRv.sess; if (s) { s.ctx = { adId, errEl: { textContent: '' } }; mmSessSkip(); } });
+    } else body.innerHTML = `<div class="mp-table-empty">${escapeHtml(e.message)}</div>`;
   }
 }
 
-function renderMatchWorkspace(ws, options) {
+function renderMatchWorkspace(ws, options, sess = null) {
   const body = document.getElementById('mm-modal-body');
   const ad = ws.ad;
   const cls = ws.classification;
@@ -2697,6 +2665,7 @@ function renderMatchWorkspace(ws, options) {
     : cr.other_ads > 0 ? `<div class="mm-muted-line">This exact creative is used in ${cr.other_ads} other ad${cr.other_ads === 1 ? '' : 's'}${cr.state === 'source' && !cls.confirmed ? ' — a person has already classified it.' : '. Confirming this one covers the others that nobody has classified.'}</div>` : '';
 
   body.innerHTML = `
+    ${sess ? mmSessBarHtml() : ''}
     <div class="mm-grid">
       <section class="mm-evidence">
         <div class="mm-ws-thumb">${ccThumbHtml(ad.meta_ad_id, { large: true })}</div>
@@ -2721,7 +2690,8 @@ function renderMatchWorkspace(ws, options) {
 
       <section class="mm-mapping" id="mm-mapping">
         <div class="mm-mapping-head">${stateNote}
-          ${hasValues ? '' : '<button type="button" class="btn btn-ghost btn-sm" id="mm-fill">Fill from suggestions</button>'}</div>
+          ${hasValues || sess ? '' : '<button type="button" class="btn btn-ghost btn-sm" id="mm-fill">Fill from suggestions</button>'}</div>
+        ${sess ? '<div class="mm-sess-note" id="mm-sess-note"></div>' : ''}
 
         <div class="mm-field mm-full"><div class="mm-lab"><span>WNDRR Ad Setup</span><small>optional — only if this ad came from the pipeline</small></div>
           <div class="mm-inline"><div id="mm-f-adsetup" class="mm-grow"></div><span id="mm-adsetup-prefill"></span></div>
@@ -2746,7 +2716,11 @@ function renderMatchWorkspace(ws, options) {
         <div class="mm-error" id="mm-error"></div>
       </section>
     </div>
-    <div class="mm-actions">
+    ${sess ? `<div class="mm-actions mm-sess-actions">
+      <div class="mm-actions-left"><button type="button" class="btn btn-ghost" id="mm-sess-close-btn">Close Review</button><button type="button" class="btn btn-ghost" id="mm-sess-skip">Skip &amp; Next</button></div>
+      <span class="mm-sess-hint">Press <kbd>Enter</kbd> to confirm</span>
+      <button type="button" class="btn btn-primary" id="mm-sess-confirm">Confirm &amp; Next</button>
+    </div>` : `<div class="mm-actions">
       <div class="mm-actions-left">
         ${cls.excluded
           ? '<button type="button" class="btn btn-ghost btn-sm" id="mm-include">Include again</button>'
@@ -2754,11 +2728,12 @@ function renderMatchWorkspace(ws, options) {
         ${hasValues ? `<button type="button" class="btn btn-ghost btn-sm" id="mm-clear">${cls.auto_matched ? 'Reject auto-match' : 'Clear mapping'}</button>` : '<button type="button" class="btn btn-ghost btn-sm" id="mm-skip">Skip</button>'}
       </div>
       <button type="button" class="btn btn-primary" id="mm-confirm">${cls.auto_matched ? 'Confirm' : 'Confirm Mapping'}</button>
-    </div>`;
+    </div>`}`;
 
   ccHydrateThumbs(body);
   // ---- pickers ----
   const adSetupPicker = mmPicker(document.getElementById('mm-f-adsetup'), {
+    blurOnPick: !!sess,
     multi: false, placeholder: 'Search Ad Setups by name or ID…',
     selected: cls.ad_setup ? [{ key: cls.ad_setup.id, label: cls.ad_setup.generated_name }] : [],
     fetch: async (q) => (await api(`/meta-ad-matching/ad-setups?q=${encodeURIComponent(q)}`)).map((x) => ({ key: x.id, label: x.generated_name, hint: `#${x.id}` })),
@@ -2766,24 +2741,29 @@ function renderMatchWorkspace(ws, options) {
   });
   const form = { ad_setup: cls.ad_setup ? { key: cls.ad_setup.id } : null };
   const productPicker = mmPicker(document.getElementById('mm-f-products'), {
+    blurOnPick: !!sess,
     multi: true, placeholder: 'Search products…', options: options.products.map((x) => ({ key: x.key, label: x.label, hint: x.key })),
     selected: cls.products.map((x) => ({ key: x.product_code, label: x.product_name || x.product_code })),
   });
   const mediaOpts = options.media_types.map((x) => ({ key: x.key, label: x.label }));
   const mediaPicker = mmPicker(document.getElementById('mm-f-media'), {
+    blurOnPick: !!sess,
     multi: false, placeholder: 'Video, Image, Carousel, GIF…', options: mediaOpts,
     selected: cls.media_type ? mediaOpts.filter((x) => x.key === cls.media_type) : [],
   });
   const conceptPicker = mmPicker(document.getElementById('mm-f-concept'), {
-    multi: false, addNew: mmAddConcept, addLabel: 'concept', placeholder: 'Search or add a concept…', groupOf: (x) => x.group,
+    blurOnPick: !!sess,
+    multi: false, addNew: mmAddConcept, addLabel: 'concept', placeholder: 'Search or add a concept…', longList: true,
     options: options.concepts.map(mmConceptItem),
     selected: cls.concept ? [mmConceptPill(cls.concept, options)] : [],
   });
   const creatorPicker = mmPicker(document.getElementById('mm-f-creator'), {
+    blurOnPick: !!sess,
     multi: false, addNew: mmAddCreator, addLabel: 'creator', placeholder: 'Search or add a creator…', options: options.creators.map((x) => ({ key: x, label: x })),
     selected: cls.creator_name ? [{ key: cls.creator_name, label: cls.creator_name }] : [],
   });
   const stylePicker = mmPicker(document.getElementById('mm-f-style'), {
+    blurOnPick: !!sess,
     multi: false, placeholder: 'Search creative styles…', options: options.creative_styles.map((x) => ({ key: x.id, label: x.label })),
     selected: cls.creative_style_id ? options.creative_styles.filter((x) => x.id === cls.creative_style_id).map((x) => ({ key: x.id, label: x.label })) : [],
   });
@@ -2858,7 +2838,8 @@ function renderMatchWorkspace(ws, options) {
       done(n ? `${msg} Also applied to ${n} similar ad${n === 1 ? '' : 's'}.` : msg);
     } catch (e) { errEl.textContent = e.message; }
   };
-  document.getElementById('mm-confirm').addEventListener('click', () => {
+  const confirmBtn = document.getElementById('mm-confirm');
+  if (confirmBtn) confirmBtn.addEventListener('click', () => {
     const concept = conceptPicker.get()[0];
     const style = stylePicker.get()[0];
     const creator = creatorPicker.get()[0];
@@ -2891,6 +2872,40 @@ function renderMatchWorkspace(ws, options) {
   });
   const include = document.getElementById('mm-include');
   if (include) include.addEventListener('click', () => act('/include', { method: 'POST' }, 'Included again.'));
+
+  // ---- review session: this modal IS the review editor ----
+  if (sess) {
+    document.getElementById('mm-sess-confirm').addEventListener('click', () => mmSessConfirm());
+    document.getElementById('mm-sess-skip').addEventListener('click', () => mmSessSkip());
+    document.getElementById('mm-sess-close-btn').addEventListener('click', mmSessClose);
+    sess.ctx = {
+      adId: ad.meta_ad_id, errEl,
+      productPicker, conceptPicker, mediaPicker, creatorPicker, stylePicker, nps, apply: applySuggestion,
+      // the form as the SAME shape rapid confirmation has always validated and sent
+      readForm: () => {
+        const c = conceptPicker.get()[0]; const cr = creatorPicker.get()[0]; const md = mediaPicker.get()[0]; const st = stylePicker.get()[0]; const su = adSetupPicker.get()[0];
+        return {
+          products: productPicker.get().map((x) => ({ key: x.key, label: x.label })), nps: nps.checked,
+          concept: c ? { label: c.label, concept_type_id: c.concept_type_id || null, vocab_id: c.vocab_id || null, legacy: !!c.free } : null,
+          creator: cr ? cr.label : null, media: md ? { key: md.key, label: md.label } : null, style: st ? { key: st.key, label: st.label } : null, adSetupId: su ? su.key : null,
+        };
+      },
+    };
+    // automatically select the reliable stored suggestions INSIDE their fields (never an Ad Setup, never a guess)
+    const filled = hasValues ? [] : mmAutofill(ws, sess.ctx);
+    const fieldHost = { Product: 'mm-f-products', Concept: 'mm-f-concept', Media: 'mm-f-media', Creator: 'mm-f-creator', 'Creative style': 'mm-f-style' };
+    filled.forEach((name) => {
+      const f = document.getElementById(fieldHost[name]).closest('.mm-field');
+      f.classList.add('mm-autofilled');
+      const clear = () => { f.classList.remove('mm-autofilled'); f.removeEventListener('pointerdown', clear); f.removeEventListener('keydown', clear); };
+      f.addEventListener('pointerdown', clear); f.addEventListener('keydown', clear); // touching a suggested field means a person is checking it
+    });
+    document.getElementById('mm-sess-note').innerHTML = filled.length
+      ? `<b>Suggestions filled in:</b> ${filled.join(', ')}. Check them against the creative, then press <kbd>Enter</kbd> (or Confirm &amp; Next). Nothing is saved until you confirm.${productPicker.get().length || nps.checked ? '' : ' <b>No product could be identified reliably — choose one, or tick Not product-specific.</b>'}`
+      : `<b>No reliable suggestion for this creative.</b> Choose a product (or tick Not product-specific), then press <kbd>Enter</kbd> to confirm.`;
+    // focus the modal itself so Enter belongs to it as soon as the creative is shown
+    body.setAttribute('tabindex', '-1'); body.focus({ preventScroll: true });
+  }
 }
 
 // ── Meta Sync (Settings, temporary admin-only operator control) ─────────
@@ -4968,6 +4983,7 @@ function populateCategorySelect() {
 // ── Modals ───────────────────────────────────────────
 function closeModal(id) {
   document.getElementById(id).classList.remove('show');
+  if (id === 'meta-match-modal' && typeof mmSessOnClosed === 'function') mmSessOnClosed(); // closing the review modal ends the review session
 }
 function openModal(id) {
   document.getElementById(id).classList.add('show');
