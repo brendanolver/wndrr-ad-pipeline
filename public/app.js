@@ -2416,6 +2416,19 @@ document.addEventListener('click', async (e) => {
 // ── Searchable selector (no giant <select>s) ────────────────────────────
 // opts: { options:[{key,label,hint}] | fetch:async(q)->options, multi, allowFree,
 //         placeholder, selected:[{key,label,...}], onChange(selected) }
+// Where a picker's dropdown opens. Down when it fits below the field; otherwise up when there is more room above; always capped at
+// baseMax (300 px grouped, 176 px plain) and, when the chosen side is tighter than that, shrunk to the room that side has so the
+// whole list stays inside the visible viewport (it scrolls internally). Pure: inputs are measurements, output is the decision.
+function mmDropdownPlacement({ hostTop, hostBottom, viewportH, naturalH, baseMax, margin = 8, minH = 72, keepUp = null }) {
+  const below = viewportH - hostBottom - margin;
+  const above = hostTop - margin;
+  const want = Math.min(naturalH, baseMax);
+  // keepUp (true / false) = the direction already chosen for this open: typing shrinks the list but must not make it jump sides
+  const up = keepUp === null ? (below < want && above > below) : keepUp;
+  const room = up ? above : below;
+  return { up, maxHeight: Math.round(Math.max(minH, Math.min(baseMax, room))) };
+}
+
 function mmPicker(host, opts) {
   let selected = (opts.selected || []).slice();
   let options = opts.options || [];
@@ -2430,6 +2443,22 @@ function mmPicker(host, opts) {
   input.placeholder = opts.placeholder || 'Search…';
   const grouped = !!opts.groupOf;
   if (grouped) list.classList.add('grouped');
+  const baseMax = grouped ? 300 : 176; // the dropdown's maximum height (internal scrolling beyond it)
+  // open downwards when there is room, upwards when there is not, and never outside the viewport
+  let tracking = false;
+  let lockedUp = null; // direction chosen when this dropdown opened (null = closed)
+  const place = (recompute = true) => {
+    list.style.maxHeight = `${baseMax}px`; // measure the list at its full allowed height first
+    const hr = host.getBoundingClientRect();
+    const d = mmDropdownPlacement({ hostTop: hr.top, hostBottom: hr.bottom, viewportH: window.innerHeight, naturalH: list.scrollHeight, baseMax, keepUp: recompute ? null : lockedUp });
+    lockedUp = d.up;
+    list.style.maxHeight = `${d.maxHeight}px`;
+    host.classList.toggle('mm-flip', d.up);
+  };
+  const onMove = () => place(true); // scrolling / resizing re-evaluates the direction
+  const track = (on) => {
+    if (on && !tracking) { window.addEventListener('scroll', onMove, true); window.addEventListener('resize', onMove); tracking = true; } else if (!on && tracking) { window.removeEventListener('scroll', onMove, true); window.removeEventListener('resize', onMove); tracking = false; lockedUp = null; }
+  };
 
   const emit = () => { if (opts.onChange) opts.onChange(selected.slice()); };
   const renderSel = () => {
@@ -2484,6 +2513,8 @@ function mmPicker(host, opts) {
     list.style.display = open ? '' : 'none';
     input.setAttribute('aria-expanded', open ? 'true' : 'false');
     list._rows = rows;
+    track(open);
+    if (open) place(lockedUp === null); // first render of an open: decide the side; later renders (typing) keep it
     const el = list.querySelector('.mm-opt.active');
     if (open && el && el.scrollIntoView) { const lt = list.getBoundingClientRect(); const r = el.getBoundingClientRect(); if (r.top < lt.top) list.scrollTop -= (lt.top - r.top) + 28; else if (r.bottom > lt.bottom) list.scrollTop += (r.bottom - lt.bottom) + 4; }
   };
@@ -2708,7 +2739,7 @@ function renderMatchWorkspace(ws, options) {
             <div id="mm-f-concept"></div>${mmSuggChips(sg.concept, 'concept')}</div>
           <div class="mm-field"><div class="mm-lab"><span>Creator</span></div>
             <div id="mm-f-creator"></div>${mmSuggChips(sg.creator, 'creator')}</div>
-          <div class="mm-field mm-dropup"><div class="mm-lab"><span>Creative Style</span><small>separate from Concept</small></div>
+          <div class="mm-field"><div class="mm-lab"><span>Creative Style</span><small>separate from Concept</small></div>
             <div id="mm-f-style"></div>${mmSuggChips(sg.creative_style, 'creative_style')}</div>
           <div class="mm-field mm-reviewbox">${!cls.confirmed && reasons.length ? `<div class="mm-lab"><span>Check before confirming</span></div><ul>${reasons.slice(0, 3).map((r) => `<li>${escapeHtml(r)}</li>`).join('')}</ul>` : ''}</div>
         </div>

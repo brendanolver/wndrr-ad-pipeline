@@ -2514,7 +2514,8 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .mm-pill small{font-size:9px;font-weight:700;text-transform:uppercase;opacity:0.8;}
 .mm-pill button{background:none;border:none;cursor:pointer;color:inherit;font-size:13px;line-height:1;padding:0 3px;}
 .mm-picker-list{position:absolute;left:0;right:0;top:100%;margin-top:2px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--shadow);z-index:200;max-height:176px;overflow-y:auto;}
-.mm-dropup .mm-picker-list{top:auto;bottom:100%;margin:0 0 2px;}
+/* the dropdown now decides its own direction from the room available (mm-flip = opens upwards); see mmDropdownPlacement */
+.mm-picker.mm-flip .mm-picker-list{top:auto;bottom:100%;margin:0 0 2px;}
 .mm-opt{padding:6px 9px;font-size:12px;cursor:pointer;display:flex;justify-content:space-between;gap:10px;}
 .mm-opt:hover{background:var(--surface2);}
 .mm-opt small{color:var(--text-muted);font-size:10.5px;white-space:nowrap;}

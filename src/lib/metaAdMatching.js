@@ -2631,7 +2631,21 @@ async function adSetupPrefill(id) {
 // grouped by product, so per-product rows are not additive to a total.
 const GROUPS = {
   product: { select: `p.product_code AS key, p.product_name AS label`, join: 'JOIN meta_ad_products p ON p.meta_ad_id = a.meta_ad_id', group: 'p.product_code, p.product_name' },
-  concept: { select: `COALESCE(c.concept_type_id::text, 'legacy:' || lower(c.concept_label)) AS key, c.concept_label AS label`, join: '', group: `COALESCE(c.concept_type_id::text, 'legacy:' || lower(c.concept_label)), c.concept_label`, where: 'c.concept_label IS NOT NULL' },
+  // Concept performance is CONSOLIDATED onto the approved concept at QUERY time: a stored concept that is an approved concept (any
+  // capitalisation) or a known historical spelling of one is reported under the approved concept; nothing stored is rewritten. Every join
+  // below matches at most ONE row (name_key / alias_key are unique), so no insight row, ad or creative is ever counted twice. Anything not
+  // mapped keeps its previous grouping and is flagged legacy (removed concepts are flagged removed).
+  concept: {
+    join: `CROSS JOIN LATERAL (SELECT lower(btrim(regexp_replace(c.concept_label, '\\s+', ' ', 'g'))) AS k) ck
+           LEFT JOIN meta_matching_vocab cv ON cv.kind = 'concept' AND cv.name_key = ck.k
+           LEFT JOIN meta_matching_concept_aliases ca ON ca.alias_key = ck.k AND cv.id IS NULL
+           LEFT JOIN meta_matching_vocab cv2 ON cv2.kind = 'concept' AND ca.removed IS NOT TRUE AND cv2.name_key = lower(btrim(ca.approved_name))`,
+    select: `CASE WHEN COALESCE(cv.id, cv2.id) IS NOT NULL THEN 'approved:' || COALESCE(cv.name_key, cv2.name_key) ELSE COALESCE(c.concept_type_id::text, 'legacy:' || lower(c.concept_label)) END AS key,
+             CASE WHEN COALESCE(cv.id, cv2.id) IS NOT NULL THEN COALESCE(cv.name, cv2.name) ELSE c.concept_label END AS label,
+             (COALESCE(cv.id, cv2.id) IS NULL) AS legacy, (ca.removed IS TRUE) AS removed`,
+    extra: `array_agg(DISTINCT c.concept_label ORDER BY c.concept_label) AS spellings`,
+    group: '1, 2, 3, 4', where: 'c.concept_label IS NOT NULL',
+  },
   creator: { select: `lower(c.creator_name) AS key, c.creator_name AS label`, join: '', group: 'lower(c.creator_name), c.creator_name', where: 'c.creator_name IS NOT NULL' },
   creative_style: { select: `cs.id::text AS key, cs.name AS label`, join: 'JOIN creative_styles cs ON cs.id = c.creative_style_id', group: 'cs.id, cs.name' },
   media_type: { select: `c.media_type AS key, c.media_type AS label`, join: '', group: 'c.media_type', where: 'c.media_type IS NOT NULL' },
@@ -2649,13 +2663,21 @@ async function performanceBy(query = {}) {
   const where = [sourceSql, 'NOT c.excluded_from_intelligence', 'd.insight_date BETWEEN $1 AND $2'];
   if (g.where) where.push(g.where);
   if (query.product_code) { params.push(String(query.product_code)); where.push(`EXISTS (SELECT 1 FROM meta_ad_products fp WHERE fp.meta_ad_id = a.meta_ad_id AND fp.product_code = $${params.length})`); }
-  if (query.concept) { params.push(String(query.concept).toLowerCase()); where.push(`lower(c.concept_label) = $${params.length}`); }
+  if (query.concept) {
+    // filter by the CANONICAL concept: asking for STYLING also finds ads stored as AESTHETIC STYLING; text on no list matches itself
+    const r = (await vocab.loadConceptResolver())(String(query.concept));
+    params.push(vocab.keyOf(r.status === 'approved' || r.status === 'alias' ? r.name : String(query.concept)));
+    where.push(`COALESCE((SELECT v.name_key FROM meta_matching_vocab v WHERE v.kind = 'concept' AND v.name_key = lower(btrim(regexp_replace(c.concept_label, '\\s+', ' ', 'g')))),
+                         (SELECT v2.name_key FROM meta_matching_concept_aliases al JOIN meta_matching_vocab v2 ON v2.kind = 'concept' AND v2.name_key = lower(btrim(al.approved_name))
+                           WHERE al.alias_key = lower(btrim(regexp_replace(c.concept_label, '\\s+', ' ', 'g'))) AND NOT al.removed),
+                         lower(btrim(regexp_replace(c.concept_label, '\\s+', ' ', 'g')))) = $${params.length}`);
+  }
   if (query.creator) { params.push(String(query.creator).toLowerCase()); where.push(`lower(c.creator_name) = $${params.length}`); }
   if (query.media_type) { params.push(String(query.media_type)); where.push(`c.media_type = $${params.length}`); }
   if (query.creative_style_id) { params.push(parseInt(query.creative_style_id, 10)); where.push(`c.creative_style_id = $${params.length}`); }
   const { rows } = await pool.query(
-    `SELECT ${g.select},
-            COUNT(DISTINCT a.meta_ad_id)::int AS ads,
+    `SELECT ${g.select},${g.extra ? ` ${g.extra},` : ''}
+            COUNT(DISTINCT a.meta_ad_id)::int AS ads, COUNT(DISTINCT COALESCE(a.meta_creative_id, a.meta_ad_id))::int AS creatives,
             COALESCE(SUM(d.spend),0) AS spend, COALESCE(SUM(d.purchases),0) AS purchases,
             COALESCE(SUM(d.purchase_value),0) AS purchase_value, COALESCE(SUM(d.add_to_cart),0) AS add_to_cart,
             COALESCE(SUM(d.outbound_clicks),0) AS outbound_clicks, COALESCE(SUM(d.impressions),0) AS impressions
@@ -2670,8 +2692,14 @@ async function performanceBy(query = {}) {
   );
   return {
     by, range: parsed.range,
-    note: by === 'product' ? 'An ad with several products is counted under each of its products, so product rows do not add up to a total.' : undefined,
-    rows: rows.map((r) => ({ key: r.key, label: by === 'media_type' ? (MEDIA_LABEL[r.key] || r.key) : r.label, ads: r.ads, ...deriveMetrics(r) })),
+    note: by === 'product' ? 'An ad with several products is counted under each of its products, so product rows do not add up to a total.'
+      : by === 'concept' ? 'Concepts are reported under their approved concept: historical spellings are grouped with it at query time (stored classifications are unchanged). legacy = not on the approved list.' : undefined,
+    rows: rows.map((r) => {
+      const m = deriveMetrics(r);
+      const row = { key: r.key, label: by === 'media_type' ? (MEDIA_LABEL[r.key] || r.key) : r.label, ads: r.ads, creatives: r.creatives, ...m, roas: Number(m.spend) > 0 ? Math.round((Number(m.purchase_value) / Number(m.spend)) * 100) / 100 : null };
+      if (by === 'concept') Object.assign(row, { legacy: !!r.legacy, removed: !!r.removed, spellings: r.spellings || [] });
+      return row;
+    }),
   };
 }
 
