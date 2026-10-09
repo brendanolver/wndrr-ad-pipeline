@@ -197,3 +197,91 @@ test('assigned concepts: aliases display as the approved concept, unmapped / rem
   assert.match(app, /confirmed_concept_legacy \? ' <small class="mm-legacy"/, 'the table flags legacy concepts');
   assert.match(app, /tag: c\.removed \? 'legacy · removed' : 'legacy'/, 'the editor pill says legacy / removed');
 });
+
+// ── dropdown positioning (pure rule + wiring) ──
+// pull one top-level function out of the shipped front end (skipping a destructured parameter list) so it can be run here
+function frontEndFn(name) {
+  const app = read('public/app.js');
+  const i = app.indexOf(`function ${name}(`);
+  assert.ok(i >= 0, name);
+  let depth = 0; let k = app.indexOf(')', app.indexOf('(', i));
+  while (k < app.length && app[k] !== '{') k++;
+  const start = k;
+  for (; k < app.length; k++) { if (app[k] === '{') depth++; else if (app[k] === '}') { depth--; if (!depth) break; } }
+  return app.slice(i, k + 1) && `${app.slice(i, start)}${app.slice(start, k + 1)}`;
+}
+test('placement: opens DOWN when it fits below, UP when it does not and there is more room above, always inside the viewport', () => {
+  // eslint-disable-next-line no-new-func
+  const place = new Function(`${frontEndFn('mmDropdownPlacement')}; return mmDropdownPlacement;`)();
+  const base = { baseMax: 300, naturalH: 900 };
+  // plenty of room below
+  assert.deepEqual(place({ ...base, hostTop: 200, hostBottom: 230, viewportH: 1000 }), { up: false, maxHeight: 300 });
+  // field near the bottom of the window: not enough below (140px), lots above -> up, capped at 300
+  assert.deepEqual(place({ ...base, hostTop: 450, hostBottom: 480, viewportH: 620 }), { up: true, maxHeight: 300 });
+  // tight on both sides: takes the larger side and shrinks to it (never beyond the viewport edge)
+  const tight = place({ ...base, hostTop: 150, hostBottom: 230, viewportH: 420 });   // 182px below vs 142px above
+  assert.equal(tight.up, false); assert.equal(tight.maxHeight, 182, 'shrinks to the room below so it ends inside the viewport');
+  const tightEven = place({ ...base, hostTop: 200, hostBottom: 230, viewportH: 420 });  // 182 below vs 192 above -> the larger side
+  assert.equal(tightEven.up, true); assert.equal(tightEven.maxHeight, 192);
+  const tightUp = place({ ...base, hostTop: 260, hostBottom: 290, viewportH: 330 });
+  assert.equal(tightUp.up, true); assert.ok(tightUp.maxHeight <= 260 - 8, JSON.stringify(tightUp));
+  // a short list that fits below stays below even near the bottom
+  assert.equal(place({ baseMax: 300, naturalH: 100, hostTop: 450, hostBottom: 480, viewportH: 620 }).up, false);
+  // the 300px (grouped) and 176px (plain) maximums are never exceeded
+  assert.equal(place({ baseMax: 300, naturalH: 900, hostTop: 10, hostBottom: 40, viewportH: 5000 }).maxHeight, 300);
+  assert.equal(place({ baseMax: 176, naturalH: 900, hostTop: 10, hostBottom: 40, viewportH: 5000 }).maxHeight, 176);
+  // a floor so the list is never collapsed to nothing
+  assert.ok(place({ ...base, hostTop: 10, hostBottom: 40, viewportH: 60 }).maxHeight >= 72);
+  // keepUp pins the side already chosen (typing shrinks the list; it must not jump sides)
+  assert.equal(place({ baseMax: 300, naturalH: 100, hostTop: 450, hostBottom: 480, viewportH: 620, keepUp: true }).up, true);
+  assert.equal(place({ ...base, hostTop: 450, hostBottom: 480, viewportH: 620, keepUp: false }).up, false);
+  // exact boundary: fits below exactly -> down
+  assert.equal(place({ baseMax: 300, naturalH: 300, hostTop: 100, hostBottom: 130, viewportH: 130 + 8 + 300 }).up, false);
+});
+test('placement is wired into the ONE shared picker (so both editors get it), keeps search + keyboard, and cleans up its listeners', () => {
+  const app = code('public/app.js');
+  const picker = app.slice(app.indexOf('function mmPicker'), app.indexOf('// ── Matching workspace'));
+  assert.match(picker, /const baseMax = grouped \? 300 : 176/);
+  assert.match(picker, /mmDropdownPlacement\(\{ hostTop: hr\.top, hostBottom: hr\.bottom, viewportH: window\.innerHeight, naturalH: list\.scrollHeight, baseMax/);
+  assert.match(picker, /host\.classList\.toggle\('mm-flip', d\.up\)/);
+  assert.match(picker, /if \(open\) place\(lockedUp === null\)/, 'direction decided when it opens, kept while typing');
+  assert.match(picker, /addEventListener\('scroll', onMove, true\)[\s\S]*addEventListener\('resize', onMove\)/, 're-placed on scroll / resize while open');
+  assert.match(picker, /removeEventListener\('scroll', onMove, true\)[\s\S]*removeEventListener\('resize', onMove\)/, 'listeners are removed on close (no leak across many rapid-review rows)');
+  assert.match(picker, /e\.key === 'ArrowDown' \|\| e\.key === 'ArrowUp'/, 'keyboard navigation intact');
+  assert.match(picker, /choose\(entries\[active\] \|\| null\)/, 'Enter intact');
+  const css = read('public/styles.css');
+  assert.match(css, /\.mm-picker\.mm-flip \.mm-picker-list\{top:auto;bottom:100%/);
+  assert.doesNotMatch(css, /\.mm-dropup \.mm-picker-list/, 'no fixed "always up" rule is left');
+  assert.match(css, /\.mm-picker-list\.grouped\{max-height:300px;\}/, 'the 300px maximum is kept');
+  // both editors build their concept dropdown through that same function
+  assert.equal((app.match(/mmPicker\(/g) || []).length >= 6, true);
+});
+
+// ── Performance by Concept: consolidated at QUERY time ──
+test('performance by concept: consolidation is a read-only query over unique keys (no writes, no double counting by construction)', () => {
+  const lib = code('src/lib/metaAdMatching.js');
+  const perf = lib.slice(lib.indexOf('async function performanceBy'), lib.indexOf('module.exports'));
+  assert.doesNotMatch(perf, /\b(INSERT|UPDATE|DELETE)\b/);
+  const groups = lib.slice(lib.indexOf('const GROUPS = {'), lib.indexOf('async function performanceBy'));
+  const concept = groups.slice(groups.indexOf('concept: {'), groups.indexOf('creator:'));
+  assert.match(concept, /LEFT JOIN meta_matching_vocab cv ON cv\.kind = 'concept' AND cv\.name_key = ck\.k/);
+  assert.match(concept, /LEFT JOIN meta_matching_concept_aliases ca ON ca\.alias_key = ck\.k AND cv\.id IS NULL/);
+  assert.match(concept, /ca\.removed IS NOT TRUE/, 'a removed concept is never merged into anything');
+  assert.match(concept, /'approved:' \|\| COALESCE\(cv\.name_key, cv2\.name_key\)/, 'approved + alias rows share one key');
+  assert.match(concept, /ELSE COALESCE\(c\.concept_type_id::text, 'legacy:' \|\| lower\(c\.concept_label\)\) END AS key/, 'unmapped concepts keep their previous key');
+  assert.match(concept, /AS legacy/);
+  assert.match(concept, /group: '1, 2, 3, 4'/);
+  // every join matches AT MOST ONE row because the keys are unique -> a join can never multiply spend / purchases / ads
+  const sql = read('db/schema.sql');
+  assert.match(sql, /UNIQUE \(kind, name_key\)/);
+  assert.match(sql, /alias_key VARCHAR\(255\) NOT NULL UNIQUE/);
+  assert.match(perf, /COUNT\(DISTINCT a\.meta_ad_id\)::int AS ads, COUNT\(DISTINCT COALESCE\(a\.meta_creative_id, a\.meta_ad_id\)\)::int AS creatives/, 'ads and creatives are counted DISTINCT');
+  assert.match(perf, /roas: Number\(m\.spend\) > 0 \?/, 'ROAS comes from the summed spend and value');
+  assert.match(perf, /deriveMetrics\(r\)/, 'CPA / cost-per-ATC / CTR are derived from the SUMS');
+});
+test('performance by concept: the concept FILTER resolves the same way (asking for STYLING or an alias finds the same ads)', () => {
+  const lib = code('src/lib/metaAdMatching.js');
+  const perf = lib.slice(lib.indexOf('async function performanceBy'), lib.indexOf('module.exports'));
+  assert.match(perf, /\(await vocab\.loadConceptResolver\(\)\)\(String\(query\.concept\)\)/);
+  assert.match(perf, /r\.status === 'approved' \|\| r\.status === 'alias' \? r\.name : String\(query\.concept\)/);
+});
