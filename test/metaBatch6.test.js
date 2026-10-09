@@ -35,7 +35,7 @@ test('vocab: kinds, length limit and the explicit add action', () => {
 // ── schema: additive, JAMES seeded, case-insensitive uniqueness in the database ──
 test('schema: meta_matching_vocab is additive, unique per (kind, lower-cased name), and seeds JAMES idempotently', () => {
   const sql = read('db/schema.sql');
-  const block = sql.slice(sql.indexOf('CREATE TABLE IF NOT EXISTS meta_matching_vocab'));
+  const block = sql.slice(sql.indexOf('CREATE TABLE IF NOT EXISTS meta_matching_vocab'), sql.indexOf('-- Approved Ad Matching concepts'));
   assert.match(block, /UNIQUE \(kind, name_key\)/);
   assert.match(block, /CHECK \(kind IN \('creator', 'concept'\)\)/);
   assert.match(block, /'creator', 'JAMES', 'james'/);
@@ -57,7 +57,7 @@ test('inventory: pure aggregation keeps unique creatives and Meta ads apart and 
     { concept: 'Unboxing', source: 'confirmed', creatives: 5, ads: 9 },
     { concept: 'Unboxing', source: null, creatives: 5, ads: 9 },
   ];
-  const out = inv.buildInventory({ usage, setups: [{ concept: 'Unboxing', setups: 2, linked_ads: 3 }], vocabulary: [{ name: 'Unboxing', origin: 'concept_types', active: true }, { name: 'Never Used', origin: 'added', active: true }] });
+  const out = inv.buildInventory({ usage, setups: [{ concept: 'Unboxing', setups: 2, linked_ads: 3 }], vocabulary: [{ name: 'Unboxing', origin: 'approved', active: true }, { name: 'Never Used', origin: 'approved', active: true }] });
   const row = (n) => out.concepts.find((c) => c.concept === n);
   assert.equal(row('Try On').total_creatives, 1);
   assert.equal(row('Try On').total_ads, 3);

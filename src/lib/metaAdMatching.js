@@ -1669,7 +1669,31 @@ async function relevanceParams() {
   return { rel, d7: addDays(win.until, -6), d30: win.since };
 }
 
+// Read-time display mapping of a suggested concept: an approved concept or a known historical spelling shows as the APPROVED concept; a
+// deliberately removed concept shows nothing; anything else is left exactly as the matcher stored it. Never written back.
+function mapConceptLabel(resolve, label) {
+  if (!label || !resolve) return label || null;
+  const m = resolve(label);
+  if (m.status === 'removed') return null;
+  return m.status === 'approved' || m.status === 'alias' ? m.name : label;
+}
+function mapConceptSuggestions(resolve, items) {
+  const out = []; const seen = new Set();
+  for (const it of items) { // items arrive highest confidence first
+    const m = resolve(it.value_label);
+    if (m.status === 'removed') continue;
+    if (m.status === 'approved' || m.status === 'alias') {
+      const k = vocab.keyOf(m.name);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push({ ...it, value_label: m.name, value_ref: m.concept_type_id || null, mapped_from: m.status === 'alias' ? it.value_label : null });
+    } else out.push(it);
+  }
+  return out;
+}
+
 async function getQueue(query = {}, deps = {}) {
+  const conceptResolve = await vocab.loadConceptResolver();
   const scope = Object.prototype.hasOwnProperty.call(SCOPES, query.scope) ? query.scope : '30d';
   const filter = Object.prototype.hasOwnProperty.call(FILTERS, query.filter) || ['historical', 'archived', 'conflict', 'inherit'].includes(query.filter) ? query.filter : 'needs';
   const q = String(query.q || '').trim().slice(0, 200);
@@ -1884,7 +1908,7 @@ async function getQueue(query = {}, deps = {}) {
       confirmed_media: r.confirmed_media ? MEDIA_LABEL[r.confirmed_media] : null,
       suggested_media: r.suggested_media,
       suggested_product: r.suggested_product,
-      suggested_concept: r.suggested_concept,
+      suggested_concept: mapConceptLabel(conceptResolve, r.suggested_concept),
       confidence: r.top_confidence === null ? null : Number(r.top_confidence),
       confidence_level: r.top_confidence === null ? null : confidenceLevel(r.top_confidence),
       // "Exact" is reserved for ads that were actually auto-matched; anything still
@@ -2157,6 +2181,7 @@ async function getAdWorkspace(metaAdId, { refresh = true } = {}) {
     if (s.field === 'ad_setup') item.ad_setup = describeAdSetup(ctx.adSetupById.get(s.value_ref));
     suggestions[s.field].push(item);
   });
+  suggestions.concept = mapConceptSuggestions(await vocab.loadConceptResolver(), suggestions.concept);
 
   const structuredParse = parseStructuredMetaName(ad.ad_name);
   const parsed = { legacy: parseMetaAdName(ad.ad_name), structured: structuredParse, loose: structuredParse ? null : parseLooseMetaName(ad.ad_name, ctx) };
@@ -2252,14 +2277,16 @@ async function confirmMapping(metaAdId, body, userId) {
       const r = await pool.query('SELECT id, name FROM concept_types WHERE id = $1', [parseInt(input.concept.concept_type_id, 10)]);
       if (!r.rows.length) throw new HttpError(400, 'Unknown concept');
       conceptTypeId = r.rows[0].id;
-      conceptLabel = r.rows[0].name;
+      // the approved spelling when this concept is on the approved list (e.g. concept record "Styling" -> "STYLING")
+      const asApproved = (await vocab.loadConceptResolver())(r.rows[0].name);
+      conceptLabel = asApproved.status === 'approved' ? asApproved.name : r.rows[0].name;
     } else {
       // A label typed in any capitalisation resolves to the offered concept (concept_types, or one a person added to the
       // Ad Matching vocabulary); anything else is a legacy / free-text classification, kept ONLY on this ad's
       // classification -- never inserted into concept_types.
       const typed = trimText(input.concept.label);
-      const known = typed ? await vocab.canonicalConcept(typed) : null;
-      if (known) { conceptTypeId = known.concept_type_id; conceptLabel = known.name; } else conceptLabel = typed;
+      const known = typed ? (await vocab.loadConceptResolver())(typed) : null;
+      if (known && (known.status === 'approved' || known.status === 'alias')) { conceptTypeId = known.concept_type_id; conceptLabel = known.name; } else conceptLabel = typed;
     }
   }
   let styleId = null;
@@ -2475,7 +2502,7 @@ async function getReviewBatch(idsInput) {
   const raw = Array.isArray(idsInput) ? idsInput : String(idsInput || '').split(',');
   const ids = [...new Set(raw.map((x) => String(x).trim()).filter((x) => /^[A-Za-z0-9_]{1,64}$/.test(x)))].slice(0, REVIEW_BATCH_MAX);
   if (!ids.length) return { ads: {} };
-  const [adsQ, suggQ, concepts] = await Promise.all([
+  const [adsQ, suggQ, conceptResolve] = await Promise.all([
     pool.query(
       `SELECT a.meta_ad_id, a.meta_creative_id, a.match_status, a.match_method, a.matched_ad_setup_id,
               COALESCE(c.excluded_from_intelligence, false) AS excluded, c.skipped_at, c.not_product_specific, c.concept_label, c.creator_name, c.media_type,
@@ -2486,9 +2513,8 @@ async function getReviewBatch(idsInput) {
     pool.query(
       `SELECT meta_ad_id, field, value_key, value_label, value_ref, confidence, evidence FROM meta_ad_suggestions
         WHERE meta_ad_id = ANY($1::text[]) ORDER BY confidence DESC, id`, [ids]),
-    vocab.listConcepts(),
+    vocab.loadConceptResolver(),
   ]);
-  const conceptByKey = new Map(concepts.map((c) => [vocab.keyOf(c.name), c]));
   const sugg = new Map();
   for (const r of suggQ.rows) { if (!sugg.has(r.meta_ad_id)) sugg.set(r.meta_ad_id, []); sugg.get(r.meta_ad_id).push(r); }
   const creativeIds = [...new Set(adsQ.rows.map((r) => r.meta_creative_id).filter(Boolean))];
@@ -2514,13 +2540,16 @@ async function getReviewBatch(idsInput) {
         ? (group ? list.filter((x) => x.field === 'product' && x.evidence && x.evidence.set_group === group) : [topProduct]).map((x) => ({ key: x.value_key, label: x.value_label || x.value_key }))
         : [];
       const scope = top('scope');
-      const c = top('concept');
+      // the strongest suggested concept that is not a deliberately removed one, shown as its APPROVED concept (alias / spelling variants
+      // resolve to it); text that is on no list stays a confirmable legacy concept
       let concept = null;
-      if (c) {
-        const known = c.value_ref ? { name: c.value_label, concept_type_id: c.value_ref, vocab_id: null } : conceptByKey.get(vocab.keyOf(c.value_label));
-        concept = known
-          ? { label: known.name || known.label, concept_type_id: known.concept_type_id || null, vocab_id: known.vocab_id || null, legacy: false }
+      for (const c of list.filter((x) => x.field === 'concept')) {
+        const m = conceptResolve(c.value_label);
+        if (m.status === 'removed') continue;
+        concept = m.status === 'approved' || m.status === 'alias'
+          ? { label: m.name, concept_type_id: m.concept_type_id || null, vocab_id: m.vocab_id || null, legacy: false, mapped_from: m.status === 'alias' ? c.value_label : null }
           : { label: c.value_label, concept_type_id: null, vocab_id: null, legacy: true };
+        break;
       }
       const m = top('media_type');
       const st = top('creative_style');
