@@ -40,7 +40,7 @@ test('the module is exact string logic only: no similarity, no Meta, no ApparelM
 
 // ── Part 1: grouping logic (pure) ────────────────────────────────────────
 const ad = (id, name, creative, o = {}) => ({ meta_ad_id: id, ad_name: name, meta_creative_id: creative, match_status: o.status || 'suggested', eligible: o.eligible !== undefined ? o.eligible : true, ineligible_reason: o.why || null, nps: !!o.nps, codes: o.codes || '', concept_key: o.concept || '' });
-const src = (key, sig = 'p|P1', concept = '') => ({ key, decision: { state: 'source', sig, concept } });
+const src = (key, sig = 'p|P1', concept = '', hasSuffix = false) => ({ key, hasSuffix, decision: { state: 'source', sig, concept } });
 test('classifyCopies: unclassified copies are eligible, one per creative; the source creative is never re-offered', () => {
   const ads = [ad('o', 'X', 'c0', { status: 'confirmed', eligible: false }), ad('o2', 'X - Copy 9', 'c0'), ad('a', 'X - Copy', 'c1'), ad('b', 'X – Copy 2', 'c2'), ad('b2', 'X – Copy 2', 'c2')];
   const r = NC.classifyCopies(ads, new Map(), src('c0'));
@@ -75,6 +75,32 @@ test('classifyCopies: ads without a creative id are each their own creative', ()
   const r = NC.classifyCopies(ads, new Map(), src('ad:n0'));
   assert.deepEqual(r.eligible.map((g) => g.rep).sort(), ['n1', 'n2']);
 });
+test('an ACTUAL copy suffix is required: identically named ads with no Copy suffix are never grouped by name', () => {
+  assert.equal(NC.hasCopySuffix('X - Copy'), true); assert.equal(NC.hasCopySuffix('X – Copy 3'), true);
+  for (const n of ['X', 'X Copy', 'X-Copy', 'Copy of X', 'X (Copy)']) assert.equal(NC.hasCopySuffix(n), false, n);
+  // two plain, identically named ads: nothing is offered, not even as already-same / conflict / protected
+  const ads = [ad('o', 'X', 'c0', { status: 'confirmed', eligible: false }), ad('same1', 'X', 'c1'), ad('same2', 'X', 'c2'), ad('prot', 'X', 'c3', { eligible: false, why: 'skipped' })];
+  const r = NC.classifyCopies(ads, new Map([['c3', NC.humanState([{ nps: false, codes: 'P9' }])]]), src('c0', 'p|P1', '', false));
+  assert.deepEqual([r.eligible.length, r.already_same.length, r.conflicts.length, r.protected.length], [0, 0, 0, 0]);
+});
+test('the suffix rule is per pair: a copy of the source is offered, an identically named plain ad next to it is not', () => {
+  const ads = [ad('o', 'X', 'c0', { status: 'confirmed', eligible: false }), ad('plain', 'X', 'c1'), ad('copy', 'X - Copy', 'c2')];
+  const r = NC.classifyCopies(ads, new Map(), src('c0', 'p|P1', '', false));
+  assert.deepEqual(r.eligible.map((g) => g.rep), ['copy']);
+  // when the SOURCE is the copy, the plain original (and an identically named plain twin) are its candidates
+  const r2 = NC.classifyCopies([ad('s', 'X - Copy', 'c0', { status: 'confirmed', eligible: false }), ad('p1', 'X', 'c1'), ad('p2', 'X', 'c2')], new Map(), src('c0', 'p|P1', '', true));
+  assert.deepEqual(r2.eligible.map((g) => g.rep).sort(), ['p1', 'p2']);
+  // a creative with several ads qualifies when ANY of its name-matching ads carries the suffix
+  const r3 = NC.classifyCopies([ad('o', 'X', 'c0', { status: 'confirmed', eligible: false }), ad('a', 'X', 'c1'), ad('b', 'X - Copy 2', 'c1')], new Map(), src('c0', 'p|P1', '', false));
+  assert.deepEqual(r3.eligible.map((g) => g.rep), ['a']);
+});
+test('suffix rule is applied in the live offer, the pre-fill and the preview (static)', () => {
+  const m = code('src/lib/metaNameCopies.js');
+  assert.match(m, /if \(!source\.hasSuffix && !group\.some\(\(a\) => hasCopySuffix\(a\.ad_name\)\)\) continue;/);
+  assert.match(m, /const hasSuffix = ads\.some\(\(a\) => hasCopySuffix\(a\.ad_name\)\);\s*if \(!hasSuffix\) continue;/);
+  assert.match(m, /meCopy \|\| ads\.some\(\(x\) => creativeKey\(x\) === creativeKey\(a\) && hasCopySuffix\(x\.ad_name\)\)/, 'pre-fill uses the same rule');
+});
+
 test('human decisions: concepts only conflict when BOTH are set and differ; product / Not-product-specific must match', () => {
   const a = { sig: 'p|P1', concept: 'styling' };
   assert.ok(NC.sameDecision(a, { sig: 'p|P1', concept: '' }) && NC.sameDecision({ sig: 'p|P1', concept: '' }, a) && NC.sameDecision(a, a));
@@ -184,17 +210,75 @@ test('a giveaway phrase is a promotional (non-product) phrase; one real product 
   for (const t of ['SALE', 'HYPE', 'FLASH SALE', 'GIFT BOX']) assert.equal(p(t), true, `existing promo phrases unchanged: ${t}`);
   assert.equal(p('MID SALE'), false, 'existing behaviour for unlisted words is unchanged');
 });
-test('suggestions: a giveaway only ever SUGGESTS Not product-specific; it is wired as a pre-selection, never a confirmation', () => {
+test('suggestions: a giveaway only ever SUGGESTS Not product-specific (pre-ticked, never confirmed) and only when NO product candidate exists', () => {
   const lib = code('src/lib/metaAdMatching.js');
-  assert.match(lib, /field: 'scope', value_key: 'not_product_specific', value_label: 'Not product-specific', confidence: 0\.85, reason: `The ad name says/);
-  assert.match(lib, /if \(!out\.some\(\(x\) => x\.field === 'product' && x\.confidence >= MEDIUM\)\) \{\s*if \(giveaway\)/, 'only while no product is reliably identified');
+  assert.match(lib, /const noProductCandidate = !out\.some\(\(x\) => x\.field === 'product'\);/, 'ANY product candidate, however weak, suppresses it');
+  assert.match(lib, /if \(giveaway && noProductCandidate\) \{\s*add\(\{ field: 'scope'[^}]*confidence: 0\.85/);
   assert.match(lib, /ad\.match_status !== 'confirmed' && !suggestions\.scope\.length/, 'a confirmed ad gets no overlay');
+  assert.match(lib, /x\.field === 'scope' && x\.source === 'name_giveaway'/);
   const app = code('public/app.js');
   assert.match(app, /if \(!c\.productPicker\.get\(\)\.length && !c\.nps\.checked && good\(scope\)\) \{ c\.apply\('scope', scope\)/, 'a pre-ticked box, not a saved decision');
   const af = app.slice(app.indexOf('function mmAutofill'), app.indexOf('async function mmSessNext'));
   assert.doesNotMatch(af, /api\(|fetch\(|confirm/, 'autofill never calls the server');
-  assert.doesNotMatch(lib.slice(lib.indexOf('const BASE_RULES_VERSION'), lib.indexOf('const BASE_RULES_VERSION') + 120), /= 4/, 'no matching-rules version bump (nothing becomes stale)');
 });
+test('SALE / HYPE / other promotional wording gets NO Not-product-specific suggestion at all (only the giveaway improvement remains)', () => {
+  const lib = code('src/lib/metaAdMatching.js');
+  assert.doesNotMatch(lib, /name_promo|productIsPromo|promotional \/ not product-specific/, 'the promo-slot suggestion logic is gone');
+  // the only sources of a not_product_specific suggestion are DPA (0.5, pre-existing) and the giveaway wording
+  const adds = [...lib.matchAll(/value_key: 'not_product_specific'[\s\S]{0,330}?source: '([a-z_]+)'/g)].map((m) => m[1]);
+  assert.deepEqual(adds.sort(), ['name_giveaway', 'name_keyword']);
+});
+
+// ── Refinement: pre-fill from a previously confirmed copy ───────────────────
+test('pre-fill: the lookup is read-only, needs an eligible ad, skips decided creatives, and any disagreement means no pre-fill', () => {
+  const m = code('src/lib/metaNameCopies.js');
+  const fn = m.slice(m.indexOf('async function findConfirmedMatch'), m.indexOf('function offerSummary'));
+  assert.doesNotMatch(fn, /\b(INSERT|UPDATE|DELETE)\b/i, 'read-only');
+  assert.match(fn, /if \(!me \|\| !me\.eligible\) return null/);
+  assert.match(fn, /mine\.state !== 'none'\) return null/, 'an ad whose own creative a person already decided is left to exact-creative inheritance');
+  assert.match(fn, /if \(sigs\.size > 1\) return \{ state: 'conflict'/);
+  const sig = NC.fullSig;
+  const row = { not_product_specific: false, codes: 'P1', concept_label: 'Styling', creator_name: 'Mark', media_type: 'video', creative_style_id: null };
+  assert.equal(sig(row), sig({ ...row, concept_label: ' STYLING ', creator_name: 'mark' }), 'case / spacing do not make a conflict');
+  for (const diff of [{ codes: 'P2' }, { not_product_specific: true }, { concept_label: 'Try On' }, { creator_name: 'James' }, { media_type: 'image' }, { creative_style_id: 3 }]) assert.notEqual(sig(row), sig({ ...row, ...diff }), JSON.stringify(diff));
+});
+test('pre-fill (modal): applied like suggestions, labelled as coming from a confirmed ad, conflicts pre-fill nothing, Enter safeguards untouched', () => {
+  const app = code('public/app.js');
+  assert.match(app, /const filled = hasValues \? \[\] : fromCopy \? mmPrefillFromCopy\(pf, sess\.ctx\) : copyConflict \? \[\] : mmAutofill\(ws, sess\.ctx\);/, 'copy > suggestions; a conflict pre-fills nothing, not even suggestions');
+  assert.match(app, /from a previously confirmed ad/);
+  assert.match(app, /Matching copies were classified differently/);
+  assert.match(app, /Nothing is saved until you confirm/);
+  const fn = app.slice(app.indexOf('function mmPrefillFromCopy'), app.indexOf('function mmAutofill'));
+  assert.doesNotMatch(fn, /api\(|fetch\(|confirm|POST/, 'pre-filling never calls the server');
+  // the pre-fill goes through the same applier as suggestions, so the SAME confirm path / guards run when the reviewer presses Enter
+  assert.match(fn, /c\.apply\('product'/);
+  const lib = code('src/lib/metaAdMatching.js');
+  assert.match(lib, /ad\.match_status !== 'confirmed' && !ad\.excluded\) \{\s*try \{ namePrefill = await buildNamePrefill/);
+  assert.match(lib, /name_copy_prefill: namePrefill/);
+  const kb = app.slice(app.indexOf("document.addEventListener('keydown', (e) => {\n  const s = mmRv.sess;"));
+  assert.match(kb, /typing/); assert.match(kb, /e\.repeat/); assert.match(kb, /enterBlockedUntil/);
+});
+test('pre-fill (unit): fields are applied from the confirmed ad; nothing for a conflict, an empty or missing pre-fill', () => {
+  const applied = [];
+  const c = { apply: (f, x) => applied.push([f, x && (x.value_label || x.value_key || '')]) };
+  const fn = new Function(`${frontEnd('mmPrefillFromCopy')}; return mmPrefillFromCopy;`)();
+  const pf = { state: 'ready', matches: 2, from: { ad_name: 'X' }, classification: { products: [{ value_key: 'P1', value_label: 'Tee' }], not_product_specific: false, concept: { value_label: 'STYLING' }, creator: 'Mark', media_type: { value_key: 'video', value_label: 'Video' }, creative_style: null } };
+  assert.deepEqual(fn(pf, c), ['Product', 'Concept', 'Media', 'Creator']);
+  assert.deepEqual(applied.map((a) => a[0]), ['product', 'concept', 'media_type', 'creator']);
+  applied.length = 0;
+  assert.deepEqual(fn({ ...pf, classification: { ...pf.classification, products: [], not_product_specific: true, concept: null, creator: null, media_type: null } }, c), ['Not product-specific']);
+  assert.deepEqual(applied.map((a) => a[0]), ['scope']);
+  applied.length = 0;
+  for (const bad of [null, undefined, { state: 'conflict', matches: 2 }, { state: 'ready' }]) assert.deepEqual(fn(bad, c), []);
+  assert.equal(applied.length, 0);
+});
+function frontEnd(name) {
+  const app = read('public/app.js');
+  const i = app.indexOf(`function ${name}(`);
+  let depth = 0; let j = app.indexOf('{', i);
+  for (let k = j; k < app.length; k++) { if (app[k] === '{') depth++; else if (app[k] === '}') { depth--; if (!depth) { j = k; break; } } }
+  return app.slice(i, j + 1);
+}
 
 // ── Part 4: percentage-based colours ─────────────────────────────────────
 test('percentRule: lower-is-better and higher-is-better rules, boundary handling, tolerance', () => {

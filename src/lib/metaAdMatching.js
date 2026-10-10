@@ -563,12 +563,13 @@ function buildSuggestions(ad, ctx) {
       pushProduct(famOf(code), fromSetup, `Product of the linked Ad Setup #${anchor.setup.id}`, 'ad_setup_products', { ad_setup_id: anchor.setup.id });
     });
   }
-  // A GIVEAWAY ("$5K CASH GIVEAWAY", "GIFT CARD GIVEAWAY") promotes a prize, not a product. When the name says so and nothing in it
-  // resolves to a product, say that -- instead of the misleading "No matching product family". A name that ALSO names a real product
-  // keeps its product suggestions exactly as before (a named product during a giveaway stays eligible for product matching).
+  // A GIVEAWAY ("$5K CASH GIVEAWAY", "GIFT CARD GIVEAWAY") promotes a prize, not a product. When the name says so and NOTHING in it
+  // resolves to or even resembles a product, say that -- instead of the misleading "No matching product family". A name that also
+  // yields ANY product candidate keeps its product suggestions exactly as before (a named product during a giveaway stays eligible
+  // for product matching), and gets no Not-product-specific suggestion.
   const giveaway = giveawayLanguage(name);
-  const productIsPromo = !!(productResolution && productResolution.promo);
-  if (giveaway && !out.some((x) => x.field === 'product' && x.confidence >= MEDIUM) && (!productResolution || productResolution.status === 'none')) {
+  const noProductCandidate = !out.some((x) => x.field === 'product');
+  if (giveaway && noProductCandidate && (!productResolution || productResolution.status === 'none')) {
     productResolution = { status: 'none', reason: `Giveaway campaign (“${giveaway}”) — not product-focused`, promo: true, giveaway: true };
   }
 
@@ -664,15 +665,12 @@ function buildSuggestions(ad, ctx) {
   if (/(^|[^A-Za-z0-9])DPA([^A-Za-z0-9]|$)/i.test(name)) {
     add({ field: 'scope', value_key: 'not_product_specific', value_label: 'Not product-specific', confidence: 0.5, reason: 'Ad name contains "DPA" (dynamic product ads cover the whole catalogue)', source: 'name_keyword', evidence: { keyword: 'DPA' } });
   }
-  // Strong evidence that the ad is about something other than one product: a giveaway, or a product slot that holds only promotional
-  // wording (SALE / HYPE / LIVE ...). Only a SUGGESTION -- a person confirms it (or overrides it) like any other field -- and only
-  // while no product is reliably identified, so a named product keeps being offered for product matching.
-  if (!out.some((x) => x.field === 'product' && x.confidence >= MEDIUM)) {
-    if (giveaway) {
-      add({ field: 'scope', value_key: 'not_product_specific', value_label: 'Not product-specific', confidence: 0.85, reason: `The ad name says “${giveaway}” — a giveaway promotes a prize, not a product`, source: 'name_giveaway', evidence: { keyword: giveaway, kind: 'giveaway' } });
-    } else if (productIsPromo) {
-      add({ field: 'scope', value_key: 'not_product_specific', value_label: 'Not product-specific', confidence: 0.75, reason: 'The product part of the name is promotional wording (e.g. SALE / HYPE / LIVE), not a product', source: 'name_promo', evidence: { kind: 'promo' } });
-    }
+  // Giveaway wording ("$5K CASH GIVEAWAY") is strong evidence that the ad is about a prize, not one product. Only a SUGGESTION -- a person
+  // confirms it (or overrides it) like any other field -- and only while the name yields no product candidate at all, so a named product
+  // keeps being offered for product matching. (SALE / HYPE / other promotional wording deliberately gets NO such suggestion: a sale ad
+  // may well be about one product, so that stays a person's call.)
+  if (giveaway && noProductCandidate) {
+    add({ field: 'scope', value_key: 'not_product_specific', value_label: 'Not product-specific', confidence: 0.85, reason: `The ad name says “${giveaway}” — a giveaway promotes a prize, not a product`, source: 'name_giveaway', evidence: { keyword: giveaway, kind: 'giveaway' } });
   }
 
   // De-duplicate on (field, value_key): keep the strongest, note the rest.
@@ -773,7 +771,7 @@ function evaluateAutoMatch(ad, built, ctx) {
 
   if (by('scope').length) {
     const kinds = new Set(by('scope').map((x) => (x.evidence || {}).kind));
-    blockers.push(kinds.has('giveaway') ? 'Looks like a giveaway / not product-specific ad' : kinds.has('promo') ? 'Looks like a promotional / not product-specific ad' : 'Looks like a DPA / not product-specific ad');
+    blockers.push(kinds.has('giveaway') ? 'Looks like a giveaway / not product-specific ad' : 'Looks like a DPA / not product-specific ad');
   }
 
   const qualifies = !blockers.length && !!product;
@@ -2159,6 +2157,26 @@ async function creativeBlock(ad) {
   };
 }
 
+// The suggestion-shaped pre-fill the review modal applies field by field (it reuses the suggestion appliers), or a conflict notice.
+async function buildNamePrefill(metaAdId, conceptResolve) {
+  const m = await nameCopies.findConfirmedMatch(metaAdId, { humanOwnedSql: HUMAN_OWNED_SQL });
+  if (!m) return null;
+  if (m.state === 'conflict') return { state: 'conflict', matches: m.matches, examples: m.examples };
+  const d = m.detail;
+  const concept = d.concept_label ? displayAssignedConcept(conceptResolve, d.concept_label) : null;
+  return {
+    state: 'ready', matches: m.matches, from: m.from,
+    classification: {
+      products: (d.products || []).map((p) => ({ value_key: p.key, value_label: p.label })),
+      not_product_specific: !!d.not_product_specific,
+      concept: concept ? { value_label: concept.label, value_ref: d.concept_type_id || null, legacy: !!concept.legacy } : null,
+      creator: d.creator_name || null,
+      media_type: d.media_type ? { value_key: d.media_type, value_label: MEDIA_LABEL[d.media_type] } : null,
+      creative_style: d.creative_style_id ? { value_ref: d.creative_style_id, value_label: d.style_name } : null,
+    },
+  };
+}
+
 async function getAdWorkspace(metaAdId, { refresh = true } = {}) {
   const loadRow = () => pool.query(
     `SELECT a.*, c.not_product_specific, c.concept_type_id, c.concept_label, c.creative_style_id, c.creator_name, c.media_type,
@@ -2216,13 +2234,20 @@ async function getAdWorkspace(metaAdId, { refresh = true } = {}) {
   });
   const conceptResolve = await vocab.loadConceptResolver();
   suggestions.concept = mapConceptSuggestions(conceptResolve, suggestions.concept);
-  // The giveaway / promotional "Not product-specific" suggestion is derived from the NAME alone, so it is shown (read-time, nothing is
+  // The giveaway "Not product-specific" suggestion is derived from the NAME alone, so it is shown (read-time, nothing is
   // written) even for an ad whose stored suggestions pre-date it. A person-confirmed ad never gets one.
   const built = buildSuggestions({ ad_name: ad.ad_name || '' }, ctx);
   if (ad.match_status !== 'confirmed' && !suggestions.scope.length) {
-    built.suggestions.filter((x) => x.field === 'scope' && ['name_giveaway', 'name_promo'].includes(x.source)).forEach((x) => suggestions.scope.push({
+    built.suggestions.filter((x) => x.field === 'scope' && x.source === 'name_giveaway').forEach((x) => suggestions.scope.push({
       value_key: x.value_key, value_label: x.value_label, value_ref: null, confidence: x.confidence, confidence_level: confidenceLevel(x.confidence), confidence_label: confidenceLabel(x.confidence), reason: x.reason, source: x.source, evidence: x.evidence,
     }));
+  }
+
+  // A previously CONFIRMED ad with the same normalised name (an actual "- Copy" pair, different creative id): offered as a visible pre-fill,
+  // never saved until the reviewer confirms. Read-only; a failure here never blocks opening the ad.
+  let namePrefill = null;
+  if (ad.match_status !== 'confirmed' && !ad.excluded) {
+    try { namePrefill = await buildNamePrefill(ad.meta_ad_id, conceptResolve); } catch (err) { namePrefill = null; }
   }
 
   const structuredParse = parseStructuredMetaName(ad.ad_name);
@@ -2274,6 +2299,7 @@ async function getAdWorkspace(metaAdId, { refresh = true } = {}) {
       ad_setup: describeAdSetup(ctx.adSetupById.get(ad.matched_ad_setup_id)),
     },
     suggestions,
+    name_copy_prefill: namePrefill,
   };
 }
 

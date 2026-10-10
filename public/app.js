@@ -1870,6 +1870,22 @@ async function mmSessOpen(id) {
   await openMatchWorkspace(id, { review: true, token: tok });
 }
 
+// A previously CONFIRMED ad with the same normalised name ("- Copy" pair, different creative id): its classification is applied to the
+// fields as a visible pre-fill, exactly like a suggestion -- nothing is saved until the reviewer confirms (Enter / Confirm & Next).
+// Returns the labels of the fields that were filled. (The server sends this only when every matching confirmed ad agrees.)
+function mmPrefillFromCopy(pf, c) {
+  const k = pf && pf.state === 'ready' ? pf.classification : null;
+  if (!k) return [];
+  const filled = [];
+  if (k.not_product_specific && !k.products.length) { c.apply('scope', {}); filled.push('Not product-specific'); }
+  else if (k.products.length) { k.products.forEach((x) => c.apply('product', x)); filled.push('Product'); }
+  if (k.concept) { c.apply('concept', k.concept); filled.push('Concept'); }
+  if (k.media_type) { c.apply('media_type', k.media_type); filled.push('Media'); }
+  if (k.creator) { c.apply('creator', { value_label: k.creator }); filled.push('Creator'); }
+  if (k.creative_style) { c.apply('creative_style', k.creative_style); filled.push('Creative style'); }
+  return filled;
+}
+
 // every reliable stored suggestion fills its own field; nothing is invented, Ad Setup is never linked, and a field that already has a
 // value is left alone. Returns the labels of the fields that were filled.
 function mmAutofill(ws, c) {
@@ -3022,15 +3038,25 @@ function renderMatchWorkspace(ws, options, sess = null) {
       },
     };
     // automatically select the reliable stored suggestions INSIDE their fields (never an Ad Setup, never a guess)
-    const filled = hasValues ? [] : mmAutofill(ws, sess.ctx);
+    // precedence: a previously confirmed same-name ad (all agree) > the stored suggestions; conflicting confirmed copies pre-fill NOTHING
+    // (not even from suggestions) so the reviewer decides manually
+    const pf = hasValues ? null : ws.name_copy_prefill;
+    const fromCopy = !!(pf && pf.state === 'ready');
+    const copyConflict = !!(pf && pf.state === 'conflict');
+    const filled = hasValues ? [] : fromCopy ? mmPrefillFromCopy(pf, sess.ctx) : copyConflict ? [] : mmAutofill(ws, sess.ctx);
     const fieldHost = { Product: 'mm-f-products', 'Not product-specific': 'mm-f-products', Concept: 'mm-f-concept', Media: 'mm-f-media', Creator: 'mm-f-creator', 'Creative style': 'mm-f-style' };
     filled.forEach((name) => {
       const f = document.getElementById(fieldHost[name]).closest('.mm-field');
-      f.classList.add('mm-autofilled');
-      const clear = () => { f.classList.remove('mm-autofilled'); f.removeEventListener('pointerdown', clear); f.removeEventListener('keydown', clear); };
+      f.classList.add('mm-autofilled'); if (fromCopy) f.classList.add('mm-fromcopy');
+      const clear = () => { f.classList.remove('mm-autofilled', 'mm-fromcopy'); f.removeEventListener('pointerdown', clear); f.removeEventListener('keydown', clear); };
       f.addEventListener('pointerdown', clear); f.addEventListener('keydown', clear); // touching a suggested field means a person is checking it
     });
-    document.getElementById('mm-sess-note').innerHTML = filled.length
+    const fromName = fromCopy ? escapeHtml(pf.from.ad_name || pf.from.meta_ad_id) : '';
+    document.getElementById('mm-sess-note').innerHTML = fromCopy
+      ? `<span class="mm-copy-badge" title="A person already confirmed an ad with the same name apart from a “- Copy” suffix">from a previously confirmed ad</span> <b>Pre-filled</b> (${filled.join(', ')}) from “${fromName}”${pf.matches > 1 ? ` and ${pf.matches - 1} other confirmed cop${pf.matches === 2 ? 'y' : 'ies'}` : ''}. It is a different creative id, so check it against this creative, then press <kbd>Enter</kbd> (or Confirm &amp; Next). Nothing is saved until you confirm.`
+      : copyConflict
+      ? `<b>Matching copies were classified differently</b> (${pf.matches}${pf.examples && pf.examples.length ? `: ${pf.examples.map((e) => `“${escapeHtml(e.ad_name || e.meta_ad_id)}”`).join(', ')}` : ''}). Nothing was pre-filled — choose the product (or tick Not product-specific) yourself, then press <kbd>Enter</kbd>.`
+      : filled.length
       ? `<b>Suggestions filled in:</b> ${filled.join(', ')}. Check them against the creative, then press <kbd>Enter</kbd> (or Confirm &amp; Next). Nothing is saved until you confirm.${productPicker.get().length || nps.checked ? '' : ' <b>No product could be identified reliably — choose one, or tick Not product-specific.</b>'}`
       : `<b>No reliable suggestion for this creative.</b> Choose a product (or tick Not product-specific), then press <kbd>Enter</kbd> to confirm.`;
     // focus the modal itself so Enter belongs to it as soon as the creative is shown

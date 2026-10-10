@@ -3083,7 +3083,7 @@ CREATE TABLE IF NOT EXISTS meta_name_copy_applications (
 CREATE INDEX IF NOT EXISTS idx_meta_name_copy_apps_copy ON meta_name_copy_applications(copy_meta_ad_id);
 CREATE INDEX IF NOT EXISTS idx_meta_name_copy_apps_source ON meta_name_copy_applications(source_meta_ad_id);
 
-
+-- =====================================================================
 -- Approved Ad Matching concepts + historical-spelling aliases
 -- =====================================================================
 -- The concept list Ad Matching offers is the people-approved vocabulary: meta_matching_vocab rows of kind 'concept'. The 40 approved
@@ -3181,4 +3181,3 @@ INSERT INTO meta_matching_concept_aliases (alias, alias_key, approved_name, remo
   ('TALKTHROUGH', 'talkthrough', 'TALK THROUGH', false),
   ('FLATLAY PHOTO', 'flatlay photo', 'FLAT LAY', false)
 ON CONFLICT (alias_key) DO NOTHING;
-
