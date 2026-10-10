@@ -473,6 +473,8 @@ const MP_KPIS = [
   { key: 'spend', label: 'Amount Spent', fmt: 'money', better: null },
   { key: 'purchases', label: 'Purchases', fmt: 'int', better: 'up' },
   { key: 'cpa', label: 'CPA', fmt: 'money', better: 'down' },
+  { key: 'purchase_value', label: 'Purchase Value', fmt: 'money', better: 'up' },
+  { key: 'roas', label: 'ROAS', fmt: 'roas', better: 'up' },
   { key: 'add_to_cart', label: 'Adds to Cart', fmt: 'int', better: 'up' },
   { key: 'cost_per_atc', label: 'Cost / ATC', fmt: 'money', better: 'down' },
   { key: 'outbound_ctr', label: 'Outbound CTR', fmt: 'pct', better: 'up' },
@@ -502,6 +504,7 @@ function mpFmt(value, kind) {
   if (value === null || value === undefined) return '<span class="mp-na">—</span>';
   if (kind === 'int') return Number(value).toLocaleString('en-AU');
   if (kind === 'pct') return `${Number(value).toFixed(2)}%`;
+  if (kind === 'roas') return `${Number(value).toFixed(2)}×`;
   try {
     return new Intl.NumberFormat('en-AU', {
       style: 'currency', currency: mpState.currency || 'AUD', minimumFractionDigits: 2, maximumFractionDigits: 2,
@@ -582,12 +585,11 @@ function mpRenderSummary(sum) {
   document.getElementById('mp-kpis').innerHTML = MP_KPIS.map((def) => `
     <div class="mp-kpi">
       <div class="mp-kpi-label">${def.label}</div>
-      <div class="mp-kpi-value">${mpFmt(sum.totals[def.key], def.fmt)}</div>
+      <div class="mp-kpi-value" title="${escapeHtml(String(sum.totals[def.key] === null || sum.totals[def.key] === undefined ? 'Not available' : sum.totals[def.key]))}">${mpFmt(sum.totals[def.key], def.fmt)}</div>
       ${cmp ? (mpDelta(def, sum.totals[def.key], cmp.totals[def.key], bothComplete) || '<div class="mp-kpi-delta"></div>') : ''}
     </div>`).join('') +
     mpReachTilesHtml(sum.reach_frequency) +
     `<div class="mp-secondary" style="grid-column:1 / -1;">
-       <span>Purchase Value <b>${mpFmt(sum.totals.purchase_value, 'money')}</b></span>
        <span>Ads with activity <b>${Number(sum.totals.ads_with_activity).toLocaleString('en-AU')}</b></span>
      </div>`;
 
@@ -627,7 +629,7 @@ function mpRenderAds(res) {
   mpState.adsById = new Map((res.ads || []).map((a) => [a.meta_ad_id, a]));
   mpRenderReachBar();
   if (!res.ads.length) {
-    body.innerHTML = `<tr><td colspan="12" class="mp-table-empty">${
+    body.innerHTML = `<tr><td colspan="14" class="mp-table-empty">${
       res.q || res.status !== 'all' || mpFiltered() ? 'No ads match this search or filter.' : 'No ads had spend or impressions in this period.'}</td></tr>`;
   } else {
     const hn = document.getElementById('mp-health-note');
@@ -656,6 +658,7 @@ function mpRenderAds(res) {
         const per = res.health.period || {};
         hn.style.display = '';
         hn.innerHTML = `Colour dots are used on <b>TOF</b> Frequency and Reach, <b>TOM</b> CPA and Reach, and <b>MOF</b> CPA and Reach, using only benchmarks WNDRR has confirmed: TOF Frequency under 2 and MOF CPA $40–$60 are green. ${(res.health.pending_benchmarks || []).length ? `Awaiting a benchmark (shown without colour): ${res.health.pending_benchmarks.map((x) => x.replace(/^(\w+) (\w+)$/, (m, f, k) => `${f} ${({ cpa: 'CPA', reach: 'Reach', frequency: 'Frequency' })[k] || k}`)).join(', ')}. ` : ''}Every other measure is left neutral. Frequency colours apply only to a period of about 4 days (${per.approx_4_days ? `${per.approx_4_days.min_days}–${per.approx_4_days.max_days} days` : '3–5 days'}); this period is ${per.days || '?'} day${per.days === 1 ? '' : 's'}${per.frequency_judged ? '' : ', so Frequency is shown without colour'}.`;
+        if ((res.health.config_errors || []).length) hn.innerHTML += ` <b>⚠ Some configured benchmarks were ignored:</b> ${res.health.config_errors.map(escapeHtml).join('; ')}.`;
       } else hn.style.display = 'none';
     }
     body.innerHTML = res.ads.map((a) => `
@@ -669,6 +672,8 @@ function mpRenderAds(res) {
         <td class="num">${mpFmt(a.spend, 'money')}</td>
         <td class="num">${mpFmt(a.purchases, 'int')}</td>
         <td class="num" title="${escapeHtml(why(a, 'cpa', a.cpa_health))}">${dot(a.cpa_health)}${mpFmt(a.cpa, 'money')}</td>
+        <td class="num" title="Meta purchase conversion value (omni_purchase) for this period">${mpFmt(a.purchase_value, 'money')}</td>
+        <td class="num" title="Meta purchase ROAS = purchase value ÷ amount spent (null when nothing was spent)">${mpFmt(a.roas, 'roas')}</td>
         <td class="num">${mpFmt(a.add_to_cart, 'int')}</td>
         <td class="num">${mpFmt(a.cost_per_atc, 'money')}</td>
         <td class="num">${mpFmt(a.outbound_ctr, 'pct')}</td>
@@ -700,7 +705,7 @@ async function loadMetaPerformanceAds() {
     mpRenderAds(res);
   } catch (e) {
     if (id !== mpState.adsReqId) return;
-    document.getElementById('mp-ads-body').innerHTML = `<tr><td colspan="12" class="mp-table-empty">${escapeHtml(e.message)}</td></tr>`;
+    document.getElementById('mp-ads-body').innerHTML = `<tr><td colspan="14" class="mp-table-empty">${escapeHtml(e.message)}</td></tr>`;
   }
 }
 
@@ -752,12 +757,12 @@ async function openMetaAdDetail(adId) {
       </dl>
       <div class="mp-detail-h">${escapeHtml(mpRange(res.range, true))}</div>
       <div class="mp-detail-metrics">
-        ${[...MP_KPIS, { key: 'purchase_value', label: 'Purchase Value', fmt: 'money' }].map((def) => `
+        ${MP_KPIS.map((def) => `
           <div class="mp-kpi"><div class="mp-kpi-label">${def.label}</div><div class="mp-kpi-value">${mpFmt(m[def.key], def.fmt)}</div></div>`).join('')}
       </div>
       <div class="mp-detail-h">Daily breakdown</div>
-      ${res.daily.length ? `<table class="mp-daily"><thead><tr><th>Date</th><th>Spend</th><th>Purchases</th><th>ATC</th><th>Outbound CTR</th></tr></thead><tbody>
-        ${res.daily.map((d) => `<tr><td>${mpDate(d.date, false)}</td><td>${mpFmt(d.spend, 'money')}</td><td>${mpFmt(d.purchases, 'int')}</td><td>${mpFmt(d.add_to_cart, 'int')}</td><td>${mpFmt(d.outbound_ctr, 'pct')}</td></tr>`).join('')}
+      ${res.daily.length ? `<table class="mp-daily"><thead><tr><th>Date</th><th>Spend</th><th>Purchases</th><th>Purchase Value</th><th>ROAS</th><th>ATC</th><th>Outbound CTR</th></tr></thead><tbody>
+        ${res.daily.map((d) => `<tr><td>${mpDate(d.date, false)}</td><td>${mpFmt(d.spend, 'money')}</td><td>${mpFmt(d.purchases, 'int')}</td><td>${mpFmt(d.purchase_value, 'money')}</td><td>${mpFmt(d.roas, 'roas')}</td><td>${mpFmt(d.add_to_cart, 'int')}</td><td>${mpFmt(d.outbound_ctr, 'pct')}</td></tr>`).join('')}
       </tbody></table>` : '<div class="mp-table-empty">No daily rows in this period.</div>'}`;
   } catch (e) {
     body.innerHTML = `<div class="mp-table-empty">${escapeHtml(e.message)}</div>`;

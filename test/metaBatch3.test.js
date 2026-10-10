@@ -419,7 +419,7 @@ test('Meta Performance: Funnel is its own FIRST column, then Creative, then Ad N
   const html = read('public/index.html');
   const m = /<table class="mp-table mp-perf">[\s\S]*?<tr>([\s\S]*?)<\/tr>/.exec(html);
   const heads = [...m[1].matchAll(/<th[^>]*>([^<]*)<\/th>/g)].map((x) => x[1].trim());
-  assert.deepEqual(heads, ['Funnel', 'Creative', 'Ad Name', 'Status', 'Amount Spent', 'Purchases', 'CPA', 'Adds to Cart', 'Cost / ATC', 'Outbound CTR', 'Reach', 'Frequency']);
+  assert.deepEqual(heads, ['Funnel', 'Creative', 'Ad Name', 'Status', 'Amount Spent', 'Purchases', 'CPA', 'Purchase Value', 'ROAS', 'Adds to Cart', 'Cost / ATC', 'Outbound CTR', 'Reach', 'Frequency']);
   const app = read('public/app.js');
   assert.match(app, /<td class="mp-funnel-cell">\$\{mpFunnelBadge\(a\.funnel\)\}<\/td>\s*<td class="mp-creative-cell">\$\{ccThumbHtml/);
   assert.doesNotMatch(app, /mp-campaign-line"><span class="mp-funnel/, 'funnel is no longer under the ad name');
