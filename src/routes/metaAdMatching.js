@@ -56,6 +56,14 @@ router.post('/creative-inheritance/apply', handle((req) => matching.applyCreativ
 router.get('/conflicts/:creativeId', handle((req) => matching.getCreativeConflict(creativeIdParam(req))));
 router.post('/conflicts/:creativeId/resolve', handle((req) => matching.resolveCreativeConflict(creativeIdParam(req), req.body, req.user && req.user.id)));
 
+// Read-only preview over the whole database: how many previously confirmed creatives have unreviewed name-copies. Changes nothing.
+router.get('/name-copies/preview', async (req, res, next) => {
+  try {
+    if (req.query.format === 'csv') return res.type('text/csv').attachment('name-copy-duplicates.csv').send(await matching.nameCopiesCsv());
+    return res.json(await matching.previewNameCopies());
+  } catch (err) { return next(err); }
+});
+
 // Selector vocabularies (products / concepts / creative styles / creators).
 router.get('/options', handle(() => matching.listOptions()));
 
@@ -129,7 +137,11 @@ router.post('/reprocess-backlog/stop', handle(() => matching.stopBacklogReproces
 router.get('/ads/:metaAdId', handle((req) => matching.getAdWorkspace(adId(req), { refresh: req.query.refresh !== '0' })));
 
 // Human actions.
-router.post('/ads/:metaAdId/confirm', handle((req) => matching.confirmMapping(adId(req), req.body, req.user && req.user.id)));
+router.post('/ads/:metaAdId/confirm', handle((req) => matching.confirmWithCopyOffer(adId(req), req.body, req.user && req.user.id)));
+// Name-copy duplicates: ads whose names differ only by a trailing "- Copy" suffix (different creative ids). The offer is read-only; applying
+// needs the person's explicit approval of the exact copies they were shown (copy_ids) and never touches anything a person already decided.
+router.get('/ads/:metaAdId/name-copies', handle((req) => matching.getNameCopies(adId(req))));
+router.post('/ads/:metaAdId/apply-name-copies', handle((req) => matching.applyNameCopies(adId(req), req.body && req.body.copy_ids, req.user && req.user.id)));
 router.post('/ads/:metaAdId/skip', handle((req) => matching.skipAd(adId(req), req.user && req.user.id)));
 router.post('/ads/:metaAdId/exclude', handle((req) => matching.setExcluded(adId(req), true, req.body && req.body.reason, req.user && req.user.id)));
 router.post('/ads/:metaAdId/include', handle((req) => matching.setExcluded(adId(req), false, null, req.user && req.user.id)));

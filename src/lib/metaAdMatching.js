@@ -51,6 +51,7 @@ const { buildMetaAdName, detectPromotionStageType } = require('./adSetupNaming')
 const { deriveProductCode } = require('./apparelmagic');
 const catalogueLib = require('./metaMatchingCatalogue');
 const creativeIdentity = require('./metaCreativeIdentity');
+const nameCopies = require('./metaNameCopies');
 const creativeConflict = require('./metaCreativeConflict');
 const creativeArchive = require('./metaCreativeArchive');
 const relevanceLib = require('./metaMatchingRelevance');
@@ -58,7 +59,7 @@ const vocab = require('./metaMatchingVocab');
 const {
   MEDIA_TYPES, MEDIA_KEYS, MEDIA_LABEL, buildFamilyIndex, matchProductPhrase, expandSet, hasSetWord,
   coreTokens, mediaTokensFromName, parseLooseMetaName,
-  cleanProductPhrase, isPromoPhrase, buildTokenSpread, identityGuard,
+  cleanProductPhrase, isPromoPhrase, giveawayLanguage, buildTokenSpread, identityGuard,
 } = require('./metaNameParsing');
 const {
   ymdInZone, addDays, REPORTING_TIMEZONE, deriveMetrics, HttpError, parseRangeParams,
@@ -562,6 +563,14 @@ function buildSuggestions(ad, ctx) {
       pushProduct(famOf(code), fromSetup, `Product of the linked Ad Setup #${anchor.setup.id}`, 'ad_setup_products', { ad_setup_id: anchor.setup.id });
     });
   }
+  // A GIVEAWAY ("$5K CASH GIVEAWAY", "GIFT CARD GIVEAWAY") promotes a prize, not a product. When the name says so and nothing in it
+  // resolves to a product, say that -- instead of the misleading "No matching product family". A name that ALSO names a real product
+  // keeps its product suggestions exactly as before (a named product during a giveaway stays eligible for product matching).
+  const giveaway = giveawayLanguage(name);
+  const productIsPromo = !!(productResolution && productResolution.promo);
+  if (giveaway && !out.some((x) => x.field === 'product' && x.confidence >= MEDIUM) && (!productResolution || productResolution.status === 'none')) {
+    productResolution = { status: 'none', reason: `Giveaway campaign (“${giveaway}”) — not product-focused`, promo: true, giveaway: true };
+  }
 
   // ---- Concept (concept_types vocabulary; unknown text = legacy free text) ----
   const pushConcept = (label, confidence, reason, source, evidence) => {
@@ -654,6 +663,16 @@ function buildSuggestions(ad, ctx) {
   // (not \b: structured names are underscore-delimited and _ is a word character)
   if (/(^|[^A-Za-z0-9])DPA([^A-Za-z0-9]|$)/i.test(name)) {
     add({ field: 'scope', value_key: 'not_product_specific', value_label: 'Not product-specific', confidence: 0.5, reason: 'Ad name contains "DPA" (dynamic product ads cover the whole catalogue)', source: 'name_keyword', evidence: { keyword: 'DPA' } });
+  }
+  // Strong evidence that the ad is about something other than one product: a giveaway, or a product slot that holds only promotional
+  // wording (SALE / HYPE / LIVE ...). Only a SUGGESTION -- a person confirms it (or overrides it) like any other field -- and only
+  // while no product is reliably identified, so a named product keeps being offered for product matching.
+  if (!out.some((x) => x.field === 'product' && x.confidence >= MEDIUM)) {
+    if (giveaway) {
+      add({ field: 'scope', value_key: 'not_product_specific', value_label: 'Not product-specific', confidence: 0.85, reason: `The ad name says “${giveaway}” — a giveaway promotes a prize, not a product`, source: 'name_giveaway', evidence: { keyword: giveaway, kind: 'giveaway' } });
+    } else if (productIsPromo) {
+      add({ field: 'scope', value_key: 'not_product_specific', value_label: 'Not product-specific', confidence: 0.75, reason: 'The product part of the name is promotional wording (e.g. SALE / HYPE / LIVE), not a product', source: 'name_promo', evidence: { kind: 'promo' } });
+    }
   }
 
   // De-duplicate on (field, value_key): keep the strongest, note the rest.
@@ -752,7 +771,10 @@ function evaluateAutoMatch(ad, built, ctx) {
   else if (crKeys.size > 1) leftBlank.push('Creator (conflicting evidence)');
   else creator = { value: crTok[0].value_label, basis: 'roster' };
 
-  if (by('scope').length) blockers.push('Looks like a DPA / not product-specific ad');
+  if (by('scope').length) {
+    const kinds = new Set(by('scope').map((x) => (x.evidence || {}).kind));
+    blockers.push(kinds.has('giveaway') ? 'Looks like a giveaway / not product-specific ad' : kinds.has('promo') ? 'Looks like a promotional / not product-specific ad' : 'Looks like a DPA / not product-specific ad');
+  }
 
   const qualifies = !blockers.length && !!product;
   if (!qualifies) return { qualifies: false, blockers, left_blank: [], values: null, auto_fields: null };
@@ -2194,6 +2216,14 @@ async function getAdWorkspace(metaAdId, { refresh = true } = {}) {
   });
   const conceptResolve = await vocab.loadConceptResolver();
   suggestions.concept = mapConceptSuggestions(conceptResolve, suggestions.concept);
+  // The giveaway / promotional "Not product-specific" suggestion is derived from the NAME alone, so it is shown (read-time, nothing is
+  // written) even for an ad whose stored suggestions pre-date it. A person-confirmed ad never gets one.
+  const built = buildSuggestions({ ad_name: ad.ad_name || '' }, ctx);
+  if (ad.match_status !== 'confirmed' && !suggestions.scope.length) {
+    built.suggestions.filter((x) => x.field === 'scope' && ['name_giveaway', 'name_promo'].includes(x.source)).forEach((x) => suggestions.scope.push({
+      value_key: x.value_key, value_label: x.value_label, value_ref: null, confidence: x.confidence, confidence_level: confidenceLevel(x.confidence), confidence_label: confidenceLabel(x.confidence), reason: x.reason, source: x.source, evidence: x.evidence,
+    }));
+  }
 
   const structuredParse = parseStructuredMetaName(ad.ad_name);
   const parsed = { legacy: parseMetaAdName(ad.ad_name), structured: structuredParse, loose: structuredParse ? null : parseLooseMetaName(ad.ad_name, ctx) };
@@ -2201,7 +2231,7 @@ async function getAdWorkspace(metaAdId, { refresh = true } = {}) {
   const autoMatched = ad.match_status === 'auto_matched';
   // Why an ad is (not) auto-matchable, from the CURRENT evidence -- shown as a
   // short note so a reviewer knows what to look at.
-  const autoEval = evaluateAutoMatch(ad, buildSuggestions({ ad_name: ad.ad_name || '' }, ctx), ctx);
+  const autoEval = evaluateAutoMatch(ad, built, ctx);
   return {
     ad: {
       meta_ad_id: ad.meta_ad_id, ad_name: ad.ad_name, effective_status: ad.effective_status,
@@ -2273,7 +2303,11 @@ function trimText(v, max = 255) {
 // reference against the live vocabularies, then writes classification +
 // products + the existing meta_ads match_* fields in one transaction under
 // a row lock (so it serialises with suggestion runs).
-async function confirmMapping(metaAdId, body, userId) {
+//   opts (internal, used ONLY by the approved name-copy apply -- see metaNameCopies.js; a normal confirmation passes none):
+//     requireEligible  re-check, under the row lock, that no person owns this ad or its exact creative (otherwise 409 not_eligible)
+//     expectedBase     ... and that its normalised name still equals this base
+//     afterWrite(client)  extra writes in the SAME transaction (the audit row)
+async function confirmMapping(metaAdId, body, userId, opts = {}) {
   const input = body || {};
   const notProductSpecific = input.not_product_specific === true;
   const productCodes = [...new Set((Array.isArray(input.product_codes) ? input.product_codes : []).map((c) => String(c).trim()).filter(Boolean))];
@@ -2337,6 +2371,18 @@ async function confirmMapping(metaAdId, body, userId) {
     await client.query('BEGIN');
     const lock = await client.query('SELECT meta_ad_id FROM meta_ads WHERE meta_ad_id = $1 FOR UPDATE', [metaAdId]);
     if (!lock.rows.length) throw new HttpError(404, 'Ad not found');
+    if (opts.requireEligible) {
+      const chk = await client.query(
+        `SELECT m.ad_name, ${creativeIdentity.eligibleSql(HUMAN_OWNED_SQL)} AS eligible, ${creativeIdentity.ineligibleReasonSql(HUMAN_OWNED_SQL)} AS why,
+                (m.meta_creative_id IS NOT NULL AND EXISTS (SELECT 1 FROM meta_ads s JOIN meta_ad_classifications sc ON sc.meta_ad_id = s.meta_ad_id
+                   WHERE s.meta_creative_id = m.meta_creative_id AND s.match_status = 'confirmed' AND NOT COALESCE(sc.excluded_from_intelligence, false))) AS creative_decided
+           FROM meta_ads m LEFT JOIN meta_ad_classifications c ON c.meta_ad_id = m.meta_ad_id WHERE m.meta_ad_id = $1`, [metaAdId]);
+      const row = chk.rows[0];
+      const notEligible = (why) => Object.assign(new HttpError(409, why), { code: 'not_eligible' });
+      if (!row.eligible) throw notEligible(`already owned by a person (${row.why || 'protected'})`);
+      if (row.creative_decided) throw notEligible('its creative already has a confirmed classification');
+      if (opts.expectedBase && nameCopies.baseOf(row.ad_name) !== opts.expectedBase) throw notEligible('its name no longer matches');
+    }
     await client.query(
       `INSERT INTO meta_ad_classifications (meta_ad_id, not_product_specific, concept_type_id, concept_label, creative_style_id, creator_name, media_type, skipped_at, classified_by_user_id)
        VALUES ($1,$2,$3,$4,$5,$6,$7,NULL,$8)
@@ -2358,6 +2404,7 @@ async function confirmMapping(metaAdId, body, userId) {
       [metaAdId, adSetupId, userId || null]
     );
     await client.query('DELETE FROM meta_ad_suggestions WHERE meta_ad_id = $1', [metaAdId]);
+    if (typeof opts.afterWrite === 'function') await opts.afterWrite(client);
     await client.query('COMMIT');
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -2377,6 +2424,21 @@ async function confirmMapping(metaAdId, body, userId) {
   workspace.applied_to_same_creative = creativeSync ? creativeSync.applied : 0;
   return workspace;
 }
+
+// ── Name-copy duplicates (see metaNameCopies.js) ─────────────────────────
+// A confirmation from the review session may ask for the OFFER: other creatives whose names are the same after removing a trailing
+// "- Copy" suffix. It is computed after the confirmation has been saved and can never fail it. Nothing is applied here.
+async function confirmWithCopyOffer(metaAdId, body, userId) {
+  const ws = await confirmMapping(metaAdId, body, userId);
+  if (body && body.offer_name_copies === true) {
+    try { ws.name_copies = nameCopies.offerSummary(await nameCopies.findNameCopies(metaAdId, { humanOwnedSql: HUMAN_OWNED_SQL })); } catch (err) { ws.name_copies = null; }
+  }
+  return ws;
+}
+const getNameCopies = async (metaAdId) => nameCopies.offerSummary(await nameCopies.findNameCopies(metaAdId, { humanOwnedSql: HUMAN_OWNED_SQL }));
+const applyNameCopies = (metaAdId, copyIds, userId) => nameCopies.applyNameCopies(metaAdId, copyIds, userId, { humanOwnedSql: HUMAN_OWNED_SQL, confirm: confirmMapping });
+const previewNameCopies = () => nameCopies.previewAll({ humanOwnedSql: HUMAN_OWNED_SQL });
+const nameCopiesCsv = async () => nameCopies.previewCsv(await nameCopies.previewAll({ humanOwnedSql: HUMAN_OWNED_SQL }, pool, { sample: Infinity, full: true }));
 
 // After a person confirms a single-product mapping, every OTHER not-yet-
 // classified ad with the same structured Product + Category is re-evaluated
@@ -2704,6 +2766,7 @@ async function performanceBy(query = {}) {
 }
 
 module.exports = {
+  confirmWithCopyOffer, getNameCopies, applyNameCopies, previewNameCopies, nameCopiesCsv,
   getReviewBatch,
   confidenceLevel,
   norm,

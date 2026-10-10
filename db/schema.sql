@@ -3067,6 +3067,23 @@ WHERE NOT EXISTS (SELECT 1 FROM content_creators WHERE lower(btrim(name)) = 'jam
 ON CONFLICT (kind, name_key) DO NOTHING;
 
 -- =====================================================================
+-- Name-copy duplicates (Ad Matching): an audit row for every classification a person approved to apply from one ad to a "- Copy" duplicate
+-- that carries a DIFFERENT creative id. Additive, local, never read by any matching rule.
+CREATE TABLE IF NOT EXISTS meta_name_copy_applications (
+  id SERIAL PRIMARY KEY,
+  source_meta_ad_id VARCHAR(64) NOT NULL REFERENCES meta_ads(meta_ad_id) ON DELETE CASCADE,
+  copy_meta_ad_id VARCHAR(64) NOT NULL REFERENCES meta_ads(meta_ad_id) ON DELETE CASCADE,
+  base_name TEXT NOT NULL,
+  source_ad_name TEXT,
+  copy_ad_name TEXT,
+  applied_by_user_id INTEGER,
+  applied_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  classification JSONB
+);
+CREATE INDEX IF NOT EXISTS idx_meta_name_copy_apps_copy ON meta_name_copy_applications(copy_meta_ad_id);
+CREATE INDEX IF NOT EXISTS idx_meta_name_copy_apps_source ON meta_name_copy_applications(source_meta_ad_id);
+
+
 -- Approved Ad Matching concepts + historical-spelling aliases
 -- =====================================================================
 -- The concept list Ad Matching offers is the people-approved vocabulary: meta_matching_vocab rows of kind 'concept'. The 40 approved
@@ -3164,3 +3181,4 @@ INSERT INTO meta_matching_concept_aliases (alias, alias_key, approved_name, remo
   ('TALKTHROUGH', 'talkthrough', 'TALK THROUGH', false),
   ('FLATLAY PHOTO', 'flatlay photo', 'FLAT LAY', false)
 ON CONFLICT (alias_key) DO NOTHING;
+

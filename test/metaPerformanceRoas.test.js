@@ -75,46 +75,47 @@ test('headline KPIs and the ad detail show Purchase Value and ROAS, with the una
 // ── configurable health benchmarks ───────────────────────────────────────────
 const withEnv = (v, fn) => { const old = process.env.META_HEALTH_RULES; if (v === undefined) delete process.env.META_HEALTH_RULES; else process.env.META_HEALTH_RULES = v; try { return fn(); } finally { if (old === undefined) delete process.env.META_HEALTH_RULES; else process.env.META_HEALTH_RULES = old; } };
 
-test('health: the confirmed benchmarks are unchanged and nothing else is coloured by default', () => {
+test('health: the approved benchmarks apply by default and nothing else is coloured', () => {
   withEnv(undefined, () => {
     assert.equal(health.classify('MOF', 'cpa', 40, { days: 30 }), 'green');
     assert.equal(health.classify('MOF', 'cpa', 60, { days: 30 }), 'green');
-    assert.equal(health.classify('MOF', 'cpa', 60.01, { days: 30 }), null, 'no orange / red invented');
-    assert.equal(health.classify('MOF', 'cpa', 39.99, { days: 30 }), null);
+    assert.equal(health.classify('MOF', 'cpa', 60.01, { days: 30 }), 'orange');
+    assert.equal(health.classify('MOF', 'cpa', 72.01, { days: 30 }), 'red');
+    assert.equal(health.classify('MOF', 'cpa', 20, { days: 30 }), 'green', 'below the $40-$60 range is not penalised');
     assert.equal(health.classify('TOF', 'frequency', 1.9, { days: 4 }), 'green');
     assert.equal(health.classify('TOF', 'frequency', 1.9, { days: 30 }), null, 'frequency is judged only for about 4 days');
-    assert.equal(health.classify('TOF', 'frequency', 2, { days: 4 }), null);
+    assert.equal(health.classify('TOF', 'frequency', 2, { days: 4 }), 'orange');
+    assert.equal(health.classify('TOF', 'frequency', 2.41, { days: 4 }), 'red');
     for (const [f, m] of [['TOF', 'reach'], ['TOM', 'cpa'], ['TOM', 'reach'], ['MOF', 'reach']]) assert.equal(health.classify(f, m, 12345, { days: 4 }), null, `${f} ${m} has no approved benchmark`);
     assert.deepEqual(health.status().pending_benchmarks, ['TOF reach', 'TOM cpa', 'TOM reach', 'MOF reach']);
     assert.equal(health.status().rules_source, 'default');
   });
 });
-test('health: approved benchmarks can be configured (green / orange / red) without a code change', () => {
+test('health: further approved benchmarks can be configured (green / orange / red) without a code change', () => {
   const cfg = JSON.stringify({
-    TOM: { cpa: { period: null, green: { max: 45 }, orange: { gt: 45, lte: 60 }, red: { gt: 60 } } },
-    TOF: { reach: { period: null, green: { min: 50000 } } },
-    MOF: { cpa: { period: null, green: { min: 40, max: 60 }, orange: { gt: 60, lte: 80 }, red: { gt: 80 } } },
+    TOM: { cpa: { period: null, green: { lte: 45 }, orange: { gt: 45, lte: 54 }, red: { gt: 54 } } },
+    TOF: { reach: { period: null, green: { gte: 50000 }, orange: { gte: 40000, lt: 50000 }, red: { lt: 40000 } } },
   });
   withEnv(cfg, () => {
     assert.equal(health.status().rules_source, 'env');
     assert.deepEqual(health.status().config_errors, []);
     assert.equal(health.classify('TOM', 'cpa', 44, {}), 'green');
     assert.equal(health.classify('TOM', 'cpa', 50, {}), 'orange');
-    assert.equal(health.classify('TOM', 'cpa', 61, {}), 'red');
+    assert.equal(health.classify('TOM', 'cpa', 55, {}), 'red');
     assert.equal(health.classify('TOF', 'reach', 60000, { days: 7 }), 'green');
-    assert.equal(health.classify('TOF', 'reach', 100, { days: 7 }), null, 'no red was configured, so this stays neutral');
-    assert.equal(health.classify('MOF', 'cpa', 50, {}), 'green', 'confirmed green still applies');
+    assert.equal(health.classify('TOF', 'reach', 45000, { days: 7 }), 'orange');
+    assert.equal(health.classify('TOF', 'reach', 100, { days: 7 }), 'red');
+    assert.equal(health.classify('MOF', 'cpa', 50, {}), 'green', 'approved rules still apply');
     assert.equal(health.classify('MOF', 'cpa', 70, {}), 'orange');
-    assert.equal(health.classify('MOF', 'cpa', 90, {}), 'red');
     assert.deepEqual(health.status().pending_benchmarks, ['TOM reach', 'MOF reach']);
   });
 });
-test('health: a configuration can never change the confirmed bands, enable a new metric, or break the dashboard', () => {
+test('health: a configuration can never change the approved bands, enable a new metric, or break the dashboard', () => {
   const bad = JSON.stringify({
-    MOF: { cpa: { period: null, green: { min: 30, max: 70 } } },        // tries to move the confirmed band
-    TOF: { frequency: { period: null, green: { lt: 3 } } },             // tries to change the confirmed frequency rule / period
-    TOM: { frequency: { period: null, green: { lt: 2 } } },             // not a colour-coded TOM measure
-    BOF: { cpa: { period: null, green: { max: 1 } } },                  // not a judged funnel
+    MOF: { cpa: { period: null, green: { lte: 70 }, orange: { gt: 70, lte: 80 }, red: { gt: 80 } } }, // tries to move the approved bands
+    TOF: { frequency: { period: null, green: { lt: 3 } } },                                           // tries to change the approved frequency rule / period
+    TOM: { frequency: { period: null, green: { lt: 2 } } },                                           // not a colour-coded TOM measure
+    BOF: { cpa: { period: null, green: { max: 1 } } },                                                // not a judged funnel
     MOF2: 'x',
     TOF2: {},
   });
@@ -122,8 +123,8 @@ test('health: a configuration can never change the confirmed bands, enable a new
     const st = health.status();
     assert.equal(st.rules_source, 'default', 'nothing valid was applied');
     assert.ok(st.config_errors.length >= 4, st.config_errors);
-    assert.equal(health.classify('MOF', 'cpa', 35, {}), null, 'the confirmed MOF CPA band is still $40-$60');
-    assert.equal(health.classify('MOF', 'cpa', 65, {}), null);
+    assert.equal(health.classify('MOF', 'cpa', 65, {}), 'orange', 'the approved MOF CPA bands are untouched');
+    assert.equal(health.classify('MOF', 'cpa', 75, {}), 'red');
     assert.equal(health.classify('TOF', 'frequency', 2.5, { days: 30 }), null);
     assert.equal(health.classify('TOM', 'frequency', 1, { days: 4 }), null);
   });

@@ -642,7 +642,7 @@ function mpRenderAds(res) {
   } else {
     const hn = document.getElementById('mp-health-note');
     const healthOn = !!(res.health && res.health.active);
-    const dot = (h) => (healthOn && h ? `<span class="mp-health mp-health-${escapeHtml(h)}" title="${h === 'green' ? 'Within the confirmed healthy range' : h === 'orange' ? 'Watch range' : 'Beyond the confirmed concern level'} for this funnel"></span>` : '');
+    const dot = (h) => (healthOn && h ? `<span class="mp-health mp-health-${escapeHtml(h)}" title="${h === 'green' ? 'Meeting the approved target' : h === 'orange' ? 'Missing the approved target by up to 20%' : 'Missing the approved target by more than 20%'}"></span>` : '');
     // Hover text on every CPA / Frequency cell says WHY it has (or has no) colour, so a neutral cell is never a mystery.
     const per0 = (res.health && res.health.period) || {};
     const why = (a, metric, h) => {
@@ -650,22 +650,35 @@ function mpRenderAds(res) {
       const hh = res.health;
       const fn = a.funnel;
       const label = { cpa: 'CPA', frequency: 'Frequency', reach: 'Reach' }[metric];
-      if (h) return h === 'green' ? `Within the confirmed healthy range for ${fn} ${label}` : `Beyond the confirmed concern level for ${fn} ${label}`;
+      if (h) return h === 'green' ? `${fn} ${label}: meeting the approved target` : h === 'orange' ? `${fn} ${label}: missing the approved target by up to 20%` : `${fn} ${label}: missing the approved target by more than 20%`;
       if (fn !== 'TOF' && fn !== 'TOM' && fn !== 'MOF') return 'Funnel is unknown or mixed (campaign name has no single TOF / TOM / MOF), so no health judgement';
       if (!((hh.colour_coded && hh.colour_coded[fn]) || []).includes(metric)) return `${label} is not a colour-coded ${fn} measure`;
       const rule = hh.defined && hh.defined[fn] && hh.defined[fn][metric];
-      if (!rule) return `No confirmed benchmark for ${fn} ${label} yet, so it shows uncoloured`;
+      if (!rule) return `No approved benchmark for ${fn} ${label} yet, so it shows uncoloured`;
       const v = metric === 'cpa' ? a.cpa : metric === 'reach' ? a.reach : a.frequency;
       if (metric === 'cpa' && (v === null || v === undefined)) return 'No purchases in this period, so no CPA to judge';
       if (/about 4 days/.test(rule) && !per0.frequency_judged) return `${label} is judged only for a period of about 4 days (3–5); this period is ${per0.days || '?'} day${per0.days === 1 ? '' : 's'}`;
       if (v === null || v === undefined) return `${label} for this period has not been loaded${metric === 'frequency' ? ' (Refresh now loads exact Reach & Frequency)' : ''}`;
-      return `Outside the confirmed healthy range (${rule})`;
+      return `Not within any approved range (${rule})`;
     };
     if (hn) {
       if (healthOn) {
         const per = res.health.period || {};
+        const fmtBand = (metric, text) => (metric === 'cpa' ? text.replace(/(\d+(?:\.\d+)?)/g, '$$$1') : text);
+        const LAB = { cpa: 'CPA', reach: 'Reach', frequency: 'Frequency' };
+        const lines = [];
+        ['TOF', 'TOM', 'MOF'].forEach((f) => ((res.health.colour_coded || {})[f] || []).forEach((m) => {
+          const bands = res.health.bands && res.health.bands[f] && res.health.bands[f][m];
+          if (!bands) return;
+          const dots = bands.map((b) => `<span class="mp-health mp-health-${escapeHtml(b.state)}"></span>${escapeHtml(fmtBand(m, b.text))}`).join(' · ');
+          const when = (res.health.defined[f][m] || '').includes('about 4 days') ? ` <small>(3–5 day periods only${per.frequency_judged ? '' : `; this period is ${per.days || '?'} days, so not coloured`})</small>` : '';
+          lines.push(`<li><b>${f} ${LAB[m]}</b> ${dots}${when}</li>`);
+        }));
+        const pend = (res.health.pending_benchmarks || []).map((x) => x.replace(/^(\w+) (\w+)$/, (m0, f, k) => `${f} ${LAB[k] || k}`));
         hn.style.display = '';
-        hn.innerHTML = `Colour dots are used on <b>TOF</b> Frequency and Reach, <b>TOM</b> CPA and Reach, and <b>MOF</b> CPA and Reach, using only benchmarks WNDRR has confirmed: TOF Frequency under 2 and MOF CPA $40–$60 are green. ${(res.health.pending_benchmarks || []).length ? `Awaiting a benchmark (shown without colour): ${res.health.pending_benchmarks.map((x) => x.replace(/^(\w+) (\w+)$/, (m, f, k) => `${f} ${({ cpa: 'CPA', reach: 'Reach', frequency: 'Frequency' })[k] || k}`)).join(', ')}. ` : ''}Every other measure is left neutral. Frequency colours apply only to a period of about 4 days (${per.approx_4_days ? `${per.approx_4_days.min_days}–${per.approx_4_days.max_days} days` : '3–5 days'}); this period is ${per.days || '?'} day${per.days === 1 ? '' : 's'}${per.frequency_judged ? '' : ', so Frequency is shown without colour'}.`;
+        hn.innerHTML = `<details class="mp-health-guide"><summary title="What the colour dots mean">ⓘ Colour guide</summary>
+          <ul>${lines.join('')}</ul>
+          <div class="mp-health-foot">Green = meets the target · orange = misses it by up to ${res.health.tolerance_pct || 20}% · red = misses it by more. ${pend.length ? `Not yet approved, so shown without colour: ${escapeHtml(pend.join(', '))}. ` : ''}CPA is Meta-reported (Triple Whale is not connected yet).</div></details>`;
         if ((res.health.config_errors || []).length) hn.innerHTML += ` <b>⚠ Some configured benchmarks were ignored:</b> ${res.health.config_errors.map(escapeHtml).join('; ')}.`;
       } else hn.style.display = 'none';
     }
@@ -1224,10 +1237,10 @@ const mmState = {
 //   Historical = needs-review work that is not about a current CORE product with sellable stock (kept, searchable).
 //   Will inherit = every outstanding copy of the creative will take a person's decision when "Apply" is pressed.
 const MM_FILTERS = [
-  ['all', 'All ads', 'all_ads', 'ads'], ['needs', 'To do', 'needs', 'creatives'], ['suggested', 'Needs review', 'suggested', 'creatives'], ['unmatched', 'Unmatched', 'unmatched', 'creatives'],
-  ['inherit', 'Will inherit', 'will_inherit', 'creatives'], ['matched', 'Matched', 'matched', 'ads'],
+  ['needs', 'Needs review', 'needs', 'creatives'], ['suggested', 'Has suggestion', 'suggested', 'creatives'], ['unmatched', 'Unmatched', 'unmatched', 'creatives'],
+  ['matched', 'Matched', 'matched', 'ads'], ['inherit', 'Will inherit', 'will_inherit', 'creatives'],
   ['historical', 'Historical', 'historical', 'creatives'], ['archived', 'Archived / pre-2026', 'archived', 'creatives'], ['conflict', 'Creative conflicts', 'conflicts', 'creatives'],
-  ['not_product_specific', 'Not product-specific', 'not_product_specific', 'ads'], ['excluded', 'Excluded', 'excluded', 'ads'],
+  ['not_product_specific', 'Not product-specific', 'not_product_specific', 'ads'], ['excluded', 'Excluded', 'excluded', 'ads'], ['all', 'All ads', 'all_ads', 'ads'],
 ];
 
 function loadMetaPerformanceArea() {
@@ -1265,11 +1278,18 @@ function mmStateChip(a) {
 // Ads whose classification values are real (human-confirmed or auto-matched).
 const mmHasValues = (a) => (a.match_status === 'confirmed' || a.match_status === 'auto_matched') && !a.excluded;
 
+// The status filter is one compact dropdown (every filter stays available, each with its count and unit) plus a concise
+// "N creatives to review" indicator. Needs review is the default view.
 function mmRenderChips(counts) {
-  const chips = document.getElementById('mm-chips');
-  chips.innerHTML = MM_FILTERS.map(([key, label, field, unit]) => `
-    <button type="button" class="mm-chip${mmState.filter === key ? ' active' : ''}" data-filter="${key}" title="${label}: ${unit}">${label}
-      <span class="mm-chip-n">${Number((counts && counts[field]) || 0).toLocaleString('en-AU')}</span> <span class="mm-chip-unit">${unit}</span></button>`).join('');
+  const sel = document.getElementById('mm-filter');
+  if (sel) {
+    sel.innerHTML = MM_FILTERS.map(([key, label, field, unit]) => `<option value="${key}"${mmState.filter === key ? ' selected' : ''}>${label} · ${Number((counts && counts[field]) || 0).toLocaleString('en-AU')} ${unit}</option>`).join('');
+    sel.value = mmState.filter;
+  }
+  const n = Number((counts && counts.needs) || 0);
+  mmState.needsCount = counts ? n : null;
+  const rem = document.getElementById('mm-remaining');
+  if (rem) rem.innerHTML = counts ? (n ? `<b>${n.toLocaleString('en-AU')}</b> creative${n === 1 ? '' : 's'} to review` : 'Nothing left to review') : '';
 }
 
 function mmRowHtml(a) {
@@ -1304,8 +1324,8 @@ function mmRenderRows(res) {
   if (res.filter === 'historical') noteParts.push('Historical: creatives that point at products which are not current CORE apparel with sellable stock, and that are not running or recently active — newest activity first. They are kept and searchable, just out of the way of the main queue.');
   else if (res.filter === 'archived') noteParts.push(`Archived / pre-2026: creatives that provably have not delivered since ${mpDate(res.archive.cutoff, true)} (no ad of the creative is active, none was created in 2026, none delivered since). Nothing is deleted or reclassified; they just don't need a person. Newest activity first.`);
   else if (res.filter === 'conflict') noteParts.push('Creatives where people classified different ads of the same creative differently. Nothing is inherited for these until someone settles it.');
-  else if (res.filter === 'inherit') noteParts.push('Creatives whose every unclassified copy will take the classification of an ad a person already classified on the exact same creative. Nothing is applied until you press "Apply" in the Review workload panel.');
-  if (res.scope && res.scope !== 'all') noteParts.push('These chips count ads active in the selected window; the Review workload panel above counts all ads. Choose "All ads" to compare them directly.');
+  else if (res.filter === 'inherit') noteParts.push('Creatives whose every unclassified copy will take the classification of an ad a person already classified on the exact same creative. Nothing is applied until you press "Apply" in the Review workload (Advanced settings).');
+  if (res.scope && res.scope !== 'all') noteParts.push('These counts cover ads active in the selected window; the Review workload below counts all ads. Choose "All ads" to compare them directly.');
   if (res.relevance && !res.relevance.known) noteParts.push(`Product relevance isn't available yet (${res.relevance.reason || 'ApparelMagic data not loaded'}), so every ad is shown as actionable.`);
   note.style.display = noteParts.length ? '' : 'none';
   note.textContent = noteParts.join(' ');
@@ -1628,12 +1648,12 @@ function mmShowPreview(pv) {
 }
 // The working view (which ads + which chip) is remembered per browser, so "All ads" stays the main workspace once chosen.
 const MM_VIEW_KEY = 'wndrr.matching.view';
-function mmSaveView() { try { localStorage.setItem(MM_VIEW_KEY, JSON.stringify({ scope: mmState.scope, filter: mmState.filter })); } catch (e) { /* storage unavailable: nothing is lost but the memory */ } }
+function mmSaveView() { try { localStorage.setItem(MM_VIEW_KEY, JSON.stringify({ scope: mmState.scope })); } catch (e) { /* storage unavailable: nothing is lost but the memory */ } }
 (function mmRestoreView() {
   try {
     const v = JSON.parse(localStorage.getItem(MM_VIEW_KEY) || 'null');
     if (v && ['30d', '90d', 'all'].includes(v.scope)) mmState.scope = v.scope;
-    if (v && MM_FILTERS.some((f) => f[0] === v.filter)) mmState.filter = v.filter;
+    // the status filter is NOT restored: Ad Matching always opens on Needs review
     document.getElementById('mm-scope').value = mmState.scope;
   } catch (e) { /* default view */ }
 })();
@@ -1645,10 +1665,9 @@ document.getElementById('mm-search').addEventListener('input', (e) => {
   clearTimeout(mmSearchTimer);
   mmSearchTimer = setTimeout(() => { mmState.q = e.target.value.trim(); mmState.page = 1; loadMetaMatching(); }, 300);
 });
-document.getElementById('mm-chips').addEventListener('click', (e) => {
-  const chip = e.target.closest('.mm-chip');
-  if (!chip) return;
-  mmState.filter = chip.dataset.filter; mmSaveView(); mmState.page = 1; loadMetaMatching();
+document.getElementById('mm-filter').addEventListener('change', (e) => {
+  if (!MM_FILTERS.some((f) => f[0] === e.target.value)) return;
+  mmState.filter = e.target.value; mmState.page = 1; loadMetaMatching();
 });
 document.getElementById('mm-pager').addEventListener('click', (e) => {
   if (e.target.id === 'mm-prev' && mmState.page > 1) mmState.page -= 1;
@@ -1724,19 +1743,17 @@ function mmRvStatus(msg, kind) {
 }
 
 function mmRvUpdateBar() {
-  const bar = document.getElementById('mm-rv-bar');
-  if (!bar) return;
-  const left = mmRv.left === null ? null : mmRv.left;
-  const total = (left || 0) + mmRv.done;
-  const pct = total ? Math.round((mmRv.done / total) * 100) : 0;
+  // the main page only carries the concise "N creatives to review" indicator (rendered with the counts) and the Start button;
+  // the detailed progress lives inside the review modal
   const reviewable = [...mmRv.batch.values()].filter((i) => i.reviewable).length;
-  bar.querySelector('.mm-rv-count').innerHTML = left === null ? '' :
-    `<b>${mmRv.done.toLocaleString('en-AU')}</b> confirmed this session · <b>${left.toLocaleString('en-AU')}</b> creative${left === 1 ? '' : 's'} left in ${escapeHtml(mmRv.leftLabel)}`;
-  bar.querySelector('.mm-rv-prog > i').style.width = `${pct}%`;
-  bar.querySelector('.mm-rv-prog').setAttribute('aria-valuenow', String(pct));
   const start = document.getElementById('mm-rv-start');
+  if (!start) return;
   start.disabled = !reviewable;
-  start.title = reviewable ? '' : 'No creative on this page can be reviewed here';
+  start.title = reviewable ? 'Opens each creative in the full editor with reliable suggestions filled in. Enter confirms and loads the next one.' : 'No creative on this page can be reviewed here';
+  if (mmRv.sess === null && mmRv.left !== null && mmState.needsCount === null) {
+    const rem = document.getElementById('mm-remaining');
+    if (rem) rem.innerHTML = `<b>${mmRv.left.toLocaleString('en-AU')}</b> creative${mmRv.left === 1 ? '' : 's'} to review`;
+  }
 }
 
 // the row behind the modal: marks reviewable rows and shows the suggested creator
@@ -1829,15 +1846,15 @@ function mmSessCandidates(fromId) {
 
 function mmSessBarHtml() {
   const s = mmRv.sess;
-  const handled = s.done + s.skipped;
+  const handled = s.done + s.skipped + s.copied;
   const total = Math.max(s.startLeft || 0, handled + 1);
   const pct = Math.min(100, Math.round((handled / total) * 100));
-  return `<div class="mm-sess-bar" id="mm-sess-bar"><span class="mm-sess-count"><b>Creative ${Math.min(handled + 1, total)} of ${total}</b> · ${s.done} confirmed · ${s.skipped} skipped · ${Math.max(0, total - handled - (s.finished ? 0 : 1))} to go</span><span class="mm-rv-prog" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><i style="width:${pct}%"></i></span></div>`;
+  return `<div class="mm-sess-bar" id="mm-sess-bar"><span class="mm-sess-count"><b>Creative ${Math.min(handled + 1, total)} of ${total}</b> · ${s.done} confirmed${s.copied ? ` · ${s.copied} copied` : ''} · ${s.skipped} skipped · ${Math.max(0, total - handled - (s.finished || s.offer ? 0 : 1))} to go</span><span class="mm-rv-prog" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><i style="width:${pct}%"></i></span></div>`;
 }
 
 async function mmSessStart(fromId) {
   if (mmRv.sess) return;
-  mmRv.sess = { seen: new Set(), done: 0, skipped: 0, startLeft: mmRv.left || 0, current: null, ctx: null, enterBlockedUntil: 0, token: 0, ended: false, finished: false };
+  mmRv.sess = { seen: new Set(), done: 0, skipped: 0, copied: 0, resolvedBases: new Set(), offer: null, startLeft: mmRv.left || 0, current: null, ctx: null, enterBlockedUntil: 0, token: 0, ended: false, finished: false };
   const first = fromId && mmRvReviewable(fromId) ? fromId : mmSessCandidates(null)[0];
   if (!first) { mmRv.sess = null; mmRvStatus('Nothing on this page can be reviewed here.', 'warn'); return; }
   await mmSessOpen(first);
@@ -1865,6 +1882,10 @@ function mmAutofill(ws, c) {
     (group ? sg.product.filter((x) => x.evidence && x.evidence.set_group === group && good(x)) : [top]).forEach((x) => c.apply('product', x));
     filled.push('Product');
   }
+  // A giveaway / promotional name ("$5K CASH GIVEAWAY"): Not product-specific is pre-ticked when the evidence is strong and no product
+  // was identified. Still only a pre-selection -- nothing is saved until the reviewer confirms, and the box can be unticked.
+  const scope = sg.scope && sg.scope[0];
+  if (!c.productPicker.get().length && !c.nps.checked && good(scope)) { c.apply('scope', scope); filled.push('Not product-specific'); }
   for (const [field, picker, label] of [['concept', c.conceptPicker, 'Concept'], ['media_type', c.mediaPicker, 'Media'], ['creator', c.creatorPicker, 'Creator'], ['creative_style', c.stylePicker, 'Creative style']]) {
     const x = sg[field] && sg[field][0];
     if (!picker.get().length && good(x)) { c.apply(field, x); filled.push(label); }
@@ -1914,7 +1935,7 @@ function mmSessOnClosed() {
   if (!s) return;
   s.ended = true; mmRv.sess = null;
   document.querySelectorAll('#mm-body tr.mm-row-cur').forEach((r) => r.classList.remove('mm-row-cur'));
-  mmRvStatus(`Review closed — ${s.done} confirmed, ${s.skipped} skipped.`, 'ok');
+  mmRvStatus(`Review closed — ${s.done} confirmed${s.copied ? `, ${s.copied} copied` : ''}, ${s.skipped} skipped.`, 'ok');
   loadMetaMatching();
 }
 
@@ -1941,6 +1962,7 @@ async function mmSessConfirm() {
   try {
     const payload = mmRvPayload(f);
     payload.ad_setup_id = f.adSetupId || null; // only if a person linked one in this modal
+    payload.offer_name_copies = true; // ask (read-only) whether ads with the same name + a "- Copy" suffix exist
     const ws = await api(`/meta-ad-matching/ads/${encodeURIComponent(id)}/confirm`, { method: 'POST', body: JSON.stringify(payload) });
     ok = true;
     const dup = Number(ws.applied_to_same_creative) || 0;
@@ -1962,6 +1984,8 @@ async function mmSessConfirm() {
     toast(`✓ Confirmed${dup ? ` (+${dup} same-creative ad${dup === 1 ? '' : 's'})` : ''}`);
     mmRvUpdateBar(); mmRvScheduleCounts();
     mmRv.cooldownUntil = Date.now() + MM_RV_COOLDOWN_MS;
+    const offer = ws.name_copies;
+    if (offer && offer.eligible_creatives > 0 && !s.resolvedBases.has(offer.base)) { mmSessOfferShow(id, offer); return ok; } // wait for a person's choice
     await mmSessNext(id);
   } catch (e) {
     const msg = e && e.message ? e.message : 'Unknown error';
@@ -1978,6 +2002,77 @@ async function mmSessConfirm() {
     mmSessSetBusy(false);
   }
   return ok;
+}
+
+// ── Name-copy offer ─────────────────────────────────────────────────────
+// After a confirmation, when other creatives have the SAME name apart from a trailing "- Copy" suffix and are still unclassified, the
+// modal asks once: apply this classification to them, or review them separately. Name equality only proves a candidate, so applying
+// is an explicit choice (button or A); Enter is deliberately ignored here so a double-press can never approve it. No offer is shown
+// when there are no such copies -- Enter then confirms and advances exactly as before.
+function mmSessOfferShow(sourceId, offer) {
+  const s = mmRv.sess;
+  if (!s || s.ended) return;
+  s.offer = { sourceId, offer, shownAt: Date.now(), busy: false }; s.ctx = null;
+  const n = offer.eligible_creatives;
+  const names = offer.copies.map((c) => `<li>${escapeHtml(c.ad_name || c.meta_ad_id)}${c.ads > 1 ? ` <small>(+${c.ads - 1} same creative)</small>` : ''}</li>`).join('');
+  const more = n > offer.copies.length ? `<li><small>+ ${n - offer.copies.length} more</small></li>` : '';
+  const side = [
+    offer.already_same ? `${offer.already_same} already classified the same way` : '',
+    offer.conflict_count ? `${offer.conflict_count} already classified differently — <b>not changed</b>, review separately` : '',
+  ].filter(Boolean).join(' · ');
+  document.getElementById('mm-modal-title').textContent = 'Review creative';
+  document.getElementById('mm-modal-body').innerHTML = `${mmSessBarHtml()}
+    <div class="mm-copy-offer" id="mm-copy-offer" role="alertdialog" aria-labelledby="mm-copy-title">
+      <div class="mm-copy-title" id="mm-copy-title"><b>${n} matching cop${n === 1 ? 'y' : 'ies'} found.</b> Apply this classification to ${n === 1 ? 'it' : `all ${n}`}?</div>
+      <ul class="mm-copy-list">${names}${more}</ul>
+      ${side ? `<div class="mm-copy-side">${side}</div>` : ''}
+      <div class="mm-copy-note">Matched by name only (“${escapeHtml(offer.base)}” plus a “- Copy” suffix) — these are different creative ids, so the files may differ.</div>
+      <div class="mm-copy-error" id="mm-copy-error"></div>
+      <div class="mm-copy-actions">
+        <button type="button" class="btn btn-primary" id="mm-copy-apply">Apply to ${n === 1 ? 'copy' : 'copies'} <kbd>A</kbd></button>
+        <button type="button" class="btn btn-ghost" id="mm-copy-decline">Review separately <kbd>S</kbd></button>
+        <span class="mm-sess-hint">Enter is ignored here on purpose</span>
+      </div>
+    </div>`;
+  document.getElementById('mm-copy-apply').addEventListener('click', mmSessOfferApply);
+  document.getElementById('mm-copy-decline').addEventListener('click', mmSessOfferDecline);
+  const body = document.getElementById('mm-modal-body'); body.setAttribute('tabindex', '-1'); body.focus({ preventScroll: true });
+}
+function mmSessOfferButtons(disabled) { document.querySelectorAll('#mm-copy-apply, #mm-copy-decline').forEach((b) => { b.disabled = disabled; }); }
+async function mmSessOfferApply() {
+  const s = mmRv.sess;
+  if (!s || s.ended || !s.offer || s.offer.busy || mmRv.busy) return; // one request at a time: a second press / click does nothing
+  const { sourceId, offer } = s.offer;
+  s.offer.busy = true; mmRv.busy = true; mmSessOfferButtons(true);
+  const err = document.getElementById('mm-copy-error'); if (err) err.textContent = '';
+  try {
+    const res = await api(`/meta-ad-matching/ads/${encodeURIComponent(sourceId)}/apply-name-copies`, { method: 'POST', body: JSON.stringify({ copy_ids: offer.copy_ids }) });
+    const keys = new Set(res.applied.map((a) => (String(a.creative_key).startsWith('ad:') ? String(a.creative_key).slice(3) : a.creative_key)));
+    keys.forEach((k) => s.seen.add(k)); // they are classified now: never shown again this session
+    s.copied += res.applied_creatives;
+    if (mmRv.left !== null) mmRv.left = Math.max(0, mmRv.left - res.applied_creatives);
+    s.resolvedBases.add(offer.base);
+    const onPage = mmRvIds().filter((rid) => keys.has(mmRvKey(rid)));
+    if (onPage.length) { try { await mmRvRefreshStates(onPage); } catch (e) { /* the closing refresh shows them */ } }
+    const skippedN = res.skipped.length;
+    mmRvStatus(`✓ Applied to ${res.applied_creatives} cop${res.applied_creatives === 1 ? 'y' : 'ies'} (${res.applied_ads} ad${res.applied_ads === 1 ? '' : 's'}).${skippedN ? ` ${skippedN} skipped — already decided by a person.` : ''}`, 'ok');
+    toast(`✓ Applied to ${res.applied_creatives} cop${res.applied_creatives === 1 ? 'y' : 'ies'}${skippedN ? ` (${skippedN} skipped)` : ''}`);
+    mmRvUpdateBar(); mmRvScheduleCounts();
+    s.offer = null;
+    await mmSessNext(sourceId);
+  } catch (e) {
+    if (s.offer) s.offer.busy = false;
+    const el = document.getElementById('mm-copy-error'); if (el) el.textContent = `Couldn’t apply: ${e.message}`;
+    mmSessOfferButtons(false);
+  } finally { mmRv.busy = false; }
+}
+async function mmSessOfferDecline() {
+  const s = mmRv.sess;
+  if (!s || s.ended || !s.offer || s.offer.busy || mmRv.busy) return;
+  const { sourceId, offer } = s.offer;
+  s.resolvedBases.add(offer.base); s.offer = null; // the copies stay untouched in the queue and are not offered again this session
+  mmRvStatus('Copies left for separate review.', 'ok');
+  await mmSessNext(sourceId);
 }
 
 async function mmSessSkip() {
@@ -2002,6 +2097,13 @@ document.getElementById('mm-rv-start').addEventListener('click', () => { mmSessS
 // Keyboard. Enter confirms ONLY when focus is not in a text field / dropdown (and not on a button or link, which act natively).
 document.addEventListener('keydown', (e) => {
   const s = mmRv.sess;
+  if (s && s.offer && document.getElementById('meta-match-modal').classList.contains('show')) {
+    // the name-copy offer: A applies, S reviews separately; Enter / Space never decide it (so a double-press cannot approve anything)
+    if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
+    if ([...document.querySelectorAll('.modal-backdrop.show')].some((m) => m.id !== 'meta-match-modal')) return;
+    if (e.key === 'a' || e.key === 'A') { e.preventDefault(); mmSessOfferApply(); } else if (e.key === 's' || e.key === 'S') { e.preventDefault(); mmSessOfferDecline(); } else if (e.key === 'Enter') e.preventDefault();
+    return;
+  }
   if (!s || !s.ctx || e.key !== 'Enter') return;
   const modal = document.getElementById('meta-match-modal');
   if (!modal.classList.contains('show')) return;
@@ -2015,6 +2117,21 @@ document.addEventListener('keydown', (e) => {
   e.preventDefault();
   if (e.repeat || Date.now() < s.enterBlockedUntil) return; // a held key never confirms twice
   mmSessConfirm();
+});
+
+// Duplicate names (read-only, Advanced settings): previously confirmed creatives that have unreviewed "- Copy" duplicates. Changes nothing.
+document.getElementById('mm-namecopies-preview').addEventListener('click', async () => {
+  const out = document.getElementById('mm-namecopies-out'); const btn = document.getElementById('mm-namecopies-preview');
+  btn.disabled = true; out.textContent = 'Checking…';
+  try {
+    const r = await api('/meta-ad-matching/name-copies/preview');
+    const t = r.totals; const n = (v) => Number(v).toLocaleString('en-AU');
+    out.innerHTML = `<div class="mm-workload-line"><span><b>${n(t.eligible_groups)}</b> duplicate group${t.eligible_groups === 1 ? '' : 's'}</span>
+      <span><b>${n(t.eligible_creatives)}</b> creative${t.eligible_creatives === 1 ? '' : 's'} (${n(t.eligible_ads)} ad${t.eligible_ads === 1 ? '' : 's'}) could be offered a person's classification</span>
+      ${t.groups_with_conflicts ? `<span><b>${n(t.groups_with_conflicts)}</b> group${t.groups_with_conflicts === 1 ? '' : 's'} with conflicting classifications (never offered)</span>` : ''}</div>
+      <div class="mm-muted">Read-only: nothing was changed. Copies are only ever offered to you one confirmation at a time, and only when you approve.</div>
+      ${r.samples.length ? `<ul class="mm-copy-list">${r.samples.slice(0, 8).map((g) => `<li>${escapeHtml(g.name)} <small>→ ${g.eligible_creatives} cop${g.eligible_creatives === 1 ? 'y' : 'ies'}</small></li>`).join('')}</ul>` : ''}`;
+  } catch (e) { out.textContent = e.message; } finally { btn.disabled = false; }
 });
 
 // ── Concept inventory (read-only): every concept in use, unique creatives vs Meta ads, spelling variants side by side ───
@@ -2906,7 +3023,7 @@ function renderMatchWorkspace(ws, options, sess = null) {
     };
     // automatically select the reliable stored suggestions INSIDE their fields (never an Ad Setup, never a guess)
     const filled = hasValues ? [] : mmAutofill(ws, sess.ctx);
-    const fieldHost = { Product: 'mm-f-products', Concept: 'mm-f-concept', Media: 'mm-f-media', Creator: 'mm-f-creator', 'Creative style': 'mm-f-style' };
+    const fieldHost = { Product: 'mm-f-products', 'Not product-specific': 'mm-f-products', Concept: 'mm-f-concept', Media: 'mm-f-media', Creator: 'mm-f-creator', 'Creative style': 'mm-f-style' };
     filled.forEach((name) => {
       const f = document.getElementById(fieldHost[name]).closest('.mm-field');
       f.classList.add('mm-autofilled');

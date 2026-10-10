@@ -32,13 +32,14 @@ test('health: TOF CPA is NOT colour-coded any more -- no red (or any colour) at 
   assert.equal(health.RULES.TOF.cpa, undefined, 'no TOF CPA rule exists');
   assert.equal(health.status().defined.TOF.cpa, undefined);
 });
-test('health: TOF Frequency under 2 is green in a ~4-day period; 2 and above stays neutral (no red/orange invented)', () => {
-  assert.equal(c('TOF', 'frequency', 1.99), 'green');
-  assert.equal(c('TOF', 'frequency', 1.2), 'green');
-  assert.equal(c('TOF', 'frequency', 2), null);
-  assert.equal(c('TOF', 'frequency', 2.4), null);
-  assert.equal(c('TOF', 'frequency', 5), null);
-  assert.deepEqual(health.RULES.TOF.frequency, { period: 'approx_4_days', green: { lt: 2 } });
+test('health: TOF Frequency (approved): green < 2, orange 2 to 2.4, red > 2.4 in a ~4-day period', () => {
+  for (const v of [0.5, 1.2, 1.99]) assert.equal(c('TOF', 'frequency', v), 'green', `${v}`);
+  for (const v of [2, 2.2, 2.4]) assert.equal(c('TOF', 'frequency', v), 'orange', `${v} (2 is already orange; 2.4 is the last orange value)`);
+  for (const v of [2.41, 3, 5]) assert.equal(c('TOF', 'frequency', v), 'red', `${v}`);
+  assert.equal(health.RULES.TOF.frequency.period, 'approx_4_days');
+  assert.deepEqual(health.RULES.TOF.frequency.green, { lt: 2 });
+  assert.deepEqual(health.RULES.TOF.frequency.orange, { gte: 2, lte: 2.4 });
+  assert.deepEqual(health.RULES.TOF.frequency.red, { gt: 2.4 });
 });
 test('health: TOF Reach is colour-coded but has NO benchmark yet -- neutral at every value', () => {
   assert.ok(health.COLOUR_CODED.TOF.includes('reach'));
@@ -62,15 +63,11 @@ test('health: TOM Reach is colour-coded but has NO benchmark yet -- neutral at e
   assert.equal(health.RULES.TOM.reach, null);
   for (const v of [0, 1000, 50000, 1e7]) assert.equal(c('TOM', 'reach', v), null);
 });
-test('health: MOF CPA $40 to $60 inclusive is green on ANY range; below $40 and above $60 stay neutral', () => {
-  assert.equal(c('MOF', 'cpa', 40), 'green');
-  assert.equal(c('MOF', 'cpa', 50), 'green');
-  assert.equal(c('MOF', 'cpa', 60), 'green');
-  assert.equal(c('MOF', 'cpa', 39.99), null);
-  assert.equal(c('MOF', 'cpa', 30), null, 'a $30 CPA is not bad merely because it is outside the range');
-  assert.equal(c('MOF', 'cpa', 60.01), null);
-  assert.equal(c('MOF', 'cpa', 120), null);
-  assert.deepEqual(health.RULES.MOF.cpa, { period: null, green: { min: 40, max: 60 } });
+test('health: MOF CPA (approved): green <= $60 (below $40 stays green), orange > $60 to $72, red > $72, on ANY range', () => {
+  for (const v of [5, 30, 39.99, 40, 50, 60]) assert.equal(c('MOF', 'cpa', v), 'green', `${v}: meeting the target (a CPA under $40 is never penalised)`);
+  for (const v of [60.01, 66, 72]) assert.equal(c('MOF', 'cpa', v), 'orange', `${v}: up to 20% over $60 (72 is the last orange value)`);
+  for (const v of [72.01, 90, 120]) assert.equal(c('MOF', 'cpa', v), 'red', `${v}`);
+  assert.deepEqual(health.RULES.MOF.cpa, { period: null, green: { lte: 60 }, orange: { gt: 60, lte: 72 }, red: { gt: 72 } });
   for (const days of [1, 4, 7, 30]) assert.equal(c('MOF', 'cpa', 50, { days }), 'green', `${days} days`);
 });
 test('health: MOF Reach is colour-coded but has NO benchmark yet; MOF Frequency stays neutral (not colour-coded)', () => {
@@ -81,12 +78,12 @@ test('health: MOF Reach is colour-coded but has NO benchmark yet; MOF Frequency 
   assert.equal(health.RULES.MOF.frequency, undefined);
   for (const v of [0.5, 1, 2, 3, 8]) assert.equal(c('MOF', 'frequency', v), null);
 });
-test('health: the ONLY colours that can ever appear are TOF Frequency (green) and MOF CPA (green)', () => {
+test('health: colours can ONLY ever appear on TOF Frequency and MOF CPA (every unapproved metric stays neutral)', () => {
   const got = [];
-  for (const f of ['TOF', 'TOM', 'MOF']) for (const m of METRIC_LIST) for (const days of [1, 3, 4, 5, 7, 30]) for (const v of [0, 0.5, 1, 1.5, 1.99, 2, 2.5, 3, 4, 10, 30, 39.99, 40, 50, 60, 60.01, 100, 150, 200, 201, 500, 12000, 1e6]) {
-    const r = c(f, m, v, { days }); if (r) got.push(`${f} ${m} ${r}`);
+  for (const f of ['TOF', 'TOM', 'MOF']) for (const m of METRIC_LIST) for (const days of [1, 3, 4, 5, 7, 30]) for (const v of [0, 0.5, 1, 1.5, 1.99, 2, 2.5, 3, 4, 10, 30, 39.99, 40, 50, 60, 60.01, 72, 73, 100, 150, 200, 201, 500, 12000, 1e6]) {
+    const r = c(f, m, v, { days }); if (r) got.push(`${f} ${m}`);
   }
-  assert.deepEqual([...new Set(got)].sort(), ['MOF cpa green', 'TOF frequency green']);
+  assert.deepEqual([...new Set(got)].sort(), ['MOF cpa', 'TOF frequency']);
 });
 test('health: Unknown / Mixed / missing funnel gets nothing, whatever the number', () => {
   for (const f of ['unknown', 'multiple', null, undefined, 'BOF', '028']) {
@@ -96,14 +93,16 @@ test('health: Unknown / Mixed / missing funnel gets nothing, whatever the number
 test('health: no value / no purchases -> neutral (never judged)', () => {
   for (const v of [null, undefined, '', NaN]) { assert.equal(c('TOF', 'frequency', v), null); assert.equal(c('MOF', 'cpa', v), null); assert.equal(c('TOM', 'cpa', v), null); assert.equal(c('TOF', 'reach', v), null); }
 });
-test('health: there are NO orange ranges anywhere in the shipped rules', () => {
+test('health: orange exists ONLY in the two approved rules, and is always "up to 20% beyond the target"', () => {
   for (const f of health.JUDGED_FUNNELS) for (const m of health.METRICS) {
     const r = health.RULES[f][m];
-    if (r) assert.equal(r.orange, undefined, `${f}/${m}`);
+    if (!r) continue;
+    assert.ok(`${f} ${m}` === 'TOF frequency' || `${f} ${m}` === 'MOF cpa', `${f} ${m} has no approved benchmark`);
+    assert.ok(r.orange && r.red, 'the approved rules carry orange and red bands');
   }
-  for (const f of ['TOF', 'TOM', 'MOF']) for (const m of METRIC_LIST) for (const v of [0.5, 1, 1.5, 2, 2.5, 3, 4, 10, 30, 40, 50, 60, 100, 150, 200, 201, 500]) {
-    assert.notEqual(c(f, m, v), 'orange');
-  }
+  assert.equal(health.TOLERANCE_PCT, 20);
+  assert.equal(health.RULES.MOF.cpa.orange.lte, 60 * 1.2);
+  assert.equal(health.RULES.TOF.frequency.orange.lte, 2 * 1.2);
 });
 test('health: Frequency is judged ONLY for a ~4-day period (3-5 calendar days); other lengths are neutral', () => {
   assert.deepEqual(health.APPROX_4_DAYS, { target_days: 4, min_days: 3, max_days: 5 });
@@ -128,14 +127,14 @@ test('health: the period is counted from the real dates (an actual 4-day custom 
   assert.equal(health.status({ range: { since: '2026-10-01', until: '2026-10-04' } }).period.frequency_judged, true);
   assert.equal(health.status({ range: { since: '2026-10-01', until: '2026-10-30' } }).period.frequency_judged, false);
 });
-test('health: only confirmed rules are described, and the system is active', () => {
+test('health: only approved rules are described, and the system is active', () => {
   const st = health.status();
   assert.equal(st.active, true);
-  assert.match(st.defined.TOF.frequency, /green under 2 \(about 4 days\)/);
+  assert.match(st.defined.TOF.frequency, /green under 2; orange 2 to 2\.4; red over 2\.4 \(about 4 days\)/);
   assert.equal(st.defined.TOF.reach, null);
   assert.equal(st.defined.TOM.cpa, null);
   assert.equal(st.defined.TOM.reach, null);
-  assert.match(st.defined.MOF.cpa, /green 40–60/);
+  assert.match(st.defined.MOF.cpa, /green 60 or less; orange over 60 and up to 72; red over 72/);
   assert.equal(st.defined.MOF.reach, null);
   assert.deepEqual(Object.keys(st.defined.TOF).sort(), ['frequency', 'reach']);
   assert.deepEqual(Object.keys(st.defined.TOM).sort(), ['cpa', 'reach']);
@@ -453,11 +452,12 @@ test('presets: Last 3 Days and Last 4 Days exist and are the N COMPLETE days end
   assert.equal(perf.parseRangeParams({ preset: 'last_4' }).label, 'Last 4 Days');
   assert.equal(perf.parseRangeParams({ preset: 'last_4', compare: '1' }).compareRange.until, perf.addDays(perf.parseRangeParams({ preset: 'last_4' }).range.since, -1));
 });
-test('presets: Last 3 and Last 4 Days qualify for the Frequency rule; Last 7 does not; the thresholds are unchanged', () => {
+test('presets: Last 3 and Last 4 Days qualify for the Frequency rule; Last 7 does not; the approved thresholds hold', () => {
   const day = (name) => health.rangeDays(perf.resolvePreset(name, '2026-10-08'));
   for (const name of ['last_3', 'last_4']) {
     assert.equal(health.classify('TOF', 'frequency', 1.5, { days: day(name) }), 'green', `${name} TOF`);
-    assert.equal(health.classify('TOF', 'frequency', 2, { days: day(name) }), null, `${name} TOF at 2`);
+    assert.equal(health.classify('TOF', 'frequency', 2, { days: day(name) }), 'orange', `${name} TOF at 2`);
+    assert.equal(health.classify('TOF', 'frequency', 2.5, { days: day(name) }), 'red', `${name} TOF at 2.5`);
     assert.equal(health.classify('TOM', 'frequency', 2.5, { days: day(name) }), null, `${name}: TOM Frequency is no longer colour-coded`);
   }
   assert.equal(health.classify('TOF', 'frequency', 1.5, { days: day('last_7') }), null, 'TOF Frequency is neutral on Last 7 Days');
@@ -465,8 +465,10 @@ test('presets: Last 3 and Last 4 Days qualify for the Frequency rule; Last 7 doe
   assert.equal(health.classify('MOF', 'cpa', 50, { days: day('last_7') }), 'green', 'MOF CPA $40-$60 is green on Last 7 Days');
   assert.equal(health.classify('MOF', 'cpa', 40, { days: day('last_7') }), 'green');
   assert.equal(health.classify('MOF', 'cpa', 60, { days: day('last_7') }), 'green');
-  assert.deepEqual(health.RULES.MOF.cpa, { period: null, green: { min: 40, max: 60 } });
-  assert.deepEqual(health.RULES.TOF.frequency, { period: 'approx_4_days', green: { lt: 2 } });
+  assert.equal(health.classify('MOF', 'cpa', 65, { days: day('last_7') }), 'orange');
+  assert.equal(health.classify('MOF', 'cpa', 80, { days: day('last_7') }), 'red');
+  assert.deepEqual(health.RULES.MOF.cpa, { period: null, green: { lte: 60 }, orange: { gt: 60, lte: 72 }, red: { gt: 72 } });
+  assert.deepEqual(health.RULES.TOF.frequency, { period: 'approx_4_days', green: { lt: 2 }, orange: { gte: 2, lte: 2.4 }, red: { gt: 2.4 } });
   assert.deepEqual(health.APPROX_4_DAYS, { target_days: 4, min_days: 3, max_days: 5 });
 });
 test('the Last 3 / Last 4 buttons exist in the date bar', () => {

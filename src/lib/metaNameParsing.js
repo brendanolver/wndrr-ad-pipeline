@@ -130,6 +130,9 @@ const DESCRIPTOR_MIN_LEADS = 3;
 // A phrase made only of these (plus filler) is never linked to a product.
 const PROMO_WORDS = new Set(['SALE', 'LIVE', 'HYPE', 'BUNDLE', 'MYSTERY', 'GWP', 'DPA', 'RESTOCK', 'PRESALE', 'CLEARANCE', 'FLASH', 'OFFER', 'DEAL', 'FREE', 'GIFT', 'CYBER', 'EOFY', 'FRIDAY', 'MEGA']);
 const PROMO_FILLER = new Set(['BOX', 'PACK', 'SET', 'BLACK', 'WEEKEND', 'EVENT', 'ANNOUNCEMENT', 'UPDATE']);
+// extra wording that may accompany the word GIVEAWAY in a phrase that is still not a product ($5K, 1000, CASH, GIFT CARD, PRIZE ...)
+const GIVEAWAY_FILLER = new Set(['CASH', 'CARD', 'VOUCHER', 'PRIZE', 'WIN', 'WINNER', 'GIVE', 'AWAY']);
+const AMOUNT_TOKEN = /^\d+[KM]?$/;
 
 // Meta product phrase -> the form the catalogue uses: drop a leading marker
 // ("*"), a trailing " - COLOUR" (AM splits product from colour on the last
@@ -145,7 +148,21 @@ function cleanProductPhrase(text) {
 
 function isPromoPhrase(text) {
   const t = matchTokens(cleanProductPhrase(text));
-  return t.length > 0 && t.every((w) => PROMO_WORDS.has(w) || PROMO_FILLER.has(w)) && t.some((w) => PROMO_WORDS.has(w));
+  if (!t.length) return false;
+  if (t.every((w) => PROMO_WORDS.has(w) || PROMO_FILLER.has(w)) && t.some((w) => PROMO_WORDS.has(w))) return true;
+  // A giveaway phrase ("$5K CASH GIVEAWAY", "GIFT CARD GIVEAWAY"): the giveaway word plus ONLY prize / amount / promo wording. A single
+  // product word anywhere ("HAVOK HOODIE GIVEAWAY") keeps it out of here, so a named product stays eligible for product matching.
+  const giveaway = t.includes('GIVEAWAY') || (t.includes('GIVE') && t.includes('AWAY'));
+  return giveaway && t.every((w) => PROMO_WORDS.has(w) || PROMO_FILLER.has(w) || GIVEAWAY_FILLER.has(w) || AMOUNT_TOKEN.test(w) || w === 'GIVEAWAY');
+}
+
+// Giveaway wording in a whole ad NAME (any layout), or null. Deliberately narrow: only the explicit word GIVEAWAY / GIVE AWAY /
+// GIVE-AWAY (so "CASH GIVEAWAY" and "GIFT CARD GIVEAWAY" are covered) delimited by non-alphanumerics -- NOT "giving", "forgive",
+// "away" on its own, or a bare "GIFT CARD". Returns the matched wording as written, upper-cased.
+const GIVEAWAY_RE = /(?<![A-Za-z0-9])(?:(?:CASH|GIFT\s*CARDS?|VOUCHERS?)[\s_-]+)?GIVE[\s-]?AWAYS?(?![A-Za-z0-9])/i;
+function giveawayLanguage(text) {
+  const m = GIVEAWAY_RE.exec(String(text || ''));
+  return m ? m[0].replace(/[_\s]+/g, ' ').trim().toUpperCase() : null;
 }
 
 // token -> Set of lead words of the families containing it.
@@ -368,5 +385,5 @@ module.exports = {
   STOP, SET_WORDS, MEDIA_TYPES, MEDIA_KEYS, MEDIA_LABEL, MEDIA_WORDS,
   norm, canonTokens, matchTokens, coreTokens, hasSetWord,
   buildFamilyIndex, matchProductPhrase, expandSet, mediaTokensFromName, stripCopySuffix, parseLooseMetaName,
-  DESCRIPTOR_MIN_LEADS, PROMO_WORDS, cleanProductPhrase, isPromoPhrase, buildTokenSpread, identityGuard,
+  DESCRIPTOR_MIN_LEADS, PROMO_WORDS, cleanProductPhrase, isPromoPhrase, giveawayLanguage, buildTokenSpread, identityGuard,
 };
