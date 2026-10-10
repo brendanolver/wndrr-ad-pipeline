@@ -1,31 +1,42 @@
-// Funnel-specific "health" colours for Meta Performance -- built ONLY from the guidance WNDRR has confirmed.
+// Funnel-specific "health" colours for Meta Performance -- built ONLY from the benchmarks WNDRR has approved.
 //
 // TWO separate things are configured here, so a missing benchmark is easy to add later:
 //   COLOUR_CODED  WHICH metrics WNDRR evaluates per funnel (this decides where a colour can ever appear)
-//   RULES         the numeric benchmark for each of those metrics -- null until WNDRR supplies one (null = neutral)
+//   RULES         the numeric benchmark for each of those metrics -- null until WNDRR approves one (null = neutral)
 //
-// WNDRR evaluates:                              benchmark today
-//   TOF  Frequency                              green under 2, over roughly a 3-5 day period
+// WNDRR evaluates:                              approved benchmark
+//   TOF  Frequency                              green < 2 | orange 2 to 2.4 | red > 2.4         (about 4 days only)
 //   TOF  Reach                                  none yet -> neutral
 //   TOM  CPA                                    none yet -> neutral
 //   TOM  Reach                                  none yet -> neutral
-//   MOF  CPA                                    green $40 to $60 inclusive (any range)
+//   MOF  CPA                                    green <= $60 | orange > $60 to $72 | red > $72   (any range)
 //   MOF  Reach                                  none yet -> neutral
 // Every other metric (TOF CPA, TOM Frequency, MOF Frequency, spend, purchases, ...) is NOT colour-coded and always displays
 // neutral, as does every Unknown / Mixed funnel. The real numbers are always shown; colour is only ever an extra signal.
-// There are NO orange ranges and no invented thresholds.
+//
+// THE COLOUR RULE (percentage based, one rule for every metric):
+//   green   meets the approved target
+//   orange  misses the target by up to 20 %
+//   red     misses the target by more than 20 %
+// For a metric where LOWER is better (CPA, Frequency) "missing" is a value above the maximum target, measured as a percentage of
+// that target: limit = target x 1.2. For a metric where HIGHER is better it is a value below the minimum target: limit = target x 0.8.
+// A value better than the target (e.g. a MOF CPA under $40) stays green -- it is never penalised for being low.
+// Boundaries: the target itself is green when `inclusive` (MOF CPA <= $60) and orange when not (TOF Frequency < 2, so exactly 2.0 is
+// orange); the 20 % limit itself is still orange (<= 72, <= 2.4).
 //
 // FREQUENCY IS PERIOD-AWARE. The frequency guidance is for about 4 days; a Frequency of 2 over 30 days is not the same thing.
 // A rule with period 'approx_4_days' is judged only when the SELECTED range is APPROX_4_DAYS.min_days .. max_days calendar days
 // long (inclusive of both end dates, counted from the real dates, not from the preset's name). Any other length shows the number
 // with no colour. Thresholds are never scaled or extrapolated.
 //
-// TO ADD A BENCHMARK LATER, edit RULES only (the metric is already colour-coded, so nothing else changes), e.g.
-//   TOF: { reach: { period: null, green: { min: 50000 } } }
-// A rule is { period: 'approx_4_days' | null, green?: {min?,max?,lt?,lte?}, orange?: {...}, red?: {...} }, evaluated
-// red -> orange -> green; a value matching none is neutral. To start colour-coding a new metric, add it to COLOUR_CODED too.
+// TO ADD A BENCHMARK LATER, edit RULES only (the metric is already colour-coded) using percentRule(), e.g.
+//   TOF: { reach: percentRule({ direction: 'higher', target: 50000, inclusive: true }) }
+// -- or supply it through META_HEALTH_RULES (below) with no code change. A rule is
+// { period: 'approx_4_days' | null, green?: {min?,max?,lt?,lte?,gt?,gte?}, orange?: {...}, red?: {...} }, evaluated red -> orange ->
+// green; a value matching none is neutral. To start colour-coding a new metric, add it to COLOUR_CODED too.
 const ENABLED = true;
-const RULES_VERSION = 2;
+const RULES_VERSION = 3;
+const TOLERANCE_PCT = 20; // orange = missing the target by up to this percentage; beyond it is red
 
 const APPROX_4_DAYS = { target_days: 4, min_days: 3, max_days: 5 };
 
@@ -36,39 +47,54 @@ const COLOUR_CODED = {
   MOF: ['cpa', 'reach'],
 };
 
-// benchmarks for the colour-coded metrics (null = WNDRR has not supplied one yet: the value shows, uncoloured)
+// Builds a percentage-based rule from ONE approved target.
+//   direction 'lower'  (lower is better):  green at/under the target, orange up to target x (1 + pct/100), red beyond it
+//   direction 'higher' (higher is better): green at/over the target,  orange down to target x (1 - pct/100), red below it
+//   inclusive          is the target value itself green (true) or already orange (false)
+const r6 = (x) => Math.round(x * 1e6) / 1e6;
+function percentRule({ direction, target, inclusive = true, pct = TOLERANCE_PCT, period = null }) {
+  if (!['lower', 'higher'].includes(direction) || !Number.isFinite(target) || !Number.isFinite(pct) || pct < 0) throw new Error('percentRule: bad arguments');
+  if (direction === 'lower') {
+    const limit = r6(target * (1 + pct / 100));
+    return { period, green: inclusive ? { lte: target } : { lt: target }, orange: { ...(inclusive ? { gt: target } : { gte: target }), lte: limit }, red: { gt: limit } };
+  }
+  const limit = r6(target * (1 - pct / 100));
+  return { period, green: inclusive ? { gte: target } : { gt: target }, orange: { ...(inclusive ? { lt: target } : { lte: target }), gte: limit }, red: { lt: limit } };
+}
+
+// benchmarks for the colour-coded metrics (null = WNDRR has not approved one yet: the value shows, uncoloured)
 const RULES = {
   TOF: {
-    frequency: { period: 'approx_4_days', green: { lt: 2 } },
-    reach: null, // colour-coded, but no benchmark supplied yet
+    frequency: percentRule({ direction: 'lower', target: 2, inclusive: false, period: 'approx_4_days' }), // green < 2, orange 2-2.4, red > 2.4
+    reach: null, // colour-coded, but no benchmark approved yet
   },
   TOM: {
-    cpa: null, // colour-coded, but no benchmark supplied yet (never inferred from TOF / MOF)
-    reach: null, // colour-coded, but no benchmark supplied yet
+    cpa: null, // colour-coded, but no benchmark approved yet (never inferred from TOF / MOF)
+    reach: null, // colour-coded, but no benchmark approved yet
   },
   MOF: {
-    cpa: { period: null, green: { min: 40, max: 60 } },
-    reach: null, // colour-coded, but no benchmark supplied yet
+    cpa: percentRule({ direction: 'lower', target: 60, inclusive: true }), // green <= $60 (the $40-$60 target; below $40 stays green), orange <= $72, red > $72
+    reach: null, // colour-coded, but no benchmark approved yet
   },
 };
 const JUDGED_FUNNELS = ['TOF', 'TOM', 'MOF'];
 const METRICS = ['cpa', 'frequency', 'reach'];
 const STATES = ['red', 'orange', 'green'];
 
-// The two benchmarks WNDRR has CONFIRMED. A configured override may ADD bands around them (e.g. an orange range) but can never
-// change or remove the confirmed green band or its period.
-const CONFIRMED_GREEN = {
-  TOF: { frequency: { period: 'approx_4_days', green: { lt: 2 } } },
-  MOF: { cpa: { period: null, green: { min: 40, max: 60 } } },
+// The two benchmarks WNDRR has APPROVED. A configured override can never change them (it may only supply the still-pending metrics).
+const APPROVED = {
+  TOF: { frequency: RULES.TOF.frequency },
+  MOF: { cpa: RULES.MOF.cpa },
 };
 
 // ── Configurable benchmarks (no code change, no schema change) ─────────────────────────────────────────────────────────────
 // META_HEALTH_RULES (an environment variable, JSON) lets WNDRR add the benchmarks it approves later, e.g.
-//   {"TOF":{"reach":{"period":null,"green":{"min":50000}}},"TOM":{"cpa":{"period":null,"green":{"max":45},"orange":{"min":45,"max":60},"red":{"min":60}}}}
+//   {"TOF":{"reach":{"period":null,"green":{"gte":50000},"orange":{"gte":40000,"lt":50000},"red":{"lt":40000}}}}
 // Only the metrics already colour-coded for a funnel (COLOUR_CODED) can be configured; a malformed rule is IGNORED (that metric stays
 // neutral) and listed under status().config_errors -- one bad entry never breaks the dashboard and nothing is guessed. A rule for a
-// metric with a CONFIRMED benchmark must keep that confirmed green band exactly. Unset / blank = the built-in rules above.
-const sameCond = (a, b) => !!a && !!b && JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
+// metric with an APPROVED benchmark cannot be changed this way. Unset / blank = the built-in rules above.
+const sameCond = (a, b) => (a === undefined && b === undefined) || (!!a && !!b && JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort()));
+const sameRule = (a, b) => a.period === b.period && STATES.every((s) => sameCond(a[s], b[s]));
 function parseOverrides(raw) {
   const out = { rules: null, errors: [], source: 'default' };
   if (raw === undefined || raw === null || String(raw).trim() === '') return out;
@@ -83,8 +109,8 @@ function parseOverrides(raw) {
     for (const [m, rule] of Object.entries(metrics)) {
       if (!(COLOUR_CODED[f] || []).includes(m)) { out.errors.push(`${f} ${m}: not a colour-coded measure for ${f}`); continue; }
       if (!validRule(rule)) { out.errors.push(`${f} ${m}: not a valid rule (period must be null or "approx_4_days"; green / orange / red take min, max, gt, gte, lt or lte numbers)`); continue; }
-      const keep = CONFIRMED_GREEN[f] && CONFIRMED_GREEN[f][m];
-      if (keep && !(rule.period === keep.period && sameCond(rule.green, keep.green))) { out.errors.push(`${f} ${m}: the confirmed green band (${describe(keep)}) cannot be changed here`); continue; }
+      const keep = APPROVED[f] && APPROVED[f][m];
+      if (keep && !sameRule(rule, keep)) { out.errors.push(`${f} ${m}: the approved benchmark (${describe(keep)}) cannot be changed here`); continue; }
       merged[f][m] = rule; applied += 1;
     }
   }
@@ -136,30 +162,42 @@ function classify(funnel, metric, value, ctx = {}, { rules = effectiveRules(), e
   return null;
 }
 
-function describe(rule) {
-  const part = (c) => [c.gt !== undefined && `over ${c.gt}`, c.gte !== undefined && `${c.gte} or more`, c.lt !== undefined && `under ${c.lt}`, c.lte !== undefined && `${c.lte} or less`, (c.min !== undefined || c.max !== undefined) && `${c.min ?? ''}–${c.max ?? ''}`].filter(Boolean).join(', ');
-  return STATES.filter((s) => rule[s] !== undefined).map((s) => `${s} ${part(rule[s])}`).join('; ');
+// "over 60 and up to 72", "2 to 2.4", "under 2" ... (plain words; the UI adds the unit)
+function condText(c) {
+  const lo = c.gt !== undefined ? ['over', c.gt] : c.gte !== undefined ? ['from', c.gte] : c.min !== undefined ? ['from', c.min] : null;
+  const hi = c.lt !== undefined ? ['under', c.lt] : c.lte !== undefined ? ['up to', c.lte] : c.max !== undefined ? ['up to', c.max] : null;
+  if (lo && hi) return lo[0] === 'from' && hi[0] === 'up to' ? `${lo[1]} to ${hi[1]}` : `${lo[0]} ${lo[1]} and ${hi[0]} ${hi[1]}`;
+  if (hi) return hi[0] === 'under' ? `under ${hi[1]}` : `${hi[1]} or less`;
+  if (lo) return lo[0] === 'over' ? `over ${lo[1]}` : `${lo[1]} or more`;
+  return '';
 }
+function describe(rule) {
+  return STATES.slice().reverse().filter((s) => rule[s] !== undefined).map((s) => `${s} ${condText(rule[s])}`).join('; ');
+}
+// [{ state, text, cond }] green -> orange -> red, for the compact colour guide in the UI
+const bandsOf = (rule) => ['green', 'orange', 'red'].filter((s) => rule[s] !== undefined).map((s) => ({ state: s, text: condText(rule[s]), cond: rule[s] }));
 
 function status({ rules = effectiveRules(), enabled = ENABLED, coded = COLOUR_CODED, range = null } = {}) {
   const days = rangeDays(range);
-  const defined = {}; // colour-coded metric -> described benchmark, or null when none has been supplied yet
+  const defined = {}; // colour-coded metric -> described benchmark, or null when none has been approved yet
+  const bands = {}; // colour-coded metric -> [{ state, text, cond }] for the UI guide
   const colourCoded = {};
   const pending = []; // colour-coded but waiting for a benchmark, e.g. 'TOF reach'
   JUDGED_FUNNELS.forEach((f) => {
-    defined[f] = {}; colourCoded[f] = (coded[f] || []).filter((m) => METRICS.includes(m));
+    defined[f] = {}; bands[f] = {}; colourCoded[f] = (coded[f] || []).filter((m) => METRICS.includes(m));
     colourCoded[f].forEach((m) => {
       const r = rules[f] && rules[f][m];
       defined[f][m] = validRule(r) ? describe(r) + (r.period ? ' (about 4 days)' : '') : null;
+      bands[f][m] = validRule(r) ? bandsOf(r) : null;
       if (!defined[f][m]) pending.push(`${f} ${m}`);
     });
   });
   return {
-    enabled: !!enabled, rules_version: RULES_VERSION, rules_source: overrides().source, config_errors: overrides().errors, judged_funnels: JUDGED_FUNNELS, colour_coded: colourCoded, defined, pending_benchmarks: pending,
+    enabled: !!enabled, rules_version: RULES_VERSION, rules_source: overrides().source, config_errors: overrides().errors, judged_funnels: JUDGED_FUNNELS, colour_coded: colourCoded, defined, bands, pending_benchmarks: pending, tolerance_pct: TOLERANCE_PCT,
     active: !!enabled && JUDGED_FUNNELS.some((f) => colourCoded[f].some((m) => defined[f][m])),
     period: { days, approx_4_days: { ...APPROX_4_DAYS }, frequency_judged: isApprox4Days(days) },
-    note: 'Colours use only WNDRR-confirmed benchmarks; everything else is neutral. Frequency is judged only for a period of about 4 days.',
+    note: 'Colours use only WNDRR-approved benchmarks; everything else is neutral. Frequency is judged only for a period of about 4 days.',
   };
 }
 
-module.exports = { parseOverrides, effectiveRules, CONFIRMED_GREEN, ENABLED, RULES_VERSION, APPROX_4_DAYS, COLOUR_CODED, RULES, JUDGED_FUNNELS, METRICS, rangeDays, isApprox4Days, validRule, classify, status };
+module.exports = { percentRule, parseOverrides, effectiveRules, APPROVED, TOLERANCE_PCT, ENABLED, RULES_VERSION, APPROX_4_DAYS, COLOUR_CODED, RULES, JUDGED_FUNNELS, METRICS, rangeDays, isApprox4Days, validRule, classify, status };

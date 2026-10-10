@@ -278,34 +278,44 @@
            calls Meta. Confirmed mappings are only ever written by the explicit
            buttons in the workspace modal below. -->
       <div id="mp-view-matching" style="display:none;">
-        <div class="mm-intro">Match Meta ads to WNDRR products, concepts and creators so performance can follow the creative. Suggestions are only proposals — nothing changes until you confirm it. Works entirely from stored data (no Meta calls).</div>
+        <div class="mm-head">
+          <h3 class="mm-title">Ad Matching</h3>
+          <span class="mm-remaining" id="mm-remaining" role="status" title="Unique creatives still needing a decision (ads that share a creative count once)"></span>
+          <span class="mm-rv-status" id="mm-rv-status" role="status" aria-live="polite"></span>
+        </div>
         <div class="mm-toolbar">
-          <select id="mm-scope" aria-label="Which ads">
+          <input type="search" id="mm-search" placeholder="Search ad name, Meta Ad ID or product" autocomplete="off">
+          <select id="mm-filter" aria-label="Status filter" title="Which ads to show"></select>
+          <select id="mm-scope" aria-label="Which ads" title="Time window (choose All ads to search older ads)">
             <option value="30d">Active in last 30 days</option>
             <option value="90d">Active in last 90 days</option>
             <option value="all">All ads (search older)</option>
           </select>
-          <input type="search" id="mm-search" placeholder="Search ad name, Meta Ad ID or product" autocomplete="off">
           <button type="button" class="btn btn-ghost btn-sm" id="mm-refresh-suggestions">Refresh suggestions</button>
+          <button type="button" class="btn btn-primary btn-sm" id="mm-rv-start" title="Opens each creative in the full editor with reliable suggestions filled in. Enter confirms and loads the next one.">Start reviewing</button>
           <button type="button" class="btn btn-ghost btn-sm" id="mm-open-inventory" title="Read-only list of every concept in use, with counts and spelling variants">Concept inventory</button>
         </div>
-        <!-- Historical backlog: ads still on older matching rules (explicit, resumable, background) -->
-        <!-- V4 matching catalogue (ApparelMagic snapshot): manual load / preview / activate -->
-        <div class="mm-catalogue" id="mm-catalogue" style="display:none;"></div>
-        <div class="mm-backlog" id="mm-backlog" style="display:none;"></div>
-        <!-- Review workload in unique creatives (ads that share a meta_creative_id are one piece of creative) -->
-        <div class="mm-workload" id="mm-workload" style="display:none;"></div>
-        <div class="mm-archive" id="mm-archive" style="display:none;"></div>
-        <div class="mm-chips" id="mm-chips" role="group" aria-label="Mapping state"></div>
-        <div class="mm-relevance-note" id="mm-relevance-note" style="display:none;"></div>
-        <!-- Review session: starts the full Match Meta ad modal (progress + live feedback; any reviewable row also starts it) -->
-        <div class="mm-rv-bar" id="mm-rv-bar">
-          <button type="button" class="btn btn-primary btn-sm" id="mm-rv-start">Start reviewing</button>
-          <span class="mm-rv-keys">Opens each creative in the full editor with reliable suggestions filled in — <kbd>Enter</kbd> confirms and loads the next one</span>
-          <span class="mm-rv-prog" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" title="Confirmed this session versus still to review"><i></i></span>
-          <span class="mm-rv-count"></span>
-          <span class="mm-rv-status" id="mm-rv-status" role="status" aria-live="polite"></span>
-        </div>
+        <!-- Technical panels live here, collapsed. Each is rendered (and keeps every safeguard) exactly as before by its own loader. -->
+        <details class="mm-advanced" id="mm-advanced">
+          <summary>Advanced settings</summary>
+          <div class="mm-adv-body">
+            <div class="mm-relevance-note" id="mm-relevance-note" style="display:none;"></div>
+            <!-- V4 matching catalogue (ApparelMagic snapshot): manual load / preview / activate -->
+            <div class="mm-catalogue" id="mm-catalogue" style="display:none;"></div>
+            <!-- Historical backlog: ads still on older matching rules (explicit, resumable, background) -->
+            <div class="mm-backlog" id="mm-backlog" style="display:none;"></div>
+            <!-- Review workload in unique creatives (ads that share a meta_creative_id are one piece of creative) -->
+            <div class="mm-workload" id="mm-workload" style="display:none;"></div>
+            <div class="mm-archive" id="mm-archive" style="display:none;"></div>
+            <!-- Read-only: previously confirmed creatives that have unreviewed "- Copy" duplicates (never changes anything) -->
+            <div class="mm-namecopies" id="mm-namecopies">
+              <div class="mm-workload-head"><strong>Duplicate names</strong> <span class="mm-muted">ads that differ only by a trailing “- Copy” (different creative ids)</span></div>
+              <div class="mm-workload-actions"><button type="button" class="btn btn-ghost btn-sm" id="mm-namecopies-preview">Preview (read-only)</button>
+                <a class="link-btn" id="mm-namecopies-csv" href="/api/meta-ad-matching/name-copies/preview?format=csv" target="_blank" rel="noopener">Download all as CSV</a></div>
+              <div class="mm-namecopies-out" id="mm-namecopies-out"></div>
+            </div>
+          </div>
+        </details>
         <table class="mp-table mm-table">
           <thead>
             <tr><th class="mp-th-name">Ad Name</th><th>Status</th><th class="num">Recent spend</th><th title="Newest day ANY ad using this exact creative delivered, from stored Insights">Last active</th><th>Mapping</th><th>Product</th><th>Concept</th><th>Media</th><th>Creator</th><th>Confidence</th></tr>
