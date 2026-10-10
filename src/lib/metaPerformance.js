@@ -264,6 +264,9 @@ function deriveMetrics(raw) {
     outbound_clicks: outboundClicks,
     impressions,
     cpa: round(safeDiv(spend, purchases), 2),
+    // Purchase ROAS = purchase value / spend, from the SAME summed columns (same omni_purchase action, same attribution window,
+    // same period) as the Purchase Value and Amount Spent shown beside it. null (never 0) when nothing was spent.
+    roas: round(safeDiv(purchaseValue, spend), 2),
     cost_per_atc: round(safeDiv(spend, addToCart), 2),
     outbound_ctr: round(impressions > 0 ? (outboundClicks / impressions) * 100 : null, 4),
   };
@@ -445,6 +448,7 @@ const SORT_SQL = {
   cost_per_atc: 'agg.spend / NULLIF(agg.add_to_cart, 0)',
   outbound_ctr: 'agg.outbound_clicks::numeric / NULLIF(agg.impressions, 0)',
   purchase_value: 'agg.purchase_value',
+  roas: 'agg.purchase_value / NULLIF(agg.spend, 0)',
   ad_name: 'lower(a.ad_name)',
   status: 'a.effective_status',
 };

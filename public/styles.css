@@ -2389,10 +2389,10 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .mp-banner.soft strong{color:var(--text);}
 .mp-empty{background:var(--surface);border:1px dashed var(--border);border-radius:var(--r-lg);padding:36px 20px;text-align:center;color:var(--text-secondary);font-size:13px;line-height:1.6;}
 .mp-empty strong{display:block;font-size:14px;color:var(--text);margin-bottom:4px;}
-.mp-kpis{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:8px;}
-.mp-kpi{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:9px 10px;box-shadow:var(--shadow-xs);min-width:0;}
-.mp-kpi-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.mp-kpi-value{font-size:clamp(15px,1.3vw,19px);font-weight:700;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.mp-kpis{display:grid;grid-template-columns:repeat(10,minmax(0,1fr));gap:8px;}
+.mp-kpi{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:9px 8px;box-shadow:var(--shadow-xs);min-width:0;}
+.mp-kpi-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.2px;color:var(--text-muted);white-space:normal;line-height:1.15;min-height:23px;overflow:hidden;}
+.mp-kpi-value{font-size:clamp(13px,1.05vw,17px);font-weight:700;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .mp-kpi-delta{font-size:10.5px;margin-top:3px;color:var(--text-muted);min-height:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .mp-kpi-delta.good{color:var(--green);}
 .mp-kpi-delta.bad{color:var(--red);}
@@ -2693,22 +2693,29 @@ main{flex:1;min-width:0;padding:20px 24px;}
    width. The ad name takes the leftover space and truncates (full name in the
    cell title). Narrow screens fall back to horizontal scrolling inside the wrapper. */
 .mp-table-wrap{overflow-x:auto;border-radius:var(--r-lg);}
-.mp-table.mp-perf{table-layout:fixed;min-width:960px;}
+.mp-table.mp-perf{table-layout:fixed;min-width:1000px;}
 .mp-table.mp-perf th{padding:7px 8px;white-space:normal;line-height:1.25;vertical-align:bottom;}
 .mp-table.mp-perf td{padding:7px 8px;font-size:12px;}
 .mp-table.mp-perf td.mp-name{max-width:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-/* FUNNEL | CREATIVE | AD NAME (flexible) | STATUS | SPEND | PURCHASES | CPA | ATC | COST/ATC | CTR | REACH | FREQUENCY */
-.mp-table.mp-perf th:nth-child(1){width:64px;}
-.mp-table.mp-perf th:nth-child(2){width:68px;}
-.mp-table.mp-perf th:nth-child(4){width:72px;}
-.mp-table.mp-perf th:nth-child(5){width:80px;}
-.mp-table.mp-perf th:nth-child(6){width:70px;}
-.mp-table.mp-perf th:nth-child(7){width:68px;}
-.mp-table.mp-perf th:nth-child(8){width:68px;}
-.mp-table.mp-perf th:nth-child(9){width:70px;}
-.mp-table.mp-perf th:nth-child(10){width:72px;}
-.mp-table.mp-perf th:nth-child(11){width:66px;}
-.mp-table.mp-perf th:nth-child(12){width:84px;}
+/* FUNNEL | CREATIVE | AD NAME (flexible) | STATUS | SPEND | PURCHASES | CPA | PURCHASE VALUE | ROAS | ATC | COST/ATC | CTR | REACH | FREQUENCY
+   Fourteen columns: tight fixed widths and 5px cell padding keep the table inside a 1280px desktop with the name column >= 220px. */
+.mp-table.mp-perf th,.mp-table.mp-perf td{padding-left:5px;padding-right:5px;}
+.mp-table.mp-perf th{font-size:9.5px;letter-spacing:0.2px;}
+.mp-table.mp-perf td.num{font-size:11.5px;white-space:nowrap;}
+.mp-table.mp-perf .mp-funnel{padding:1px 3px;font-size:9px;letter-spacing:0;}
+.mp-table.mp-perf th:nth-child(1){width:58px;}
+.mp-table.mp-perf th:nth-child(2){width:60px;}
+.mp-table.mp-perf th:nth-child(4){width:64px;}
+.mp-table.mp-perf th:nth-child(5){width:72px;}
+.mp-table.mp-perf th:nth-child(6){width:58px;}
+.mp-table.mp-perf th:nth-child(7){width:58px;}
+.mp-table.mp-perf th:nth-child(8){width:70px;}
+.mp-table.mp-perf th:nth-child(9){width:48px;}
+.mp-table.mp-perf th:nth-child(10){width:52px;}
+.mp-table.mp-perf th:nth-child(11){width:56px;}
+.mp-table.mp-perf th:nth-child(12){width:58px;}
+.mp-table.mp-perf th:nth-child(13){width:54px;}
+.mp-table.mp-perf th:nth-child(14){width:68px;}
 .mp-table.mp-perf td.mp-funnel-cell,.mp-table.mp-perf td.mp-creative-cell{padding-left:6px;padding-right:4px;}
 .mp-table.mp-perf td.mp-creative-cell .cc-thumb{margin:0;}
 .mp-table.mp-perf td.mp-name .mp-name-stack{max-width:100%;display:flex;}

@@ -55,6 +55,51 @@ const JUDGED_FUNNELS = ['TOF', 'TOM', 'MOF'];
 const METRICS = ['cpa', 'frequency', 'reach'];
 const STATES = ['red', 'orange', 'green'];
 
+// The two benchmarks WNDRR has CONFIRMED. A configured override may ADD bands around them (e.g. an orange range) but can never
+// change or remove the confirmed green band or its period.
+const CONFIRMED_GREEN = {
+  TOF: { frequency: { period: 'approx_4_days', green: { lt: 2 } } },
+  MOF: { cpa: { period: null, green: { min: 40, max: 60 } } },
+};
+
+// ── Configurable benchmarks (no code change, no schema change) ─────────────────────────────────────────────────────────────
+// META_HEALTH_RULES (an environment variable, JSON) lets WNDRR add the benchmarks it approves later, e.g.
+//   {"TOF":{"reach":{"period":null,"green":{"min":50000}}},"TOM":{"cpa":{"period":null,"green":{"max":45},"orange":{"min":45,"max":60},"red":{"min":60}}}}
+// Only the metrics already colour-coded for a funnel (COLOUR_CODED) can be configured; a malformed rule is IGNORED (that metric stays
+// neutral) and listed under status().config_errors -- one bad entry never breaks the dashboard and nothing is guessed. A rule for a
+// metric with a CONFIRMED benchmark must keep that confirmed green band exactly. Unset / blank = the built-in rules above.
+const sameCond = (a, b) => !!a && !!b && JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
+function parseOverrides(raw) {
+  const out = { rules: null, errors: [], source: 'default' };
+  if (raw === undefined || raw === null || String(raw).trim() === '') return out;
+  let parsed;
+  try { parsed = JSON.parse(String(raw)); } catch (e) { out.errors.push('META_HEALTH_RULES is not valid JSON; the built-in benchmarks are used'); return out; }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) { out.errors.push('META_HEALTH_RULES must be a JSON object keyed by funnel; the built-in benchmarks are used'); return out; }
+  const merged = {};
+  JUDGED_FUNNELS.forEach((f) => { merged[f] = { ...(RULES[f] || {}) }; });
+  let applied = 0;
+  for (const [f, metrics] of Object.entries(parsed)) {
+    if (!JUDGED_FUNNELS.includes(f) || !metrics || typeof metrics !== 'object') { out.errors.push(`${f}: not a judged funnel (TOF, TOM, MOF)`); continue; }
+    for (const [m, rule] of Object.entries(metrics)) {
+      if (!(COLOUR_CODED[f] || []).includes(m)) { out.errors.push(`${f} ${m}: not a colour-coded measure for ${f}`); continue; }
+      if (!validRule(rule)) { out.errors.push(`${f} ${m}: not a valid rule (period must be null or "approx_4_days"; green / orange / red take min, max, gt, gte, lt or lte numbers)`); continue; }
+      const keep = CONFIRMED_GREEN[f] && CONFIRMED_GREEN[f][m];
+      if (keep && !(rule.period === keep.period && sameCond(rule.green, keep.green))) { out.errors.push(`${f} ${m}: the confirmed green band (${describe(keep)}) cannot be changed here`); continue; }
+      merged[f][m] = rule; applied += 1;
+    }
+  }
+  if (applied) { out.rules = merged; out.source = 'env'; }
+  return out;
+}
+let overrideCache = { raw: undefined, parsed: null };
+function overrides() {
+  const raw = process.env.META_HEALTH_RULES;
+  if (overrideCache.parsed === null || overrideCache.raw !== raw) overrideCache = { raw, parsed: parseOverrides(raw) };
+  return overrideCache.parsed;
+}
+// the rules in force right now: the built-in ones, plus any valid configured benchmarks
+const effectiveRules = () => overrides().rules || RULES;
+
 // whole calendar days of an inclusive range, from the dates themselves ('YYYY-MM-DD')
 function rangeDays(range) {
   if (!range || !range.since || !range.until) return null;
@@ -78,7 +123,7 @@ function validRule(r) {
 
 // 'green' | 'orange' | 'red' | null (null = neutral / not judged). ctx.days = calendar days of the selected range.
 // `rules` / `enabled` are injectable for tests only.
-function classify(funnel, metric, value, ctx = {}, { rules = RULES, enabled = ENABLED, coded = COLOUR_CODED } = {}) {
+function classify(funnel, metric, value, ctx = {}, { rules = effectiveRules(), enabled = ENABLED, coded = COLOUR_CODED } = {}) {
   if (!enabled) return null;
   if (!JUDGED_FUNNELS.includes(funnel) || !METRICS.includes(metric)) return null; // Unknown / Mixed / anything else: neutral
   if (!(coded[funnel] || []).includes(metric)) return null; // not a colour-coded metric for this funnel: always neutral
@@ -96,7 +141,7 @@ function describe(rule) {
   return STATES.filter((s) => rule[s] !== undefined).map((s) => `${s} ${part(rule[s])}`).join('; ');
 }
 
-function status({ rules = RULES, enabled = ENABLED, coded = COLOUR_CODED, range = null } = {}) {
+function status({ rules = effectiveRules(), enabled = ENABLED, coded = COLOUR_CODED, range = null } = {}) {
   const days = rangeDays(range);
   const defined = {}; // colour-coded metric -> described benchmark, or null when none has been supplied yet
   const colourCoded = {};
@@ -110,11 +155,11 @@ function status({ rules = RULES, enabled = ENABLED, coded = COLOUR_CODED, range 
     });
   });
   return {
-    enabled: !!enabled, rules_version: RULES_VERSION, judged_funnels: JUDGED_FUNNELS, colour_coded: colourCoded, defined, pending_benchmarks: pending,
+    enabled: !!enabled, rules_version: RULES_VERSION, rules_source: overrides().source, config_errors: overrides().errors, judged_funnels: JUDGED_FUNNELS, colour_coded: colourCoded, defined, pending_benchmarks: pending,
     active: !!enabled && JUDGED_FUNNELS.some((f) => colourCoded[f].some((m) => defined[f][m])),
     period: { days, approx_4_days: { ...APPROX_4_DAYS }, frequency_judged: isApprox4Days(days) },
     note: 'Colours use only WNDRR-confirmed benchmarks; everything else is neutral. Frequency is judged only for a period of about 4 days.',
   };
 }
 
-module.exports = { ENABLED, RULES_VERSION, APPROX_4_DAYS, COLOUR_CODED, RULES, JUDGED_FUNNELS, METRICS, rangeDays, isApprox4Days, validRule, classify, status };
+module.exports = { parseOverrides, effectiveRules, CONFIRMED_GREEN, ENABLED, RULES_VERSION, APPROX_4_DAYS, COLOUR_CODED, RULES, JUDGED_FUNNELS, METRICS, rangeDays, isApprox4Days, validRule, classify, status };
