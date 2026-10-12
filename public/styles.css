@@ -3410,3 +3410,6 @@ input[type=checkbox],input[type=radio]{accent-color:var(--accent-strong);}
 .mp-table.mp-perf th:nth-child(14){width:80px;} .mp-table.mp-perf th:nth-child(15){width:84px;}
 .mp-table.mp-perf th.mp-th-funnel,.mp-table.mp-perf td.mp-funnel-cell{padding-left:6px;padding-right:2px;}
 .mp-table.mp-perf th.mp-th-creative,.mp-table.mp-perf td.mp-creative-cell{padding-left:6px;padding-right:4px;}
+/* Batch 13: 11 summary cards (CPM added) still sit on one row on a 1,440px window; narrower windows wrap to two tidy rows */
+.mp-kpis{grid-template-columns:repeat(auto-fit,minmax(98px,1fr));}
+.mp-kpi{padding:9px 7px;}
