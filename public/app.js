@@ -896,7 +896,7 @@ function mpRenderBenchStrip(res) {
   }));
   hn.style.display = '';
   hn.innerHTML = `<div class="mp-bench-strip" id="mp-bench-strip">${groups}${reachMissing ? '<div class="mp-bench-group mp-bench-warn">Frequency and Reach for this period have not been loaded yet, so they show without colour until they are (use Refresh).</div>' : ''}</div>
-    <details class="mp-health-guide"><summary title="What the colour dots mean">ⓘ Colour guide</summary>
+    <details class="mp-health-guide"><summary title="What the colours mean">ⓘ Colour guide</summary>
       <ul>${lines.join('') || '<li>No benchmark is active.</li>'}</ul>
       <div class="mp-health-foot">Green = meets the benchmark · orange = misses it by up to ${h.tolerance_pct || 20}% · red = misses it by more. A value better than the target (for example a CPA under $40) stays green. ${unjudged ? `${unjudged.toLocaleString('en-AU')} ad${unjudged === 1 ? '' : 's'} in this view ha${unjudged === 1 ? 's' : 've'} an Unknown or Mixed funnel (campaign name without a single TOF / TOM / MOF), so never ${unjudged === 1 ? 'gets' : 'get'} a colour. ` : ''}CPA is Meta-reported (Triple Whale is not connected yet). ${state.currentUser && state.currentUser.role === 'admin' ? '<a href="#" data-open-bench-settings>Edit benchmarks in Settings</a>' : ''}</div></details>`;
   const link = hn.querySelector('[data-open-bench-settings]');
@@ -922,7 +922,13 @@ function mpRenderAds(res) {
       res.q || res.status !== 'all' || mpFiltered() ? 'No ads match this search or filter.' : 'No ads had spend or impressions in this period.'}</td></tr>`;
   } else {
     const healthOn = !!(res.health && res.health.active);
-    const dot = (h) => (healthOn && h ? `<span class="mp-health mp-health-${escapeHtml(h)}" title="${h === 'green' ? 'Meeting the benchmark' : h === 'orange' ? 'Missing the benchmark by up to 20%' : 'Missing the benchmark by more than 20%'}"></span>` : '');
+    // The value itself sits in a soft coloured rectangle (green / orange / red) -- never colour alone: a small symbol, the band spoken to screen readers (CSS ::after from data-band) and the tooltip.
+    // A cell with no approved benchmark (or an unknown funnel) stays plain and neutral.
+    const tol = (res.health && res.health.tolerance_pct) || 20;
+    const bandText = { green: 'Meeting the benchmark', orange: `Missing the benchmark by up to ${tol}%`, red: `Missing the benchmark by more than ${tol}%` };
+    const metric = (h, inner) => (healthOn && h && bandText[h]
+      ? `<span class="mp-metric mp-metric-${escapeHtml(h)}" data-health="${escapeHtml(h)}" data-band="${escapeHtml(bandText[h])}">${inner}</span>`
+      : `<span class="mp-metric">${inner}</span>`);
     // Hover text on every CPA / Frequency / Reach cell says WHY it has (or has no) colour, so a neutral cell is never a mystery.
     const why = (a, metric, h) => {
       if (!healthOn) return '';
@@ -948,14 +954,14 @@ function mpRenderAds(res) {
         <td>${mpStatusChip(a.effective_status)}</td>
         <td class="num">${mpFmt(a.spend, 'money')}</td>
         <td class="num">${mpFmt(a.purchases, 'int')}</td>
-        <td class="num" title="${escapeHtml(why(a, 'cpa', a.cpa_health))}">${dot(a.cpa_health)}${mpFmt(a.cpa, 'money')}</td>
+        <td class="num" title="${escapeHtml(why(a, 'cpa', a.cpa_health))}">${metric(a.cpa_health, mpFmt(a.cpa, 'money'))}</td>
         <td class="num" title="Meta purchase conversion value (omni_purchase) for this period">${mpFmt(a.purchase_value, 'money')}</td>
         <td class="num" title="Meta purchase ROAS = purchase value ÷ amount spent (null when nothing was spent)">${mpFmt(a.roas, 'roas')}</td>
         <td class="num">${mpFmt(a.add_to_cart, 'int')}</td>
         <td class="num">${mpFmt(a.cost_per_atc, 'money')}</td>
         <td class="num">${mpFmt(a.outbound_ctr, 'pct')}</td>
-        <td class="num${a.funnel === 'TOF' ? ' mp-reach-key' : ''}" title="${escapeHtml(why(a, 'reach', a.reach_health) || (a.funnel === 'TOF' ? 'Reach is the key measure for TOF' : ''))}">${dot(a.reach_health)}${mpReachCell(a.reach, 'int')}</td>
-        <td class="num" title="${escapeHtml(why(a, 'frequency', a.frequency_health))}">${dot(a.frequency_health)}${mpReachCell(a.frequency, 'freq')}</td>
+        <td class="num${a.funnel === 'TOF' ? ' mp-reach-key' : ''}" title="${escapeHtml(why(a, 'reach', a.reach_health) || (a.funnel === 'TOF' ? 'Reach is the key measure for TOF' : ''))}">${metric(a.reach_health, mpReachCell(a.reach, 'int'))}</td>
+        <td class="num" title="${escapeHtml(why(a, 'frequency', a.frequency_health))}">${metric(a.frequency_health, mpReachCell(a.frequency, 'freq'))}</td>
       </tr>`).join('');
     ccHydrateThumbs(body);
   }
@@ -5065,7 +5071,7 @@ const ASSET_STATUS_COLORS = {
   concept_script: ['var(--blue-light)', 'var(--blue)'],
   filming: ['var(--amber-light)', 'var(--amber)'],
   editing: ['var(--amber-light)', 'var(--amber)'],
-  qc: ['var(--teal-light)', 'var(--teal-dark)'],
+  qc: ['var(--accent-soft)', 'var(--accent-text)'],
   uploaded_live: ['var(--green-light)', 'var(--green)'],
 };
 
