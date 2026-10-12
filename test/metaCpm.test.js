@@ -35,7 +35,7 @@ test('CPM is sortable (whitelisted SQL), a KPI card, a table column, never colou
   const app = read('public/app.js');
   assert.match(app, /\{ key: 'cpm', label: 'CPM', fmt: 'money', better: null \}/, 'a summary card; better is null so a comparison is never shown as good or bad');
   const row = app.slice(app.indexOf("body.innerHTML = res.ads.map((a) => `"), app.indexOf('ccHydrateThumbs(body);'));
-  assert.match(row, /class="num mp-cpm"/); assert.doesNotMatch(row, /cellCls\(a\.cpm/);
+  assert.match(row, /'mp-c-tr mp-cpm'/, 'the CPM cell'); assert.doesNotMatch(row, /cellCls\(a\.cpm/);
   assert.match(read('public/index.html'), /data-sort="cpm"/);
   const health = read('src/lib/metaFunnelHealth.js');
   assert.doesNotMatch(health.slice(health.indexOf('const METRICS')), /'cpm'/, 'no CPM benchmark exists to colour against');

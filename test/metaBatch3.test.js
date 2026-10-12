@@ -473,8 +473,8 @@ test('presets: Last 3 and Last 4 Days qualify for the Frequency rule; Last 7 doe
 });
 test('the Last 3 / Last 4 buttons exist in the date bar', () => {
   const html = read('public/index.html');
-  assert.match(html, /data-preset="last_3">Last 3 Days</);
-  assert.match(html, /data-preset="last_4">Last 4 Days</);
+  assert.match(html, /data-preset="last_3"[^>]*>Last 3 Days</);
+  assert.match(html, /data-preset="last_4"[^>]*>Last 4 Days</);
 });
 test('planning: 3 unique creatives across 13 Meta ads = 3 pieces of creative (counts, wording and recommendation)', () => {
   // Creative A in 5 ads, B in 4, C in 4: the active ads are 13 but the creatives are 3

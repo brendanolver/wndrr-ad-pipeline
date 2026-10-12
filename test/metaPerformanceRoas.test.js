@@ -54,7 +54,8 @@ test('Meta Performance table: header, rows and empty rows all have the same numb
   assert.match(thead, /data-sort="roas"/);
   const app = read('public/app.js');
   const row = app.slice(app.indexOf("body.innerHTML = res.ads.map((a) => `"), app.indexOf('ccHydrateThumbs(body);', app.indexOf("body.innerHTML = res.ads.map((a) => `")));
-  assert.equal(row.match(/<td\b/g).length, heads, 'a data row has one cell per header');
+  // Batch 14: the metric cells come from one cell() helper (4 literal <td> for Funnel / Creative / Ad Name / Status + 11 cell() calls)
+  assert.equal(row.match(/<td\b/g).length + row.match(/\$\{cell\(/g).length, heads, 'a data row has one cell per header');
   assert.match(row, /mpFmt\(a\.purchase_value, 'money'\)/);
   assert.match(row, /mpFmt\(a\.roas, 'roas'\)/);
   assert.equal((app.match(/colspan="15" class="mp-table-empty"/g) || []).length, 2, 'both empty / error rows span all columns');
