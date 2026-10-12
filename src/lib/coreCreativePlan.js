@@ -427,7 +427,8 @@ function buildPlan({ families, codeToFamily, snapshot, demand, stock, sizesBySty
       if (hasCard.has(f.product_code) || !a.coverage.known || !a.coverage.needs_creative) return;
       const held = heldLowStock.find((h) => h.product_code === f.product_code);
       const stockOk = st && st.known && st.pass;
-      if (stockOk && (a.level === 'High' || a.level === 'Medium')) {
+      // like every other card, a coverage card is withheld while sales data is unavailable (the engine's own contract: no recommendations without it)
+      if (stockOk && salesAvailable && (a.level === 'High' || a.level === 'Medium')) {
         const ps = signals.get(f.key); const facts = factsByFamily.get(f.key);
         const card = cardBase({
           type: 'coverage_gap', family: f, ps, facts, stock: st, benchmarkCpa, priority: a.level === 'High' ? 'High' : 'Medium', severity: 0,
@@ -439,7 +440,7 @@ function buildPlan({ families, codeToFamily, snapshot, demand, stock, sizesBySty
       } else {
         needsOther.push({
           product_code: f.product_code, product_name: f.name, active_ads: a.coverage.active_ads, min: a.coverage.min, level: a.level,
-          why_not_a_priority: a.caps[0] || (st && !st.known ? 'Stock is unavailable' : st && !st.pass ? (held ? `Low stock (${st.units} units)` : 'Low stock') : `Priority is ${a.level}`),
+          why_not_a_priority: a.caps[0] || (!salesAvailable ? 'Sales data is unavailable' : st && !st.known ? 'Stock is unavailable' : st && !st.pass ? (held ? `Low stock (${st.units} units)` : 'Low stock') : `Priority is ${a.level}`),
           season: a.season.label, stock_units: a.stock.units,
         });
       }
