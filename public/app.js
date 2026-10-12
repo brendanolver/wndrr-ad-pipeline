@@ -2709,6 +2709,7 @@ function planDataNotes(pd) {
   const n = [`Creative priority needs at least ${pd.min_active_ads} distinct active Meta ads per product (Settings → Planning).`];
   n.push(pd.coverage.available ? (pd.coverage.note || `Active ad counts use ad statuses as of ${pd.coverage.status_as_of || 'the last sync'}.`) : pd.coverage.note);
   n.push(pd.seasonality.note);
+  (pd.seasonality.notes || []).forEach((x) => n.push(x));
   if (!pd.on_order.available) n.push('Open purchase orders are unavailable, so confirmed restocks are not detected.');
   return n.filter(Boolean);
 }

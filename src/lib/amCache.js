@@ -52,4 +52,6 @@ function cacheStatus(key) {
   return { hasData: Boolean(entry.data), fetching: Boolean(entry.inFlight), fetchedAt: entry.fetchedAt || null };
 }
 
-module.exports = { getCached, cacheStatus };
+function clear(key) { entries.delete(key); }
+
+module.exports = { getCached, cacheStatus, clear };

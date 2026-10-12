@@ -11,6 +11,7 @@ const { pool } = require('../db');
 const apparelmagic = require('./apparelmagic');
 const { canonicalKey } = require('./metaMatchingCatalogue');
 const seasonality = require('./seasonality');
+const seasonalSales = require('./seasonalSales');
 const coverageLib = require('./activeAdCoverage');
 const prio = require('./creativePriority');
 const cfg = require('./creativePriorityConfig');
@@ -72,21 +73,19 @@ async function loadPlanningContext({ amDetails, today, deps = {} } = {}) {
   const styleToFamily = new Map();
   allFamilies.forEach((f) => f.style_codes.forEach((c) => styleToFamily.set(c, f.key)));
   const settings = deps.settings || await loadSettings();
-  const ctx = { today, settings, allFamilies, styleToFamily, coverage: null, seasonality: null, overrides: [], onOrder: null, notes: [] };
+  const ctx = { today, settings, allFamilies, styleToFamily, coverage: null, seasonality: null, salesSource: null, overrides: [], onOrder: null, notes: [] };
 
   // active ad coverage
   try {
     ctx.coverage = deps.coverage !== undefined ? deps.coverage : await coverageLib.loadActiveAdCoverage(allFamilies.map((f) => ({ key: f.key, codes: f.codes })), { min: settings.min_active_ads });
   } catch (e) { ctx.coverage = { available: false, reason: `Active ad counts could not be read (${e.message})` }; }
 
-  // seasonality from the monthly sales history
+  // seasonality from the monthly sales history (Shopify online orders when configured and loaded, else ApparelMagic online sales; the source is reported)
   try {
-    let sales = deps.salesByStyle;
-    if (sales === undefined) {
-      const st = apparelmagic.getAmCacheStatus();
-      sales = apparelmagic.configured() && st.sales && st.sales.hasData ? await apparelmagic.getSalesByStyle() : null;
-    }
-    if (!sales) ctx.seasonality = { available: false, reason: 'Monthly sales history has not loaded yet' };
+    const src = await seasonalSales.load({ amDetails, deps });
+    ctx.salesSource = { source: src.source, label: src.label, notes: src.notes || [], window: src.sales && src.sales.window ? src.sales.window : null };
+    const sales = src.sales;
+    if (!sales) ctx.seasonality = { available: false, reason: src.reason || 'Monthly sales history has not loaded yet' };
     else {
       const { monthly, window } = monthlyFromSales(sales);
       const launchByStyle = new Map();
@@ -136,6 +135,31 @@ function assessProduct(ctx, { styleCodes, productCodes, stock, sales, existing }
 }
 
 // what the page needs to say about where the numbers come from (no money, no internals)
+const srcOf = (ctx) => (ctx.salesSource && ctx.salesSource.source) || null;
+
+// What the seasonality was built from, how much of it, and what is incomplete: stated, never implied.
+function seasonalityStatus(ctx, s) {
+  const src = ctx.salesSource || {};
+  const w = src.window || {};
+  const st = w.stats || {};
+  const months = s.months.length;
+  const cycles = months >= 24 ? Math.floor(months / 12) : 1;
+  const quality = [];
+  if (w.source === 'apparelmagic' && w.failed_requests > 0) quality.push(`${w.failed_requests} of ${w.total_requests} daily ApparelMagic requests failed, so some days are under-counted`);
+  if (w.source === 'shopify' && st.unmapped_units > 0) quality.push(`${st.unmapped_units} units on ${st.unmapped_skus} SKUs matched no known style and are left out`);
+  if (w.source === 'shopify' && w.requested_from && w.from > w.requested_from && (Number(String(w.from).slice(0, 7).replace('-', '')) - Number(String(w.requested_from).slice(0, 7).replace('-', ''))) > 1) quality.push(`Shopify returned orders only from ${w.from}, later than the ${w.requested_from} that was requested (the token may not be able to read older orders)`);
+  const label = src.label || 'online sales';
+  const cycleText = cycles >= 2
+    ? `${cycles} observed cycles, so a pattern that repeats across years is real evidence`
+    : 'one observed cycle — real evidence of what sold when, but a second year would confirm that it repeats';
+  return {
+    available: true, source: src.source || null, source_label: label, window: s.window, months_of_data: months, baseline: s.baseline,
+    confidence: cycles >= 2 ? 'medium' : 'limited', years_of_data: cycles, incomplete: quality.length > 0, quality,
+    notes: src.notes || [],
+    note: `Seasonality is read from ${months} months of ${label} (${s.window.from} to ${s.window.to}) — ${cycleText}.${quality.length ? ` Data quality: ${quality.join('; ')}.` : ''}`,
+  };
+}
+
 function dataStatus(ctx) {
   const s = ctx.seasonality;
   const c = ctx.coverage;
@@ -144,10 +168,7 @@ function dataStatus(ctx) {
     coverage: c && c.available
       ? { available: true, status_as_of: c.status_as_of, stale: !!c.stale, stale_days: c.stale_days, note: c.stale ? `Ad statuses were last refreshed ${c.stale_days} days ago, so active counts may be out of date.` : null }
       : { available: false, note: (c && c.reason) || 'Active ad counts are unavailable.' },
-    seasonality: s && s.available
-      ? { available: true, window: s.window, months_of_data: s.months.length, baseline: s.baseline, confidence: s.months.length >= 24 ? 'medium' : 'limited', years_of_data: s.months.length >= 24 ? Math.floor(s.months.length / 12) : 1,
-          note: `Seasonality is read from ${s.months.length} months of online sales (${s.window.from} to ${s.window.to}) — one observed cycle. It is real evidence of what sold when, but a second year would confirm that it repeats.` }
-      : { available: false, note: `${(s && s.reason) || 'Seasonal data is unavailable'}. Priority uses the other factors only.` },
+    seasonality: s && s.available ? seasonalityStatus(ctx, s) : { available: false, source: srcOf(ctx), note: `${(s && s.reason) || 'Seasonal data is unavailable'}. Priority uses the other factors only.`, notes: (ctx.salesSource && ctx.salesSource.notes) || [] },
     on_order: { available: !!ctx.onOrder },
     overrides: (ctx.overrides || []).length,
   };

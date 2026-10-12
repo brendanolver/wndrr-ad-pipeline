@@ -168,7 +168,7 @@ function buildSeasonality({ monthlyByStyle: monthlyIn, groups, launchByStyle, wi
   const startYm = ymOf(window.from); const curYm = ymOf(today);
   const startDays = daysInMonth(startYm) - Number(String(window.from).slice(8, 10)) + 1;
   const curDays = Number(String(today).slice(8, 10));
-  const fold = startYm < curYm && monthNum(startYm) === monthNum(curYm) && String(window.from).slice(8, 10) !== '01' && (startDays + curDays) / daysInMonth(startYm) >= 0.8;
+  const fold = addMonths(startYm, 12) === curYm && String(window.from).slice(8, 10) !== '01' && (startDays + curDays) / daysInMonth(startYm) >= 0.8;
   const months = completeMonths(window.from, today, { foldStart: fold });
   if (months.length < CFG.MIN_MONTHS) return { available: false, reason: `Only ${months.length} complete months of sales are available (needs ${CFG.MIN_MONTHS})` };
   if (fold) {

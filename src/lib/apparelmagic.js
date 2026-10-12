@@ -256,14 +256,16 @@ async function fetchSalesByStyleUncached() {
     entry.months[ym] = (entry.months[ym] || 0) + qty;
   }
 
+  let failedRequests = 0; // a day that could not be read is UNDER-counted: tracked and reported, never silent
   await runWithConcurrency(jobs, SALES_CONCURRENCY, async ({ daysAgo, customer, usDate }) => {
     let result;
     try {
       result = await amRequest('GET', 'orders', { customer_name: customer, date: usDate });
     } catch {
+      failedRequests += 1;
       return; // one bad day/customer combo shouldn't fail the whole crawl
     }
-    if (result.status !== 200) return;
+    if (result.status !== 200) { failedRequests += 1; return; }
     const orders = result.data?.response || [];
     for (const order of orders) {
       if ((order.credit_status || '') !== 'Approved') continue;
@@ -278,7 +280,7 @@ async function fetchSalesByStyleUncached() {
 
   // what period the numbers cover (the crawl is exactly SALES_WINDOW_DAYS back from today), so seasonality knows how much history it really has
   const from = new Date(today); from.setUTCDate(from.getUTCDate() - (SALES_WINDOW_DAYS - 1));
-  salesByStyle.window = { from: from.toISOString().slice(0, 10), to: today.toISOString().slice(0, 10), days: SALES_WINDOW_DAYS, customers: AM_ONLINE_CUSTOMERS.slice() };
+  salesByStyle.window = { from: from.toISOString().slice(0, 10), to: today.toISOString().slice(0, 10), days: SALES_WINDOW_DAYS, customers: AM_ONLINE_CUSTOMERS.slice(), source: 'apparelmagic', total_requests: jobs.length, failed_requests: failedRequests };
   return salesByStyle; // Map<style_code, { qty7, qty30, qty365, months }> + .window
 }
 
