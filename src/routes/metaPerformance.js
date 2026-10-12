@@ -12,6 +12,7 @@ const perf = require('../lib/metaPerformance');
 const reachLib = require('../lib/metaRangeReach');
 const freshness = require('../lib/metaFreshness');
 const campaigns = require('../lib/metaCampaigns');
+const benchmarks = require('../lib/metaBenchmarks');
 
 const router = express.Router();
 router.use(requireAdmin);
@@ -43,6 +44,24 @@ router.get('/ads', handle((req) => perf.getAds(perf.parseRangeParams(req.query),
 router.get('/ads/:metaAdId', handle((req) => {
   if (!AD_ID_RE.test(req.params.metaAdId)) throw new perf.HttpError(400, 'Invalid ad id');
   return perf.getAdDetail(req.params.metaAdId, perf.parseRangeParams(req.query));
+}));
+
+// Editable benchmarks (Settings -> Meta Performance). Admin-only like the rest of this router; every change is validated, audited
+// (meta_performance_benchmark_history) and only changes how values are COLOURED -- no metric is ever recalculated.
+// GET /benchmarks -> rows + the funnel x metric grid + recent history;  POST /benchmarks {funnel,metric,target,min_days?,max_days?,inclusive?,tolerance_pct?}
+// PUT /benchmarks/:id (any of those fields, or active/note);  DELETE /benchmarks/:id
+const BENCH_ID_RE = /^[0-9]{1,9}$/;
+router.get('/benchmarks', handle(() => benchmarks.getSettings()));
+router.post('/benchmarks', handle(async (req) => { await benchmarks.create(req.body, req.user && req.user.id); return benchmarks.getSettings(); }));
+router.put('/benchmarks/:id', handle(async (req) => {
+  if (!BENCH_ID_RE.test(req.params.id)) throw new perf.HttpError(400, 'Invalid benchmark id');
+  await benchmarks.update(Number(req.params.id), req.body, req.user && req.user.id);
+  return benchmarks.getSettings();
+}));
+router.delete('/benchmarks/:id', handle(async (req) => {
+  if (!BENCH_ID_RE.test(req.params.id)) throw new perf.HttpError(400, 'Invalid benchmark id');
+  await benchmarks.remove(Number(req.params.id), req.user && req.user.id);
+  return benchmarks.getSettings();
 }));
 
 // Range-level Reach / Frequency (unique people: never summed from daily rows).

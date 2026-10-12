@@ -75,6 +75,10 @@ router.post('/vocab/concepts', handle((req) => vocab.addName('concept', req.body
 // Rapid review: live state + draft (built from stored suggestions) for a page of ads, in one read. ?ids=a,b,c (max 100). Read-only.
 router.get('/review-batch', handle((req) => matching.getReviewBatch(req.query.ids)));
 
+// The exact, ordered list of creatives a review session will work through (the Needs review / Has suggestion / Unmatched view for the
+// same scope + search, one row per creative). Read-only.  GET /review-queue?scope=&filter=needs|suggested|unmatched&q=
+router.get('/review-queue', handle((req) => matching.getReviewQueue({ scope: req.query.scope, filter: req.query.filter, q: req.query.q })));
+
 // Every concept in use with unique-creative and Meta-ad counts per source, and spelling variants side by side. Read-only, nothing is
 // merged or approved. ?format=csv downloads it.
 router.get('/concept-inventory', async (req, res, next) => {

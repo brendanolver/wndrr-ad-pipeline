@@ -177,7 +177,7 @@ test('keyboard safety (review modal): Enter confirms only outside a field / drop
   assert.match(fn, /return false;\s*\}\s*mmRv\.busy = true/, 'a refused confirmation stays on the same creative (no advance)');
   assert.match(fn, /mmRv\.cooldownUntil = Date\.now\(\) \+ MM_RV_COOLDOWN_MS/);
   assert.match(app, /MM_RV_COOLDOWN_MS = 400/);
-  assert.match(fn, /await mmSessNext\(id\)/, 'moves on to the next unique creative only after a successful confirmation');
+  assert.match(fn, /await mmSessNextStep\(\)/, 'moves on to the next unique creative only after a successful confirmation');
   assert.match(fn, /if \(!ok\) \{\s*if \(ctx\.errEl\) ctx\.errEl\.textContent = msg/, 'a failed confirmation keeps the creative and explains');
 });
 test('the full editor and the rapid editor offer an explicit Add for new creators / concepts (no silent free text for these)', () => {

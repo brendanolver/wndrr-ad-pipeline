@@ -2959,3 +2959,55 @@ td.mp-name > .mp-name-stack{vertical-align:middle;max-width:calc(100% - 46px);}
 /* Review modal: a field pre-filled from a previously confirmed same-name ad */
 .mm-field.mm-fromcopy{outline:1px solid #6b8fd6;background:#f3f7fd;}
 .mm-copy-badge{display:inline-block;font-size:10.5px;font-weight:700;color:#2f5aa8;background:#e6eefb;border:1px solid #bcd0f0;border-radius:999px;padding:1px 8px;margin-right:4px;}
+
+/* Batch 11: Meta Performance benchmark strip + Settings editor */
+.mp-bench-strip{display:flex;flex-wrap:wrap;gap:4px 18px;align-items:center;font-size:12px;color:var(--text-secondary);margin:0 0 4px;}
+.mp-bench-group{display:inline-flex;flex-wrap:wrap;gap:4px 6px;align-items:center;}
+.mp-bench-group>b{color:var(--text);font-weight:700;margin-right:2px;}
+.mp-bench-chip{display:inline-flex;align-items:center;gap:3px;padding:1px 8px;border-radius:999px;border:1px solid var(--border);background:var(--surface2,transparent);white-space:nowrap;}
+.mp-bench-chip small{color:var(--text-muted);}
+.mp-bench-chip.on{border-color:#3f9d6b66;}
+.mp-bench-chip.wait{border-style:dashed;color:var(--text-muted);}
+.mp-bench-chip .mp-health{margin:0 3px 0 0;}
+.mp-bench-note,.mp-bench-none{color:var(--text-muted);font-size:11.5px;}
+.mp-bench-warn{color:#b9741a;}
+.mbench-table{width:100%;border-collapse:collapse;font-size:13px;margin:8px 0 14px;}
+.mbench-table th,.mbench-table td{border:1px solid var(--border);padding:8px 10px;vertical-align:top;text-align:left;}
+.mbench-table thead th{background:var(--surface2,transparent);font-weight:700;}
+.mbench-table thead small{display:block;font-weight:400;color:var(--text-muted);font-size:11px;}
+.mbench-table tbody th{width:70px;}
+.mbench-item{display:flex;flex-wrap:wrap;gap:2px 10px;align-items:center;margin-bottom:6px;padding-bottom:6px;border-bottom:1px dashed var(--border);}
+.mbench-item.off{opacity:.55;}
+.mbench-target small{color:var(--text-muted);}
+.mbench-bands{color:var(--text-muted);font-size:11.5px;}
+.mbench-bands .mp-health{margin-right:2px;}
+.mbench-acts{display:inline-flex;gap:8px;font-size:12px;}
+.mbench-none{color:var(--text-muted);font-size:12px;display:block;margin-bottom:4px;}
+.mbench-add{font-size:12px;}
+.link-btn.danger{color:#c0392b;}
+.mbench-form{border:1px solid var(--border);border-radius:8px;padding:12px 14px;max-width:880px;}
+.mbench-form-title{font-weight:700;margin-bottom:8px;}
+.mbench-fields{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:flex-end;}
+.mbench-fields label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--text-secondary);}
+.mbench-fields input[type=number]{width:90px;}
+.mbench-window-fields{display:inline-flex;gap:8px;}
+.mbench-check{flex-direction:row!important;align-items:center;gap:6px!important;}
+.mbench-form-actions{margin-top:10px;display:flex;gap:10px;align-items:center;}
+.mbench-msg{font-size:12px;}.mbench-msg.ok{color:#2f7d54;}.mbench-msg.err{color:#c0392b;}
+.mbench-hint{margin-top:8px;font-size:11.5px;color:var(--text-muted);}
+.mbench-history{margin-top:12px;font-size:12px;}
+.mbench-history ul{margin:6px 0 0;padding-left:18px;}
+
+/* Batch 11: Ad Matching status tabs (counts visible at a glance) + the More dropdown */
+.mm-tabs{display:flex;flex-wrap:wrap;gap:2px;border-bottom:1px solid var(--border);margin:0 0 10px;}
+.mm-tab{font-family:inherit;font-size:13px;font-weight:600;color:var(--text-secondary);background:none;border:0;border-bottom:2px solid transparent;padding:7px 12px;margin-bottom:-1px;cursor:pointer;display:inline-flex;align-items:baseline;gap:6px;white-space:nowrap;}
+.mm-tab:hover{color:var(--text);background:var(--surface2);}
+.mm-tab.active{color:var(--teal);border-bottom-color:var(--teal);}
+.mm-tab-n{font-weight:800;color:var(--text);font-variant-numeric:tabular-nums;}
+.mm-tab.active .mm-tab-n{color:var(--teal);}
+.mm-tab-unit{font-size:10px;font-weight:600;color:var(--text-muted);text-transform:lowercase;}
+.mm-toolbar #mm-filter{max-width:200px;}
+.mm-toolbar #mm-filter.active{border-color:var(--teal);color:var(--teal);font-weight:600;}
+.mm-sess-wl{color:var(--text-muted);font-weight:400;}
+.mm-sess-left{color:var(--teal);}
+.mm-sess-done-actions{display:flex;gap:10px;margin-top:12px;}

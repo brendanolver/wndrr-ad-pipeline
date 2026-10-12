@@ -477,6 +477,9 @@ async function getAds(parsed, query) {
   const opts = parseAdsQuery(query);
   const filter = parseFilter(query);
   const healthDays = funnelHealth.rangeDays(parsed.range);
+  // the benchmarks in force: those saved in Settings (Meta Performance), else the built-in approved ones (lazy require: metaBenchmarks needs HttpError from here)
+  const bench = await require('./metaBenchmarks').getEffective();
+  const healthCtx = { rules: bench.rules, coded: bench.coded };
   // Where this range's per-ad Reach/Frequency can come from (never Meta, only the stored cache).
   const reachStatus = await reachStore.getStatus(parsed.range, parsed.today);
   const reachFrom = reachStatus.ad_values; // 'stored_daily' (one day) | 'meta_range' (cached pull) | null
@@ -515,6 +518,13 @@ async function getAds(parsed, query) {
     params
   );
   const total = num(countRes.rows[0].total);
+  const fcRes = await pool.query(
+    `${cte} SELECT COALESCE(mc.funnel, 'unknown') AS funnel, COUNT(*) AS n FROM agg JOIN meta_ads a ON a.meta_ad_id = agg.meta_ad_id LEFT JOIN meta_campaigns mc ON mc.meta_campaign_id = a.meta_campaign_id ${whereSql} GROUP BY 1`,
+    params
+  );
+  // how many of the ads in this view can ever be judged: a funnel is read from the campaign name; Unknown / Mixed are never coloured
+  const funnelCounts = { TOF: 0, TOM: 0, MOF: 0, multiple: 0, unknown: 0 };
+  fcRes.rows.forEach((r) => { funnelCounts[r.funnel] = (funnelCounts[r.funnel] || 0) + num(r.n); });
   const listParams = [...params, opts.pageSize, (opts.page - 1) * opts.pageSize];
   // NULLS LAST keeps "no purchases" (null CPA) at the bottom in either
   // direction; spend then meta_ad_id are tiebreakers so paging is stable
@@ -555,11 +565,11 @@ async function getAds(parsed, query) {
     })).map((a) => ({
       ...a,
       // Only WNDRR-confirmed benchmarks (lib/metaFunnelHealth.js); null = neutral. Frequency is judged only for ~4-day ranges.
-      cpa_health: funnelHealth.classify(a.funnel, 'cpa', a.cpa, { days: healthDays }),
-      frequency_health: funnelHealth.classify(a.funnel, 'frequency', a.frequency, { days: healthDays }),
-      reach_health: funnelHealth.classify(a.funnel, 'reach', a.reach, { days: healthDays }), // no confirmed Reach benchmark: always null today
+      cpa_health: funnelHealth.classify(a.funnel, 'cpa', a.cpa, { days: healthDays }, healthCtx),
+      frequency_health: funnelHealth.classify(a.funnel, 'frequency', a.frequency, { days: healthDays }, healthCtx),
+      reach_health: funnelHealth.classify(a.funnel, 'reach', a.reach, { days: healthDays }, healthCtx), // coloured only where a Reach benchmark has been set
     })),
-    health: funnelHealth.status({ range: parsed.range }),
+    health: { ...funnelHealth.status({ range: parsed.range, rules: bench.rules, coded: bench.coded, source: bench.source === 'settings' ? 'settings' : null }), funnel_counts: funnelCounts },
     reach_info: {
       state: reachFrom ? 'ready' : reachStatus.state, source: reachFrom, pulled_at: reachStatus.pulled_at, stale: reachFrom === 'meta_range' && reachStatus.stale,
       includes_today: reachStatus.includes_today, last_error: reachStatus.last_error,

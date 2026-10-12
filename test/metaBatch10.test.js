@@ -151,8 +151,8 @@ test('schema: one additive audit table, no drops / deletes / alters of anything 
 });
 test('review modal: the offer is a separate, explicit step -- Enter / Space never decide it, A / S do, and a held key is ignored', () => {
   const app = code('public/app.js');
-  assert.match(app, /payload\.offer_name_copies = true/);
-  assert.match(app, /if \(offer && offer\.eligible_creatives > 0 && !s\.resolvedBases\.has\(offer\.base\)\) \{ mmSessOfferShow\(id, offer\); return ok; \}/, 'no offer -> straight to the next creative, exactly as before');
+  assert.match(app, /payload\.offer_name_copies = firstReview/, 'only a first confirmation asks; a correction never offers anything');
+  assert.match(app, /if \(firstReview && offer && offer\.eligible_creatives > 0 && !s\.resolvedBases\.has\(offer\.base\)\) \{ mmSessOfferShow\(id, offer\); return ok; \}/, 'no offer -> straight to the next creative, exactly as before');
   const kb = app.slice(app.indexOf("document.addEventListener('keydown', (e) => {\n  const s = mmRv.sess;"));
   const offerBranch = kb.slice(0, kb.indexOf('if (!s || !s.ctx || e.key'));
   assert.match(offerBranch, /e\.repeat/);
@@ -162,10 +162,10 @@ test('review modal: the offer is a separate, explicit step -- Enter / Space neve
   assert.doesNotMatch(offerBranch, /mmSessConfirm/, 'the offer branch can never confirm a creative');
   const apply = app.slice(app.indexOf('async function mmSessOfferApply'), app.indexOf('async function mmSessOfferDecline'));
   assert.match(apply, /s\.offer\.busy \|\| mmRv\.busy\) return/, 'double submission guard');
-  assert.match(apply, /keys\.forEach\(\(k\) => s\.seen\.add\(k\)\)/, 'applied copies leave the queue');
+  assert.match(apply, /s\.state\.set\(k, 'copied'\)/, 'applied copies are resolved in the session (they leave the queue) once the server has saved them');
   assert.match(apply, /s\.resolvedBases\.add\(offer\.base\)/, 'a resolved name is not offered again this session');
   assert.match(apply, /mmRv\.left = Math\.max\(0, mmRv\.left - res\.applied_creatives\)/, 'the remaining counter drops by the copies applied');
-  assert.match(app, /const handled = s\.done \+ s\.skipped \+ s\.copied/, 'progress counts the copies');
+  assert.match(app, /const resolved = s\.state\.size/, 'progress counts the copies (every counter is derived from the one resolution map)');
 });
 
 // ── Part 2: the simplified page ──────────────────────────────────────────
@@ -182,12 +182,13 @@ test('Ad Matching page: title, search, status dropdown, actions and count on the
 });
 test('Ad Matching page: every existing status stays available, Needs review is the default and is not overridden by a saved view', () => {
   const app = code('public/app.js');
-  const filters = [...app.matchAll(/\['([a-z_]+)', '([^']+)', '([a-z_]+)', '(creatives|ads)'\]/g)].map((m) => m[1]);
-  assert.deepEqual(filters.sort(), ['all', 'archived', 'conflict', 'excluded', 'historical', 'inherit', 'matched', 'needs', 'not_product_specific', 'suggested', 'unmatched']);
+  const filters = [...app.matchAll(/\['([a-z_]+)', '([^']+)', '([a-z_]+)', '(creatives|ads)', (true|false)\]/g)];
+  assert.deepEqual(filters.map((m) => m[1]).sort(), ['all', 'archived', 'auto', 'confirmed', 'conflict', 'excluded', 'historical', 'inherit', 'matched', 'needs', 'not_product_specific', 'suggested', 'unmatched']);
+  assert.deepEqual(filters.filter((m) => m[5] === 'true').map((m) => m[1]), ['needs', 'matched', 'auto', 'confirmed', 'not_product_specific'], 'the five working statuses are the horizontal tabs, in order');
   assert.match(app, /filter: 'needs'/);
   assert.doesNotMatch(app.slice(app.indexOf('(function mmRestoreView'), app.indexOf("document.getElementById('mm-scope').addEventListener")), /mmState\.filter\s*=/, 'the saved view restores only the time window');
   assert.match(app, /document\.getElementById\('mm-filter'\)\.addEventListener\('change'/);
-  assert.match(app, /creatives? to review/);
+  assert.match(app, /creative\$\{n === 1 \? '' : 's'\} to review/, 'the concise count beside the title');
 });
 test('Ad Matching page: the cleanup removes no loader, endpoint or safeguard (panels are still rendered by their own functions)', () => {
   const app = code('public/app.js');
@@ -305,9 +306,9 @@ test('Meta Performance colour guide: one collapsed control generated from the ac
   assert.match(app, /<details class="mp-health-guide"><summary title="What the colour dots mean">ⓘ Colour guide<\/summary>/);
   assert.match(app, /CPA is Meta-reported \(Triple Whale is not connected yet\)/);
   assert.doesNotMatch(app.slice(app.indexOf('<details class="mp-health-guide">') - 200, app.indexOf('<details class="mp-health-guide">') + 1800), /Colour dots are used on/, 'the long paragraph is gone');
-  assert.match(app, /Meeting the approved target/);
-  assert.match(app, /Missing the approved target by up to 20%/);
-  assert.match(app, /Missing the approved target by more than 20%/);
+  assert.match(app, /Meeting the benchmark/);
+  assert.match(app, /Missing the benchmark by up to 20%/);
+  assert.match(app, /Missing the benchmark by more than 20%/);
   const files = fs.readdirSync(path.join(__dirname, '..', 'src', 'lib')).concat(fs.readdirSync(path.join(__dirname, '..', 'src', 'routes')));
   assert.ok(!files.some((f) => /triple|whale/i.test(f)), 'no Triple Whale integration exists in this batch');
   assert.doesNotMatch(code('src/lib/metaFunnelHealth.js'), /triple|whale|TRIPLEWHALE/i);

@@ -283,9 +283,10 @@
           <span class="mm-remaining" id="mm-remaining" role="status" title="Unique creatives still needing a decision (ads that share a creative count once)"></span>
           <span class="mm-rv-status" id="mm-rv-status" role="status" aria-live="polite"></span>
         </div>
+        <div class="mm-tabs" id="mm-tabs" role="tablist" aria-label="Ad status"></div>
         <div class="mm-toolbar">
           <input type="search" id="mm-search" placeholder="Search ad name, Meta Ad ID or product" autocomplete="off">
-          <select id="mm-filter" aria-label="Status filter" title="Which ads to show"></select>
+          <select id="mm-filter" aria-label="More statuses" title="More statuses (Has suggestion, Unmatched, Will inherit, Historical, Archived, Conflicts, Excluded, All ads)"></select>
           <select id="mm-scope" aria-label="Which ads" title="Time window (choose All ads to search older ads)">
             <option value="30d">Active in last 30 days</option>
             <option value="90d">Active in last 90 days</option>
@@ -1348,6 +1349,7 @@
         <button type="button" class="settings-subnav-btn" data-settings-panel="meta-mapping">Meta Mapping</button>
         <button type="button" class="settings-subnav-btn" id="settings-users-tab-btn" data-settings-panel="users" style="display:none;">Users</button>
         <button type="button" class="settings-subnav-btn" id="settings-meta-sync-tab-btn" data-settings-panel="meta-sync" style="display:none;">Meta Sync</button>
+        <button type="button" class="settings-subnav-btn" id="settings-meta-benchmarks-tab-btn" data-settings-panel="meta-benchmarks" style="display:none;">Meta Performance</button>
       </div>
 
       <div class="settings-panel active" id="settings-panel-planning">
@@ -1425,6 +1427,31 @@
         </div>
         <div id="ca-list" class="pw-list"></div>
         <button class="btn btn-primary btn-sm" id="ca-add-btn">+ Add Customer Avatar</button>
+      </div>
+
+      <!-- Meta Performance benchmarks (admin-only; GET/POST/PUT/DELETE /api/meta-performance/benchmarks). A row is one target for a funnel +
+           metric (+ optional reporting window); the colour bands are always derived from it by the 20% rule. -->
+      <div class="settings-panel" id="settings-panel-meta-benchmarks">
+        <div class="planning-section-header">
+          <h2>Performance benchmarks</h2>
+          <span class="admin-note">Targets behind the green / orange / red dots on Meta Performance. Green meets the target, orange misses it by up to 20%, red by more. A metric with no target stays uncoloured. CPA is Meta-reported (Triple Whale is not connected).</span>
+        </div>
+        <div id="mbench-grid" class="mbench-grid"></div>
+        <div class="mbench-form" id="mbench-form">
+          <div class="mbench-form-title" id="mbench-form-title">Add a benchmark</div>
+          <div class="mbench-fields">
+            <label>Funnel<select id="mbench-funnel"><option>TOF</option><option>TOM</option><option>MOF</option></select></label>
+            <label>Metric<select id="mbench-metric"><option value="cpa">CPA ($ AUD, lower is better)</option><option value="frequency">Frequency (lower is better)</option><option value="reach">Reach (higher is better)</option></select></label>
+            <label>Target<input type="number" id="mbench-target" step="any" min="0" placeholder="e.g. 60"></label>
+            <label>Reporting window<select id="mbench-window"><option value="any">Any period</option><option value="custom">Only periods of…</option></select></label>
+            <span class="mbench-window-fields" id="mbench-window-fields" style="display:none;"><label>from <input type="number" id="mbench-min" min="1" step="1" placeholder="days"></label><label>to <input type="number" id="mbench-max" min="1" step="1" placeholder="days"></label></span>
+            <label class="mbench-check"><input type="checkbox" id="mbench-inclusive" checked> <span id="mbench-inclusive-label">A value exactly on the target is green</span></label>
+            <label>Orange up to<input type="number" id="mbench-tol" min="0" max="100" step="1" value="20"><small>% beyond the target</small></label>
+          </div>
+          <div class="mbench-form-actions"><button type="button" class="btn btn-primary btn-sm" id="mbench-save">Save benchmark</button><button type="button" class="btn btn-ghost btn-sm" id="mbench-cancel" style="display:none;">Cancel edit</button><span class="mbench-msg" id="mbench-msg"></span></div>
+          <div class="mbench-hint">A benchmark with a reporting window is judged only for periods inside it (for example a 3–5 day Frequency target is never applied to a 7-day period). Add a separate benchmark for another window if you have an approved target for it.</div>
+        </div>
+        <details class="mbench-history"><summary>Change history</summary><div id="mbench-history"></div></details>
       </div>
 
       <div class="settings-panel" id="settings-panel-meta-mapping">

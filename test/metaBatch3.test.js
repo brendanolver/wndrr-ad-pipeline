@@ -500,7 +500,7 @@ test('planning: 3 unique creatives across 13 Meta ads = 3 pieces of creative (co
 });
 test('ad matching: All ads is a chip, the working view is remembered, and the table is compact', () => {
   const app = read('public/app.js');
-  assert.match(app, /\['all', 'All ads', 'all_ads', 'ads'\]/);
+  assert.match(app, /\['all', 'All ads', 'all_ads', 'ads', false\]/);
   assert.match(app, /wndrr\.matching\.view/);
   assert.match(app, /pageSize: 50/);
   const css = read('public/styles.css');

@@ -95,8 +95,8 @@ test('the inline rapid editor is gone; the full modal is the only review surface
   const app = code('public/app.js');
   for (const dead of ['mmRvSelect', 'mmRvForm', 'mmRvConfirm', 'mmRvOnTick', 'mmRvAdvance', 'mm-rv-tick', 'mm-tickcell', 'mm-rv-panel']) assert.doesNotMatch(app, new RegExp(dead), dead);
   assert.doesNotMatch(read('public/index.html'), /mm-th-tick/);
-  for (const live of ['mmSessStart', 'mmSessOpen', 'mmSessNext', 'mmSessConfirm', 'mmSessSkip', 'mmSessClose', 'mmSessOnClosed', 'mmAutofill']) assert.match(app, new RegExp(`function ${live}\\b`), live);
-  assert.match(app, /id="mm-sess-confirm"/); assert.match(app, /Confirm &amp; Next/); assert.match(app, /Skip &amp; Next/); assert.match(app, /Close review/i);
+  for (const live of ['mmSessStart', 'mmSessShow', 'mmSessAdvance', 'mmSessNextStep', 'mmSessPrevious', 'mmSessFinish', 'mmSessConfirm', 'mmSessSkip', 'mmSessClose', 'mmSessOnClosed', 'mmAutofill']) assert.match(app, new RegExp(`function ${live}\\b`), live);
+  assert.match(app, /id="mm-sess-confirm"/); assert.match(app, /Confirm &amp; Next/); assert.match(app, /Skip &amp; Next/); assert.match(app, /← Previous/); assert.match(app, /Close review/i); assert.match(app, /Finish reviewing/);
   assert.match(app, /closeModal[\s\S]{0,400}mmSessOnClosed\(\)/, 'closing the modal ends the session');
 });
 test('the session reuses the existing confirm path and adds no new write, sync, or propagation path', () => {
@@ -113,10 +113,12 @@ test('the session reuses the existing confirm path and adds no new write, sync, 
 test('unique creatives: one review per exact meta_creative_id, and a handled creative is never shown twice', () => {
   const app = code('public/app.js');
   assert.match(app, /const mmRvKey = \(id\) => \(mmRv\.rows\.get\(id\) \|\| \{\}\)\.meta_creative_id \|\| id/);
-  const cand = app.slice(app.indexOf('function mmSessCandidates'), app.indexOf('function mmSessBarHtml'));
-  assert.match(cand, /!s\.seen\.has\(mmRvKey\(id\)\)/);
-  assert.match(cand, /mmRvReviewable\(id\)/);
-  assert.match(app.slice(app.indexOf('async function mmSessOpen'), app.indexOf('function mmAutofill')), /s\.seen\.add\(mmRvKey\(id\)\)/);
+  // the session's list has ONE entry per exact creative (keyed by meta_creative_id; an ad without one is its own creative) and a creative that is
+  // resolved is skipped when advancing, so it is never shown twice
+  assert.match(app, /const queue = r\.items\.map\(\(i\) => \(\{ id: i\.meta_ad_id, key: i\.creative_key, name: i\.ad_name \}\)\)/);
+  const adv = app.slice(app.indexOf('async function mmSessAdvance'), app.indexOf('async function mmSessNextStep'));
+  assert.match(adv, /if \(s\.state\.has\(e\.key\)\) continue;/, 'a resolved creative is never presented again');
+  assert.match(app, /s\.queue\.length - resolved/, 'left in this session = list length - resolved');
 });
 test('Enter never confirms from a field, a dropdown or a button, and the picker blurs after a pick', () => {
   const app = code('public/app.js');

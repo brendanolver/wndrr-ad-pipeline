@@ -3084,6 +3084,73 @@ CREATE INDEX IF NOT EXISTS idx_meta_name_copy_apps_copy ON meta_name_copy_applic
 CREATE INDEX IF NOT EXISTS idx_meta_name_copy_apps_source ON meta_name_copy_applications(source_meta_ad_id);
 
 -- =====================================================================
+-- Batch 11: editable Meta Performance benchmarks (Settings -> Meta Performance).
+-- One row per funnel + metric + reporting window. The colour rule itself stays percentage-based (green meets the target, orange misses it
+-- by up to tolerance_pct, red by more); a row only stores the TARGET, which side of it is "good" is fixed by the metric (CPA and Frequency:
+-- lower is better; Reach: higher is better). A NULL window bound is open; a row with no window applies to every reporting period. A benchmark
+-- is never scaled to another period length: a 4-day Frequency target is judged only on 3-5 day ranges unless a person adds another window.
+-- Additive: nothing here is read by matching or classification code. history is append-only and has no FK so it survives a deleted row.
+CREATE TABLE IF NOT EXISTS meta_performance_benchmarks (
+  id SERIAL PRIMARY KEY,
+  funnel VARCHAR(8) NOT NULL CHECK (funnel IN ('TOF', 'TOM', 'MOF')),
+  metric VARCHAR(12) NOT NULL CHECK (metric IN ('cpa', 'frequency', 'reach')),
+  min_days INTEGER CHECK (min_days IS NULL OR min_days >= 1),
+  max_days INTEGER CHECK (max_days IS NULL OR max_days >= 1),
+  target NUMERIC(14,4) NOT NULL CHECK (target >= 0),
+  inclusive BOOLEAN NOT NULL DEFAULT true,
+  tolerance_pct NUMERIC(5,2) NOT NULL DEFAULT 20 CHECK (tolerance_pct >= 0 AND tolerance_pct <= 100),
+  active BOOLEAN NOT NULL DEFAULT true,
+  note TEXT,
+  created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (min_days IS NULL OR max_days IS NULL OR min_days <= max_days)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_meta_perf_benchmarks_window
+  ON meta_performance_benchmarks (funnel, metric, COALESCE(min_days, 0), COALESCE(max_days, 0));
+CREATE TABLE IF NOT EXISTS meta_performance_benchmark_history (
+  id SERIAL PRIMARY KEY,
+  benchmark_id INTEGER,
+  action VARCHAR(12) NOT NULL,
+  before_value JSONB,
+  after_value JSONB,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+-- The two benchmarks WNDRR approved are seeded ONCE (only while no history exists at all), so a person who later amends or removes one is
+-- never overridden by a restart.
+DO $$
+DECLARE r RECORD;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM meta_performance_benchmark_history) AND NOT EXISTS (SELECT 1 FROM meta_performance_benchmarks) THEN
+    FOR r IN
+      INSERT INTO meta_performance_benchmarks (funnel, metric, min_days, max_days, target, inclusive, tolerance_pct, note) VALUES
+        ('MOF', 'cpa', NULL, NULL, 60, true, 20, 'Approved: green <= $60 AUD (values under $40 stay green), orange up to $72, red above. Meta-reported CPA.'),
+        ('TOF', 'frequency', 3, 5, 2, false, 20, 'Approved for roughly 3-5 days: green < 2, orange 2 to 2.4, red above 2.4.')
+      RETURNING *
+    LOOP
+      INSERT INTO meta_performance_benchmark_history (benchmark_id, action, after_value) VALUES (r.id, 'seed', to_jsonb(r));
+    END LOOP;
+  END IF;
+END $$;
+
+-- =====================================================================
+-- Batch 11: corrections audit. When a person re-saves an ad whose classification they had already confirmed (Previous / edit in the review
+-- modal, or the full editor) and the values CHANGE, the before/after snapshot is kept here. Additive and append-only; nothing reads it for
+-- matching. Cascades with the ad row like the classification itself.
+CREATE TABLE IF NOT EXISTS meta_classification_corrections (
+  id SERIAL PRIMARY KEY,
+  meta_ad_id VARCHAR(64) NOT NULL REFERENCES meta_ads(meta_ad_id) ON DELETE CASCADE,
+  corrected_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  corrected_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  before_value JSONB NOT NULL,
+  after_value JSONB NOT NULL,
+  source VARCHAR(24) NOT NULL DEFAULT 'editor'
+);
+CREATE INDEX IF NOT EXISTS idx_meta_class_corrections_ad ON meta_classification_corrections(meta_ad_id, corrected_at DESC);
+
+-- =====================================================================
 -- Approved Ad Matching concepts + historical-spelling aliases
 -- =====================================================================
 -- The concept list Ad Matching offers is the people-approved vocabulary: meta_matching_vocab rows of kind 'concept'. The 40 approved

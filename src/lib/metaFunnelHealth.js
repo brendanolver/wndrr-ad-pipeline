@@ -135,6 +135,33 @@ function rangeDays(range) {
 }
 const isApprox4Days = (days) => days !== null && days !== undefined && days >= APPROX_4_DAYS.min_days && days <= APPROX_4_DAYS.max_days;
 
+// Reporting window of a rule: explicit { min_days, max_days } (either bound may be null = open) set from Settings, or the legacy period
+// 'approx_4_days' (= 3..5 days). A rule with neither applies to every period. A rule that has a window is judged ONLY when the selected
+// range's length falls inside it -- never scaled or extrapolated to another length.
+const windowOf = (rule) => {
+  if (rule && rule.window && typeof rule.window === 'object') {
+    const lo = Number.isFinite(rule.window.min_days) ? rule.window.min_days : null;
+    const hi = Number.isFinite(rule.window.max_days) ? rule.window.max_days : null;
+    return lo === null && hi === null ? null : { min_days: lo, max_days: hi };
+  }
+  if (rule && rule.period === 'approx_4_days') return { min_days: APPROX_4_DAYS.min_days, max_days: APPROX_4_DAYS.max_days };
+  return null;
+};
+const inWindow = (w, days) => !w || (days !== null && days !== undefined && (w.min_days === null || days >= w.min_days) && (w.max_days === null || days <= w.max_days));
+const windowText = (w) => {
+  if (!w) return 'any reporting period';
+  if (w.min_days !== null && w.max_days !== null) return w.min_days === w.max_days ? `${w.min_days}-day periods only` : `${w.min_days}–${w.max_days}-day periods only`;
+  if (w.min_days !== null) return `periods of ${w.min_days}+ days only`;
+  return `periods up to ${w.max_days} days only`;
+};
+// a metric's benchmark may be ONE rule or a list of rules for different windows; the narrowest window that fits the range wins
+const rulesOf = (entry) => (Array.isArray(entry) ? entry : entry ? [entry] : []);
+const spanOf = (w) => (w ? ((w.max_days === null ? 1e6 : w.max_days) - (w.min_days === null ? 0 : w.min_days)) : 2e6);
+function pickRule(entry, days) {
+  const fits = rulesOf(entry).filter((r) => validRule(r) && inWindow(windowOf(r), days));
+  return fits.sort((x, y) => spanOf(windowOf(x)) - spanOf(windowOf(y)))[0] || null;
+}
+
 const match = (v, c) => !!c
   && (c.gt === undefined || v > c.gt) && (c.gte === undefined || v >= c.gte)
   && (c.lt === undefined || v < c.lt) && (c.lte === undefined || v <= c.lte)
@@ -142,7 +169,13 @@ const match = (v, c) => !!c
 const validCond = (c) => !!c && typeof c === 'object' && Object.keys(c).length > 0 && Object.entries(c).every(([k, x]) => ['gt', 'gte', 'lt', 'lte', 'min', 'max'].includes(k) && typeof x === 'number' && Number.isFinite(x));
 function validRule(r) {
   if (!r || typeof r !== 'object') return false;
-  if (r.period !== null && r.period !== 'approx_4_days') return false;
+  if (r.period !== null && r.period !== undefined && r.period !== 'approx_4_days') return false;
+  if (r.window !== undefined && r.window !== null) {
+    const w = r.window;
+    const okBound = (x) => x === null || x === undefined || (Number.isInteger(x) && x >= 1);
+    if (typeof w !== 'object' || !okBound(w.min_days) || !okBound(w.max_days)) return false;
+    if (Number.isInteger(w.min_days) && Number.isInteger(w.max_days) && w.min_days > w.max_days) return false;
+  }
   const given = STATES.filter((s) => r[s] !== undefined);
   return given.length > 0 && given.every((s) => validCond(r[s]));
 }
@@ -154,9 +187,8 @@ function classify(funnel, metric, value, ctx = {}, { rules = effectiveRules(), e
   if (!JUDGED_FUNNELS.includes(funnel) || !METRICS.includes(metric)) return null; // Unknown / Mixed / anything else: neutral
   if (!(coded[funnel] || []).includes(metric)) return null; // not a colour-coded metric for this funnel: always neutral
   if (value === null || value === undefined || value === '' || !Number.isFinite(Number(value))) return null;
-  const rule = rules[funnel] && rules[funnel][metric];
-  if (!validRule(rule)) return null;
-  if (rule.period === 'approx_4_days' && !isApprox4Days(ctx.days)) return null; // not scaled to other lengths
+  const rule = pickRule(rules[funnel] && rules[funnel][metric], ctx.days);
+  if (!rule) return null; // no rule, or none for THIS reporting window (a benchmark is never scaled to another period length)
   const v = Number(value);
   for (const s of STATES) if (rule[s] !== undefined && match(v, rule[s])) return s;
   return null;
@@ -177,27 +209,70 @@ function describe(rule) {
 // [{ state, text, cond }] green -> orange -> red, for the compact colour guide in the UI
 const bandsOf = (rule) => ['green', 'orange', 'red'].filter((s) => rule[s] !== undefined).map((s) => ({ state: s, text: condText(rule[s]), cond: rule[s] }));
 
-function status({ rules = effectiveRules(), enabled = ENABLED, coded = COLOUR_CODED, range = null } = {}) {
+const METRIC_LABEL = { cpa: 'CPA', frequency: 'Frequency', reach: 'Reach' };
+// the green side of a rule as a short symbol: '≤ 60', '< 2', '≥ 50000' (the UI adds units)
+const targetSymbol = (rule) => {
+  const g = rule.green || {};
+  if (g.lte !== undefined) return `≤ ${g.lte}`; if (g.lt !== undefined) return `< ${g.lt}`;
+  if (g.gte !== undefined) return `≥ ${g.gte}`; if (g.gt !== undefined) return `> ${g.gt}`;
+  if (g.max !== undefined) return `≤ ${g.max}`; if (g.min !== undefined) return `≥ ${g.min}`;
+  return '';
+};
+// The primary rule shown for a colour-coded metric: the one that applies to this range, else the first configured one.
+const primaryRule = (entry, days) => pickRule(entry, days) || rulesOf(entry).find(validRule) || null;
+const ruleText = (r) => describe(r) + (r.period === 'approx_4_days' && !r.window ? ' (about 4 days)' : (windowOf(r) ? ` (${windowText(windowOf(r))})` : ''));
+
+// Why a metric is (or is not) coloured for the selected range -- one entry per funnel x metric, for the benchmark strip and the colour guide.
+//   active        a benchmark applies to this period: values are coloured
+//   window        a benchmark exists but only for other reporting periods: neutral, and it says which
+//   no_benchmark  nothing has been set for this funnel + metric: neutral (nothing is guessed or borrowed from another funnel)
+function buildMatrix({ rules, coded, days, enabled }) {
+  const out = {};
+  JUDGED_FUNNELS.forEach((f) => {
+    out[f] = {};
+    METRICS.forEach((m) => {
+      const entry = rules[f] && rules[f][m];
+      const list = rulesOf(entry).filter(validRule);
+      const isCoded = (coded[f] || []).includes(m);
+      const label = `${f} ${METRIC_LABEL[m]}`;
+      const windows = list.map((r) => ({ text: windowText(windowOf(r)), rule: describe(r), target: targetSymbol(r), window: windowOf(r) }));
+      if (!enabled) { out[f][m] = { state: 'disabled', rule: null, windows, reason: 'Colour coding is switched off' }; return; }
+      if (!isCoded || !list.length) { out[f][m] = { state: 'no_benchmark', rule: null, windows, reason: `No approved benchmark for ${label}, so it shows without colour` }; return; }
+      const hit = pickRule(entry, days);
+      if (hit) { out[f][m] = { state: 'active', rule: describe(hit), target: targetSymbol(hit), window: windowOf(hit), windows, reason: `${label}: ${describe(hit)}${windowOf(hit) ? ` (${windowText(windowOf(hit))})` : ''}` }; return; }
+      out[f][m] = {
+        state: 'window', rule: null, windows,
+        reason: `${label} is only judged for ${windows.map((w) => w.text.replace(/ only$/, '')).join(' or ')}; this period is ${days === null ? 'unknown' : `${days} day${days === 1 ? '' : 's'}`}, so it shows without colour`,
+      };
+    });
+  });
+  return out;
+}
+
+function status({ rules = effectiveRules(), enabled = ENABLED, coded = COLOUR_CODED, range = null, source = null } = {}) {
   const days = rangeDays(range);
   const defined = {}; // colour-coded metric -> described benchmark, or null when none has been approved yet
-  const bands = {}; // colour-coded metric -> [{ state, text, cond }] for the UI guide
+  const bands = {}; // colour-coded metric -> [{ state, text, cond }] for the UI guide (the rule that applies to this range, else the first)
   const colourCoded = {};
   const pending = []; // colour-coded but waiting for a benchmark, e.g. 'TOF reach'
   JUDGED_FUNNELS.forEach((f) => {
     defined[f] = {}; bands[f] = {}; colourCoded[f] = (coded[f] || []).filter((m) => METRICS.includes(m));
     colourCoded[f].forEach((m) => {
-      const r = rules[f] && rules[f][m];
-      defined[f][m] = validRule(r) ? describe(r) + (r.period ? ' (about 4 days)' : '') : null;
-      bands[f][m] = validRule(r) ? bandsOf(r) : null;
+      const r = primaryRule(rules[f] && rules[f][m], days);
+      defined[f][m] = r ? ruleText(r) : null;
+      bands[f][m] = r ? bandsOf(r) : null;
       if (!defined[f][m]) pending.push(`${f} ${m}`);
     });
   });
+  const anyWindow4 = JUDGED_FUNNELS.some((f) => METRICS.some((m) => rulesOf(rules[f] && rules[f][m]).some((r) => validRule(r) && windowOf(r))));
   return {
-    enabled: !!enabled, rules_version: RULES_VERSION, rules_source: overrides().source, config_errors: overrides().errors, judged_funnels: JUDGED_FUNNELS, colour_coded: colourCoded, defined, bands, pending_benchmarks: pending, tolerance_pct: TOLERANCE_PCT,
+    enabled: !!enabled, rules_version: RULES_VERSION, rules_source: source || overrides().source, config_errors: source ? [] : overrides().errors, judged_funnels: JUDGED_FUNNELS, colour_coded: colourCoded, defined, bands, pending_benchmarks: pending, tolerance_pct: TOLERANCE_PCT,
     active: !!enabled && JUDGED_FUNNELS.some((f) => colourCoded[f].some((m) => defined[f][m])),
     period: { days, approx_4_days: { ...APPROX_4_DAYS }, frequency_judged: isApprox4Days(days) },
-    note: 'Colours use only WNDRR-approved benchmarks; everything else is neutral. Frequency is judged only for a period of about 4 days.',
+    matrix: buildMatrix({ rules, coded, days, enabled }),
+    has_window_rules: anyWindow4,
+    note: 'Colours use only WNDRR-approved benchmarks; everything else is neutral. A benchmark with a reporting window is judged only for periods inside that window.',
   };
 }
 
-module.exports = { percentRule, parseOverrides, effectiveRules, APPROVED, TOLERANCE_PCT, ENABLED, RULES_VERSION, APPROX_4_DAYS, COLOUR_CODED, RULES, JUDGED_FUNNELS, METRICS, rangeDays, isApprox4Days, validRule, classify, status };
+module.exports = { windowOf, inWindow, windowText, rulesOf, pickRule, describe, METRIC_LABEL, percentRule, parseOverrides, effectiveRules, APPROVED, TOLERANCE_PCT, ENABLED, RULES_VERSION, APPROX_4_DAYS, COLOUR_CODED, RULES, JUDGED_FUNNELS, METRICS, rangeDays, isApprox4Days, validRule, classify, status };

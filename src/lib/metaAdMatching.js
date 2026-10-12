@@ -1721,12 +1721,24 @@ function mapConceptSuggestions(resolve, items) {
   return out;
 }
 
+// A review session works through an exact, ordered list of creatives fixed when it starts (see public/app.js, mmSess*). It is the same list the
+// Needs review / Has suggestion / Unmatched view shows -- one row per creative, same order, same scope and search -- minus creatives that
+// need a person in the full editor (an unresolved creative conflict, or an excluded ad). Capped so the response stays small.
+const REVIEW_QUEUE_MAX = 3000;
+async function getReviewQueue(query = {}, deps = {}) {
+  const filter = ['needs', 'suggested', 'unmatched'].includes(query.filter) ? query.filter : 'needs';
+  const res = await getQueue({ scope: query.scope, filter, q: query.q, relevance: query.relevance, compact: true, page: 1, page_size: REVIEW_QUEUE_MAX }, deps);
+  const items = res.items.filter((i) => (i.match_status === 'unmatched' || i.match_status === 'suggested') && !i.excluded && !i.creative_conflict);
+  return { scope: res.scope, filter: res.filter, q: res.q, total: items.length, view_total: res.total, left_out: res.items.length - items.length, capped: res.capped, counts: res.counts, items };
+}
+
 async function getQueue(query = {}, deps = {}) {
   const conceptResolve = await vocab.loadConceptResolver();
   const scope = Object.prototype.hasOwnProperty.call(SCOPES, query.scope) ? query.scope : '30d';
   const filter = Object.prototype.hasOwnProperty.call(FILTERS, query.filter) || ['historical', 'archived', 'conflict', 'inherit'].includes(query.filter) ? query.filter : 'needs';
   const q = String(query.q || '').trim().slice(0, 200);
-  const pageSize = Math.min(100, Math.max(1, parseInt(query.page_size, 10) || 25));
+  const compact = query.compact === true; // internal (review session queue): one lightweight row per creative, up to REVIEW_QUEUE_MAX
+  const pageSize = Math.min(compact ? REVIEW_QUEUE_MAX : 100, Math.max(1, parseInt(query.page_size, 10) || 25));
   const page = Math.max(1, parseInt(query.page, 10) || 1);
   const win = scopeWindow(scope);
   const showAllRelevance = query.relevance === 'all';
@@ -1863,6 +1875,19 @@ async function getQueue(query = {}, deps = {}) {
                a.meta_ad_id ASC
       LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`;
 
+  const compactSql = `${matched}
+     SELECT a.meta_ad_id, a.ad_name, a.meta_creative_id, a.match_status, matched.gsize AS same_creative_ads,
+            ${inConflict} AS creative_conflict, (c.skipped_at IS NOT NULL) AS skipped, COALESCE(c.excluded_from_intelligence, false) AS excluded
+       ${base}
+       JOIN matched ON matched.meta_ad_id = a.meta_ad_id AND matched.rn = 1
+      ORDER BY (c.skipped_at IS NOT NULL) ASC,
+               COALESCE(act.spend, 0) DESC,
+               act.last_active DESC NULLS LAST,
+               CASE a.match_status WHEN 'unmatched' THEN 0 WHEN 'suggested' THEN 1 WHEN 'auto_matched' THEN 2 ELSE 3 END ASC,
+               a.created_time DESC NULLS LAST,
+               a.meta_ad_id ASC
+      LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`;
+
   let countsRes; let total; let rows;
   const client = await pool.connect();
   try {
@@ -1870,11 +1895,11 @@ async function getQueue(query = {}, deps = {}) {
     for (const [stmt, p] of setup) await client.query(stmt, p);
     countsRes = await client.query(countsSql);
     total = (await client.query(`${matched} SELECT count(*)::int AS n FROM matched WHERE rn = 1`, filterParams)).rows[0].n;
-    rows = (await client.query(listSql, listParams)).rows;
+    rows = (await client.query(compact ? compactSql : listSql, listParams)).rows;
     // Creatives with no outstanding ad (matched / confirmed ones) are not in cfacts. Derive the same creative-level facts for
     // just the rows on this page (at most one page of ads), so Last active shows for every ad in the All ads view without
     // touching the rest of the table.
-    const lack = rows.filter((r) => !r.has_cfacts);
+    const lack = compact ? [] : rows.filter((r) => !r.has_cfacts);
     if (lack.length) {
       const cids = [...new Set(lack.map((r) => r.meta_creative_id).filter(Boolean))];
       const aids = [...new Set(lack.filter((r) => !r.meta_creative_id).map((r) => r.meta_ad_id))];
@@ -1898,6 +1923,15 @@ async function getQueue(query = {}, deps = {}) {
     throw err;
   } finally {
     client.release();
+  }
+  if (compact) {
+    return {
+      scope, filter, q, total, capped: total > rows.length, counts: countsRes.rows[0],
+      items: rows.map((r) => ({
+        meta_ad_id: r.meta_ad_id, ad_name: r.ad_name, creative_key: r.meta_creative_id || r.meta_ad_id, same_creative_ads: Number(r.same_creative_ads) || 1,
+        match_status: r.match_status, skipped: !!r.skipped, excluded: !!r.excluded, creative_conflict: !!r.creative_conflict,
+      })),
+    };
   }
   return {
     scope, filter, q, page, page_size: pageSize, total, total_pages: Math.max(1, Math.ceil(total / pageSize)),
@@ -2300,6 +2334,23 @@ async function getAdWorkspace(metaAdId, { refresh = true } = {}) {
     },
     suggestions,
     name_copy_prefill: namePrefill,
+    name_copy_relations: await nameCopyRelations(ad.meta_ad_id),
+  };
+}
+
+// How this ad relates to name-copy applications (read-only): copies a person applied ITS classification to, and the ad ITS classification
+// was applied from. Shown when it is reopened so an edit is never mistaken for a change to its copies (it changes only this creative).
+async function nameCopyRelations(metaAdId) {
+  const asSource = await pool.query(
+    `SELECT a.copy_meta_ad_id, a.copy_ad_name, a.applied_at FROM meta_name_copy_applications a WHERE a.source_meta_ad_id = $1 ORDER BY a.applied_at DESC, a.id DESC LIMIT 50`, [metaAdId]);
+  const asCopy = await pool.query(
+    `SELECT a.source_meta_ad_id, a.source_ad_name, a.applied_at FROM meta_name_copy_applications a WHERE a.copy_meta_ad_id = $1 ORDER BY a.applied_at DESC, a.id DESC LIMIT 1`, [metaAdId]);
+  const total = await pool.query('SELECT count(*)::int AS n FROM meta_name_copy_applications WHERE source_meta_ad_id = $1', [metaAdId]);
+  if (!asSource.rows.length && !asCopy.rows.length) return null;
+  return {
+    applied_to: asSource.rows.map((r) => ({ meta_ad_id: r.copy_meta_ad_id, ad_name: r.copy_ad_name, applied_at: new Date(r.applied_at).toISOString() })),
+    applied_to_count: total.rows[0].n,
+    applied_from: asCopy.rows[0] ? { meta_ad_id: asCopy.rows[0].source_meta_ad_id, ad_name: asCopy.rows[0].source_ad_name, applied_at: new Date(asCopy.rows[0].applied_at).toISOString() } : null,
   };
 }
 
@@ -2333,6 +2384,21 @@ function trimText(v, max = 255) {
 //     requireEligible  re-check, under the row lock, that no person owns this ad or its exact creative (otherwise 409 not_eligible)
 //     expectedBase     ... and that its normalised name still equals this base
 //     afterWrite(client)  extra writes in the SAME transaction (the audit row)
+// The person-visible classification of one ad as plain data (used for the corrections audit trail).
+async function classificationSnapshot(db, metaAdId) {
+  const r = await db.query(
+    `SELECT m.match_status, m.matched_ad_setup_id, c.not_product_specific, c.concept_type_id, c.concept_label, c.creative_style_id, c.creator_name, c.media_type,
+            COALESCE((SELECT array_agg(p.product_code ORDER BY p.product_code) FROM meta_ad_products p WHERE p.meta_ad_id = m.meta_ad_id), '{}') AS products
+       FROM meta_ads m LEFT JOIN meta_ad_classifications c ON c.meta_ad_id = m.meta_ad_id WHERE m.meta_ad_id = $1`, [metaAdId]);
+  const x = r.rows[0];
+  if (!x) return null;
+  return {
+    match_status: x.match_status, not_product_specific: !!x.not_product_specific, products: x.products, concept_label: x.concept_label || null, concept_type_id: x.concept_type_id || null,
+    creative_style_id: x.creative_style_id || null, creator_name: x.creator_name || null, media_type: x.media_type || null, ad_setup_id: x.matched_ad_setup_id || null,
+  };
+}
+const classificationSig = (s) => ({ ...s, match_status: undefined });
+
 async function confirmMapping(metaAdId, body, userId, opts = {}) {
   const input = body || {};
   const notProductSpecific = input.not_product_specific === true;
@@ -2397,6 +2463,8 @@ async function confirmMapping(metaAdId, body, userId, opts = {}) {
     await client.query('BEGIN');
     const lock = await client.query('SELECT meta_ad_id FROM meta_ads WHERE meta_ad_id = $1 FOR UPDATE', [metaAdId]);
     if (!lock.rows.length) throw new HttpError(404, 'Ad not found');
+    // snapshot BEFORE the write: a re-save of an already person-confirmed ad is a CORRECTION and is kept in the audit table
+    const prevSnap = await classificationSnapshot(client, metaAdId);
     if (opts.requireEligible) {
       const chk = await client.query(
         `SELECT m.ad_name, ${creativeIdentity.eligibleSql(HUMAN_OWNED_SQL)} AS eligible, ${creativeIdentity.ineligibleReasonSql(HUMAN_OWNED_SQL)} AS why,
@@ -2430,6 +2498,13 @@ async function confirmMapping(metaAdId, body, userId, opts = {}) {
       [metaAdId, adSetupId, userId || null]
     );
     await client.query('DELETE FROM meta_ad_suggestions WHERE meta_ad_id = $1', [metaAdId]);
+    if (prevSnap && prevSnap.match_status === 'confirmed') {
+      const nextSnap = await classificationSnapshot(client, metaAdId);
+      if (JSON.stringify(classificationSig(prevSnap)) !== JSON.stringify(classificationSig(nextSnap))) {
+        await client.query('INSERT INTO meta_classification_corrections (meta_ad_id, corrected_by_user_id, before_value, after_value, source) VALUES ($1,$2,$3,$4,$5)',
+          [metaAdId, userId || null, JSON.stringify(prevSnap), JSON.stringify(nextSnap), opts.source || (rapid ? 'review_session' : 'editor')]);
+      }
+    }
     if (typeof opts.afterWrite === 'function') await opts.afterWrite(client);
     await client.query('COMMIT');
   } catch (err) {
@@ -2793,7 +2868,7 @@ async function performanceBy(query = {}) {
 
 module.exports = {
   confirmWithCopyOffer, getNameCopies, applyNameCopies, previewNameCopies, nameCopiesCsv,
-  getReviewBatch,
+  getReviewBatch, getReviewQueue,
   confidenceLevel,
   norm,
   parseStructuredMetaName,

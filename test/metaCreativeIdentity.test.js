@@ -136,12 +136,12 @@ test('Apply, the workload panel and the queue all use that one rule (no second d
 test('every status filter (now one dropdown) reads a count field the queue returns, and says its unit', () => {
   const app = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
   const matching = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'metaAdMatching.js'), 'utf8');
-  const chips = [...app.matchAll(/\['([a-z_]+)', '([^']+)', '([a-z_]+)', '(creatives|ads)'\]/g)];
-  assert.equal(chips.length, 11); // every existing status stays available
+  const chips = [...app.matchAll(/\['([a-z_]+)', '([^']+)', '([a-z_]+)', '(creatives|ads)', (?:true|false)\]/g)];
+  assert.equal(chips.length, 13); // every existing status stays available (11 before + the Auto-matched and Confirmed tabs, which the server already supported)
   chips.forEach(([, , , field]) => assert.match(matching, new RegExp(`AS ${field}\\b`), `counts.${field} exists`));
   const unit = Object.fromEntries(chips.map((m) => [m[2], m[4]]));
   ['Needs review', 'Has suggestion', 'Unmatched', 'Will inherit', 'Historical', 'Archived / pre-2026', 'Creative conflicts'].forEach((l) => assert.equal(unit[l], 'creatives', l));
-  ['All ads', 'Matched', 'Not product-specific', 'Excluded'].forEach((l) => assert.equal(unit[l], 'ads', l));
+  ['All ads', 'Matched', 'Auto-matched', 'Confirmed', 'Not product-specific', 'Excluded'].forEach((l) => assert.equal(unit[l], 'ads', l));
   assert.equal(chips.find((m) => m[1] === 'conflict')[3], 'conflicts', 'the conflict filter reads `conflicts` (it used to read an undefined `conflict`)');
   assert.equal(chips[0][1], 'needs', 'Needs review is the first (default) filter');
 });
