@@ -572,6 +572,32 @@ async function getAds(parsed, query) {
       LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`,
     listParams
   );
+  // Relative magnitude for the little bars under Amount Spent / Purchases: the largest value anywhere in the FILTERED result set (not just this page),
+  // so a bar means the same thing on every page and recalculates when a filter changes. Read-only; no metric is changed.
+  const scaleRes = await pool.query(
+    `${cte} SELECT MAX(agg.spend) AS spend_max, MAX(agg.purchases) AS purchases_max FROM agg JOIN meta_ads a ON a.meta_ad_id = agg.meta_ad_id LEFT JOIN meta_campaigns mc ON mc.meta_campaign_id = a.meta_campaign_id ${whereSql}`,
+    params
+  );
+  const scale = { spend_max: round(num(scaleRes.rows[0].spend_max), 2), purchases_max: num(scaleRes.rows[0].purchases_max) };
+  // Previous-period figures for exactly the ads on this page (only when "Compare to previous period" is on). Same columns and same derivation as the current period
+  // (deriveMetrics); shown only when BOTH periods are fully synced, exactly like the summary cards. Reach / Frequency are unique-people figures that cannot be
+  // rebuilt for a previous period without a separate Meta pull, so they carry no comparison.
+  let compare = null;
+  const prevByAd = new Map();
+  if (parsed.compareRange) {
+    const [curCov, prevCov] = await Promise.all([getCoverage(parsed.range, new Date()), getCoverage(parsed.compareRange, new Date())]);
+    const available = curCov.status !== 'none' && curCov.missing_days === 0 && prevCov.status !== 'none' && prevCov.missing_days === 0;
+    compare = { range: parsed.compareRange, available, reason: available ? null : (prevCov.status === 'none' ? 'The previous period has no synced data' : 'The previous period is not fully synced') };
+    if (available && rows.length) {
+      const prev = await pool.query(
+        `SELECT d.meta_ad_id, SUM(d.spend) AS spend, SUM(d.purchases) AS purchases, SUM(d.purchase_value) AS purchase_value, SUM(d.add_to_cart) AS add_to_cart,
+                SUM(d.outbound_clicks) AS outbound_clicks, SUM(d.impressions) AS impressions
+           FROM meta_ad_insights_daily d WHERE d.insight_date BETWEEN $1 AND $2 AND d.meta_ad_id = ANY($3::text[]) GROUP BY d.meta_ad_id`,
+        [parsed.compareRange.since, parsed.compareRange.until, rows.map((r) => r.meta_ad_id)]
+      );
+      prev.rows.forEach((r) => prevByAd.set(r.meta_ad_id, deriveMetrics(r)));
+    }
+  }
   return {
     range: parsed.range,
     page: opts.page,
@@ -584,6 +610,8 @@ async function getAds(parsed, query) {
     q: opts.q,
     filter: filter.active ? { funnel: filter.funnel, campaign_id: filter.campaignId } : null,
     dpa: await getDpaInfo(parsed.range, filter),
+    scale,
+    compare,
     ads: rows.map((r) => ({
       meta_ad_id: r.meta_ad_id,
       ad_name: r.ad_name,
@@ -595,6 +623,7 @@ async function getAds(parsed, query) {
       days_active: num(r.days_active),
       ...deriveMetrics(r),
       ...adReach(reachFrom, r),
+      prev: prevByAd.get(r.meta_ad_id) || null,
     })).map((a) => ({
       ...a,
       // Only WNDRR-confirmed benchmarks (lib/metaFunnelHealth.js); null = neutral. Frequency is judged only for ~4-day ranges.

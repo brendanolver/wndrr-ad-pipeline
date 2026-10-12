@@ -3683,3 +3683,72 @@ body{background:var(--bg);color:var(--text);}
 .mp-table.mp-perf th{background:var(--surface);}
 .mp-table.mp-perf td.mp-name .mp-name-text{font-size:13px;}
 .mp-format{display:inline-block;margin-left:6px;padding-left:8px;border-left:1px solid var(--border-strong);color:var(--text-muted);}
+
+/* ═══ Meta Performance v2: analytics table ═══════════════════════════════════════════════════════════════════════════════════════
+   Group shading (Ad details neutral / Financial light blue / Traffic & delivery light purple) with extremely subtle alternating columns, bold primary values with a smaller
+   previous-period change underneath (only when Compare is on), COMPACT green / amber / red pills around CPA (and anything else with an approved benchmark) instead of
+   tinting the whole cell, small blue data bars under Amount Spent and Purchases, sticky two-level header and sticky Ad details columns. Colours are tokens. */
+:root {
+  --mp-fin-tint: #F3F8FF; --mp-fin-head: #EAF3FF; --mp-fin-ink: #1F5FBF;
+  --mp-tr-tint: #F8F6FF; --mp-tr-head: #F1EDFF; --mp-tr-ink: #6A3FC9;
+  --mp-alt: #F8F9FB; --mp-line: #E8EAF0; --mp-bar: #7FB0F2; --mp-bar-bg: #E6EEF9;
+  --mp-good: #1B8A52; --mp-bad: #D1392F;
+}
+.mp-table-wrap{max-height:calc(100vh - 150px);overflow:auto;position:relative;}
+.mp-table.mp-perf{border-collapse:separate;border-spacing:0;}
+/* sticky two-level header */
+.mp-table.mp-perf thead tr.mp-group-row td{position:sticky;top:0;z-index:5;height:36px;padding:0 14px;}
+.mp-table.mp-perf thead tr:not(.mp-group-row) th{position:sticky;top:36px;z-index:4;box-shadow:0 1px 0 var(--mp-line);}
+.mp-table.mp-perf .mp-group-details{background:#fff;color:var(--text-secondary);}
+.mp-table.mp-perf .mp-group-fin{background:var(--mp-fin-head);color:var(--mp-fin-ink);border-left:1px solid #D9E6F7;}
+.mp-table.mp-perf .mp-group-traffic{background:var(--mp-tr-head);color:var(--mp-tr-ink);border-left:1px solid #E3DAF6;}
+.mp-table.mp-perf thead th{background:#fff;}
+.mp-table.mp-perf thead th:nth-child(n+5):nth-child(-n+9){background:var(--mp-fin-tint);}
+.mp-table.mp-perf thead th:nth-child(n+10){background:var(--mp-tr-tint);}
+.mp-table.mp-perf thead th:nth-child(6),.mp-table.mp-perf thead th:nth-child(8){background:#EEF5FF;}
+.mp-table.mp-perf thead th:nth-child(11),.mp-table.mp-perf thead th:nth-child(13),.mp-table.mp-perf thead th:nth-child(15){background:#F4F1FF;}
+/* body: group tint with extremely subtle alternating columns */
+.mp-table.mp-perf tbody td{background:#fff;border-bottom:1px solid var(--mp-line);padding:8px 10px;vertical-align:middle;}
+.mp-table.mp-perf tbody td.mp-c-fin{background:var(--mp-fin-tint);}
+.mp-table.mp-perf tbody td.mp-c-fin:nth-child(6),.mp-table.mp-perf tbody td.mp-c-fin:nth-child(8){background:#F7FAFF;}
+.mp-table.mp-perf tbody td.mp-c-tr{background:var(--mp-tr-tint);}
+.mp-table.mp-perf tbody td.mp-c-tr:nth-child(11),.mp-table.mp-perf tbody td.mp-c-tr:nth-child(13),.mp-table.mp-perf tbody td.mp-c-tr:nth-child(15){background:#FBFAFF;}
+/* very light alternating rows (an overlay, so the column tints still read) + a hover that never hides the pills */
+.mp-table.mp-perf tbody tr:nth-child(even) td{background-image:linear-gradient(rgba(16,16,40,.018),rgba(16,16,40,.018));}
+.mp-table.mp-perf tbody tr:hover td{background-image:linear-gradient(rgba(60,70,160,.06),rgba(60,70,160,.06));}
+/* section dividers */
+.mp-table.mp-perf thead tr:not(.mp-group-row) th:nth-child(5),.mp-table.mp-perf tbody td:nth-child(5),.mp-table.mp-perf thead tr:not(.mp-group-row) th:nth-child(10),.mp-table.mp-perf tbody td:nth-child(10){border-left:1px solid #DCE3F0;}
+/* values: bold primary, smaller change under it */
+.mp-table.mp-perf td.mp-v{text-align:right;}
+.mp-table.mp-perf .mp-val{font-size:13.5px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.25;color:var(--text);}
+.mp-table.mp-perf .mp-val .mp-na{font-weight:500;color:var(--text-muted);}
+.mp-table.mp-perf .mp-d{margin-top:2px;font-size:11px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.2;color:var(--text-muted);}
+.mp-table.mp-perf .mp-d.good{color:var(--mp-good);}
+.mp-table.mp-perf .mp-d.bad{color:var(--mp-bad);}
+.mp-table.mp-perf .mp-d.neutral{color:var(--text-muted);}
+/* compact benchmark pills (only where an approved benchmark rates the value) */
+.mp-table.mp-perf .mp-metric[data-health]{display:inline-block;padding:2px 9px;border-radius:7px;font-weight:700;}
+.mp-table.mp-perf .mp-metric-green{background:#DDF3E6;color:#16794A;}
+.mp-table.mp-perf .mp-metric-orange{background:#FDEBCB;color:#8A5200;}
+.mp-table.mp-perf .mp-metric-red{background:#FADCD8;color:#A3281F;}
+.mp-table.mp-perf .mp-val .mp-metric[data-health]{margin-right:-9px;}
+/* data bars under Amount Spent / Purchases */
+.mp-table.mp-perf .mp-bar{height:4px;margin:5px 0 0 auto;width:100%;max-width:76px;border-radius:99px;background:var(--mp-bar-bg);overflow:hidden;}
+.mp-table.mp-perf .mp-bar span{display:block;height:100%;border-radius:99px;background:var(--mp-bar);}
+/* the key Reach figure for TOF keeps its emphasis without a heavy fill */
+.mp-table.mp-perf td.mp-reach-key .mp-val{color:#1B3F8F;}
+/* sticky Ad details columns (Funnel, Creative, Ad name): enough room to read, the metrics scroll beside them */
+@media (min-width:1000px){
+  .mp-table.mp-perf thead tr:not(.mp-group-row) th:nth-child(1),.mp-table.mp-perf tbody td:nth-child(1){position:sticky;left:0;z-index:3;background:#fff;}
+  .mp-table.mp-perf thead tr:not(.mp-group-row) th:nth-child(2),.mp-table.mp-perf tbody td:nth-child(2){position:sticky;left:64px;z-index:3;background:#fff;}
+  .mp-table.mp-perf thead tr:not(.mp-group-row) th:nth-child(3),.mp-table.mp-perf tbody td:nth-child(3){position:sticky;left:152px;z-index:3;background:#fff;box-shadow:1px 0 0 var(--mp-line);}
+  .mp-table.mp-perf thead tr:not(.mp-group-row) th:nth-child(-n+3){z-index:6;}
+  .mp-table.mp-perf thead tr.mp-group-row td.mp-group-details{z-index:7;left:0;}
+  .mp-table.mp-perf tbody tr:nth-child(even) td:nth-child(-n+3){background-image:linear-gradient(rgba(16,16,40,.018),rgba(16,16,40,.018));}
+}
+/* header sorting / labels */
+.mp-table.mp-perf thead th{font-size:10.5px;letter-spacing:.04em;}
+/* toolbar row: compare sits at the right of the date controls */
+.mp-controls .mp-compare{margin-left:auto;}
+/* sticky needs the WRAPPER (not the table) to be the scroll container: the base .mp-table clips with overflow:hidden, which would trap every sticky cell inside the table */
+.mp-table.mp-perf{overflow:visible;}

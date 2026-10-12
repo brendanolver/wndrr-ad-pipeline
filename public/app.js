@@ -966,6 +966,26 @@ function mpRenderAds(res) {
       if (v === null || v === undefined) return `${label} for this period has not been loaded${metric !== 'cpa' ? ' (Refresh loads exact Reach & Frequency)' : ''}`;
       return `Not within any benchmark band (${cell ? cell.rule : ''})`;
     };
+    // Per-cell previous-period change (only when Compare is on AND both periods are fully synced; real stored data, never invented). The colour says whether the move is
+    // FAVOURABLE for that metric (lower CPA is good, fewer purchases are not); metrics with no clear direction (Amount Spent, CPM) and the unique-people Reach / Frequency
+    // carry a neutral change or none at all.
+    const cmpOn = !!(res.compare && res.compare.available);
+    const delta = (key, better, a) => {
+      if (!cmpOn) return '';
+      if (!a.prev) return '<div class="mp-d">&nbsp;</div>'; // no previous-period activity for this ad: nothing is invented (the line keeps rows the same height)
+      const cur = a[key]; const prv = a.prev[key];
+      if (cur === null || cur === undefined || prv === null || prv === undefined || !(prv > 0)) return '<div class="mp-d">&nbsp;</div>';
+      const pct = ((cur - prv) / prv) * 100;
+      if (!Number.isFinite(pct)) return '<div class="mp-d">&nbsp;</div>';
+      const r = Math.round(pct);
+      const arrow = pct > 0 ? '▲' : pct < 0 ? '▼' : '•';
+      const cls = better && r !== 0 ? ((pct > 0) === (better === 'up') ? 'good' : 'bad') : 'neutral';
+      return `<div class="mp-d ${cls}" title="Previous period: ${escapeHtml(String(prv))}">${arrow} ${r > 0 ? '+' : ''}${r}%</div>`;
+    };
+    // data bars: relative size within the filtered result set (the server sends the maximum), subtle blue, number stays on top
+    const sc = res.scale || {};
+    const bar = (v, max) => { const w = max > 0 && v > 0 ? Math.max(3, Math.min(100, Math.round((v / max) * 100))) : 0; return `<div class="mp-bar" aria-hidden="true"><span style="width:${w}%"></span></div>`; };
+    const cell = (cls, title, value, key, better, a, extra) => `<td class="num mp-v ${cls}"${title ? ` title="${escapeHtml(title)}"` : ''}><div class="mp-val">${value}</div>${extra || ''}${key ? delta(key, better, a) : ''}</td>`;
     body.innerHTML = res.ads.map((a) => `
       <tr data-ad-id="${escapeHtml(a.meta_ad_id)}">
         <td class="mp-funnel-cell">${mpFunnelBadge(a.funnel)}</td>
@@ -974,17 +994,17 @@ function mpRenderAds(res) {
           <span class="mp-name-stack"><span class="mp-name-text" data-preview-ad="${escapeHtml(a.meta_ad_id)}">${escapeHtml(a.ad_name || '(unnamed ad)')}</span>
           <span class="mp-campaign-line"><span class="mp-campaign-name">${a.campaign_name ? escapeHtml(a.campaign_name) : (a.campaign_id ? 'Campaign ' + escapeHtml(a.campaign_id) : 'No campaign')}</span></span></span></td>
         <td>${mpStatusChip(a.effective_status)}</td>
-        <td class="num">${mpFmt(a.spend, 'money')}</td>
-        <td class="num">${mpFmt(a.purchases, 'int')}</td>
-        <td class="num${cellCls(a.cpa_health)}" title="${escapeHtml(why(a, 'cpa', a.cpa_health))}">${metric(a.cpa_health, mpFmt(a.cpa, 'money'))}</td>
-        <td class="num" title="Meta purchase conversion value (omni_purchase) for this period">${mpFmt(a.purchase_value, 'money')}</td>
-        <td class="num" title="Meta purchase ROAS = purchase value ÷ amount spent (null when nothing was spent)">${mpFmt(a.roas, 'roas')}</td>
-        <td class="num">${mpFmt(a.add_to_cart, 'int')}</td>
-        <td class="num">${mpFmt(a.cost_per_atc, 'money')}</td>
-        <td class="num">${mpFmt(a.outbound_ctr, 'pct')}</td>
-        <td class="num mp-cpm" title="CPM = Amount Spent ÷ Impressions × 1,000 (no benchmark approved, so it is never coloured)">${a.impressions > 0 ? mpFmt(a.cpm, 'money') : '<span class="mp-na" title="No impressions in this period">—</span>'}</td>
-        <td class="num${a.funnel === 'TOF' ? ' mp-reach-key' : ''}${cellCls(a.reach_health)}" title="${escapeHtml(why(a, 'reach', a.reach_health) || (a.funnel === 'TOF' ? 'Reach is the key measure for TOF' : ''))}">${metric(a.reach_health, mpReachCell(a.reach, 'int'))}</td>
-        <td class="num${cellCls(a.frequency_health)}" title="${escapeHtml(why(a, 'frequency', a.frequency_health))}">${metric(a.frequency_health, mpReachCell(a.frequency, 'freq'))}</td>
+        ${cell('mp-c-fin', '', mpFmt(a.spend, 'money'), 'spend', null, a, bar(a.spend, sc.spend_max))}
+        ${cell('mp-c-fin', '', mpFmt(a.purchases, 'int'), 'purchases', 'up', a, bar(a.purchases, sc.purchases_max))}
+        ${cell('mp-c-fin', why(a, 'cpa', a.cpa_health), metric(a.cpa_health, mpFmt(a.cpa, 'money')), 'cpa', 'down', a)}
+        ${cell('mp-c-fin', 'Meta purchase conversion value (omni_purchase) for this period', mpFmt(a.purchase_value, 'money'), 'purchase_value', 'up', a)}
+        ${cell('mp-c-fin', 'Meta purchase ROAS = purchase value ÷ amount spent (null when nothing was spent). No ROAS benchmark is approved, so it is never rated.', mpFmt(a.roas, 'roas'), 'roas', 'up', a)}
+        ${cell('mp-c-tr', '', mpFmt(a.add_to_cart, 'int'), 'add_to_cart', 'up', a)}
+        ${cell('mp-c-tr', '', mpFmt(a.cost_per_atc, 'money'), 'cost_per_atc', 'down', a)}
+        ${cell('mp-c-tr', '', mpFmt(a.outbound_ctr, 'pct'), 'outbound_ctr', 'up', a)}
+        ${cell('mp-c-tr mp-cpm', 'CPM = Amount Spent ÷ Impressions × 1,000 (no benchmark approved, so it is never rated)', a.impressions > 0 ? mpFmt(a.cpm, 'money') : '<span class="mp-na" title="No impressions in this period">—</span>', 'cpm', null, a)}
+        ${cell(`mp-c-tr${a.funnel === 'TOF' ? ' mp-reach-key' : ''}`, why(a, 'reach', a.reach_health) || (a.funnel === 'TOF' ? 'Reach is the key measure for TOF' : ''), metric(a.reach_health, mpReachCell(a.reach, 'int')), null, null, a)}
+        ${cell('mp-c-tr', why(a, 'frequency', a.frequency_health), metric(a.frequency_health, mpReachCell(a.frequency, 'freq')), null, null, a)}
       </tr>`).join('');
     ccHydrateThumbs(body);
   }
@@ -1004,7 +1024,7 @@ function mpRenderAds(res) {
 async function loadMetaPerformanceAds() {
   const id = ++mpState.adsReqId;
   const qs = `${mpRangeQuery()}&q=${encodeURIComponent(mpState.q)}&status=${mpState.status}` +
-    `&sort=${mpState.sort}&dir=${mpState.dir}&page=${mpState.page}&page_size=${mpState.pageSize}${mpFilterQuery()}`;
+    `&sort=${mpState.sort}&dir=${mpState.dir}&page=${mpState.page}&page_size=${mpState.pageSize}${mpState.compare ? '&compare=1' : ''}${mpFilterQuery()}`;
   try {
     const res = await api(`/meta-performance/ads?${qs}`);
     if (id !== mpState.adsReqId) return; // a newer request superseded this one
