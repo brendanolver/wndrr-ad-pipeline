@@ -162,4 +162,16 @@ async function loadVocab(db) {
 
 const publicSettings = (s) => ({ weekly_video_target: s.weekly_video_target, min_active_ads: s.min_active_ads, high_stock_min_soh: s.high_stock_min_soh, season_immediate_days: s.season_immediate_days, season_secondary_days: s.season_secondary_days });
 
-module.exports = { computeWeeklyVideoPlan, loadShootPlanCounts, loadLaunchContext, mondayOf, addDays };
+// One short cache so the Planning tabs (Weekly Plan, Core, High Stocks, Shoot Plan) that all want the same plan do not each recompute it.
+let memo = null;
+const MEMO_MS = 20 * 1000;
+const invalidate = () => { memo = null; };
+async function getWeeklyPlan(weekStart, { fresh = false, deps } = {}) {
+  const key = weekStart || 'current';
+  if (!fresh && !deps && memo && memo.key === key && Date.now() - memo.at < MEMO_MS) return memo.value;
+  const value = await computeWeeklyVideoPlan({ weekStart, deps });
+  if (!deps) memo = { key, at: Date.now(), value };
+  return value;
+}
+
+module.exports = { getWeeklyPlan, invalidate, computeWeeklyVideoPlan, loadShootPlanCounts, loadLaunchContext, mondayOf, addDays };

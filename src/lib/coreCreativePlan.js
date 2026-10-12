@@ -35,6 +35,8 @@ const { MEDIA_LABEL } = require('./metaNameParsing');
 const { ymdInZone, addDays, REPORTING_TIMEZONE } = require('./metaPerformance');
 const creativeActivity = require('./metaCreativeActivity');
 const planningContext = require('./planningContext');
+const weeklyLoader = require('./weeklyVideoPlanLoader');
+const launchLib = require('./launchStatus');
 const creativePriority = require('./creativePriority');
 
 const num = (v) => Number(v) || 0;
@@ -569,7 +571,24 @@ async function computePlan({ now = new Date(), isAdmin = false } = {}, deps = {}
     // size ranges only order the size run: never block on a cold crawl for them
     deps.sizeRanges !== undefined ? Promise.resolve(deps.sizeRanges) : (apparelmagic.configured() && status.sizeRanges && status.sizeRanges.hasData ? apparelmagic.getSizeRanges().catch(() => null) : Promise.resolve(null)),
   ]);
-  const { families, codeToFamily } = buildCoreFamilies(amDetails);
+  const built = buildCoreFamilies(amDetails);
+  let { families, codeToFamily } = built;
+  // Batch 12: a CORE product that has not launched (future launch date, Upcoming Drop, manual override) is not an ordinary Core recommendation: it belongs to Upcoming
+  // Drops. It is left out here and reported, never silently dropped. (An unknown launch status stays in: established Core products are launched by definition.)
+  let launchExcluded = [];
+  try {
+    const lc = deps.launch !== undefined ? deps.launch : await weeklyLoader.loadLaunchContext(pool, families.flatMap((f) => f.style_codes || []));
+    if (lc) {
+      const todayStr = new Date(now).toISOString().slice(0, 10);
+      families = families.filter((f) => {
+        const styles = (f.style_codes || []).map((c) => { const d = amDetails.get(c) || {}; return { style_code: c, launchDate: d.launchDate || null, drop: lc.drops.get(c) || null, qty: null, override: lc.overrides.get(c) || null }; });
+        const res = launchLib.assessFamily({ styles, familyOverride: lc.overrides.get(f.product_code) || null }, todayStr);
+        if (res.status === 'unlaunched' || res.status === 'discontinued') { launchExcluded.push({ product_code: f.product_code, product_name: f.name, status: res.status, detail: res.detail, in_upcoming_drop: res.in_upcoming_drop }); return false; }
+        return true;
+      });
+      if (launchExcluded.length) { codeToFamily = new Map(); families.forEach((f) => f.codes.forEach((c) => codeToFamily.set(c, f))); }
+    }
+  } catch (e) { launchExcluded = []; }
   const sizeOrderFor = (styleCode) => {
     try { return apparelmagic.resolveStyleSizing(amDetails, sizeRanges, styleCode).sizes || []; } catch (e) { return []; }
   };
@@ -592,12 +611,25 @@ async function computePlan({ now = new Date(), isAdmin = false } = {}, deps = {}
     families, codeToFamily, snapshot, demand, stock: stockObj || null, sizesByStyle: stockObj ? stockObj.sizes : null,
     sizeOrderFor, now, stateRows: stateRes.rows, salesAvailable, activity, planning,
   });
+  // ONE headline per product (Batch 12): the unified production priority from the weekly plan travels with every card. The engine's own priority and the Batch 11
+  // level stay inside the card as signals; the UI shows only this category so a card is never "critical" and "low priority" at once.
+  let weekly = null;
+  try { weekly = deps.weekly !== undefined ? deps.weekly : await weeklyLoader.getWeeklyPlan(); } catch (e) { weekly = null; }
+  if (weekly && weekly.available) {
+    const byCode = new Map();
+    weekly.products.forEach((wp) => (wp.codes || []).forEach((c) => byCode.set(c, wp)));
+    ['recommendations', 'hold', 'acted_on', 'dismissed'].forEach((k) => (plan[k] || []).forEach((card) => {
+      const wp = byCode.get(card.product && card.product.product_code);
+      card.weekly = wp ? { category: wp.category, category_label: wp.category_label, score: wp.score, recommended_videos: wp.recommended_videos, planned: wp.planned.this_week, remaining: wp.remaining, headline: wp.headline, reasons: wp.reasons.slice(0, 6) } : null;
+    }));
+  }
   const sizeField = stockObj ? stockObj.sizeField : null;
   const out = {
     available: true,
     generated_at: new Date().toISOString(),
     config_version: cfg.VERSION,
     stock_minimum: cfg.STOCK.min_sellable_units,
+    launch_excluded: launchExcluded,
     ...plan,
     data_status: {
       catalogue: true,

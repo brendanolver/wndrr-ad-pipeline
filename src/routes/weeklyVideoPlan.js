@@ -10,19 +10,13 @@ const router = express.Router();
 const WEEK_RE = /^\d{4}-\d{2}-\d{2}$/;
 const CODE_RE = /^[A-Z0-9]{3,32}$/;
 
-let memo = null; // one short cache so the Planning tabs that all ask for it do not each recompute it
-const MEMO_MS = 20 * 1000;
-const invalidate = () => { memo = null; };
+const invalidate = () => loader.invalidate();
 
 router.get('/', async (req, res, next) => {
   try {
     const weekStart = req.query.week_start;
     if (weekStart !== undefined && !WEEK_RE.test(weekStart)) return res.status(400).json({ error: 'week_start must be YYYY-MM-DD' });
-    const key = weekStart || 'current';
-    if (!req.query.fresh && memo && memo.key === key && Date.now() - memo.at < MEMO_MS) return res.json(memo.value);
-    const value = await loader.computeWeeklyVideoPlan({ weekStart });
-    memo = { key, at: Date.now(), value };
-    res.json(value);
+    res.json(await loader.getWeeklyPlan(weekStart, { fresh: !!req.query.fresh }));
   } catch (err) { next(err); }
 });
 

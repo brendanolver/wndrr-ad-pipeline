@@ -269,3 +269,28 @@ test('data status explains how complete the counts are', async () => {
   const clean = pc.dataStatus(await ctxFor({ coverage: { ...covBy({}), reliability: { active_ads: 12, confirmed_or_auto: 12, awaiting_review: 0, awaiting_review_without_product: 0, share_awaiting_review: 0, complete: true } } }));
   assert.match(clean.coverage.note, /Every active Meta ad has been reviewed or auto-matched/);
 });
+
+// ── Batch 12: launch status + one unified headline in the Core plan ──
+test('Core plan: a CORE product that has not launched (future date / upcoming drop) is left out and reported, never silently dropped', async () => {
+  const ctx = await ctxFor();
+  const launch = { drops: new Map([['W26AA001BLK', { name: 'Drop 24', launch_date: '2026-11-20' }], ['W26AA001WHT', { name: 'Drop 24', launch_date: '2026-11-20' }]]), overrides: new Map() };
+  const run = (extra) => plan.computePlan({ now: NOW, isAdmin: true }, { amDetails: AM, stock, sizeRanges: null, demand, snapshot, stateRows: [], quality: { unreviewed_recent_ads: 0 }, activity: null, planning: ctx, weekly: null, ...extra });
+  const base = await run({ launch: { drops: new Map(), overrides: new Map() } });
+  const withDrop = await run({ launch });
+  const names = (p) => [...p.recommendations, ...p.hold, ...p.no_action.map((n) => ({ product: { product_name: n } }))].map((c) => c.product.product_name);
+  assert.ok(names(base).includes('ALPHA HEAVY WEIGHT TEE'), 'launched: it is in the plan');
+  assert.ok(!names(withDrop).includes('ALPHA HEAVY WEIGHT TEE'), 'in an upcoming drop: not an ordinary Core recommendation');
+  assert.ok(withDrop.launch_excluded.some((x) => x.product_name === 'ALPHA HEAVY WEIGHT TEE' && x.in_upcoming_drop), 'and it is reported as excluded (handled in Upcoming Drops)');
+  assert.deepEqual(base.launch_excluded, []);
+});
+test('Core plan: every card carries the ONE unified production priority from the weekly plan (and only when the weekly plan is available)', async () => {
+  const ctx = await ctxFor();
+  const weekly = { available: true, products: [{ key: 'W26FF001', codes: ['W26FF001'], category: 'SHOOT_NOW', category_label: 'Shoot now', score: 71, recommended_videos: 4, planned: { this_week: 1 }, remaining: 3, headline: 'Shoot 3 videos this week (1 already planned).', reasons: [{ text: 'x' }] }] };
+  const p = await plan.computePlan({ now: NOW, isAdmin: true }, { amDetails: AM, stock, sizeRanges: null, demand, snapshot, stateRows: [], quality: { unreviewed_recent_ads: 0 }, activity: null, planning: ctx, launch: { drops: new Map(), overrides: new Map() }, weekly });
+  const fox = [...p.recommendations, ...p.hold].find((c) => c.product.product_name === 'FOXTROT SHORT');
+  assert.ok(fox && fox.weekly && fox.weekly.category === 'SHOOT_NOW' && fox.weekly.recommended_videos === 4 && fox.weekly.remaining === 3);
+  const other = [...p.recommendations, ...p.hold].find((c) => c.product.product_name !== 'FOXTROT SHORT');
+  assert.equal(other && other.weekly, null, 'a product the weekly plan does not cover carries no unified label (the UI then falls back)');
+  const none = await plan.computePlan({ now: NOW, isAdmin: true }, { amDetails: AM, stock, sizeRanges: null, demand, snapshot, stateRows: [], quality: { unreviewed_recent_ads: 0 }, activity: null, planning: ctx, launch: { drops: new Map(), overrides: new Map() }, weekly: null });
+  assert.ok([...none.recommendations].every((c) => c.weekly === undefined));
+});

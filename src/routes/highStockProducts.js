@@ -5,6 +5,12 @@ const reportPipeline = require('../lib/reportPipeline');
 const { fetchAmData, getAssetCounts } = require('../lib/planningData');
 const { STATUS_LABELS } = require('../lib/statuses');
 const planningContext = require('../lib/planningContext');
+const weeklyLoader = require('../lib/weeklyVideoPlanLoader');
+const launchLib = require('../lib/launchStatus');
+const mergeExcluded = (a, b) => { const m = new Map(); [...a, ...b].forEach((x) => { const k = x.key || x.name; if (!m.has(k)) m.set(k, { ...x, colourways: [...(x.colourways || [])] }); else m.get(k).colourways.push(...(x.colourways || [])); }); return [...m.values()]; };
+const RANK_OF = { SHOOT_NOW: 3, COMING_UP: 2, MONITOR: 1, NO_ACTION: 0 };
+// the unified production priority for one product, as shown on a High Stocks / Core row (ONE headline; the underlying signals stay in the detail)
+const weeklyBrief = (wp) => ({ category: wp.category, category_label: wp.category_label, score: wp.score, recommended_videos: wp.recommended_videos, planned: wp.planned.this_week, remaining: wp.remaining, headline: wp.headline, reasons: wp.reasons.slice(0, 6) });
 const { ymdInZone, REPORTING_TIMEZONE } = require('../lib/metaPerformance');
 
 const router = express.Router();
@@ -76,7 +82,10 @@ async function computeHighStockProducts(deps = {}) {
   const settings = settingsResult.rows[0];
   const minSoh = settings.high_stock_min_soh;
 
+    const preExcluded = []; // products left out because they have not launched (reported, never silently dropped)
     const emptyResponse = () => ({
+      families: [],
+      excluded_unlaunched: preExcluded.map((x) => ({ ...x })),
       products: [],
       min_soh: minSoh,
       apparelmagic: { configured: am.amConfigured, error: am.amError },
@@ -111,6 +120,10 @@ async function computeHighStockProducts(deps = {}) {
       // not excluded on this basis alone.
       if (details.launchDate) {
         const daysSinceLaunch = Math.floor((Date.now() - details.launchDate.getTime()) / 86400000);
+        if (daysSinceLaunch < 0) { // a launch date still ahead: unlaunched, reported (not silently dropped) and never recommended here
+          preExcluded.push({ key: apparelmagic.deriveProductCode(styleCode), name: details.productName || styleCode, status: 'unlaunched', detail: `ApparelMagic launch date ${details.launchDate.toISOString().slice(0, 10)} is still ahead.`, in_upcoming_drop: false, colourways: [styleCode] });
+          continue;
+        }
         if (daysSinceLaunch < HIGH_STOCK_MIN_DAYS_SINCE_LAUNCH) continue;
       }
 
@@ -163,7 +176,9 @@ async function computeHighStockProducts(deps = {}) {
     const surviving = eligibleStyleCodes.filter((e) => {
       const local = preCheckByCode.get(e.styleCode);
       if (!local) return true;
-      return local.tier !== 'core_proven' && !(local.drop_id != null && upcomingDropIds.has(local.drop_id));
+      const inDrop = local.drop_id != null && upcomingDropIds.has(local.drop_id);
+      if (inDrop) { const d = am.amDetails.get(e.styleCode) || {}; preExcluded.push({ key: apparelmagic.deriveProductCode(e.styleCode), name: d.productName || e.styleCode, status: 'unlaunched', detail: 'Part of an upcoming Drop: its creative is handled in Upcoming Drops.', in_upcoming_drop: true, colourways: [e.styleCode] }); }
+      return local.tier !== 'core_proven' && !inDrop;
     });
 
     if (!surviving.length) return emptyResponse();
@@ -240,7 +255,7 @@ async function computeHighStockProducts(deps = {}) {
       assetRowsByStyleId.get(row.style_id).push(row);
     }
 
-    const products = surviving.map(({ styleCode, soh, tierInfo, sellThrough7Pct }) => {
+    let products = surviving.map(({ styleCode, soh, tierInfo, sellThrough7Pct }) => {
       const local = localStyleByCode.get(styleCode);
       if (!local) return null; // guards a sync race; shouldn't happen given the insert above
       const details = am.amDetails.get(styleCode);
@@ -344,8 +359,56 @@ async function computeHighStockProducts(deps = {}) {
       products.sort((a, b) => (lv[b.planning.level] - lv[a.planning.level]) || (b.planning.score_delta - a.planning.score_delta) || (b.soh - a.soh));
     } else products.sort((a, b) => b.soh - a.soh);
 
+    // ── Batch 12: launch status, ONE row per product family, and the single unified production priority ─────────────────────────────────────────────
+    // A colourway row used to be a recommendation of its own, so one product could appear several times with different stock and tiers. Rows stay (their
+    // own stock / sell-through / tier are preserved) but are grouped under their product FAMILY; the family's stock is counted once. Products that have not
+    // launched (a future launch date, an Upcoming Drop, a manual override) leave the list: they belong to Upcoming Drops and must not be recommended twice.
+    // A product whose launch status cannot be established stays visible, clearly flagged, rather than being assumed launched.
+    let excludedUnlaunched = []; let families = [];
+    let weekly = null;
+    try { weekly = deps.weekly !== undefined ? deps.weekly : await weeklyLoader.getWeeklyPlan(); } catch (e) { weekly = null; }
+    if (planning) {
+      const famByKey = new Map(planning.allFamilies.map((f) => [f.key, f]));
+      const lc = deps.launch || await weeklyLoader.loadLaunchContext(pool, products.map((p) => p.style_code));
+      const launchByFam = new Map();
+      const famOf = (p) => planning.styleToFamily.get(p.style_code) || p.product_code;
+      const launchFor = (fk, rows) => {
+        if (launchByFam.has(fk)) return launchByFam.get(fk);
+        const fam = famByKey.get(fk);
+        const codes = fam ? fam.style_codes : rows.map((r) => r.style_code);
+        const styles = codes.map((c) => { const d = am.amDetails.get(c) || {}; const e = salesByStyle.get(c); return { style_code: c, launchDate: d.launchDate || null, drop: lc.drops.get(c) || null, qty: e ? (e.qty365 || 0) : null, override: lc.overrides.get(c) || null }; });
+        const stock = { known: true, units: codes.reduce((t, c) => t + Math.max(0, Number(am.amStock.get(c)) || 0), 0) };
+        const onOrder = am.amOnOrder ? codes.reduce((t, c) => t + Math.max(0, Number(am.amOnOrder.get(c)) || 0), 0) : 0;
+        const res = launchLib.assessFamily({ styles, familyOverride: lc.overrides.get(fk) || null, stock, onOrder }, ymdInZone(new Date(), REPORTING_TIMEZONE));
+        launchByFam.set(fk, res); return res;
+      };
+      const rowsByFam = new Map();
+      products.forEach((p) => { const fk = famOf(p); if (!rowsByFam.has(fk)) rowsByFam.set(fk, []); rowsByFam.get(fk).push(p); });
+      const kept = [];
+      rowsByFam.forEach((rows, fk) => {
+        const l = launchFor(fk, rows);
+        if (l.status === 'unlaunched' || l.status === 'discontinued') { excludedUnlaunched.push({ key: fk, name: rows[0].product_name, status: l.status, detail: l.detail, in_upcoming_drop: l.in_upcoming_drop, colourways: rows.map((r) => r.style_code) }); return; }
+        const wp = weekly && weekly.available ? weekly.products.find((x) => x.key === fk) : null;
+        rows.forEach((r) => { r.launch = { status: l.status, basis: l.basis, detail: l.detail, needs_check: l.needs_check }; r.weekly = wp ? weeklyBrief(wp) : null; });
+        kept.push(...rows);
+        const fam = famByKey.get(fk);
+        families.push({
+          key: fk, name: fam ? fam.name : rows[0].product_name, image_url: (rows.find((r) => r.image_url) || {}).image_url || null, category: rows[0].category,
+          soh_total: rows[0].family_soh != null ? rows[0].family_soh : rows.reduce((t, r) => t + r.soh, 0), listed_soh: rows.reduce((t, r) => t + r.soh, 0),
+          colourways: rows, launch: { status: l.status, basis: l.basis, detail: l.detail, needs_check: l.needs_check, restock: l.restock }, planning: rows[0].planning || null, weekly: wp ? weeklyBrief(wp) : null,
+        });
+      });
+      products = kept;
+      const rank = (f) => (f.weekly ? RANK_OF[f.weekly.category] : -1);
+      families.sort((a, b) => rank(b) - rank(a) || ((b.weekly && b.weekly.score) || 0) - ((a.weekly && a.weekly.score) || 0) || b.soh_total - a.soh_total);
+      const famOrder = new Map(families.map((f, i) => [f.key, i]));
+      products.sort((a, b) => (famOrder.get(famOf(a)) ?? 0) - (famOrder.get(famOf(b)) ?? 0) || b.soh - a.soh);
+    }
+
     return {
       planning_data: planning ? planningContext.dataStatus(planning) : null,
+      families,
+      excluded_unlaunched: mergeExcluded(preExcluded, excludedUnlaunched),
       products,
       min_soh: minSoh,
       apparelmagic: { configured: am.amConfigured, error: am.amError },
