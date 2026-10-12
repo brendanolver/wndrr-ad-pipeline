@@ -335,6 +335,15 @@ function autoExpandSidebarGroupForTab(name) {
   if (toggleBtn) toggleBtn.setAttribute('aria-expanded', 'true');
 }
 
+// Clicking the WNDRR wordmark in the sidebar goes to the Dashboard (nothing happens for someone who has no Dashboard access: no error, no dead end).
+document.addEventListener('click', (e) => {
+  const logo = e.target.closest && e.target.closest('#sidebar-logo-home');
+  if (!logo) return;
+  e.preventDefault();
+  if ((state.restrictedModules || []).includes('dashboard')) return;
+  switchTab('dashboard');
+});
+
 function switchTab(name) {
   // Defense in depth alongside applySidebarModuleAccess hiding the sidebar
   // button itself -- a restricted user directly manipulating a hash link or

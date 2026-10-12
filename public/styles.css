@@ -3889,3 +3889,8 @@ body{background:var(--bg);color:var(--text);}
   .mp-kpi-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));}
   .mp-top .mp-controls{flex-wrap:wrap;}
 }
+
+/* sidebar wordmark is a link to the Dashboard */
+.sidebar .wndrr-logo-link{text-decoration:none;color:inherit;cursor:pointer;border-radius:10px;padding:6px 8px;margin:-6px -8px;transition:background .12s;}
+.sidebar .wndrr-logo-link:hover{background:rgba(255,255,255,.06);}
+.sidebar .wndrr-logo-link:focus-visible{outline:2px solid var(--ds-purple-300,#b9aef5);outline-offset:2px;}

@@ -48,10 +48,11 @@
 <div id="app" style="display:none;">
   <aside class="sidebar">
     <div class="sidebar-header">
-      <div class="wndrr-logo">
+      <!-- the wordmark takes you to the Dashboard (a link for keyboard and screen-reader users too) -->
+      <a class="wndrr-logo wndrr-logo-link" id="sidebar-logo-home" href="#dashboard" aria-label="WNDRR Ad Creative Pipeline: go to the Dashboard">
         <img class="brand-wordmark" src="brand/wndrr-wordmark.png" alt="WNDRR" width="120" height="40">
         <div class="logo-text"><span>Ad Creative Pipeline</span></div>
-      </div>
+      </a>
     </div>
     <nav class="sidebar-nav" id="sidebar-nav">
       <button class="tab-btn active" data-tab="dashboard"><span class="sidebar-nav-icon"><svg class=ic aria-hidden=true focusable=false><use href=#i-home></use></svg></span>Dashboard</button>
