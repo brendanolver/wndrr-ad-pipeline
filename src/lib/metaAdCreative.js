@@ -163,11 +163,12 @@ async function fetchFromMeta(adId, creativeId, deps = {}, opts = {}) {
     }
   };
 
-  // the ad's own node also names its ad set at no extra cost ("adset{name}" rides on the same read as the share link); a reused link only asks for the ad set when its name is not already saved
-  const shareStep = opts.knownShareLink && opts.knownAdsetName
-    ? Promise.resolve({ preview_shareable_link: opts.knownShareLink, adset: { name: opts.knownAdsetName } })
+  // the ad's own node also names its ad set at NO extra call ("adset{name}" rides on the same read as the share link). A reused stored share link skips that read entirely
+  // (an efficiency guarantee), so the ad set name is then simply not refreshed: the preview shows the saved name, or the ad set id, and Reload fetches it.
+  const shareStep = opts.knownShareLink
+    ? Promise.resolve({ preview_shareable_link: opts.knownShareLink })
     : ok('share_link', () => get(`/${encodeURIComponent(adId)}`, { fields: 'preview_shareable_link,adset{name}' }));
-  if (opts.knownShareLink && opts.knownAdsetName) diagnostics.share_link = 'reused';
+  if (opts.knownShareLink) diagnostics.share_link = 'reused';
   const previewStep = ok('preview', () => get(`/${encodeURIComponent(adId)}/previews`, { ad_format: 'MOBILE_FEED_STANDARD' }));
 
   if (opts.base) {
@@ -264,17 +265,6 @@ async function getCreative(adId, { refresh = false, prefetch = false, now = Date
     timings_ms: { total: Date.now() - t0, ...(extra.timings_ms || {}) },
   });
   if (usable && !refresh) {
-    // A copy saved before the ad set was recorded: ask Meta for just the ad set's name once (one small read-only call, saved with the copy), never blocking the preview on failure.
-    if (!cached.payload.adset_name && !prefetch && (deps.configured ? deps.configured() : metaAds.configured())) {
-      try {
-        const r = await (deps.metaGet || metaAds.metaGet)(`/${encodeURIComponent(adId)}`, { fields: 'adset{name}' });
-        const nm = r && r.status === 200 && r.data && r.data.adset && r.data.adset.name;
-        if (nm) {
-          cached.payload = { ...cached.payload, adset_name: nm };
-          await db.query("UPDATE meta_ad_creatives SET payload = payload || jsonb_build_object('adset_name', $2::text) WHERE meta_ad_id = $1", [adId, nm]);
-        }
-      } catch (e) { /* the ad set name is a nicety; the preview does not wait on it */ }
-    }
     return respond({ ...cached.payload, fetched_at: new Date(cached.fetched_at).toISOString(), cached: true }, { source: 'cache' });
   }
 
