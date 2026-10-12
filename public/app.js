@@ -1159,7 +1159,7 @@ function mpCalRender() {
   document.getElementById('mp-cal-months').innerHTML = mpCalMonthHtml(v.y, v.m) + mpCalMonthHtml(right.y, right.m);
   const ms = document.getElementById('mp-cal-month'); const ys = document.getElementById('mp-cal-year');
   ms.innerHTML = MP_MONTH_NAMES.map((n, i) => `<option value="${i}"${i === v.m ? ' selected' : ''}>${n}</option>`).join('');
-  const years = []; for (let y = ty - 3; y <= ty; y++) years.push(y);
+  const years = []; for (let y = Math.min(ty - 3, v.y); y <= ty; y++) years.push(y);
   ys.innerHTML = years.map((y) => `<option value="${y}"${y === v.y ? ' selected' : ''}>${y}</option>`).join('');
   document.getElementById('mp-cal-next').disabled = (right.y > ty) || (right.y === ty && right.m >= tm - 1);
   const sum = document.getElementById('mp-cal-summary'); const apply = document.getElementById('mp-custom-apply');
@@ -1177,7 +1177,8 @@ function mpCalRender() {
   apply.disabled = !ok;
 }
 document.getElementById('mp-range-btn').addEventListener('click', (e) => { e.stopPropagation(); if (mpCal.open) mpCalClose(); else mpCalOpen(); });
-document.addEventListener('click', (e) => { if (mpCal.open && !e.target.closest('.mp-range-wrap')) mpCalClose(); });
+// (composedPath, not e.target.closest: a calendar click re-renders the days, so by the time this runs the clicked day is already detached)
+document.addEventListener('click', (e) => { if (mpCal.open && !e.composedPath().some((el) => el.classList && el.classList.contains('mp-range-wrap'))) mpCalClose(); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && mpCal.open) { mpCalClose(); document.getElementById('mp-range-btn').focus(); } });
 document.getElementById('mp-cal-cancel').addEventListener('click', mpCalClose);
 document.getElementById('mp-cal-prev').addEventListener('click', () => { const v = mpCal.view; mpCal.view = v.m === 0 ? { y: v.y - 1, m: 11 } : { y: v.y, m: v.m - 1 }; mpCalRender(); });

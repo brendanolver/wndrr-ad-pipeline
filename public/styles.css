@@ -3797,7 +3797,9 @@ body{background:var(--bg);color:var(--text);}
 .mp-cal-actions .btn{height:38px;padding:0 18px;border-radius:10px;font-size:14px;font-weight:600;}
 .mp-cal-actions .btn:disabled{background:#d6d8e0;border-color:#d6d8e0;color:#fff;cursor:default;}
 @media (max-width:760px){
-  .mp-range-pop{grid-template-columns:1fr;right:auto;left:0;}
+  .mp-controls{justify-content:flex-start;flex-wrap:wrap;}
+  .mp-range-wrap{position:static;}
+  .mp-range-pop{grid-template-columns:1fr;left:0;right:0;width:auto;max-height:80vh;overflow:auto;}
   .mp-range-presets{flex-direction:row;overflow-x:auto;border-right:0;border-bottom:1px solid var(--border);max-height:none;}
   .mp-range-presets .mp-preset{flex:0 0 auto;white-space:nowrap;}
   .mp-cal-months{grid-template-columns:1fr;}
