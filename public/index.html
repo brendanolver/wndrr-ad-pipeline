@@ -200,26 +200,51 @@
       </div>
 
       <div class="mp-controls">
-        <div class="mp-presets" id="mp-presets" role="group" aria-label="Date range">
-          <button type="button" class="mp-preset" data-preset="today">Today</button>
-          <button type="button" class="mp-preset" data-preset="yesterday">Yesterday</button>
-          <button type="button" class="mp-preset" data-preset="last_3">Last 3 Days</button>
-          <button type="button" class="mp-preset" data-preset="last_4">Last 4 Days</button>
-          <button type="button" class="mp-preset active" data-preset="last_7">Last 7 Days</button>
-          <button type="button" class="mp-preset" data-preset="last_14">Last 14 Days</button>
-          <button type="button" class="mp-preset" data-preset="last_30">Last 30 Days</button>
-          <button type="button" class="mp-preset" data-preset="this_week">This Week</button>
-          <button type="button" class="mp-preset" data-preset="last_week">Last Week</button>
-          <button type="button" class="mp-preset" data-preset="this_month">This Month</button>
-          <button type="button" class="mp-preset" data-preset="custom">Custom</button>
+        <!-- Date range: one dropdown (as in the design) holding the same preset buttons as before plus a two-month calendar. Presets apply at once; a calendar selection applies on Update. -->
+        <div class="mp-range-wrap">
+          <button type="button" class="mp-range-btn" id="mp-range-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="mp-range-pop">
+            <svg class="ic" aria-hidden="true" focusable="false"><use href="#i-calendar"></use></svg><span id="mp-range-btn-label">Last 7 Days</span>
+            <svg class="mp-range-chev" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+          <div class="mp-range-pop" id="mp-range-pop" role="dialog" aria-label="Choose a date range" hidden>
+            <div class="mp-presets mp-range-presets" id="mp-presets" role="group" aria-label="Date range">
+              <button type="button" class="mp-preset" data-preset="today">Today</button>
+              <button type="button" class="mp-preset" data-preset="yesterday">Yesterday</button>
+              <button type="button" class="mp-preset" data-preset="last_3" title="Three complete days (the window the Frequency benchmark judges)">Last 3 Days</button>
+              <button type="button" class="mp-preset" data-preset="last_4" title="Four complete days (the window the Frequency benchmark judges)">Last 4 Days</button>
+              <button type="button" class="mp-preset" data-preset="this_week">This Week</button>
+              <button type="button" class="mp-preset active" data-preset="last_7">Last 7 Days</button>
+              <button type="button" class="mp-preset" data-preset="last_14">Last 14 Days</button>
+              <button type="button" class="mp-preset" data-preset="last_30">Last 30 Days</button>
+              <button type="button" class="mp-preset" data-preset="last_90">Last 90 Days</button>
+              <button type="button" class="mp-preset" data-preset="last_week">Last Week</button>
+              <button type="button" class="mp-preset" data-preset="this_month">This Month</button>
+              <button type="button" class="mp-preset" data-preset="last_month">Last Month</button>
+              <button type="button" class="mp-preset" data-preset="ytd">Year to Date</button>
+              <button type="button" class="mp-preset" data-preset="last_365">Maximum <span class="mp-preset-note">Last 365 days</span></button>
+            </div>
+            <div class="mp-range-cal">
+              <div class="mp-cal-nav">
+                <button type="button" class="mp-cal-arrow" id="mp-cal-prev" aria-label="Previous month">&lsaquo;</button>
+                <select id="mp-cal-month" aria-label="Month"></select>
+                <select id="mp-cal-year" aria-label="Year"></select>
+                <button type="button" class="mp-cal-arrow" id="mp-cal-next" aria-label="Next month">&rsaquo;</button>
+              </div>
+              <div class="mp-cal-months" id="mp-cal-months"></div>
+              <div class="mp-cal-summary" id="mp-cal-summary"></div>
+              <div class="mp-cal-note" id="mp-cal-note">Dates are in Australia/Sydney time.</div>
+              <div class="mp-custom mp-cal-fields" id="mp-custom">
+                <label>From <input type="date" id="mp-custom-since" aria-label="Start date"></label>
+                <label>to <input type="date" id="mp-custom-until" aria-label="End date"></label>
+              </div>
+              <div class="mp-cal-actions">
+                <button type="button" class="btn btn-ghost" id="mp-cal-cancel">Cancel</button>
+                <button type="button" class="btn btn-primary" id="mp-custom-apply">Update</button>
+              </div>
+            </div>
+          </div>
         </div>
-        <div class="mp-custom" id="mp-custom" style="display:none;">
-          <input type="date" id="mp-custom-since" aria-label="Start date">
-          <span>to</span>
-          <input type="date" id="mp-custom-until" aria-label="End date">
-          <button type="button" class="btn btn-ghost btn-sm" id="mp-custom-apply">Apply</button>
-        </div>
-        <label class="mp-compare"><input type="checkbox" id="mp-compare"> Compare to previous period</label>
+        <label class="mp-compare mp-compare-pill" title="Show how each figure moved against the period immediately before"><input type="checkbox" id="mp-compare"> <span>Previous period</span></label>
       </div>
 
       <div id="mp-coverage"></div>

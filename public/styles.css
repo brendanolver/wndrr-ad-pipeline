@@ -3752,3 +3752,53 @@ body{background:var(--bg);color:var(--text);}
 .mp-controls .mp-compare{margin-left:auto;}
 /* sticky needs the WRAPPER (not the table) to be the scroll container: the base .mp-table clips with overflow:hidden, which would trap every sticky cell inside the table */
 .mp-table.mp-perf{overflow:visible;}
+
+/* ═══ Meta Performance: date range picker (dropdown + presets + two-month calendar) ═══════════════════════════════════════════════ */
+.mp-controls{justify-content:flex-end;align-items:center;gap:10px;position:relative;}
+.mp-range-wrap{position:relative;}
+.mp-range-btn{display:inline-flex;align-items:center;gap:10px;height:40px;padding:0 14px;background:var(--surface);border:1px solid var(--border-strong);border-radius:10px;font-family:inherit;font-size:14px;font-weight:700;color:var(--text);cursor:pointer;min-width:190px;}
+.mp-range-btn:hover,.mp-range-btn[aria-expanded="true"]{border-color:#9aa0b4;}
+.mp-range-btn .ic{width:18px;height:18px;}
+.mp-range-btn #mp-range-btn-label{flex:1;text-align:left;}
+.mp-range-chev{width:16px;height:16px;color:var(--text-muted);}
+.mp-compare-pill{display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 14px;background:var(--surface);border:1px solid var(--border-strong);border-radius:10px;font-size:14px;color:var(--text-secondary);cursor:pointer;margin-left:0 !important;}
+.mp-compare-pill:has(input:checked){color:var(--text);font-weight:600;border-color:#9aa0b4;background:var(--accent-softer);}
+.mp-compare-pill input{margin:0;accent-color:var(--primary);}
+.mp-range-pop{position:absolute;right:0;top:calc(100% + 8px);z-index:60;display:grid;grid-template-columns:210px minmax(0,1fr);background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:0 18px 48px rgba(16,16,22,.18);overflow:hidden;width:min(780px,calc(100vw - 48px));}
+.mp-range-pop[hidden]{display:none;}
+.mp-range-presets{display:flex;flex-direction:column;gap:2px;padding:10px;border-right:1px solid var(--border);background:var(--surface2);max-height:520px;overflow:auto;}
+.mp-range-presets .mp-preset{display:flex;justify-content:space-between;align-items:center;gap:8px;text-align:left;background:none;border:0;border-radius:9px;padding:9px 12px;font-family:inherit;font-size:13.5px;font-weight:500;color:var(--text-secondary);cursor:pointer;}
+.mp-range-presets .mp-preset:hover{background:var(--border);}
+.mp-range-presets .mp-preset.active{background:var(--ds-navy-900);color:#fff;font-weight:700;}
+.mp-preset-note{font-size:11px;font-weight:400;color:var(--text-muted);}
+.mp-range-presets .mp-preset.active .mp-preset-note{color:rgba(255,255,255,.7);}
+.mp-range-cal{padding:14px 16px 14px;min-width:0;}
+.mp-cal-nav{display:flex;gap:8px;align-items:center;margin-bottom:10px;}
+.mp-cal-nav select{height:34px;border:1px solid var(--border-strong);border-radius:9px;background:var(--surface);font-family:inherit;font-size:13.5px;padding:0 8px;}
+.mp-cal-nav #mp-cal-month{flex:1;min-width:0;}
+.mp-cal-arrow{width:34px;height:34px;border:1px solid var(--border-strong);border-radius:9px;background:var(--surface);font-size:20px;line-height:1;color:var(--text);cursor:pointer;}
+.mp-cal-arrow:disabled{opacity:.35;cursor:default;}
+.mp-cal-months{display:grid;grid-template-columns:1fr 1fr;gap:22px;}
+.mp-cal-title{text-align:center;font-weight:700;font-size:14px;margin:6px 0 8px;}
+.mp-cal-dow,.mp-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);}
+.mp-cal-dow span{text-align:center;font-size:11.5px;font-weight:600;color:var(--text-muted);padding:4px 0;}
+.mp-cal-day{position:relative;height:34px;border:0;background:none;font-family:inherit;font-size:13.5px;font-weight:500;color:var(--text);cursor:pointer;font-variant-numeric:tabular-nums;border-radius:0;}
+.mp-cal-pad{cursor:default;}
+.mp-cal-day.in{background:#EFF0F4;}
+.mp-cal-day.sel{background:var(--ds-navy-900);color:#fff;font-weight:700;border-radius:8px;}
+.mp-cal-day:not(:disabled):not(.sel):hover{background:var(--border);border-radius:8px;}
+.mp-cal-day:disabled{color:#c3c6d0;cursor:default;}
+.mp-cal-day.today::after{content:'';position:absolute;left:50%;bottom:3px;width:4px;height:4px;margin-left:-2px;border-radius:50%;background:currentColor;}
+.mp-cal-summary{margin-top:12px;font-size:14px;font-weight:700;}
+.mp-cal-note{font-size:12px;color:var(--text-muted);margin-top:2px;}
+.mp-cal-fields{display:flex;gap:10px;align-items:center;margin-top:10px;font-size:12px;color:var(--text-secondary);}
+.mp-cal-fields input{font-family:inherit;font-size:12.5px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:8px;}
+.mp-cal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:12px;}
+.mp-cal-actions .btn{height:38px;padding:0 18px;border-radius:10px;font-size:14px;font-weight:600;}
+.mp-cal-actions .btn:disabled{background:#d6d8e0;border-color:#d6d8e0;color:#fff;cursor:default;}
+@media (max-width:760px){
+  .mp-range-pop{grid-template-columns:1fr;right:auto;left:0;}
+  .mp-range-presets{flex-direction:row;overflow-x:auto;border-right:0;border-bottom:1px solid var(--border);max-height:none;}
+  .mp-range-presets .mp-preset{flex:0 0 auto;white-space:nowrap;}
+  .mp-cal-months{grid-template-columns:1fr;}
+}

@@ -53,12 +53,15 @@ const REPORTING_TIMEZONE = 'Australia/Sydney';
 const PRESETS = [
   'today', 'yesterday', 'last_3', 'last_4', 'last_7', 'last_14', 'last_30',
   'this_week', 'last_week', 'this_month', 'custom',
+  // added with the date-range picker (Batch 14): resolved here, in Sydney time, like every other preset
+  'last_90', 'last_month', 'ytd', 'last_365',
 ];
 const DEFAULT_PRESET = 'last_7';
 const PRESET_LABELS = {
   today: 'Today', yesterday: 'Yesterday', last_3: 'Last 3 Days', last_4: 'Last 4 Days', last_7: 'Last 7 Days', last_14: 'Last 14 Days',
   last_30: 'Last 30 Days', this_week: 'This Week', last_week: 'Last Week',
   this_month: 'This Month', custom: 'Custom',
+  last_90: 'Last 90 Days', last_month: 'Last Month', ytd: 'Year to Date', last_365: 'Last 365 Days',
 };
 const MAX_CUSTOM_DAYS = 366;
 
@@ -175,6 +178,10 @@ function resolvePreset(preset, today) {
       return { since: addDays(thisMonday, -7), until: addDays(thisMonday, -1) };
     }
     case 'this_month': return { since: monthStart(today), until: today };
+    case 'last_90': return { since: addDays(today, -90), until: addDays(today, -1) };
+    case 'last_365': return { since: addDays(today, -365), until: addDays(today, -1) };
+    case 'last_month': { const prevLast = addDays(monthStart(today), -1); return { since: monthStart(prevLast), until: prevLast }; }
+    case 'ytd': return { since: `${today.slice(0, 4)}-01-01`, until: today };
     default: throw new HttpError(400, `Unknown preset "${preset}"`);
   }
 }

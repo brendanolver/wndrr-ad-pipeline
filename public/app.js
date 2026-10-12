@@ -804,6 +804,8 @@ function mpDelta(def, cur, prev, ok) {
 
 function mpRenderSummary(sum) {
   mpState.range = sum.range;
+  if (sum.today) mpState.today = sum.today;
+  const rbl = document.getElementById('mp-range-btn-label'); if (rbl) rbl.textContent = sum.preset === 'custom' ? mpRangeLabel(sum.range.since, sum.range.until) : sum.label;
   mpState.currency = sum.freshness.currency;
   document.getElementById('mp-range-line').textContent =
     `${sum.label} · ${mpRange(sum.range, true)} · ${sum.timezone.replace('_', ' ')} time`;
@@ -1099,20 +1101,111 @@ function mpSetPreset(preset) {
   mpState.preset = preset;
   mpState.page = 1;
   document.querySelectorAll('.mp-preset').forEach((b) => b.classList.toggle('active', b.dataset.preset === preset));
-  document.getElementById('mp-custom').style.display = preset === 'custom' ? '' : 'none';
 }
+
+// ── Date range picker: presets on the left, a two-month calendar on the right ─────────────────────────────────────────────
+// A preset applies at once (resolved SERVER-side in Sydney time, exactly as before). A calendar selection (click a start day, then an end day) applies on Update and is
+// sent as a custom since / until. "Today" for the calendar is Sydney's today, never the browser's. Nothing about how a range is queried or computed changes.
+const MP_CAL_MAX_DAYS = 366;
+const MP_MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const mpCal = { open: false, view: null, start: null, end: null, hover: null };
+const mpSydneyToday = () => (mpState.today || new Intl.DateTimeFormat('en-CA', { timeZone: MP_TZ }).format(new Date()));
+const mpYmd = (y, m, d) => `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+const mpYmdAdd = (ymd, n) => { const [y, m, d] = ymd.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10); };
+const mpDaysBetween = (a, b) => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86400000) + 1;
+function mpRangeLabel(since, until) {
+  const [sy, sm, sd] = since.split('-').map(Number); const [ey, em, ed] = until.split('-').map(Number);
+  const mon = (m) => MP_MONTH_NAMES[m - 1].slice(0, 3);
+  if (since === until) return `${sd} ${mon(sm)} ${sy}`;
+  return `${sd} ${sy === ey ? '' : ''}${mon(sm)}${sy === ey ? '' : ' ' + sy} to ${ed} ${mon(em)} ${ey}`.replace('  ', ' ');
+}
+function mpCalCurrent() { return mpState.range ? { since: mpState.range.since, until: mpState.range.until } : null; }
+function mpCalOpen() {
+  const cur = mpCalCurrent();
+  mpCal.start = cur ? cur.since : null; mpCal.end = cur ? cur.until : null; mpCal.hover = null;
+  const endRef = cur ? cur.until : mpSydneyToday();
+  const [y, m] = endRef.split('-').map(Number);
+  mpCal.view = { y: m === 1 ? y - 1 : y, m: m === 1 ? 11 : m - 2 }; // the range's end month sits on the right, the month before it on the left
+  mpCal.open = true;
+  const pop = document.getElementById('mp-range-pop'); pop.hidden = false;
+  document.getElementById('mp-range-btn').setAttribute('aria-expanded', 'true');
+  mpCalRender();
+}
+function mpCalClose() {
+  mpCal.open = false;
+  document.getElementById('mp-range-pop').hidden = true;
+  document.getElementById('mp-range-btn').setAttribute('aria-expanded', 'false');
+}
+function mpCalMonthHtml(y, m) {
+  const today = mpSydneyToday();
+  const first = new Date(Date.UTC(y, m, 1)); const lead = (first.getUTCDay() + 6) % 7; // Monday first
+  const days = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  const lo = mpCal.start; const hi = mpCal.end || (mpCal.hover && mpCal.start ? mpCal.hover : null);
+  const a = lo && hi ? (lo <= hi ? lo : hi) : lo; const z = lo && hi ? (lo <= hi ? hi : lo) : lo;
+  let cells = '';
+  for (let i = 0; i < lead; i++) cells += '<span class="mp-cal-day mp-cal-pad"></span>';
+  for (let d = 1; d <= days; d++) {
+    const ymd = mpYmd(y, m, d);
+    const future = ymd > today;
+    const isEnd = ymd === a || ymd === z;
+    const inRange = a && z && ymd >= a && ymd <= z;
+    cells += `<button type="button" class="mp-cal-day${isEnd ? ' sel' : ''}${inRange && !isEnd ? ' in' : ''}${ymd === today ? ' today' : ''}" data-day="${ymd}"${future ? ' disabled' : ''} aria-label="${d} ${MP_MONTH_NAMES[m]} ${y}"${isEnd ? ' aria-pressed="true"' : ''}>${d}</button>`;
+  }
+  return `<div class="mp-cal-month"><div class="mp-cal-title">${MP_MONTH_NAMES[m]} ${y}</div><div class="mp-cal-dow"><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span></div><div class="mp-cal-grid">${cells}</div></div>`;
+}
+function mpCalRender() {
+  const v = mpCal.view; const today = mpSydneyToday(); const [ty, tm] = today.split('-').map(Number);
+  const right = { y: v.m === 11 ? v.y + 1 : v.y, m: (v.m + 1) % 12 };
+  document.getElementById('mp-cal-months').innerHTML = mpCalMonthHtml(v.y, v.m) + mpCalMonthHtml(right.y, right.m);
+  const ms = document.getElementById('mp-cal-month'); const ys = document.getElementById('mp-cal-year');
+  ms.innerHTML = MP_MONTH_NAMES.map((n, i) => `<option value="${i}"${i === v.m ? ' selected' : ''}>${n}</option>`).join('');
+  const years = []; for (let y = ty - 3; y <= ty; y++) years.push(y);
+  ys.innerHTML = years.map((y) => `<option value="${y}"${y === v.y ? ' selected' : ''}>${y}</option>`).join('');
+  document.getElementById('mp-cal-next').disabled = (right.y > ty) || (right.y === ty && right.m >= tm - 1);
+  const sum = document.getElementById('mp-cal-summary'); const apply = document.getElementById('mp-custom-apply');
+  let ok = false;
+  if (mpCal.start && mpCal.end) {
+    const n = mpDaysBetween(mpCal.start, mpCal.end);
+    sum.textContent = `${mpRangeLabel(mpCal.start, mpCal.end)} · ${n} day${n === 1 ? '' : 's'}`;
+    const cur = mpCalCurrent();
+    ok = n <= MP_CAL_MAX_DAYS && !(cur && cur.since === mpCal.start && cur.until === mpCal.end);
+    if (n > MP_CAL_MAX_DAYS) sum.textContent += ` (the longest range is ${MP_CAL_MAX_DAYS} days)`;
+    document.getElementById('mp-custom-since').value = mpCal.start; document.getElementById('mp-custom-until').value = mpCal.end;
+  } else if (mpCal.start) {
+    sum.textContent = `${mpRangeLabel(mpCal.start, mpCal.start)} · choose the last day`;
+  } else sum.textContent = 'Choose the first day';
+  apply.disabled = !ok;
+}
+document.getElementById('mp-range-btn').addEventListener('click', (e) => { e.stopPropagation(); if (mpCal.open) mpCalClose(); else mpCalOpen(); });
+document.addEventListener('click', (e) => { if (mpCal.open && !e.target.closest('.mp-range-wrap')) mpCalClose(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && mpCal.open) { mpCalClose(); document.getElementById('mp-range-btn').focus(); } });
+document.getElementById('mp-cal-cancel').addEventListener('click', mpCalClose);
+document.getElementById('mp-cal-prev').addEventListener('click', () => { const v = mpCal.view; mpCal.view = v.m === 0 ? { y: v.y - 1, m: 11 } : { y: v.y, m: v.m - 1 }; mpCalRender(); });
+document.getElementById('mp-cal-next').addEventListener('click', () => { const v = mpCal.view; mpCal.view = v.m === 11 ? { y: v.y + 1, m: 0 } : { y: v.y, m: v.m + 1 }; mpCalRender(); });
+document.getElementById('mp-cal-month').addEventListener('change', (e) => { mpCal.view.m = Number(e.target.value); mpCalRender(); });
+document.getElementById('mp-cal-year').addEventListener('change', (e) => { mpCal.view.y = Number(e.target.value); mpCalRender(); });
+const mpCalMonths = document.getElementById('mp-cal-months');
+mpCalMonths.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-day]'); if (!b || b.disabled) return;
+  const day = b.dataset.day;
+  if (!mpCal.start || (mpCal.start && mpCal.end)) { mpCal.start = day; mpCal.end = null; mpCal.hover = null; } // a new selection begins
+  else { mpCal.end = day; if (mpCal.end < mpCal.start) { const t = mpCal.start; mpCal.start = mpCal.end; mpCal.end = t; } }
+  mpCalRender();
+});
+mpCalMonths.addEventListener('mouseover', (e) => {
+  const b = e.target.closest('[data-day]'); if (!b || b.disabled || !mpCal.start || mpCal.end) return;
+  if (mpCal.hover !== b.dataset.day) { mpCal.hover = b.dataset.day; mpCalRender(); }
+});
+// typing dates is the keyboard route to the same selection
+['mp-custom-since', 'mp-custom-until'].forEach((id) => document.getElementById(id).addEventListener('change', () => {
+  const s0 = document.getElementById('mp-custom-since').value; const u0 = document.getElementById('mp-custom-until').value;
+  if (s0 && u0) { mpCal.start = s0 <= u0 ? s0 : u0; mpCal.end = s0 <= u0 ? u0 : s0; const [y, m] = mpCal.end.split('-').map(Number); mpCal.view = { y: m === 1 ? y - 1 : y, m: m === 1 ? 11 : m - 2 }; mpCalRender(); }
+}));
 
 document.querySelectorAll('.mp-preset').forEach((btn) => {
   btn.addEventListener('click', () => {
-    const preset = btn.dataset.preset;
-    if (preset === 'custom') {
-      mpSetPreset('custom');
-      const since = document.getElementById('mp-custom-since');
-      const until = document.getElementById('mp-custom-until');
-      if (!since.value && mpState.range) { since.value = mpState.range.since; until.value = mpState.range.until; }
-      return; // loads on Apply
-    }
-    mpSetPreset(preset);
+    mpSetPreset(btn.dataset.preset);
+    mpCalClose();
     loadMetaPerformance();
   });
 });
@@ -1121,9 +1214,10 @@ document.getElementById('mp-custom-apply').addEventListener('click', () => {
   const until = document.getElementById('mp-custom-until').value;
   if (!since || !until) { toast('Pick a start and end date.', true); return; }
   if (since > until) { toast('Start date must be on or before the end date.', true); return; }
+  mpSetPreset('custom');
   mpState.customSince = since;
   mpState.customUntil = until;
-  mpState.page = 1;
+  mpCalClose();
   loadMetaPerformance();
 });
 document.getElementById('mp-compare').addEventListener('change', (e) => {
