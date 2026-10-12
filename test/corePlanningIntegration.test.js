@@ -206,14 +206,16 @@ test('classify(): meets / below (reliable) / uncertain, by whether awaiting-revi
   assert.equal(cov.classify({ confirmed: 5, min: 5 }).state, 'meets');
   assert.equal(cov.classify({ confirmed: 7, possible: 3, unattributed: 9, min: 5 }).state, 'meets', 'confirmed ads alone meet it: pending ads are irrelevant');
   assert.equal(cov.classify({ confirmed: 2, possible: 0, unattributed: 0, min: 5 }).state, 'below', 'nothing pending: a reliable shortage');
-  assert.equal(cov.classify({ confirmed: 2, possible: 1, unattributed: 1, min: 5 }).state, 'below', '2 + 1 + 1 = 4 < 5: even all of them would not reach the minimum');
-  const u = cov.classify({ confirmed: 2, possible: 2, unattributed: 1, min: 5 });
-  assert.equal(u.state, 'uncertain'); assert.equal(u.likely_meets, false, '2 confirmed + 2 suggested for it = 4: only the unattributed ad could make 5');
+  assert.equal(cov.classify({ confirmed: 2, possible: 1, unattributed: 1, min: 5 }).state, 'below', '2 + 1 = 3 < 5: even every ad suggested for it would not reach the minimum');
+  const u = cov.classify({ confirmed: 2, possible: 3, unattributed: 1, min: 5 });
+  assert.equal(u.state, 'uncertain'); assert.equal(u.likely_meets, true, '2 confirmed + 3 suggested for it = 5');
+  // Batch 14: awaiting-review ads with NO product suggestion are shared by every product, so they never make one product's count uncertain
+  assert.equal(cov.classify({ confirmed: 2, possible: 2, unattributed: 40, min: 5 }).state, 'below', '2 + 2 = 4 < 5: 40 unattributed ads somewhere in the account do not change that');
 });
-test('classify(): "likely meets" only when confirmed + suggested-for-it reach the minimum', () => {
+test('classify(): "likely meets" only when confirmed + suggested-for-it reach the minimum; unattributed ads never create uncertainty (Batch 14)', () => {
   assert.equal(cov.classify({ confirmed: 3, possible: 2, unattributed: 0, min: 5 }).likely_meets, true);
   assert.equal(cov.classify({ confirmed: 3, possible: 0, unattributed: 4, min: 5 }).likely_meets, false);
-  assert.equal(cov.classify({ confirmed: 3, possible: 0, unattributed: 4, min: 5 }).state, 'uncertain');
+  assert.equal(cov.classify({ confirmed: 3, possible: 0, unattributed: 4, min: 5 }).state, 'below', 'the account having unreviewed ads does not make THIS product uncertain');
 });
 test('pendingByFamily(): an awaiting-review ad counts toward each product it is suggested for (once per family); ads with no product suggestion are unattributed', () => {
   const fams = [{ key: 'A', codes: ['A1', 'A2'] }, { key: 'B', codes: ['B1'] }];
@@ -239,18 +241,17 @@ test('a product whose confirmed count is low but whose awaiting-review ads could
   assert.equal(P1.counts.coverage_uncertain, P1.planning.coverage_uncertain.length);
   assert.ok(P1.planning.counts.needs_creative >= 1 && !P1.planning.coverage_uncertain.some((x) => x.product_name === 'LIMA TEE'));
 });
-test('unattributed awaiting-review ads can also make a count uncertain, and the reason says exactly why in plain words', async () => {
+test('Batch 14: unattributed awaiting-review ads do NOT make a count uncertain (they are shared by every product); ads suggested for the product still do, with the reason in plain words', async () => {
   const ctx = await ctxFor({ coverage: withPending(covBy({ 'KILO TEE': 3 }), {}, 2) });
   const P1 = plan.buildPlan({ ...baseArgs, planning: ctx });
-  const k = P1.planning.coverage_uncertain.find((x) => x.product_name === 'KILO TEE');
-  assert.ok(k && k.without_product_suggestion === 2 && k.likely_meets_after_review === false);
-  const a = ctx.allFamilies && require('../src/lib/planningContext').assessProduct(ctx, { styleCodes: ['W26KK001BLK'], productCodes: ['W26KK001'], stock: { known: true, units: 100 }, sales: { available: true, seller_class: 'neutral', trend: 'flat' }, existing: null });
-  const text = a.reasons.join('\n');
-  assert.match(text, /3 confirmed active Meta ads — below the minimum of 5, but the count may be incomplete/);
-  assert.match(text, /2 have no product suggestion yet/);
-  assert.match(text, /Not treated as a shortage until they are reviewed/);
-  assert.ok(a.missing.includes('coverage_confirmation'));
-  assert.equal(a.factors.find((f) => f.key === 'coverage').points, 0, 'an uncertain count carries no creative-gap points');
+  assert.ok(!P1.planning.coverage_uncertain.find((x) => x.product_name === 'KILO TEE'), '3 confirmed + 2 unattributed is a reliable shortage, not an uncertain count');
+  const a = require('../src/lib/planningContext').assessProduct(ctx, { styleCodes: ['W26KK001BLK'], productCodes: ['W26KK001'], stock: { known: true, units: 100 }, sales: { available: true, seller_class: 'strong', trend: null } });
+  assert.equal(a.coverage.uncertain, false);
+  const ctx2 = await ctxFor({ coverage: withPending(covBy({ 'KILO TEE': 3 }), { 'KILO TEE': 2 }, 0) });
+  const b = require('../src/lib/planningContext').assessProduct(ctx2, { styleCodes: ['W26KK001BLK'], productCodes: ['W26KK001'], stock: { known: true, units: 100 }, sales: { available: true, seller_class: 'strong', trend: null } });
+  assert.equal(b.coverage.uncertain, true, '3 confirmed + 2 suggested for it could reach 5');
+  assert.match(b.reasons.join('\n'), /3 confirmed active Meta ads — below the minimum of 5, but the count may be incomplete/);
+  assert.ok(b.missing.includes('coverage_confirmation'));
 });
 test('the threshold is still read from Settings: with a minimum of 3, 3 confirmed ads meets it and 2 + pending is uncertain', async () => {
   const ctx = await ctxFor({ settings: { min_active_ads: 3, high_stock_min_soh: 100 }, coverage: { ...withPending(covBy({ 'KILO TEE': 3, 'LIMA TEE': 2 }), { 'LIMA TEE': 1 }, 0), min: 3 } });

@@ -42,6 +42,7 @@
 const { pool } = require('../db');
 const reachStore = require('./metaReachStore'); // DB-only reads of the Reach/Frequency cache (no network)
 const funnelHealth = require('./metaFunnelHealth'); // confirmed WNDRR benchmarks only
+const dpaLib = require('./metaDpa'); // Dynamic Product Ads: excluded from creative performance by default
 
 // The account reporting timezone. Insight dates in meta_ad_insights_daily
 // are calendar days in the Meta ad account's own timezone, so every
@@ -361,14 +362,17 @@ const CAMPAIGN_ID_RE = /^[0-9]{1,32}$/;
 function parseFilter(query = {}) {
   const funnel = FUNNEL_FILTERS.has(query.funnel) ? query.funnel : null;
   const campaignId = CAMPAIGN_ID_RE.test(String(query.campaign_id || '')) ? String(query.campaign_id) : null;
-  return { funnel, campaignId, active: !!(funnel || campaignId) };
+  // Dynamic Product Ads are left out of creative performance by default (lib/metaDpa.js); ?dpa=include brings them back for reporting. Nothing is deleted.
+  const dpa = dpaLib.parseDpaMode(query);
+  return { funnel, campaignId, dpa, excludeDpa: dpa === 'exclude', active: !!(funnel || campaignId) };
 }
 // Restricts an insights table (alias given) to the ads in the filter; params are appended to `params`.
 function adFilterSql(filter, params, alias = 'd') {
-  if (!filter || !filter.active) return '';
+  if (!filter || !(filter.active || filter.excludeDpa)) return '';
   const conds = [];
   if (filter.funnel) { params.push(filter.funnel); conds.push(`COALESCE(mc.funnel, 'unknown') = $${params.length}`); }
   if (filter.campaignId) { params.push(filter.campaignId); conds.push(`fa.meta_campaign_id = $${params.length}`); }
+  if (filter.excludeDpa) conds.push(dpaLib.notDpaPredicate('fa', 'mc'));
   return ` AND ${alias}.meta_ad_id IN (SELECT fa.meta_ad_id FROM meta_ads fa LEFT JOIN meta_campaigns mc ON mc.meta_campaign_id = fa.meta_campaign_id WHERE ${conds.join(' AND ')})`;
 }
 
@@ -399,11 +403,31 @@ async function getTotals(range, filter) {
   };
 }
 
+// What the DPA switch is hiding / including for a period: ads with activity that are DPAs, and their spend. Always computed (whatever the mode) so the page can say so.
+async function getDpaInfo(range, filter) {
+  const mode = filter && filter.dpa ? filter.dpa : 'exclude';
+  const { rows } = await pool.query(
+    `SELECT COUNT(DISTINCT d.meta_ad_id) FILTER (WHERE d.spend > 0 OR d.impressions > 0) AS ads, COALESCE(SUM(d.spend), 0) AS spend
+       FROM meta_ad_insights_daily d
+       JOIN meta_ads a ON a.meta_ad_id = d.meta_ad_id
+       LEFT JOIN meta_campaigns mc ON mc.meta_campaign_id = a.meta_campaign_id
+      WHERE d.insight_date BETWEEN $1 AND $2 AND ${dpaLib.dpaPredicate('a', 'mc')}`,
+    [range.since, range.until]
+  );
+  const ads = num(rows[0].ads); const spend = round(num(rows[0].spend), 2);
+  return { mode, excluded: mode === 'exclude', ads, spend,
+    label: mode === 'exclude' ? 'DPAs excluded' : 'DPAs included',
+    note: mode === 'exclude'
+      ? `Dynamic Product Ads are excluded from these figures${ads ? ` (${ads} ad${ads === 1 ? '' : 's'}, $${Math.round(spend).toLocaleString('en-AU')} spend in this period)` : ''}. They are still stored; switch "Include DPAs" on to see them.`
+      : `These figures include Dynamic Product Ads${ads ? ` (${ads} ad${ads === 1 ? '' : 's'}, $${Math.round(spend).toLocaleString('en-AU')} spend in this period)` : ''}.` };
+}
+
 async function getSummary(parsed, now = new Date(), filter = null) {
-  const [totals, coverage, freshness] = await Promise.all([
+  const [totals, coverage, freshness, dpa] = await Promise.all([
     getTotals(parsed.range, filter),
     getCoverage(parsed.range, now),
     getFreshness(),
+    getDpaInfo(parsed.range, filter),
   ]);
   const out = {
     preset: parsed.preset,
@@ -417,8 +441,11 @@ async function getSummary(parsed, now = new Date(), filter = null) {
     // Exact range-level Reach/Frequency from the cache (null + status until loaded).
     reach_frequency: reachStore.summaryFrom(await reachStore.getStatus(parsed.range, parsed.today, { now: now.getTime() })),
     filter: filter && filter.active ? { funnel: filter.funnel, campaign_id: filter.campaignId } : null,
+    dpa,
     compare: null,
   };
+  // Exact Reach / Frequency is whole-account (Meta cannot split it by ad type): when DPAs are excluded from the other figures it still includes them, and says so.
+  if (dpa.excluded && dpa.ads > 0 && out.reach_frequency) out.reach_frequency = { ...out.reach_frequency, scope_note: 'Whole account, including DPAs (Meta cannot split Reach by ad type)' };
   if (filter && filter.active) {
     // Exact Reach / Frequency is a unique-people figure Meta computes for the WHOLE account over the period; it cannot be
     // derived for a funnel / campaign subset from daily rows or from per-ad reach, so it is withheld rather than faked.
@@ -497,6 +524,7 @@ async function getAds(parsed, query) {
   if (STATUS_FILTERS[opts.status]) where.push(STATUS_FILTERS[opts.status]);
   if (filter.funnel) { params.push(filter.funnel); where.push(`COALESCE(mc.funnel, 'unknown') = $${params.length}`); }
   if (filter.campaignId) { params.push(filter.campaignId); where.push(`a.meta_campaign_id = $${params.length}`); }
+  if (filter.excludeDpa) where.push(dpaLib.notDpaPredicate('a', 'mc'));
   if (opts.q) {
     params.push(`%${escapeLike(opts.q)}%`);
     const like = `$${params.length}`;
@@ -555,6 +583,7 @@ async function getAds(parsed, query) {
     status: opts.status,
     q: opts.q,
     filter: filter.active ? { funnel: filter.funnel, campaign_id: filter.campaignId } : null,
+    dpa: await getDpaInfo(parsed.range, filter),
     ads: rows.map((r) => ({
       meta_ad_id: r.meta_ad_id,
       ad_name: r.ad_name,

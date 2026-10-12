@@ -15,13 +15,16 @@
 // classify() then asks the honest question -- "could this product actually reach the minimum if those ads were reviewed?":
 //   meets      confirmed >= minimum
 //   below      even if EVERY pending ad that might be this product's were, the count would stay under the minimum (a reliable shortage)
-//   uncertain  confirmed < minimum but confirmed + suggested-for-it + unattributed >= minimum: the count may be incomplete; NOT proof of a shortage
+//   uncertain  confirmed < minimum but confirmed + awaiting-review ads SUGGESTED FOR THIS PRODUCT >= minimum: the count may be incomplete; NOT proof of a shortage
+//   (Batch 14: awaiting-review ads that carry NO product suggestion at all are reported account-wide but are NOT added to every product's upper bound. Counting
+//    them made nearly every product "uncertain" the moment the account had a few unreviewed ads, because the same unattributed ads were counted for all of them.)
 // WHAT THIS IS NOT: the total number of creatives ever made for the product (that is history, shown elsewhere), nor distinct creatives -- it is live ads.
 //
 // STATUS FRESHNESS: effective_status is whatever the last ad-inventory refresh stored. The result says when that was (status_as_of) so a stale count is
 // visible. If no Meta ads are stored at all the count is "unavailable" (never reported as zero active ads).
 // Local database only; read-only.
 const { pool } = require('../db');
+const dpaLib = require('./metaDpa'); // Dynamic Product Ads are not a product's creative: never counted (nothing is deleted, they are only left out here)
 
 const DAY = 86400000;
 
@@ -45,8 +48,8 @@ function countByFamily(families, pairs) {
 function classify({ confirmed, possible = 0, unattributed = 0, min }) {
   const n = Math.max(0, Math.round(Number(confirmed) || 0)); const m = Math.max(1, Math.round(Number(min) || 5));
   const p = Math.max(0, Math.round(Number(possible) || 0)); const u = Math.max(0, Math.round(Number(unattributed) || 0));
-  if (n >= m) return { state: 'meets', confirmed: n, min: m, possible: p, unattributed: u, upper_bound: n + p + u };
-  const upper = n + p + u;
+  if (n >= m) return { state: 'meets', confirmed: n, min: m, possible: p, unattributed: u, upper_bound: n + p };
+  const upper = n + p; // only ads with evidence pointing at THIS product can close its gap; unattributed ads (u) are context, not evidence for any one product
   return { state: upper >= m ? 'uncertain' : 'below', confirmed: n, min: m, possible: p, unattributed: u, upper_bound: upper, likely_meets: n + p >= m };
 }
 
@@ -76,6 +79,7 @@ async function loadActiveAdCoverage(families, { db = pool, min, now = new Date()
       WHERE m.effective_status = 'ACTIVE'
         AND m.match_status IN ('confirmed', 'auto_matched')
         AND NOT COALESCE(c.excluded_from_intelligence, false)
+        AND ${dpaLib.notDpaStandalone('m')}
         AND p.product_code = ANY($1::text[])`, [codes])).rows : [];
   // ACTIVE ads that nobody has reviewed yet: they are not counted, but they are why a count may be incomplete
   const pendingRows = (await db.query(
@@ -85,11 +89,12 @@ async function loadActiveAdCoverage(families, { db = pool, min, now = new Date()
        LEFT JOIN meta_ad_classifications c ON c.meta_ad_id = m.meta_ad_id
       WHERE m.effective_status = 'ACTIVE'
         AND m.match_status IN ('unmatched', 'suggested')
-        AND NOT COALESCE(c.excluded_from_intelligence, false)`)).rows;
+        AND NOT COALESCE(c.excluded_from_intelligence, false)
+        AND ${dpaLib.notDpaStandalone('m')}`)).rows;
   const pend = pendingByFamily(families, pendingRows);
   const trustedActive = (await db.query(
     `SELECT count(DISTINCT m.meta_ad_id)::int AS n FROM meta_ads m LEFT JOIN meta_ad_classifications c ON c.meta_ad_id = m.meta_ad_id
-      WHERE m.effective_status = 'ACTIVE' AND m.match_status IN ('confirmed', 'auto_matched') AND NOT COALESCE(c.excluded_from_intelligence, false)`)).rows[0].n;
+      WHERE m.effective_status = 'ACTIVE' AND m.match_status IN ('confirmed', 'auto_matched') AND NOT COALESCE(c.excluded_from_intelligence, false) AND ${dpaLib.notDpaStandalone('m')}`)).rows[0].n;
   const activeTotal = trustedActive + pendingRows.length;
   const lastSeen = meta.last_seen ? new Date(meta.last_seen) : null;
   const staleDays = lastSeen ? Math.floor((now.getTime() - lastSeen.getTime()) / DAY) : null;

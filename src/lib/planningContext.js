@@ -48,11 +48,11 @@ async function loadSettings(db = pool) {
     const r = (await db.query('SELECT * FROM planning_settings WHERE id = 1')).rows[0] || {};
     return {
       min_active_ads: Number(r.min_active_ads_per_product) || cfg.MIN_ACTIVE_ADS_DEFAULT, high_stock_min_soh: Number(r.high_stock_min_soh) || 0,
-      weekly_video_target: Number(r.weekly_video_target) || 25, season_immediate_days: Number(r.season_immediate_days) || 7, season_secondary_days: Number(r.season_secondary_days) || 14,
+      weekly_video_target: Number(r.weekly_video_target) || 25, weekly_new_concept_target: r.weekly_new_concept_target === null || r.weekly_new_concept_target === undefined ? 15 : Number(r.weekly_new_concept_target), season_immediate_days: Number(r.season_immediate_days) || 7, season_secondary_days: Number(r.season_secondary_days) || 14,
       creative_planning_config: r.creative_planning_config && typeof r.creative_planning_config === 'object' ? r.creative_planning_config : {}, source: 'settings',
     };
   } catch (e) {
-    return { min_active_ads: cfg.MIN_ACTIVE_ADS_DEFAULT, high_stock_min_soh: 0, weekly_video_target: 25, season_immediate_days: 7, season_secondary_days: 14, creative_planning_config: {}, source: 'default', error: e.message };
+    return { min_active_ads: cfg.MIN_ACTIVE_ADS_DEFAULT, high_stock_min_soh: 0, weekly_video_target: 25, weekly_new_concept_target: 15, season_immediate_days: 7, season_secondary_days: 14, creative_planning_config: {}, source: 'default', error: e.message };
   }
 }
 

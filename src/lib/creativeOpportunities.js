@@ -45,12 +45,14 @@ const cfg = require('./creativeOpportunitiesConfig');
 const { ymdInZone, addDays, REPORTING_TIMEZONE, deriveMetrics, HttpError } = require('./metaPerformance');
 const { deriveProductCode } = require('./apparelmagic');
 const { MEDIA_LABEL } = require('./metaNameParsing');
+const dpaLib = require('./metaDpa');
 
 // The data-quality gate, in one place.
 const INCLUDED_ADS_SQL = `
   m.match_status IN ('confirmed', 'auto_matched')
   AND NOT COALESCE(c.excluded_from_intelligence, false)
-  AND NOT COALESCE(c.not_product_specific, false)`;
+  AND NOT COALESCE(c.not_product_specific, false)
+  AND ${dpaLib.notDpaStandalone('m')}`;
 
 // ── small pure helpers ──────────────────────────────────────────────────
 const num = (v) => Number(v) || 0;

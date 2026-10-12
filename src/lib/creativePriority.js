@@ -42,7 +42,9 @@ function coverageBand(cov) {
   const n = Math.max(0, Math.round(num(cov.active_ads))); const min = Math.max(1, Math.round(num(cov.min) || cfg.MIN_ACTIVE_ADS_DEFAULT));
   const possible = Math.max(0, Math.round(num(cov.possible))); const unattributed = Math.max(0, Math.round(num(cov.unattributed)));
   if (n >= min) return { band: 'ok', needs_creative: false, uncertain: false, n, min, possible, unattributed };
-  if (n + possible + unattributed >= min) return { band: 'uncertain', needs_creative: false, uncertain: true, n, min, possible, unattributed, likely_meets: n + possible >= min };
+  // Batch 14: unattributed awaiting-review ads (no product suggestion at all) are NOT added to this product's bound: they are shared by every product, so counting
+  // them made almost every product "uncertain". Only ads suggested for THIS product can close its gap.
+  if (n + possible >= min) return { band: 'uncertain', needs_creative: false, uncertain: true, n, min, possible, unattributed, likely_meets: n + possible >= min };
   return { band: n === 0 ? 'zero' : n <= 2 ? 'one_two' : 'three_four', needs_creative: true, uncertain: false, n, min, possible, unattributed };
 }
 

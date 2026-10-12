@@ -22,6 +22,7 @@
 // "insufficient". A weak result is also not proof the CREATIVE is the cause (audience, offer, landing page and product all matter): the wording everywhere
 // is "worth testing new creative", never "this creative is bad".
 const health = require('./metaFunnelHealth');
+const dpaLib = require('./metaDpa'); // Dynamic Product Ads are not creative the team made for a product: never judged as its coverage
 
 const DEFAULTS = {
   window_days: 14,          // evidence window (complete days, ending yesterday)
@@ -176,6 +177,7 @@ async function loadProductAdPerformance(families, { db, rules, coded, config = D
        LEFT JOIN meta_campaigns c ON c.meta_campaign_id = m.meta_campaign_id
        LEFT JOIN meta_ad_insights_daily d ON d.meta_ad_id = m.meta_ad_id AND d.insight_date BETWEEN $2 AND $3
       WHERE m.effective_status = 'ACTIVE' AND m.match_status IN ('confirmed', 'auto_matched') AND NOT COALESCE(cl.excluded_from_intelligence, false)
+        AND NOT COALESCE((${dpaLib.dpaPredicate('m', 'c')}), false)
         AND EXISTS (SELECT 1 FROM meta_ad_products p WHERE p.meta_ad_id = m.meta_ad_id AND p.product_code = ANY($1::text[]))
       GROUP BY m.meta_ad_id, m.ad_name, m.meta_creative_id, m.created_time, c.funnel, cl.concept_label, cl.creator_name, cl.creative_style_id, cl.media_type`,
     [codes, from, end, recentFrom, priorFrom, priorTo])).rows;

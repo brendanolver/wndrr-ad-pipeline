@@ -119,7 +119,7 @@ async function computeWeeklyVideoPlan({ weekStart, today, deps = {} } = {}) {
     const cov = ctx.coverage && ctx.coverage.available
       ? { known: true, active_ads: ctx.coverage.by_family.get(f.key) || 0, min: settings.min_active_ads, possible: (pendingBy && pendingBy.get(f.key)) || 0, unattributed: ctx.coverage.unattributed_pending || 0 }
       : { known: false, min: settings.min_active_ads };
-    if (cov.known) cov.uncertain = cov.active_ads < cov.min && cov.active_ads + cov.possible + cov.unattributed >= cov.min;
+    if (cov.known) cov.uncertain = cov.active_ads < cov.min && cov.active_ads + cov.possible >= cov.min;
     const performance = ctx.coverage && ctx.coverage.available ? perf.summarizeProduct(ev.creatives, { pendingAds: cov.possible, minPerforming: config.min_performing_creatives, activeAds: cov.active_ads }) : null;
     const created = ev.creatives.map((c) => c.created).filter(Boolean).map((d) => Math.floor((todayMs - Date.parse(`${ymd(new Date(d))}T00:00:00Z`)) / 86400000));
     const g = ctx.seasonality && ctx.seasonality.available ? ctx.seasonality.groups.get(f.key) : null;
