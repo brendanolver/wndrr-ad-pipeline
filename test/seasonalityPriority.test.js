@@ -138,7 +138,7 @@ test('priority: HIGH = strong stock + coming into season + strong rising sales +
   assert.equal(a.level, 'High');
   assert.match(a.reasons.join('\n'), /320 units available — strong stock/);
   assert.match(a.reasons.join('\n'), /Coming into season/);
-  assert.match(a.reasons.join('\n'), /2 active Meta ads — below the minimum of 5. Needs creative/);
+  assert.match(a.reasons.join('\n'), /2 confirmed active Meta ads — below the minimum of 5, and no awaiting-review ad could close the gap. Needs creative/);
   assert.match(a.reasons.join('\n'), /Selling strongly and rising/);
   assert.equal(a.coverage.needs_creative, true);
 });

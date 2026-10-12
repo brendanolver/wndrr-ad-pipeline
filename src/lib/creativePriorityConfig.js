@@ -20,7 +20,7 @@ module.exports = {
   POINTS: {
     stock: { high: 15, ok: 8, low: -25, out: -60, unknown: 0 },
     season: { in_season: 15, coming_into_season: 20, shoulder: 0, year_round: 5, out_of_season: -25, insufficient_data: 0, unavailable: 0 },
-    coverage: { zero: 20, one_two: 15, three_four: 10, ok: 0, unknown: 0 },
+    coverage: { zero: 20, one_two: 15, three_four: 10, ok: 0, unknown: 0, uncertain: 0 }, // uncertain: active ads awaiting review might close the gap, so a shortage is not assumed
     sales: { strong: 15, rising_bonus: 5, neutral: 0, weak: -10, unknown: 0 },
   },
   LEVEL: { high_min: 40, medium_min: 15 },

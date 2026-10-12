@@ -31,12 +31,19 @@ function stockBand(stock, { highMin = Infinity, gate = cfg.STOCK_GATE_UNITS } = 
   return { band: 'ok', units: u };
 }
 
-// coverage: { known, active_ads, min } -> { band, needs_creative }
+// coverage: { known, active_ads, min, possible?, unattributed? } -> { band, needs_creative, uncertain }
+//   active_ads   distinct ACTIVE ads a person confirmed (or the matcher auto-matched) for the product
+//   possible     ACTIVE ads still awaiting review that carry a product suggestion for THIS product
+//   unattributed ACTIVE ads awaiting review with no product suggestion at all (they could belong to any product)
+// A shortage is reliable only when even all of those together could not reach the minimum; otherwise the count "may be incomplete" and is NOT treated
+// as proof that the product needs creative.
 function coverageBand(cov) {
-  if (!cov || !cov.known) return { band: 'unknown', needs_creative: false };
+  if (!cov || !cov.known) return { band: 'unknown', needs_creative: false, uncertain: false };
   const n = Math.max(0, Math.round(num(cov.active_ads))); const min = Math.max(1, Math.round(num(cov.min) || cfg.MIN_ACTIVE_ADS_DEFAULT));
-  if (n >= min) return { band: 'ok', needs_creative: false, n, min };
-  return { band: n === 0 ? 'zero' : n <= 2 ? 'one_two' : 'three_four', needs_creative: true, n, min };
+  const possible = Math.max(0, Math.round(num(cov.possible))); const unattributed = Math.max(0, Math.round(num(cov.unattributed)));
+  if (n >= min) return { band: 'ok', needs_creative: false, uncertain: false, n, min, possible, unattributed };
+  if (n + possible + unattributed >= min) return { band: 'uncertain', needs_creative: false, uncertain: true, n, min, possible, unattributed, likely_meets: n + possible >= min };
+  return { band: n === 0 ? 'zero' : n <= 2 ? 'one_two' : 'three_four', needs_creative: true, uncertain: false, n, min, possible, unattributed };
 }
 
 // sales: { available, seller_class: 'strong'|'weak'|'neutral', trend: 'up'|'down'|'flat'|null }
@@ -86,8 +93,15 @@ function assess({ stock, highStockMin, seasonal, coverage, sales, overrides, tod
 
   // 3. coverage
   if (cb.band === 'unknown') { add('coverage', 'Creative coverage', P.coverage.unknown, 'Active Meta ad counts are not available, so coverage is not weighed.'); missing.push('coverage'); }
-  else if (cb.needs_creative) add('coverage', 'Creative coverage', P.coverage[cb.band], `${plural(cb.n, 'active Meta ad')} — below the minimum of ${cb.min}. Needs creative.`);
-  else add('coverage', 'Creative coverage', P.coverage.ok, `${plural(cb.n, 'active Meta ad')} — meets the minimum of ${cb.min}.`);
+  else if (cb.uncertain) {
+    const parts = [];
+    if (cb.possible) parts.push(`${plural(cb.possible, 'is', 'are')} suggested for this product`);
+    if (cb.unattributed) parts.push(`${plural(cb.unattributed, 'has', 'have')} no product suggestion yet`);
+    add('coverage', 'Creative coverage', P.coverage.uncertain, `${plural(cb.n, 'confirmed active Meta ad')} — below the minimum of ${cb.min}, but the count may be incomplete: active ads are still awaiting review (${parts.join('; ')}). Not treated as a shortage until they are reviewed.`);
+    missing.push('coverage_confirmation');
+  }
+  else if (cb.needs_creative) add('coverage', 'Creative coverage', P.coverage[cb.band], `${plural(cb.n, 'confirmed active Meta ad')} — below the minimum of ${cb.min}, and no awaiting-review ad could close the gap. Needs creative.`);
+  else add('coverage', 'Creative coverage', P.coverage.ok, `${plural(cb.n, 'confirmed active Meta ad')} — meets the minimum of ${cb.min}.`);
 
   // 4. sales
   if (slb === 'unknown') { add('sales', 'Sales', P.sales.unknown, 'Sales data is not available, so it is not weighed.'); missing.push('sales'); }
@@ -124,7 +138,7 @@ function assess({ stock, highStockMin, seasonal, coverage, sales, overrides, tod
     version: cfg.VERSION, level, score_delta: score, factors, missing, caps, exceptions,
     stock: { band: sb.band, units: sb.units, on_order: stock && stock.known ? onOrder : null },
     season: { status: seasonKey, label: SEASON_LABEL[seasonKey] || seasonKey },
-    coverage: cb.band === 'unknown' ? { known: false, min: coverage && coverage.min ? coverage.min : cfg.MIN_ACTIVE_ADS_DEFAULT } : { known: true, active_ads: cb.n, min: cb.min, needs_creative: cb.needs_creative },
+    coverage: cb.band === 'unknown' ? { known: false, min: coverage && coverage.min ? coverage.min : cfg.MIN_ACTIVE_ADS_DEFAULT } : { known: true, active_ads: cb.n, min: cb.min, needs_creative: cb.needs_creative, uncertain: !!cb.uncertain, possible: cb.possible || 0, unattributed: cb.unattributed || 0, reliable: !cb.uncertain },
     reasons: [
       ...factors.map((f) => f.text),
       ...caps,

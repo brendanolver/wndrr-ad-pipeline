@@ -118,7 +118,7 @@ function assessProduct(ctx, { styleCodes, productCodes, stock, sales, existing }
     ? { status: 'unavailable', reason: (ctx.seasonality && ctx.seasonality.reason) || 'Seasonal data is unavailable' }
     : (famKey && ctx.seasonality.groups.get(famKey)) || { status: 'insufficient_data', evidence: { reason: 'no sales history for this product', summary: '' } };
   const coverage = ctx.coverage && ctx.coverage.available && famKey
-    ? { known: true, active_ads: ctx.coverage.by_family.get(famKey) || 0, min }
+    ? { known: true, active_ads: ctx.coverage.by_family.get(famKey) || 0, min, possible: (ctx.coverage.pending_by_family && ctx.coverage.pending_by_family.get(famKey)) || 0, unattributed: ctx.coverage.unattributed_pending || 0 }
     : { known: false, min };
   const codes = new Set([...(productCodes || []), ...(famKey ? [famKey] : [])]);
   const overrides = (ctx.overrides || []).filter((o) => codes.has(o.product_code));
@@ -135,6 +135,16 @@ function assessProduct(ctx, { styleCodes, productCodes, stock, sales, existing }
 }
 
 // what the page needs to say about where the numbers come from (no money, no internals)
+// What the active-ad counts are, and how far to trust them (stated, never implied).
+function coverageNote(c) {
+  const parts = [];
+  if (c.stale) parts.push(`Ad statuses were last refreshed ${c.stale_days} days ago, so active counts may be out of date.`);
+  const r = c.reliability;
+  if (r && r.awaiting_review > 0) parts.push(`${r.awaiting_review} of ${r.active_ads} active Meta ads (${r.share_awaiting_review}%) are still awaiting review in Ad Matching${r.awaiting_review_without_product ? `, ${r.awaiting_review_without_product} of them with no product suggestion` : ''}. Product counts include only confirmed or auto-matched ads, so a count may be incomplete; a product is only called short of creative when those ads could not close the gap.`);
+  else if (r) parts.push('Every active Meta ad has been reviewed or auto-matched, so product counts are complete as of the last ad-status refresh.');
+  return parts.join(' ') || null;
+}
+
 const srcOf = (ctx) => (ctx.salesSource && ctx.salesSource.source) || null;
 
 // What the seasonality was built from, how much of it, and what is incomplete: stated, never implied.
@@ -166,7 +176,7 @@ function dataStatus(ctx) {
   return {
     min_active_ads: ctx.settings.min_active_ads, high_stock_min_soh: ctx.settings.high_stock_min_soh,
     coverage: c && c.available
-      ? { available: true, status_as_of: c.status_as_of, stale: !!c.stale, stale_days: c.stale_days, note: c.stale ? `Ad statuses were last refreshed ${c.stale_days} days ago, so active counts may be out of date.` : null }
+      ? { available: true, status_as_of: c.status_as_of, stale: !!c.stale, stale_days: c.stale_days, reliability: c.reliability || null, note: coverageNote(c) }
       : { available: false, note: (c && c.reason) || 'Active ad counts are unavailable.' },
     seasonality: s && s.available ? seasonalityStatus(ctx, s) : { available: false, source: srcOf(ctx), note: `${(s && s.reason) || 'Seasonal data is unavailable'}. Priority uses the other factors only.`, notes: (ctx.salesSource && ctx.salesSource.notes) || [] },
     on_order: { available: !!ctx.onOrder },

@@ -91,7 +91,7 @@ test('annotated cards carry a level, the reasons and the factors; the existing r
   assert.equal(fox1.planning.level, 'High', JSON.stringify(fox1.planning.factors));
   const text = fox1.planning.reasons.join('\n');
   assert.match(text, /300 units available — strong stock/);
-  assert.match(text, /2 active Meta ads — below the minimum of 5. Needs creative/);
+  assert.match(text, /2 confirmed active Meta ads — below the minimum of 5, and no awaiting-review ad could close the gap. Needs creative/);
   assert.match(text, /(In season|Coming into season)/);
   assert.equal(fox1.score_base, fox0.score, 'the engine\'s own score is kept; the adjustment is added to it');
   assert.ok(fox1.score > fox1.score_base);
@@ -131,7 +131,7 @@ test('a product below the minimum that is worth acting on (adequate stock, stead
   const india = where(P1, 'INDIA POLO');
   assert.ok(india.card, 'India is a card: ' + JSON.stringify(india));
   assert.equal(india.card.type, 'coverage_gap');
-  assert.match(india.card.why, /only 1 active Meta ad \(the minimum is 5\)/);
+  assert.match(india.card.why, /only 1 confirmed active Meta ad \(the minimum is 5\)/);
   assert.ok(['High', 'Medium'].includes(india.card.planning.level));
   assert.ok(india.card.planning.reasons.length >= 4);
   assert.match(india.card.headline, /Add creative/);
@@ -141,8 +141,8 @@ test('active ads: 0 ads reads "no active Meta ads"; 4 needs creative; 5 does not
   const ctx = await ctxFor({ coverage: covBy({ 'KILO TEE': 0, 'LIMA TEE': 4, 'INDIA POLO': 5 }) });
   const P1 = plan.buildPlan({ ...baseArgs, planning: ctx });
   const kilo = where(P1, 'KILO TEE'); const lima = where(P1, 'LIMA TEE'); const india = where(P1, 'INDIA POLO');
-  assert.ok(kilo.card && kilo.card.type === 'coverage_gap' && /no active Meta ads/.test(kilo.card.why), JSON.stringify(kilo));
-  assert.ok(lima.card && lima.card.type === 'coverage_gap' && /only 4 active Meta ads \(the minimum is 5\)/.test(lima.card.why), JSON.stringify(lima));
+  assert.ok(kilo.card && kilo.card.type === 'coverage_gap' && /no confirmed active Meta ads/.test(kilo.card.why), JSON.stringify(kilo));
+  assert.ok(lima.card && lima.card.type === 'coverage_gap' && /only 4 confirmed active Meta ads \(the minimum is 5\)/.test(lima.card.why), JSON.stringify(lima));
   assert.equal(india.card, null, '5 active ads meets the minimum: no coverage card');
   assert.equal(india.other, null);
   assert.ok(kilo.card.planning.score_delta > lima.card.planning.score_delta, '0 ads weighs more than 4');
@@ -197,4 +197,75 @@ test('active-ad counting: DISTINCT ads per product family; colourways / season c
 test('planning modules only READ: no writes, no Meta client, no network', () => {
   const read = (f) => require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'lib', f), 'utf8').replace(/\/\/.*$/gm, '');
   ['activeAdCoverage.js', 'planningContext.js', 'seasonality.js', 'creativePriority.js'].forEach((f) => { assert.doesNotMatch(read(f), /\b(INSERT|UPDATE|DELETE)\b|fetch\(|https?\.request|metaAds'\)/, f); });
+});
+
+// ── coverage RELIABILITY: confirmed ads vs active ads still awaiting review ──
+const withPending = (cov, pendingByName, unattributed) => ({ ...cov, pending_by_family: new Map(allFamilies.map((f) => [f.key, pendingByName[f.name] || 0])), unattributed_pending: unattributed || 0, reliability: { active_ads: 40, confirmed_or_auto: 30, awaiting_review: 10, awaiting_review_without_product: unattributed || 0, share_awaiting_review: 25, complete: false } });
+
+test('classify(): meets / below (reliable) / uncertain, by whether awaiting-review ads could close the gap', () => {
+  assert.equal(cov.classify({ confirmed: 5, min: 5 }).state, 'meets');
+  assert.equal(cov.classify({ confirmed: 7, possible: 3, unattributed: 9, min: 5 }).state, 'meets', 'confirmed ads alone meet it: pending ads are irrelevant');
+  assert.equal(cov.classify({ confirmed: 2, possible: 0, unattributed: 0, min: 5 }).state, 'below', 'nothing pending: a reliable shortage');
+  assert.equal(cov.classify({ confirmed: 2, possible: 1, unattributed: 1, min: 5 }).state, 'below', '2 + 1 + 1 = 4 < 5: even all of them would not reach the minimum');
+  const u = cov.classify({ confirmed: 2, possible: 2, unattributed: 1, min: 5 });
+  assert.equal(u.state, 'uncertain'); assert.equal(u.likely_meets, false, '2 confirmed + 2 suggested for it = 4: only the unattributed ad could make 5');
+});
+test('classify(): "likely meets" only when confirmed + suggested-for-it reach the minimum', () => {
+  assert.equal(cov.classify({ confirmed: 3, possible: 2, unattributed: 0, min: 5 }).likely_meets, true);
+  assert.equal(cov.classify({ confirmed: 3, possible: 0, unattributed: 4, min: 5 }).likely_meets, false);
+  assert.equal(cov.classify({ confirmed: 3, possible: 0, unattributed: 4, min: 5 }).state, 'uncertain');
+});
+test('pendingByFamily(): an awaiting-review ad counts toward each product it is suggested for (once per family); ads with no product suggestion are unattributed', () => {
+  const fams = [{ key: 'A', codes: ['A1', 'A2'] }, { key: 'B', codes: ['B1'] }];
+  const r = cov.pendingByFamily(fams, [
+    { meta_ad_id: 'x1', suggested_codes: ['A1', 'A2'] }, // two codes of one family -> once
+    { meta_ad_id: 'x2', suggested_codes: ['A2', 'B1'] }, // suggested for two families
+    { meta_ad_id: 'x3', suggested_codes: null }, { meta_ad_id: 'x4', suggested_codes: [] }, { meta_ad_id: 'x5', suggested_codes: ['ZZZ'] },
+  ]);
+  assert.equal(r.by_family.get('A'), 2); assert.equal(r.by_family.get('B'), 1);
+  assert.equal(r.unattributed, 2, 'x3 and x4; x5 points at a product that is not in the list');
+});
+test('a product whose confirmed count is low but whose awaiting-review ads could close the gap is NOT called short of creative', async () => {
+  const base = covBy({ 'KILO TEE': 3, 'LIMA TEE': 3, 'INDIA POLO': 3 });
+  const ctx = await ctxFor({ coverage: withPending(base, { 'KILO TEE': 2 }, 0) }); // KILO: 3 confirmed + 2 suggested = 5 -> likely meets; LIMA / INDIA: nothing could close it
+  const P1 = plan.buildPlan({ ...baseArgs, planning: ctx });
+  const kilo = where(P1, 'KILO TEE'); const lima = where(P1, 'LIMA TEE');
+  assert.equal(kilo.card, null, 'no "add creative" card for KILO: the count may be incomplete');
+  assert.equal(kilo.other, null, 'and it is not in the "needs creative" list either');
+  const k = P1.planning.coverage_uncertain.find((x) => x.product_name === 'KILO TEE');
+  assert.ok(k && k.confirmed_active_ads === 3 && k.suggested_for_it === 2 && k.likely_meets_after_review === true, JSON.stringify(P1.planning.coverage_uncertain));
+  assert.ok(lima.card && lima.card.type === 'coverage_gap', 'LIMA has no awaiting-review ad that could help: a reliable shortage still produces a card');
+  assert.equal(lima.card.planning.coverage.reliable, true);
+  assert.equal(P1.counts.coverage_uncertain, P1.planning.coverage_uncertain.length);
+  assert.ok(P1.planning.counts.needs_creative >= 1 && !P1.planning.coverage_uncertain.some((x) => x.product_name === 'LIMA TEE'));
+});
+test('unattributed awaiting-review ads can also make a count uncertain, and the reason says exactly why in plain words', async () => {
+  const ctx = await ctxFor({ coverage: withPending(covBy({ 'KILO TEE': 3 }), {}, 2) });
+  const P1 = plan.buildPlan({ ...baseArgs, planning: ctx });
+  const k = P1.planning.coverage_uncertain.find((x) => x.product_name === 'KILO TEE');
+  assert.ok(k && k.without_product_suggestion === 2 && k.likely_meets_after_review === false);
+  const a = ctx.allFamilies && require('../src/lib/planningContext').assessProduct(ctx, { styleCodes: ['W26KK001BLK'], productCodes: ['W26KK001'], stock: { known: true, units: 100 }, sales: { available: true, seller_class: 'neutral', trend: 'flat' }, existing: null });
+  const text = a.reasons.join('\n');
+  assert.match(text, /3 confirmed active Meta ads — below the minimum of 5, but the count may be incomplete/);
+  assert.match(text, /2 have no product suggestion yet/);
+  assert.match(text, /Not treated as a shortage until they are reviewed/);
+  assert.ok(a.missing.includes('coverage_confirmation'));
+  assert.equal(a.factors.find((f) => f.key === 'coverage').points, 0, 'an uncertain count carries no creative-gap points');
+});
+test('the threshold is still read from Settings: with a minimum of 3, 3 confirmed ads meets it and 2 + pending is uncertain', async () => {
+  const ctx = await ctxFor({ settings: { min_active_ads: 3, high_stock_min_soh: 100 }, coverage: { ...withPending(covBy({ 'KILO TEE': 3, 'LIMA TEE': 2 }), { 'LIMA TEE': 1 }, 0), min: 3 } });
+  const pcx = require('../src/lib/planningContext');
+  const kilo = pcx.assessProduct(ctx, { styleCodes: ['W26KK001BLK'], productCodes: ['W26KK001'], stock: { known: true, units: 100 }, sales: { available: true, seller_class: 'neutral' }, existing: null });
+  const lima = pcx.assessProduct(ctx, { styleCodes: ['W26LL001BLK'], productCodes: ['W26LL001'], stock: { known: true, units: 100 }, sales: { available: true, seller_class: 'neutral' }, existing: null });
+  assert.equal(kilo.coverage.needs_creative, false); assert.equal(kilo.coverage.uncertain, false); assert.equal(kilo.coverage.min, 3);
+  assert.equal(lima.coverage.uncertain, true); assert.equal(lima.coverage.min, 3);
+});
+test('data status explains how complete the counts are', async () => {
+  const ds = pc.dataStatus(await ctxFor({ coverage: withPending(covBy({}), {}, 3) }));
+  assert.equal(ds.coverage.reliability.awaiting_review, 10);
+  assert.match(ds.coverage.note, /10 of 40 active Meta ads \(25%\) are still awaiting review/);
+  assert.match(ds.coverage.note, /3 of them with no product suggestion/);
+  assert.match(ds.coverage.note, /may be incomplete/);
+  const clean = pc.dataStatus(await ctxFor({ coverage: { ...covBy({}), reliability: { active_ads: 12, confirmed_or_auto: 12, awaiting_review: 0, awaiting_review_without_product: 0, share_awaiting_review: 0, complete: true } } }));
+  assert.match(clean.coverage.note, /Every active Meta ad has been reviewed or auto-matched/);
 });

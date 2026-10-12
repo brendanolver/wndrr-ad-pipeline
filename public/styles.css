@@ -3069,3 +3069,5 @@ td.mp-name > .mp-name-stack{vertical-align:middle;max-width:calc(100% - 46px);}
 .po-match { border: 1px solid #d5dae1; background: #fff; border-radius: 6px; padding: 3px 8px; cursor: pointer; font-size: 12.5px; }
 .po-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid #eceff3; }
 .po-row .btn { margin-left: auto; }
+
+.plan-cov-uncertain { background: #fff1d6; color: #8a5a00; }

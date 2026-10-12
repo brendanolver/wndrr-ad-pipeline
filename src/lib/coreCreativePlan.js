@@ -419,11 +419,13 @@ function buildPlan({ families, codeToFamily, snapshot, demand, stock, sizesBySty
     // 3. products below the minimum coverage that have no card yet
     const hasCard = new Set(cards.map((c) => c.product.product_code));
     const needsOther = [];
+    const uncertainCoverage = []; // below the minimum on CONFIRMED ads, but active ads still awaiting review could close the gap: not treated as a shortage
     let needsCreativeCount = 0; let coverageCards = 0;
     families.forEach((f) => {
       const st = stockByFamily.get(f.key);
       const a = assessments.get(f.key) || assessFor(f, null);
       if (a.coverage.known && a.coverage.needs_creative) needsCreativeCount += 1;
+      if (a.coverage.known && a.coverage.uncertain) uncertainCoverage.push({ product_code: f.product_code, product_name: f.name, confirmed_active_ads: a.coverage.active_ads, min: a.coverage.min, suggested_for_it: a.coverage.possible, without_product_suggestion: a.coverage.unattributed, likely_meets_after_review: a.coverage.active_ads + a.coverage.possible >= a.coverage.min });
       if (hasCard.has(f.product_code) || !a.coverage.known || !a.coverage.needs_creative) return;
       const held = heldLowStock.find((h) => h.product_code === f.product_code);
       const stockOk = st && st.known && st.pass;
@@ -433,7 +435,7 @@ function buildPlan({ families, codeToFamily, snapshot, demand, stock, sizesBySty
         const card = cardBase({
           type: 'coverage_gap', family: f, ps, facts, stock: st, benchmarkCpa, priority: a.level === 'High' ? 'High' : 'Medium', severity: 0,
           headline: 'Add creative — below the minimum', strength: 30,
-          why: `${f.name} has ${a.coverage.active_ads === 0 ? 'no active Meta ads' : `only ${a.coverage.active_ads} active Meta ad${a.coverage.active_ads === 1 ? '' : 's'}`} (the minimum is ${a.coverage.min}).`,
+          why: `${f.name} has ${a.coverage.active_ads === 0 ? 'no confirmed active Meta ads' : `only ${a.coverage.active_ads} confirmed active Meta ad${a.coverage.active_ads === 1 ? '' : 's'}`} (the minimum is ${a.coverage.min}), and no active ad still awaiting review could close the gap.`,
         });
         card.planning = publicOf(a); card.score_base = card.score; card.score += a.score_adjust; card.evidence = null;
         cards.push(card); assessments.set(f.key, a); coverageCards += 1;
@@ -447,7 +449,8 @@ function buildPlan({ families, codeToFamily, snapshot, demand, stock, sizesBySty
     });
     planningOut = {
       data: planningContext.dataStatus(planning), promoted_by_exception: promoted, needs_creative_other: needsOther.sort((x, y) => x.active_ads - y.active_ads || x.product_name.localeCompare(y.product_name)),
-      counts: { needs_creative: needsCreativeCount, coverage_cards: coverageCards, needs_creative_not_a_priority: needsOther.length },
+      coverage_uncertain: uncertainCoverage.sort((x, y) => (y.suggested_for_it - x.suggested_for_it) || x.product_name.localeCompare(y.product_name)),
+      counts: { needs_creative: needsCreativeCount, coverage_cards: coverageCards, needs_creative_not_a_priority: needsOther.length, coverage_uncertain: uncertainCoverage.length },
     };
   }
   heldLowStock.forEach((h) => { delete h._rec; delete h._family; });
@@ -482,7 +485,7 @@ function buildPlan({ families, codeToFamily, snapshot, demand, stock, sizesBySty
       hold: active.filter((c) => c.type === 'hold').length,
       no_action: noAction.length,
       stock_known: stockKnown,
-      ...(planningOut ? { needs_creative: planningOut.counts.needs_creative, needs_creative_not_a_priority: planningOut.counts.needs_creative_not_a_priority } : {}),
+      ...(planningOut ? { needs_creative: planningOut.counts.needs_creative, needs_creative_not_a_priority: planningOut.counts.needs_creative_not_a_priority, coverage_uncertain: planningOut.counts.coverage_uncertain } : {}),
     },
     concepts: { proven: concepts.concepts.filter((c) => c.status === 'proven').length, benchmark_cpa: benchmarkCpa },
     folded_ads: folded.ads.length,

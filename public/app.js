@@ -2699,7 +2699,9 @@ function planChipsHtml(pl) {
   chips.push(`<span class="plan-chip plan-stock-${escapeHtml(st.band || 'unknown')}">${st.band === 'unknown' ? 'Stock n/a' : st.band === 'out' ? 'Out of stock' : `${cpNum(st.units)} units`}</span>`);
   const cv = pl.coverage || {};
   chips.push(cv.known
-    ? `<span class="plan-chip ${cv.needs_creative ? 'plan-cov-low' : 'plan-cov-ok'}" title="Distinct active Meta ads matched to this product (minimum ${cv.min})">${cv.active_ads}/${cv.min} active ads</span>`
+    ? (cv.uncertain
+      ? `<span class="plan-chip plan-cov-uncertain" title="${cv.active_ads} confirmed active Meta ads for this product (minimum ${cv.min}). Active ads are still awaiting review in Ad Matching (${cv.possible} suggested for this product, ${cv.unattributed} with no product suggestion), so this count may be incomplete and is not treated as a shortage.">${cv.active_ads}/${cv.min} confirmed · may be incomplete</span>`
+      : `<span class="plan-chip ${cv.needs_creative ? 'plan-cov-low' : 'plan-cov-ok'}" title="Distinct confirmed active Meta ads for this product (minimum ${cv.min})">${cv.active_ads}/${cv.min} active ads</span>`)
     : '<span class="plan-chip plan-cov-unknown">Ad count n/a</span>');
   (pl.exceptions || []).forEach((e) => chips.push(`<span class="plan-chip plan-exception" title="${escapeHtml(e.note || '')}">${escapeHtml(e.label)}</span>`));
   return `<div class="plan-chips">${chips.join('')}</div>`;
@@ -2815,7 +2817,8 @@ function renderCorePlan() {
       <span>${c.held_low_stock} held back (low stock)</span>
       ${c.stock_unavailable ? `<span class="cp-warn">${c.stock_unavailable} withheld (stock unavailable)</span>` : ''}
       <span>${c.no_action} need no action</span>
-      ${c.needs_creative !== undefined ? `<span title="Products with fewer active Meta ads than the minimum"><b>${c.needs_creative}</b> need creative</span>` : ''}
+      ${c.needs_creative !== undefined ? `<span title="Products with fewer confirmed active Meta ads than the minimum, where no ad still awaiting review could close the gap"><b>${c.needs_creative}</b> need creative</span>` : ''}
+      ${c.coverage_uncertain ? `<span class="cp-warn" title="Below the minimum on confirmed ads, but active ads are still awaiting review, so the count may be incomplete"><b>${c.coverage_uncertain}</b> coverage uncertain</span>` : ''}
       <span class="co-subnav" id="cp-state-nav" role="tablist">
         <button type="button" class="co-subnav-btn ${f === 'active' ? 'active' : ''}" data-cp-state="active">To act on</button>
         <button type="button" class="co-subnav-btn ${f === 'acted_on' ? 'active' : ''}" data-cp-state="acted_on">Done</button>
@@ -2828,6 +2831,7 @@ function renderCorePlan() {
     ${f === 'active' && d.stock_unavailable.length ? `<div class="co-banner cp-stock-unavail"><b>Stock unavailable — recommendation withheld (${d.stock_unavailable.length})</b><div class="cp-low">${d.stock_unavailable.map((p) => `<div><b>${escapeHtml(p.product_name)}</b> — ${p.reason === 'no_stock_record' ? 'no inventory record in ApparelMagic' : 'stock data not loaded'}${p.would_have_been ? ` <span class="hint">(would otherwise suggest: ${escapeHtml(p.would_have_been)})</span>` : ''}</div>`).join('')}</div><div class="hint">This is a data problem, not low stock: these products are not shown as shoot recommendations until their stock can be read.</div></div>` : ''}
     ${f === 'active' && low.length ? `<details class="co-how"><summary>Not recommended: low stock (${low.length})</summary><div class="cp-low">${low.map((p) => `<div><b>${escapeHtml(p.product_name)}</b> — ${cpNum(p.units)} units${p.would_have_been ? ` <span class="hint">(would otherwise suggest: ${escapeHtml(p.would_have_been)})</span>` : ''}</div>`).join('')}</div></details>` : ''}
     ${f === 'active' && d.planning && d.planning.needs_creative_other.length ? `<details class="co-how"><summary>Needs creative, but not a shoot priority (${d.planning.needs_creative_other.length})</summary><div class="cp-low">${d.planning.needs_creative_other.map((p) => `<div><b>${escapeHtml(p.product_name)}</b> — ${p.active_ads}/${p.min} active ads · ${escapeHtml(p.season)}${p.stock_units != null ? ` · ${cpNum(p.stock_units)} units` : ''} <span class="hint">${escapeHtml(p.why_not_a_priority)}</span></div>`).join('')}</div></details>` : ''}
+    ${f === 'active' && d.planning && (d.planning.coverage_uncertain || []).length ? `<details class="co-how"><summary>Coverage may be incomplete — review ads before making creative (${d.planning.coverage_uncertain.length})</summary><div class="cp-low">${d.planning.coverage_uncertain.map((p) => `<div><b>${escapeHtml(p.product_name)}</b> — ${p.confirmed_active_ads}/${p.min} confirmed active ads · ${p.suggested_for_it} awaiting review suggested for it · ${p.without_product_suggestion} with no product suggestion <span class="hint">${p.likely_meets_after_review ? 'likely meets the minimum once reviewed' : 'review them in Ad Matching to know'}</span></div>`).join('')}</div></details>` : ''}
     ${f === 'active' && d.no_action.length ? `<details class="co-how"><summary>No action needed (${d.no_action.length})</summary><div class="cp-low hint">${d.no_action.map(escapeHtml).join(' · ')}</div></details>` : ''}
     <details class="co-how"><summary>About this data</summary><ul class="co-how-list">${notes.map((n) => `<li>${escapeHtml(n)}</li>`).join('')}</ul></details>`;
 }
