@@ -617,7 +617,8 @@ async function computePlan({ now = new Date(), isAdmin = false } = {}, deps = {}
   // ONE headline per product (Batch 12): the unified production priority from the weekly plan travels with every card. The engine's own priority and the Batch 11
   // level stay inside the card as signals; the UI shows only this category so a card is never "critical" and "low priority" at once.
   let weekly = null;
-  try { weekly = deps.weekly !== undefined ? deps.weekly : await weeklyLoader.getWeeklyPlan(); } catch (e) { weekly = null; }
+  // (Batch 14: the weekly video plan is retired, so no weekly category is attached unless a caller supplies one)
+  weekly = deps.weekly !== undefined ? deps.weekly : null;
   if (weekly && weekly.available) {
     const byCode = new Map();
     weekly.products.forEach((wp) => (wp.codes || []).forEach((c) => byCode.set(c, wp)));

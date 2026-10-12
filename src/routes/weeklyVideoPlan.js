@@ -1,3 +1,6 @@
+// RETIRED AS A WORKFLOW (Batch 14): the Weekly Plan screen, its 25-video target and its automatic video allocation are gone from the app. Planning is now Core -> High Stocks ->
+// Shoot Plan with a weekly target of NEW CONCEPTS (src/routes/opportunities.js, src/lib/shootPlanProgress.js). This router stays ONLY because the launch-override and
+// recommendation-tuning endpoints below are still used by Settings and by the launch checks, and so historical records and any other caller keep working.
 // Weekly VIDEO plan: GET the ranked recommendations + the week's production totals, read and edit the recommendation tuning, and manage launch-status overrides.
 // Read-only apart from the settings / override tables it owns; it never creates production records (the Shoot Plan does that, on a person's explicit action).
 const express = require('express');
@@ -10,7 +13,7 @@ const router = express.Router();
 const WEEK_RE = /^\d{4}-\d{2}-\d{2}$/;
 const CODE_RE = /^[A-Z0-9]{3,32}$/;
 
-const invalidate = () => loader.invalidate();
+const invalidate = () => { loader.invalidate(); try { require('../lib/planningOpportunitiesLoader').invalidate(); } catch (e) { /* cache only */ } };
 
 router.get('/', async (req, res, next) => {
   try {

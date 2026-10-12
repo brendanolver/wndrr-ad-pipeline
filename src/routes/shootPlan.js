@@ -472,6 +472,24 @@ router.get('/progress', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// Adds more distinct concepts to a product already in the Shoot Plan (each is its own Concept Development record; nothing existing is changed).
+router.post('/:id/concepts', async (req, res, next) => {
+  const count = Number((req.body || {}).count);
+  if (!Number.isInteger(count) || count < 1 || count > MAX_CONCEPTS) return res.status(400).json({ error: `count must be a whole number from 1 to ${MAX_CONCEPTS}` });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const item = (await client.query('SELECT * FROM shoot_plan_items WHERE id = $1 FOR UPDATE', [req.params.id])).rows[0];
+    if (!item) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Shoot Plan item not found' }); }
+    const have = (await client.query("SELECT count(*)::int AS n FROM creative_assets WHERE shoot_plan_item_id = $1 AND concept_dev_status <> 'killed'", [item.id])).rows[0].n;
+    const cu = await client.query('SELECT user_id FROM content_creators WHERE LOWER(name) = LOWER($1) AND user_id IS NOT NULL', [item.creator || '']);
+    const made = await ensureConcepts(client, item, have + count, { baseName: item.product_name ? `New Concept — ${item.product_name}` : 'New Concept', creator: item.creator, createdByUserId: cu.rows[0] ? cu.rows[0].user_id : null, format: 'video' });
+    await client.query('UPDATE shoot_plan_items SET planned_videos = GREATEST(planned_videos, $1) WHERE id = $2', [have + made, item.id]);
+    await client.query('COMMIT'); bust();
+    res.status(201).json({ item_id: item.id, added: made, concepts: have + made });
+  } catch (err) { await client.query('ROLLBACK'); next(err); } finally { client.release(); }
+});
+
 // One concept adapted for another product: the concept stays ONE record (and one count); this records the extra product so both products show the concept.
 router.post('/concepts/:id/products', async (req, res, next) => {
   try {

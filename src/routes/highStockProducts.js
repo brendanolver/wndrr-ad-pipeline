@@ -374,7 +374,8 @@ async function computeHighStockProducts(deps = {}) {
     // A product whose launch status cannot be established stays visible, clearly flagged, rather than being assumed launched.
     let excludedUnlaunched = []; let families = []; const verification = [];
     let weekly = null;
-    try { weekly = deps.weekly !== undefined ? deps.weekly : await weeklyLoader.getWeeklyPlan(); } catch (e) { weekly = null; }
+    // (Batch 14: the weekly video plan is retired, so no weekly category is attached unless a caller supplies one)
+    weekly = deps.weekly !== undefined ? deps.weekly : null;
     if (planning) {
       const famByKey = new Map(planning.allFamilies.map((f) => [f.key, f]));
       const lc = deps.launch || await weeklyLoader.loadLaunchContext(pool, products.map((p) => p.style_code));

@@ -33,7 +33,7 @@ let state = {
   // -- always starts at Core on load (not persisted to localStorage): this
   // is a recurring weekly ritual, not a session to resume, so a stale
   // mid-flow step from a prior visit would only confuse.
-  planningStep: 'weekly',
+  planningStep: 'core',
   promotions: [], currentPromotionId: null, currentPromotion: null,
   weeklyShootPlanConfirmation: null,
   // Set by "Edit Plan" on the confirmed handoff card -- lets the team keep
@@ -699,13 +699,14 @@ const mpState = {
   reachTimer: null,
   funnel: 'all', // all | TOF | TOM | MOF | multiple | unknown
   campaign: '', // exact Meta campaign id or ''
+  dpa: false, // include Dynamic Product Ads (default: excluded)
   fresh: null, // last /freshness answer
   lastAutoAt: {}, // range key -> ms of the last automatic refresh request from this page
   freshPoll: null,
   freshTimer: null,
   campaignsFor: '', // range key the campaign dropdown was loaded for
 };
-const mpFilterQuery = () => `${mpState.funnel && mpState.funnel !== 'all' ? `&funnel=${encodeURIComponent(mpState.funnel)}` : ''}${mpState.campaign ? `&campaign_id=${encodeURIComponent(mpState.campaign)}` : ''}`;
+const mpFilterQuery = () => `${mpState.dpa ? '&dpa=include' : ''}${mpState.funnel && mpState.funnel !== 'all' ? `&funnel=${encodeURIComponent(mpState.funnel)}` : ''}${mpState.campaign ? `&campaign_id=${encodeURIComponent(mpState.campaign)}` : ''}`;
 const mpFiltered = () => (mpState.funnel && mpState.funnel !== 'all') || !!mpState.campaign;
 const MP_FUNNEL_LABEL = { TOF: 'TOF', TOM: 'TOM', MOF: 'MOF', multiple: 'Mixed', unknown: 'Unknown' };
 function mpFunnelBadge(f) {
@@ -840,6 +841,7 @@ function mpRenderSummary(sum) {
        <span>Ads with activity <b>${Number(sum.totals.ads_with_activity).toLocaleString('en-AU')}</b></span>
      </div>`;
 
+  mpRenderDpaNote(sum.dpa);
   mpState.reach = sum.reach_frequency;
   mpRenderReachBar();
   const fnote = document.getElementById('mp-filter-note');
@@ -862,6 +864,17 @@ function mpRenderSummary(sum) {
   return true;
 }
 
+
+// Dynamic Product Ads are excluded by default (they are stored, never deleted). The label always says whether the totals include or exclude them.
+function mpRenderDpaNote(dpa) {
+  const el = document.getElementById('mp-dpa-note');
+  if (!el) return;
+  if (!dpa) { el.textContent = ''; el.title = ''; return; }
+  const spend = dpa.ads ? ` · ${dpa.ads.toLocaleString('en-AU')} DPA ad${dpa.ads === 1 ? '' : 's'}, $${Math.round(dpa.spend).toLocaleString('en-AU')} spend in this period` : '';
+  el.textContent = `${dpa.label}${spend}`;
+  el.title = dpa.note || '';
+  el.dataset.mode = dpa.mode;
+}
 
 // The benchmark strip above the table: for CPA, Frequency and Reach it says which funnels have an ACTIVE benchmark for the selected period
 // (and its target), which have one that does not apply to this period length, and which have none -- so a grey value is always explained.
@@ -897,7 +910,7 @@ function mpRenderBenchStrip(res) {
     lines.push(`<li><b>${f} ${LAB[m]}</b> ${bands.map((b) => `<span class="mp-health mp-health-${escapeHtml(b.state)}"></span>${escapeHtml(fmtBand(m, b.text))}`).join(' · ')} <small>(${escapeHtml(((h.matrix[f][m].windows || []).map((w) => w.text).join('; ')) || 'any period')})</small></li>`);
   }));
   hn.style.display = '';
-  hn.innerHTML = `<div class="mp-bench-strip" id="mp-bench-strip">${groups}${reachMissing ? '<div class="mp-bench-group mp-bench-warn">Frequency and Reach for this period have not been loaded yet, so they show without colour until they are (use Refresh).</div>' : ''}</div>
+  hn.innerHTML = `<details class="mp-bench-details"><summary title="The approved benchmarks the cell colours use">Benchmarks in use</summary><div class="mp-bench-strip" id="mp-bench-strip">${groups}${reachMissing ? '<div class="mp-bench-group mp-bench-warn">Frequency and Reach for this period have not been loaded yet, so they show without colour until they are (use Refresh).</div>' : ''}</div></details>
     <details class="mp-health-guide"><summary title="What the colours mean">ⓘ Colour guide</summary>
       <ul>${lines.join('') || '<li>No benchmark is active.</li>'}</ul>
       <div class="mp-health-foot">Green = meets the benchmark · orange = misses it by up to ${h.tolerance_pct || 20}% · red = misses it by more. A value better than the target (for example a CPA under $40) stays green. ${unjudged ? `${unjudged.toLocaleString('en-AU')} ad${unjudged === 1 ? '' : 's'} in this view ha${unjudged === 1 ? 's' : 've'} an Unknown or Mixed funnel (campaign name without a single TOF / TOM / MOF), so never ${unjudged === 1 ? 'gets' : 'get'} a colour. ` : ''}CPA is Meta-reported (Triple Whale is not connected yet). ${state.currentUser && state.currentUser.role === 'admin' ? '<a href="#" data-open-bench-settings>Edit benchmarks in Settings</a>' : ''}</div></details>`;
@@ -1198,7 +1211,7 @@ function mpRenderFreshness() {
   if (f.is_refreshing) note = '<span class="mp-fresh-busy">Refreshing…</span>';
   else if (!f.auto_enabled) note = `<span class="mp-fresh-off" title="${escapeHtml(f.auto_disabled_reason || '')}">Automatic refresh is off</span>`;
   else if (f.additive.needs_backfill) note = '<span class="mp-fresh-off" title="Older days in this period were never synced; only a manual backfill can fill them.">Older days need a manual backfill</span>';
-  el.innerHTML = `<span>${parts.map(escapeHtml).join(' · ')}</span> ${note} <button type="button" class="btn btn-ghost btn-sm" id="mp-refresh-now" ${f.is_refreshing ? 'disabled' : ''}>Refresh now</button>`;
+  el.innerHTML = `<span class="mp-fresh-text" title="${escapeHtml(parts.join(' · '))}">${escapeHtml(parts[0])}${parts.length > 1 ? ' <i class="mp-fresh-more">+' + (parts.length - 1) + '</i>' : ''}</span> ${note} <button type="button" class="btn btn-ghost btn-sm" id="mp-refresh-now" ${f.is_refreshing ? 'disabled' : ''}>Refresh now</button>`;
 }
 async function mpCheckFreshness() {
   try {
@@ -1279,6 +1292,7 @@ async function mpLoadCampaignFilter() {
     if (b) b.onclick = async () => { b.disabled = true; try { await api('/meta-performance/campaigns/refresh', { method: 'POST', body: '{}' }); mpState.campaignsFor = ''; loadMetaPerformance(); } catch (e) { toast(e.message, true); b.disabled = false; } };
   } catch (e) { /* the filter is optional */ }
 }
+document.getElementById('mp-dpa').addEventListener('change', (e) => { mpState.dpa = e.target.checked; mpState.page = 1; loadMetaPerformance(); });
 document.getElementById('mp-funnel').addEventListener('change', (e) => { mpState.funnel = e.target.value; mpState.page = 1; loadMetaPerformance(); });
 document.getElementById('mp-campaign').addEventListener('change', (e) => { mpState.campaign = e.target.value; mpState.page = 1; loadMetaPerformance(); });
 
@@ -2648,6 +2662,8 @@ const CP_VISIBLE = 12;
 const CP_TYPE_LABEL = { shoot_fresh: 'Shoot', test_new: 'Test', try_concept: 'Concept', hold: 'Hold' };
 
 async function loadCorePlan(force) {
+  // Batch 14: Core is the opportunity list (planning.js); the older plan below is no longer rendered
+  if (typeof plLoadOpportunities === 'function') return plLoadOpportunities(!!force);
   const host = document.getElementById('core-plan');
   if (!host || cpState.loading) return;
   if (!force && cpState.data && Date.now() - cpState.loadedAt < 5 * 60 * 1000) return;
@@ -2800,7 +2816,7 @@ function cpCardHtml(c) {
           <div class="cp-tile-uc" title="Entirely different pieces of creative (distinct Meta creative ids) with an ad delivering. The same creative duplicated into several campaigns / ad sets counts once."><dt>Unique creatives running</dt><dd><b>${u}</b> <span class="hint">· ${cr.active_ads} Meta ad${cr.active_ads === 1 ? '' : 's'} using ${u === 1 ? 'it' : 'them'}</span></dd></div>
           <div><dt>Meta</dt><dd>${escapeHtml(c.meta_status)}</dd></div>
         </dl>
-        ${c.stock.size_warning ? `<div class="cp-tile-warn" title="${escapeHtml(c.stock.size_warning)}">⚠ ${escapeHtml(c.stock.size_level === 'broken' ? 'Broken sizes' : 'Limited sizes')}</div>` : ''}
+        ${c.stock.size_warning ? `<div class="cp-tile-warn" title="${escapeHtml(c.stock.size_warning)}"><svg class=ic aria-hidden=true focusable=false><use href=#i-warning></use></svg> ${escapeHtml(c.stock.size_level === 'broken' ? 'Broken sizes' : 'Limited sizes')}</div>` : ''}
         ${c.state ? `<div class="cp-tile-state">${c.state.state === 'dismissed' ? 'Dismissed' : 'Done'} ${escapeHtml(c.state.acted_at.slice(0, 10))}</div>` : ''}
       </div>
     </article>`;
@@ -2828,7 +2844,7 @@ function cpDetailHtml(c) {
         ${c.weekly ? `<div class="cp-weekly-line"><b>${escapeHtml(c.weekly.headline)}</b></div>` : ''}
         ${c.planning ? `${planChipsHtml(c.planning)}${planSeasonHtml(c.planning)}${planWhyHtml(c.planning)}` : ''}
         ${cpFactsHtml(c)}
-        ${c.stock.size_warning ? `<div class="co-note cp-size-warn">⚠ ${escapeHtml(c.stock.size_warning)}</div>` : ''}
+        ${c.stock.size_warning ? `<div class="co-note cp-size-warn"><svg class=ic aria-hidden=true focusable=false><use href=#i-warning></use></svg> ${escapeHtml(c.stock.size_warning)}</div>` : ''}
         ${note}
         <div class="co-actions">
           ${canShoot ? '<button type="button" class="btn btn-primary btn-sm" data-cp-act="shoot">Shoot this week</button>' : ''}
@@ -2841,6 +2857,7 @@ function cpDetailHtml(c) {
 }
 
 function renderCorePlan() {
+  if (typeof plRenderCore === 'function') { plRenderCore(); return; }
   const host = document.getElementById('core-plan');
   const d = cpState.data;
   if (!host || !d) return;
@@ -2941,7 +2958,7 @@ function cpEvidenceHtml(c) {
   return `
     <div class="co-ev-head"><b>${escapeHtml(c.headline)}</b><div class="hint">${escapeHtml(c.why)}</div></div>
     <h4>Sales</h4>${sales}
-    <h4>Stock ${e.stock.units === null ? '' : `<span class="hint">(${cpNum(e.stock.units)} sellable units · minimum ${e.stock.minimum})</span>`}</h4>${sizes}${e.stock.size_warning ? `<div class="co-note cp-size-warn">⚠ ${escapeHtml(e.stock.size_warning)}</div>` : ''}
+    <h4>Stock ${e.stock.units === null ? '' : `<span class="hint">(${cpNum(e.stock.units)} sellable units · minimum ${e.stock.minimum})</span>`}</h4>${sizes}${e.stock.size_warning ? `<div class="co-note cp-size-warn"><svg class=ic aria-hidden=true focusable=false><use href=#i-warning></use></svg> ${escapeHtml(e.stock.size_warning)}</div>` : ''}
     <h4>Creative history</h4>${creative}<div class="hint">${reliability}</div>
     <h4>Meta</h4>${meta}
     <h4>Creatives <span class="hint">(click ▶ to play)</span></h4>${creatives}
@@ -4104,7 +4121,7 @@ function renderCard(card) {
       ${card.is_deliberate_trial ? '<span class="badge badge-trial">Deliberate Trial</span>' : ''}
     </div>
     <div class="card-meta">
-      <span class="card-owner">${card.current_owner ? '👤 ' + escapeHtml(card.current_owner) : '👤 unassigned'}</span>
+      <span class="card-owner">${card.current_owner ? '<svg class=ic aria-hidden=true focusable=false><use href=#i-user></use></svg> ' + escapeHtml(card.current_owner) : '<svg class=ic aria-hidden=true focusable=false><use href=#i-user></use></svg> unassigned'}</span>
       <span class="card-days ${stale ? 'stale' : ''}">${daysLabel(card.days_in_stage)}</span>
       ${card.target_date ? `<span>Target: ${card.target_date}</span>` : ''}
     </div>
@@ -4159,13 +4176,13 @@ const STATUS_LABEL_TEXT = { on_track: 'On Track', at_risk: 'At Risk', off_track:
 
 const KPI_CARDS = [
   { key: 'planned', icon: '▤', label: 'Planned', defaultSub: 'Committed for this week' },
-  { key: 'briefing', icon: '✎', label: 'Briefing', defaultSub: 'Currently being briefed' },
+  { key: 'briefing', icon: '<svg class=ic aria-hidden=true focusable=false><use href=#i-edit></use></svg>', label: 'Briefing', defaultSub: 'Currently being briefed' },
   { key: 'in_production', icon: '●', label: 'In Production', defaultSub: 'Being shot / designed' },
-  { key: 'editing', icon: '✂', label: 'Editing', defaultSub: 'Currently being edited' },
-  { key: 'awaiting_review', icon: '⏳', label: 'Awaiting Review', defaultSub: 'Waiting for approval' },
+  { key: 'editing', icon: '<svg class=ic aria-hidden=true focusable=false><use href=#i-scissors></use></svg>', label: 'Editing', defaultSub: 'Currently being edited' },
+  { key: 'awaiting_review', icon: '<svg class=ic aria-hidden=true focusable=false><use href=#i-hourglass></use></svg>', label: 'Awaiting Review', defaultSub: 'Waiting for approval' },
   { key: 'changes', icon: '↺', label: 'Changes', defaultSub: 'Changes requested' },
   { key: 'approved', icon: '✓', label: 'Approved', defaultSub: 'Approved, not yet uploaded' },
-  { key: 'shipped', icon: '🚀', label: 'Shipped', defaultSub: 'Uploaded to Meta this week' },
+  { key: 'shipped', icon: '<svg class=ic aria-hidden=true focusable=false><use href=#i-rocket></use></svg>', label: 'Shipped', defaultSub: 'Uploaded to Meta this week' },
 ];
 
 function renderDashboard() {
@@ -4304,7 +4321,7 @@ function renderPlanning() {
 // loaded by loadAll(). Upcoming Drops and Promotions used to be steps 3
 // and 4 here -- they're now their own sidebar tabs (#tab-drops /
 // #tab-promotions), so this workflow is Core/High Stocks/Shoot Plan only.
-const PLANNING_STEPS = ['weekly', 'core', 'high-stocks', 'shoot-plan'];
+const PLANNING_STEPS = ['core', 'high-stocks', 'shoot-plan'];
 function setPlanningStep(key) {
   state.planningStep = key;
   document.querySelectorAll('.planning-step-btn').forEach((btn) => btn.classList.toggle('active', btn.dataset.step === key));
@@ -4714,7 +4731,7 @@ function dropCardProductsHtml(products) {
   // colourway-collapsed upstream by GET /drops), never per colourway.
   const tiles = shown.map((p) => `
     <div class="drop-card-product-tile">
-      ${p.image_url ? `<img src="${p.image_url}" alt="">` : '<span class="drop-card-product-noimg">🖼</span>'}
+      ${p.image_url ? `<img src="${p.image_url}" alt="">` : '<span class="drop-card-product-noimg"><svg class=ic aria-hidden=true focusable=false><use href=#i-image></use></svg></span>'}
       <span class="drop-card-product-name">${escapeHtml(p.product_name)}</span>
       <span class="drop-card-product-code">${escapeHtml(p.product_code)}</span>
     </div>`).join('');
@@ -4741,9 +4758,9 @@ function dropCardHtml(d) {
       ${dropCardProductsHtml(d.products)}
       <div class="drop-card-secondary">
         <span class="drop-card-counts">
-          <span class="green">🟢 ${d.summary.green}</span>
-          <span class="amber">🟠 ${d.summary.amber}</span>
-          <span class="red">🔴 ${d.summary.red}</span>
+          <span class="green"><span class="dot dot-g" aria-hidden="true"></span> ${d.summary.green}</span>
+          <span class="amber"><span class="dot dot-o" aria-hidden="true"></span> ${d.summary.amber}</span>
+          <span class="red"><span class="dot dot-r" aria-hidden="true"></span> ${d.summary.red}</span>
         </span>
         <span class="drop-card-pct">${d.summary.totalCovered}/${d.summary.totalTarget}${pct !== null ? ' — ' + pct + '%' : ''}</span>
       </div>
@@ -4996,9 +5013,8 @@ function dropCreativeDueInfo(drop) {
 }
 
 function coverageGapLabel(c) {
-  if (c.status === 'green') return '🟢 COVERAGE COMPLETE';
-  const icon = c.status === 'amber' ? '🟠' : '🔴';
-  return `${icon} ${c.creative_gap} more required`;
+  if (c.status === 'green') return 'COVERAGE COMPLETE';
+  return `${c.creative_gap} more required`;
 }
 
 // Coverage cards here are compact and mostly navigational -- click one to
@@ -5020,7 +5036,7 @@ function renderCoverageGrid(coverage) {
         <span class="coverage-card-img-count">${idx + 1} / ${c.images.length}</span>` : '';
       images = `<img src="${c.images[idx]}" alt="">${nav}`;
     } else {
-      images = '<span class="coverage-card-noimg">🖼</span>';
+      images = '<span class="coverage-card-noimg"><svg class=ic aria-hidden=true focusable=false><use href=#i-image></use></svg></span>';
     }
     const pct = c.creative_target ? Math.min(100, Math.round((c.current_coverage / c.creative_target) * 100)) : 0;
     // Colourway identity (style_code, and colour_label when ApparelMagic
@@ -5046,7 +5062,7 @@ function renderCoverageGrid(coverage) {
           <div class="coverage-card-ratio">${c.current_coverage} / ${c.creative_target}</div>
           <div class="coverage-progress-track"><div class="coverage-progress-fill ${c.status}" style="width:${pct}%;"></div></div>
           <div class="coverage-card-gap ${c.status}">${coverageGapLabel(c)}</div>` : ''}
-        ${c.live_meta_ads !== null ? `<div class="coverage-card-live-meta">📡 ${c.live_meta_ads} live on Meta</div>` : ''}
+        ${c.live_meta_ads !== null ? `<div class="coverage-card-live-meta"><svg class=ic aria-hidden=true focusable=false><use href=#i-signal></use></svg> ${c.live_meta_ads} live on Meta</div>` : ''}
         <button type="button" class="btn btn-primary btn-sm coverage-card-shoot-btn" onclick="event.stopPropagation(); shootThisWeekForCoverage('${c.product_code}')">+ Shoot This Week</button>
       </div>
     </div>`;
@@ -5105,11 +5121,11 @@ async function loadProductView(dropId, productCode) {
     document.getElementById('product-view-code').textContent = `${group.product_code} · ${group.styles.length} colour${group.styles.length === 1 ? '' : 's'}`;
     document.getElementById('product-view-images').innerHTML = group.images.length
       ? group.images.slice(0, 4).map((url) => `<img src="${url}" alt="">`).join('')
-      : '<span class="no-img">🖼</span>';
+      : '<span class="no-img"><svg class=ic aria-hidden=true focusable=false><use href=#i-image></use></svg></span>';
 
     document.getElementById('product-view-colours').innerHTML = group.styles.map((s) => `
       <div class="product-view-colour-card">
-        ${s.image_url ? `<img src="${s.image_url}" alt="">` : '<span class="no-img">🖼</span>'}
+        ${s.image_url ? `<img src="${s.image_url}" alt="">` : '<span class="no-img"><svg class=ic aria-hidden=true focusable=false><use href=#i-image></use></svg></span>'}
         <div>
           <div class="product-view-colour-code">${s.style_code}</div>
           <div class="product-view-colour-stats">${colourStatsLine(s)}</div>
@@ -5117,7 +5133,7 @@ async function loadProductView(dropId, productCode) {
       </div>`).join('');
 
     const pct = group.creative_target ? Math.min(100, Math.round((group.current_coverage / group.creative_target) * 100)) : 0;
-    const liveMetaLine = group.live_meta_ads !== null ? `<div class="coverage-card-live-meta">📡 ${group.live_meta_ads} live on Meta</div>` : '';
+    const liveMetaLine = group.live_meta_ads !== null ? `<div class="coverage-card-live-meta"><svg class=ic aria-hidden=true focusable=false><use href=#i-signal></use></svg> ${group.live_meta_ads} live on Meta</div>` : '';
     document.getElementById('product-view-overview').innerHTML = group.soh !== null ? `
       <div class="coverage-card-ratio">${group.current_coverage} / ${group.creative_target} creatives</div>
       <div class="coverage-progress-track"><div class="coverage-progress-fill ${group.status}" style="width:${pct}%;"></div></div>
@@ -5983,7 +5999,7 @@ function renderCoreWeeklyCard() {
     card.innerHTML = `
       <div class="core-weekly-top">
         <div class="core-weekly-left">
-          <div class="core-weekly-icon">🎯</div>
+          <div class="core-weekly-icon"><svg class=ic aria-hidden=true focusable=false><use href=#i-target></use></svg></div>
           <div>
             <div class="core-weekly-label">Weekly Creative Target</div>
             <div class="core-weekly-title">New Concepts Planned</div>
@@ -6110,7 +6126,7 @@ function coreAttentionChipsHtml(p) {
 }
 
 function coreProblemProductRowHtml(p, selectedCodes) {
-  const badge = p.flag === 'needs_attention' ? '🔴' : p.flag === 'opportunity' ? '🟠' : '';
+  const badge = p.flag === 'needs_attention' ? '<span class="dot dot-r" aria-hidden="true"></span>' : p.flag === 'opportunity' ? '<span class="dot dot-o" aria-hidden="true"></span>' : '';
   const isSelected = selectedCodes.has(p.product_code);
   const trend = coreProductTrendInfo(p);
   return `
@@ -6325,7 +6341,7 @@ function coreShootCategoryRowHtml(cat, selectedCodes) {
           ${coreCadenceCellHtml(trend)}
         </span>
         <span class="core-shoot-stat-col">
-          ${cat.needsAttention ? `<span class="core-shoot-stat">🔴 <span class="core-shoot-stat-count core-shoot-count-red">${cat.needsAttention}</span> needing attention</span>` : ''}
+          ${cat.needsAttention ? `<span class="core-shoot-stat"><span class="dot dot-r" aria-hidden="true"></span> <span class="core-shoot-stat-count core-shoot-count-red">${cat.needsAttention}</span> needing attention</span>` : ''}
         </span>
         <span class="core-shoot-stat-col">
           ${cat.stale ? `<span class="core-shoot-stat">${cat.stale} stale/untested</span>` : ''}
@@ -6562,7 +6578,7 @@ function toggleHighStockFamily(key) {
 function highStockFamilyHtml(f, selectedCodes) {
   const open = highStockFamilyOpen(f);
   const many = f.colourways.length > 1;
-  const thumb = f.image_url ? `<img class="high-stock-thumb" src="${escapeHtml(f.image_url)}" alt="">` : '<span class="high-stock-thumb high-stock-noimg">🖼</span>';
+  const thumb = f.image_url ? `<img class="high-stock-thumb" src="${escapeHtml(f.image_url)}" alt="">` : '<span class="high-stock-thumb high-stock-noimg"><svg class=ic aria-hidden=true focusable=false><use href=#i-image></use></svg></span>';
   const w = f.weekly;
   const cat = w && typeof WP_CAT_BY_KEY !== 'undefined' ? WP_CAT_BY_KEY[w.category] : null;
   const badge = w ? `<span class="wp-badge ${cat ? cat.cls : ''}" data-headline-priority title="${escapeHtml(w.headline || '')}">${escapeHtml(w.category_label || w.category)}${w.category === 'SHOOT_NOW' && w.recommended_videos ? ` · ${w.recommended_videos} video${w.recommended_videos === 1 ? '' : 's'}` : ''}</span>` : '';
@@ -6608,7 +6624,7 @@ function highStockExcludedHtml() {
 function highStockProductRowHtml(p, selectedCodes) {
   const thumb = p.image_url
     ? `<img class="high-stock-thumb" src="${p.image_url}" alt="">`
-    : '<span class="high-stock-thumb high-stock-noimg">🖼</span>';
+    : '<span class="high-stock-thumb high-stock-noimg"><svg class=ic aria-hidden=true focusable=false><use href=#i-image></use></svg></span>';
   const isOpen = state.highStockExpandedProducts.has(p.style_code);
   const displayName = `${p.product_name}${p.colour_label ? ` — ${p.colour_label}` : ''}`;
   return `
@@ -6638,6 +6654,7 @@ function renderHighStockStepFooter() {
 }
 
 function renderHighStockProducts() {
+  if (typeof plRenderHighStocks === 'function') { plRenderHighStocks(); return; }
   const selectedCodes = new Set(state.shootPlan.map((i) => i.product_code));
 
   const list = document.getElementById('high-stock-list');
@@ -6758,7 +6775,7 @@ function openShootPlanModal(preset) {
   const headerImage = preset.colours.find((c) => c.image_url);
   document.getElementById('shoot-plan-product-image').innerHTML = headerImage
     ? `<img src="${headerImage.image_url}" alt="">`
-    : '<span class="shoot-plan-noimg">🖼</span>';
+    : '<span class="shoot-plan-noimg"><svg class=ic aria-hidden=true focusable=false><use href=#i-image></use></svg></span>';
 
   document.getElementById('shoot-plan-colours').innerHTML = preset.colours.map((c) => {
     const sizeControl = c.sizes && c.sizes.length
@@ -6766,7 +6783,7 @@ function openShootPlanModal(preset) {
       : `<input type="text" class="shoot-plan-colour-size" data-style-id="${c.style_id}" placeholder="Size">`;
     return `
     <div class="shoot-plan-colour-row">
-      ${c.image_url ? `<img class="shoot-plan-colour-thumb" src="${c.image_url}" alt="">` : '<span class="shoot-plan-colour-thumb shoot-plan-noimg">🖼</span>'}
+      ${c.image_url ? `<img class="shoot-plan-colour-thumb" src="${c.image_url}" alt="">` : '<span class="shoot-plan-colour-thumb shoot-plan-noimg"><svg class=ic aria-hidden=true focusable=false><use href=#i-image></use></svg></span>'}
       <label class="checkbox-label shoot-plan-colour-check">
         <input type="checkbox" class="shoot-plan-colour-required" value="${c.style_id}" checked>
         <span class="shoot-plan-colour-names">
@@ -6789,7 +6806,7 @@ function openShootPlanModal(preset) {
   const oppBanner = document.getElementById('shoot-plan-opportunity');
   const opp = preset.opportunity || null;
   if (opp) {
-    oppBanner.innerHTML = `<div class="co-shoot-title">🎯 Creative Opportunity · ${escapeHtml(opp.priority)}</div><div><b>${escapeHtml(opp.title)}</b></div><div class="hint">${escapeHtml(opp.explanation)}</div>${opp.concept ? `<div class="hint">Suggested concept: <b>${escapeHtml(opp.concept)}</b>${opp.media ? ` · ${escapeHtml(opp.media)}` : ''}</div>` : ''}`;
+    oppBanner.innerHTML = `<div class="co-shoot-title"><svg class=ic aria-hidden=true focusable=false><use href=#i-target></use></svg> Creative Opportunity · ${escapeHtml(opp.priority)}</div><div><b>${escapeHtml(opp.title)}</b></div><div class="hint">${escapeHtml(opp.explanation)}</div>${opp.concept ? `<div class="hint">Suggested concept: <b>${escapeHtml(opp.concept)}</b>${opp.media ? ` · ${escapeHtml(opp.media)}` : ''}</div>` : ''}`;
     oppBanner.style.display = '';
   } else {
     oppBanner.style.display = 'none';
@@ -7081,7 +7098,7 @@ function promotionCurrentFocusHtml(p) {
   const countdownHtml = p.days_until_launch >= 0 ? `${p.days_until_launch} days to launch` : 'Launched';
   return `
     <div class="promo-focus-card" data-promotion-id="${p.id}">
-      <div class="promo-focus-eyebrow">🔥 Current Focus</div>
+      <div class="promo-focus-eyebrow"><svg class=ic aria-hidden=true focusable=false><use href=#i-flame></use></svg> Current Focus</div>
       <div class="promo-focus-header">
         <div class="promo-focus-name">${escapeHtml(p.name)}</div>
         ${promotionUrgencyBadgeHtml(p.status)}
@@ -7360,9 +7377,8 @@ async function refreshCurrentPromotion() {
 }
 
 function promotionStageGapLabel(s) {
-  if (s.still_required <= 0) return '🟢 COVERAGE COMPLETE';
-  const icon = s.urgency === 'at_risk' ? '🔴' : s.urgency === 'needs_attention' ? '🟠' : s.urgency === 'future' ? '⚪' : '🟢';
-  return `${icon} ${s.still_required} still required`;
+  if (s.still_required <= 0) return 'COVERAGE COMPLETE';
+  return `${s.still_required} still required`;
 }
 
 // Primary identifier is the concept itself (concept_name, +Concept Type in
@@ -8365,7 +8381,7 @@ async function saveShootPlanEditSizes() {
 function shootPlanProductRowHtml(item) {
   const thumb = item.image_url
     ? `<img class="high-stock-thumb" src="${item.image_url}" alt="">`
-    : '<span class="high-stock-thumb high-stock-noimg">🖼</span>';
+    : '<span class="high-stock-thumb high-stock-noimg"><svg class=ic aria-hidden=true focusable=false><use href=#i-image></use></svg></span>';
   const ready = item.stock_status === 'in_office';
   const chips = item.styles
     .map((s) => `<span class="shoot-plan-style-chip">${escapeHtml(s.colour_label || s.style_code)}${s.size ? ` · ${escapeHtml(s.size)}` : ''}</span>`)
@@ -8394,7 +8410,7 @@ function shootPlanProductRowHtml(item) {
         </div>
         <div class="shoot-plan-style-chips">${chips}</div>
         ${typeof wpShootPlanVideosHtml === 'function' ? wpShootPlanVideosHtml(item, readOnly) : ''}
-        ${item.quick_note ? `<div class="shoot-plan-idea">💡 ${escapeHtml(item.quick_note)}</div>` : ''}
+        ${item.quick_note ? `<div class="shoot-plan-idea"><svg class=ic aria-hidden=true focusable=false><use href=#i-bulb></use></svg> ${escapeHtml(item.quick_note)}</div>` : ''}
       </div>
       <div class="shoot-plan-row-actions">${editSizesBtn}${removeBtn}</div>
     </div>`;
@@ -8719,7 +8735,7 @@ function conceptDevProductCtaLabel(product) {
 function conceptDevProductCardHtml(product) {
   const thumb = product.image_url
     ? `<img class="high-stock-thumb" src="${product.image_url}" alt="">`
-    : '<span class="high-stock-thumb high-stock-noimg">🖼</span>';
+    : '<span class="high-stock-thumb high-stock-noimg"><svg class=ic aria-hidden=true focusable=false><use href=#i-image></use></svg></span>';
   const sourceLabel = CONCEPT_DEV_SOURCE_LABELS[product.source] || product.source || '—';
   const count = product.concepts.length;
   const breakdown = conceptDevStatusBreakdown(product.concepts);
@@ -8920,7 +8936,7 @@ function closeConceptDevProduct() {
 function conceptDevWorkspaceHeaderHtml(product) {
   const thumb = product.image_url
     ? `<img class="high-stock-thumb" src="${product.image_url}" alt="">`
-    : '<span class="high-stock-thumb high-stock-noimg">🖼</span>';
+    : '<span class="high-stock-thumb high-stock-noimg"><svg class=ic aria-hidden=true focusable=false><use href=#i-image></use></svg></span>';
   const sourceLabel = CONCEPT_DEV_SOURCE_LABELS[product.source] || product.source || '—';
   const chips = product.colourways
     .map((c) => `<span class="shoot-plan-style-chip">${escapeHtml(c.colour_label || c.style_code)}${c.size ? ` · ${escapeHtml(c.size)}` : ''}</span>`)
@@ -8975,7 +8991,7 @@ function conceptDevWorkspaceHeaderHtml(product) {
         </div>
         ${product.source === 'promotion' && conceptDevStatusBreakdown(product.concepts).length ? `<div class="cd-card-status-row">${conceptDevStatusBreakdown(product.concepts).map((s) => `<span class="cd-concept-status-pill ${CONCEPT_DEV_STATUS_CLASS[s.status] || ''}">${s.count} ${CONCEPT_DEV_STATUS_LABELS[s.status] || s.status}</span>`).join('')}</div>` : ''}
         <div class="shoot-plan-style-chips">${chips}</div>
-        ${product.initial_idea ? `<div class="shoot-plan-idea">💡 ${escapeHtml(product.initial_idea)}</div>` : ''}
+        ${product.initial_idea ? `<div class="shoot-plan-idea"><svg class=ic aria-hidden=true focusable=false><use href=#i-bulb></use></svg> ${escapeHtml(product.initial_idea)}</div>` : ''}
       </div>
     </div>`;
 }
@@ -9382,7 +9398,7 @@ function conceptDevReferenceCardHtml(r, i) {
   return `
     <div class="cd-reference-card">
       <div class="cd-reference-card-main">
-        <a href="${escapeHtml(r.url)}" target="_blank" rel="noopener" class="cd-reference-card-label">${r.library_reference_id ? '📚 ' : ''}${escapeHtml(label)}</a>
+        <a href="${escapeHtml(r.url)}" target="_blank" rel="noopener" class="cd-reference-card-label">${r.library_reference_id ? '<svg class=ic aria-hidden=true focusable=false><use href=#i-book></use></svg> ' : ''}${escapeHtml(label)}</a>
         ${note ? `<div class="cd-reference-card-note">${escapeHtml(note)}</div>` : ''}
       </div>
       <div class="cd-reference-card-actions">
@@ -9473,7 +9489,7 @@ function saveConceptDevReferencePaste() {
 function conceptDevModalContextHtml(product) {
   const thumb = product.image_url
     ? `<img class="cd-modal-context-thumb" src="${product.image_url}" alt="">`
-    : '<span class="cd-modal-context-thumb cd-modal-context-noimg">🖼</span>';
+    : '<span class="cd-modal-context-thumb cd-modal-context-noimg"><svg class=ic aria-hidden=true focusable=false><use href=#i-image></use></svg></span>';
   const sourceLabel = CONCEPT_DEV_SOURCE_LABELS[product.source] || product.source || '—';
   const pathwayLabel = conceptDevPathwayBadgeLabel(product);
   const skuInfo = product.colourways
@@ -9491,13 +9507,13 @@ function conceptDevModalContextHtml(product) {
   // Promotion-level notes rather than duplicating offer text onto each
   // creative_asset.
   const promoNotes = product.source === 'promotion' && product.promotion_notes && product.promotion_notes.trim()
-    ? `<div class="cd-modal-context-idea">🏷️ Promotion Message/Offer: ${escapeHtml(product.promotion_notes.trim())}</div>`
+    ? `<div class="cd-modal-context-idea"><svg class=ic aria-hidden=true focusable=false><use href=#i-tag></use></svg> Promotion Message/Offer: ${escapeHtml(product.promotion_notes.trim())}</div>`
     : '';
   return `
     ${thumb}
     <div class="cd-modal-context-lines">
       <div class="cd-modal-context-line">${line}</div>
-      ${product.initial_idea ? `<div class="cd-modal-context-idea">💡 ${escapeHtml(product.initial_idea)}</div>` : ''}
+      ${product.initial_idea ? `<div class="cd-modal-context-idea"><svg class=ic aria-hidden=true focusable=false><use href=#i-bulb></use></svg> ${escapeHtml(product.initial_idea)}</div>` : ''}
       ${promoNotes}
     </div>`;
 }
@@ -10375,7 +10391,7 @@ function promotionConceptDevReferenceCardHtml(r, i) {
   return `
     <div class="cd-reference-card">
       <div class="cd-reference-card-main">
-        <a href="${escapeHtml(r.url)}" target="_blank" rel="noopener" class="cd-reference-card-label">${r.library_reference_id ? '📚 ' : ''}${escapeHtml(label)}</a>
+        <a href="${escapeHtml(r.url)}" target="_blank" rel="noopener" class="cd-reference-card-label">${r.library_reference_id ? '<svg class=ic aria-hidden=true focusable=false><use href=#i-book></use></svg> ' : ''}${escapeHtml(label)}</a>
         ${note ? `<div class="cd-reference-card-note">${escapeHtml(note)}</div>` : ''}
       </div>
       <div class="cd-reference-card-actions">
@@ -10616,7 +10632,7 @@ function applyPromotionConceptDevOrigin(origin) {
 function promotionConceptDevModalContextHtml(product) {
   const thumb = product.image_url
     ? `<img class="cd-modal-context-thumb" src="${product.image_url}" alt="">`
-    : '<span class="cd-modal-context-thumb cd-modal-context-noimg">🖼</span>';
+    : '<span class="cd-modal-context-thumb cd-modal-context-noimg"><svg class=ic aria-hidden=true focusable=false><use href=#i-image></use></svg></span>';
   const skuInfo = (product.colourways || [])
     .map((c) => `${c.style_code || c.colour_label}${c.size ? `-${c.size}` : ''}`)
     .join(', ');
@@ -11314,13 +11330,13 @@ function referenceLabelFromUrl(url) {
 function tuesdayReviewReferenceInfo(url) {
   try {
     const host = new URL(url).hostname.replace(/^www\./, '');
-    if (host.includes('tiktok')) return { icon: '🎵', platform: 'TikTok' };
-    if (host.includes('instagram')) return { icon: '📸', platform: 'Instagram' };
-    if (host.includes('youtube') || host.includes('youtu.be')) return { icon: '▶️', platform: 'YouTube' };
-    if (host.includes('pinterest')) return { icon: '📌', platform: 'Pinterest' };
-    return { icon: '🔗', platform: host };
+    if (host.includes('tiktok')) return { icon: '<svg class=ic aria-hidden=true focusable=false><use href=#i-music></use></svg>', platform: 'TikTok' };
+    if (host.includes('instagram')) return { icon: '<svg class=ic aria-hidden=true focusable=false><use href=#i-camera></use></svg>', platform: 'Instagram' };
+    if (host.includes('youtube') || host.includes('youtu.be')) return { icon: '▶', platform: 'YouTube' };
+    if (host.includes('pinterest')) return { icon: '<svg class=ic aria-hidden=true focusable=false><use href=#i-pin></use></svg>', platform: 'Pinterest' };
+    return { icon: '<svg class=ic aria-hidden=true focusable=false><use href=#i-link></use></svg>', platform: host };
   } catch {
-    return { icon: '🔗', platform: 'Website' };
+    return { icon: '<svg class=ic aria-hidden=true focusable=false><use href=#i-link></use></svg>', platform: 'Website' };
   }
 }
 
@@ -11404,7 +11420,7 @@ function tuesdayReviewShotCardHtml(s) {
     <div class="tr-shot-card">
       <div class="tr-shot-card-top">
         <span class="tr-shot-type">${escapeHtml(s.name.trim())}</span>
-        ${hasLocation ? `<span class="tr-shot-pin">📍 ${escapeHtml(s.location.trim())}</span>` : ''}
+        ${hasLocation ? `<span class="tr-shot-pin"><svg class=ic aria-hidden=true focusable=false><use href=#i-pin></use></svg> ${escapeHtml(s.location.trim())}</span>` : ''}
       </div>
       ${hasCapture ? `<div class="tr-shot-detail">${escapeHtml(s.capture.trim())}</div>` : ''}
     </div>`;
@@ -12622,7 +12638,7 @@ function renderShootingBrief(brief) {
     skuInfo,
   ].filter(Boolean).join(' &middot; ');
   document.getElementById('shoot-brief-context').innerHTML = `
-    ${brief.image_url ? `<img class="cd-modal-context-thumb" src="${brief.image_url}" alt="">` : '<span class="cd-modal-context-thumb cd-modal-context-noimg">🖼</span>'}
+    ${brief.image_url ? `<img class="cd-modal-context-thumb" src="${brief.image_url}" alt="">` : '<span class="cd-modal-context-thumb cd-modal-context-noimg"><svg class=ic aria-hidden=true focusable=false><use href=#i-image></use></svg></span>'}
     <div class="cd-modal-context-lines"><div class="cd-modal-context-line">${contextLine}</div></div>`;
 
   renderShootingBriefBlackFridayContext(brief);
@@ -13473,7 +13489,7 @@ function editingConceptCardHtml(concept) {
   const isReady = status === 'ready_for_approval';
   const thumb = concept.image_url
     ? `<img class="high-stock-thumb" src="${concept.image_url}" alt="">`
-    : '<span class="high-stock-thumb high-stock-noimg">🖼</span>';
+    : '<span class="high-stock-thumb high-stock-noimg"><svg class=ic aria-hidden=true focusable=false><use href=#i-image></use></svg></span>';
   // Same person-accent convention as Shooting (see personAccentKey) --
   // consistent colour identification anywhere an assignment is surfaced.
   const personKey = personAccentKey(concept.editing_owner);
@@ -15711,10 +15727,10 @@ function bfInspirationVisualHtml(insp) {
   }
   const info = bfVideoPreviewInfo(insp.video_url);
   if (!info) {
-    return `<div class="bf-insp-card-visual"><div class="bf-insp-placeholder"><span class="bf-insp-placeholder-icon">🖼</span>No link yet</div></div>`;
+    return `<div class="bf-insp-card-visual"><div class="bf-insp-placeholder"><span class="bf-insp-placeholder-icon"><svg class=ic aria-hidden=true focusable=false><use href=#i-image></use></svg></span>No link yet</div></div>`;
   }
   if (!info.embeddable) {
-    return `<div class="bf-insp-card-visual"><div class="bf-insp-placeholder"><span class="bf-insp-placeholder-icon">🔗</span>${escapeHtml(info.platform)}</div></div>`;
+    return `<div class="bf-insp-card-visual"><div class="bf-insp-placeholder"><span class="bf-insp-placeholder-icon"><svg class=ic aria-hidden=true focusable=false><use href=#i-link></use></svg></span>${escapeHtml(info.platform)}</div></div>`;
   }
   const thumb = info.thumbnailUrl
     ? `<img src="${escapeHtml(info.thumbnailUrl)}" alt="" onerror="this.remove()">`
@@ -16225,12 +16241,12 @@ function formatReferenceLibraryDate(iso) {
 function detectReferencePlatform(url) {
   const lower = String(url || '').toLowerCase();
   if (lower.includes('instagram.com')) {
-    return { label: 'Instagram', placeholder: lower.includes('/reel') ? 'Instagram Reel' : 'Instagram', icon: '📷' };
+    return { label: 'Instagram', placeholder: lower.includes('/reel') ? 'Instagram Reel' : 'Instagram', icon: '<svg class=ic aria-hidden=true focusable=false><use href=#i-camera></use></svg>' };
   }
-  if (lower.includes('tiktok.com')) return { label: 'TikTok', placeholder: 'TikTok', icon: '🎵' };
+  if (lower.includes('tiktok.com')) return { label: 'TikTok', placeholder: 'TikTok', icon: '<svg class=ic aria-hidden=true focusable=false><use href=#i-music></use></svg>' };
   if (lower.includes('youtube.com') || lower.includes('youtu.be')) return { label: 'YouTube', placeholder: 'YouTube', icon: '▶' };
-  if (lower.includes('facebook.com/ads/library')) return { label: 'Meta Ad', placeholder: 'Meta Ad', icon: '📣' };
-  return { label: 'External', placeholder: 'External Reference', icon: '🔗' };
+  if (lower.includes('facebook.com/ads/library')) return { label: 'Meta Ad', placeholder: 'Meta Ad', icon: '<svg class=ic aria-hidden=true focusable=false><use href=#i-megaphone></use></svg>' };
+  return { label: 'External', placeholder: 'External Reference', icon: '<svg class=ic aria-hidden=true focusable=false><use href=#i-link></use></svg>' };
 }
 
 // YouTube is the one platform with a reliable, key-free, CORS-free

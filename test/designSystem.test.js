@@ -10,7 +10,7 @@ const read = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
 const css = read('public/styles.css');
 const html = read('public/index.html');
 const app = read('public/app.js');
-const wp = read('public/weekly-plan.js');
+const wp = read('public/planning.js');
 
 test('design tokens: one :root layer for colour, spacing, type, radius, elevation and focus', () => {
   const root = css.slice(css.indexOf(':root {'), css.indexOf('*{margin:0'));
@@ -55,19 +55,19 @@ test('Meta Performance: coloured RECTANGLES replace the dots in the table, with 
   assert.match(guide, /What the colours mean/);
 });
 
-test('Weekly Plan wiring: script loaded after app.js, first planning step, modal fields, settings fields, shoot plan hooks', () => {
-  assert.ok(html.indexOf('<script src="app.js"></script>') < html.indexOf('<script src="weekly-plan.js"></script>'));
-  assert.match(html, /<button type="button" class="planning-step-btn active" data-step="weekly">Weekly Plan<\/button>/);
-  for (const id of ['planning-production-header', 'planning-step-weekly', 'weekly-plan', 'shoot-plan-videos', 'shoot-plan-mix', 'shoot-plan-recommendation', 'shoot-plan-videos-modal', 'weekly-video-target-input', 'season-immediate-days-input', 'season-secondary-days-input', 'wpc-groups', 'lo-list', 'po-videos']) {
+test('Planning wiring (Batch 14): Core -> High Stocks -> Shoot Plan, no Weekly Plan, script loaded after app.js, modal + progress hooks', () => {
+  assert.ok(html.indexOf('<script src="app.js"></script>') < html.indexOf('<script src="planning.js"></script>'));
+  assert.doesNotMatch(html, /data-step="weekly"/); assert.doesNotMatch(html, /id="weekly-plan"/); assert.doesNotMatch(html, /weekly-plan\.js/);
+  assert.match(html, /<button type="button" class="planning-step-btn active" data-step="core">1 Core<\/button>/);
+  for (const id of ['planning-production-header', 'core-plan', 'high-stock-list', 'shoot-plan-progress', 'shoot-plan-videos', 'shoot-plan-recommendation', 'pl-adapt-modal', 'season-immediate-days-input', 'season-secondary-days-input', 'wpc-groups', 'lo-list', 'weekly-target-input']) {
     assert.ok(html.includes(`id="${id}"`), `#${id} exists`);
   }
-  assert.match(app, /const PLANNING_STEPS = \['weekly', 'core', 'high-stocks', 'shoot-plan'\]/);
-  assert.match(app, /wpPrepareShootModal\(preset\)/);
-  assert.match(app, /wpShootPayloadExtras\(shootPlanModalContext\)/);
-  assert.match(app, /wpShootPlanVideosHtml\(item, readOnly\)/);
-  assert.match(app, /loadWeeklyVideoPlan\(\)/);
-  assert.match(app, /cpHeadlineBadgeHtml\(c, priority\)/, 'Core cards show ONE headline priority');
-  assert.doesNotMatch(app.slice(app.indexOf('function cpCardHtml'), app.indexOf('// The full card (explanation')), /planLevelBadge/, 'the competing "n priority" label is no longer on the card');
+  assert.ok(!html.includes('weekly-video-target-input'), 'the 25-video target field is gone from Settings');
+  assert.match(app, /const PLANNING_STEPS = \['core', 'high-stocks', 'shoot-plan'\]/);
+  assert.match(app, /wpPrepareShootModal\(preset\)/); assert.match(app, /wpShootPayloadExtras\(shootPlanModalContext\)/); assert.match(app, /wpShootPlanVideosHtml\(item, readOnly\)/);
+  assert.match(app, /plRenderCore\(\)/); assert.match(app, /plRenderHighStocks\(\)/); assert.match(app, /plLoadOpportunities/);
+  assert.match(wp, /fields = \{ concepts: n \}/, 'the modal sends a concept count, not a video target');
+  assert.doesNotMatch(wp, /weekly_video_target|recommended_videos|video_mix/, 'no weekly video allocation remains in the Planning UI');
 });
 
 test('the Weekly Plan only creates production records through the existing explicit Shoot Plan action', () => {

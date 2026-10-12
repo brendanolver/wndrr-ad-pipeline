@@ -1,3 +1,5 @@
+// RETIRED AS A WORKFLOW (Batch 14): the video-allocation engine is no longer used by the UI; the opportunity engine is src/lib/planningOpportunities.js. Kept so the Batch 12/13
+// behaviour, its tests and its historical shoot_plan_items.recommendation_snapshot records stay valid.
 // The WEEKLY VIDEO PLAN: which products deserve new creative this week, how many videos for each, and why.
 //
 // It EXTENDS the Batch 11 combined priority (stock, season, sales, confirmed ad coverage) with what a content team that makes ~20-30 videos a week needs:

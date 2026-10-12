@@ -1,3 +1,5 @@
+// RETIRED AS A WORKFLOW (Batch 14): nothing in the UI calls this any more (the Weekly Plan was replaced by src/lib/planningOpportunitiesLoader.js). Kept, unchanged, so the
+// Batch 12/13 history, tests and any external caller keep working; it is not extended.
 // Gathers everything the weekly video plan needs and runs the pure engine (lib/weeklyVideoPlan.js). READ-ONLY: local database + cached ApparelMagic only. It never
 // writes, never calls Meta or Shopify, never starts a sync. Every source is injectable (deps) so it is testable with fixtures; a source that is missing is reported,
 // not guessed. The result is the Shoot Plan's "recommended / planned / remaining" view of the week.

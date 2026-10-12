@@ -77,6 +77,7 @@ router.put('/', async (req, res, next) => {
       values
     );
     try { require('./weeklyVideoPlan').invalidate(); } catch (e) { /* cache only */ }
+    try { require('../lib/planningOpportunitiesLoader').invalidate(); } catch (e) { /* cache only */ }
     res.json(result.rows[0]);
   } catch (err) {
     next(err);

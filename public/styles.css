@@ -3413,3 +3413,209 @@ input[type=checkbox],input[type=radio]{accent-color:var(--accent-strong);}
 /* Batch 13: 11 summary cards (CPM added) still sit on one row on a 1,440px window; narrower windows wrap to two tidy rows */
 .mp-kpis{grid-template-columns:repeat(auto-fit,minmax(98px,1fr));}
 .mp-kpi{padding:9px 7px;}
+
+/* ═══ Batch 14: WNDRR design system v2 ═══════════════════════════════════════════════════════════════════════════════════════
+   Built from the written brief (near-black charcoal sidebar, white wordmark, minimal monochrome outline icons, muted secondary
+   navigation, subtle purple selected states, light neutral page, white cards, thin borders, restrained shadows; charcoal for primary
+   UI, purple for selection / interaction, neutral greys, green / orange / red only for performance and status). The reference
+   screenshots (WNDRR Global, Warehouse Management, Tuesday) were NOT available in the build environment, so this is PROVISIONAL:
+   every value is a token below and changing it restyles the app. The wordmark is the real WNDRR logo taken from the Demand Planning app. */
+:root {
+  --ds-navy-950: #0c0c0f;
+  --ds-navy-900: #121216;
+  --ds-navy-800: #1c1c22;
+  --ds-navy-700: #2a2a33;
+  --sidebar: #101014;
+  --sidebar-hover: rgba(255,255,255,0.06);
+  --sidebar-active: rgba(122,107,220,0.16);
+  --sidebar-text: rgba(255,255,255,0.62);
+  --sidebar-text-strong: rgba(255,255,255,0.92);
+  --sidebar-divider: rgba(255,255,255,0.08);
+  --bg: #f6f6f8;
+  --surface: #ffffff;
+  --surface2: #fafafb;
+  --border: #e7e7ec;
+  --border-strong: #d6d6de;
+  --text: #17171c;
+  --text-secondary: #4a4a55;
+  --text-muted: #7b7b88;
+  --shadow-xs: 0 1px 2px rgba(16,16,22,0.04);
+  --shadow: 0 8px 24px rgba(16,16,22,0.10);
+  --primary: var(--ds-navy-800);
+  --primary-hover: var(--ds-navy-700);
+}
+body{background:var(--bg);color:var(--text);}
+
+/* icons: one family, monochrome outline, sized with the text */
+.ic{width:1.15em;height:1.15em;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;vertical-align:-0.2em;flex-shrink:0;}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:2px;vertical-align:0;background:var(--text-muted);}
+.dot-g{background:var(--green);} .dot-o{background:var(--orange);} .dot-r{background:var(--red);} .dot-n{background:var(--border-strong);}
+
+/* sidebar + brand */
+.sidebar{width:232px;padding:22px 12px 14px;background:var(--sidebar);}
+.sidebar-header{margin-bottom:20px;padding:0 8px;}
+.sidebar .wndrr-logo,.pw-card .wndrr-logo{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:0;}
+.brand-wordmark{display:block;height:34px;width:auto;max-width:100%;}
+.sidebar .logo-text{font-size:11px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:rgba(255,255,255,0.46);}
+.sidebar .logo-text span{display:inline;margin:0;font-size:11px;color:inherit;font-weight:500;}
+.sidebar-nav{gap:1px;}
+.sidebar-nav .tab-btn,.sidebar-footer .tab-btn{gap:11px;padding:8px 10px;border-radius:8px;font-size:13px;font-weight:500;color:var(--sidebar-text);}
+.sidebar-nav .tab-btn:hover,.sidebar-footer .tab-btn:hover{background:var(--sidebar-hover);color:var(--sidebar-text-strong);}
+.sidebar-nav .tab-btn.active,.sidebar-footer .tab-btn.active{background:var(--sidebar-active);color:#fff;font-weight:600;}
+.sidebar-nav .tab-btn.active::before,.sidebar-footer .tab-btn.active::before{background:var(--ds-purple-300);}
+.sidebar-nav-icon{width:18px;font-size:16px;display:inline-flex;align-items:center;justify-content:center;opacity:.85;}
+.sidebar-nav-icon .ic{width:18px;height:18px;vertical-align:0;}
+.sidebar-group{margin-top:14px;}
+.sidebar-group-toggle{padding:6px 10px;font-size:10.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,0.38);}
+.sidebar-group-toggle:hover{color:rgba(255,255,255,0.7);background:none;}
+.sidebar-group-label{font-size:10.5px;letter-spacing:.1em;}
+.sidebar-group-chevron{color:rgba(255,255,255,0.3);}
+.sidebar-group-items{padding-left:0;margin-top:2px;}
+.sidebar-spacer{height:6px;border-bottom:1px solid var(--sidebar-divider);margin:6px 10px 8px;}
+.sidebar-footer{border-top:1px solid var(--sidebar-divider);}
+.sidebar-signout{color:rgba(255,255,255,0.42);}
+.sidebar-user{color:rgba(255,255,255,0.7);}
+#password-screen{background:var(--sidebar);}
+.pw-card{width:360px;padding:36px;border-radius:14px;}
+.pw-card .wndrr-logo-login{align-items:center;justify-content:center;margin-bottom:22px;padding:14px;background:#000;border-radius:12px;}
+.pw-card .brand-wordmark{height:40px;}
+.pw-submit,.btn-primary{background:var(--primary);}
+.pw-submit:hover,.btn-primary:hover:not(:disabled){background:var(--primary-hover);}
+.confirm-icon .ic{width:28px;height:28px;color:var(--amber);}
+
+/* concept progress strip (top of Planning) */
+.prod-header{padding:14px 18px;border-radius:12px;}
+.prod-title{font-size:15px;font-weight:700;letter-spacing:0;color:var(--text);}
+.prod-target{display:flex;align-items:baseline;gap:8px;}
+.prod-target-num{font-size:24px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--text);}
+.prod-target-num b{font-weight:700;}
+.prod-target-label{font-size:12px;color:var(--text-muted);}
+.prod-bar{height:6px;margin-top:10px;}
+.prod-bar span{background:var(--accent);}
+.pl-stages{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin-top:12px;}
+.pl-stage{display:flex;flex-direction:column;gap:1px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface2);min-width:0;}
+.pl-stage b{font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.1;}
+.pl-stage span{font-size:11px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+@media (max-width:900px){.pl-stages{grid-template-columns:repeat(3,minmax(0,1fr));}}
+@media (max-width:520px){.pl-stages{grid-template-columns:repeat(2,minmax(0,1fr));}}
+.pl-progress-card{border:1px solid var(--border);border-radius:12px;background:var(--surface);padding:14px 18px;margin-bottom:14px;}
+.pl-progress-head{font-size:14px;margin-bottom:2px;}
+.pl-shortfall{margin-top:10px;padding:10px 12px;border-radius:8px;background:var(--amber-light);color:#7a4a05;font-size:12.5px;}
+.pl-stage-tag{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;font-weight:600;background:var(--surface2);border:1px solid var(--border);color:var(--text-secondary);}
+.pl-stage-tag[data-stage="uploaded"],.pl-stage-tag[data-stage="approved"]{background:var(--green-light);border-color:transparent;color:#166534;}
+.pl-concepts{margin-top:8px;font-size:12.5px;}
+.pl-concepts-head{display:flex;align-items:center;gap:10px;}
+.pl-concept-list{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:5px;}
+.pl-concept{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.pl-concept-name{font-weight:600;}
+.pl-also{font-size:11.5px;color:var(--accent-text);background:var(--accent-softer);padding:1px 8px;border-radius:999px;}
+.pl-chip{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;font-weight:600;background:var(--surface2);border:1px solid var(--border);color:var(--text-secondary);}
+.pl-chip-plat{background:var(--accent-softer);border-color:var(--accent-border);color:var(--accent-text);}
+.pl-chip-rocket{background:var(--surface2);border-color:var(--border-strong);color:var(--text);}
+.pl-reco-head{display:flex;gap:8px;align-items:center;margin-bottom:4px;}
+
+/* opportunity lists (Core + High Stocks) */
+.opp-panel{display:flex;flex-direction:column;gap:12px;}
+.opp-intro{font-size:12.5px;color:var(--text-secondary);}
+.opp-summary{display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:13px;}
+.opp-summary .hint{flex:1;min-width:220px;}
+.opp-tier-note{padding:10px 12px;border-radius:8px;background:var(--amber-light);color:#7a4a05;font-size:12.5px;}
+.opp-toolbar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
+.opp-view{background:var(--surface);border:1px solid var(--border-strong);border-radius:999px;padding:6px 12px;font-family:inherit;font-size:12.5px;font-weight:600;color:var(--text-secondary);cursor:pointer;}
+.opp-view b{font-variant-numeric:tabular-nums;margin-left:4px;color:var(--text);}
+.opp-view:hover{border-color:var(--accent);}
+.opp-view.active{background:var(--accent-soft);border-color:var(--accent-border);color:var(--accent-text);}
+.opp-view.active b{color:var(--accent-text);}
+.opp-search{margin-left:auto;min-width:200px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;font-family:inherit;font-size:12.5px;}
+.opp-list{display:flex;flex-direction:column;gap:8px;}
+.opp-card{display:grid;grid-template-columns:48px minmax(0,1fr) auto;gap:14px;align-items:start;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 14px;}
+.opp-thumb{width:48px;height:60px;border-radius:8px;background:var(--surface2);border:1px solid var(--border);overflow:hidden;display:flex;align-items:center;justify-content:center;}
+.opp-thumb img{width:100%;height:100%;object-fit:contain;}
+.opp-body{min-width:0;display:flex;flex-direction:column;gap:5px;}
+.opp-title{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.opp-name{font-size:14px;font-weight:700;}
+.opp-cat{font-size:11.5px;color:var(--text-muted);}
+.opp-priority{font-size:11px;font-weight:700;padding:1px 8px;border-radius:999px;background:var(--surface2);border:1px solid var(--border);color:var(--text-secondary);}
+.opp-priority[data-priority="High"]{background:var(--red-light);border-color:transparent;color:#991b1b;}
+.opp-priority[data-priority="Medium"]{background:var(--amber-light);border-color:transparent;color:#92400e;}
+.opp-status{font-size:11.5px;font-weight:600;color:var(--text-muted);}
+.opp-headline{font-size:13px;font-weight:600;color:var(--text);}
+.opp-reason{font-size:12.5px;color:var(--text-secondary);}
+.opp-facts{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:12px;color:var(--text-muted);}
+.opp-facts b{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums;}
+.opp-facts i{font-style:normal;}
+.opp-pipeline{font-size:12px;color:var(--accent-text);}
+.opp-more{font-size:12.5px;}
+.opp-more>summary{cursor:pointer;color:var(--accent-text);font-weight:600;font-size:12px;list-style:none;}
+.opp-more>summary::-webkit-details-marker{display:none;}
+.opp-more>summary::before{content:'+';display:inline-block;width:14px;}
+.opp-more[open]>summary::before{content:'\2212';}
+.opp-why,.opp-other ul,.opp-creatives ul{margin:6px 0 0 16px;padding:0;display:flex;flex-direction:column;gap:3px;}
+.opp-direction,.opp-other,.opp-creatives{margin-top:8px;}
+.opp-action{display:flex;align-items:flex-start;}
+.opp-empty{padding:18px;}
+.opp-notes,.opp-launch-review{font-size:12.5px;border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:10px 14px;}
+.opp-notes>summary,.opp-launch-review>summary{cursor:pointer;font-weight:600;color:var(--text-secondary);}
+.opp-notes ul,.lr-list{margin:8px 0 0 16px;padding:0;display:flex;flex-direction:column;gap:6px;}
+.lr-list{list-style:none;margin-left:0;}
+.lr-row{display:flex;justify-content:space-between;gap:12px;align-items:center;}
+.lr-actions{display:flex;gap:6px;flex-shrink:0;}
+.opp-launch-review h4{margin:12px 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);}
+@media (max-width:760px){.opp-card{grid-template-columns:40px minmax(0,1fr);}.opp-action{grid-column:1 / -1;}.opp-search{margin-left:0;flex:1;}}
+
+/* ═══ Batch 14: Meta Performance layout ═══════════════════════════════════════════════════════════════════════════════════════
+   Summary cards WRAP instead of squeezing into one row, so a financial value (Amount Spent, Purchase Value) is never truncated.
+   The table keeps a readable ad-name column, right-aligned tabular numbers and scrolls horizontally inside its own wrapper;
+   the long explanatory text (timestamps, benchmark rules) lives in tooltips / a collapsed details block. */
+.mp-kpis{grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;}
+.mp-kpi{padding:12px 14px;border-radius:12px;box-shadow:none;}
+.mp-kpi-label{font-size:11px;letter-spacing:.04em;min-height:0;white-space:nowrap;overflow:visible;}
+.mp-kpi-value{font-size:20px;line-height:1.2;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:visible;text-overflow:clip;}
+.mp-kpi-delta{white-space:normal;overflow:visible;}
+.mp-secondary{grid-column:1 / -1;}
+.mp-dpa-note{display:inline-block;margin:0 0 8px;padding:3px 10px;border-radius:999px;font-size:11.5px;font-weight:600;background:var(--surface2);border:1px solid var(--border);color:var(--text-secondary);}
+.mp-dpa-note:empty{display:none;}
+.mp-dpa-note[data-mode="include"]{background:var(--accent-softer);border-color:var(--accent-border);color:var(--accent-text);}
+.mp-inline-check{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text-secondary);cursor:pointer;white-space:nowrap;}
+.mp-table-toolbar{flex-wrap:wrap;}
+.mp-table-toolbar input[type=search]{width:min(280px,100%);}
+.mp-fresh-text{white-space:nowrap;}
+.mp-fresh-more{font-style:normal;font-size:10.5px;padding:0 6px;border-radius:999px;background:var(--surface2);border:1px solid var(--border);cursor:help;}
+.mp-bench-details{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:6px 12px;margin:6px 0;}
+.mp-bench-details>summary{cursor:pointer;font-size:12px;font-weight:600;color:var(--text-secondary);}
+.mp-bench-details[open]>summary{margin-bottom:6px;}
+
+.mp-table-wrap{border:1px solid var(--border);border-radius:12px;background:var(--surface);max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;}
+.mp-table-wrap .mp-table{box-shadow:none;border-radius:0;}
+.mp-table.mp-perf{table-layout:fixed;min-width:1540px;width:100%;}
+.mp-table.mp-perf th{font-size:10.5px;letter-spacing:.03em;padding:9px 10px;white-space:nowrap;vertical-align:middle;}
+.mp-table.mp-perf th.num{text-align:right;}
+.mp-table.mp-perf td{padding:9px 10px;font-size:12.5px;}
+.mp-table.mp-perf td.num{font-size:12.5px;font-variant-numeric:tabular-nums;text-align:right;}
+.mp-table.mp-perf th:nth-child(1){width:64px;}
+.mp-table.mp-perf th:nth-child(2){width:58px;}
+.mp-table.mp-perf th:nth-child(3){width:auto;min-width:300px;}
+.mp-table.mp-perf th:nth-child(4){width:84px;}
+.mp-table.mp-perf th:nth-child(5){width:104px;}
+.mp-table.mp-perf th:nth-child(6){width:84px;}
+.mp-table.mp-perf th:nth-child(7){width:78px;}
+.mp-table.mp-perf th:nth-child(8){width:112px;}
+.mp-table.mp-perf th:nth-child(9){width:70px;}
+.mp-table.mp-perf th:nth-child(10){width:86px;}
+.mp-table.mp-perf th:nth-child(11){width:80px;}
+.mp-table.mp-perf th:nth-child(12){width:96px;}
+.mp-table.mp-perf th:nth-child(13){width:76px;}
+.mp-table.mp-perf th:nth-child(14){width:88px;}
+.mp-table.mp-perf th:nth-child(15){width:94px;}
+/* ad name: two readable lines, full name (and campaign) on hover */
+.mp-table.mp-perf td.mp-name .mp-name-text{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;white-space:normal;overflow:hidden;word-break:break-word;font-weight:600;line-height:1.3;}
+.mp-table.mp-perf td.mp-name .mp-name-stack{max-width:100%;}
+.mp-table.mp-perf td.mp-name .mp-campaign-line{margin-top:2px;}
+.mp-table.mp-perf .cc-thumb{width:40px;height:40px;border-radius:8px;}
+.mp-table.mp-perf td.mp-funnel-cell,.mp-table.mp-perf td.mp-creative-cell{padding-left:10px;padding-right:4px;}
+.mp-table.mp-perf .mp-funnel{font-size:10px;padding:2px 6px;}
+.mp-table.mp-perf td{border-bottom:1px solid var(--border);}
+.mp-table.mp-perf tbody tr:hover{background:var(--surface2);}
+.mp-status{font-size:11px;}
+@media (max-width:760px){.mp-kpis{grid-template-columns:repeat(auto-fill,minmax(130px,1fr));}.mp-kpi-value{font-size:18px;}}
+.mp-table-toolbar .mp-inline-check input{width:auto;padding:0;margin:0;}
