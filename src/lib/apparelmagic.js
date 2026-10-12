@@ -239,17 +239,21 @@ async function fetchSalesByStyleUncached() {
     }
   }
 
-  const salesByStyle = new Map(); // style_code -> { qty7, qty30, qty365 }
+  const salesByStyle = new Map(); // style_code -> { qty7, qty30, qty365, months: { 'YYYY-MM': units } }
+  // calendar month of each crawled day, so the SAME crawl also yields monthly units per style (Creative Planning's seasonality reads these)
+  const monthOfDaysAgo = (daysAgo) => { const d = new Date(today); d.setUTCDate(d.getUTCDate() - daysAgo); return d.toISOString().slice(0, 7); };
   function addQty(style, daysAgo, qty) {
     if (qty <= 0) return;
     let entry = salesByStyle.get(style);
     if (!entry) {
-      entry = { qty7: 0, qty30: 0, qty365: 0 };
+      entry = { qty7: 0, qty30: 0, qty365: 0, months: {} };
       salesByStyle.set(style, entry);
     }
     if (daysAgo < 7) entry.qty7 += qty;
     if (daysAgo < 30) entry.qty30 += qty;
     entry.qty365 += qty;
+    const ym = monthOfDaysAgo(daysAgo);
+    entry.months[ym] = (entry.months[ym] || 0) + qty;
   }
 
   await runWithConcurrency(jobs, SALES_CONCURRENCY, async ({ daysAgo, customer, usDate }) => {
@@ -272,7 +276,10 @@ async function fetchSalesByStyleUncached() {
     }
   });
 
-  return salesByStyle; // Map<style_code, { qty7, qty30, qty365 }>
+  // what period the numbers cover (the crawl is exactly SALES_WINDOW_DAYS back from today), so seasonality knows how much history it really has
+  const from = new Date(today); from.setUTCDate(from.getUTCDate() - (SALES_WINDOW_DAYS - 1));
+  salesByStyle.window = { from: from.toISOString().slice(0, 10), to: today.toISOString().slice(0, 10), days: SALES_WINDOW_DAYS, customers: AM_ONLINE_CUSTOMERS.slice() };
+  return salesByStyle; // Map<style_code, { qty7, qty30, qty365, months }> + .window
 }
 
 // WNDRR's modern style codes are a fixed 11 characters: W + 2-digit year +

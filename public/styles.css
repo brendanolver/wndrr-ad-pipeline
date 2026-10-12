@@ -3045,3 +3045,27 @@ td.mp-name > .mp-name-stack{vertical-align:middle;max-width:calc(100% - 46px);}
 .mcls-confirm{display:flex;gap:8px;align-items:flex-start;font-size:12.5px;margin:10px 0 4px;}
 .mcls-modal .mcls-confirm{display:flex!important;flex-direction:row;align-items:flex-start;gap:8px;}
 .mcls-modal .mcls-confirm input{flex:none;margin-top:3px;width:auto;}
+
+/* ── Planning priority (Batch 11) ── */
+.plan-level { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; margin-left: 6px; white-space: nowrap; }
+.plan-level-high { background: #fde2e1; color: #9b1c1c; }
+.plan-level-medium { background: #fff1d6; color: #8a5a00; }
+.plan-level-low { background: #eceff3; color: #5a6472; }
+.plan-tile-line { margin: 4px 0 2px; }
+.plan-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
+.plan-chip { font-size: 11px; padding: 1px 7px; border-radius: 9px; background: #eef1f5; color: #3b4452; }
+.plan-season-in_season, .plan-season-coming_into_season, .plan-cov-ok { background: #e1f4e6; color: #17602b; }
+.plan-season-out_of_season, .plan-stock-out, .plan-stock-low, .plan-cov-low { background: #fde9e7; color: #9b1c1c; }
+.plan-exception { background: #e8e4fb; color: #43308a; }
+.plan-why { margin: 8px 0; font-size: 12.5px; }
+.plan-why summary { cursor: pointer; font-weight: 600; }
+.plan-why ul { margin: 6px 0 0; padding-left: 18px; }
+.plan-why li { margin: 2px 0; }
+.plan-pts { font-variant-numeric: tabular-nums; font-size: 11px; color: #6b7280; }
+.plan-pts.pos { color: #17602b; } .plan-pts.neg { color: #9b1c1c; }
+.po-add-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+.po-add-row input[type=text] { min-width: 180px; }
+.po-matches { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.po-match { border: 1px solid #d5dae1; background: #fff; border-radius: 6px; padding: 3px 8px; cursor: pointer; font-size: 12.5px; }
+.po-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid #eceff3; }
+.po-row .btn { margin-left: auto; }

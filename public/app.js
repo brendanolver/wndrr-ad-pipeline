@@ -416,6 +416,7 @@ function switchSettingsPanel(name) {
   // sync by itself; that only happens from the explicit button below.
   if (name === 'meta-sync') loadMetaSyncPanel();
   if (name === 'meta-benchmarks') loadMetaBenchmarksPanel();
+  if (name === 'planning') loadPriorityOverrides();
   if (name === 'classification') loadClassificationPanel();
 }
 
@@ -2682,6 +2683,43 @@ function cpFactsHtml(c) {
   return `<div class="cp-facts">${facts.join('')}</div>`;
 }
 
+// ── Planning priority (Batch 11): level badge, season / stock / coverage chips and a plain-language "why" list ──
+// All of it comes from the server's `planning` assessment on a card / High Stock row; nothing is computed here.
+function planLevelBadge(pl) {
+  if (!pl) return '';
+  return `<span class="plan-level plan-level-${escapeHtml(String(pl.level).toLowerCase())}" title="Creative priority from stock, season, ad coverage and sales">${escapeHtml(pl.level)} priority</span>`;
+}
+
+function planChipsHtml(pl) {
+  if (!pl) return '';
+  const chips = [];
+  const season = pl.season || {};
+  chips.push(`<span class="plan-chip plan-season-${escapeHtml(season.status || 'unavailable')}">${escapeHtml(season.label || 'Season n/a')}</span>`);
+  const st = pl.stock || {};
+  chips.push(`<span class="plan-chip plan-stock-${escapeHtml(st.band || 'unknown')}">${st.band === 'unknown' ? 'Stock n/a' : st.band === 'out' ? 'Out of stock' : `${cpNum(st.units)} units`}</span>`);
+  const cv = pl.coverage || {};
+  chips.push(cv.known
+    ? `<span class="plan-chip ${cv.needs_creative ? 'plan-cov-low' : 'plan-cov-ok'}" title="Distinct active Meta ads matched to this product (minimum ${cv.min})">${cv.active_ads}/${cv.min} active ads</span>`
+    : '<span class="plan-chip plan-cov-unknown">Ad count n/a</span>');
+  (pl.exceptions || []).forEach((e) => chips.push(`<span class="plan-chip plan-exception" title="${escapeHtml(e.note || '')}">${escapeHtml(e.label)}</span>`));
+  return `<div class="plan-chips">${chips.join('')}</div>`;
+}
+
+function planDataNotes(pd) {
+  const n = [`Creative priority needs at least ${pd.min_active_ads} distinct active Meta ads per product (Settings → Planning).`];
+  n.push(pd.coverage.available ? (pd.coverage.note || `Active ad counts use ad statuses as of ${pd.coverage.status_as_of || 'the last sync'}.`) : pd.coverage.note);
+  n.push(pd.seasonality.note);
+  if (!pd.on_order.available) n.push('Open purchase orders are unavailable, so confirmed restocks are not detected.');
+  return n.filter(Boolean);
+}
+
+function planWhyHtml(pl) {
+  if (!pl || !(pl.reasons || []).length) return '';
+  const rows = (pl.factors || []).map((f) => `<li><b>${escapeHtml(f.label)}</b> <span class="plan-pts ${f.points > 0 ? 'pos' : f.points < 0 ? 'neg' : ''}">${f.points > 0 ? '+' : ''}${f.points || '·'}</span> ${escapeHtml(f.text)}</li>`);
+  const extra = [...(pl.caps || []), ...(pl.exceptions || []).map((e) => `Exception — ${e.label}${e.note ? `: ${e.note}` : ''}`)].map((t) => `<li class="plan-extra">${escapeHtml(t)}</li>`);
+  return `<details class="plan-why" open><summary>Why ${escapeHtml(pl.level)} priority</summary><ul>${rows.join('')}${extra.join('')}</ul></details>`;
+}
+
 // Compact tile for the weekly scan. The full explanation, evidence and actions are in the detail view (click the tile).
 function cpCardHtml(c) {
   const cr = c.creative;
@@ -2695,6 +2733,7 @@ function cpCardHtml(c) {
       <div class="cp-tile-body">
         <div class="cp-tile-head"><span class="cp-tile-name" title="${escapeHtml(c.product.product_name)}">${escapeHtml(c.product.product_name)}</span>${priority ? `<span class="co-pri pri-${priority.toLowerCase()}">${escapeHtml(priority.toUpperCase())}</span>` : ''}</div>
         <div class="cp-tile-rec">${escapeHtml(c.headline)}${c.product.category ? ` <span class="cp-tile-cat">· ${escapeHtml(c.product.category.toLowerCase())}</span>` : ''}</div>
+        ${c.planning ? `<div class="plan-tile-line">${planLevelBadge(c.planning)}</div>${planChipsHtml(c.planning)}` : ''}
         <dl class="cp-tile-facts">
           <div><dt>Stock</dt><dd>${cpNum(c.stock.units)}</dd></div>
           <div><dt>Sales</dt><dd>${s ? escapeHtml(s.label.replace('Selling ', '')) : '—'}${s && s.tier ? ` <span class="hint">${escapeHtml(s.tier)}</span>` : ''}</dd></div>
@@ -2727,6 +2766,7 @@ function cpDetailHtml(c) {
           ${c.priority && c.priority !== 'Info' ? `<span class="co-pri pri-${c.priority.toLowerCase()}">${escapeHtml(c.priority.toUpperCase())}</span>` : ''}</div>
         <h3 class="co-title">${escapeHtml(c.headline)}</h3>
         <p class="co-expl">${escapeHtml(c.why)}</p>
+        ${c.planning ? `${planLevelBadge(c.planning)}${planChipsHtml(c.planning)}${planWhyHtml(c.planning)}` : ''}
         ${cpFactsHtml(c)}
         ${c.stock.size_warning ? `<div class="co-note cp-size-warn">⚠ ${escapeHtml(c.stock.size_warning)}</div>` : ''}
         ${note}
@@ -2761,6 +2801,7 @@ function renderCorePlan() {
     ds.sizes.note,
     `Based on ${ds.matching.trusted_ads_used} confirmed + auto-matched ads. ${ds.matching.unreviewed_recent_ads ? `${ds.matching.unreviewed_recent_ads} ad${ds.matching.unreviewed_recent_ads === 1 ? '' : 's'} created in the last ${ds.matching.reliable_days} days still need review in Ad Matching, so creative recency may be understated.` : ''}`,
     ds.meta.history_first_day ? `Daily Meta performance is stored from ${cpDate(ds.meta.history_first_day)}, so spend and CPA cover a short period; creative dates come from each ad's own Meta creation date.` : null,
+    ...(d.planning && d.planning.data ? planDataNotes(d.planning.data) : []),
   ].filter(Boolean);
   const low = d.held_low_stock;
   host.innerHTML = `
@@ -2773,6 +2814,7 @@ function renderCorePlan() {
       <span>${c.held_low_stock} held back (low stock)</span>
       ${c.stock_unavailable ? `<span class="cp-warn">${c.stock_unavailable} withheld (stock unavailable)</span>` : ''}
       <span>${c.no_action} need no action</span>
+      ${c.needs_creative !== undefined ? `<span title="Products with fewer active Meta ads than the minimum"><b>${c.needs_creative}</b> need creative</span>` : ''}
       <span class="co-subnav" id="cp-state-nav" role="tablist">
         <button type="button" class="co-subnav-btn ${f === 'active' ? 'active' : ''}" data-cp-state="active">To act on</button>
         <button type="button" class="co-subnav-btn ${f === 'acted_on' ? 'active' : ''}" data-cp-state="acted_on">Done</button>
@@ -2784,6 +2826,7 @@ function renderCorePlan() {
     ${f === 'active' && d.hold.length ? `<h4 class="cp-h">Hold off — don't shoot more yet</h4><div class="cp-grid">${d.hold.map(cpCardHtml).join('')}</div>` : ''}
     ${f === 'active' && d.stock_unavailable.length ? `<div class="co-banner cp-stock-unavail"><b>Stock unavailable — recommendation withheld (${d.stock_unavailable.length})</b><div class="cp-low">${d.stock_unavailable.map((p) => `<div><b>${escapeHtml(p.product_name)}</b> — ${p.reason === 'no_stock_record' ? 'no inventory record in ApparelMagic' : 'stock data not loaded'}${p.would_have_been ? ` <span class="hint">(would otherwise suggest: ${escapeHtml(p.would_have_been)})</span>` : ''}</div>`).join('')}</div><div class="hint">This is a data problem, not low stock: these products are not shown as shoot recommendations until their stock can be read.</div></div>` : ''}
     ${f === 'active' && low.length ? `<details class="co-how"><summary>Not recommended: low stock (${low.length})</summary><div class="cp-low">${low.map((p) => `<div><b>${escapeHtml(p.product_name)}</b> — ${cpNum(p.units)} units${p.would_have_been ? ` <span class="hint">(would otherwise suggest: ${escapeHtml(p.would_have_been)})</span>` : ''}</div>`).join('')}</div></details>` : ''}
+    ${f === 'active' && d.planning && d.planning.needs_creative_other.length ? `<details class="co-how"><summary>Needs creative, but not a shoot priority (${d.planning.needs_creative_other.length})</summary><div class="cp-low">${d.planning.needs_creative_other.map((p) => `<div><b>${escapeHtml(p.product_name)}</b> — ${p.active_ads}/${p.min} active ads · ${escapeHtml(p.season)}${p.stock_units != null ? ` · ${cpNum(p.stock_units)} units` : ''} <span class="hint">${escapeHtml(p.why_not_a_priority)}</span></div>`).join('')}</div></details>` : ''}
     ${f === 'active' && d.no_action.length ? `<details class="co-how"><summary>No action needed (${d.no_action.length})</summary><div class="cp-low hint">${d.no_action.map(escapeHtml).join(' · ')}</div></details>` : ''}
     <details class="co-how"><summary>About this data</summary><ul class="co-how-list">${notes.map((n) => `<li>${escapeHtml(n)}</li>`).join('')}</ul></details>`;
 }
@@ -3873,6 +3916,7 @@ async function loadAll() {
     state.shootPlan = shootPlan;
     state.contentCreators = contentCreators;
     state.highStockProducts = highStockRes.products;
+    state.highStockPlanningData = highStockRes.planning_data || null;
     state.promotions = promotions;
     state.weeklyShootPlanConfirmation = weeklyConfirmation;
     state.weeklyPlanningProgress = weeklyPlanningProgress;
@@ -6378,6 +6422,7 @@ function highStockDetailHtml(p, selectedCodes) {
   return `
     <div class="high-stock-detail">
       <div class="high-stock-detail-recommendation"><span class="high-stock-detail-priority">${escapeHtml(priority)}:</span> ${escapeHtml(recommendation)}</div>
+      ${p.planning ? `${planChipsHtml(p.planning)}${p.family_soh != null && p.family_soh !== p.soh ? `<div class="hint">Whole product (all colourways, counted once): ${cpNum(p.family_soh)} units.</div>` : ''}${planWhyHtml(p.planning)}` : ''}
       <div class="high-stock-detail-grid">
         <div class="high-stock-detail-col">
           <div class="high-stock-detail-col-title">Inventory</div>
@@ -6443,6 +6488,7 @@ function highStockProductRowHtml(p, selectedCodes) {
           <span class="accordion-arrow ${isOpen ? 'open' : ''}">&#9656;</span>
           ${thumb}
           <span class="core-shoot-review-name">${escapeHtml(displayName)}</span>
+          ${p.planning ? planLevelBadge(p.planning) : ''}
         </div>
         <div class="high-stock-row-value">${p.soh}</div>
         <div class="high-stock-row-value">${p.sell_through_7d_pct}%</div>
@@ -16688,6 +16734,8 @@ function renderPlanningSettingsForm() {
   if (!state.planningSettings) return;
   document.getElementById('weekly-target-input').value = state.planningSettings.weekly_new_concept_target;
   document.getElementById('high-stock-min-soh-input').value = state.planningSettings.high_stock_min_soh;
+  document.getElementById('min-active-ads-input').value = state.planningSettings.min_active_ads_per_product ?? 5;
+  loadPriorityOverrides();
   document.getElementById('default-shoot-top-size-input').value = state.planningSettings.default_shoot_top_size;
   document.getElementById('default-shoot-bottom-alpha-size-input').value = state.planningSettings.default_shoot_bottom_alpha_size;
   document.getElementById('default-shoot-bottom-waist-size-input').value = state.planningSettings.default_shoot_bottom_waist_size;
@@ -16706,6 +16754,67 @@ async function saveWeeklyTarget() {
   } catch (e) {
     toast(e.message, true);
   }
+}
+
+async function saveMinActiveAds() {
+  const value = document.getElementById('min-active-ads-input').value;
+  try {
+    const updated = await api('/planning-settings', { method: 'PUT', body: JSON.stringify({ min_active_ads_per_product: Number(value) }) });
+    state.planningSettings = updated;
+    toast('Minimum active ads saved');
+    const res = await api('/high-stock-products');
+    state.highStockProducts = res.products;
+    renderHighStockProducts();
+    if (typeof loadCorePlan === 'function') loadCorePlan(true);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// ── Settings: Priority overrides ─────────────────────
+const PO = { kinds: [], overrides: [], pick: null, timer: null };
+
+async function loadPriorityOverrides() {
+  try {
+    const res = await api('/creative-priority-overrides');
+    PO.kinds = res.kinds; PO.overrides = res.overrides;
+    document.getElementById('po-kind').innerHTML = PO.kinds.map((k) => `<option value="${escapeHtml(k.key)}">${escapeHtml(k.label)}</option>`).join('');
+    renderPriorityOverrides();
+  } catch (e) {
+    document.getElementById('po-list').innerHTML = `<div class="attention-empty">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function renderPriorityOverrides() {
+  const host = document.getElementById('po-list');
+  host.innerHTML = PO.overrides.length
+    ? PO.overrides.map((o) => `<div class="po-row"><b>${escapeHtml(o.product_name || o.product_code)}</b> <span class="plan-chip plan-exception">${escapeHtml(o.kind_label)}</span>${o.note ? ` <span class="hint">${escapeHtml(o.note)}</span>` : ''}${o.until ? ` <span class="hint">until ${escapeHtml(o.until)}</span>` : ''}<button type="button" class="btn btn-ghost btn-sm" data-po-remove="${o.id}">Remove</button></div>`).join('')
+    : '<div class="attention-empty">No overrides. Priority comes from stock, season, ad coverage and sales alone.</div>';
+}
+
+async function poSearch() {
+  const q = document.getElementById('po-product-q').value.trim();
+  const host = document.getElementById('po-matches');
+  PO.pick = null;
+  if (q.length < 2) { host.innerHTML = ''; return; }
+  try {
+    const res = await api(`/creative-priority-overrides/products?q=${encodeURIComponent(q)}`);
+    host.innerHTML = res.available
+      ? (res.products.length ? res.products.map((p) => `<button type="button" class="po-match" data-po-pick="${escapeHtml(p.product_code)}" data-po-name="${escapeHtml(p.product_name)}">${escapeHtml(p.product_name)} <span class="hint">${escapeHtml(p.product_code)}</span></button>`).join('') : '<span class="hint">No matching product.</span>')
+      : '<span class="hint">The product catalogue is not loaded, so products cannot be searched yet.</span>';
+  } catch (e) { host.innerHTML = `<span class="hint">${escapeHtml(e.message)}</span>`; }
+}
+
+async function poAdd() {
+  if (!PO.pick) return toast('Search for a product and choose it first', true);
+  try {
+    await api('/creative-priority-overrides', { method: 'POST', body: JSON.stringify({ product_code: PO.pick, kind: document.getElementById('po-kind').value, note: document.getElementById('po-note').value, until_date: document.getElementById('po-until').value || null }) });
+    PO.pick = null;
+    ['po-product-q', 'po-note', 'po-until'].forEach((id) => { document.getElementById(id).value = ''; });
+    document.getElementById('po-matches').innerHTML = '';
+    toast('Override added');
+    await loadPriorityOverrides();
+  } catch (e) { toast(e.message, true); }
 }
 
 async function saveHighStockMinSoh() {
@@ -16901,6 +17010,21 @@ document.getElementById('cr-add-btn').addEventListener('click', () => openCrModa
 document.getElementById('ca-add-btn').addEventListener('click', () => openCaModal(null));
 document.getElementById('weekly-target-save-btn').addEventListener('click', saveWeeklyTarget);
 document.getElementById('high-stock-min-soh-save-btn').addEventListener('click', saveHighStockMinSoh);
+document.getElementById('min-active-ads-save-btn').addEventListener('click', saveMinActiveAds);
+document.getElementById('po-add-btn').addEventListener('click', poAdd);
+document.getElementById('po-product-q').addEventListener('input', () => { clearTimeout(PO.timer); PO.timer = setTimeout(poSearch, 250); });
+document.getElementById('po-matches').addEventListener('click', (ev) => {
+  const b = ev.target.closest('[data-po-pick]');
+  if (!b) return;
+  PO.pick = b.dataset.poPick;
+  document.getElementById('po-product-q').value = b.dataset.poName;
+  document.getElementById('po-matches').innerHTML = `<span class="hint">Selected: <b>${escapeHtml(b.dataset.poName)}</b></span>`;
+});
+document.getElementById('po-list').addEventListener('click', async (ev) => {
+  const b = ev.target.closest('[data-po-remove]');
+  if (!b) return;
+  try { await api(`/creative-priority-overrides/${b.dataset.poRemove}`, { method: 'DELETE' }); toast('Override removed'); await loadPriorityOverrides(); } catch (e) { toast(e.message, true); }
+});
 document.getElementById('default-shoot-top-size-save-btn').addEventListener('click', () => saveDefaultShootSize('top'));
 document.getElementById('default-shoot-bottom-alpha-size-save-btn').addEventListener('click', () => saveDefaultShootSize('bottom_alpha'));
 document.getElementById('default-shoot-bottom-waist-size-save-btn').addEventListener('click', () => saveDefaultShootSize('bottom_waist'));

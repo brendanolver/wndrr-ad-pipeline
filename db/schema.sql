@@ -3185,6 +3185,24 @@ CREATE INDEX IF NOT EXISTS idx_meta_cls_option_items_change ON meta_classificati
 CREATE INDEX IF NOT EXISTS idx_meta_cls_option_items_ad ON meta_classification_option_change_items(meta_ad_id);
 
 -- =====================================================================
+-- Batch 11: Creative Planning priority. A product with fewer than min_active_ads_per_product ACTIVE Meta ads needs new creative (default 5, editable in
+-- Settings). Overrides record the business reasons that may lift (or hold) a product's priority regardless of season / stock / coverage: an upcoming
+-- drop, a confirmed restock, a major promotion, a strategic launch or a manual priority. An override can expire; removing one is a soft delete.
+ALTER TABLE planning_settings ADD COLUMN IF NOT EXISTS min_active_ads_per_product INTEGER NOT NULL DEFAULT 5 CHECK (min_active_ads_per_product BETWEEN 1 AND 100);
+CREATE TABLE IF NOT EXISTS creative_priority_overrides (
+  id SERIAL PRIMARY KEY,
+  product_code VARCHAR(32) NOT NULL,
+  kind VARCHAR(24) NOT NULL CHECK (kind IN ('upcoming_drop', 'confirmed_restock', 'major_promotion', 'strategic_launch', 'manual_high', 'manual_medium', 'manual_low')),
+  note TEXT,
+  until_date DATE,
+  created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  removed_at TIMESTAMPTZ,
+  removed_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_creative_priority_overrides_product ON creative_priority_overrides(product_code) WHERE removed_at IS NULL;
+
+-- =====================================================================
 -- Approved Ad Matching concepts + historical-spelling aliases
 -- =====================================================================
 -- The concept list Ad Matching offers is the people-approved vocabulary: meta_matching_vocab rows of kind 'concept'. The 40 approved

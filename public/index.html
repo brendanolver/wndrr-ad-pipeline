@@ -1373,6 +1373,30 @@
           <input type="number" id="high-stock-min-soh-input" min="0" step="1">
           <button class="btn btn-primary btn-sm" id="high-stock-min-soh-save-btn">Save</button>
         </div>
+
+        <div class="planning-section-header">
+          <h2>Creative Coverage</h2>
+          <span class="admin-note">A product with fewer distinct <b>active</b> Meta ads than this needs new creative. Counts ads that are active, matched (confirmed or auto-matched) and not excluded; paused, archived and unreviewed ads do not count.</span>
+        </div>
+        <div class="settings-field-row">
+          <label for="min-active-ads-input">Minimum active Meta ads per product</label>
+          <input type="number" id="min-active-ads-input" min="1" max="100" step="1">
+          <button class="btn btn-primary btn-sm" id="min-active-ads-save-btn">Save</button>
+        </div>
+
+        <div class="planning-section-header">
+          <h2>Priority Overrides</h2>
+          <span class="admin-note">Business reasons that lift (or hold) a product's creative priority whatever its stock, season or coverage: an upcoming drop, a confirmed restock, a promotion, a strategic launch or a manual priority. They only change ranking and its explanation; they never create or change creative.</span>
+        </div>
+        <div class="po-add-row">
+          <input type="text" id="po-product-q" placeholder="Search product name or code" autocomplete="off">
+          <select id="po-kind"></select>
+          <input type="text" id="po-note" placeholder="Note (optional)" maxlength="300">
+          <input type="date" id="po-until" title="Optional end date">
+          <button class="btn btn-primary btn-sm" id="po-add-btn">+ Add override</button>
+        </div>
+        <div id="po-matches" class="po-matches"></div>
+        <div id="po-list" class="po-list"></div>
       </div>
 
       <div class="settings-panel" id="settings-panel-shoot-prep">

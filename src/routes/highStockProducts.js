@@ -4,6 +4,8 @@ const apparelmagic = require('../lib/apparelmagic');
 const reportPipeline = require('../lib/reportPipeline');
 const { fetchAmData, getAssetCounts } = require('../lib/planningData');
 const { STATUS_LABELS } = require('../lib/statuses');
+const planningContext = require('../lib/planningContext');
+const { ymdInZone, REPORTING_TIMEZONE } = require('../lib/metaPerformance');
 
 const router = express.Router();
 
@@ -66,7 +68,7 @@ function salesTrendInfo(vel30, vel365) {
 // exact same eligibility+computation logic the High Stock Planning step
 // itself uses, rather than a second, possibly-diverging copy. Returns the
 // same shape the route below responds with.
-async function computeHighStockProducts() {
+async function computeHighStockProducts(deps = {}) {
   const [am, settingsResult] = await Promise.all([
     fetchAmData(),
     pool.query('SELECT * FROM planning_settings WHERE id = 1'),
@@ -306,9 +308,44 @@ async function computeHighStockProducts() {
       };
     }).filter(Boolean);
 
-    products.sort((a, b) => b.soh - a.soh);
+    // ── combined creative priority (same facts and rules as the Core plan; see lib/creativePriority.js) ──────────────────────────────────
+    // Stock for the decision is the PRODUCT FAMILY's total sellable units (every colourway and season code once, from the same ApparelMagic quantities
+    // shown above), because creative is made per product, not per colourway. `soh` above stays the colourway's own figure.
+    let planning = null;
+    try {
+      planning = deps.planning !== undefined ? deps.planning : await planningContext.loadPlanningContext({ amDetails: am.amDetails, today: ymdInZone(new Date(), REPORTING_TIMEZONE) });
+    } catch (e) { planning = null; }
+    if (planning) {
+      const famByKey = new Map(planning.allFamilies.map((f) => [f.key, f]));
+      const cache = new Map();
+      products.forEach((p) => {
+        const famKey = planning.styleToFamily.get(p.style_code);
+        const fam = famKey ? famByKey.get(famKey) : null;
+        const styleCodes = fam ? fam.style_codes : [p.style_code];
+        const familyUnits = styleCodes.reduce((sum, c) => sum + Math.max(0, Number(am.amStock.get(c)) || 0), 0); // each style exactly once: no colourway / size is counted twice
+        const key = `${famKey || p.style_code}`;
+        let a = cache.get(key);
+        const trend = p.sales_trend && /up/.test(p.sales_trend.cls || '') ? 'up' : p.sales_trend && /down/.test(p.sales_trend.cls || '') ? 'down' : 'flat';
+        if (!a) {
+          a = planningContext.assessProduct(planning, {
+            styleCodes, productCodes: fam ? fam.codes : [p.product_code], stock: { known: true, units: familyUnits },
+            sales: { available: true, seller_class: ['platinum', 'rocket'].includes(p.tier) ? 'strong' : p.tier === 'dog' || p.tier === 'egg' ? 'weak' : 'neutral', trend },
+            existing: null,
+          });
+          cache.set(key, a);
+        }
+        p.family_soh = familyUnits;
+        p.planning = {
+          level: a.level, score_delta: a.score_delta, reasons: a.reasons, factors: a.factors.map((x) => ({ key: x.key, label: x.label, points: x.points, text: x.text })),
+          missing: a.missing, caps: a.caps, exceptions: a.exceptions, stock: a.stock, season: a.season, coverage: a.coverage, family_key: a.family_key,
+        };
+      });
+      const lv = { High: 2, Medium: 1, Low: 0 };
+      products.sort((a, b) => (lv[b.planning.level] - lv[a.planning.level]) || (b.planning.score_delta - a.planning.score_delta) || (b.soh - a.soh));
+    } else products.sort((a, b) => b.soh - a.soh);
 
     return {
+      planning_data: planning ? planningContext.dataStatus(planning) : null,
       products,
       min_soh: minSoh,
       apparelmagic: { configured: am.amConfigured, error: am.amError },

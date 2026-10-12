@@ -35,6 +35,13 @@ router.put('/', async (req, res, next) => {
       }
       updates.high_stock_min_soh = v;
     }
+    if (body.min_active_ads_per_product !== undefined) {
+      const v = Number.parseInt(body.min_active_ads_per_product, 10);
+      if (!Number.isInteger(v) || v < 1 || v > 100) {
+        return res.status(400).json({ error: 'min_active_ads_per_product must be a whole number from 1 to 100' });
+      }
+      updates.min_active_ads_per_product = v;
+    }
     for (const field of ['default_shoot_top_size', 'default_shoot_bottom_alpha_size', 'default_shoot_bottom_waist_size']) {
       if (body[field] === undefined) continue;
       const v = String(body[field] || '').trim();

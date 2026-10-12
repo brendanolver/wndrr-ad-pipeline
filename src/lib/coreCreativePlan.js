@@ -34,6 +34,8 @@ const { canonicalKey } = require('./metaMatchingCatalogue');
 const { MEDIA_LABEL } = require('./metaNameParsing');
 const { ymdInZone, addDays, REPORTING_TIMEZONE } = require('./metaPerformance');
 const creativeActivity = require('./metaCreativeActivity');
+const planningContext = require('./planningContext');
+const creativePriority = require('./creativePriority');
 
 const num = (v) => Number(v) || 0;
 const round = (v, d = 1) => (v === null || v === undefined ? null : Number(Number(v).toFixed(d)));
@@ -326,7 +328,7 @@ function recommendFamily({ family, ps, facts, stock, benchmarkCpa, salesAvailabl
 }
 
 // ── the plan (pure core; orchestration below feeds it) ──────────────────
-function buildPlan({ families, codeToFamily, snapshot, demand, stock, sizesByStyle, sizeOrderFor, now = new Date(), stateRows = [], salesAvailable, activity }) {
+function buildPlan({ families, codeToFamily, snapshot, demand, stock, sizesByStyle, sizeOrderFor, now = new Date(), stateRows = [], salesAvailable, activity, planning = null }) {
   const folded = foldSnapshot(snapshot, codeToFamily);
   const foldedDemand = foldDemand(demand, codeToFamily);
   const sellers = co.classifySellers(foldedDemand);
@@ -352,7 +354,7 @@ function buildPlan({ families, codeToFamily, snapshot, demand, stock, sizesBySty
     if (rec.type === 'hold') { cards.push(rec); return; } // a "do not shoot" insight: not a shoot recommendation, so the gate doesn't apply
     // Only a KNOWN count under the minimum is "low stock"; no count at all is "stock unavailable".
     if (!st.known) { stockUnavailable.push({ product_code: f.product_code, product_name: f.name, reason: st.reason, would_have_been: rec.headline }); return; }
-    if (!st.pass) { heldLowStock.push({ product_code: f.product_code, product_name: f.name, units: st.units, known: true, would_have_been: rec.headline }); return; }
+    if (!st.pass) { heldLowStock.push({ product_code: f.product_code, product_name: f.name, units: st.units, known: true, would_have_been: rec.headline, _rec: rec, _family: f }); return; }
     cards.push(rec);
   });
 
@@ -381,6 +383,73 @@ function buildPlan({ families, codeToFamily, snapshot, demand, stock, sizesBySty
     card._concept_ads = folded.ads.filter((a) => a.concept_key === c.key && num(a.w.e.spend) > 0).sort((a, b) => num(b.w.e.spend) - num(a.w.e.spend)).slice(0, cfg.LIMITS.concept_evidence_ads);
     cards.push(card);
   });
+
+  // ── combined creative priority (stock x season x active-ad coverage x sales, plus business exceptions) ──────────────────────────
+  // Annotates every card with a level, a score adjustment and plain-language reasons; adds a card for a product that is below the minimum active-ad
+  // coverage and worth acting on; lets a CONFIRMED restock / drop / manual priority lift a product the stock gate would have held back. The existing
+  // recommendation engine above is untouched: with no `planning` context nothing here runs.
+  let planningOut = null;
+  if (planning) {
+    const stockOf = (f) => { const st = stockByFamily.get(f.key); return st && st.known ? { known: true, units: st.units } : { known: false }; };
+    const salesOf = (f) => { const ps = signals.get(f.key); return ps && ps.sales ? { available: !!salesAvailable, seller_class: ps.sales.seller_class, trend: ps.sales.trend ? ps.sales.trend.direction : null } : { available: false }; };
+    const assessFor = (f, existing) => planningContext.assessProduct(planning, { styleCodes: f.style_codes, productCodes: f.codes, stock: stockOf(f), sales: salesOf(f), existing: existing ? { priority: existing.priority, type: existing.type } : null });
+    const publicOf = (a) => ({
+      level: a.level, score_delta: a.score_delta, reasons: a.reasons, factors: a.factors.map((x) => ({ key: x.key, label: x.label, points: x.points, text: x.text })), missing: a.missing, caps: a.caps,
+      exceptions: a.exceptions, stock: a.stock, season: a.season, coverage: a.coverage, family_key: a.family_key,
+    });
+    const famOfCard = new Map(families.map((f) => [f.product_code, f]));
+    // 1. exceptions may promote a product the stock gate held back (a confirmed restock on order, an upcoming drop, a manual priority)
+    const promoted = [];
+    for (let i = heldLowStock.length - 1; i >= 0; i -= 1) {
+      const h = heldLowStock[i];
+      if (!h._rec) continue;
+      const a = assessFor(h._family, h._rec);
+      if (a.exceptions.length && a.level !== 'Low') { cards.push(h._rec); famOfCard.set(h._rec.product.product_code, h._family); promoted.push(h.product_name); heldLowStock.splice(i, 1); }
+    }
+    // 2. annotate every card
+    const assessments = new Map();
+    cards.forEach((card) => {
+      const f = famOfCard.get(card.product.product_code) || familyByKey.get(card.product.product_code);
+      if (!f) return;
+      const a = assessFor(f, card);
+      assessments.set(f.key, a);
+      card.planning = publicOf(a);
+      if (card.type !== 'hold') { card.score_base = card.score; card.score += a.score_adjust; }
+    });
+    // 3. products below the minimum coverage that have no card yet
+    const hasCard = new Set(cards.map((c) => c.product.product_code));
+    const needsOther = [];
+    let needsCreativeCount = 0; let coverageCards = 0;
+    families.forEach((f) => {
+      const st = stockByFamily.get(f.key);
+      const a = assessments.get(f.key) || assessFor(f, null);
+      if (a.coverage.known && a.coverage.needs_creative) needsCreativeCount += 1;
+      if (hasCard.has(f.product_code) || !a.coverage.known || !a.coverage.needs_creative) return;
+      const held = heldLowStock.find((h) => h.product_code === f.product_code);
+      const stockOk = st && st.known && st.pass;
+      if (stockOk && (a.level === 'High' || a.level === 'Medium')) {
+        const ps = signals.get(f.key); const facts = factsByFamily.get(f.key);
+        const card = cardBase({
+          type: 'coverage_gap', family: f, ps, facts, stock: st, benchmarkCpa, priority: a.level === 'High' ? 'High' : 'Medium', severity: 0,
+          headline: 'Add creative — below the minimum', strength: 30,
+          why: `${f.name} has ${a.coverage.active_ads === 0 ? 'no active Meta ads' : `only ${a.coverage.active_ads} active Meta ad${a.coverage.active_ads === 1 ? '' : 's'}`} (the minimum is ${a.coverage.min}).`,
+        });
+        card.planning = publicOf(a); card.score_base = card.score; card.score += a.score_adjust; card.evidence = null;
+        cards.push(card); assessments.set(f.key, a); coverageCards += 1;
+      } else {
+        needsOther.push({
+          product_code: f.product_code, product_name: f.name, active_ads: a.coverage.active_ads, min: a.coverage.min, level: a.level,
+          why_not_a_priority: a.caps[0] || (st && !st.known ? 'Stock is unavailable' : st && !st.pass ? (held ? `Low stock (${st.units} units)` : 'Low stock') : `Priority is ${a.level}`),
+          season: a.season.label, stock_units: a.stock.units,
+        });
+      }
+    });
+    planningOut = {
+      data: planningContext.dataStatus(planning), promoted_by_exception: promoted, needs_creative_other: needsOther.sort((x, y) => x.active_ads - y.active_ads || x.product_name.localeCompare(y.product_name)),
+      counts: { needs_creative: needsCreativeCount, coverage_cards: coverageCards, needs_creative_not_a_priority: needsOther.length },
+    };
+  }
+  heldLowStock.forEach((h) => { delete h._rec; delete h._family; });
 
   // evidence (admin-only money lives under .admin so it can be stripped server-side)
   cards.forEach((card) => {
@@ -412,9 +481,11 @@ function buildPlan({ families, codeToFamily, snapshot, demand, stock, sizesBySty
       hold: active.filter((c) => c.type === 'hold').length,
       no_action: noAction.length,
       stock_known: stockKnown,
+      ...(planningOut ? { needs_creative: planningOut.counts.needs_creative, needs_creative_not_a_priority: planningOut.counts.needs_creative_not_a_priority } : {}),
     },
     concepts: { proven: concepts.concepts.filter((c) => c.status === 'proven').length, benchmark_cpa: benchmarkCpa },
     folded_ads: folded.ads.length,
+    planning: planningOut,
   };
 }
 
@@ -511,9 +582,11 @@ async function computePlan({ now = new Date(), isAdmin = false } = {}, deps = {}
     snapshot.ads.filter((a) => a.creative_key !== a.id).map((a) => a.creative_key),
     { today: snapshot.win.today, recentDays: coCfg.WINDOWS.recent_days }
   );
+  // the combined-priority context (settings, active-ad coverage, seasonality, overrides, on-order); never blocks the plan if a piece is missing
+  const planning = deps.planning !== undefined ? deps.planning : await planningContext.loadPlanningContext({ amDetails, today: snapshot.win.today, deps: deps.planningDeps || {} });
   const plan = buildPlan({
     families, codeToFamily, snapshot, demand, stock: stockObj || null, sizesByStyle: stockObj ? stockObj.sizes : null,
-    sizeOrderFor, now, stateRows: stateRes.rows, salesAvailable, activity,
+    sizeOrderFor, now, stateRows: stateRes.rows, salesAvailable, activity, planning,
   });
   const sizeField = stockObj ? stockObj.sizeField : null;
   const out = {
