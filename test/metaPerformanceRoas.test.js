@@ -49,7 +49,7 @@ test('Meta Performance table: header, rows and empty rows all have the same numb
   const html = read('public/index.html');
   const thead = html.slice(html.indexOf('<table class="mp-table mp-perf">'), html.indexOf('<tbody id="mp-ads-body">'));
   const heads = thead.match(/<th\b/g).length;
-  assert.equal(heads, 14);
+  assert.equal(heads, 15); // Batch 13 added CPM
   assert.match(thead, /data-sort="purchase_value"/);
   assert.match(thead, /data-sort="roas"/);
   const app = read('public/app.js');
@@ -57,8 +57,8 @@ test('Meta Performance table: header, rows and empty rows all have the same numb
   assert.equal(row.match(/<td\b/g).length, heads, 'a data row has one cell per header');
   assert.match(row, /mpFmt\(a\.purchase_value, 'money'\)/);
   assert.match(row, /mpFmt\(a\.roas, 'roas'\)/);
-  assert.equal((app.match(/colspan="14" class="mp-table-empty"/g) || []).length, 2, 'both empty / error rows span all columns');
-  assert.doesNotMatch(app, /colspan="12" class="mp-table-empty"/);
+  assert.equal((app.match(/colspan="15" class="mp-table-empty"/g) || []).length, 2, 'both empty / error rows span all columns');
+  assert.doesNotMatch(app, /colspan="12" class="mp-table-empty"/); assert.doesNotMatch(app, /colspan="14" class="mp-table-empty"/);
 });
 test('headline KPIs and the ad detail show Purchase Value and ROAS, with the unavailable case rendered as a dash', () => {
   const app = read('public/app.js');

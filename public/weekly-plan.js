@@ -487,6 +487,7 @@ async function loadWeeklyPlanConfig() {
   try {
     const res = await api('/weekly-video-plan/config');
     WPS.config = res;
+    const wasOpen = !!(document.getElementById('wpc-advanced') && document.getElementById('wpc-advanced').open);
     const field = (f) => {
       const input = f.key === 'launch_sales_confirms'
         ? `<select id="wpc-${wpEsc(f.key)}" data-wpc-key="${wpEsc(f.key)}" aria-describedby="wpc-${wpEsc(f.key)}-hint"><option value="0" ${Number(f.value) === 0 ? 'selected' : ''}>No: a person confirms</option><option value="1" ${Number(f.value) === 1 ? 'selected' : ''}>Yes: sustained sales count</option></select>`
@@ -496,7 +497,7 @@ async function loadWeeklyPlanConfig() {
     const group = (g) => `<fieldset class="wpc-group" data-wpc-group="${wpEsc(g.key)}"><legend>${wpEsc(g.title)}</legend>${g.help ? `<div class="hint wpc-help">${wpEsc(g.help)}</div>` : ''}${g.fields.map(field).join('')}</fieldset>`;
     const everyday = res.groups.filter((g) => !g.advanced);
     const advanced = res.groups.filter((g) => g.advanced);
-    host.innerHTML = everyday.map(group).join('') + (advanced.length ? `<details class="wpc-advanced" id="wpc-advanced"><summary>Advanced: how products are scored and sized</summary>${advanced.map(group).join('')}</details>` : '');
+    host.innerHTML = everyday.map(group).join('') + (advanced.length ? `<details class="wpc-advanced" id="wpc-advanced"${wasOpen ? ' open' : ''}><summary>Advanced: how products are scored and sized</summary>${advanced.map(group).join('')}</details>` : '');
     const status = document.getElementById('wpc-status');
     if (status) status.textContent = Object.keys(res.stored || {}).length ? `${Object.keys(res.stored).length} setting(s) changed from the defaults` : 'All settings are at their defaults';
   } catch (e) { host.innerHTML = `<div class="attention-empty">${wpEsc(e.message)}</div>`; }

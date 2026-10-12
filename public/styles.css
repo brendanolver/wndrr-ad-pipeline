@@ -3390,3 +3390,23 @@ input[type=checkbox],input[type=radio]{accent-color:var(--accent-strong);}
    provisional until the Tuesday / Retention references are available to match exactly. */
 .logo-mark{display:flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:8px;background:var(--ds-navy-700);box-shadow:inset 0 0 0 1px rgba(255,255,255,0.14);}
 .logo-mark svg{display:block;}
+/* headers wrap onto two lines instead of being cut off; the narrow Funnel / Creative columns keep their badge and thumbnail inside the cell */
+.mp-table.mp-perf th{white-space:normal !important;text-overflow:clip !important;overflow:visible !important;overflow-wrap:break-word;}
+.mp-table.mp-perf th.mp-th-funnel,.mp-table.mp-perf td.mp-funnel-cell{padding-left:8px;padding-right:4px;}
+.mp-table.mp-perf th.mp-th-creative,.mp-table.mp-perf td.mp-creative-cell{padding-left:8px;padding-right:6px;}
+.mp-table.mp-perf th:nth-child(1){width:60px;}
+.mp-table.mp-perf{min-width:1420px;}
+.mp-table.mp-perf th{font-size:10px;letter-spacing:.02em;overflow-wrap:normal;}
+.mp-table.mp-perf th:nth-child(2){width:78px;}
+.mp-table.mp-perf th:nth-child(6){width:100px;}
+.mp-table.mp-perf th:nth-child(12){width:96px;}
+/* compact definitive widths (sum 1,024px + a 200px+ ad-name column): the table fits a 1,440px window with at most a short scroll, and scrolls inside its wrapper on narrower windows */
+.mp-table.mp-perf{min-width:1226px;}
+.mp-table.mp-perf th,.mp-table.mp-perf td{padding-left:8px;padding-right:8px;}
+.mp-table.mp-perf th:nth-child(1){width:56px;} .mp-table.mp-perf th:nth-child(2){width:62px;} .mp-table.mp-perf th:nth-child(4){width:74px;}
+.mp-table.mp-perf th:nth-child(5){width:86px;} .mp-table.mp-perf th:nth-child(6){width:84px;} .mp-table.mp-perf th:nth-child(7){width:78px;}
+.mp-table.mp-perf th:nth-child(8){width:90px;} .mp-table.mp-perf th:nth-child(9){width:62px;} .mp-table.mp-perf th:nth-child(10){width:68px;}
+.mp-table.mp-perf th:nth-child(11){width:78px;} .mp-table.mp-perf th:nth-child(12){width:80px;} .mp-table.mp-perf th:nth-child(13){width:72px;}
+.mp-table.mp-perf th:nth-child(14){width:80px;} .mp-table.mp-perf th:nth-child(15){width:84px;}
+.mp-table.mp-perf th.mp-th-funnel,.mp-table.mp-perf td.mp-funnel-cell{padding-left:6px;padding-right:2px;}
+.mp-table.mp-perf th.mp-th-creative,.mp-table.mp-perf td.mp-creative-cell{padding-left:6px;padding-right:4px;}
