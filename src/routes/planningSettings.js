@@ -42,6 +42,21 @@ router.put('/', async (req, res, next) => {
       }
       updates.min_active_ads_per_product = v;
     }
+    if (body.weekly_video_target !== undefined) {
+      const v = Number.parseInt(body.weekly_video_target, 10);
+      if (!Number.isInteger(v) || v < 20 || v > 30) return res.status(400).json({ error: 'weekly_video_target must be a whole number from 20 to 30' });
+      updates.weekly_video_target = v;
+    }
+    if (body.season_immediate_days !== undefined || body.season_secondary_days !== undefined) {
+      const cur = (await pool.query('SELECT season_immediate_days, season_secondary_days FROM planning_settings WHERE id = 1')).rows[0] || { season_immediate_days: 7, season_secondary_days: 14 };
+      const imm = body.season_immediate_days !== undefined ? Number.parseInt(body.season_immediate_days, 10) : cur.season_immediate_days;
+      const sec = body.season_secondary_days !== undefined ? Number.parseInt(body.season_secondary_days, 10) : cur.season_secondary_days;
+      if (!Number.isInteger(imm) || imm < 1 || imm > 28) return res.status(400).json({ error: 'season_immediate_days must be a whole number from 1 to 28' });
+      if (!Number.isInteger(sec) || sec < 2 || sec > 56) return res.status(400).json({ error: 'season_secondary_days must be a whole number from 2 to 56' });
+      if (sec <= imm) return res.status(400).json({ error: 'The secondary lookahead must be longer than the immediate lookahead' });
+      if (body.season_immediate_days !== undefined) updates.season_immediate_days = imm;
+      if (body.season_secondary_days !== undefined) updates.season_secondary_days = sec;
+    }
     for (const field of ['default_shoot_top_size', 'default_shoot_bottom_alpha_size', 'default_shoot_bottom_waist_size']) {
       if (body[field] === undefined) continue;
       const v = String(body[field] || '').trim();
@@ -61,6 +76,7 @@ router.put('/', async (req, res, next) => {
       `UPDATE planning_settings SET ${setClauses.join(', ')}, updated_at = now(), updated_by_user_id = $${values.length} WHERE id = 1 RETURNING *`,
       values
     );
+    try { require('./weeklyVideoPlan').invalidate(); } catch (e) { /* cache only */ }
     res.json(result.rows[0]);
   } catch (err) {
     next(err);

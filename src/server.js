@@ -47,6 +47,7 @@ const promotionCreativeRoutes = require('./routes/promotionCreative');
 const metaSyncRoutes = require('./routes/metaSync');
 const metaClassificationOptionsRoutes = require('./routes/metaClassificationOptions');
 const creativePriorityOverrideRoutes = require('./routes/creativePriorityOverrides');
+const weeklyVideoPlanRoutes = require('./routes/weeklyVideoPlan');
 const metaPerformanceRoutes = require('./routes/metaPerformance');
 const metaAdMatchingRoutes = require('./routes/metaAdMatching');
 const metaArchiveRoutes = require('./routes/metaArchive');
@@ -113,6 +114,7 @@ app.use('/api/concept-types', requireAuth, conceptTypeRoutes);
 app.use('/api/shooting', requireAuth, requireModuleAccess('shooting'), shootingRoutes);
 app.use('/api/planning-settings', requireAuth, requireModuleAccess('planning'), planningSettingsRoutes);
 app.use('/api/creative-priority-overrides', requireAuth, requireModuleAccess('planning'), creativePriorityOverrideRoutes);
+app.use('/api/weekly-video-plan', requireAuth, requireModuleAccess('planning'), weeklyVideoPlanRoutes);
 app.use('/api/core-products', requireAuth, requireModuleAccess('planning'), coreProductRoutes);
 // Core creative plan: Planning users; money is stripped server-side for non-admins; never calls Meta.
 app.use('/api/core-creative-plan', requireAuth, requireModuleAccess('planning'), coreCreativePlanRoutes);

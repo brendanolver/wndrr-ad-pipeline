@@ -3203,6 +3203,43 @@ CREATE TABLE IF NOT EXISTS creative_priority_overrides (
 CREATE INDEX IF NOT EXISTS idx_creative_priority_overrides_product ON creative_priority_overrides(product_code) WHERE removed_at IS NULL;
 
 -- =====================================================================
+-- Batch 12: weekly VIDEO production planning (additive; nothing existing is changed or backfilled)
+-- =====================================================================
+-- Weekly production target (videos), the production lookahead windows for seasonality, and the creative-recommendation tuning knobs (evidence thresholds,
+-- allocation limits) as one JSON object whose missing keys fall back to the defaults in code. Defaults: 25 videos a week; 7 / 14 days.
+ALTER TABLE planning_settings ADD COLUMN IF NOT EXISTS weekly_video_target INTEGER NOT NULL DEFAULT 25 CHECK (weekly_video_target BETWEEN 1 AND 200);
+ALTER TABLE planning_settings ADD COLUMN IF NOT EXISTS season_immediate_days INTEGER NOT NULL DEFAULT 7 CHECK (season_immediate_days BETWEEN 1 AND 28);
+ALTER TABLE planning_settings ADD COLUMN IF NOT EXISTS season_secondary_days INTEGER NOT NULL DEFAULT 14 CHECK (season_secondary_days BETWEEN 2 AND 56);
+ALTER TABLE planning_settings ADD COLUMN IF NOT EXISTS creative_planning_config JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+-- A shoot_plan_item is a product's workspace for one week (Concept Development then develops its concepts, each a creative_asset = one video). planned_videos is how
+-- many VIDEOS that item plans: existing rows default to 1 (what they have always meant). Selecting the same product again raises this number on the existing item
+-- instead of creating a duplicate record. recommended_videos / recommendation_snapshot remember what the engine suggested when it was planned; video_mix is the
+-- (editable) creative mix for those videos.
+ALTER TABLE shoot_plan_items ADD COLUMN IF NOT EXISTS planned_videos INTEGER NOT NULL DEFAULT 1 CHECK (planned_videos BETWEEN 1 AND 50);
+ALTER TABLE shoot_plan_items ADD COLUMN IF NOT EXISTS recommended_videos INTEGER;
+ALTER TABLE shoot_plan_items ADD COLUMN IF NOT EXISTS video_mix JSONB;
+ALTER TABLE shoot_plan_items ADD COLUMN IF NOT EXISTS recommendation_snapshot JSONB;
+
+-- A manual override may also fix the number of videos recommended for a product (0 = none); production-priority overrides reuse the existing kinds
+-- (manual_high = shoot now, manual_medium = coming up, manual_low = monitor / no action).
+ALTER TABLE creative_priority_overrides ADD COLUMN IF NOT EXISTS videos INTEGER CHECK (videos IS NULL OR videos BETWEEN 0 AND 50);
+
+-- Launch-status overrides: a person's call that a product has launched / has not / is discontinued, used when ApparelMagic and Upcoming Drops cannot tell.
+-- Soft-deleted (removed_at) so the history is kept.
+CREATE TABLE IF NOT EXISTS product_launch_overrides (
+  id SERIAL PRIMARY KEY,
+  product_code VARCHAR(32) NOT NULL,
+  status VARCHAR(16) NOT NULL CHECK (status IN ('launched', 'unlaunched', 'discontinued')),
+  note TEXT,
+  created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  removed_at TIMESTAMPTZ,
+  removed_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_product_launch_overrides_product ON product_launch_overrides(product_code) WHERE removed_at IS NULL;
+
+-- =====================================================================
 -- Approved Ad Matching concepts + historical-spelling aliases
 -- =====================================================================
 -- The concept list Ad Matching offers is the people-approved vocabulary: meta_matching_vocab rows of kind 'concept'. The 40 approved

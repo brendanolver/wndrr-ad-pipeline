@@ -45,17 +45,21 @@ function buildAllFamilies(amDetails) {
 
 async function loadSettings(db = pool) {
   try {
-    const r = (await db.query('SELECT high_stock_min_soh, min_active_ads_per_product FROM planning_settings WHERE id = 1')).rows[0] || {};
-    return { min_active_ads: Number(r.min_active_ads_per_product) || cfg.MIN_ACTIVE_ADS_DEFAULT, high_stock_min_soh: Number(r.high_stock_min_soh) || 0, source: 'settings' };
+    const r = (await db.query('SELECT * FROM planning_settings WHERE id = 1')).rows[0] || {};
+    return {
+      min_active_ads: Number(r.min_active_ads_per_product) || cfg.MIN_ACTIVE_ADS_DEFAULT, high_stock_min_soh: Number(r.high_stock_min_soh) || 0,
+      weekly_video_target: Number(r.weekly_video_target) || 25, season_immediate_days: Number(r.season_immediate_days) || 7, season_secondary_days: Number(r.season_secondary_days) || 14,
+      creative_planning_config: r.creative_planning_config && typeof r.creative_planning_config === 'object' ? r.creative_planning_config : {}, source: 'settings',
+    };
   } catch (e) {
-    return { min_active_ads: cfg.MIN_ACTIVE_ADS_DEFAULT, high_stock_min_soh: 0, source: 'default', error: e.message };
+    return { min_active_ads: cfg.MIN_ACTIVE_ADS_DEFAULT, high_stock_min_soh: 0, weekly_video_target: 25, season_immediate_days: 7, season_secondary_days: 14, creative_planning_config: {}, source: 'default', error: e.message };
   }
 }
 
 async function loadOverrides(db = pool) {
   try {
     const r = await db.query(
-      `SELECT o.id, o.product_code, o.kind, o.note, to_char(o.until_date, 'YYYY-MM-DD') AS until, o.created_at, u.name AS created_by
+      `SELECT o.id, o.product_code, o.kind, o.note, o.videos, to_char(o.until_date, 'YYYY-MM-DD') AS until, o.created_at, u.name AS created_by
          FROM creative_priority_overrides o LEFT JOIN users u ON u.id = o.created_by_user_id WHERE o.removed_at IS NULL ORDER BY o.id`);
     return r.rows;
   } catch (e) { return []; }
@@ -103,7 +107,7 @@ async function loadPlanningContext({ amDetails, today, deps = {} } = {}) {
       const { monthly, window } = monthlyFromSales(sales);
       const launchByStyle = new Map();
       if (amDetails) amDetails.forEach((d, code) => { const l = ymd(d && d.launchDate); if (l) launchByStyle.set(code, l); });
-      ctx.seasonality = seasonality.buildSeasonality({ monthlyByStyle: monthly, groups: allFamilies.map((f) => ({ key: f.key, name: f.name, category: categoryOf(f, sales), style_codes: f.style_codes })), launchByStyle, window, today });
+      ctx.seasonality = seasonality.buildSeasonality({ monthlyByStyle: monthly, groups: allFamilies.map((f) => ({ key: f.key, name: f.name, category: categoryOf(f, sales), style_codes: f.style_codes })), launchByStyle, window, today, lookahead: { immediate_days: settings.season_immediate_days || 7, secondary_days: settings.season_secondary_days || 14 } });
       ctx.salesSource.category_source = sales.categories && sales.categories.size ? 'shopify_product_type' : 'apparelmagic_category';
     }
   } catch (e) { ctx.seasonality = { available: false, reason: `Seasonality could not be calculated (${e.message})` }; }

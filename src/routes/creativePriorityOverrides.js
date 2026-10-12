@@ -8,10 +8,11 @@ const apparelmagic = require('../lib/apparelmagic');
 const planningContext = require('../lib/planningContext');
 
 const router = express.Router();
+const bust = () => { try { require('./weeklyVideoPlan').invalidate(); } catch (e) { /* cache only */ } };
 const KINDS = Object.keys(cfg.OVERRIDE_KINDS);
 const CODE_RE = /^[A-Z0-9]{3,32}$/;
 
-const view = (r) => ({ id: r.id, product_code: r.product_code, kind: r.kind, kind_label: cfg.OVERRIDE_KINDS[r.kind] ? cfg.OVERRIDE_KINDS[r.kind].label : r.kind, note: r.note, until: r.until, created_by: r.created_by || null, created_at: r.created_at });
+const view = (r) => ({ videos: r.videos === undefined ? null : r.videos, id: r.id, product_code: r.product_code, kind: r.kind, kind_label: cfg.OVERRIDE_KINDS[r.kind] ? cfg.OVERRIDE_KINDS[r.kind].label : r.kind, note: r.note, until: r.until, created_by: r.created_by || null, created_at: r.created_at });
 
 // GET /api/creative-priority-overrides -> active overrides (+ the available kinds)
 router.get('/', async (req, res, next) => {
@@ -52,11 +53,17 @@ router.post('/', async (req, res, next) => {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(String(b.until_date))) return res.status(400).json({ error: 'until_date must be YYYY-MM-DD' });
       until = String(b.until_date);
     }
+    let videos = null;
+    if (b.videos !== undefined && b.videos !== null && b.videos !== '') {
+      videos = Number(b.videos);
+      if (!Number.isInteger(videos) || videos < 0 || videos > 50) return res.status(400).json({ error: 'videos must be a whole number from 0 to 50' });
+    }
     const dup = await pool.query('SELECT id FROM creative_priority_overrides WHERE product_code = $1 AND kind = $2 AND removed_at IS NULL', [code, b.kind]);
     if (dup.rows.length) return res.status(409).json({ error: 'That product already has this override. Remove it first to change it.' });
     const r = await pool.query(
-      `INSERT INTO creative_priority_overrides (product_code, kind, note, until_date, created_by_user_id) VALUES ($1,$2,$3,$4,$5)
-       RETURNING id, product_code, kind, note, to_char(until_date, 'YYYY-MM-DD') AS until, created_at`, [code, b.kind, note, until, req.user && req.user.id]);
+      `INSERT INTO creative_priority_overrides (product_code, kind, note, until_date, created_by_user_id, videos) VALUES ($1,$2,$3,$4,$5,$6)
+       RETURNING id, product_code, kind, note, videos, to_char(until_date, 'YYYY-MM-DD') AS until, created_at`, [code, b.kind, note, until, req.user && req.user.id, videos]);
+    bust();
     res.status(201).json(view(r.rows[0]));
   } catch (err) { next(err); }
 });
@@ -67,6 +74,7 @@ router.delete('/:id', async (req, res, next) => {
     if (!/^\d{1,9}$/.test(req.params.id)) return res.status(400).json({ error: 'Invalid id' });
     const r = await pool.query('UPDATE creative_priority_overrides SET removed_at = now(), removed_by_user_id = $2 WHERE id = $1 AND removed_at IS NULL RETURNING id', [Number(req.params.id), req.user && req.user.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Override not found' });
+    bust();
     res.json({ id: r.rows[0].id, removed: true });
   } catch (err) { next(err); }
 });

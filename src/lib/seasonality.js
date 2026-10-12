@@ -67,9 +67,17 @@ function horizonWeights(today) {
   return w;
 }
 
+// the share of an arbitrary day range [fromDay, toDay) (days ahead of today) that falls in each month
+function rangeWeights(today, fromDay, toDay) {
+  const t = toMs(today); const w = {}; let tot = 0;
+  for (let d = fromDay; d < toDay; d += 1) { const k = toYmd(t + d * dayMs).slice(0, 7); w[k] = (w[k] || 0) + 1; tot += 1; }
+  Object.keys(w).forEach((k) => { w[k] /= tot || 1; });
+  return w;
+}
+
 // ONE series -> a season assessment.   series: { 'YYYY-MM': units } ; factor: { 'YYYY-MM': store-wide level for that month (1.0 = usual) } ;
 // startMonth: first on-sale month (inclusive)
-function assessSeries({ series, factor, months, startMonth, today, label }) {
+function assessSeries({ series, factor, months, startMonth, today, label, lookahead = { immediate_days: 7, secondary_days: 14 } }) {
   const avail = months.filter((m) => !startMonth || m >= startMonth);
   const units = avail.map((m) => Math.max(0, Number(series[m]) || 0));
   const total = units.reduce((s, x) => s + x, 0);
@@ -148,8 +156,21 @@ function assessSeries({ series, factor, months, startMonth, today, label }) {
   // compact monthly breakdown + a plain-language "why" for the screen (units only: no money, no customers)
   const nowYm = ymOf(today);
   const horizonMonths = Object.keys(hw).sort();
-  const monthly = months.map((m) => ({ m, u: Math.round(Number(series[m]) || 0), on_sale: !startMonth || m >= startMonth, i: idx[m] !== undefined ? r2(idx[m]) : null, flag: gaps.includes(m) ? 'gap' : spikes.includes(m) ? 'spike' : null }));
+  // PRODUCTION outlook: what the next days look like, over the configurable immediate (default 0-7 days) and secondary (8-14 days) windows. Months are the
+  // finest resolution the sales history has, so each window is the day-weighted mix of the months it touches. The 4-8-week horizon above stays as the
+  // longer-term insight; only these windows may lift THIS WEEK's shoot priority.
   const fx = (v) => `${r2(v)}×`;
+  const imm = Math.max(1, Math.round(lookahead.immediate_days || 7)); const sec = Math.max(imm + 1, Math.round(lookahead.secondary_days || 14));
+  const idxOver = (w) => { let v = 0; let ws = 0; Object.entries(w).forEach(([m, x]) => { const f = fill(monthNum(m)); if (f !== null) { v += f * x; ws += x; } }); return ws > 0 ? v / ws : null; };
+  const immIdx = idxOver(rangeWeights(today, 0, imm)); const secIdx = idxOver(rangeWeights(today, imm, sec));
+  let boost = 'none'; let entering = null; let outlookText;
+  if (cur >= CFG.IN_SEASON) { boost = 'strong'; entering = 'now'; outlookText = `In season now (${fx(cur)} its usual level).`; }
+  else if (immIdx !== null && immIdx >= CFG.IN_SEASON && immIdx - cur >= CFG.RISING_DELTA / 2) { boost = 'strong'; entering = 'immediate'; outlookText = `Entering its stronger selling period within ${imm} days (${fx(immIdx)} its usual level, from ${fx(cur)} now).`; }
+  else if (secIdx !== null && secIdx >= CFG.IN_SEASON && secIdx - cur >= CFG.RISING_DELTA / 2) { boost = 'small'; entering = 'secondary'; outlookText = `Entering its stronger selling period in ${imm + 1}-${sec} days (${fx(secIdx)} its usual level): a smaller boost.`; }
+  else if (status === 'coming_into_season') { entering = 'later'; outlookText = `Its stronger period is more than ${sec} days away (${fx(horizon)} in the next 4-8 weeks): kept as an insight, not a reason to shoot this week.`; }
+  else outlookText = 'No seasonal lift expected in the next two weeks.';
+  const outlook = { now_index: r2(cur), immediate_index: immIdx === null ? null : r2(immIdx), secondary_index: secIdx === null ? null : r2(secIdx), immediate_days: imm, secondary_days: sec, boost, entering, text: outlookText };
+  const monthly = months.map((m) => ({ m, u: Math.round(Number(series[m]) || 0), on_sale: !startMonth || m >= startMonth, i: idx[m] !== undefined ? r2(idx[m]) : null, flag: gaps.includes(m) ? 'gap' : spikes.includes(m) ? 'spike' : null }));
   const why = [];
   if (status === 'year_round') why.push(`Year-round: every month sits between ${fx(Math.min(...known))} and ${fx(Math.max(...known))} of its usual level, so there is no season to chase.`);
   else if (status === 'in_season') why.push(`In season: ${MONTH_NAMES[curN - 1]} runs at ${fx(cur)} its usual level (in season is ${fx(CFG.IN_SEASON)} or more).`);
@@ -162,7 +183,7 @@ function assessSeries({ series, factor, months, startMonth, today, label }) {
   return {
     status,
     evidence: {
-      label, why, monthly, now_month: nowYm, horizon_months: horizonMonths, summary, months_used: used.length, first_month: avail[0], last_month: avail[avail.length - 1], units: Math.round(total),
+      label, outlook, why, monthly, now_month: nowYm, horizon_months: horizonMonths, summary, months_used: used.length, first_month: avail[0], last_month: avail[avail.length - 1], units: Math.round(total),
       current_index: r2(cur), horizon_index: r2(horizon), peaks: peaks.slice(0, 4).map(([n, v]) => ({ month: MONTH_NAMES[n - 1], index: r2(v) })), troughs: troughs.slice(0, 4).map(([n, v]) => ({ month: MONTH_NAMES[n - 1], index: r2(v) })),
       index_by_month: Object.fromEntries(MONTH_NAMES.map((nm, i) => [nm, profile[i + 1] === null ? null : r2(profile[i + 1])])),
       confidence: monthsCovered >= 24 ? 'medium' : 'limited', years_of_data: monthsCovered >= 24 ? Math.floor(monthsCovered / 12) : 1, caveats,
@@ -172,7 +193,7 @@ function assessSeries({ series, factor, months, startMonth, today, label }) {
 
 // MAIN.  monthlyByStyle: Map(styleCode -> { 'YYYY-MM': units }) ; groups: [{ key, name, category, style_codes[] }] (a product family each)
 //        launchByStyle: Map(styleCode -> 'YYYY-MM-DD' | null) ; window: { from, to } of the sales feed ; today: 'YYYY-MM-DD'
-function buildSeasonality({ monthlyByStyle: monthlyIn, groups, launchByStyle, window, today }) {
+function buildSeasonality({ monthlyByStyle: monthlyIn, groups, launchByStyle, window, today, lookahead }) {
   let monthlyByStyle = monthlyIn;
   if (!monthlyByStyle || !monthlyByStyle.size) return { available: false, reason: 'No monthly sales history has loaded yet' };
   if (!window || !window.from) return { available: false, reason: 'The sales window is unknown' };
@@ -222,11 +243,11 @@ function buildSeasonality({ monthlyByStyle: monthlyIn, groups, launchByStyle, wi
   const categories = new Map(); const catCodes = new Map();
   groups.forEach((g) => { const c = String(g.category || 'UNCATEGORISED').toUpperCase(); if (!catCodes.has(c)) catCodes.set(c, []); catCodes.get(c).push(...g.style_codes); });
   catCodes.forEach((codes, cat) => {
-    categories.set(cat, { ...assessSeries({ series: sumSeries(codes), factor, months, startMonth: months[0], today, label: `${cat} category` }), level: 'category', name: cat });
+    categories.set(cat, { ...assessSeries({ series: sumSeries(codes), factor, months, startMonth: months[0], today, label: `${cat} category`, lookahead }), level: 'category', name: cat });
   });
   const out = new Map();
   prepared.forEach(({ g, s, fs, start }) => {
-    const own = fs ? assessSeries({ series: s, factor, months, startMonth: start, today, label: g.name }) : { status: 'insufficient_data', evidence: { reason: 'no sales in the period', months_used: 0, units: 0, summary: 'no sales in the period', confidence: 'none', caveats: [] } };
+    const own = fs ? assessSeries({ series: s, factor, months, startMonth: start, today, label: g.name, lookahead }) : { status: 'insufficient_data', evidence: { reason: 'no sales in the period', months_used: 0, units: 0, summary: 'no sales in the period', confidence: 'none', caveats: [] } };
     if (own.status !== 'insufficient_data') { out.set(g.key, { ...own, level: 'family' }); return; }
     const cat = categories.get(String(g.category || 'UNCATEGORISED').toUpperCase());
     if (cat && cat.status !== 'insufficient_data') {

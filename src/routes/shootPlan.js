@@ -6,6 +6,7 @@ const apparelmagic = require('../lib/apparelmagic');
 const { fetchAmData } = require('../lib/planningData');
 
 const router = express.Router();
+const bust = () => { try { require('./weeklyVideoPlan').invalidate(); } catch (e) { /* cache only */ } };
 
 const STOCK_STATUSES = ['in_office', 'needs_to_be_brought_in'];
 const SOURCES = ['core', 'high_stock', 'drop', 'promotion', 'manual'];
@@ -28,7 +29,10 @@ router.get('/', async (req, res, next) => {
     }
 
     const itemsResult = await pool.query(
-      `SELECT spi.*, ca.status AS asset_status, p.id AS promotion_id, p.name AS promotion_name, ps.name AS promotion_stage_name
+      `SELECT spi.*, ca.status AS asset_status, p.id AS promotion_id, p.name AS promotion_name, ps.name AS promotion_stage_name,
+              (SELECT count(*)::int FROM creative_assets c2 WHERE c2.shoot_plan_item_id = spi.id AND c2.format = 'video') AS video_assets,
+              (SELECT count(*)::int FROM creative_assets c2 WHERE c2.shoot_plan_item_id = spi.id AND c2.format = 'video' AND c2.status IN ('filming', 'editing', 'qc')) AS videos_in_production,
+              (SELECT count(*)::int FROM creative_assets c2 WHERE c2.shoot_plan_item_id = spi.id AND c2.format = 'video' AND c2.status = 'uploaded_live') AS videos_completed
        FROM shoot_plan_items spi
        LEFT JOIN creative_assets ca ON ca.id = spi.asset_id
        LEFT JOIN promotion_stages ps ON ps.id = spi.promotion_stage_id
@@ -81,6 +85,14 @@ router.get('/', async (req, res, next) => {
       asset_status: i.asset_status,
       asset_status_label: i.asset_status ? (STATUS_LABELS[i.asset_status] || i.asset_status) : null,
       source: i.source,
+      planned_videos: Math.max(i.planned_videos || 1, i.video_assets || 0),
+      planned_videos_set: i.planned_videos || 1,
+      video_assets: i.video_assets || 0,
+      videos_in_production: i.videos_in_production || 0,
+      videos_completed: i.videos_completed || 0,
+      recommended_videos: i.recommended_videos,
+      video_mix: i.video_mix || null,
+      recommendation_snapshot: i.recommendation_snapshot || null,
       image_url: i.image_url,
       promotion_stage_id: i.promotion_stage_id,
       promotion_id: i.promotion_id,
@@ -97,7 +109,16 @@ router.post('/', async (req, res, next) => {
   const {
     product_code, product_name, colourways, stock_status, creator, quick_note, source, image_url,
     promotion_stage_id, week_start, format, concept_name, concept_type, concept_assignee, editing_owner,
+    videos, recommended_videos, video_mix, recommendation_snapshot,
   } = req.body || {};
+  const requestedVideos = videos === undefined || videos === null ? 1 : Number(videos);
+  if (!Number.isInteger(requestedVideos) || requestedVideos < 1 || requestedVideos > 50) {
+    return res.status(400).json({ error: 'videos must be a whole number from 1 to 50' });
+  }
+  if (recommended_videos !== undefined && recommended_videos !== null && (!Number.isInteger(Number(recommended_videos)) || Number(recommended_videos) < 0 || Number(recommended_videos) > 50)) {
+    return res.status(400).json({ error: 'recommended_videos must be a whole number from 0 to 50' });
+  }
+  if (video_mix !== undefined && video_mix !== null && !Array.isArray(video_mix)) return res.status(400).json({ error: 'video_mix must be a list' });
 
   // Product is now optional everywhere this route is called from -- Core/
   // High Stock/Drop's own pickers still always supply one (their UI never
@@ -141,6 +162,29 @@ router.post('/', async (req, res, next) => {
       }
     }
 
+    // The same product selected again this week (from Core, High Stocks or by hand) is ONE production record, never a duplicate: the existing item keeps
+    // its concept and gains any new colourways, and its planned video count is raised to the number asked for (never lowered here: PATCH /:id/videos is
+    // the explicit way to change a quantity). Drops and Promotions keep their own items and workflows.
+    const DEDUPE_SOURCES = [null, undefined, 'core', 'high_stock', 'manual'];
+    if (product_code && !promotion_stage_id && DEDUPE_SOURCES.includes(source)) {
+      const existing = await client.query(
+        `SELECT * FROM shoot_plan_items WHERE product_code = $1 AND week_start = COALESCE($2::date, date_trunc('week', now())::date) AND promotion_stage_id IS NULL
+            AND (source IS NULL OR source IN ('core', 'high_stock', 'manual')) ORDER BY id LIMIT 1 FOR UPDATE`, [product_code, week_start || null]);
+      if (existing.rows.length) {
+        const ex = existing.rows[0];
+        const raised = Math.max(ex.planned_videos || 1, requestedVideos);
+        await client.query('UPDATE shoot_plan_items SET planned_videos = $1, recommended_videos = COALESCE($2, recommended_videos), video_mix = COALESCE($3::jsonb, video_mix), recommendation_snapshot = COALESCE($4::jsonb, recommendation_snapshot) WHERE id = $5',
+          [raised, recommended_videos === undefined ? null : recommended_videos, video_mix ? JSON.stringify(video_mix) : null, recommendation_snapshot ? JSON.stringify(recommendation_snapshot) : null, ex.id]);
+        for (const c of trimmedColourways) {
+          await client.query(`INSERT INTO shoot_plan_item_styles (shoot_plan_item_id, style_id, size, colour_label) VALUES ($1, $2, $3, $4) ON CONFLICT (shoot_plan_item_id, style_id) DO NOTHING`,
+            [ex.id, Number(c.style_id), c.size && String(c.size).trim() ? String(c.size).trim() : null, c.colour_label || null]);
+        }
+        await client.query('COMMIT'); bust();
+        const refreshed = (await pool.query('SELECT * FROM shoot_plan_items WHERE id = $1', [ex.id])).rows[0];
+        return res.status(200).json({ ...refreshed, quick_note: refreshed.initial_idea, asset_id: refreshed.asset_id, merged: true, message: 'This product was already in this week\'s Shoot Plan: its video count was updated instead of adding a duplicate.' });
+      }
+    }
+
     const trimmedCreator = creator.trim();
     const trimmedNote = quick_note && quick_note.trim() ? quick_note.trim() : null;
     // Concept Name / Idea takes priority when supplied explicitly (the
@@ -175,8 +219,8 @@ router.post('/', async (req, res, next) => {
     });
 
     const itemResult = await client.query(
-      `INSERT INTO shoot_plan_items (product_code, product_name, stock_status, creator, initial_idea, asset_id, source, image_url, promotion_stage_id, week_start, created_by_user_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10::date, date_trunc('week', now())::date), $11) RETURNING *`,
+      `INSERT INTO shoot_plan_items (product_code, product_name, stock_status, creator, initial_idea, asset_id, source, image_url, promotion_stage_id, week_start, created_by_user_id, planned_videos, recommended_videos, video_mix, recommendation_snapshot)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10::date, date_trunc('week', now())::date), $11, $12, $13, $14::jsonb, $15::jsonb) RETURNING *`,
       [
         product_code || null,
         product_name || null,
@@ -189,6 +233,10 @@ router.post('/', async (req, res, next) => {
         promotion_stage_id || null,
         week_start || null,
         createdByUserId,
+        requestedVideos,
+        recommended_videos === undefined ? null : recommended_videos,
+        video_mix ? JSON.stringify(video_mix) : null,
+        recommendation_snapshot ? JSON.stringify(recommendation_snapshot) : null,
       ]
     );
     const item = itemResult.rows[0];
@@ -206,7 +254,7 @@ router.post('/', async (req, res, next) => {
       );
     }
 
-    await client.query('COMMIT');
+    await client.query('COMMIT'); bust();
     res.status(201).json({
       ...item,
       quick_note: item.initial_idea,
@@ -296,6 +344,36 @@ router.delete('/:itemId/styles/:styleId', async (req, res, next) => {
   }
 });
 
+// Change how many VIDEOS a plan item plans (and, optionally, its creative mix). Existing work is never silently cancelled: the number cannot go below the video
+// concepts that already exist for this item (remove those concepts in Concept Development first). Editing a past week is not allowed.
+router.patch('/:id/videos', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid item id' });
+    const body = req.body || {};
+    const hasVideos = body.videos !== undefined;
+    if (hasVideos && (!Number.isInteger(Number(body.videos)) || Number(body.videos) < 1 || Number(body.videos) > 50)) return res.status(400).json({ error: 'videos must be a whole number from 1 to 50' });
+    if (body.video_mix !== undefined && body.video_mix !== null && !Array.isArray(body.video_mix)) return res.status(400).json({ error: 'video_mix must be a list' });
+    const itemResult = await pool.query(
+      `SELECT spi.*, (SELECT count(*)::int FROM creative_assets c WHERE c.shoot_plan_item_id = spi.id AND c.format = 'video') AS video_assets,
+              (spi.week_start < date_trunc('week', now())::date) AS past
+         FROM shoot_plan_items spi WHERE spi.id = $1`, [id]);
+    if (!itemResult.rows.length) return res.status(404).json({ error: 'Shoot plan item not found' });
+    const it = itemResult.rows[0];
+    if (it.past) return res.status(409).json({ error: 'A past week is a read-only record.' });
+    if (hasVideos && Number(body.videos) < it.video_assets) {
+      return res.status(409).json({ error: `${it.video_assets} video concept${it.video_assets === 1 ? '' : 's'} already exist for this product this week, so the plan cannot go below ${it.video_assets}. Remove a concept in Concept Development first if it should be cancelled.` });
+    }
+    const result = await pool.query(
+      `UPDATE shoot_plan_items SET planned_videos = COALESCE($1, planned_videos), video_mix = CASE WHEN $2::boolean THEN $3::jsonb ELSE video_mix END WHERE id = $4 RETURNING *`,
+      [hasVideos ? Number(body.videos) : null, body.video_mix !== undefined, body.video_mix ? JSON.stringify(body.video_mix) : null, id]);
+    bust();
+    res.json({ ...result.rows[0], week_start: dateStr(result.rows[0].week_start), video_assets: it.video_assets, planned_videos: Math.max(result.rows[0].planned_videos, it.video_assets) });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Lets a Promotion concept's planned Shoot Week be changed after creation
 // (see the Shoot Week brief, section 1: "production plans change") --
 // scoped to items that haven't reached Shooting yet (no shoot_schedule row
@@ -340,6 +418,7 @@ router.delete('/:id', async (req, res, next) => {
   try {
     const result = await pool.query('DELETE FROM shoot_plan_items WHERE id = $1 RETURNING id', [req.params.id]);
     if (!result.rows.length) return res.status(404).json({ error: 'Shoot plan item not found' });
+    bust();
     res.status(204).send();
   } catch (err) {
     next(err);
