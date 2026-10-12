@@ -132,7 +132,7 @@ async function getInventory(db = pool) {
             (SELECT count(*)::int FROM meta_ads m WHERE m.matched_ad_setup_id = ANY(array_agg(s.id))) AS linked_ads
        FROM ad_setups s WHERE s.concept_label IS NOT NULL AND btrim(s.concept_label) <> '' GROUP BY s.concept_label`);
   const types = await db.query('SELECT name, active FROM concept_types ORDER BY name');
-  const added = await db.query("SELECT name, group_name, group_order, sort_order FROM meta_matching_vocab WHERE kind = 'concept' ORDER BY group_order NULLS LAST, sort_order NULLS LAST, name");
+  const added = await db.query("SELECT name, group_name, group_order, sort_order FROM meta_matching_vocab WHERE kind = 'concept' AND active ORDER BY group_order NULLS LAST, sort_order NULLS LAST, name");
   const aliases = await db.query('SELECT alias, alias_key, approved_name, removed FROM meta_matching_concept_aliases');
   // roll-up per approved concept over DISTINCT creatives / ads across every spelling that maps to it (approved name, else alias)
   const rollup = await db.query(
@@ -142,9 +142,9 @@ async function getInventory(db = pool) {
             SELECT k.concept, k.unit, k.meta_ad_id,
                    COALESCE(v.name, t.name) AS approved, (al.removed IS TRUE AND v.id IS NULL) AS removed
               FROM keyed k
-              LEFT JOIN meta_matching_vocab v ON v.kind = 'concept' AND v.name_key = k.k
+              LEFT JOIN meta_matching_vocab v ON v.kind = 'concept' AND v.active AND v.name_key = k.k
               LEFT JOIN meta_matching_concept_aliases al ON al.alias_key = k.k AND v.id IS NULL
-              LEFT JOIN meta_matching_vocab t ON t.kind = 'concept' AND t.name_key = lower(btrim(al.approved_name)) AND NOT al.removed)
+              LEFT JOIN meta_matching_vocab t ON t.kind = 'concept' AND t.active AND t.name_key = lower(btrim(al.approved_name)) AND NOT al.removed)
        SELECT approved, removed, count(DISTINCT unit)::int AS creatives, count(DISTINCT meta_ad_id)::int AS ads, array_agg(DISTINCT concept) AS spellings
          FROM mapped GROUP BY approved, removed`);
   const vocabulary = [

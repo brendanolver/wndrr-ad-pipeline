@@ -144,7 +144,7 @@ test('applying needs an explicit list of copies and re-derives eligibility serve
 });
 test('schema: one additive audit table, no drops / deletes / alters of anything existing', () => {
   const sql = read('db/schema.sql');
-  const block = sql.slice(sql.indexOf('-- Name-copy duplicates (Ad Matching)'), sql.indexOf('-- Approved Ad Matching concepts'));
+  const block = sql.slice(sql.indexOf('-- Name-copy duplicates (Ad Matching)'), sql.indexOf('-- Batch 11:'));
   assert.match(block, /CREATE TABLE IF NOT EXISTS meta_name_copy_applications/);
   assert.doesNotMatch(block, /\b(DROP|DELETE FROM|TRUNCATE|UPDATE |ALTER TABLE)/i);
   assert.match(block, /CREATE INDEX IF NOT EXISTS/);

@@ -36,13 +36,15 @@ function dedupe(items) {
 async function listCreators(db = pool) {
   // sequential on purpose: `db` may be a single transaction client, which must not run queries concurrently
   const roster = await db.query('SELECT name FROM content_creators ORDER BY name');
-  const added = await db.query("SELECT name FROM meta_matching_vocab WHERE kind = 'creator' ORDER BY name");
+  const added = await db.query("SELECT name, active FROM meta_matching_vocab WHERE kind = 'creator' ORDER BY name");
   const used = await db.query("SELECT DISTINCT btrim(creator_name) AS name FROM meta_ad_classifications WHERE creator_name IS NOT NULL AND btrim(creator_name) <> '' ORDER BY 1");
+  // a RETIRED creator (hidden or merged away in Settings -> Creative Classification) is no longer offered, whichever list it came from
+  const retired = new Set(added.rows.filter((r) => r.active === false).map((r) => keyOf(r.name)));
   return dedupe([
     ...roster.rows.map((r) => ({ name: cleanName(r.name), source: 'roster' })),
-    ...added.rows.map((r) => ({ name: cleanName(r.name), source: 'added' })),
+    ...added.rows.filter((r) => r.active !== false).map((r) => ({ name: cleanName(r.name), source: 'added' })),
     ...used.rows.map((r) => ({ name: cleanName(r.name), source: 'in_use' })),
-  ]);
+  ]).filter((x) => !retired.has(keyOf(x.name)));
 }
 
 // The concept list Ad Matching OFFERS is the approved vocabulary (meta_matching_vocab, kind 'concept': the people-approved concepts plus
@@ -51,7 +53,7 @@ async function listCreators(db = pool) {
 // that are not approved are NOT offered here.
 async function listConcepts(db = pool) {
   // approved baseline first, in the approved group + position order; concepts a person added later (no group) follow, alphabetically
-  const added = await db.query("SELECT id, name, group_name, group_order, sort_order FROM meta_matching_vocab WHERE kind = 'concept' ORDER BY group_order NULLS LAST, sort_order NULLS LAST, name");
+  const added = await db.query("SELECT id, name, group_name, group_order, sort_order FROM meta_matching_vocab WHERE kind = 'concept' AND active ORDER BY group_order NULLS LAST, sort_order NULLS LAST, name");
   const types = await db.query('SELECT id, name, format FROM concept_types WHERE active ORDER BY sort_order, id');
   const typeByKey = new Map();
   for (const t of types.rows) { const k = keyOf(t.name); if (k && !typeByKey.has(k)) typeByKey.set(k, t); }
@@ -133,8 +135,14 @@ async function addName(kind, raw, userId, db = pool) {
     );
     await client.query('COMMIT');
     if (!ins.rows.length) {
-      const again = await db.query('SELECT id, name FROM meta_matching_vocab WHERE kind = $1 AND name_key = $2', [kind, key]);
-      return { kind, created: false, name: again.rows[0].name, source: 'added', concept_type_id: null, vocab_id: again.rows[0].id };
+      // the name exists as a row that is RETIRED (deactivated, never merged): adding it again turns it back on
+      const again = await db.query('SELECT id, name, active, merged_into_id FROM meta_matching_vocab WHERE kind = $1 AND name_key = $2', [kind, key]);
+      const row = again.rows[0];
+      if (row && row.active === false && !row.merged_into_id) {
+        await db.query('UPDATE meta_matching_vocab SET active = true, retired_at = NULL WHERE id = $1', [row.id]);
+        return { kind, created: true, reactivated: true, name: row.name, source: 'added', concept_type_id: null, vocab_id: row.id };
+      }
+      return { kind, created: false, name: row.name, source: 'added', concept_type_id: null, vocab_id: row.id };
     }
     return { kind, created: true, name: ins.rows[0].name, source: 'added', concept_type_id: null, vocab_id: ins.rows[0].id };
   } catch (err) {
@@ -150,7 +158,12 @@ async function canonicalCreator(raw, db = pool) {
   const key = keyOf(raw);
   if (!key) return null;
   const hit = (await listCreators(db)).find((x) => keyOf(x.name) === key);
-  return hit ? hit.name : null;
+  if (hit) return hit.name;
+  // a spelling that was merged into another creator in Settings maps to that creator (never re-created under the old spelling)
+  const merged = await db.query(
+    `SELECT t.name FROM meta_matching_vocab v JOIN meta_matching_vocab t ON t.id = v.merged_into_id AND t.active
+      WHERE v.kind = 'creator' AND v.name_key = $1 AND v.active = false`, [key]);
+  return merged.rows.length ? merged.rows[0].name : null;
 }
 // the offered concept for a typed label: { name, concept_type_id|null, vocab_id|null } or null
 async function canonicalConcept(raw, db = pool) {

@@ -2652,7 +2652,7 @@ async function listOptions() {
   const [families, concepts, styles, creators] = await Promise.all([
     catalogueLib.loadPickerFamilies(),
     vocab.listConcepts(),
-    pool.query('SELECT id, name, media_type FROM creative_styles ORDER BY sort_order, name'),
+    pool.query('SELECT id, name, media_type, ad_matching_active FROM creative_styles ORDER BY sort_order, name'),
     vocab.listCreators(),
   ]);
   const conceptAliases = await vocab.listConceptAliases();
@@ -2661,7 +2661,7 @@ async function listOptions() {
     // concept_types rows carry id (saved as the concept id); names a person added carry vocab_id and id null (saved as their label)
     // in the approved order; `group` is a heading only (never a choice); `aliases` are historical spellings, used only so typing one finds the concept
     concepts: concepts.map((c) => ({ id: c.concept_type_id || null, vocab_id: c.vocab_id || null, label: c.name, format: c.format || null, source: c.source, group: c.group || null, group_order: c.group_order || null, aliases: conceptAliases.get(vocab.keyOf(c.name)) || [] })),
-    creative_styles: styles.rows.map((s) => ({ id: s.id, label: s.name, media_type: s.media_type })),
+    creative_styles: styles.rows.map((s) => ({ id: s.id, label: s.name, media_type: s.media_type, hidden: s.ad_matching_active === false })), // hidden = retired from the pickers, still shown on ads that already use it
     creators: creators.map((c) => c.name),
     creator_sources: Object.fromEntries(creators.map((c) => [c.name, c.source])),
     media_types: MEDIA_TYPES,
@@ -2800,9 +2800,9 @@ const GROUPS = {
   // mapped keeps its previous grouping and is flagged legacy (removed concepts are flagged removed).
   concept: {
     join: `CROSS JOIN LATERAL (SELECT lower(btrim(regexp_replace(c.concept_label, '\\s+', ' ', 'g'))) AS k) ck
-           LEFT JOIN meta_matching_vocab cv ON cv.kind = 'concept' AND cv.name_key = ck.k
+           LEFT JOIN meta_matching_vocab cv ON cv.kind = 'concept' AND cv.active AND cv.name_key = ck.k
            LEFT JOIN meta_matching_concept_aliases ca ON ca.alias_key = ck.k AND cv.id IS NULL
-           LEFT JOIN meta_matching_vocab cv2 ON cv2.kind = 'concept' AND ca.removed IS NOT TRUE AND cv2.name_key = lower(btrim(ca.approved_name))`,
+           LEFT JOIN meta_matching_vocab cv2 ON cv2.kind = 'concept' AND cv2.active AND ca.removed IS NOT TRUE AND cv2.name_key = lower(btrim(ca.approved_name))`,
     select: `CASE WHEN COALESCE(cv.id, cv2.id) IS NOT NULL THEN 'approved:' || COALESCE(cv.name_key, cv2.name_key) ELSE COALESCE(c.concept_type_id::text, 'legacy:' || lower(c.concept_label)) END AS key,
              CASE WHEN COALESCE(cv.id, cv2.id) IS NOT NULL THEN COALESCE(cv.name, cv2.name) ELSE c.concept_label END AS label,
              (COALESCE(cv.id, cv2.id) IS NULL) AS legacy, (ca.removed IS TRUE) AS removed`,
@@ -2830,8 +2830,8 @@ async function performanceBy(query = {}) {
     // filter by the CANONICAL concept: asking for STYLING also finds ads stored as AESTHETIC STYLING; text on no list matches itself
     const r = (await vocab.loadConceptResolver())(String(query.concept));
     params.push(vocab.keyOf(r.status === 'approved' || r.status === 'alias' ? r.name : String(query.concept)));
-    where.push(`COALESCE((SELECT v.name_key FROM meta_matching_vocab v WHERE v.kind = 'concept' AND v.name_key = lower(btrim(regexp_replace(c.concept_label, '\\s+', ' ', 'g')))),
-                         (SELECT v2.name_key FROM meta_matching_concept_aliases al JOIN meta_matching_vocab v2 ON v2.kind = 'concept' AND v2.name_key = lower(btrim(al.approved_name))
+    where.push(`COALESCE((SELECT v.name_key FROM meta_matching_vocab v WHERE v.kind = 'concept' AND v.active AND v.name_key = lower(btrim(regexp_replace(c.concept_label, '\\s+', ' ', 'g')))),
+                         (SELECT v2.name_key FROM meta_matching_concept_aliases al JOIN meta_matching_vocab v2 ON v2.kind = 'concept' AND v2.active AND v2.name_key = lower(btrim(al.approved_name))
                            WHERE al.alias_key = lower(btrim(regexp_replace(c.concept_label, '\\s+', ' ', 'g'))) AND NOT al.removed),
                          lower(btrim(regexp_replace(c.concept_label, '\\s+', ' ', 'g')))) = $${params.length}`);
   }

@@ -1350,6 +1350,7 @@
         <button type="button" class="settings-subnav-btn" id="settings-users-tab-btn" data-settings-panel="users" style="display:none;">Users</button>
         <button type="button" class="settings-subnav-btn" id="settings-meta-sync-tab-btn" data-settings-panel="meta-sync" style="display:none;">Meta Sync</button>
         <button type="button" class="settings-subnav-btn" id="settings-meta-benchmarks-tab-btn" data-settings-panel="meta-benchmarks" style="display:none;">Meta Performance</button>
+        <button type="button" class="settings-subnav-btn" id="settings-classification-tab-btn" data-settings-panel="classification" style="display:none;">Creative Classification</button>
       </div>
 
       <div class="settings-panel active" id="settings-panel-planning">
@@ -1427,6 +1428,31 @@
         </div>
         <div id="ca-list" class="pw-list"></div>
         <button class="btn btn-primary btn-sm" id="ca-add-btn">+ Add Customer Avatar</button>
+      </div>
+
+      <!-- Creative Classification (admin-only; /api/meta-classification-options): the options Ad Matching offers for Concept, Creator and Creative Style.
+           Add / rename / merge / hide. Anything that rewrites classifications is previewed first and needs an explicit confirmation. -->
+      <div class="settings-panel" id="settings-panel-classification">
+        <div class="planning-section-header">
+          <h2>Creative classification</h2>
+          <span class="admin-note">Manage the Concept, Creator and Creative Style options Ad Matching offers. Renaming or merging shows exactly which creatives and ads would change, and only changes that one field. Nothing is ever deleted.</span>
+        </div>
+        <div class="mcls-tabs" id="mcls-tabs" role="tablist">
+          <button type="button" class="mcls-tab active" data-mcls-kind="concept" role="tab">Concepts</button>
+          <button type="button" class="mcls-tab" data-mcls-kind="creator" role="tab">Creators</button>
+          <button type="button" class="mcls-tab" data-mcls-kind="style" role="tab">Creative styles</button>
+        </div>
+        <div class="mcls-toolbar">
+          <input type="search" id="mcls-search" placeholder="Search…" autocomplete="off">
+          <span class="mcls-add">
+            <input type="text" id="mcls-add-name" placeholder="Add a new one…" maxlength="100" autocomplete="off">
+            <select id="mcls-add-media" style="display:none;"><option value="video">Video</option><option value="graphic">Graphic</option></select>
+            <button type="button" class="btn btn-primary btn-sm" id="mcls-add-btn">+ Add</button>
+          </span>
+          <span class="mbench-msg" id="mcls-msg"></span>
+        </div>
+        <div id="mcls-list" class="mcls-list"></div>
+        <details class="mbench-history"><summary>Change history</summary><div id="mcls-history"></div></details>
       </div>
 
       <!-- Meta Performance benchmarks (admin-only; GET/POST/PUT/DELETE /api/meta-performance/benchmarks). A row is one target for a funnel +
@@ -1653,6 +1679,16 @@
       <button class="modal-close" onclick="closeModal('mm-inventory-modal')">&times;</button>
     </div>
     <div class="modal-body" id="mm-inventory-body"></div>
+  </div>
+</div>
+
+<div id="mcls-modal" class="modal-backdrop">
+  <div class="modal mcls-modal">
+    <div class="modal-header">
+      <h3 id="mcls-modal-title">Change</h3>
+      <button class="modal-close" onclick="closeModal('mcls-modal')">&times;</button>
+    </div>
+    <div class="modal-body" id="mcls-modal-body"></div>
   </div>
 </div>
 

@@ -222,6 +222,8 @@ function applySidebarModuleAccess() {
   if (usersTabBtn) usersTabBtn.style.display = state.currentUser && state.currentUser.role === 'admin' ? '' : 'none';
   const metaSyncTabBtn = document.getElementById('settings-meta-sync-tab-btn');
   if (metaSyncTabBtn) metaSyncTabBtn.style.display = state.currentUser && state.currentUser.role === 'admin' ? '' : 'none';
+  const classTabBtn = document.getElementById('settings-classification-tab-btn');
+  if (classTabBtn) classTabBtn.style.display = state.currentUser && state.currentUser.role === 'admin' ? '' : 'none';
   const metaBenchTabBtn = document.getElementById('settings-meta-benchmarks-tab-btn');
   if (metaBenchTabBtn) metaBenchTabBtn.style.display = state.currentUser && state.currentUser.role === 'admin' ? '' : 'none';
   // Meta Performance is admin-only (the API enforces it too). The loop above
@@ -414,12 +416,148 @@ function switchSettingsPanel(name) {
   // sync by itself; that only happens from the explicit button below.
   if (name === 'meta-sync') loadMetaSyncPanel();
   if (name === 'meta-benchmarks') loadMetaBenchmarksPanel();
+  if (name === 'classification') loadClassificationPanel();
 }
 
 document.querySelectorAll('.settings-subnav-btn').forEach((btn) => {
   btn.addEventListener('click', () => switchSettingsPanel(btn.dataset.settingsPanel));
 });
 
+
+
+// ── Settings -> Creative Classification ─────────────────────────────────
+// Concepts, Creators and Creative Styles are different things in the database (see src/lib/metaClassificationOptions.js), so this screen shows
+// what each one actually is: status, how many creatives / ads use it, and only the actions that are safe for it. Rename and merge always open
+// a read-only PREVIEW first (which creatives and ads change, and what else happens); the change is applied only after an explicit confirmation of
+// that preview, in one transaction, and the server refuses a preview that went stale.
+const MCLS = { kind: 'concept', data: null, q: '', preview: null };
+const mclsKindLabel = { concept: 'concept', creator: 'creator', style: 'creative style' };
+function mclsMsg(text, kind) { const el = document.getElementById('mcls-msg'); if (el) { el.textContent = text || ''; el.className = `mbench-msg${kind ? ` ${kind}` : ''}`; } }
+const mclsApi = (path, opts) => api(`/meta-classification-options${path}`, opts);
+const mclsStatusChip = (it) => {
+  if (it.status === 'active') return '<span class="mcls-chip ok">Active</span>';
+  if (it.status === 'merged') return `<span class="mcls-chip merged" title="Merged into ${escapeHtml(it.merged_into || '')}">Merged → ${escapeHtml(it.merged_into || '')}</span>`;
+  return '<span class="mcls-chip off">Hidden</span>';
+};
+function mclsRender() {
+  const d = MCLS.data; const host = document.getElementById('mcls-list');
+  if (!d || !host) return;
+  const q = MCLS.q.toLowerCase();
+  const items = d.items.filter((i) => !q || i.name.toLowerCase().includes(q) || (i.aliases || []).some((a) => a.toLowerCase().includes(q)) || (i.merged_into || '').toLowerCase().includes(q));
+  const k = MCLS.kind;
+  const extra = (i) => {
+    const bits = [];
+    if (k === 'concept' && i.group) bits.push(escapeHtml(i.group));
+    if (k === 'creator') bits.push(i.source === 'roster' ? 'filming roster' : i.source === 'added' ? 'added in Ad Matching' : 'seen on ads');
+    if (k === 'style') bits.push(`${i.media_type}${i.builtin ? ' · built-in' : ''}${i.promotion_uses ? ` · ${i.promotion_uses} Promotions record${i.promotion_uses === 1 ? '' : 's'}` : ''}`);
+    if (k === 'concept' && i.aliases && i.aliases.length) bits.push(`also: ${escapeHtml(i.aliases.slice(0, 3).join(', '))}${i.aliases.length > 3 ? '…' : ''}`);
+    return bits.length ? `<small>${bits.join(' · ')}</small>` : '';
+  };
+  const actions = (i) => {
+    const key = escapeHtml(i.name);
+    if (i.status === 'merged') return '<span class="mcls-na">retired</span>';
+    if (i.status === 'hidden') return `<button type="button" class="link-btn" data-mcls="reactivate" data-name="${key}">Restore</button>`;
+    return `${(k === 'creator' && i.roster) || (k === 'style' && i.builtin) ? '' : `<button type="button" class="link-btn" data-mcls="rename" data-name="${key}">Rename</button>`}<button type="button" class="link-btn" data-mcls="merge" data-name="${key}">Merge into…</button><button type="button" class="link-btn" data-mcls="deactivate" data-name="${key}">Hide</button>`;
+  };
+  let html = `<table class="mcls-table"><thead><tr><th>${mclsKindLabel[k][0].toUpperCase() + mclsKindLabel[k].slice(1)}</th><th>Status</th><th class="num">Creatives</th><th class="num">Ads</th><th>Actions</th></tr></thead><tbody>${
+    items.map((i) => `<tr class="${i.status !== 'active' ? 'mcls-off' : ''}"><td><b>${escapeHtml(i.name)}</b> ${extra(i)}</td><td>${mclsStatusChip(i)}</td><td class="num">${Number(i.creatives).toLocaleString('en-AU')}</td><td class="num">${Number(i.ads).toLocaleString('en-AU')}</td><td class="mcls-actions">${actions(i)}</td></tr>`).join('') || '<tr><td colspan="5" class="mp-table-empty">Nothing matches.</td></tr>'}</tbody></table>`;
+  if (k === 'concept' && d.unlisted && d.unlisted.length) {
+    const un = d.unlisted.filter((u) => !q || u.name.toLowerCase().includes(q));
+    if (un.length) html += `<div class="mcls-unlisted"><h4>On ads but not on the list</h4><small>Free text or old spellings stored on classifications. They keep working, and can be merged into a concept on the list.</small>
+      <table class="mcls-table"><tbody>${un.map((u) => `<tr><td><b>${escapeHtml(u.name)}</b></td><td class="num">${u.creatives} creative${u.creatives === 1 ? '' : 's'}</td><td class="num">${u.ads} ad${u.ads === 1 ? '' : 's'}</td><td class="mcls-actions"><button type="button" class="link-btn" data-mcls="merge" data-name="${escapeHtml(u.name)}" data-unlisted="1">Merge into…</button></td></tr>`).join('')}</tbody></table></div>`;
+  }
+  host.innerHTML = html;
+}
+async function mclsLoad() {
+  try { MCLS.data = await mclsApi(`/${MCLS.kind}`); mclsRender(); }
+  catch (e) { mclsMsg(`Could not load: ${e.message}`, 'err'); }
+}
+async function mclsHistory() {
+  try {
+    const h = await mclsApi('/history?limit=25');
+    const box = document.getElementById('mcls-history');
+    if (box) box.innerHTML = h.length ? `<ul>${h.map((x) => `<li><b>${escapeHtml(x.action)}</b> ${escapeHtml(x.kind)}: ${escapeHtml(x.source_name || '')}${x.target_name ? ` → ${escapeHtml(x.target_name)}` : ''}${x.affected_ads ? ` <small>(${x.affected_ads} ad${x.affected_ads === 1 ? '' : 's'}, ${x.affected_creatives} creative${x.affected_creatives === 1 ? '' : 's'})</small>` : ''} <small>· ${escapeHtml(x.user_name || 'system')} · ${escapeHtml(new Date(x.applied_at).toLocaleString('en-AU'))}</small></li>`).join('')}</ul>` : '<small>No changes yet.</small>';
+  } catch (e) { /* history is informational */ }
+}
+function loadClassificationPanel() { mclsMsg(''); mclsLoad(); mclsHistory(); }
+
+// the preview + confirmation dialog
+function mclsOpenDialog(action, name, unlisted) {
+  const k = MCLS.kind; const d = MCLS.data;
+  const others = d.items.filter((i) => i.status === 'active' && i.name.toLowerCase() !== name.toLowerCase());
+  const title = { rename: `Rename ${mclsKindLabel[k]}`, merge: `Merge “${name}” into another ${mclsKindLabel[k]}`, deactivate: `Hide “${name}”`, reactivate: `Restore “${name}”` }[action];
+  document.getElementById('mcls-modal-title').textContent = title;
+  const body = document.getElementById('mcls-modal-body');
+  const field = action === 'rename'
+    ? `<label class="mcls-field">New name<input type="text" id="mcls-new-name" value="${escapeHtml(name)}" maxlength="100" autocomplete="off"></label>`
+    : action === 'merge'
+      ? `<label class="mcls-field">Merge into<select id="mcls-target"><option value="">Choose…</option>${others.map((i) => `<option value="${escapeHtml(i.name)}">${escapeHtml(i.name)}</option>`).join('')}</select></label>`
+      : '';
+  body.innerHTML = `<div class="mcls-dialog">${field}
+    <div class="mcls-dialog-actions"><button type="button" class="btn btn-ghost btn-sm" id="mcls-do-preview">Preview what will change</button><span class="mbench-msg" id="mcls-dialog-msg"></span></div>
+    <div id="mcls-preview" class="mcls-preview"></div></div>`;
+  MCLS.preview = null; MCLS.dialog = { action, name, unlisted: !!unlisted };
+  openModal('mcls-modal');
+  const run = async () => {
+    const msg = document.getElementById('mcls-dialog-msg'); msg.textContent = ''; msg.className = 'mbench-msg';
+    const payload = { action, source: name, target: (document.getElementById('mcls-target') || {}).value || undefined, new_name: (document.getElementById('mcls-new-name') || {}).value || undefined };
+    try {
+      const pv = await mclsApi(`/${MCLS.kind}/preview`, { method: 'POST', body: JSON.stringify(payload) });
+      MCLS.preview = { pv, payload }; mclsRenderPreview();
+    } catch (e) { msg.textContent = e.message; msg.className = 'mbench-msg err'; }
+  };
+  document.getElementById('mcls-do-preview').addEventListener('click', run);
+  if (action === 'deactivate' || action === 'reactivate') run();
+}
+function mclsRenderPreview() {
+  const { pv, payload } = MCLS.preview; const box = document.getElementById('mcls-preview');
+  if (!pv.allowed) { box.innerHTML = `<div class="mcls-blocked"><b>Can’t do this:</b><ul>${pv.blockers.map((b) => `<li>${escapeHtml(b)}</li>`).join('')}</ul></div>`; return; }
+  const c = pv.counts || {};
+  const sample = (pv.sample || []).length ? `<table class="mcls-sample"><thead><tr><th>Ad</th><th>Status</th><th>Now</th><th></th><th>Becomes</th></tr></thead><tbody>${pv.sample.map((s) => `<tr><td>${escapeHtml(s.ad_name || s.meta_ad_id)}</td><td>${escapeHtml(s.match_status)}</td><td>${escapeHtml(s.from == null ? '—' : s.from)}</td><td>→</td><td><b>${escapeHtml(s.to)}</b></td></tr>`).join('')}</tbody></table>${pv.sample_truncated ? `<small>Showing the first ${pv.sample.length} of ${c.ads}.</small>` : ''}` : '';
+  const needs = pv.changes_classifications;
+  box.innerHTML = `<div class="mcls-summary">${needs ? `<b>${c.ads.toLocaleString('en-AU')} ad${c.ads === 1 ? '' : 's'}</b> across <b>${c.creatives.toLocaleString('en-AU')} creative${c.creatives === 1 ? '' : 's'}</b> would change (${c.confirmed_ads} person-confirmed, ${c.auto_or_other_ads} machine-matched or inherited).` : '<b>No classification changes.</b>'}${c.suggestions ? ` ${c.suggestions} stored suggestion${c.suggestions === 1 ? '' : 's'} would be relabelled.` : ''}${pv.using ? ` ${pv.using.ads} ad${pv.using.ads === 1 ? '' : 's'} still use it.` : ''}</div>
+    <ul class="mcls-effects">${pv.effects.map((e) => `<li>${escapeHtml(e)}</li>`).join('')}${pv.notes.map((e) => `<li>${escapeHtml(e)}</li>`).join('')}</ul>
+    ${sample}
+    <label class="mcls-confirm"><input type="checkbox" id="mcls-confirm-check"> ${needs ? `I have reviewed this and want to change ${c.ads.toLocaleString('en-AU')} classification${c.ads === 1 ? '' : 's'}.` : 'I understand this only changes what Ad Matching offers.'}</label>
+    <div class="mcls-dialog-actions"><button type="button" class="btn btn-primary btn-sm" id="mcls-apply" disabled>Apply change</button><button type="button" class="btn btn-ghost btn-sm" onclick="closeModal('mcls-modal')">Cancel</button><span class="mbench-msg" id="mcls-apply-msg"></span></div>`;
+  const chk = document.getElementById('mcls-confirm-check'); const btn = document.getElementById('mcls-apply');
+  chk.addEventListener('change', () => { btn.disabled = !chk.checked; });
+  btn.addEventListener('click', async () => {
+    btn.disabled = true; chk.disabled = true;
+    const msg = document.getElementById('mcls-apply-msg'); msg.textContent = 'Applying…'; msg.className = 'mbench-msg';
+    try {
+      const r = await mclsApi(`/${MCLS.kind}/apply`, { method: 'POST', body: JSON.stringify({ ...payload, fingerprint: pv.fingerprint, confirm: true }) });
+      closeModal('mcls-modal');
+      mclsMsg(`Done${r.counts && r.counts.ads ? ` — ${r.counts.ads} ad${r.counts.ads === 1 ? '' : 's'} updated` : ''}.`, 'ok');
+      mmState.options = null; // Ad Matching re-reads its pickers (the retired option must not linger)
+      mclsLoad(); mclsHistory();
+    } catch (e) { msg.textContent = e.message; msg.className = 'mbench-msg err'; chk.disabled = false; chk.checked = false; }
+  });
+}
+document.getElementById('mcls-tabs').addEventListener('click', (e) => {
+  const b = e.target.closest('.mcls-tab'); if (!b || b.dataset.mclsKind === MCLS.kind) return;
+  MCLS.kind = b.dataset.mclsKind; MCLS.data = null; MCLS.q = ''; document.getElementById('mcls-search').value = '';
+  document.querySelectorAll('.mcls-tab').forEach((x) => x.classList.toggle('active', x === b));
+  document.getElementById('mcls-add-media').style.display = MCLS.kind === 'style' ? '' : 'none';
+  mclsMsg(''); mclsLoad();
+});
+document.getElementById('mcls-search').addEventListener('input', (e) => { MCLS.q = e.target.value.trim(); mclsRender(); });
+document.getElementById('mcls-list').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-mcls]'); if (!b) return;
+  mclsOpenDialog(b.dataset.mcls, b.dataset.name, b.dataset.unlisted === '1');
+});
+document.getElementById('mcls-add-btn').addEventListener('click', async () => {
+  const name = document.getElementById('mcls-add-name').value.trim();
+  if (!name) { mclsMsg('Type a name to add.', 'err'); return; }
+  try {
+    const r = await mclsApi(`/${MCLS.kind}/add`, { method: 'POST', body: JSON.stringify({ name, media_type: document.getElementById('mcls-add-media').value }) });
+    document.getElementById('mcls-add-name').value = '';
+    mmState.options = null;
+    mclsMsg(r.created ? `Added “${r.name}”.` : `“${r.name}” already exists${r.alias_of ? ` (a spelling of ${r.alias_of})` : ''}.`, r.created ? 'ok' : '');
+    mclsLoad(); mclsHistory();
+  } catch (e) { mclsMsg(e.message, 'err'); }
+});
+document.getElementById('mcls-add-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); document.getElementById('mcls-add-btn').click(); } });
 
 // ── Settings -> Meta Performance: editable benchmarks ───────────────────
 // One target per funnel + metric (+ optional reporting window). The server derives the bands (20% rule), validates every field, audits each
@@ -3156,7 +3294,7 @@ function renderMatchWorkspace(ws, options, sess = null, rv = {}) {
   });
   const stylePicker = mmPicker(document.getElementById('mm-f-style'), {
     blurOnPick: !!sess,
-    multi: false, placeholder: 'Search creative styles…', options: options.creative_styles.map((x) => ({ key: x.id, label: x.label })),
+    multi: false, placeholder: 'Search creative styles…', options: options.creative_styles.filter((x) => !x.hidden).map((x) => ({ key: x.id, label: x.label })),
     selected: cls.creative_style_id ? options.creative_styles.filter((x) => x.id === cls.creative_style_id).map((x) => ({ key: x.id, label: x.label })) : [],
   });
   const nps = document.getElementById('mm-nps');

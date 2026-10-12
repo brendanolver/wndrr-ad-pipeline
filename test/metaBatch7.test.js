@@ -270,7 +270,7 @@ test('performance by concept: consolidation is a read-only query over unique key
   assert.doesNotMatch(perf, /\b(INSERT|UPDATE|DELETE)\b/);
   const groups = lib.slice(lib.indexOf('const GROUPS = {'), lib.indexOf('async function performanceBy'));
   const concept = groups.slice(groups.indexOf('concept: {'), groups.indexOf('creator:'));
-  assert.match(concept, /LEFT JOIN meta_matching_vocab cv ON cv\.kind = 'concept' AND cv\.name_key = ck\.k/);
+  assert.match(concept, /LEFT JOIN meta_matching_vocab cv ON cv\.kind = 'concept' AND cv\.active AND cv\.name_key = ck\.k/, 'only ACTIVE approved concepts consolidate; a retired one is mapped through its alias or stays legacy');
   assert.match(concept, /LEFT JOIN meta_matching_concept_aliases ca ON ca\.alias_key = ck\.k AND cv\.id IS NULL/);
   assert.match(concept, /ca\.removed IS NOT TRUE/, 'a removed concept is never merged into anything');
   assert.match(concept, /'approved:' \|\| COALESCE\(cv\.name_key, cv2\.name_key\)/, 'approved + alias rows share one key');

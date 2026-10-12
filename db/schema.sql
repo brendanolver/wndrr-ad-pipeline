@@ -3151,6 +3151,40 @@ CREATE TABLE IF NOT EXISTS meta_classification_corrections (
 CREATE INDEX IF NOT EXISTS idx_meta_class_corrections_ad ON meta_classification_corrections(meta_ad_id, corrected_at DESC);
 
 -- =====================================================================
+-- Batch 11: Creative Classification management (Settings). Concepts and creators are both rows of meta_matching_vocab; an option can now be
+-- RETIRED (active = false: no longer offered by any picker) and, when it was merged into another option, points at it (merged_into_id). The
+-- row is KEPT, never deleted, so the boot-time seed below (ON CONFLICT DO NOTHING / group-only UPDATE) can never bring a retired name back.
+-- Creative styles are shared with Promotions, so Ad Matching gets its own visibility flag and the styles themselves are never deleted.
+ALTER TABLE meta_matching_vocab ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE meta_matching_vocab ADD COLUMN IF NOT EXISTS merged_into_id INTEGER REFERENCES meta_matching_vocab(id) ON DELETE SET NULL;
+ALTER TABLE meta_matching_vocab ADD COLUMN IF NOT EXISTS retired_at TIMESTAMPTZ;
+ALTER TABLE creative_styles ADD COLUMN IF NOT EXISTS ad_matching_active BOOLEAN NOT NULL DEFAULT true;
+-- One row per applied change to the offered options (add / rename / merge / deactivate / reactivate), and, for a merge or rename, one row per
+-- classification that was rewritten (old and new value) so the change is fully traceable and reversible. Append-only.
+CREATE TABLE IF NOT EXISTS meta_classification_option_changes (
+  id SERIAL PRIMARY KEY,
+  kind VARCHAR(12) NOT NULL CHECK (kind IN ('concept', 'creator', 'style')),
+  action VARCHAR(16) NOT NULL,
+  source_name TEXT,
+  target_name TEXT,
+  affected_ads INTEGER NOT NULL DEFAULT 0,
+  affected_creatives INTEGER NOT NULL DEFAULT 0,
+  details JSONB,
+  applied_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS meta_classification_option_change_items (
+  id SERIAL PRIMARY KEY,
+  change_id INTEGER NOT NULL REFERENCES meta_classification_option_changes(id) ON DELETE CASCADE,
+  meta_ad_id VARCHAR(64) NOT NULL,
+  field VARCHAR(24) NOT NULL,
+  old_value TEXT,
+  new_value TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_meta_cls_option_items_change ON meta_classification_option_change_items(change_id);
+CREATE INDEX IF NOT EXISTS idx_meta_cls_option_items_ad ON meta_classification_option_change_items(meta_ad_id);
+
+-- =====================================================================
 -- Approved Ad Matching concepts + historical-spelling aliases
 -- =====================================================================
 -- The concept list Ad Matching offers is the people-approved vocabulary: meta_matching_vocab rows of kind 'concept'. The 40 approved
