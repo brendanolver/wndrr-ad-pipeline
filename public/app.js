@@ -264,6 +264,7 @@ function showApp() {
   applySidebarGroupDefaults();
   applySidebarModuleAccess();
   loadAll();
+  vhLoad();
   // Dashboard is ALWAYS the landing screen -- a fresh visit and a full browser
   // refresh alike. Previously the URL hash (#promotions/..., #drops/...) that
   // switchTab/the promotion views write survived a refresh, and this startup
@@ -17615,3 +17616,32 @@ document.querySelectorAll('.core-view-btn').forEach((btn) => {
 document.getElementById('core-view-all-btn').addEventListener('click', toggleCoreAllProducts);
 
 checkSession();
+
+// ── Version (sidebar footer) + history ────────────────────────────────────────────────────────────────────────────────────
+// The version comes from version-history.json via /api/version; every change gets a new entry (see src/lib/version.js, `npm run bump`).
+let vhData = null;
+async function vhLoad() {
+  try {
+    vhData = await api('/version');
+    const n = document.getElementById('sidebar-version-num');
+    if (n && vhData && vhData.version) n.textContent = vhData.version;
+  } catch (e) { /* the version label is a nicety: the app works without it */ }
+}
+function vhRender() {
+  const body = document.getElementById('vh-body');
+  const d = vhData;
+  if (!d || !d.entries || !d.entries.length) { body.innerHTML = '<div class="mp-table-empty">No version history yet.</div>'; return; }
+  const fmtDate = (ymd) => { const [y, m, dd] = String(ymd).split('-').map(Number); return y ? `${dd} ${MP_MONTHS[m - 1]} ${y}` : ymd; };
+  body.innerHTML = `${d.scheme ? `<div class="hint vh-scheme">${escapeHtml(d.scheme)}</div>` : ''}
+    <ol class="vh-list">${d.entries.map((e, i) => `<li class="vh-entry${i === 0 ? ' vh-current' : ''}">
+      <div class="vh-head"><span class="vh-ver">${escapeHtml(e.version)}</span>${i === 0 ? '<span class="vh-badge">Current</span>' : ''}<span class="vh-date">${escapeHtml(fmtDate(e.date))}</span></div>
+      <div class="vh-title">${escapeHtml(e.title || '')}</div>
+      ${(e.changes || []).length ? `<ul class="vh-changes">${e.changes.map((c) => `<li>${escapeHtml(c)}</li>`).join('')}</ul>` : ''}</li>`).join('')}</ol>
+    ${d.build ? `<div class="hint vh-build">Running build ${escapeHtml(d.build)}</div>` : ''}`;
+}
+document.addEventListener('click', async (e) => {
+  if (!e.target.closest('#sidebar-version')) return;
+  if (!vhData) await vhLoad();
+  vhRender();
+  openModal('version-modal');
+});

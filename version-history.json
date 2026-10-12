@@ -1,0 +1,17 @@
+{
+  "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
+  "entries": [
+    {
+      "version": "1.0.0",
+      "date": "2026-10-13",
+      "title": "Version tracking begins",
+      "changes": [
+        "The version now shows at the bottom of the sidebar; click it to see this history.",
+        "Starting point for numbering. Earlier work was not versioned one change at a time; it is included here.",
+        "Planning: Core, High Stocks and the Shoot Plan with a weekly target of 15 new concepts; the Weekly Plan is retired.",
+        "Meta Performance: new layout with KPI panels, previous-period comparisons, a date range picker, DPA exclusion, and real creative previews.",
+        "The WNDRR wordmark in the sidebar now takes you to the Dashboard."
+      ]
+    }
+  ]
+}

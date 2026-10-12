@@ -112,6 +112,7 @@
       <button class="tab-btn" data-tab="settings"><span class="sidebar-nav-icon"><svg class=ic aria-hidden=true focusable=false><use href=#i-settings></use></svg></span>Settings</button>
       <div class="sidebar-user" id="sidebar-user"></div>
       <button class="sidebar-signout" onclick="logout()">Sign out</button>
+      <button type="button" class="sidebar-version" id="sidebar-version" title="Version history" aria-haspopup="dialog">VER. <span id="sidebar-version-num">&nbsp;</span></button>
     </div>
   </aside>
 
@@ -1754,6 +1755,16 @@
 </div>
 
 <!-- Ad preview: plays / shows the creative behind a Meta ad (media fetched read-only from Meta, cached). Shared by Meta Performance and the Core creative plan. -->
+<div id="version-modal" class="modal-backdrop">
+  <div class="modal vh-modal" role="dialog" aria-labelledby="vh-title">
+    <div class="modal-header">
+      <h3 id="vh-title">Version history</h3>
+      <button class="modal-close" onclick="closeModal('version-modal')" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-body" id="vh-body"></div>
+  </div>
+</div>
+
 <div id="ad-preview-modal" class="modal-backdrop">
   <div class="modal ap-modal">
     <div class="modal-header">
