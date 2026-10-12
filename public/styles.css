@@ -3619,3 +3619,29 @@ body{background:var(--bg);color:var(--text);}
 .mp-status{font-size:11px;}
 @media (max-width:760px){.mp-kpis{grid-template-columns:repeat(auto-fill,minmax(130px,1fr));}.mp-kpi-value{font-size:18px;}}
 .mp-table-toolbar .mp-inline-check input{width:auto;padding:0;margin:0;}
+
+/* ═══ Creative-first Meta Performance: actual ad creative thumbnails + preview modal ═══════════════════════════════════════════
+   The thumbnail is the creative of THAT ad (Meta's own cover for the ad's creative id), never a Shopify product image. 64 x 64, object-fit: cover, rounded,
+   with a small video / carousel marker; with no cover it is a neutral tile naming the format (no broken-image icon). */
+.mp-table.mp-perf .cc-thumb{width:64px;height:64px;border-radius:10px;flex:0 0 64px;}
+.mp-table.mp-perf th:nth-child(2){width:88px;}
+.mp-table.mp-perf td.mp-creative-cell{padding:8px 6px 8px 10px;vertical-align:middle;}
+.cc-thumb img{object-fit:cover;}
+.cc-thumb{background:var(--surface2);}
+.cc-thumb-badge.cc-badge-play,.cc-thumb-badge.cc-badge-multi{display:flex;align-items:center;justify-content:center;width:20px;height:20px;min-width:20px;padding:0;line-height:1;border-radius:999px;background:rgba(16,16,22,.72);color:#fff;}
+.cc-thumb-badge.cc-badge-play{left:4px;bottom:4px;right:auto;}
+.cc-thumb-badge.cc-badge-multi{right:4px;top:4px;bottom:auto;border-radius:6px;}
+.cc-thumb-badge svg{width:12px;height:12px;display:block;}
+.cc-thumb-lg .cc-thumb-badge.cc-badge-play,.cc-thumb-lg .cc-thumb-badge.cc-badge-multi{width:26px;height:26px;min-width:26px;}
+.cc-thumb-lg .cc-thumb-badge svg{width:15px;height:15px;}
+/* placeholder: neutral tile with the format when known (replaces the old glyph) */
+.cc-thumb-none::after{content:attr(data-label);position:static;display:flex;align-items:center;justify-content:center;width:100%;height:100%;padding:4px;text-align:center;font-size:10px;font-weight:600;letter-spacing:.02em;line-height:1.2;color:var(--text-muted);opacity:1;}
+.cc-thumb-none .cc-thumb-ph{display:none;}
+/* modal */
+.ap-info{grid-template-columns:1fr 1fr;}
+.ap-info .ap-info-wide{grid-column:1 / -1;}
+.ap-fullname{font-weight:600;word-break:break-word;}
+.ap-mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;}
+.ap-actions{align-items:center;}
+.ap-secondary{display:flex;gap:14px;margin:0 0 8px;font-size:12px;}
+.ap-dynamic-note{background:var(--amber-light);color:#7a4a05;border-radius:8px;padding:8px 10px;}

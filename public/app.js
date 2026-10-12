@@ -1313,7 +1313,7 @@ function closeAdPreview() {
 }
 // ONE creative viewer for the whole app (Meta Performance, Ad Matching, conflict resolution, Inspiration Library,
 // Planning evidence). Meta's own preview (the real ad: creative, copy, CTA) is the default whenever Meta supplied it;
-// the in-app image/video player is the fallback; "Open in Meta" is always offered.
+// the in-app image/video player is the fallback; "View Ad on Meta" is offered whenever Meta supplied a link.
 function ccOpenViewer(adId, ctx) {
   const a = mpState.adsById && mpState.adsById.get(adId);
   const metrics = ctx !== undefined ? ctx : (a ? { metrics: { spend: a.spend, purchases: a.purchases, cpa: a.cpa, outbound_ctr: a.outbound_ctr, reach: a.reach, frequency: a.frequency }, range: mpState.range } : null);
@@ -1327,10 +1327,19 @@ function ccThumbHtml(adId, opts = {}) {
   const id = escapeHtml(adId);
   return `<button type="button" class="cc-thumb ${opts.large ? 'cc-thumb-lg' : ''}" ${opts.openAttr || 'data-cc-open'}="${id}" data-thumb-ad="${id}" title="Preview this creative" aria-label="Preview creative"><span class="cc-thumb-ph"></span></button>`;
 }
+const CC_KIND_LABEL = { video: 'Video', image: 'Image', carousel: 'Carousel', dynamic: 'Dynamic' };
+const CC_BADGE_PLAY = '<span class="cc-thumb-badge cc-badge-play" title="Video"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg></span>';
+const CC_BADGE_MULTI = (label) => `<span class="cc-thumb-badge cc-badge-multi" title="${label}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M5 15V6a1 1 0 0 1 1-1h9"/></svg></span>`;
+// A thumbnail is the ACTUAL creative of that ad (never a product image). With no usable cover it shows a neutral tile that says the format when Meta told us it,
+// never a broken-image icon; the metrics never wait on it (this runs after the table is on screen).
 function ccThumbFill(el, t) {
+  const kind = t && t.kind ? t.kind : '';
+  el.dataset.kind = kind;
+  el.dataset.label = CC_KIND_LABEL[kind] || 'No preview';
   if (!t || t.state !== 'ok' || !t.thumb_url) { el.classList.toggle('cc-thumb-none', !!(t && t.state === 'unavailable')); return; }
-  const badge = t.kind === 'video' ? '<span class="cc-thumb-badge">&#9654;</span>' : (t.kind === 'carousel' || t.kind === 'dynamic') ? '<span class="cc-thumb-badge cc-thumb-badge-multi">&#9638;</span>' : '';
-  el.innerHTML = `<img src="${escapeHtml(t.thumb_url)}" loading="lazy" decoding="async" referrerpolicy="no-referrer" alt="" onerror="this.parentNode.classList.add('cc-thumb-none');this.remove()">${badge}`;
+  el.classList.remove('cc-thumb-none');
+  const badge = kind === 'video' ? CC_BADGE_PLAY : kind === 'carousel' ? CC_BADGE_MULTI('Carousel') : kind === 'dynamic' ? CC_BADGE_MULTI('Dynamic creative: several assets') : '';
+  el.innerHTML = `<img src="${escapeHtml(t.thumb_url)}" loading="lazy" decoding="async" referrerpolicy="no-referrer" alt="" onerror="this.parentNode.classList.add('cc-thumb-none');this.parentNode.querySelectorAll('.cc-thumb-badge').forEach(function(b){b.remove()});this.remove()">${badge}`;
 }
 async function ccHydrateThumbs(root) {
   const els = [...(root || document).querySelectorAll('[data-thumb-ad]')];
@@ -1438,7 +1447,7 @@ function apMediaFailed() {
   if (!apState.showMeta && apState.data && apState.data.creative.preview_iframe_src) { apState.showMeta = true; renderAdPreview(); return; }
   if (!apState.retried) { apState.retried = true; openAdPreview(apState.adId, apState.ctx, true); return; }
   const m = document.getElementById('ap-media');
-  if (m) m.insertAdjacentHTML('beforeend', '<div class="ap-note">This preview could not be played in the app. Use "Open in Meta" or try Reload.</div>');
+  if (m) m.insertAdjacentHTML('beforeend', '<div class="ap-note">This preview could not be played in the app. Use "View Ad on Meta" or try Reload.</div>');
 }
 // Meta renders its preview on request, so the frame can take a moment: show the cover + a spinner until it has loaded.
 function apIframeHtml(c) {
@@ -1475,15 +1484,22 @@ function renderAdPreview() {
   const x = apState.ctx && apState.ctx.metrics;
   const dash = (v) => (v ? escapeHtml(v) : '—');
   const products = (ad.products || []).length ? ad.products.map(escapeHtml).join(', ') : '—';
+  const fmt = apFormatLabel(c);
+  const dynamicNote = c.dynamic
+    ? '<div class="ap-note ap-dynamic-note"><b>Dynamic creative.</b> Meta assembles this ad from several images / videos and shows each viewer a different combination, so this is one representative preview, not what every viewer sees.</div>' : '';
   document.getElementById('ap-body').innerHTML = `
     <div class="ap-layout">
-      <div class="ap-media" id="ap-media">${media}</div>
+      <div class="ap-media" id="ap-media">${media}${dynamicNote}</div>
       <div class="ap-context">
-        <dl class="mp-detail-grid">
-          <div><dt>Product</dt><dd>${products}</dd></div>
-          <div><dt>Concept</dt><dd>${dash(ad.concept)}</dd></div>
-          <div><dt>Creator</dt><dd>${dash(ad.creator)}</dd></div>
+        <div class="mp-detail-h">Ad information</div>
+        <dl class="mp-detail-grid ap-info">
+          <div class="ap-info-wide"><dt>Ad name</dt><dd class="ap-fullname">${dash(ad.ad_name)}</dd></div>
+          <div><dt>Meta Ad ID</dt><dd class="ap-mono">${escapeHtml(ad.meta_ad_id || apState.adId)}</dd></div>
           <div><dt>Status</dt><dd>${mpStatusChip(ad.effective_status)}</dd></div>
+          <div class="ap-info-wide"><dt>Campaign</dt><dd>${ad.campaign_name ? escapeHtml(ad.campaign_name) : (ad.campaign_id ? `Campaign ${escapeHtml(ad.campaign_id)}` : '—')}</dd></div>
+          <div class="ap-info-wide"><dt>Ad set</dt><dd>${c.adset_name ? escapeHtml(c.adset_name) : (ad.adset_id ? `<span title="The ad set name loads from Meta when the preview is reloaded">Ad set ${escapeHtml(ad.adset_id)}</span>` : '—')}</dd></div>
+          <div><dt>Creative format</dt><dd>${escapeHtml(fmt)}</dd></div>
+          <div><dt>Product</dt><dd>${products}</dd></div>
         </dl>
         ${x ? `<div class="mp-detail-h">${apState.ctx.range ? escapeHtml(mpRange(apState.ctx.range, true)) : 'Performance'}</div>
         <div class="mp-detail-metrics">
@@ -1491,14 +1507,24 @@ function renderAdPreview() {
             ['Reach', mpReachCell(x.reach, 'int')], ['Frequency', mpReachCell(x.frequency, 'freq')]].map(([l, v]) => `<div class="mp-kpi"><div class="mp-kpi-label">${l}</div><div class="mp-kpi-value">${v}</div></div>`).join('')}
         </div>` : ''}
         <div class="ap-actions">
-          ${openLink ? `<a class="btn btn-ghost btn-sm" href="${escapeHtml(openLink)}" target="_blank" rel="noopener noreferrer">Open in Meta</a>` : ''}
-          ${c.preview_iframe_src && playable ? `<button type="button" class="btn btn-ghost btn-sm" onclick="apToggleMeta()">${apState.showMeta ? 'Show in-app player' : "Show Meta's own preview"}</button>` : ''}
-          <button type="button" class="btn btn-ghost btn-sm" onclick="openAdPreview('${escapeHtml(apState.adId)}', apState.ctx, true)">Reload</button>
+          ${openLink ? `<a class="btn btn-primary btn-sm" href="${escapeHtml(openLink)}" target="_blank" rel="noopener noreferrer" data-ap-view-meta>View Ad on Meta</a>` : '<span class="hint" data-ap-no-link>Meta did not supply a preview link for this ad.</span>'}
+          <button type="button" class="btn btn-ghost btn-sm" onclick="closeAdPreview()" data-ap-close>Close</button>
+        </div>
+        <div class="ap-secondary">
+          ${c.preview_iframe_src && playable ? `<button type="button" class="link-btn" onclick="apToggleMeta()">${apState.showMeta ? 'Show in-app player' : "Show Meta's own preview"}</button>` : ''}
+          <button type="button" class="link-btn" onclick="openAdPreview('${escapeHtml(apState.adId)}', apState.ctx, true)">Reload</button>
         </div>
         ${d.warning ? `<div class="ap-note">${escapeHtml(d.warning)}</div>` : ''}
         <div class="hint">Loaded from Meta ${escapeHtml(mpDateTime(c.fetched_at))}${c.cached ? ' (saved copy)' : ''}. Media links expire; Reload fetches fresh ones.</div>
       </div>
     </div>`;
+}
+function apFormatLabel(c) {
+  if (c.dynamic) return `Dynamic creative${(c.cards || []).length ? ` (${c.cards.length} assets)` : ''}`;
+  if (c.kind === 'carousel') return `Carousel${(c.cards || []).length ? ` (${c.cards.length} cards)` : ''}`;
+  if (c.kind === 'video') return 'Video';
+  if (c.kind === 'image') return 'Image';
+  return c.object_type ? String(c.object_type).replace(/_/g, ' ').toLowerCase().replace(/^./, (m) => m.toUpperCase()) : 'Unknown';
 }
 
 // ── Meta Performance: sub-navigation + Ad Matching ──────────────────────

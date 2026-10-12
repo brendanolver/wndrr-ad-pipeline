@@ -71,3 +71,48 @@ test('cache freshness: ranges that include recent days refresh sooner than past 
   assert.equal(store.freshnessMs({ since: '2026-08-01', until: '2026-08-20' }, '2026-10-07'), store.FRESH_MS_PAST);
   assert.equal(store.addDaysYmd('2026-10-01', -1), '2026-09-30');
 });
+
+test('Batch 14 previews: a dynamic (asset-feed) creative is flagged so it is never presented as the one creative every viewer sees', () => {
+  const dyn = c.normalise({ creative: { asset_feed_spec: { images: [{ url: cdn('a.jpg') }, { url: cdn('b.jpg') }, { url: cdn('c.jpg') }], videos: [] } }, shareLink: null, previewBody: null, videos: {}, imageUrls: {} });
+  assert.equal(dyn.dynamic, true);
+  assert.equal(dyn.cards.length, 3, 'the available assets are kept as representative previews');
+  const plain = c.normalise({ creative: { image_url: cdn('i.jpg') }, shareLink: null, previewBody: null, videos: {}, imageUrls: {} });
+  assert.equal(plain.dynamic, false);
+  const car = c.normalise({ creative: { object_story_spec: { link_data: { child_attachments: [{ picture: cdn('1.jpg') }, { picture: cdn('2.jpg') }] } } }, shareLink: null, previewBody: null, videos: {}, imageUrls: {} });
+  assert.equal(car.dynamic, false, 'a normal carousel is a fixed set of cards, not a dynamic creative');
+});
+
+test('Batch 14 previews: the ad set name rides on the share-link read and a missing link is never invented', async () => {
+  const calls = [];
+  const metaGet = async (path, params) => {
+    calls.push({ path, params });
+    if (path === '/AD1') return { status: 200, data: { preview_shareable_link: 'https://fb.me/adspreview/xyz', adset: { name: 'ASC Broad' } } };
+    if (path === '/AD1/previews') return { status: 200, data: { data: [] } };
+    if (path === '/CR1') return { status: 200, data: { id: 'CR1', image_url: cdn('i.jpg'), thumbnail_url: cdn('t.jpg') } };
+    return { status: 404, data: {} };
+  };
+  const r = await c.fetchFromMeta('AD1', 'CR1', { metaGet, accountPath: () => '/act_1' });
+  assert.equal(r.adset_name, 'ASC Broad');
+  assert.equal(r.share_link, 'https://fb.me/adspreview/xyz');
+  assert.match(calls.find((x) => x.path === '/AD1').params.fields, /adset\{name\}/);
+  const none = await c.fetchFromMeta('AD2', 'CR1', { metaGet: async (path) => (path === '/AD2' ? { status: 200, data: {} } : path === '/CR1' ? { status: 200, data: { id: 'CR1', image_url: cdn('i.jpg') } } : { status: 200, data: { data: [] } }), accountPath: () => '/act_1' });
+  assert.equal(none.share_link, null, 'no link from Meta -> no link (nothing is built from the account id)');
+  assert.equal(none.adset_name, null);
+});
+
+test('Batch 14 thumbnails: a larger cover is requested in the same multi-id read, and the format survives a missing cover', async () => {
+  const t = require('../src/lib/metaCreativeThumbs');
+  assert.equal(t.THUMB_PARAMS.thumbnail_width, '256');
+  const seen = [];
+  const db = { query: async (sql) => {
+    if (/FROM meta_ads/.test(sql)) return { rows: [{ meta_ad_id: 'A1', meta_creative_id: 'C1' }] };
+    if (/FROM meta_ad_creatives/.test(sql)) return { rows: [] };
+    if (/FROM meta_creative_thumbs/.test(sql)) return { rows: [] };
+    return { rows: [] };
+  } };
+  const out = await t.getThumbs(['A1'], {}, { db, configured: () => true, autoEnabled: () => true, metaGetByIds: async (ids, fields, params) => { seen.push(params); return { C1: { id: 'C1', video_id: 'v1', object_story_spec: { video_data: { video_id: 'v1' } } } }; } });
+  assert.deepEqual(seen[0], t.THUMB_PARAMS);
+  assert.equal(out.thumbs.A1.state, 'unavailable', 'no cover URL from Meta -> neutral placeholder, never another image');
+  assert.equal(out.thumbs.A1.kind, 'video', 'the format is still reported so the placeholder can name it');
+  assert.equal(out.thumbs.A1.thumb_url, null);
+});

@@ -102,6 +102,8 @@ function normalise({ creative, shareLink, previewBody, videos, imageUrls }) {
     };
   };
   const outCards = cards.map(withVideo);
+  // Dynamic creative: Meta assembles the ad from several assets per viewer, so no single asset is "the" creative everyone sees (the preview is representative only)
+  const dynamic = ((feed.videos || []).length + (feed.images || []).length) > 1;
   const thumb = safeUrl(c.thumbnail_url);
   let kind = 'unknown';
   let main = null;
@@ -120,6 +122,7 @@ function normalise({ creative, shareLink, previewBody, videos, imageUrls }) {
     .concat(outCards.flatMap((x) => [x.image_url, x.video_url, x.poster_url])).filter(Boolean);
   return {
     kind,
+    dynamic,
     object_type: c.object_type || null,
     thumbnail_url: thumb,
     main,
@@ -160,10 +163,11 @@ async function fetchFromMeta(adId, creativeId, deps = {}, opts = {}) {
     }
   };
 
-  const shareStep = opts.knownShareLink
-    ? Promise.resolve({ preview_shareable_link: opts.knownShareLink })
-    : ok('share_link', () => get(`/${encodeURIComponent(adId)}`, { fields: 'preview_shareable_link' }));
-  if (opts.knownShareLink) diagnostics.share_link = 'reused';
+  // the ad's own node also names its ad set at no extra cost ("adset{name}" rides on the same read as the share link); a reused link only asks for the ad set when its name is not already saved
+  const shareStep = opts.knownShareLink && opts.knownAdsetName
+    ? Promise.resolve({ preview_shareable_link: opts.knownShareLink, adset: { name: opts.knownAdsetName } })
+    : ok('share_link', () => get(`/${encodeURIComponent(adId)}`, { fields: 'preview_shareable_link,adset{name}' }));
+  if (opts.knownShareLink && opts.knownAdsetName) diagnostics.share_link = 'reused';
   const previewStep = ok('preview', () => get(`/${encodeURIComponent(adId)}/previews`, { ad_format: 'MOBILE_FEED_STANDARD' }));
 
   if (opts.base) {
@@ -172,8 +176,9 @@ async function fetchFromMeta(adId, creativeId, deps = {}, opts = {}) {
     if (!Object.values(diagnostics).some((v) => v === 'ok' || v === 'reused')) throw firstErr || new Error('Meta returned nothing');
     const b = opts.base;
     return {
-      kind: b.kind, object_type: b.object_type || null, thumbnail_url: b.thumbnail_url || null, main: b.main || null, cards: b.cards || [],
-      share_link: safeUrl(adNode && adNode.preview_shareable_link),
+      kind: b.kind, dynamic: !!b.dynamic, object_type: b.object_type || null, thumbnail_url: b.thumbnail_url || null, main: b.main || null, cards: b.cards || [],
+      share_link: safeUrl(adNode && adNode.preview_shareable_link) || safeUrl(opts.knownShareLink),
+      adset_name: (adNode && adNode.adset && adNode.adset.name) || opts.knownAdsetName || null,
       preview_iframe_src: iframeSrcFrom(previews && previews.data && previews.data[0] && previews.data[0].body),
       urls: [b.thumbnail_url, b.main && b.main.image_url, b.main && b.main.video_url, b.main && b.main.poster_url]
         .concat((b.cards || []).flatMap((x) => [x.image_url, x.video_url, x.poster_url])).filter(Boolean),
@@ -220,16 +225,16 @@ async function fetchFromMeta(adId, creativeId, deps = {}, opts = {}) {
     creative, shareLink: adNode && adNode.preview_shareable_link,
     previewBody: previews && previews.data && previews.data[0] && previews.data[0].body, videos, imageUrls,
   });
-  return { ...norm, diagnostics, timings_ms: timings, source: 'meta' };
+  return { ...norm, adset_name: (adNode && adNode.adset && adNode.adset.name) || opts.knownAdsetName || null, diagnostics, timings_ms: timings, source: 'meta' };
 }
 
 // Ad + the context shown beside the creative (product/concept; money is added by the caller for admins only).
 async function adContext(adId, db = pool) {
   const r = await db.query(
-    `SELECT m.meta_ad_id, m.ad_name, m.meta_creative_id, m.effective_status, m.match_status,
+    `SELECT m.meta_ad_id, m.ad_name, m.meta_creative_id, m.effective_status, m.match_status, m.meta_adset_id, m.meta_campaign_id, mc.name AS campaign_name,
             c.concept_label, c.creator_name, c.media_type,
             COALESCE((SELECT json_agg(p.product_name ORDER BY p.product_code) FROM meta_ad_products p WHERE p.meta_ad_id = m.meta_ad_id), '[]') AS products
-       FROM meta_ads m LEFT JOIN meta_ad_classifications c ON c.meta_ad_id = m.meta_ad_id WHERE m.meta_ad_id = $1`,
+       FROM meta_ads m LEFT JOIN meta_ad_classifications c ON c.meta_ad_id = m.meta_ad_id LEFT JOIN meta_campaigns mc ON mc.meta_campaign_id = m.meta_campaign_id WHERE m.meta_ad_id = $1`,
     [adId]
   );
   return r.rows[0] || null;
@@ -252,12 +257,26 @@ async function getCreative(adId, { refresh = false, prefetch = false, now = Date
     ad: {
       meta_ad_id: ad.meta_ad_id, ad_name: ad.ad_name, effective_status: ad.effective_status, match_status: ad.match_status,
       products: ad.products || [], concept: ad.concept_label || null, creator: ad.creator_name || null, media_type: ad.media_type || null,
+      campaign_id: ad.meta_campaign_id || null, campaign_name: ad.campaign_name || null, adset_id: ad.meta_adset_id || null,
     },
     creative: payload,
     ...extra,
     timings_ms: { total: Date.now() - t0, ...(extra.timings_ms || {}) },
   });
-  if (usable && !refresh) return respond({ ...cached.payload, fetched_at: new Date(cached.fetched_at).toISOString(), cached: true }, { source: 'cache' });
+  if (usable && !refresh) {
+    // A copy saved before the ad set was recorded: ask Meta for just the ad set's name once (one small read-only call, saved with the copy), never blocking the preview on failure.
+    if (!cached.payload.adset_name && !prefetch && (deps.configured ? deps.configured() : metaAds.configured())) {
+      try {
+        const r = await (deps.metaGet || metaAds.metaGet)(`/${encodeURIComponent(adId)}`, { fields: 'adset{name}' });
+        const nm = r && r.status === 200 && r.data && r.data.adset && r.data.adset.name;
+        if (nm) {
+          cached.payload = { ...cached.payload, adset_name: nm };
+          await db.query("UPDATE meta_ad_creatives SET payload = payload || jsonb_build_object('adset_name', $2::text) WHERE meta_ad_id = $1", [adId, nm]);
+        }
+      } catch (e) { /* the ad set name is a nicety; the preview does not wait on it */ }
+    }
+    return respond({ ...cached.payload, fetched_at: new Date(cached.fetched_at).toISOString(), cached: true }, { source: 'cache' });
+  }
 
   const configured = deps.configured ? deps.configured() : metaAds.configured();
   if (prefetch) {
@@ -282,7 +301,7 @@ async function getCreative(adId, { refresh = false, prefetch = false, now = Date
               ORDER BY fetched_at DESC LIMIT 1`, [ad.meta_creative_id, adId, new Date(now + 5 * 60 * 1000)]) : Promise.resolve({ rows: [] }),
         ]);
         const known = link.rows[0] && now - new Date(link.rows[0].fetched_at).getTime() < SHARE_LINK_REUSE_MS && !refresh ? link.rows[0].share_link : null;
-        return fetchFromMeta(adId, ad.meta_creative_id, deps, { knownShareLink: known, base: sibling.rows[0] ? sibling.rows[0].payload : null });
+        return fetchFromMeta(adId, ad.meta_creative_id, deps, { knownShareLink: known, knownAdsetName: (cached && cached.payload && cached.payload.adset_name) || null, base: sibling.rows[0] ? sibling.rows[0].payload : null });
       })();
       inflight.set(adId, job);
       job.finally(() => inflight.delete(adId)).catch(() => {});

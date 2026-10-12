@@ -20,6 +20,8 @@ const BATCH = 50;
 const MAX_ADS = 100;
 const UNAVAILABLE_TTL_MS = 10 * 60 * 1000;
 const FIELDS = 'id,object_type,thumbnail_url,video_id,object_story_spec,asset_feed_spec';
+// Meta's default creative thumbnail is 64x64, which is soft at table size on a high-density screen: ask for a larger one (same single multi-id read, no extra call).
+const THUMB_PARAMS = { thumbnail_width: '256', thumbnail_height: '256' };
 
 function enabled() {
   return String(process.env.META_THUMBNAILS || 'on').toLowerCase() !== 'off';
@@ -78,7 +80,7 @@ async function getThumbs(adIds, { now = Date.now() } = {}, deps = {}) {
       let data;
       try {
         stats.meta_calls += 1; stats.creatives_asked += batch.length;
-        data = await getByIds(batch, FIELDS);
+        data = await getByIds(batch, FIELDS, THUMB_PARAMS);
       } catch (err) {
         if (err && err.rateLimited) { stats.rate_limited = true; break; }
         data = null; // this batch failed: remember nothing, serve what we have
@@ -107,9 +109,10 @@ async function getThumbs(adIds, { now = Date.now() } = {}, deps = {}) {
     if (pvThumb) { out[id] = { state: 'ok', kind: pv.payload.kind, thumb_url: pvThumb }; stats.from_preview_cache += 1; continue; }
     const c = cid ? cacheOf.get(cid) : null;
     if (c && c.state === 'ok' && c.thumb_url && c.expires_at && new Date(c.expires_at).getTime() > now) { out[id] = { state: 'ok', kind: c.kind, thumb_url: c.thumb_url }; stats.from_thumb_cache += 1; continue; }
-    out[id] = { state: c && c.state === 'unavailable' ? 'unavailable' : 'pending', kind: null, thumb_url: null };
+    // no cover to show, but the format is still reported when Meta told us (the table shows it on the placeholder)
+    out[id] = { state: c && c.state === 'unavailable' ? 'unavailable' : 'pending', kind: (c && c.kind) || (pv && pv.payload && pv.payload.kind && pv.payload.kind !== 'unknown' ? pv.payload.kind : null), thumb_url: null };
   }
   return { thumbs: out, stats };
 }
 
-module.exports = { getThumbs, summarise, enabled, BATCH, MAX_ADS, FIELDS };
+module.exports = { getThumbs, summarise, enabled, BATCH, MAX_ADS, FIELDS, THUMB_PARAMS };

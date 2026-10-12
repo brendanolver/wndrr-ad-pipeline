@@ -317,8 +317,8 @@ async function metaGetAllPages(path, params, onPage, maxPages = 200) {
 // Read several objects by stable ID in ONE Graph call (`/?ids=a,b,c`),
 // returning the raw { id: object } map. Callers keep batches small
 // (Meta allows up to 50 ids per request). Read-only.
-async function metaGetByIds(ids, fields) {
-  const result = await metaGet('/', { ids: ids.join(','), fields });
+async function metaGetByIds(ids, fields, params = {}) {
+  const result = await metaGet('/', { ...params, ids: ids.join(','), fields });
   if (result.status !== 200) throw buildMetaApiError(result, 'Meta ad lookup');
   return result.data && typeof result.data === 'object' ? result.data : {};
 }
