@@ -7,10 +7,11 @@ const { STATUS_LABELS } = require('../lib/statuses');
 const planningContext = require('../lib/planningContext');
 const weeklyLoader = require('../lib/weeklyVideoPlanLoader');
 const launchLib = require('../lib/launchStatus');
+const launchInputs = require('../lib/launchInputs');
 const mergeExcluded = (a, b) => { const m = new Map(); [...a, ...b].forEach((x) => { const k = x.key || x.name; if (!m.has(k)) m.set(k, { ...x, colourways: [...(x.colourways || [])] }); else m.get(k).colourways.push(...(x.colourways || [])); }); return [...m.values()]; };
 const RANK_OF = { SHOOT_NOW: 3, COMING_UP: 2, MONITOR: 1, NO_ACTION: 0 };
 // the unified production priority for one product, as shown on a High Stocks / Core row (ONE headline; the underlying signals stay in the detail)
-const weeklyBrief = (wp) => ({ category: wp.category, category_label: wp.category_label, score: wp.score, recommended_videos: wp.recommended_videos, planned: wp.planned.this_week, remaining: wp.remaining, headline: wp.headline, reasons: wp.reasons.slice(0, 6) });
+const weeklyBrief = (wp) => ({ category: wp.category, category_label: wp.category_label, score: wp.score, recommended_videos: wp.recommended_videos, planned: wp.planned.this_week, remaining: wp.remaining, headline: wp.headline, reasons: wp.reasons.slice(0, 6), role: wp.role || null, roles: wp.roles || [], unique_creatives: wp.performance ? wp.performance.unique_creatives : null, active_ads: wp.coverage && wp.coverage.known ? wp.coverage.active_ads : null, explain: wp.explain || null });
 const { ymdInZone, REPORTING_TIMEZONE } = require('../lib/metaPerformance');
 
 const router = express.Router();
@@ -84,7 +85,7 @@ async function computeHighStockProducts(deps = {}) {
 
     const preExcluded = []; // products left out because they have not launched (reported, never silently dropped)
     const emptyResponse = () => ({
-      families: [],
+      families: [], launch_verification: [],
       excluded_unlaunched: preExcluded.map((x) => ({ ...x })),
       products: [],
       min_soh: minSoh,
@@ -364,7 +365,7 @@ async function computeHighStockProducts(deps = {}) {
     // own stock / sell-through / tier are preserved) but are grouped under their product FAMILY; the family's stock is counted once. Products that have not
     // launched (a future launch date, an Upcoming Drop, a manual override) leave the list: they belong to Upcoming Drops and must not be recommended twice.
     // A product whose launch status cannot be established stays visible, clearly flagged, rather than being assumed launched.
-    let excludedUnlaunched = []; let families = [];
+    let excludedUnlaunched = []; let families = []; const verification = [];
     let weekly = null;
     try { weekly = deps.weekly !== undefined ? deps.weekly : await weeklyLoader.getWeeklyPlan(); } catch (e) { weekly = null; }
     if (planning) {
@@ -376,10 +377,10 @@ async function computeHighStockProducts(deps = {}) {
         if (launchByFam.has(fk)) return launchByFam.get(fk);
         const fam = famByKey.get(fk);
         const codes = fam ? fam.style_codes : rows.map((r) => r.style_code);
-        const styles = codes.map((c) => { const d = am.amDetails.get(c) || {}; const e = salesByStyle.get(c); return { style_code: c, launchDate: d.launchDate || null, drop: lc.drops.get(c) || null, qty: e ? (e.qty365 || 0) : null, override: lc.overrides.get(c) || null }; });
+        const styles = codes.map((c) => launchInputs.forStyle(c, { amDetails: am.amDetails, salesByStyle, drops: lc.drops, overrides: lc.overrides, shopify: lc.shopify || deps.shopifyEvidence || null }));
         const stock = { known: true, units: codes.reduce((t, c) => t + Math.max(0, Number(am.amStock.get(c)) || 0), 0) };
         const onOrder = am.amOnOrder ? codes.reduce((t, c) => t + Math.max(0, Number(am.amOnOrder.get(c)) || 0), 0) : 0;
-        const res = launchLib.assessFamily({ styles, familyOverride: lc.overrides.get(fk) || null, stock, onOrder }, ymdInZone(new Date(), REPORTING_TIMEZONE));
+        const res = launchLib.assessFamily({ styles, familyOverride: lc.overrides.get(fk) || null, stock, onOrder }, ymdInZone(new Date(), REPORTING_TIMEZONE), launchLib.fromConfig((settings && settings.creative_planning_config) || {}));
         launchByFam.set(fk, res); return res;
       };
       const rowsByFam = new Map();
@@ -388,6 +389,11 @@ async function computeHighStockProducts(deps = {}) {
       rowsByFam.forEach((rows, fk) => {
         const l = launchFor(fk, rows);
         if (l.status === 'unlaunched' || l.status === 'discontinued') { excludedUnlaunched.push({ key: fk, name: rows[0].product_name, status: l.status, detail: l.detail, in_upcoming_drop: l.in_upcoming_drop, colourways: rows.map((r) => r.style_code) }); return; }
+        if (l.status === 'unknown') { // not enough proof it has launched: listed for a person to confirm, never recommended here
+          const fam0 = famByKey.get(fk);
+          verification.push({ key: fk, name: fam0 ? fam0.name : rows[0].product_name, product_code: rows[0].product_code, image_url: (rows.find((r) => r.image_url) || {}).image_url || null, soh_total: rows[0].family_soh != null ? rows[0].family_soh : rows.reduce((t, r) => t + r.soh, 0), units_sold_30d: rows.reduce((t, r) => t + (r.units_sold_30d || 0), 0), basis: l.basis, confidence: l.confidence, detail: l.detail, evidence: (l.by_style[0] && l.by_style[0].evidence) || [], colourways: rows.map((r) => ({ style_code: r.style_code, colour_label: r.colour_label, soh: r.soh })) });
+          return;
+        }
         const wp = weekly && weekly.available ? weekly.products.find((x) => x.key === fk) : null;
         rows.forEach((r) => { r.launch = { status: l.status, basis: l.basis, detail: l.detail, needs_check: l.needs_check }; r.weekly = wp ? weeklyBrief(wp) : null; });
         kept.push(...rows);
@@ -409,6 +415,7 @@ async function computeHighStockProducts(deps = {}) {
       planning_data: planning ? planningContext.dataStatus(planning) : null,
       families,
       excluded_unlaunched: mergeExcluded(preExcluded, excludedUnlaunched),
+      launch_verification: verification.sort((a, b) => b.soh_total - a.soh_total),
       products,
       min_soh: minSoh,
       apparelmagic: { configured: am.amConfigured, error: am.amError },

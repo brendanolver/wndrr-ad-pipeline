@@ -145,7 +145,8 @@ test('unlaunched / discontinued products are EXCLUDED (not scored); unknown laun
   const p = plan([fam({ name: 'NOT LAUNCHED', launch: { status: 'unlaunched', eligible: false, detail: 'ApparelMagic launch date 2026-11-01 is still ahead.' } }), fam({ name: 'DISCONTINUED', launch: { status: 'discontinued', eligible: false } }), fam({ name: 'UNKNOWN LAUNCH', launch: { status: 'unknown', eligible: false, needs_check: true, detail: 'No launch date' }, sales: { available: true, units30: 140, units365: 1000 }, creatives: [cr('underperforming', 'clear')], age: 120 })]);
   assert.ok(!find(p, 'NOT LAUNCHED') && !find(p, 'DISCONTINUED'));
   assert.deepEqual(p.excluded.map((x) => x.name).sort(), ['DISCONTINUED', 'NOT LAUNCHED']);
-  const u = find(p, 'UNKNOWN LAUNCH'); assert.ok(RANKOK(u.category, 'MONITOR')); assert.equal(u.recommended_videos, 0); assert.ok(p.needs_launch_check.length === 1);
+  assert.ok(!find(p, 'UNKNOWN LAUNCH'), 'Batch 13: an unverified product is NOT in any category (not even Monitor)');
+  assert.equal(p.verification.length, 1); assert.equal(p.verification[0].name, 'UNKNOWN LAUNCH'); assert.ok(p.needs_launch_check.length === 1);
 });
 test('an Upcoming Drop product is excluded and labelled as handled in Upcoming Drops (no duplicate requirement)', () => {
   const p = plan([fam({ name: 'DROP PRODUCT', launch: { status: 'unlaunched', eligible: false, in_upcoming_drop: true, detail: 'Part of the upcoming drop "Drop 24"; its creative is handled in Upcoming Drops.' } })]);
@@ -203,4 +204,70 @@ test('creative mix: with no evidence anywhere every slot is honestly exploratory
   assert.ok(mix.slots.every((s) => s.basis !== 'evidence')); assert.ok(mix.slots.some((s) => s.creator_hint));
   assert.deepEqual(M.suggestMix({ videos: 0, vocab: VOCAB }).slots, []);
   assert.equal(M.suggestMix({ videos: 2, vocab: { concepts: [], creators: [] } }).slots.length, 2);
+});
+
+
+// ── Batch 13: refined quantities and the explanation ────────────────────────────────────
+const crs = (n, state, severity) => Array.from({ length: n }, () => cr(state, severity));
+test('HIGH DEMAND + MANY UNIQUE CREATIVES that are not fatigued: capped (a product with 29 creatives does not get 5 more just because it sells)', () => {
+  const many = fam({ name: 'RAIDER', units: 499, sales: { available: true, units30: 117, units365: 900 }, creatives: [...crs(8, 'performing'), ...crs(9, 'underperforming', 'clear'), ...crs(8, 'insufficient'), ...crs(4, 'insufficient')], activeAds: 40, age: 20 });
+  const p = plan([many]); const t = find(p, 'RAIDER');
+  assert.equal(t.performance.unique_creatives, 29); assert.equal(t.saturated, true); assert.equal(t.fatigued, false);
+  assert.ok(t.recommended_videos <= CFG.videos_when_saturated, `capped at ${CFG.videos_when_saturated}, got ${t.recommended_videos}`);
+  assert.ok(t.quantity_steps.some((s) => s.key === 'saturated'));
+  assert.match(t.explain.quantity.text, /29 unique creatives are already running and they are not fatigued/);
+});
+test('HIGH DEMAND + FATIGUED creative: fresh creative IS justified (the saturation cap does not apply)', () => {
+  const tired = fam({ name: 'TIRED', sales: { available: true, units30: 130, units365: 900 }, creatives: [...crs(6, 'declining', 'relative'), ...crs(8, 'underperforming', 'clear'), ...crs(2, 'performing')], activeAds: 16, age: 100 });
+  const t = find(plan([tired]), 'TIRED');
+  assert.equal(t.saturated, true); assert.equal(t.fatigued, true); assert.ok(t.recommended_videos > CFG.videos_when_saturated, `got ${t.recommended_videos}`);
+});
+test('HIGH DEMAND + POOR creative -> high priority with several videos; HIGH DEMAND + STRONG creative -> few or none', () => {
+  const poor = fam({ name: 'POOR', sales: { available: true, units30: 130, units365: 900 }, creatives: [cr('underperforming', 'clear'), cr('underperforming', 'clear'), cr('insufficient')], coverage: { known: true, active_ads: 3, min: 5 }, age: 80 });
+  const strong = fam({ name: 'STRONG', sales: { available: true, units30: 130, units365: 900 }, creatives: crs(6, 'performing'), age: 14 });
+  const p = plan([poor, strong]);
+  assert.equal(find(p, 'POOR').category, 'SHOOT_NOW'); assert.ok(find(p, 'POOR').recommended_videos >= 3);
+  assert.ok(find(p, 'STRONG').recommended_videos <= 1);
+});
+test('HIGH DEMAND but INSUFFICIENT Meta data: not read as a shortage; the explanation says the picture is unclear', () => {
+  const unclear = fam({ name: 'UNCLEAR', sales: { available: true, units30: 130, units365: 900 }, creatives: [cr('insufficient'), cr('insufficient')], activeAds: 2, pending: 4, uncertain: true });
+  const t = find(plan([unclear]), 'UNCLEAR');
+  assert.match(t.explain.creative.text, /without enough data to judge/); assert.match(t.explain.creative.text, /awaiting match review/);
+});
+test('LOW DEMAND + HIGH STOCK (slow mover): stock is not a reason to invest, at most one video, never Shoot now without a seasonal lift, and the explanation says how many weeks of cover', () => {
+  const slow = fam({ name: 'SLOW', units: 291, sales: { available: true, units30: 8, units365: 200 }, creatives: [cr('underperforming', 'clear'), cr('insufficient')], coverage: { known: true, active_ads: 2, min: 5 }, age: 90 });
+  const t = find(plan([slow]), 'SLOW');
+  assert.equal(t.slow_mover, true); assert.notEqual(t.category, 'SHOOT_NOW'); assert.ok(t.recommended_videos <= CFG.videos_slow_mover);
+  assert.match(t.explain.data.find((x) => x.label === 'Stock').text, /weeks of cover/);
+  assert.equal(t.factors.worth.find((x) => x.key === 'stock').points, 0);
+});
+test('OUT-OF-SEASON high-stock product that already meets the active-ad minimum is not an immediate shoot', () => {
+  const oos = fam({ name: 'REFRAIN', units: 456, sales: { available: true, units30: 40, units365: 900 }, creatives: crs(7, 'performing'), activeAds: 7, season: { status: 'out_of_season', label: 'Out of season', outlook: { boost: 'none', text: 'Out of season.' } }, age: 30 });
+  const t = find(plan([oos]), 'REFRAIN');
+  assert.notEqual(t.category, 'SHOOT_NOW'); assert.equal(t.coverage.active_ads, 7);
+});
+test('a product ALREADY SCHEDULED for production: planned / in-pipeline videos reduce what remains, and the explanation says so', () => {
+  const sched = fam({ name: 'SCHEDULED', sales: { available: true, units30: 130, units365: 900 }, creatives: [cr('underperforming', 'clear'), cr('underperforming', 'clear')], coverage: { known: true, active_ads: 2, min: 5 }, age: 90, planned: { this_week: 2, in_pipeline: 1, in_production: 1, completed: 0, by_source: {} } });
+  const t = find(plan([sched]), 'SCHEDULED');
+  assert.equal(t.net_recommended, t.recommended_videos - 1); assert.equal(t.remaining, Math.max(0, t.net_recommended - 2));
+  assert.match(t.explain.planned.text, /2 videos already planned this week/); assert.match(t.explain.quantity.text, /1 video from earlier weeks still in production is subtracted/);
+});
+test('the explanation names the data behind the decision, counts performing / weak / untested creatives, and never claims a cause for poor performance', () => {
+  const t = find(plan([fam({ name: 'EXPLAINED', sales: { available: true, units30: 120, units365: 900 }, creatives: [cr('performing'), cr('underperforming', 'clear'), cr('underperforming', 'clear'), cr('insufficient')], coverage: { known: true, active_ads: 4, min: 5 }, age: 70 })]), 'EXPLAINED');
+  const e = t.explain;
+  assert.match(e.priority, /^Prioritised because of/); assert.deepEqual(e.data.map((x) => x.label), ['Sales', 'Stock', 'Season', 'Launch']);
+  assert.equal(e.creative.counts.performing, 1); assert.equal(e.creative.counts.weak, 2); assert.equal(e.creative.counts.insufficient, 1); assert.equal(e.creative.counts.unique, 4);
+  assert.match(e.quantity.text, /Sizing table/); assert.ok(e.cautions.some((c) => /not proof that creative is the cause/.test(c)));
+  assert.doesNotMatch(JSON.stringify(e), /because the creative is bad|caused by|due to poor creative/i);
+});
+test('DUPLICATE product across planning sources: one family, one recommendation (colourways are not separate recommendations)', () => {
+  const two = fam({ name: 'TWO COLOURS', colourways: [{ style_code: 'W26TC001BLK', colour_label: 'Black', soh: 150 }, { style_code: 'W26TC001WHT', colour_label: 'White', soh: 150 }], units: 300, creatives: [cr('underperforming', 'clear')] });
+  const p = plan([two]);
+  assert.equal(p.products.filter((x) => x.name === 'TWO COLOURS').length, 1);
+});
+test('the ~47-video / 25-target case: recommendations above the target are allocated by rank and the surplus is deferred, never padded and never silently dropped', () => {
+  const many = Array.from({ length: 12 }, (_, i) => fam({ name: `HOT ${i}`, sales: { available: true, units30: 150 + i, units365: 1200 }, creatives: [cr('underperforming', 'clear'), cr('underperforming', 'clear')], coverage: { known: true, active_ads: 2, min: 5 }, age: 90 }));
+  const p = plan(many);
+  assert.ok(p.summary.recommended_total > p.target, `${p.summary.recommended_total} > ${p.target}`);
+  assert.equal(p.summary.to_plan_from_recommendations, p.target); assert.ok(p.summary.deferred > 0); assert.match(p.summary.explanation, /deferred/);
 });

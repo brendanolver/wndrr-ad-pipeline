@@ -377,19 +377,27 @@ function isAdExcludedCategory(details) {
 }
 
 // AU day-first date parsing ("30-07-26", "30/07/2026"), also accepts ISO.
-// Returns a Date or null if unparseable.
+// Returns a Date or null if unparseable. A launch date drives which products are recommended, so it is read STRICTLY: only the formats above are accepted
+// (an untidy value such as "1 Nov" used to fall through to Date.parse, which can invent a year such as 2001 and make a future launch look like the past),
+// real calendar dates only (31/02 is rejected), and a year outside 2015-2100 is treated as unreadable. Unreadable is reported (launchDateRaw is kept), never guessed.
 function parseLaunchDate(value) {
   if (!value) return null;
   const s = String(value).trim();
-  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-  if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
-  m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
-  if (m) {
-    const y = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3]);
-    return new Date(y, Number(m[2]) - 1, Number(m[1]));
+  let y; let mo; let d;
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ].*)?$/);
+  if (m) { y = +m[1]; mo = +m[2]; d = +m[3]; }
+  else {
+    const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+    const year = (t) => (t.length === 2 ? 2000 + Number(t) : Number(t));
+    const monthNo = (t) => MONTHS.indexOf(String(t).slice(0, 3).toLowerCase()) + 1;
+    if ((m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2}|\d{4})$/))) { d = +m[1]; mo = +m[2]; y = year(m[3]); }
+    else if ((m = s.match(/^(\d{1,2})[ -]([A-Za-z]{3,9})[ ,-]+(\d{2}|\d{4})$/)) && monthNo(m[2])) { d = +m[1]; mo = monthNo(m[2]); y = year(m[3]); }
+    else if ((m = s.match(/^([A-Za-z]{3,9}) (\d{1,2}),? (\d{2}|\d{4})$/)) && monthNo(m[1])) { d = +m[2]; mo = monthNo(m[1]); y = year(m[3]); }
+    else return null;
   }
-  const t = Date.parse(s);
-  return Number.isNaN(t) ? null : new Date(t);
+  if (y < 2015 || y > 2100 || mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  const dt = new Date(y, mo - 1, d);
+  return dt.getFullYear() === y && dt.getMonth() === mo - 1 && dt.getDate() === d ? dt : null;
 }
 
 // One catalogue crawl of /products, returning everything Planning needs per
@@ -421,6 +429,7 @@ async function fetchStyleCatalogueUncached() {
       images: extractImages(row),
       launchDateRaw,
       launchDate: parseLaunchDate(launchDateRaw),
+      launchDateReadable: launchDateRaw ? parseLaunchDate(launchDateRaw) !== null : null, // null = no date recorded; false = a value is recorded but cannot be read
       isCore: CORE_GROUPS.has(normGroupName(row.group)),
       // AM's own `category` field -- confirmed live in production
       // (demandplanning's per-style AM product lookup) -- distinct from

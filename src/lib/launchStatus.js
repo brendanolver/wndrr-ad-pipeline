@@ -1,57 +1,121 @@
 // Has a product LAUNCHED? Creative Planning must not recommend a shoot for something that has not gone on sale (it belongs to Upcoming Drops, which has its
 // own creative workflow), and must not assume a product has launched just because the warehouse holds stock of it.
 //
+// WHAT IS KNOWN ABOUT WNDRR'S DATA (verified in the code that reads it; see docs/launch-status.md):
+//   * ApparelMagic has NO product-status or release-date field that this app reads. WNDRR repurposes the style's `mid_code` as its Launch Date (confirmed in the
+//     Demand Planning app). It is held PER STYLE (= per colourway), is free text, and '0' / blank mean "none". Nothing else in the style record is a date this
+//     app uses; an inventory receipt, purchase order date or warehouse arrival date is NOT a launch date and is never read as one.
+//   * Upcoming Drops live in this database (styles.drop_id -> drops.launch_date).
+//   * Shopify (status / publication) is the only direct evidence a product is on sale, but its credentials are not configured in production, so it is an OPTIONAL
+//     input here (`shopify`), used only when a caller supplies it.
+//
 // EVIDENCE USED, strongest first (a product is judged from what is KNOWN, never from what is missing):
 //   1. a manual launch-status override (product_launch_overrides), set by a person
-//   2. an Upcoming Drop the product belongs to (styles.drop_id -> drops.launch_date): a future drop date = unlaunched; a past one = launched
-//   3. ApparelMagic's launch date for the colourway (`mid_code`): a future date = unlaunched; a past date = launched
-//   4. positive sales: units actually sold in the sales history prove it is on sale (not "no sales" - zero sales proves nothing)
-// NEVER used on their own: stock quantity, zero sales, or "last creative = never". With no evidence either way the status is UNKNOWN, which is
-// flagged for a person to confirm rather than assumed to be launched.
-//
-// There is no Shopify publication check here: Shopify credentials are deliberately not configured in production yet, and ApparelMagic exposes no product
-// status field, so "discontinued / inactive" can only come from a manual override (or ApparelMagic's excluded categories, which families already drop).
+//   2. Shopify, when supplied: DRAFT = not launched, ARCHIVED = discontinued, ACTIVE and published = on sale (corroborates; it never overrides a future date)
+//   3. an Upcoming Drop the product belongs to: a future drop date = not launched
+//   4. ApparelMagic's launch date for the colourway: a future date = not launched; a date that cannot be read = UNKNOWN (never guessed)
+//      a past date = launched, unless it passed only a few days ago with no sales yet (a planned date passing does not prove the product went live: UNKNOWN)
+//   5. the CORE product group in ApparelMagic (an established evergreen range) with no future date
+//   6. a past Upcoming Drop
+//   7. sustained sales, ONLY when the sales setting allows it. Sales alone are not proof: they can include pre-launch, staff, gifting or seeding orders.
+// NEVER used on their own: stock quantity, zero sales, "last creative = never", or stock arriving at the warehouse. With no usable evidence the status is
+// UNKNOWN: flagged for a person to verify, never recommended, never silently treated as launched.
 //
 // Pure: no database, no clock (today is passed in). Colourways are judged one by one so a family can have launched and unlaunched colours.
 const STATUSES = ['launched', 'unlaunched', 'upcoming_restock', 'discontinued', 'unknown'];
-const DEFAULTS = { sales_launch_units: 10, restock_min_on_order: 30, low_stock_units: 30 };
+const DEFAULTS = {
+  sales_launch_units: 10, // units sold before sales count as (weak) evidence
+  sales_confirms_launch: false, // sales alone confirm a launch only when this is on
+  settle_days: 21, // a launch date this recent with no sales is verified rather than assumed
+  restock_min_on_order: 30, low_stock_units: 30,
+};
 const ymd = (d) => (d instanceof Date ? d.toISOString().slice(0, 10) : d ? String(d).slice(0, 10) : null);
+const daysBetween = (a, b) => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86400000);
+const ymOf = (t) => t.slice(0, 7);
 
-// ONE colourway. input: { launchDate (Date|string|null), drop: { launch_date, name }|null, qty: units sold in the sales history (number|null), override: { status, note }|null }
-function assessStyle({ launchDate = null, drop = null, qty = null, override = null }, today, cfg = DEFAULTS) {
-  const t = ymd(today);
-  if (override && ['launched', 'unlaunched', 'discontinued'].includes(override.status)) {
-    return { status: override.status, basis: 'manual', detail: `Set by a person${override.note ? `: ${override.note}` : ''}.` };
-  }
-  const dropDate = drop && drop.launch_date ? ymd(drop.launch_date) : null;
-  if (dropDate && dropDate >= t) return { status: 'unlaunched', basis: 'upcoming_drop', detail: `Part of the upcoming drop${drop.name ? ` "${drop.name}"` : ''} launching ${dropDate}; its creative is handled in Upcoming Drops.`, drop };
-  const ld = ymd(launchDate);
-  if (ld && ld > t) return { status: 'unlaunched', basis: 'launch_date', detail: `ApparelMagic launch date ${ld} is still ahead.` };
-  if (ld && ld <= t) return { status: 'launched', basis: 'launch_date', detail: `ApparelMagic launch date ${ld} has passed.` };
-  if (dropDate && dropDate < t) return { status: 'launched', basis: 'past_drop', detail: `Its drop launched ${dropDate}.` };
-  if (qty !== null && qty >= cfg.sales_launch_units) return { status: 'launched', basis: 'sales', detail: `${Math.round(qty)} units sold, so it is on sale.` };
-  return { status: 'unknown', basis: 'none', detail: 'No launch date, drop or sales history to confirm it has launched. Stock alone does not prove it.' };
+// settings (creative_planning_config keys) -> the thresholds this file uses
+function fromConfig(c = {}) {
+  return {
+    ...DEFAULTS,
+    ...(c.launch_sales_min_units !== undefined ? { sales_launch_units: Number(c.launch_sales_min_units) } : {}),
+    ...(c.launch_sales_confirms !== undefined ? { sales_confirms_launch: Number(c.launch_sales_confirms) === 1 } : {}),
+    ...(c.launch_settle_days !== undefined ? { settle_days: Number(c.launch_settle_days) } : {}),
+  };
 }
 
-// A product FAMILY from its colourways. styles: [{ style_code, launchDate, drop, qty, override }]; family-level override applies to every colourway without its own.
+// units sold on or after a date, from the monthly sales history ({ 'YYYY-MM': units }): a month counts when it starts on/after the date's month (coarse on purpose)
+const unitsSince = (months, date) => (months ? Object.entries(months).filter(([ym]) => ym >= ymOf(date)).reduce((s, [, u]) => s + (Number(u) || 0), 0) : null);
+const firstSaleMonth = (months) => { const k = months ? Object.entries(months).filter(([, u]) => Number(u) > 0).map(([ym]) => ym).sort() : []; return k.length ? k[0] : null; };
+
+// ONE colourway. input: { launchDate (Date|string|null), launchDateRaw, launchDateReadable (false = a value is recorded but unreadable), drop: { launch_date, name }|null,
+//   qty (units sold in the history), months ({YYYY-MM: units}), isCore, override: { status, note }|null, shopify: { status, published_at }|null }
+// → { status, basis, detail, confidence, evidence: [{ source, text, verdict }] } (evidence is the full picture, for the diagnostics)
+function assessStyle(input, today, cfg = DEFAULTS) {
+  const { launchDate = null, launchDateRaw = null, launchDateReadable = null, drop = null, qty = null, months = null, isCore = false, override = null, shopify = null } = input;
+  const t = ymd(today);
+  const c = { ...DEFAULTS, ...cfg };
+  const ev = [];
+  const add = (source, text, verdict) => ev.push({ source, text, verdict });
+  const dropDate = drop && drop.launch_date ? ymd(drop.launch_date) : null;
+  const ld = ymd(launchDate);
+  const sold = qty === null ? null : Math.round(qty);
+  const first = firstSaleMonth(months);
+
+  // gather the evidence first so the diagnostics always show all of it, whichever rule decides
+  if (override && ['launched', 'unlaunched', 'discontinued'].includes(override.status)) add('manual', `A person marked it ${override.status}${override.note ? `: ${override.note}` : ''}.`, override.status);
+  if (shopify) add('shopify', `Shopify status ${shopify.status}${shopify.published_at ? `, published ${ymd(shopify.published_at)}` : ', not published'}.`, shopify.status === 'ARCHIVED' ? 'discontinued' : shopify.status === 'DRAFT' ? 'unlaunched' : shopify.published_at && ymd(shopify.published_at) <= t ? 'launched' : 'unknown');
+  if (dropDate) add('drop', `Upcoming Drop${drop.name ? ` "${drop.name}"` : ''} dated ${dropDate}.`, dropDate >= t ? 'unlaunched' : 'launched');
+  if (launchDateRaw && launchDateReadable === false) add('apparelmagic_date', `ApparelMagic launch date "${launchDateRaw}" could not be read as a date.`, 'unknown');
+  else if (ld) add('apparelmagic_date', `ApparelMagic launch date ${ld}${ld > t ? ' is still ahead' : ' has passed'}.`, ld > t ? 'unlaunched' : 'launched');
+  else add('apparelmagic_date', 'ApparelMagic has no launch date for this colourway.', 'none');
+  if (isCore) add('core_group', 'In the ApparelMagic CORE product group (an established range).', 'launched');
+  if (sold !== null) add('sales', sold > 0 ? `${sold} units sold in the sales history${first ? `, first in ${first}` : ''}. Sales can include pre-launch, staff or seeding orders.` : 'No sales in the sales history (this proves nothing either way).', sold >= c.sales_launch_units ? 'sales_only' : 'none');
+
+  const done = (status, basis, detail, confidence) => ({ status, basis, detail, confidence, evidence: ev });
+  if (override && ['launched', 'unlaunched', 'discontinued'].includes(override.status)) return done(override.status, 'manual', `Set by a person${override.note ? `: ${override.note}` : ''}.`, 'confirmed');
+  if (shopify && shopify.status === 'ARCHIVED') return done('discontinued', 'shopify', 'Archived in Shopify.', 'confirmed');
+  if (shopify && shopify.status === 'DRAFT') return done('unlaunched', 'shopify', 'A draft in Shopify, so it is not on sale.', 'confirmed');
+  if (dropDate && dropDate >= t) return { ...done('unlaunched', 'upcoming_drop', `Part of the upcoming drop${drop.name ? ` "${drop.name}"` : ''} launching ${dropDate}; its creative is handled in Upcoming Drops.`, 'confirmed'), drop };
+  if (ld && ld > t) return done('unlaunched', 'launch_date', `ApparelMagic launch date ${ld} is still ahead.`, 'confirmed');
+  if (launchDateRaw && launchDateReadable === false) return done('unknown', 'unreadable_date', `ApparelMagic holds a launch date ("${launchDateRaw}") that cannot be read, so it is not assumed to have passed. Please confirm.`, 'none');
+  if (ld && ld <= t) {
+    const age = daysBetween(ld, t);
+    const since = unitsSince(months, ld);
+    if (age < c.settle_days && (since === null ? sold === 0 : since === 0)) return done('unknown', 'date_just_passed', `ApparelMagic launch date ${ld} passed ${age} day${age === 1 ? '' : 's'} ago and nothing has sold yet. A planned date passing does not prove it went live. Please confirm.`, 'low');
+    if (shopify && shopify.published_at && ymd(shopify.published_at) <= t) return done('launched', 'launch_date', `ApparelMagic launch date ${ld} has passed and Shopify has it published.`, 'confirmed');
+    return done('launched', 'launch_date', `ApparelMagic launch date ${ld} has passed.`, since > 0 || sold > 0 ? 'confirmed' : 'date_only');
+  }
+  if (shopify && shopify.status === 'ACTIVE' && shopify.published_at && ymd(shopify.published_at) <= t) return done('launched', 'shopify', `Active in Shopify since ${ymd(shopify.published_at)}.`, 'confirmed');
+  if (isCore) return done('launched', 'core_group', 'In the ApparelMagic CORE product group, an established range with no future launch date.', 'group');
+  if (dropDate && dropDate < t) return done('launched', 'past_drop', `Its drop launched ${dropDate}.`, 'date_only');
+  if (sold !== null && sold >= c.sales_launch_units) {
+    if (c.sales_confirms_launch) return done('launched', 'sales', `${sold} units sold and sales are allowed to confirm a launch, so it is treated as on sale.`, 'sales_only');
+    return done('unknown', 'sales_only', `No launch date is recorded. ${sold} units have sold${first ? ` since ${first}` : ''}, but sales alone do not prove a launch (they can include pre-launch, staff or seeding orders). Please confirm.`, 'sales_only');
+  }
+  return done('unknown', 'none', 'No launch date, drop or sustained sales to confirm it has launched. Stock alone does not prove it.', 'none');
+}
+
+// A product FAMILY from its colourways. styles: [{ style_code, launchDate, ..., override }]; a family-level override applies to every colourway without its own.
 function assessFamily({ styles = [], familyOverride = null, stock = null, onOrder = null }, today, cfg = DEFAULTS) {
   const per = styles.map((s) => ({ style_code: s.style_code, ...assessStyle({ ...s, override: s.override || familyOverride }, today, cfg) }));
   const by = (st) => per.filter((x) => x.status === st);
-  let status; let basis; let detail;
-  if (!per.length) { status = 'unknown'; basis = 'none'; detail = 'No colourways found.'; }
-  else if (by('discontinued').length === per.length) { status = 'discontinued'; basis = 'manual'; detail = by('discontinued')[0].detail; }
+  let status; let basis; let detail; let confidence;
+  if (!per.length) { status = 'unknown'; basis = 'none'; detail = 'No colourways found.'; confidence = 'none'; }
+  else if (by('discontinued').length === per.length) { status = 'discontinued'; basis = by('discontinued')[0].basis; detail = by('discontinued')[0].detail; confidence = by('discontinued')[0].confidence; }
   else if (by('launched').length) {
-    status = 'launched'; basis = by('launched')[0].basis;
-    detail = by('launched')[0].detail + (by('unlaunched').length ? ` ${by('unlaunched').length} colourway(s) have not launched and are left out.` : '');
-  } else if (by('unlaunched').length) { status = 'unlaunched'; basis = by('unlaunched')[0].basis; detail = by('unlaunched')[0].detail; }
-  else { status = 'unknown'; basis = 'none'; detail = per[0].detail; }
+    status = 'launched'; basis = by('launched')[0].basis; confidence = by('launched')[0].confidence;
+    detail = by('launched')[0].detail + (by('unlaunched').length ? ` ${by('unlaunched').length} colourway(s) have not launched and are left out.` : '') + (by('unknown').length ? ` ${by('unknown').length} colourway(s) need checking.` : '');
+  } else if (by('unlaunched').length) { status = 'unlaunched'; basis = by('unlaunched')[0].basis; detail = by('unlaunched')[0].detail; confidence = by('unlaunched')[0].confidence; }
+  else { status = 'unknown'; basis = per[0].basis; detail = per[0].detail; confidence = per[0].confidence; }
   // a launched product that is out / low with a real order on the way is an upcoming restock: eligible where demand justifies it
   const units = stock && stock.known ? Math.max(0, Number(stock.units) || 0) : null;
   const oo = Math.max(0, Number(onOrder) || 0);
-  const restock = status === 'launched' && units !== null && units <= cfg.low_stock_units && oo >= cfg.restock_min_on_order;
+  const lowStock = (cfg && cfg.low_stock_units) !== undefined ? cfg.low_stock_units : DEFAULTS.low_stock_units;
+  const minOrder = (cfg && cfg.restock_min_on_order) !== undefined ? cfg.restock_min_on_order : DEFAULTS.restock_min_on_order;
+  const restock = status === 'launched' && units !== null && units <= lowStock && oo >= minOrder;
   if (restock) { status = 'upcoming_restock'; detail += ` ${oo} units are on order.`; }
   const inDrop = per.find((x) => x.basis === 'upcoming_drop');
-  return { status, basis, detail, eligible: status === 'launched' || status === 'upcoming_restock', needs_check: status === 'unknown', in_upcoming_drop: !!inDrop, drop: inDrop ? inDrop.drop : null, by_style: per, restock, on_order: oo };
+  return { status, basis, detail, confidence, eligible: status === 'launched' || status === 'upcoming_restock', needs_check: status === 'unknown', in_upcoming_drop: !!inDrop, drop: inDrop ? inDrop.drop : null, by_style: per, restock, on_order: oo };
 }
 
-module.exports = { STATUSES, DEFAULTS, assessStyle, assessFamily };
+module.exports = { STATUSES, DEFAULTS, fromConfig, assessStyle, assessFamily };

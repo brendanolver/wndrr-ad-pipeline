@@ -27,6 +27,24 @@ const OVERRIDE_FLOOR = { manual_high: 'SHOOT_NOW', major_promotion: 'SHOOT_NOW',
 const plural = (n, one, many) => `${n} ${n === 1 ? one : (many || `${one}s`)}`;
 const fmt = (n) => Number(n).toLocaleString('en-AU');
 
+// weeks of stock at the current 30-day pace (null when sales or stock are not known; Infinity when nothing is selling)
+function coverWeeks(f) {
+  if (!f.sales || !f.sales.available || !f.stock || !f.stock.known) return null;
+  const u30 = Number(f.sales.units30) || 0;
+  if (u30 <= 0) return f.stock.units > 0 ? Infinity : 0;
+  return f.stock.units / (u30 / (30 / 7));
+}
+const weeksText = (w) => (w === Infinity ? 'longer than a year' : `about ${Math.round(w)} weeks`);
+
+// fatigue = the existing creative is wearing out (several declining against their own earlier results, or the newest is old), as opposed to merely weak or untested
+function isFatigued(f, cfg) {
+  const p = f.performance;
+  const age = f.creative_age_days;
+  const declining = p ? p.declining || 0 : 0;
+  const judged = p ? p.judged || 0 : 0;
+  return declining >= 2 || (judged >= 4 && declining / judged >= 0.25) || (age !== null && age !== undefined && age > cfg.creative_age_old_days);
+}
+
 function percentile(sorted, p) {
   if (!sorted.length) return null;
   const idx = Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1));
@@ -121,7 +139,12 @@ function scoreFamily(f, sales, config, settings) {
   if (sb.band === 'unknown') { push(worth, 'stock', 'Stock', 0, 'Stock is not available, so it is not weighed.'); flags.push('stock_unknown'); }
   else if (sb.band === 'out') push(worth, 'stock', 'Stock', restock ? -5 : -40, restock ? `Out of stock, but ${fmt(f.launch.on_order)} units are on order.` : 'Out of stock.');
   else if (sb.band === 'low') push(worth, 'stock', 'Stock', restock ? -2 : -15, `${fmt(sb.units)} units available: below the ${cfgFile.STOCK_GATE_UNITS}-unit minimum${restock ? `, with ${fmt(f.launch.on_order)} on order` : ''}.`);
-  else push(worth, 'stock', 'Stock', sb.band === 'high' ? 10 : 6, `${fmt(sb.units)} units available${sb.band === 'high' ? ': strong stock' : ''}.`);
+  else {
+    const cw = coverWeeks(f);
+    const slow = cw !== null && cw > config.slow_mover_weeks_cover && sales.band !== 'strong';
+    if (slow) { push(worth, 'stock', 'Stock', 0, `${fmt(sb.units)} units available, but at the current pace they would take ${weeksText(cw)} to sell. Plenty of stock is not by itself a reason to make more creative.`); flags.push('slow_mover'); }
+    else push(worth, 'stock', 'Stock', sb.band === 'high' ? 10 : 6, `${fmt(sb.units)} units available${sb.band === 'high' ? ': strong stock' : ''}${cw !== null && Number.isFinite(cw) ? `, about ${Math.round(cw)} weeks of cover` : ''}.`);
+  }
   const se = f.season;
   if (!se || se.status === 'unavailable') { push(worth, 'season', 'Season', 0, `${(se && se.reason) || 'Seasonal data has not loaded'}, so season is not weighed.`); flags.push('season_unavailable'); }
   else if (se.status === 'insufficient_data') { push(worth, 'season', 'Season', 0, 'Not enough sales history to judge seasonality; season is not weighed.'); flags.push('season_insufficient'); }
@@ -141,12 +164,49 @@ function activeOverrides(list, today) {
 }
 
 // MAIN
+
+// The "Why this recommendation" story, assembled from the same numbers that produced the score so the text and the ranking can never disagree. It states what the
+// data shows, never why results are what they are: weak results are not proof that creative is the cause.
+const PHRASE = { sales: 'strong current sales', stock: 'healthy stock', season: 'a seasonal lift', coverage: 'few confirmed active ads', performance: 'existing creative that is weak or thin', age: 'creative that is getting old', diversity: 'little variety in its creative' };
+function buildExplain({ f, sc, category, recommended, net, remaining, pl, inPipeline, steps, capNotes, sales, cw }) {
+  const pos = sc.worth.concat(sc.need).filter((x) => x.points > 0).sort((a, b) => b.points - a.points).slice(0, 3).map((x) => PHRASE[x.key]).filter(Boolean);
+  const neg = sc.worth.concat(sc.need).filter((x) => x.points < 0).sort((a, b) => a.points - b.points).slice(0, 2).map((x) => x.text.replace(/\.$/, ''));
+  let priority;
+  if (category === 'SHOOT_NOW') priority = `Prioritised because of ${pos.length ? pos.join(', ') : 'its overall score'}${neg.length ? `. Held back a little by: ${neg.join('; ')}` : ''}.`;
+  else if (category === 'COMING_UP') priority = `Worth preparing but not urgent this week${capNotes.length ? `: ${capNotes[0]}` : pos.length ? `. In its favour: ${pos.join(', ')}` : ''}.`;
+  else if (category === 'MONITOR') priority = `No new creative needed yet${capNotes.length ? `: ${capNotes[0]}` : ''}.`;
+  else priority = 'No worthwhile creative opportunity right now.';
+  const p = f.performance;
+  const weak = p ? (p.underperforming || 0) + (p.declining || 0) : 0;
+  const creative = p && p.unique_creatives > 0 ? {
+    counts: { unique: p.unique_creatives, active_ads: f.coverage && f.coverage.known ? f.coverage.active_ads : null, performing: p.performing, weak, insufficient: p.insufficient, unrated: (p.unrated || 0) + (p.unavailable || 0), pending_review_ads: p.pending_review_ads || 0 },
+    newest_age_days: f.creative_age_days ?? null,
+    text: `${p.unique_creatives} unique creative${p.unique_creatives === 1 ? '' : 's'} running${f.coverage && f.coverage.known ? ` across ${f.coverage.active_ads} confirmed active ads` : ''}: ${p.performing} performing against the approved benchmark, ${weak} weak or fading, ${p.insufficient} without enough data to judge${(p.unrated || 0) + (p.unavailable || 0) ? `, ${(p.unrated || 0) + (p.unavailable || 0)} with no approved benchmark to judge against` : ''}.${p.pending_review_ads ? ` ${p.pending_review_ads} more active ad${p.pending_review_ads === 1 ? ' is' : 's are'} still awaiting match review, so the true picture may be better.` : ''}${f.creative_age_days !== null && f.creative_age_days !== undefined ? ` The newest creative is ${f.creative_age_days} days old.` : ''}`,
+  } : { counts: null, newest_age_days: null, text: p ? 'No unique creative is running for this product.' : 'Ad performance is not available for this product, so existing creative is not judged.' };
+  const data = [
+    { label: 'Sales', text: sales.text },
+    { label: 'Stock', text: f.stock && f.stock.known ? `${fmt(f.stock.units)} units in stock${cw !== null && Number.isFinite(cw) ? `, about ${Math.round(cw)} weeks of cover at the current pace` : cw === Infinity ? ', and nothing is selling' : ''}${f.launch && f.launch.on_order ? `; ${fmt(f.launch.on_order)} on order` : ''}.` : 'Stock is not available.' },
+    { label: 'Season', text: f.season && f.season.outlook && f.season.outlook.text ? f.season.outlook.text : (f.season && f.season.label) || 'Seasonality is not available.' },
+    { label: 'Launch', text: f.launch ? f.launch.detail || 'Launched.' : 'Launch status unknown.' },
+  ];
+  const quantity = {
+    steps,
+    text: (steps.map((x) => x.text).join(' ')) + (inPipeline > 0 && recommended > 0 ? ` ${plural(inPipeline, 'video')} from earlier weeks still in production ${inPipeline === 1 ? 'is' : 'are'} subtracted, leaving ${plural(net, 'new video')}.` : ''),
+    recommended, net,
+  };
+  const planned = { this_week: pl.this_week || 0, in_pipeline: inPipeline, remaining, text: pl.this_week > 0 ? `${plural(pl.this_week, 'video')} already planned this week; ${remaining > 0 ? `${plural(remaining, 'more')} would complete the recommendation` : 'the recommendation is fully planned'}.` : (inPipeline > 0 ? `Nothing planned this week yet; ${plural(inPipeline, 'video')} from earlier weeks still in production.` : 'Nothing planned yet this week.') };
+  const cautions = [];
+  if (weak > 0) cautions.push('Weak results are not proof that creative is the cause: audience, offer, price or stock can hold results back too.');
+  return { priority, data, creative, quantity, planned, cautions };
+}
+
 function buildWeeklyVideoPlan({ families = [], settings = {}, config, today, planned_other = 0 } = {}) {
   const cfg = config;
   const target = Number(settings.weekly_video_target) || 25;
   const sales = classifySales(families, cfg);
   const items = [];
   const excluded = [];
+  const verification = []; // launch status could not be established: listed for a person to confirm, never recommended
   families.forEach((f) => {
     const l = f.launch || { status: 'unknown', eligible: false, needs_check: true };
     const base = { key: f.key, name: f.name, category_name: f.category || null, launch: l, colourways: f.colourways || [], planned: f.planned || { this_week: 0, in_pipeline: 0, in_production: 0, completed: 0, by_source: {} } };
@@ -154,17 +214,18 @@ function buildWeeklyVideoPlan({ families = [], settings = {}, config, today, pla
       excluded.push({ ...base, reason: l.status === 'discontinued' ? 'Discontinued / inactive.' : l.detail, in_upcoming_drop: !!l.in_upcoming_drop });
       return;
     }
+    if (l.needs_check) { verification.push({ ...base, reason: l.detail, basis: l.basis, confidence: l.confidence, stock: f.stock || null, sales: f.sales || null }); return; }
     const sc = scoreFamily(f, sales.get(f.key), cfg, settings);
     const score = sc.need_points + sc.worth_points;
     const caps = []; // [{category, why}]
     const cap = (category, why) => caps.push({ category, why });
-    if (!l.eligible) cap('MONITOR', 'Launch status is unknown: confirm the product has launched before shooting for it.');
     if (sc.stock_band === 'out' && !(f.launch && f.launch.restock)) cap('MONITOR', 'Out of stock: not an immediate shoot unless a restock, drop or manual priority justifies it.');
     else if (sc.stock_band === 'low' && !(f.launch && f.launch.restock)) cap('COMING_UP', 'Low stock: generally a lower shoot priority.');
     const sb = sales.get(f.key).band;
     const boost = f.season && f.season.outlook ? f.season.outlook.boost : 'none';
     if (sb === 'weak' && boost === 'none') cap('MONITOR', 'Weak current sales with no seasonal lift in the next two weeks.');
     if (sb === 'unknown') cap('COMING_UP', 'Sales data is missing, so a shoot is not justified yet.');
+    if (sc.flags.includes('slow_mover') && boost === 'none') cap('COMING_UP', 'Slow mover: sales are not strong enough to show that more creative would shift this stock, so it is not an immediate shoot.');
     if (sc.flags.includes('coverage_unknown') && sc.flags.includes('performance_unavailable')) cap('MONITOR', 'No Meta ad data at all: not enough evidence to say what is needed.');
     // category from the score
     let category = score >= cfg.shoot_now_min_score ? 'SHOOT_NOW' : score >= cfg.coming_up_min_score ? 'COMING_UP' : score >= cfg.monitor_min_score ? 'MONITOR' : 'NO_ACTION';
@@ -186,16 +247,29 @@ function buildWeeklyVideoPlan({ families = [], settings = {}, config, today, pla
     });
     if (f.launch && f.launch.restock && RANK[category] < RANK.COMING_UP && sb !== 'weak') { category = 'COMING_UP'; exceptions.push({ kind: 'confirmed_restock', note: `${fmt(f.launch.on_order)} units on order`, source: 'on_order', effect: 'raised to Coming up' }); }
 
-    // quantity
+    // quantity: the sizing table first, then the limits that stop a product being given more creative than it can use
     const needTier = sc.need_points >= NEED_TIERS.high ? 'high' : sc.need_points >= NEED_TIERS.medium ? 'medium' : sc.need_points >= NEED_TIERS.low ? 'low' : null;
     const demandTier = sc.worth_points >= DEMAND_TIERS.strong ? 'strong' : sc.worth_points >= DEMAND_TIERS.ok ? 'ok' : 'low';
     let matrix = needTier ? Number(cfg[`videos_${needTier}_need_${demandTier}`]) : 0;
     matrix = Math.min(matrix, cfg.max_videos_per_product);
+    const steps = [{ key: 'table', videos: matrix, text: needTier ? `Sizing table: ${needTier} need and ${demandTier === 'ok' ? 'steady' : demandTier} demand gives ${plural(matrix, 'video')}.` : 'Sizing table: no need for new creative, so no videos.' }];
+    const unique = f.performance ? f.performance.unique_creatives || 0 : 0;
+    const fatigued = isFatigued(f, cfg);
+    const saturated = unique >= cfg.creative_saturation_count;
+    let limited = matrix;
+    if (saturated && !fatigued && limited > cfg.videos_when_saturated) {
+      limited = cfg.videos_when_saturated;
+      steps.push({ key: 'saturated', videos: limited, text: `Limited to ${plural(limited, 'video')}: ${unique} unique creatives are already running and they are not fatigued, so more of the same is unlikely to be what is holding results back.` });
+    }
+    if (sc.flags.includes('slow_mover') && limited > cfg.videos_slow_mover) {
+      limited = cfg.videos_slow_mover;
+      steps.push({ key: 'slow', videos: limited, text: `Limited to ${plural(limited, 'video')}: sales are not strong enough to show that more creative would move this stock.` });
+    }
     const overrideVideos = ov.map((o) => o.videos).find((v) => v !== null && v !== undefined);
-    let recommended = category === 'SHOOT_NOW' ? Math.max(1, matrix) : 0;
-    if (category === 'SHOOT_NOW' && matrix === 0) { category = 'COMING_UP'; recommended = 0; capNotes.push('The sizing rules give no videos for this need and demand.'); }
+    let recommended = category === 'SHOOT_NOW' ? Math.max(1, limited) : 0;
+    if (category === 'SHOOT_NOW' && limited === 0) { category = 'COMING_UP'; recommended = 0; capNotes.push('The sizing rules give no videos for this need and demand.'); }
     let manualVideos = false;
-    if (overrideVideos !== undefined) { recommended = Math.min(cfg.max_videos_per_product, overrideVideos); manualVideos = true; if (recommended > 0 && RANK[category] < RANK.SHOOT_NOW) category = 'SHOOT_NOW'; if (recommended === 0 && category === 'SHOOT_NOW') category = 'COMING_UP'; }
+    if (overrideVideos !== undefined) { recommended = Math.min(cfg.max_videos_per_product, overrideVideos); manualVideos = true; steps.push({ key: 'manual', videos: recommended, text: `Set by hand to ${plural(recommended, 'video')}.` }); if (recommended > 0 && RANK[category] < RANK.SHOOT_NOW) category = 'SHOOT_NOW'; if (recommended === 0 && category === 'SHOOT_NOW') category = 'COMING_UP'; }
     const pl = base.planned;
     const inPipeline = pl.in_pipeline || 0;
     const net = Math.max(0, recommended - inPipeline);
@@ -212,6 +286,8 @@ function buildWeeklyVideoPlan({ families = [], settings = {}, config, today, pla
       season: f.season ? { status: f.season.status, label: f.season.label, outlook: f.season.outlook || null } : null,
       coverage: f.coverage || null, performance: f.performance || null, creative_age_days: f.creative_age_days ?? null,
       headline: headline(category, recommended, net, pl, name(f), manualVideos),
+      quantity_steps: steps, saturated, fatigued, slow_mover: sc.flags.includes('slow_mover'), cover_weeks: coverWeeks(f),
+      explain: buildExplain({ f, sc, category, recommended, net, remaining, pl, inPipeline, steps, capNotes, sales: sales.get(f.key), cw: coverWeeks(f) }),
     });
   });
 
@@ -226,7 +302,7 @@ function buildWeeklyVideoPlan({ families = [], settings = {}, config, today, pla
     const a = Math.min(i.remaining, capacity); capacity -= a; i.allocated = a; i.deferred = i.remaining - a; allocatedTotal += a; deferredTotal += i.deferred;
   });
   const recommendedTotal = items.filter((i) => i.category === 'SHOOT_NOW').reduce((s, i) => s + Math.max(i.net_recommended, i.planned.this_week || 0), 0);
-  const needsCheck = items.filter((i) => i.launch && i.launch.needs_check);
+  const needsCheck = verification;
   const counts = {}; CATEGORIES.forEach((c) => { counts[c] = items.filter((i) => i.category === c).length; });
   const remainingCapacity = Math.max(0, target - plannedTotal);
   const explanation = remainingCapacity === 0
@@ -237,7 +313,7 @@ function buildWeeklyVideoPlan({ families = [], settings = {}, config, today, pla
         ? `Only ${plannedTotal + allocatedTotal} worthwhile videos were identified for the ${target}-video target. The remaining ${target - plannedTotal - allocatedTotal} are deliberately not filled with weak recommendations.`
         : `The recommendations fill the ${target}-video target.`;
   return {
-    today, target, config: cfg, categories: CATEGORIES, category_labels: CATEGORY_LABEL, products: items, excluded, needs_launch_check: needsCheck.map((i) => i.key), counts,
+    today, target, config: cfg, categories: CATEGORIES, category_labels: CATEGORY_LABEL, products: items, excluded, verification, needs_launch_check: needsCheck.map((i) => i.key), counts,
     summary: { target, recommended_total: recommendedTotal, planned_total: plannedTotal, remaining_capacity: remainingCapacity, to_plan_from_recommendations: allocatedTotal, deferred: deferredTotal, explanation },
   };
 }

@@ -36,6 +36,7 @@ const { ymdInZone, addDays, REPORTING_TIMEZONE } = require('./metaPerformance');
 const creativeActivity = require('./metaCreativeActivity');
 const planningContext = require('./planningContext');
 const weeklyLoader = require('./weeklyVideoPlanLoader');
+const launchInputs = require('./launchInputs');
 const launchLib = require('./launchStatus');
 const creativePriority = require('./creativePriority');
 
@@ -581,7 +582,7 @@ async function computePlan({ now = new Date(), isAdmin = false } = {}, deps = {}
     if (lc) {
       const todayStr = new Date(now).toISOString().slice(0, 10);
       families = families.filter((f) => {
-        const styles = (f.style_codes || []).map((c) => { const d = amDetails.get(c) || {}; return { style_code: c, launchDate: d.launchDate || null, drop: lc.drops.get(c) || null, qty: null, override: lc.overrides.get(c) || null }; });
+        const styles = (f.style_codes || []).map((c) => launchInputs.forStyle(c, { amDetails, salesByStyle: null, drops: lc.drops, overrides: lc.overrides }));
         const res = launchLib.assessFamily({ styles, familyOverride: lc.overrides.get(f.product_code) || null }, todayStr);
         if (res.status === 'unlaunched' || res.status === 'discontinued') { launchExcluded.push({ product_code: f.product_code, product_name: f.name, status: res.status, detail: res.detail, in_upcoming_drop: res.in_upcoming_drop }); return false; }
         return true;

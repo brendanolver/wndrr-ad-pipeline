@@ -57,6 +57,60 @@ router.post('/prepare-shoot', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// READ-ONLY diagnostics: for a product (name or code fragment) exactly what the launch decision saw, colourway by colourway: ApparelMagic's launch-date field as recorded,
+// whether it could be read, CORE group, stock, units sold, the Upcoming Drop and manual override, and which rule decided. `?raw=1` also asks ApparelMagic (GET only,
+// at most 12 styles) for the raw product record and lists every date-like or status-like field it carries, so the fields the app does not read are visible too.
+// It never writes anything and never changes a status.
+router.get('/launch-evidence', async (req, res, next) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    if (q.length < 3) return res.status(400).json({ error: 'Type at least 3 letters of a product name or code' });
+    const deps = req.app && req.app.locals && req.app.locals.weeklyPlanDeps ? req.app.locals.weeklyPlanDeps : {};
+    const apparelmagic = require('../lib/apparelmagic');
+    const launchLib = require('../lib/launchStatus');
+    const launchInputs = require('../lib/launchInputs');
+    const am = deps.am || await require('../lib/planningData').fetchAmData();
+    if (!am.amConfigured || !am.amDetails || !am.amStock) return res.status(503).json({ error: am.amConfigured ? 'The ApparelMagic catalogue or stock has not loaded yet.' : 'ApparelMagic is not configured.' });
+    const salesByStyle = deps.salesByStyle !== undefined ? deps.salesByStyle : (apparelmagic.getAmCacheStatus().sales.hasData ? await apparelmagic.getSalesByStyle() : null);
+    const lower = q.toLowerCase(); const upper = q.toUpperCase();
+    const fams = planningContext.buildAllFamilies(am.amDetails).filter((f) => String(f.name || '').toLowerCase().includes(lower) || f.codes.some((c) => c.includes(upper)) || f.style_codes.some((c) => c.includes(upper))).slice(0, 8);
+    const lc = deps.launch || await loader.loadLaunchContext(pool, fams.flatMap((f) => f.style_codes));
+    const settings = deps.settings || await planningContext.loadSettings(pool);
+    const cfg = launchLib.fromConfig((settings && settings.creative_planning_config) || {});
+    const today = new Date().toISOString().slice(0, 10);
+    const DATEISH = /date|launch|release|avail|status|season|active|disc|mid_code|inactive|delivery|ship/i;
+    let rawLeft = req.query.raw === '1' ? 12 : 0;
+    const out = [];
+    for (const f of fams) {
+      const styles = f.style_codes.map((c) => launchInputs.forStyle(c, { amDetails: am.amDetails, salesByStyle, drops: lc.drops, overrides: lc.overrides, shopify: lc.shopify || deps.shopifyEvidence || null }));
+      const stockUnits = f.style_codes.reduce((t, c) => t + Math.max(0, Number(am.amStock.get(c)) || 0), 0);
+      const onOrder = am.amOnOrder ? f.style_codes.reduce((t, c) => t + Math.max(0, Number(am.amOnOrder.get(c)) || 0), 0) : 0;
+      const fam = launchLib.assessFamily({ styles, familyOverride: lc.overrides.get(f.key) || null, stock: { known: true, units: stockUnits }, onOrder }, today, cfg);
+      const perStyle = [];
+      for (const st of fam.by_style) {
+        const input = styles.find((x) => x.style_code === st.style_code) || {};
+        const e = salesByStyle ? salesByStyle.get(st.style_code) : null;
+        const row = { style_code: st.style_code, colour: apparelmagic.resolveColourLabel(am.amDetails, st.style_code), status: st.status, basis: st.basis, confidence: st.confidence, detail: st.detail,
+          am_launch_date_raw: input.launchDateRaw, am_launch_date_readable: input.launchDateReadable, am_launch_date: input.launchDate ? new Date(input.launchDate).toISOString().slice(0, 10) : null,
+          core_group: !!input.isCore, stock: Math.max(0, Number(am.amStock.get(st.style_code)) || 0), units_sold_30d: e ? Math.round(e.qty30 || 0) : null, units_sold_365d: e ? Math.round(e.qty365 || 0) : null,
+          first_sale_month: e && e.months ? (Object.keys(e.months).filter((k) => e.months[k] > 0).sort()[0] || null) : null,
+          drop: input.drop, manual_override: input.override, evidence: st.evidence };
+        if (rawLeft > 0) {
+          rawLeft -= 1;
+          try {
+            const r = await apparelmagic.rawRequest('products', { style_number: st.style_code, 'pagination[page_size]': 10 });
+            const rec = r && r.data && Array.isArray(r.data.response) ? r.data.response[0] : null;
+            row.raw = rec ? { field_names: Object.keys(rec).sort(), date_or_status_fields: Object.fromEntries(Object.entries(rec).filter(([k, v]) => DATEISH.test(k) && (typeof v !== 'object' || v === null)).map(([k, v]) => [k, v])) } : { note: `ApparelMagic returned status ${r && r.status} and no record` };
+          } catch (e) { row.raw = { error: e.message }; }
+        }
+        perStyle.push(row);
+      }
+      out.push({ key: f.key, name: f.name, product_codes: f.codes, status: fam.status, basis: fam.basis, confidence: fam.confidence, detail: fam.detail, stock_total: stockUnits, on_order: onOrder, in_upcoming_drop: fam.in_upcoming_drop, colourways: perStyle });
+    }
+    res.json({ query: q, today, thresholds: cfg, shopify_evidence: !!(lc.shopify || deps.shopifyEvidence), note: 'Read-only. Shopify publication status is not part of this unless Shopify credentials are configured.', products: out });
+  } catch (err) { next(err); }
+});
+
 // the tuning, grouped, with defaults and allowed ranges, for Settings
 router.get('/config', async (req, res, next) => {
   try {

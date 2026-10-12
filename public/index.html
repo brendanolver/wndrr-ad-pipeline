@@ -1437,6 +1437,17 @@
         <div id="lo-list" class="po-list"></div>
 
         <div class="planning-section-header">
+          <h2>Check a product's launch evidence</h2>
+          <span class="admin-note">Read-only. Shows, colourway by colourway, the ApparelMagic launch date exactly as recorded, whether it could be read, stock, sales, any Upcoming Drop or manual status, and which rule decided. Tick the box to also list the raw ApparelMagic fields that look like dates or statuses. Nothing is changed.</span>
+        </div>
+        <div class="po-add-row">
+          <input type="text" id="le-q" placeholder="Product name or code, e.g. Loan Shark" autocomplete="off">
+          <label class="checkbox-label"><input type="checkbox" id="le-raw"> Include raw ApparelMagic fields</label>
+          <button class="btn btn-primary btn-sm" id="le-btn">Check</button>
+        </div>
+        <div id="le-result" class="le-result"></div>
+
+        <div class="planning-section-header">
           <h2>Priority Overrides</h2>
           <span class="admin-note">Business reasons that lift (or hold) a product's creative priority whatever its stock, season or coverage: an upcoming drop, a confirmed restock, a promotion, a strategic launch or a manual priority. They only change ranking and its explanation; they never create or change creative.</span>
         </div>

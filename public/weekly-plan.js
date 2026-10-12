@@ -131,10 +131,11 @@ function renderWeeklyPlan() {
   const counts = plan.counts || {};
   const tab = state.weeklyPlanTab;
   const tabs = WP_CATEGORIES.map((c) => `<button type="button" role="tab" class="wp-tab ${c.cls} ${tab === c.key ? 'active' : ''}" aria-selected="${tab === c.key}" data-wp-tab="${c.key}" onclick="wpSetTab('${c.key}')">${c.label} <span class="wp-tab-count">${counts[c.key] || 0}</span></button>`).join('')
-    + `<button type="button" role="tab" class="wp-tab wp-cat-excluded ${tab === 'EXCLUDED' ? 'active' : ''}" aria-selected="${tab === 'EXCLUDED'}" data-wp-tab="EXCLUDED" onclick="wpSetTab('EXCLUDED')">Not launched <span class="wp-tab-count">${(plan.excluded || []).length}</span></button>`;
-  const body = tab === 'EXCLUDED' ? wpExcludedHtml(plan) : wpListHtml(plan, tab);
-  const check = (plan.needs_launch_check || []).length
-    ? `<div class="wp-banner wp-banner-warn" role="status">${wpPlural(plan.needs_launch_check.length, 'product')} could not be confirmed as launched, so ${plan.needs_launch_check.length === 1 ? 'it is' : 'they are'} held at Monitor. Confirm the launch status below or in Settings &rarr; Planning.</div>` : '';
+    + `<button type="button" role="tab" class="wp-tab wp-cat-excluded ${tab === 'EXCLUDED' ? 'active' : ''}" aria-selected="${tab === 'EXCLUDED'}" data-wp-tab="EXCLUDED" onclick="wpSetTab('EXCLUDED')">Not launched <span class="wp-tab-count">${(plan.excluded || []).length}</span></button>`
+    + `<button type="button" role="tab" class="wp-tab wp-cat-verify ${tab === 'VERIFY' ? 'active' : ''}" aria-selected="${tab === 'VERIFY'}" data-wp-tab="VERIFY" onclick="wpSetTab('VERIFY')">Needs verification <span class="wp-tab-count">${(plan.verification || []).length}</span></button>`;
+  const body = tab === 'EXCLUDED' ? wpExcludedHtml(plan) : tab === 'VERIFY' ? wpVerificationHtml(plan.verification || []) : wpListHtml(plan, tab);
+  const check = (plan.verification || []).length && tab !== 'VERIFY'
+    ? `<div class="wp-banner wp-banner-warn" role="status">${wpPlural(plan.verification.length, 'product')} could not be confirmed as launched and ${plan.verification.length === 1 ? 'is' : 'are'} left out of the recommendations. <button type="button" class="link-btn" onclick="wpSetTab('VERIFY')">Review them</button></div>` : '';
   const issues = (plan.config_issues || []).length ? `<div class="wp-banner wp-banner-warn" role="status">Some recommendation settings were out of range and defaults are being used: ${wpEsc(plan.config_issues.join('; '))}</div>` : '';
   const data = plan.data || {};
   const unavailable = [];
@@ -144,7 +145,7 @@ function renderWeeklyPlan() {
   const dataNote = unavailable.length ? `<div class="wp-banner wp-banner-warn" role="status">Not available right now: ${wpEsc(unavailable.join(', '))}. Those signals are not weighed, and the products affected say so.</div>` : '';
   el.innerHTML = `${dataNote}${issues}${check}
     <div class="wp-tabs" role="tablist" aria-label="Recommendation categories">${tabs}</div>
-    <div class="wp-tab-hint">${tab === 'EXCLUDED' ? 'Products that have not launched are never recommended for creative. Upcoming Drops plans them.' : wpEsc((WP_CAT_BY_KEY[tab] || {}).hint || '')}</div>
+    <div class="wp-tab-hint">${tab === 'EXCLUDED' ? 'Products that have not launched are never recommended for creative. Upcoming Drops plans them.' : tab === 'VERIFY' ? 'There is not enough proof that these have gone on sale, so they are not recommended. Confirm each one (or mark it not launched).' : wpEsc((WP_CAT_BY_KEY[tab] || {}).hint || '')}</div>
     <div class="wp-list" role="tabpanel">${body}</div>`;
 }
 
@@ -189,7 +190,6 @@ function wpRowHtml(p) {
   else if (p.coverage && p.coverage.known) chips.push(wpChip(`${p.coverage.active_ads} confirmed active ad${p.coverage.active_ads === 1 ? '' : 's'}`, p.coverage.active_ads < p.coverage.min ? 'wp-warn' : ''));
   if (p.coverage && p.coverage.known && p.coverage.uncertain) chips.push(wpChip('ads awaiting review', 'wp-muted', 'Some active ads are unmatched or pending, so the true coverage may be higher.'));
   if (p.season && p.season.label) chips.push(wpChip(wpEsc(p.season.label), p.season.outlook && p.season.outlook.boost !== 'none' ? 'wp-ok' : 'wp-muted', p.season.outlook && p.season.outlook.text));
-  if (p.launch && p.launch.needs_check) chips.push(wpChip('Confirm launch status', 'wp-warn'));
   if ((p.colourways || []).length > 1) chips.push(wpChip(`${p.colourways.length} colourways`, 'wp-muted'));
   const qty = p.category === 'SHOOT_NOW'
     ? `<div class="wp-qty" aria-label="Video quantities"><div><b>${rec}</b><span>recommended</span></div><div><b>${planned}</b><span>planned</span></div><div><b>${p.remaining}</b><span>remaining</span></div></div>`
@@ -205,7 +205,6 @@ function wpRowHtml(p) {
   } else if (canPlan) {
     action = `<button type="button" class="btn btn-ghost btn-sm" data-wp-plan="${wpEsc(p.key)}" onclick="wpPlan('${wpEsc(p.key)}', 1)" title="Not recommended this week. Plan it anyway.">Plan anyway</button>`;
   }
-  if (p.launch && p.launch.needs_check && !readOnly) action += `<button type="button" class="btn btn-ghost btn-sm" onclick="wpConfirmLaunch('${wpEsc((p.codes || [])[0] || '')}', '${wpEsc(p.name)}')">Confirm launched</button>`;
   return `
     <article class="wp-row ${cat.cls}" data-wp-key="${wpEsc(p.key)}" data-wp-category="${p.category}">
       ${thumb}
@@ -214,6 +213,7 @@ function wpRowHtml(p) {
           <span class="wp-name">${wpEsc(p.name)}</span>
           <span class="wp-badge ${cat.cls}" data-wp-badge>${cat.label}</span>
           ${p.manual_videos || (p.exceptions || []).length ? '<span class="wp-badge wp-badge-manual" title="A manual priority applies">Manual</span>' : ''}
+          ${wpRoleChip(p)}
           ${p.category_name ? `<span class="wp-catname">${wpEsc(p.category_name)}</span>` : ''}
         </div>
         <div class="wp-headline">${wpEsc(p.headline)}</div>
@@ -226,34 +226,49 @@ function wpRowHtml(p) {
     </article>`;
 }
 
+function wpRoleChip(p) {
+  const r = p.role || (p.roles && p.roles[0]);
+  if (!r) return '';
+  const all = (p.roles || [r]).map((x) => `${x.label}: ${x.basis}`).join('; ');
+  return `<span class="wp-role wp-role-${wpEsc(r.key)}" data-wp-role="${wpEsc(r.key)}" title="Role in the range (not a priority): ${wpEsc(all)}">${wpEsc(r.label)}</span>`;
+}
+
+// "Why this recommendation": priority, the data behind it, the creative picture, how the number of videos was reached, what is already planned.
 function wpDetailHtml(p) {
-  const reasons = (p.reasons || []).map((r) => `<li><span class="wp-pts ${r.points > 0 ? 'wp-pts-up' : r.points < 0 ? 'wp-pts-down' : ''}">${r.points > 0 ? '+' : ''}${r.points}</span> <b>${wpEsc(r.label)}</b> &mdash; ${wpEsc(r.text)}</li>`).join('');
-  const caps = (p.caps || []).map((c) => `<li>${wpEsc(c)}</li>`).join('');
-  const exc = (p.exceptions || []).map((e) => `<li>${wpEsc(e.source === 'manual' ? 'Manual priority' : 'Rule')}: ${wpEsc(e.kind)} &mdash; ${wpEsc(e.effect)}${e.note ? ` (${wpEsc(e.note)})` : ''}</li>`).join('');
-  const perf = p.performance;
-  const perfHtml = perf ? `
-    <div class="wp-sub"><b>Effective coverage</b> <span class="hint">unique creatives, confirmed or auto-matched ads only; copies and bundle ads are not counted twice</span></div>
-    <div class="wp-perf-grid">
-      <span class="wp-perf-cell wp-ok">${perf.performing} performing</span>
-      <span class="wp-perf-cell wp-warn">${perf.underperforming} underperforming</span>
-      <span class="wp-perf-cell wp-bad">${perf.declining} declining</span>
-      <span class="wp-perf-cell wp-muted">${perf.insufficient} not enough data</span>
-      <span class="wp-perf-cell wp-muted">${(perf.unrated || 0) + (perf.unavailable || 0)} not rated</span>
-    </div>
-    <div class="hint">${wpEsc(perf.text)} ${perf.pending_review_ads ? `${wpPlural(perf.pending_review_ads, 'active ad')} still awaiting match review.` : ''} Weak creative is not proof the creative was the cause; the ads may be limited by audience, offer, price or stock.</div>` : '<div class="hint">Ad performance is not available for this product.</div>';
-  const cov = p.coverage && p.coverage.known ? `<div class="hint">Confirmed active ads: <b>${p.coverage.active_ads}</b> of ${p.coverage.min} minimum${p.coverage.possible ? `; ${p.coverage.possible} possible ads awaiting review` : ''}.</div>` : '';
+  const e = p.explain;
+  if (!e) return wpDetailLegacyHtml(p);
+  const data = (e.data || []).map((d) => `<li><b>${wpEsc(d.label)}</b> &mdash; ${wpEsc(d.text)}</li>`).join('');
+  const steps = ((e.quantity && e.quantity.steps) || []).map((x) => `<li><span class="wp-pts">${x.videos}</span> ${wpEsc(x.text)}</li>`).join('');
+  const c = e.creative && e.creative.counts;
+  const cells = c ? `<div class="wp-perf-grid">
+      <span class="wp-perf-cell">${c.unique} unique creative${c.unique === 1 ? '' : 's'}</span>
+      <span class="wp-perf-cell wp-ok">${c.performing} performing</span><span class="wp-perf-cell wp-warn">${c.weak} weak or fading</span>
+      <span class="wp-perf-cell wp-muted">${c.insufficient} not enough data</span>${c.unrated ? `<span class="wp-perf-cell wp-muted">${c.unrated} no benchmark</span>` : ''}${c.pending_review_ads ? `<span class="wp-perf-cell wp-muted">${c.pending_review_ads} ads awaiting review</span>` : ''}</div>` : '';
+  const caps = (p.caps || []).map((x) => `<li>${wpEsc(x)}</li>`).join('');
+  const exc = (p.exceptions || []).map((x) => `<li>${wpEsc(x.source === 'manual' ? 'Manual priority' : 'Rule')}: ${wpEsc(x.kind)} &mdash; ${wpEsc(x.effect)}${x.note ? ` (${wpEsc(x.note)})` : ''}</li>`).join('');
   const season = p.season && p.season.outlook ? `<div class="hint"><b>Season:</b> ${wpEsc(p.season.outlook.text || p.season.label)}</div>` : '';
   const mix = p.mix && p.mix.slots && p.mix.slots.length
     ? `<div class="wp-sub"><b>Suggested creative mix</b> <span class="hint">${wpEsc(p.mix.note || '')} Editable when you plan it.</span></div>
-       <ol class="wp-mix-list">${p.mix.slots.map((s) => `<li><span class="wp-basis wp-basis-${s.basis}">${WP_BASIS_LABEL[s.basis] || s.basis}</span> ${wpEsc(s.concept || 'New concept')} <span class="hint">${wpEsc(s.reason)}</span></li>`).join('')}</ol>` : '';
-  const cw = (p.colourways || []).length ? `<div class="hint"><b>Colourways</b> (stock counted once for the product): ${p.colourways.map((c) => `${wpEsc(c.colour_label || c.style_code)} ${Number(c.soh || 0).toLocaleString('en-AU')}`).join(' · ')}</div>` : '';
-  return `<div class="wp-detail">
-    <div class="wp-score">Score ${p.score} &nbsp;(need ${p.need_points} + worth ${p.worth_points})</div>
-    <ul class="wp-reasons">${reasons}</ul>
+       <ol class="wp-mix-list">${p.mix.slots.map((s2) => `<li><span class="wp-basis wp-basis-${s2.basis}">${WP_BASIS_LABEL[s2.basis] || s2.basis}</span> ${wpEsc(s2.concept || 'New concept')} <span class="hint">${wpEsc(s2.reason)}</span></li>`).join('')}</ol>` : '';
+  const cw = (p.colourways || []).length ? `<div class="hint"><b>Colourways</b> (stock counted once for the product): ${p.colourways.map((x) => `${wpEsc(x.colour_label || x.style_code)} ${Number(x.soh || 0).toLocaleString('en-AU')}`).join(' · ')}</div>` : '';
+  const reasons = (p.reasons || []).map((r) => `<li><span class="wp-pts ${r.points > 0 ? 'wp-pts-up' : r.points < 0 ? 'wp-pts-down' : ''}">${r.points > 0 ? '+' : ''}${r.points}</span> <b>${wpEsc(r.label)}</b> &mdash; ${wpEsc(r.text)}</li>`).join('');
+  return `<div class="wp-detail" data-wp-explain>
+    <div class="wp-sub"><b>Why it is prioritised</b></div><p class="wp-explain-line">${wpEsc(e.priority)}</p>
+    <div class="wp-sub"><b>The data behind it</b></div><ul class="wp-reasons">${data}</ul>
+    <div class="wp-sub"><b>The creative picture</b> <span class="hint">unique creatives, confirmed or auto-matched ads only; copies and bundle ads are not counted twice</span></div>${cells}<p class="wp-explain-line">${wpEsc(e.creative.text)}</p>
+    <div class="wp-sub"><b>Why this many videos</b></div><ul class="wp-reasons">${steps}</ul>${e.quantity && e.quantity.text && !steps ? `<p>${wpEsc(e.quantity.text)}</p>` : ''}
+    <div class="wp-sub"><b>Already planned</b></div><p class="wp-explain-line">${wpEsc(e.planned.text)}</p>
     ${caps ? `<div class="wp-sub"><b>Why it is not higher</b></div><ul class="wp-caps">${caps}</ul>` : ''}
     ${exc ? `<div class="wp-sub"><b>Manual or rule exceptions</b></div><ul class="wp-caps">${exc}</ul>` : ''}
-    ${perfHtml}${cov}${season}${cw}${mix}
+    ${(e.cautions || []).map((x) => `<div class="hint wp-caution">${wpEsc(x)}</div>`).join('')}
+    ${season}${cw}${mix}
+    <details class="wp-score-detail"><summary>Score breakdown (${p.score} = need ${p.need_points} + worth ${p.worth_points})</summary><ul class="wp-reasons">${reasons}</ul></details>
   </div>`;
+}
+
+function wpDetailLegacyHtml(p) {
+  const reasons = (p.reasons || []).map((r) => `<li><b>${wpEsc(r.label)}</b> &mdash; ${wpEsc(r.text)}</li>`).join('');
+  return `<div class="wp-detail"><div class="wp-score">Score ${p.score}</div><ul class="wp-reasons">${reasons}</ul></div>`;
 }
 
 function wpExcludedHtml(plan) {
@@ -269,6 +284,32 @@ function wpExcludedHtml(plan) {
     </article>`).join('');
 }
 
+function wpVerificationHtml(list) {
+  if (!list.length) return '<div class="attention-empty wp-empty">Every product in the plan has enough proof of launch.</div>';
+  const readOnly = state.planningWeekOffset < 0;
+  return list.map((v) => {
+    const ev = ((v.launch && v.launch.by_style && v.launch.by_style[0] && v.launch.by_style[0].evidence) || []).map((e) => `<li><b>${wpEsc(e.source.replace(/_/g, ' '))}</b> &mdash; ${wpEsc(e.text)}</li>`).join('');
+    const code = (v.codes || [])[0] || '';
+    const btns = readOnly || !code ? '' : `<button type="button" class="btn btn-primary btn-sm" data-wp-verify-launched="${wpEsc(code)}" onclick="wpConfirmLaunch('${wpEsc(code)}', '${wpEsc(v.name)}')">Confirm launched</button><button type="button" class="btn btn-ghost btn-sm" onclick="wpMarkUnlaunched('${wpEsc(code)}', '${wpEsc(v.name)}')">Not launched</button>`;
+    return `<article class="wp-row wp-cat-verify" data-wp-key="${wpEsc(v.key)}"><span class="wp-thumb wp-noimg" aria-hidden="true">&#9635;</span>
+      <div class="wp-main"><div class="wp-title"><span class="wp-name">${wpEsc(v.name)}</span><span class="wp-badge wp-cat-verify">Verify launch</span>${wpRoleChip(v)}</div>
+      <div class="wp-headline">${wpEsc(v.reason || '')}</div>
+      <div class="wp-chips">${v.stock && v.stock.known ? wpChip(`${Number(v.stock.units || 0).toLocaleString('en-AU')} in stock`) : ''}${v.sales && v.sales.available ? wpChip(`${Number(v.sales.units365 || 0).toLocaleString('en-AU')} sold / 365d`, 'wp-muted') : ''}</div>
+      ${ev ? `<details class="wp-score-detail"><summary>What was checked</summary><ul class="wp-reasons">${ev}</ul></details>` : ''}</div>
+      <div class="wp-qty"></div><div class="wp-action">${btns}</div></article>`;
+  }).join('');
+}
+
+async function wpMarkUnlaunched(code, name) {
+  if (!(await confirmDialog(`Mark ${name} as not launched? It will be left out of recommendations. This is a note in this pipeline only; nothing changes in Shopify or ApparelMagic.`, { okLabel: 'Mark not launched' }))) return;
+  try {
+    await api('/weekly-video-plan/launch-overrides', { method: 'POST', body: JSON.stringify({ product_code: code, status: 'unlaunched', note: 'Marked from the Weekly Plan verification list' }) });
+    toast(`${name} marked as not launched`);
+    await loadWeeklyVideoPlan(true);
+    if (typeof loadAll === 'function') loadAll();
+  } catch (e) { toast(e.message, true); }
+}
+
 async function wpConfirmLaunch(code, name) {
   if (!code) return toast('This product has no product code to confirm', true);
   if (!(await confirmDialog(`Confirm that ${name} has launched? This is a note in this pipeline only; nothing changes in Shopify or ApparelMagic.`, { okLabel: 'Confirm launched' }))) return;
@@ -276,6 +317,7 @@ async function wpConfirmLaunch(code, name) {
     await api('/weekly-video-plan/launch-overrides', { method: 'POST', body: JSON.stringify({ product_code: code, status: 'launched', note: 'Confirmed from the Weekly Plan' }) });
     toast(`${name} marked as launched`);
     await loadWeeklyVideoPlan(true);
+    if (typeof loadAll === 'function') loadAll();
   } catch (e) { toast(e.message, true); }
 }
 
@@ -445,14 +487,16 @@ async function loadWeeklyPlanConfig() {
   try {
     const res = await api('/weekly-video-plan/config');
     WPS.config = res;
-    host.innerHTML = res.groups.map((g) => `
-      <fieldset class="wpc-group"><legend>${wpEsc(g.title)}</legend>
-        ${g.fields.map((f) => `<div class="wpc-field">
-          <label for="wpc-${wpEsc(f.key)}">${wpEsc(f.label)}</label>
-          <input type="number" id="wpc-${wpEsc(f.key)}" data-wpc-key="${wpEsc(f.key)}" min="${f.min}" max="${f.max}" step="any" value="${f.value}" aria-describedby="wpc-${wpEsc(f.key)}-hint">
-          <span class="hint" id="wpc-${wpEsc(f.key)}-hint">default ${f.default} &middot; ${f.min}&ndash;${f.max}</span>
-        </div>`).join('')}
-      </fieldset>`).join('');
+    const field = (f) => {
+      const input = f.key === 'launch_sales_confirms'
+        ? `<select id="wpc-${wpEsc(f.key)}" data-wpc-key="${wpEsc(f.key)}" aria-describedby="wpc-${wpEsc(f.key)}-hint"><option value="0" ${Number(f.value) === 0 ? 'selected' : ''}>No: a person confirms</option><option value="1" ${Number(f.value) === 1 ? 'selected' : ''}>Yes: sustained sales count</option></select>`
+        : `<input type="number" id="wpc-${wpEsc(f.key)}" data-wpc-key="${wpEsc(f.key)}" min="${f.min}" max="${f.max}" step="any" value="${f.value}" aria-describedby="wpc-${wpEsc(f.key)}-hint">`;
+      return `<div class="wpc-field"><label for="wpc-${wpEsc(f.key)}">${wpEsc(f.label)}</label>${input}<span class="hint" id="wpc-${wpEsc(f.key)}-hint">${Number(f.value) !== Number(f.default) ? '<b>changed</b> &middot; ' : ''}default ${f.default} &middot; ${f.min}&ndash;${f.max}</span></div>`;
+    };
+    const group = (g) => `<fieldset class="wpc-group" data-wpc-group="${wpEsc(g.key)}"><legend>${wpEsc(g.title)}</legend>${g.help ? `<div class="hint wpc-help">${wpEsc(g.help)}</div>` : ''}${g.fields.map(field).join('')}</fieldset>`;
+    const everyday = res.groups.filter((g) => !g.advanced);
+    const advanced = res.groups.filter((g) => g.advanced);
+    host.innerHTML = everyday.map(group).join('') + (advanced.length ? `<details class="wpc-advanced" id="wpc-advanced"><summary>Advanced: how products are scored and sized</summary>${advanced.map(group).join('')}</details>` : '');
     const status = document.getElementById('wpc-status');
     if (status) status.textContent = Object.keys(res.stored || {}).length ? `${Object.keys(res.stored).length} setting(s) changed from the defaults` : 'All settings are at their defaults';
   } catch (e) { host.innerHTML = `<div class="attention-empty">${wpEsc(e.message)}</div>`; }
@@ -542,4 +586,26 @@ async function loAdd() {
       loadWeeklyVideoPlan(true);
     } catch (e) { toast(e.message, true); }
   });
+})();
+
+// ── Launch evidence lookup (read-only): what the launch decision saw for a product ──
+async function leLookup() {
+  const q = document.getElementById('le-q').value.trim();
+  const out = document.getElementById('le-result');
+  if (q.length < 3) { out.innerHTML = '<span class="hint">Type at least 3 letters of a product name or code.</span>'; return; }
+  out.innerHTML = '<span class="hint">Checking&hellip;</span>';
+  try {
+    const raw = document.getElementById('le-raw').checked ? '&raw=1' : '';
+    const res = await api(`/weekly-video-plan/launch-evidence?q=${encodeURIComponent(q)}${raw}`);
+    if (!res.products.length) { out.innerHTML = '<span class="hint">No product matches.</span>'; return; }
+    out.innerHTML = `<div class="hint">${wpEsc(res.note)} Thresholds: sales count as evidence from ${res.thresholds.sales_launch_units} units${res.thresholds.sales_confirms_launch ? ' and are allowed to confirm a launch' : ' but never confirm a launch on their own'}; a date that passed under ${res.thresholds.settle_days} days ago with no sales is verified.</div>` + res.products.map((p) => `
+      <div class="le-product" data-le-product="${wpEsc(p.key)}"><div class="le-head"><b>${wpEsc(p.name)}</b> <span class="wp-badge ${p.status === 'launched' || p.status === 'upcoming_restock' ? 'wp-cat-shoot' : p.status === 'unknown' ? 'wp-cat-verify' : 'wp-cat-none'}">${wpEsc(p.status)}</span> <span class="hint">${wpEsc(p.detail)}</span></div>
+        <div class="table-scroll"><table class="admin-table le-table"><thead><tr><th>Colourway</th><th>AM launch date (as recorded)</th><th>Readable</th><th>Core group</th><th>Stock</th><th>Sold 30d / 365d</th><th>First sale</th><th>Drop</th><th>Override</th><th>Decision</th></tr></thead><tbody>
+        ${p.colourways.map((c) => `<tr><td>${wpEsc(c.colour || c.style_code)}<div class="hint">${wpEsc(c.style_code)}</div></td><td>${c.am_launch_date_raw ? wpEsc(c.am_launch_date_raw) : '<span class="hint">none</span>'}${c.am_launch_date ? `<div class="hint">${wpEsc(c.am_launch_date)}</div>` : ''}</td><td>${c.am_launch_date_readable === null ? '&mdash;' : c.am_launch_date_readable ? 'yes' : '<b>no</b>'}</td><td>${c.core_group ? 'yes' : 'no'}</td><td class="num">${c.stock}</td><td class="num">${c.units_sold_30d === null ? '&mdash;' : c.units_sold_30d} / ${c.units_sold_365d === null ? '&mdash;' : c.units_sold_365d}</td><td>${wpEsc(c.first_sale_month || '')}</td><td>${c.drop ? wpEsc(`${c.drop.name || 'drop'} ${c.drop.launch_date || ''}`) : ''}</td><td>${c.manual_override ? wpEsc(c.manual_override.status) : ''}</td><td><b>${wpEsc(c.status)}</b> <span class="hint">${wpEsc(c.basis)} · ${wpEsc(c.confidence)}</span><div class="hint">${wpEsc(c.detail)}</div>${c.raw ? `<details class="wp-score-detail"><summary>Raw ApparelMagic fields</summary><div class="hint">${wpEsc(JSON.stringify(c.raw.date_or_status_fields || c.raw))}</div><div class="hint">All fields: ${wpEsc((c.raw.field_names || []).join(', '))}</div></details>` : ''}</td></tr>`).join('')}
+        </tbody></table></div></div>`).join('');
+  } catch (e) { out.innerHTML = `<span class="hint">${wpEsc(e.message)}</span>`; }
+}
+(function wireLaunchEvidence() {
+  const b = document.getElementById('le-btn'); if (b) b.addEventListener('click', leLookup);
+  const i = document.getElementById('le-q'); if (i) i.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') leLookup(); });
 })();

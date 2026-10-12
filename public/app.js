@@ -28,7 +28,7 @@ let state = {
   contentCreators: [],
   conceptDevLocations: [],
   conceptTypes: [],
-  highStockProducts: [], highStockFamilies: [], highStockExcluded: [], highStockExpandedFamilies: new Set(), highStockCollapsedFamilies: new Set(), highStockExpandedProducts: new Set(),
+  highStockProducts: [], highStockFamilies: [], highStockExcluded: [], highStockVerification: [], highStockExpandedFamilies: new Set(), highStockCollapsedFamilies: new Set(), highStockExpandedProducts: new Set(),
   // Monday Planning's 3-step guided workflow (Core/High Stocks/Shoot Plan)
   // -- always starts at Core on load (not persisted to localStorage): this
   // is a recurring weekly ritual, not a session to resume, so a stale
@@ -2862,6 +2862,7 @@ function renderCorePlan() {
   host.innerHTML = `
     <div class="core-shoot-planning-title">What to make next</div>
     <div class="core-shoot-planning-subtitle">For our Core products: what creative should we make next, and why?</div>
+    <div class="hint core-role-note" id="core-role-note">Core means products in WNDRR's Core range (the ApparelMagic CORE product group). This page lists creative opportunities for those products only; it is not a list of every product that needs creative, and a Core product can still be "Monitor" when its creative is already healthy. Seasonal products, new drops and the rest of the range are in the Weekly Plan and High Stocks.</div>
     ${banners.map((b) => `<div class="co-banner">${escapeHtml(b)}</div>`).join('')}
     ${d.planning && d.planning.data ? planSourceLineHtml(d.planning.data) : ''}
     <div class="cp-summary">
@@ -3977,6 +3978,7 @@ async function loadAll() {
     state.highStockProducts = highStockRes.products;
     state.highStockFamilies = highStockRes.families || [];
     state.highStockExcluded = highStockRes.excluded_unlaunched || [];
+    state.highStockVerification = highStockRes.launch_verification || [];
     state.highStockPlanningData = highStockRes.planning_data || null;
     state.promotions = promotions;
     state.weeklyShootPlanConfirmation = weeklyConfirmation;
@@ -6567,13 +6569,29 @@ function highStockFamilyHtml(f, selectedCodes) {
         <span class="accordion-arrow ${open ? 'open' : ''}">&#9656;</span>
         ${thumb}
         <span class="high-stock-family-name">${escapeHtml(f.name)}</span>
-        ${badge}${flag}
+        ${badge}${w && typeof wpRoleChip === 'function' ? wpRoleChip(w) : ''}${flag}
+        ${w && w.unique_creatives !== null && w.unique_creatives !== undefined ? `<span class="wp-chip wp-muted" title="Distinct pieces of creative running (the same creative duplicated into several ads counts once)">${w.active_ads !== null ? `${w.active_ads} active ad${w.active_ads === 1 ? '' : 's'} · ` : ''}${w.unique_creatives} unique creative${w.unique_creatives === 1 ? '' : 's'}</span>` : ''}
         <span class="high-stock-family-stock" title="Stock is counted once for the product, not once per colourway">${stockText}</span>
       </div>
       ${f.planning ? `<div class="high-stock-family-chips">${planChipsHtml(f.planning)}</div>` : ''}
       ${open ? `<div class="high-stock-family-body">${f.colourways.map((p) => highStockProductRowHtml(p, selectedCodes)).join('')}</div>` : ''}
     </div>`;
 }
+// Products whose launch cannot be established from reliable evidence: kept OUT of the actionable list and shown here, with what was checked, for a person to confirm.
+function highStockVerificationHtml() {
+  const v = state.highStockVerification || [];
+  if (!v.length) return '';
+  const readOnly = state.planningWeekOffset < 0;
+  return `<details class="high-stock-verify" id="high-stock-verification"><summary>Products requiring launch verification (${v.length})</summary>
+    <div class="hint">These have stock but not enough proof that they have gone on sale, so they are not recommended here. Confirm each one, or mark it not launched.</div>
+    ${v.map((x) => `<div class="high-stock-verify-row" data-hs-verify="${escapeHtml(x.key)}">
+      <div class="high-stock-verify-main"><b>${escapeHtml(x.name)}</b> <span class="hint">${cpNum(x.soh_total)} units in stock${x.units_sold_30d ? ` · ${cpNum(x.units_sold_30d)} sold in 30 days` : ''}</span>
+        <div class="hint">${escapeHtml(x.detail || '')}</div>
+        ${(x.evidence || []).length ? `<details class="wp-score-detail"><summary>What was checked</summary><ul class="wp-reasons">${x.evidence.map((e) => `<li><b>${escapeHtml(String(e.source).replace(/_/g, ' '))}</b> — ${escapeHtml(e.text)}</li>`).join('')}</ul></details>` : ''}</div>
+      ${readOnly || !x.product_code ? '' : `<div class="high-stock-verify-actions"><button type="button" class="btn btn-primary btn-sm" onclick="wpConfirmLaunch('${escapeHtml(x.product_code)}', '${escapeHtml(x.name)}')">Confirm launched</button><button type="button" class="btn btn-ghost btn-sm" onclick="wpMarkUnlaunched('${escapeHtml(x.product_code)}', '${escapeHtml(x.name)}')">Not launched</button></div>`}
+    </div>`).join('')}</details>`;
+}
+
 function highStockExcludedHtml() {
   const ex = state.highStockExcluded || [];
   if (!ex.length) return '';
@@ -6620,9 +6638,9 @@ function renderHighStockProducts() {
   const list = document.getElementById('high-stock-list');
   const families = state.highStockFamilies || [];
   list.innerHTML = state.highStockProducts.length
-    ? planSourceLineHtml(state.highStockPlanningData) + highStockExcludedHtml() + highStockHeaderHtml()
+    ? planSourceLineHtml(state.highStockPlanningData) + highStockVerificationHtml() + highStockExcludedHtml() + highStockHeaderHtml()
       + (families.length ? families.map((f) => highStockFamilyHtml(f, selectedCodes)).join('') : state.highStockProducts.map((p) => highStockProductRowHtml(p, selectedCodes)).join(''))
-    : `${highStockExcludedHtml()}<div class="attention-empty">No Platinum/Rocket products currently meet the High Stock threshold.</div>`;
+    : `${highStockVerificationHtml()}${highStockExcludedHtml()}<div class="attention-empty">No Platinum/Rocket products currently meet the High Stock threshold.</div>`;
 
   renderHighStockStepFooter();
 }
@@ -16884,6 +16902,7 @@ async function saveMinActiveAds() {
     state.highStockProducts = res.products;
     state.highStockFamilies = res.families || [];
     state.highStockExcluded = res.excluded_unlaunched || [];
+    state.highStockVerification = res.launch_verification || [];
     renderHighStockProducts();
     if (typeof loadWeeklyVideoPlan === 'function') loadWeeklyVideoPlan(true);
     if (typeof loadCorePlan === 'function') loadCorePlan(true);
@@ -16948,6 +16967,7 @@ async function saveHighStockMinSoh() {
     state.highStockProducts = res.products;
     state.highStockFamilies = res.families || [];
     state.highStockExcluded = res.excluded_unlaunched || [];
+    state.highStockVerification = res.launch_verification || [];
     renderHighStockProducts();
     if (typeof loadWeeklyVideoPlan === 'function') loadWeeklyVideoPlan(true);
   } catch (e) {

@@ -7,6 +7,7 @@ const planningContext = require('./planningContext');
 const cfgLib = require('./creativePlanningConfig');
 const perf = require('./productAdPerformance');
 const launch = require('./launchStatus');
+const launchInputs = require('./launchInputs');
 const mixLib = require('./creativeMix');
 const engine = require('./weeklyVideoPlan');
 const nameCopies = require('./metaNameCopies');
@@ -34,6 +35,21 @@ async function loadShootPlanCounts(db, weekStart, lookbackWeeks) {
       GROUP BY spi.product_code`, [weekStart, lookbackWeeks])).rows;
   const confirmed = (await db.query('SELECT confirmed_at FROM weekly_shoot_plan_confirmations WHERE week_start = $1::date', [weekStart])).rows[0] || null;
   return { items: items.map((i) => ({ ...i, planned: Math.max(i.planned_videos || 1, i.video_assets || 0) })), earlier, confirmed };
+}
+
+// A product's ROLE in the range, separate from its creative priority. Built only from what WNDRR's own data already says (nothing is invented):
+//   Core = ApparelMagic's CORE product group (an established, ongoing range); New drop = launched within the configured number of days (ApparelMagic launch date, or its
+//   Upcoming Drop); Seasonal = the seasonality read says it sells in seasons (in / coming into / out of season); everything else is Range. A product can have several.
+const ROLE_LABEL = { core: 'Core', new_drop: 'New drop', seasonal: 'Seasonal', range: 'Range' };
+function roleOf({ isCore, lstyles, season, today, newDropDays }) {
+  const roles = [];
+  const days = (d) => Math.floor((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${ymd(d)}T00:00:00Z`)) / 86400000);
+  if (isCore) roles.push({ key: 'core', basis: 'ApparelMagic CORE product group' });
+  const recent = lstyles.map((x) => (x.launchDate ? ymd(x.launchDate) : x.drop && x.drop.launch_date && ymd(x.drop.launch_date) <= today ? ymd(x.drop.launch_date) : null)).filter((d) => d && d <= today && days(d) <= newDropDays).sort().pop();
+  if (recent) roles.push({ key: 'new_drop', basis: `launched ${recent}` });
+  if (season && ['in_season', 'coming_into_season', 'out_of_season'].includes(season.status)) roles.push({ key: 'seasonal', basis: 'seasonal sales pattern' });
+  if (!roles.length) roles.push({ key: 'range', basis: 'not Core, not recently launched, no seasonal pattern' });
+  return roles.map((r) => ({ ...r, label: ROLE_LABEL[r.key] }));
 }
 
 async function loadLaunchContext(db, styleCodes) {
@@ -97,8 +113,8 @@ async function computeWeeklyVideoPlan({ weekStart, today, deps = {} } = {}) {
   const inputs = families.map((f) => {
     const stock = stockOf(f); const onOrder = onOrderOf(f);
     const sales = salesOf(f);
-    const lstyles = f.style_codes.map((c) => { const d = am.amDetails.get(c) || {}; const e = salesByStyle ? salesByStyle.get(c) : null; return { style_code: c, launchDate: d.launchDate || null, drop: lc.drops.get(c) || null, qty: salesByStyle ? ((e && e.qty365) || 0) : null, override: lc.overrides.get(c) || null }; });
-    const launchRes = launch.assessFamily({ styles: lstyles, familyOverride: lc.overrides.get(f.key) || null, stock, onOrder }, todayStr);
+    const lstyles = f.style_codes.map((c) => launchInputs.forStyle(c, { amDetails: am.amDetails, salesByStyle, drops: lc.drops, overrides: lc.overrides, shopify: lc.shopify || deps.shopifyEvidence || null }));
+    const launchRes = launch.assessFamily({ styles: lstyles, familyOverride: lc.overrides.get(f.key) || null, stock, onOrder }, todayStr, launch.fromConfig(settings.creative_planning_config || {}));
     const ev = evidence.get(f.key) || { creatives: [], ads: 0 };
     const cov = ctx.coverage && ctx.coverage.available
       ? { known: true, active_ads: ctx.coverage.by_family.get(f.key) || 0, min: settings.min_active_ads, possible: (pendingBy && pendingBy.get(f.key)) || 0, unattributed: ctx.coverage.unattributed_pending || 0 }
@@ -110,11 +126,12 @@ async function computeWeeklyVideoPlan({ weekStart, today, deps = {} } = {}) {
     const season = !ctx.seasonality || !ctx.seasonality.available ? { status: 'unavailable', reason: (ctx.seasonality && ctx.seasonality.reason) || 'Seasonal data is unavailable' }
       : g ? { status: g.status, label: ({ in_season: 'In season', coming_into_season: 'Coming into season', out_of_season: 'Out of season', year_round: 'Year-round', shoulder: 'Shoulder season', insufficient_data: 'Insufficient data' })[g.status] || g.status, outlook: g.evidence && g.evidence.outlook ? g.evidence.outlook : null, level: g.level, evidence: g.evidence }
         : { status: 'insufficient_data', label: 'Insufficient data' };
+    const roles = roleOf({ isCore: f.style_codes.some((c) => (am.amDetails.get(c) || {}).isCore), lstyles, season, today: todayStr, newDropDays: config.new_drop_days });
     const planned = plannedBy.get(f.key) || { this_week: 0, in_pipeline: 0, in_production: 0, in_concept: 0, completed: 0, by_source: {} };
     planned.in_pipeline = earlierBy.get(f.key) || 0;
     const colourways = f.style_codes.map((c) => { const d = am.amDetails.get(c) || {}; const e = salesByStyle ? salesByStyle.get(c) : null; const ls = launchRes.by_style.find((x) => x.style_code === c); return { style_code: c, colour_label: apparelmagic.resolveColourLabel(am.amDetails, c), image_url: d.imageUrl || null, soh: Math.max(0, Number(am.amStock.get(c)) || 0), units30: e ? Math.round(e.qty30 || 0) : null, launch_status: ls ? ls.status : 'unknown' }; });
     return {
-      key: f.key, name: f.name, category: f.category, style_codes: f.style_codes, codes: f.codes, colourways, launch: launchRes, stock, sales, coverage: cov, performance, creatives: ev.creatives,
+      key: f.key, name: f.name, category: f.category, style_codes: f.style_codes, codes: f.codes, colourways, launch: launchRes, roles, role: roles[0], stock, sales, coverage: cov, performance, creatives: ev.creatives,
       creative_age_days: created.length ? Math.min(...created) : null, season, planned, overrides: overridesBy.get(f.key) || [], image_url: (colourways.find((c) => c.image_url) || {}).image_url || null,
     };
   });
@@ -131,9 +148,13 @@ async function computeWeeklyVideoPlan({ weekStart, today, deps = {} } = {}) {
   const byKey = new Map(inputs.map((i) => [i.key, i]));
   result.products.forEach((p) => {
     const src = byKey.get(p.key);
-    p.image_url = src.image_url; p.codes = src.codes; p.style_codes = src.style_codes;
+    p.image_url = src.image_url; p.codes = src.codes; p.style_codes = src.style_codes; p.roles = src.roles; p.role = src.role;
     p.creative_summary = { active_ads: p.coverage && p.coverage.known ? p.coverage.active_ads : null, unique_creatives: p.performance ? p.performance.unique_creatives : null };
     if (p.category === 'SHOOT_NOW' && p.net_recommended > 0) p.mix = mixLib.suggestMix({ videos: p.net_recommended, creatives: src.creatives, vocab, conceptEvidence, minEvidence: 3 });
+  });
+  [...(result.verification || []), ...(result.excluded || [])].forEach((p) => {
+    const src = byKey.get(p.key);
+    if (src) { p.image_url = src.image_url; p.codes = src.codes; p.style_codes = src.style_codes; p.roles = src.roles; p.role = src.role; }
   });
   const totals = counts.items.reduce((t, i) => { t.planned += i.planned; t.in_concept += i.in_concept; t.in_production += i.in_production; t.completed += i.completed; return t; }, { planned: 0, in_concept: 0, in_production: 0, completed: 0 });
   const confirmed = !!counts.confirmed;
@@ -174,4 +195,4 @@ async function getWeeklyPlan(weekStart, { fresh = false, deps } = {}) {
   return value;
 }
 
-module.exports = { getWeeklyPlan, invalidate, computeWeeklyVideoPlan, loadShootPlanCounts, loadLaunchContext, mondayOf, addDays };
+module.exports = { getWeeklyPlan, invalidate, computeWeeklyVideoPlan, loadShootPlanCounts, loadLaunchContext, roleOf, ROLE_LABEL, mondayOf, addDays };
