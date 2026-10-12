@@ -3326,3 +3326,67 @@ input[type=checkbox],input[type=radio]{accent-color:var(--accent-strong);}
 /* Settings: a long explanatory note sits under its heading instead of fighting it for the same line */
 .settings-panel .planning-section-header{flex-direction:column;align-items:flex-start;gap:var(--sp-1);margin-bottom:var(--sp-3);}
 .settings-panel .planning-section-header .admin-note{margin-bottom:0;max-width:880px;line-height:1.45;}
+
+/* ═══ Batch 13: Meta Performance table (WNDRR Global style) ════════════════════════════════════════════════════════════
+   One definitive layout for the ad table: fixed column widths (set per column below, so nothing is squeezed or can spill into its neighbour), numbers right-aligned
+   under right-aligned headers, comfortable row height, and soft FULL-CELL colour for the benchmark bands. The wrapper scrolls horizontally when the window is narrower
+   than the table. The earlier narrow-column rules above are overridden here on purpose. */
+.mp-table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--r-lg);background:var(--surface);box-shadow:var(--shadow-xs);}
+.mp-table.mp-perf{table-layout:fixed;width:100%;min-width:1380px;border-radius:0;box-shadow:none;border-collapse:separate;border-spacing:0;}
+.mp-table.mp-perf th,.mp-table.mp-perf td{padding:11px 12px;font-size:12.5px;vertical-align:middle;overflow:hidden;text-overflow:ellipsis;border-bottom:1px solid var(--border);}
+.mp-table.mp-perf th{font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;white-space:normal;line-height:1.25;vertical-align:bottom;background:var(--surface2);color:var(--text-secondary);}
+.mp-table.mp-perf th.num,.mp-table.mp-perf td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.mp-table.mp-perf tbody tr:last-child td{border-bottom:none;}
+.mp-table.mp-perf th:nth-child(1){width:64px;}  .mp-table.mp-perf th:nth-child(2){width:64px;}
+.mp-table.mp-perf th:nth-child(4){width:84px;}  .mp-table.mp-perf th:nth-child(5){width:104px;} .mp-table.mp-perf th:nth-child(6){width:92px;}
+.mp-table.mp-perf th:nth-child(7){width:104px;} .mp-table.mp-perf th:nth-child(8){width:112px;} .mp-table.mp-perf th:nth-child(9){width:76px;}
+.mp-table.mp-perf th:nth-child(10){width:84px;} .mp-table.mp-perf th:nth-child(11){width:96px;} .mp-table.mp-perf th:nth-child(12){width:92px;}
+.mp-table.mp-perf th:nth-child(13){width:92px;} .mp-table.mp-perf th:nth-child(14){width:100px;} .mp-table.mp-perf th:nth-child(15){width:104px;}
+.mp-table.mp-perf td.mp-name{overflow:hidden;white-space:normal;}
+.mp-table.mp-perf .mp-name-stack{display:flex;flex-direction:column;max-width:100%;min-width:0;}
+.mp-table.mp-perf .mp-name-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;}
+.mp-table.mp-perf .mp-campaign-line{overflow:hidden;}
+.mp-table.mp-perf td.mp-creative-cell .cc-thumb,.mp-table.mp-perf td.mp-name .cc-thumb{width:40px;height:40px;border-radius:6px;}
+.mp-table.mp-perf tbody tr:hover td:not(.mp-cell){background:var(--accent-softer);}
+.mp-table.mp-perf td.mp-reach-key{background:var(--accent-softer);}
+/* benchmark bands: the whole cell takes the soft colour, the value stays bold and readable; neutral cells (no approved benchmark, or a reporting window the benchmark does not cover) get none */
+.mp-table.mp-perf td.mp-cell{font-weight:700;}
+.mp-table.mp-perf td.mp-cell-green{background:#e8f5ec;color:#17603c;}
+.mp-table.mp-perf td.mp-cell-orange{background:#fdf1df;color:#855000;}
+.mp-table.mp-perf td.mp-cell-red{background:#fbe6e3;color:#9d261d;}
+.mp-table.mp-perf tbody tr:hover td.mp-cell-green{background:#dcefe3;} .mp-table.mp-perf tbody tr:hover td.mp-cell-orange{background:#fbe8cc;} .mp-table.mp-perf tbody tr:hover td.mp-cell-red{background:#f8d9d5;}
+/* the value inside a coloured cell is plain (no rectangle, no symbol); its meaning is announced by screen readers and shown in the tooltip */
+.mp-metric{display:inline;min-width:0;padding:0;border:0;border-radius:0;background:none;color:inherit;text-align:inherit;font-weight:inherit;}
+.mp-metric[data-health]::before{content:none;margin:0;}
+.mp-cpm{color:var(--text-secondary);}
+.mp-kpis{grid-template-columns:repeat(auto-fit,minmax(122px,1fr));}
+
+/* ═══ Batch 13: launch verification, role chips, explanations ═══════════════════════════════════════════════════════════ */
+.wp-role{display:inline-block;padding:1px 8px;border-radius:var(--r-pill);font-size:var(--fs-xs);font-weight:700;border:1px solid var(--border-strong);background:var(--surface);color:var(--text-secondary);}
+.wp-role-core{background:var(--accent-soft);color:var(--accent-text);border-color:var(--accent-border);}
+.wp-role-new_drop{background:#e8f5ec;color:#17603c;border-color:#c3e3d1;}
+.wp-role-seasonal{background:#fdf1df;color:#855000;border-color:#f4d9ae;}
+.wp-cat-verify{border-left-color:#e2a93b;}
+.wp-badge.wp-cat-verify{background:#fdf1df;color:#855000;border-color:#f4d9ae;}
+.wp-explain-line{margin:0 0 var(--sp-1);color:var(--text);line-height:1.45;}
+.wp-caution{margin-top:var(--sp-2);}
+.wp-score-detail{margin-top:var(--sp-2);}
+.wp-score-detail summary{cursor:pointer;font-weight:600;color:var(--accent-text);}
+.high-stock-verify{background:#fffaf0;border:1px solid #f1dba8;border-radius:var(--r);padding:8px 12px;margin-bottom:var(--sp-3);font-size:var(--fs-sm);color:var(--text-secondary);}
+.high-stock-verify summary{cursor:pointer;font-weight:700;color:#7a5200;}
+.high-stock-verify-row{display:flex;justify-content:space-between;gap:var(--sp-4);align-items:flex-start;padding:var(--sp-2) 0;border-top:1px solid #f1e3bd;}
+.high-stock-verify-actions{display:flex;gap:var(--sp-2);flex-shrink:0;}
+.core-role-note{margin:4px 0 10px;max-width:880px;line-height:1.45;}
+.le-result{margin-top:var(--sp-3);display:grid;gap:var(--sp-3);}
+.le-product{border:1px solid var(--border);border-radius:var(--r-lg);padding:var(--sp-3);background:var(--surface);}
+.le-head{display:flex;gap:var(--sp-2);align-items:center;flex-wrap:wrap;margin-bottom:var(--sp-2);}
+.le-table th,.le-table td{vertical-align:top;font-size:var(--fs-sm);}
+.wpc-advanced{margin-top:var(--sp-3);border:1px dashed var(--border-strong);border-radius:var(--r-lg);padding:var(--sp-2) var(--sp-4);}
+.wpc-advanced>summary{cursor:pointer;font-weight:700;color:var(--ds-navy-800);padding:var(--sp-2) 0;}
+.wpc-help{margin-bottom:var(--sp-2);max-width:760px;}
+.mbench-rules{margin:0 0 var(--sp-3) 18px;padding:0;display:grid;gap:4px;font-size:var(--fs-sm);color:var(--text-secondary);max-width:900px;line-height:1.45;}
+
+/* Application mark: a minimal film frame with a play symbol (replaces the clapperboard emoji). Sized and rounded like the other WNDRR application marks;
+   provisional until the Tuesday / Retention references are available to match exactly. */
+.logo-mark{display:flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:8px;background:var(--ds-navy-700);box-shadow:inset 0 0 0 1px rgba(255,255,255,0.14);}
+.logo-mark svg{display:block;}

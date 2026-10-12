@@ -269,6 +269,9 @@ function deriveMetrics(raw) {
     roas: round(safeDiv(purchaseValue, spend), 2),
     cost_per_atc: round(safeDiv(spend, addToCart), 2),
     outbound_ctr: round(impressions > 0 ? (outboundClicks / impressions) * 100 : null, 4),
+    // CPM = cost per 1,000 impressions = Spend / Impressions x 1,000, always from the SAME summed columns and period as the rest (an aggregate is total spend over
+    // total impressions: individual ad CPMs are never averaged). null (never 0) when there are no impressions.
+    cpm: round(impressions > 0 ? (spend / impressions) * 1000 : null, 2),
   };
 }
 
@@ -447,6 +450,7 @@ const SORT_SQL = {
   add_to_cart: 'agg.add_to_cart',
   cost_per_atc: 'agg.spend / NULLIF(agg.add_to_cart, 0)',
   outbound_ctr: 'agg.outbound_clicks::numeric / NULLIF(agg.impressions, 0)',
+  cpm: 'agg.spend / NULLIF(agg.impressions, 0)',
   purchase_value: 'agg.purchase_value',
   roas: 'agg.purchase_value / NULLIF(agg.spend, 0)',
   ad_name: 'lower(a.ad_name)',

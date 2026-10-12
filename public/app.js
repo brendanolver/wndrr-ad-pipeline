@@ -588,7 +588,7 @@ function mbenchRender() {
           <span class="mbench-bands" title="Orange up to ${b.tolerance_pct}% beyond the target; red beyond that"><i class="mp-health mp-health-green"></i><i class="mp-health mp-health-orange"></i><i class="mp-health mp-health-red"></i> ${b.tolerance_pct}%</span>
           <span class="mbench-acts"><button type="button" class="link-btn" data-mb-edit="${b.id}">Edit</button><button type="button" class="link-btn" data-mb-toggle="${b.id}">${b.active ? 'Turn off' : 'Turn on'}</button><button type="button" class="link-btn danger" data-mb-del="${b.id}">Remove</button></span>
         </div>`).join('');
-      return `<td>${items || '<span class="mbench-none">No benchmark — shows uncoloured</span>'}<button type="button" class="link-btn mbench-add" data-mb-add="${f}|${m.key}">+ Add</button></td>`;
+      return `<td>${items || '<span class="mbench-none">Not set — shows a neutral value</span>'}<button type="button" class="link-btn mbench-add" data-mb-add="${f}|${m.key}">+ Add</button></td>`;
     }).join('')}</tr>`).join('')}</tbody></table>`;
   const hist = document.getElementById('mbench-history');
   if (hist) {
@@ -723,6 +723,8 @@ const MP_KPIS = [
   { key: 'add_to_cart', label: 'Adds to Cart', fmt: 'int', better: 'up' },
   { key: 'cost_per_atc', label: 'Cost / ATC', fmt: 'money', better: 'down' },
   { key: 'outbound_ctr', label: 'Outbound CTR', fmt: 'pct', better: 'up' },
+  // CPM = cost per 1,000 impressions (total spend / total impressions x 1,000, not an average of ad CPMs). No CPM benchmark is approved, so it is never coloured or judged.
+  { key: 'cpm', label: 'CPM', fmt: 'money', better: null },
 ];
 
 function mpDate(ymd, withYear) {
@@ -918,14 +920,16 @@ function mpRenderAds(res) {
   mpRenderReachBar();
   mpRenderBenchStrip(res);
   if (!res.ads.length) {
-    body.innerHTML = `<tr><td colspan="14" class="mp-table-empty">${
+    body.innerHTML = `<tr><td colspan="15" class="mp-table-empty">${
       res.q || res.status !== 'all' || mpFiltered() ? 'No ads match this search or filter.' : 'No ads had spend or impressions in this period.'}</td></tr>`;
   } else {
     const healthOn = !!(res.health && res.health.active);
-    // The value itself sits in a soft coloured rectangle (green / orange / red) -- never colour alone: a small symbol, the band spoken to screen readers (CSS ::after from data-band) and the tooltip.
+    // The whole metric cell takes a soft background (green / orange / red) -- never colour alone: the band is spoken to screen readers (CSS ::after from data-band) and shown in the tooltip.
     // A cell with no approved benchmark (or an unknown funnel) stays plain and neutral.
     const tol = (res.health && res.health.tolerance_pct) || 20;
     const bandText = { green: 'Meeting the benchmark', orange: `Missing the benchmark by up to ${tol}%`, red: `Missing the benchmark by more than ${tol}%` };
+    // the WHOLE cell takes a soft background (green / orange / red); a cell with no approved benchmark, or an incompatible reporting window, stays neutral
+    const cellCls = (h) => (healthOn && h && bandText[h] ? ` mp-cell mp-cell-${h}` : '');
     const metric = (h, inner) => (healthOn && h && bandText[h]
       ? `<span class="mp-metric mp-metric-${escapeHtml(h)}" data-health="${escapeHtml(h)}" data-band="${escapeHtml(bandText[h])}">${inner}</span>`
       : `<span class="mp-metric">${inner}</span>`);
@@ -954,14 +958,15 @@ function mpRenderAds(res) {
         <td>${mpStatusChip(a.effective_status)}</td>
         <td class="num">${mpFmt(a.spend, 'money')}</td>
         <td class="num">${mpFmt(a.purchases, 'int')}</td>
-        <td class="num" title="${escapeHtml(why(a, 'cpa', a.cpa_health))}">${metric(a.cpa_health, mpFmt(a.cpa, 'money'))}</td>
+        <td class="num${cellCls(a.cpa_health)}" title="${escapeHtml(why(a, 'cpa', a.cpa_health))}">${metric(a.cpa_health, mpFmt(a.cpa, 'money'))}</td>
         <td class="num" title="Meta purchase conversion value (omni_purchase) for this period">${mpFmt(a.purchase_value, 'money')}</td>
         <td class="num" title="Meta purchase ROAS = purchase value ÷ amount spent (null when nothing was spent)">${mpFmt(a.roas, 'roas')}</td>
         <td class="num">${mpFmt(a.add_to_cart, 'int')}</td>
         <td class="num">${mpFmt(a.cost_per_atc, 'money')}</td>
         <td class="num">${mpFmt(a.outbound_ctr, 'pct')}</td>
-        <td class="num${a.funnel === 'TOF' ? ' mp-reach-key' : ''}" title="${escapeHtml(why(a, 'reach', a.reach_health) || (a.funnel === 'TOF' ? 'Reach is the key measure for TOF' : ''))}">${metric(a.reach_health, mpReachCell(a.reach, 'int'))}</td>
-        <td class="num" title="${escapeHtml(why(a, 'frequency', a.frequency_health))}">${metric(a.frequency_health, mpReachCell(a.frequency, 'freq'))}</td>
+        <td class="num mp-cpm" title="CPM = Amount Spent ÷ Impressions × 1,000 (no benchmark approved, so it is never coloured)">${a.impressions > 0 ? mpFmt(a.cpm, 'money') : '<span class="mp-na" title="No impressions in this period">—</span>'}</td>
+        <td class="num${a.funnel === 'TOF' ? ' mp-reach-key' : ''}${cellCls(a.reach_health)}" title="${escapeHtml(why(a, 'reach', a.reach_health) || (a.funnel === 'TOF' ? 'Reach is the key measure for TOF' : ''))}">${metric(a.reach_health, mpReachCell(a.reach, 'int'))}</td>
+        <td class="num${cellCls(a.frequency_health)}" title="${escapeHtml(why(a, 'frequency', a.frequency_health))}">${metric(a.frequency_health, mpReachCell(a.frequency, 'freq'))}</td>
       </tr>`).join('');
     ccHydrateThumbs(body);
   }
@@ -988,7 +993,7 @@ async function loadMetaPerformanceAds() {
     mpRenderAds(res);
   } catch (e) {
     if (id !== mpState.adsReqId) return;
-    document.getElementById('mp-ads-body').innerHTML = `<tr><td colspan="14" class="mp-table-empty">${escapeHtml(e.message)}</td></tr>`;
+    document.getElementById('mp-ads-body').innerHTML = `<tr><td colspan="15" class="mp-table-empty">${escapeHtml(e.message)}</td></tr>`;
   }
 }
 

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>WNDRR — Ad Creative Pipeline</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23243763'/%3E%3Crect x='4.5' y='8' width='23' height='16' rx='3.2' fill='none' stroke='%23ffffff' stroke-width='1.9'/%3E%3Cpath d='M13.4 12.3v7.4l6.2-3.7z' fill='%23b9b0f0'/%3E%3Cpath d='M4.5 12.4h3M4.5 16h3M4.5 19.6h3M24.5 12.4h3M24.5 16h3M24.5 19.6h3' stroke='%23ffffff' stroke-width='1.5' stroke-linecap='round' opacity='.75'/%3E%3C/svg%3E">
 <!-- Preconnect so the Inter webfont request starts immediately alongside
      the page itself, rather than only after styles.css's @import is parsed.
      This is the fix for the "first click on a Filming/Assigned To dropdown
@@ -27,11 +27,12 @@
 <link rel="preconnect" href="https://business.facebook.com" crossorigin>
 </head>
 <body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><symbol id="wndrr-mark" viewBox="0 0 32 32"><rect x="4.5" y="8" width="23" height="16" rx="3.2" fill="none" stroke="#ffffff" stroke-width="1.9"/><path d="M13.4 12.3v7.4l6.2-3.7z" fill="#b9b0f0"/><path d="M4.5 12.4h3M4.5 16h3M4.5 19.6h3M24.5 12.4h3M24.5 16h3M24.5 19.6h3" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round" opacity=".75"/></symbol></svg>
 
 <div id="password-screen">
   <div class="pw-card">
     <div class="wndrr-logo">
-      <div class="logo-mark">🎬</div>
+      <div class="logo-mark" role="img" aria-label="WNDRR Ad Creative Pipeline"><svg viewBox="0 0 32 32" width="22" height="22" aria-hidden="true"><use href="#wndrr-mark"></use></svg></div>
       <div class="logo-text">WNDRR<span>Ad Creative Pipeline</span></div>
     </div>
     <div class="pw-title">Ad Creative Pipeline</div>
@@ -47,7 +48,7 @@
   <aside class="sidebar">
     <div class="sidebar-header">
       <div class="wndrr-logo">
-        <div class="logo-mark">🎬</div>
+        <div class="logo-mark" role="img" aria-label="WNDRR Ad Creative Pipeline"><svg viewBox="0 0 32 32" width="22" height="22" aria-hidden="true"><use href="#wndrr-mark"></use></svg></div>
         <div class="logo-text">WNDRR<span>Ad Creative Pipeline</span></div>
       </div>
     </div>
@@ -261,6 +262,7 @@
               <th class="num" data-sort="add_to_cart">Adds to Cart</th>
               <th class="num" data-sort="cost_per_atc">Cost / ATC</th>
               <th class="num" data-sort="outbound_ctr">Outbound CTR</th>
+              <th class="num" data-sort="cpm" title="Cost per 1,000 impressions = Amount Spent ÷ Impressions × 1,000">CPM</th>
               <th class="num" data-sort="reach">Reach</th>
               <th class="num" data-sort="frequency">Frequency</th>
             </tr>
@@ -1548,8 +1550,15 @@
       <div class="settings-panel" id="settings-panel-meta-benchmarks">
         <div class="planning-section-header">
           <h2>Performance benchmarks</h2>
-          <span class="admin-note">Targets behind the green / orange / red dots on Meta Performance. Green meets the target, orange misses it by up to 20%, red by more. A metric with no target stays uncoloured. CPA is Meta-reported (Triple Whale is not connected).</span>
+          <span class="admin-note">Targets behind the green / orange / red cells on Meta Performance. Green meets the target, orange misses it by up to 20%, red by more. CPA is Meta-reported (Triple Whale is not connected).</span>
         </div>
+        <ul class="mbench-rules" id="mbench-rules">
+          <li><b>Each funnel has its own slots.</b> TOF, TOM and MOF can each have a CPA and a Frequency benchmark (and Reach). One funnel's benchmark is never borrowed by another.</li>
+          <li><b>Only approved targets are set.</b> MOF CPA (green at $60 or below, orange to $72, red above) and TOF Frequency (green below 2, orange 2 to 2.4, red above; 3&ndash;5-day periods only) are approved and in place. Every other slot is left empty until you give it a number.</li>
+          <li><b>An empty slot shows a neutral value.</b> A metric with no benchmark is never coloured, and nothing is estimated.</li>
+          <li><b>A benchmark with a reporting window is judged only inside that window.</b> A 3&ndash;5-day Frequency target is not applied to a 7-day period: the value shows neutral, and the tooltip says why.</li>
+          <li><b>CPM has no benchmark.</b> It is shown on Meta Performance but never coloured.</li>
+        </ul>
         <div id="mbench-grid" class="mbench-grid"></div>
         <div class="mbench-form" id="mbench-form">
           <div class="mbench-form-title" id="mbench-form-title">Add a benchmark</div>

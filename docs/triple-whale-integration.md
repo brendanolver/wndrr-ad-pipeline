@@ -71,3 +71,36 @@ Pass criteria are written down before running: ≥ 95 % of Triple Whale spend ma
 5. Plan tier vs API availability (confirm in-app or with Triple Whale support).
 6. Model/window choice and timezone alignment — a business decision, not a technical one.
 7. Triple Whale "Triple Attribution" can credit more revenue than native sales data because of overlapping attribution; totals will not reconcile to Meta and should not be forced to.
+
+---
+
+## Batch 13 update (12 Oct 2026): re-verification and feasibility verdict
+
+Nothing in the app changed for Triple Whale in Batch 13. This section re-checks the earlier findings and gives the recommendation.
+
+**What was re-checked**
+
+- **Credentials / access in this environment.** No Triple Whale key, shop id or connector exists in the build environment (checked the process environment and the available tool list), and none is stored in the repository. Nothing was called, so nothing in the Triple Whale account could have been changed. **No Triple Whale API call has been made by this project to date**, so API access is still *unverified*, not confirmed.
+- **Official documentation (re-read).** Triple Whale's public API repository (`github.com/Triple-Whale/triple-whale-public-apis`) still documents only: `POST /summary-page` (account-level KPIs for a timeframe), the custom-metrics endpoints (`/tw-metrics/*`, which *write* into Triple Whale and must never be called by this app), and `POST /attribution/get-orders-with-journeys-v2` (orders with customer journeys; v1 is deprecated). Personal API keys go in the `x-api-key` header, are created in the Triple Whale app for customers with a subscription, and can reach only: summary-page data, attribution v1/v2, and `/api/v2/users/api-keys/me`. The page does not document campaign / ad set / ad reporting, attribution models, scopes by name, SQL / data-out, or rate limits.
+- **Ad identity (new, from Triple Whale's help centre).** Triple Whale ties an order to a Meta ad through a URL tracking parameter: `tw_source={{site_source_name}}&tw_adid={{ad.id}}`. The Meta ad id is therefore available *only where WNDRR's ads carry these parameters*, and it cannot be applied to past ad activity retroactively.
+- **Attribution window (new).** When Meta is connected, Triple Whale asks for a window; *7-day click or 1-day view* is the default and the most common. Meta-reported figures in this app also use 7-day click + 1-day view (marked provisional on screen), so a like-for-like comparison is possible **only if** WNDRR's Triple Whale uses the same window and an attribution model chosen for comparison (Triple Whale's models credit orders differently from Meta, so totals will never reconcile).
+- **Third-party notes (unverified).** A community write-up lists an `ads` aggregation inside the attribution endpoint that returns ad-level orders / revenue. Treat as a lead to test, not as documented behaviour.
+
+**Verdict**
+
+| Question | Answer |
+| --- | --- |
+| Does the subscription allow API access? | **Unknown.** Personal keys are available "with a Triple Whale subscription"; the plan tier needed is not stated publicly. Confirm in the app (Settings → API Keys) or with Triple Whale support. |
+| Can Triple Whale CPA / ROAS / purchases / revenue be shown per ad? | **Possibly, not yet proven.** Account-level (Summary Page) is documented. Per-ad needs either the attribution-v2 `ads` aggregation or a data-out endpoint that personal keys may not expose. |
+| Can results be matched to Meta ids reliably? | **Only if `tw_adid` is on WNDRR's ad URLs.** The probe in §3 measures coverage (target: 95% of Triple Whale spend maps to a known `meta_ads.meta_ad_id`). Without it, compare at account or campaign level only. |
+| Reporting delay? | Triple Whale attributes on its own schedule and can revise recent days; compare completed days only (the same rule Meta Performance already uses for "today"). Not documented numerically. |
+| Safe to build now? | **No.** Build nothing until the probe in §3 passes. |
+
+**Recommended rollout (unchanged, tightened)**
+
+1. Brendan creates a *read-only* key (Summary Page: Read and Pixel Attribution: Read only) and stores it as a sealed Railway variable (`TRIPLEWHALE_API_KEY`, plus `TRIPLEWHALE_SHOP`). Never paste it into a chat, commit or `.env`.
+2. Confirm WNDRR's ad URLs carry `tw_adid={{ad.id}}` (otherwise per-ad matching is not achievable).
+3. Run the read-only probe in §3 (four GET/POST reads, nothing stored). Decide from its numbers: per-ad, campaign-level, or account-level only.
+4. If it passes: additive tables, a manual bounded sync (never tied to `META_AUTO_SYNC`), and side-by-side labelled columns (`Meta CPA | Triple Whale CPA`, `Meta ROAS | Triple Whale ROAS`) with "no Triple Whale data" shown as "—", never filled with Meta numbers. Benchmarks and colours stay on Meta figures until Triple Whale data is validated.
+
+**Risks:** attribution overlap (Triple Whale's models can credit more than Meta), timezone alignment, rate limits (unpublished), history depth, key scope drift, and the ad-URL parameter gap above.
