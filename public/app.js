@@ -2708,6 +2708,38 @@ function planChipsHtml(pl) {
   return `<div class="plan-chips">${chips.join('')}</div>`;
 }
 
+// Why this product has its seasonal class: the plain-language reasons from the server, plus a compact monthly units strip (units only, one row per year).
+// Deliberately small: not a dashboard (Demand Planning's Sales Cadence is the place for that).
+const PLAN_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function planSeasonHtml(pl) {
+  const se = pl && pl.season; const ev = se && se.evidence;
+  if (!se) return '';
+  const why = (ev && ev.why) || [];
+  const monthly = (ev && ev.monthly) || [];
+  const head = `<b>${escapeHtml(se.label || 'Season')}</b>${ev && ev.series_label && /category/i.test(ev.series_label) ? ` <span class="hint">(${escapeHtml(ev.series_label)} pattern)</span>` : ''}`;
+  const max = Math.max(1, ...monthly.map((x) => x.u || 0));
+  const cells = monthly.map((x) => {
+    const [yy, mm] = x.m.split('-'); const nm = PLAN_MONTHS[Number(mm) - 1];
+    // compared by calendar month: "this month" and "the next 4–8 weeks" are marked in each past year (the same time of year)
+    const cls = ['plan-mo', ev && ev.now_month && ev.now_month.slice(5) === mm ? 'now' : '', (ev && ev.horizon_months || []).some((h) => h.slice(5) === mm) ? 'ahead' : '', x.flag === 'gap' ? 'gap' : '', x.flag === 'spike' ? 'spike' : '', x.on_sale ? '' : 'off'].filter(Boolean).join(' ');
+    const tip = `${nm} ${yy}: ${x.u} unit${x.u === 1 ? '' : 's'}${x.i !== null && x.i !== undefined ? ` · ${x.i}× usual` : ''}${x.flag === 'gap' ? ' · possible stock-out, left out' : x.flag === 'spike' ? ' · one-off spike, capped' : ''}${x.on_sale ? '' : ' · not on sale yet'}`;
+    return `<div class="${cls}" title="${escapeHtml(tip)}"><i style="height:${Math.max(2, Math.round((x.u / max) * 34))}px"></i><span class="plan-mo-n">${x.u}</span><span class="plan-mo-l">${nm}${monthly.length > 12 ? ` ’${yy.slice(2)}` : ''}</span></div>`;
+  }).join('');
+  return `<div class="plan-season"><div class="plan-season-head">${head}</div>
+    ${why.length ? `<ul class="plan-season-why">${why.map((t) => `<li>${escapeHtml(t)}</li>`).join('')}</ul>` : ''}
+    ${monthly.length ? `<div class="plan-months" role="img" aria-label="Units sold per month">${cells}</div>
+    <div class="hint plan-months-key">Units sold per month${ev && ev.series_label ? ` (${escapeHtml(ev.series_label)})` : ''}${se.source && se.source.label ? `, from ${escapeHtml(se.source.label)}` : ''}; the month in progress is not shown. Outlined = this time of year; tinted = the months the next 4–8 weeks fall in; striped = possible stock-out (left out); dashed = capped spike.</div>` : ''}</div>`;
+}
+
+// One always-visible line saying which sales history the seasonal side of Planning is using (and why, if it fell back).
+function planSourceLineHtml(pd) {
+  const sd = pd && pd.seasonality;
+  if (!sd) return '';
+  if (!sd.available) return `<div class="plan-source plan-source-off">Seasonal data: unavailable — ${escapeHtml(sd.note || '')}</div>`;
+  const fb = (sd.notes || []).filter(Boolean);
+  return `<div class="plan-source" title="${escapeHtml([sd.note, ...fb].filter(Boolean).join(' '))}">Seasonal data: <b>${escapeHtml(sd.source_label || 'online sales')}</b> · ${sd.months_of_data} months${sd.incomplete ? ' · <span class="plan-source-warn">incomplete</span>' : ''}${fb.length ? ` · <span class="hint">${escapeHtml(fb[0])}</span>` : ''}</div>`;
+}
+
 function planDataNotes(pd) {
   const n = [`Creative priority needs at least ${pd.min_active_ads} distinct active Meta ads per product (Settings → Planning).`];
   n.push(pd.coverage.available ? (pd.coverage.note || `Active ad counts use ad statuses as of ${pd.coverage.status_as_of || 'the last sync'}.`) : pd.coverage.note);
@@ -2770,7 +2802,7 @@ function cpDetailHtml(c) {
           ${c.priority && c.priority !== 'Info' ? `<span class="co-pri pri-${c.priority.toLowerCase()}">${escapeHtml(c.priority.toUpperCase())}</span>` : ''}</div>
         <h3 class="co-title">${escapeHtml(c.headline)}</h3>
         <p class="co-expl">${escapeHtml(c.why)}</p>
-        ${c.planning ? `${planLevelBadge(c.planning)}${planChipsHtml(c.planning)}${planWhyHtml(c.planning)}` : ''}
+        ${c.planning ? `${planLevelBadge(c.planning)}${planChipsHtml(c.planning)}${planSeasonHtml(c.planning)}${planWhyHtml(c.planning)}` : ''}
         ${cpFactsHtml(c)}
         ${c.stock.size_warning ? `<div class="co-note cp-size-warn">⚠ ${escapeHtml(c.stock.size_warning)}</div>` : ''}
         ${note}
@@ -2812,6 +2844,7 @@ function renderCorePlan() {
     <div class="core-shoot-planning-title">What to make next</div>
     <div class="core-shoot-planning-subtitle">For our Core products: what creative should we make next, and why?</div>
     ${banners.map((b) => `<div class="co-banner">${escapeHtml(b)}</div>`).join('')}
+    ${d.planning && d.planning.data ? planSourceLineHtml(d.planning.data) : ''}
     <div class="cp-summary">
       <span><b>${c.recommendations}</b> worth acting on</span>
       <span>${c.hold} on hold</span>
@@ -6428,7 +6461,7 @@ function highStockDetailHtml(p, selectedCodes) {
   return `
     <div class="high-stock-detail">
       <div class="high-stock-detail-recommendation"><span class="high-stock-detail-priority">${escapeHtml(priority)}:</span> ${escapeHtml(recommendation)}</div>
-      ${p.planning ? `${planChipsHtml(p.planning)}${p.family_soh != null && p.family_soh !== p.soh ? `<div class="hint">Whole product (all colourways, counted once): ${cpNum(p.family_soh)} units.</div>` : ''}${planWhyHtml(p.planning)}` : ''}
+      ${p.planning ? `${planChipsHtml(p.planning)}${planSeasonHtml(p.planning)}${p.family_soh != null && p.family_soh !== p.soh ? `<div class="hint">Whole product (all colourways, counted once): ${cpNum(p.family_soh)} units.</div>` : ''}${planWhyHtml(p.planning)}` : ''}
       <div class="high-stock-detail-grid">
         <div class="high-stock-detail-col">
           <div class="high-stock-detail-col-title">Inventory</div>
@@ -6519,7 +6552,7 @@ function renderHighStockProducts() {
 
   const list = document.getElementById('high-stock-list');
   list.innerHTML = state.highStockProducts.length
-    ? highStockHeaderHtml() + state.highStockProducts.map((p) => highStockProductRowHtml(p, selectedCodes)).join('')
+    ? planSourceLineHtml(state.highStockPlanningData) + highStockHeaderHtml() + state.highStockProducts.map((p) => highStockProductRowHtml(p, selectedCodes)).join('')
     : '<div class="attention-empty">No Platinum/Rocket products currently meet the High Stock threshold.</div>';
 
   renderHighStockStepFooter();

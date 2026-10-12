@@ -73,7 +73,7 @@ function assessSeries({ series, factor, months, startMonth, today, label }) {
   const avail = months.filter((m) => !startMonth || m >= startMonth);
   const units = avail.map((m) => Math.max(0, Number(series[m]) || 0));
   const total = units.reduce((s, x) => s + x, 0);
-  const insufficient = (reason) => ({ status: 'insufficient_data', evidence: { reason, months_used: avail.length, units: Math.round(total), summary: reason, confidence: 'none', caveats: [] } });
+  const insufficient = (reason) => ({ status: 'insufficient_data', evidence: { reason, why: [`Not enough sales history to judge seasonality: ${reason}. Season is not used for this product's priority.`], monthly: months.map((m) => ({ m, u: Math.round(Number(series[m]) || 0), on_sale: !startMonth || m >= startMonth, i: null, flag: null })), now_month: ymOf(today), horizon_months: [], months_used: avail.length, units: Math.round(total), summary: reason, confidence: 'none', caveats: [] } });
   if (avail.length < CFG.MIN_MONTHS) return insufficient(`${avail.length} month${avail.length === 1 ? '' : 's'} on sale (needs ${CFG.MIN_MONTHS})`);
   if (total < CFG.MIN_UNITS) return insufficient(`${Math.round(total)} units sold (needs ${CFG.MIN_UNITS})`);
 
@@ -145,10 +145,24 @@ function assessSeries({ series, factor, months, startMonth, today, label }) {
   const summary = status === 'year_round'
     ? `sells at a steady rate all year (every month between ${r2(Math.min(...known))} and ${r2(Math.max(...known))} of its usual)`
     : `${peaks.length ? `peaks ${names(peaks)}` : 'no clear peak'}${troughs.length ? `, quiet ${names(troughs)}` : ''}; now ${r2(cur)}× its usual level, next 4–8 weeks ${r2(horizon)}×`;
+  // compact monthly breakdown + a plain-language "why" for the screen (units only: no money, no customers)
+  const nowYm = ymOf(today);
+  const horizonMonths = Object.keys(hw).sort();
+  const monthly = months.map((m) => ({ m, u: Math.round(Number(series[m]) || 0), on_sale: !startMonth || m >= startMonth, i: idx[m] !== undefined ? r2(idx[m]) : null, flag: gaps.includes(m) ? 'gap' : spikes.includes(m) ? 'spike' : null }));
+  const fx = (v) => `${r2(v)}×`;
+  const why = [];
+  if (status === 'year_round') why.push(`Year-round: every month sits between ${fx(Math.min(...known))} and ${fx(Math.max(...known))} of its usual level, so there is no season to chase.`);
+  else if (status === 'in_season') why.push(`In season: ${MONTH_NAMES[curN - 1]} runs at ${fx(cur)} its usual level (in season is ${fx(CFG.IN_SEASON)} or more).`);
+  else if (status === 'coming_into_season') why.push(`Coming into season: ${MONTH_NAMES[curN - 1]} is ${fx(cur)} its usual level but the next 4–8 weeks (${horizonMonths.map((m) => MONTH_NAMES[monthNum(m) - 1]).join('–')}) run at ${fx(horizon)}, so demand is rising towards a peak.`);
+  else if (status === 'out_of_season') why.push(cur <= CFG.OUT_OF_SEASON ? `Out of season: ${MONTH_NAMES[curN - 1]} runs at ${fx(cur)} its usual level (out of season is ${fx(CFG.OUT_OF_SEASON)} or less).` : `Out of season: ${MONTH_NAMES[curN - 1]} is ${fx(cur)} its usual level and the next 4–8 weeks fall to ${fx(horizon)}.`);
+  else why.push(`Shoulder season: ${MONTH_NAMES[curN - 1]} is ${fx(cur)} its usual level and the next 4–8 weeks ${fx(horizon)}: neither a peak nor a trough.`);
+  if (peaks.length && status !== 'year_round') why.push(`Peak months: ${peaks.slice(0, 4).sort((a, b) => a[0] - b[0]).map(([n, v]) => `${MONTH_NAMES[n - 1]} ${fx(v)}`).join(', ')}.`);
+  if (troughs.length && status !== 'year_round') why.push(`Quiet months: ${troughs.slice(0, 4).sort((a, b) => a[0] - b[0]).map(([n, v]) => `${MONTH_NAMES[n - 1]} ${fx(v)}`).join(', ')}.`);
+  why.push(`"Usual" is this ${label ? `${label}'s` : 'product\'s'} own average month, after dividing out store-wide surges (sales, Black Friday) so only product-specific movement counts.`);
   return {
     status,
     evidence: {
-      label, summary, months_used: used.length, first_month: avail[0], last_month: avail[avail.length - 1], units: Math.round(total),
+      label, why, monthly, now_month: nowYm, horizon_months: horizonMonths, summary, months_used: used.length, first_month: avail[0], last_month: avail[avail.length - 1], units: Math.round(total),
       current_index: r2(cur), horizon_index: r2(horizon), peaks: peaks.slice(0, 4).map(([n, v]) => ({ month: MONTH_NAMES[n - 1], index: r2(v) })), troughs: troughs.slice(0, 4).map(([n, v]) => ({ month: MONTH_NAMES[n - 1], index: r2(v) })),
       index_by_month: Object.fromEntries(MONTH_NAMES.map((nm, i) => [nm, profile[i + 1] === null ? null : r2(profile[i + 1])])),
       confidence: monthsCovered >= 24 ? 'medium' : 'limited', years_of_data: monthsCovered >= 24 ? Math.floor(monthsCovered / 12) : 1, caveats,
@@ -216,7 +230,7 @@ function buildSeasonality({ monthlyByStyle: monthlyIn, groups, launchByStyle, wi
     if (own.status !== 'insufficient_data') { out.set(g.key, { ...own, level: 'family' }); return; }
     const cat = categories.get(String(g.category || 'UNCATEGORISED').toUpperCase());
     if (cat && cat.status !== 'insufficient_data') {
-      out.set(g.key, { status: cat.status, level: 'category', evidence: { ...cat.evidence, summary: `${cat.evidence.summary} (category pattern: this product has too little history of its own — ${own.evidence.reason})`, own_reason: own.evidence.reason } });
+      out.set(g.key, { status: cat.status, level: 'category', evidence: { ...cat.evidence, why: [`Using the ${cat.name} category pattern: this product has too little history of its own (${own.evidence.reason}).`, ...(cat.evidence.why || [])], summary: `${cat.evidence.summary} (category pattern: this product has too little history of its own — ${own.evidence.reason})`, own_reason: own.evidence.reason } });
     } else out.set(g.key, { ...own, level: 'family' });
   });
   return { available: true, window: { from: window.from, to: window.to || today }, months, groups: out, categories, store_units: Object.values(storeTotals).reduce((s, x) => s + x, 0), baseline: usedMedian ? 'median_product' : 'store_total', config: { ...CFG } };

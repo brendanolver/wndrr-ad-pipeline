@@ -61,6 +61,19 @@ async function loadOverrides(db = pool) {
   } catch (e) { return []; }
 }
 
+// The category a product is grouped under for seasonality. With Shopify orders it is Shopify's own Product type (what Demand Planning's Sales
+// Cadence groups by): the type carrying most of the family's units. Otherwise (ApparelMagic sales, or a product Shopify has no type for) it is the
+// ApparelMagic category.
+function categoryOf(f, sales) {
+  const cats = sales && sales.categories;
+  if (cats && cats.size) {
+    const votes = new Map();
+    (f.style_codes || []).forEach((c) => { const t = cats.get(c); if (!t) return; const u = (sales.get(c) && sales.get(c).qty365) || 1; votes.set(t, (votes.get(t) || 0) + u); });
+    if (votes.size) return [...votes.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0][0];
+  }
+  return f.category;
+}
+
 // monthly units per style out of the sales crawl: Map(style -> { 'YYYY-MM': units }) + the window the crawl covers
 function monthlyFromSales(salesByStyle) {
   const m = new Map();
@@ -90,7 +103,8 @@ async function loadPlanningContext({ amDetails, today, deps = {} } = {}) {
       const { monthly, window } = monthlyFromSales(sales);
       const launchByStyle = new Map();
       if (amDetails) amDetails.forEach((d, code) => { const l = ymd(d && d.launchDate); if (l) launchByStyle.set(code, l); });
-      ctx.seasonality = seasonality.buildSeasonality({ monthlyByStyle: monthly, groups: allFamilies.map((f) => ({ key: f.key, name: f.name, category: f.category, style_codes: f.style_codes })), launchByStyle, window, today });
+      ctx.seasonality = seasonality.buildSeasonality({ monthlyByStyle: monthly, groups: allFamilies.map((f) => ({ key: f.key, name: f.name, category: categoryOf(f, sales), style_codes: f.style_codes })), launchByStyle, window, today });
+      ctx.salesSource.category_source = sales.categories && sales.categories.size ? 'shopify_product_type' : 'apparelmagic_category';
     }
   } catch (e) { ctx.seasonality = { available: false, reason: `Seasonality could not be calculated (${e.message})` }; }
 
@@ -128,8 +142,9 @@ function assessProduct(ctx, { styleCodes, productCodes, stock, sales, existing }
     highStockMin: ctx.settings.high_stock_min_soh, seasonal, coverage, sales, overrides: overrides.map((o) => ({ kind: o.kind, note: o.note, until: o.until })), today: ctx.today, existing,
   });
   a.score_adjust = prio.scoreAdjust(a);
-  a.season.evidence = seasonal.evidence ? { summary: seasonal.evidence.summary, level: seasonal.level || null, confidence: seasonal.evidence.confidence || null, months_used: seasonal.evidence.months_used || null, current_index: seasonal.evidence.current_index ?? null, horizon_index: seasonal.evidence.horizon_index ?? null, peaks: seasonal.evidence.peaks || [], caveats: seasonal.evidence.caveats || [] } : null;
+  a.season.evidence = seasonal.evidence ? { summary: seasonal.evidence.summary, level: seasonal.level || null, confidence: seasonal.evidence.confidence || null, months_used: seasonal.evidence.months_used || null, current_index: seasonal.evidence.current_index ?? null, why: seasonal.evidence.why || [], monthly: seasonal.evidence.monthly || [], now_month: seasonal.evidence.now_month || null, horizon_months: seasonal.evidence.horizon_months || [], first_month: seasonal.evidence.first_month || null, last_month: seasonal.evidence.last_month || null, units: seasonal.evidence.units ?? null, troughs: seasonal.evidence.troughs || [], series_label: seasonal.evidence.label || null, horizon_index: seasonal.evidence.horizon_index ?? null, peaks: seasonal.evidence.peaks || [], caveats: seasonal.evidence.caveats || [] } : null;
   a.season.level = seasonal.level || null;
+  a.season.source = ctx.salesSource ? { source: ctx.salesSource.source, label: ctx.salesSource.label } : null;
   a.family_key = famKey;
   return a;
 }
@@ -156,6 +171,8 @@ function seasonalityStatus(ctx, s) {
   const cycles = months >= 24 ? Math.floor(months / 12) : 1;
   const quality = [];
   if (w.source === 'apparelmagic' && w.failed_requests > 0) quality.push(`${w.failed_requests} of ${w.total_requests} daily ApparelMagic requests failed, so some days are under-counted`);
+  const defs = []; // definition differences from Demand Planning: stated, but they are not missing data
+  if (w.source === 'shopify' && (st.cancelled_units > 0 || st.test_units > 0)) defs.push(`${(st.cancelled_units || 0) + (st.test_units || 0)} units on cancelled or test orders are excluded (Demand Planning counts them unless the order was refunded)`);
   if (w.source === 'shopify' && st.unmapped_units > 0) quality.push(`${st.unmapped_units} units on ${st.unmapped_skus} SKUs matched no known style and are left out`);
   if (w.source === 'shopify' && w.requested_from && w.from > w.requested_from && (Number(String(w.from).slice(0, 7).replace('-', '')) - Number(String(w.requested_from).slice(0, 7).replace('-', ''))) > 1) quality.push(`Shopify returned orders only from ${w.from}, later than the ${w.requested_from} that was requested (the token may not be able to read older orders)`);
   const label = src.label || 'online sales';
@@ -164,9 +181,9 @@ function seasonalityStatus(ctx, s) {
     : 'one observed cycle — real evidence of what sold when, but a second year would confirm that it repeats';
   return {
     available: true, source: src.source || null, source_label: label, window: s.window, months_of_data: months, baseline: s.baseline,
-    confidence: cycles >= 2 ? 'medium' : 'limited', years_of_data: cycles, incomplete: quality.length > 0, quality,
-    notes: src.notes || [],
-    note: `Seasonality is read from ${months} months of ${label} (${s.window.from} to ${s.window.to}) — ${cycleText}.${quality.length ? ` Data quality: ${quality.join('; ')}.` : ''}`,
+    confidence: cycles >= 2 ? 'medium' : 'limited', years_of_data: cycles, incomplete: quality.length > 0, quality, definitions: defs,
+    notes: src.notes || [], category_source: src.category_source || null,
+    note: `Seasonality is read from ${months} months of ${label} (${s.window.from} to ${s.window.to}) — ${cycleText}.${quality.length ? ` Data quality: ${quality.join('; ')}.` : ''}${defs.length ? ` Definitions: ${defs.join('; ')}.` : ''}`,
   };
 }
 

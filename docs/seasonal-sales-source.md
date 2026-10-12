@@ -47,3 +47,34 @@ Assessed from the code on the `V2` branch of `brendanolver/demandplanning` (read
   - `shopify-proxy` is unauthenticated and forwards any non-mutation GraphQL query with the Shopify admin token (the only block is on mutations). With a `read_orders` token that can include customer names, emails and addresses on orders.
   - `netlify/edge-functions/pipeline-proxy.js` contains a bearer token and a server IP address **in plain text in a public repository**. That token should be treated as exposed and rotated.
 - **Recommendation (not done; the Demand Planning project must not be changed without approval):** put every function behind authentication (a shared secret header or Netlify Identity / site password), restrict CORS to the app's own origin, remove the committed token and rotate it, restrict `shopify-proxy` to the specific queries the app needs, and restrict `am-proxy` writes to the one place that needs them.
+
+## Same definitions as Demand Planning (checked against its code, 2026-10-12)
+
+Compared with the `V2` branch of `brendanolver/demandplanning`: its server-side Shopify sales feed and its Sales Cadence screen. Nothing was queried in production Shopify.
+
+| Definition | Demand Planning | Creative Planning (`src/lib/shopifySales.js`) | Same? |
+|---|---|---|---|
+| Units | `LineItem.currentQuantity`: net of refunded and removed units | the same field | Yes |
+| Day | the order's creation day in the shop's own time zone (`shop.ianaTimezone`) | the same | Yes |
+| Monthly total | sum of those days by calendar month (Sales Cadence "12 Months") | sum of the same days by `YYYY-MM` | Yes |
+| Refunds | attributed to the original order day (no negative days; only positive quantities) | the same | Yes |
+| Service lines | `ORDPRO`, `OS`, no-SKU lines (gift cards) dropped; product type `RETURN` excluded | the same | Yes |
+| SKU to style | modern SKUs: the first 11 characters (`W` + year + 2 letters + 3 digits + 3-letter colour) | the same rule, plus the longest known catalogue style for older SKUs; units that fit neither are counted and reported, never guessed | Yes for modern SKUs |
+| Category | Shopify product type, upper-cased (the Sales Cadence category) | the same, taken per style from the type carrying most units; the ApparelMagic category only when Shopify has no type | Yes |
+| Cancelled orders | not filtered (relies on `currentQuantity`) | excluded, and their units are counted and reported | **Deliberately different**, visible in the Planning data note |
+| Test orders | not filtered | excluded and reported | **Deliberately different** |
+| History | 365 days (older days from a CSV export, newest days from ApparelMagic) | 730 days from Shopify alone | Longer |
+
+The cancelled-order difference is zero whenever a cancelled order was refunded (Shopify then reports zero units). Where an order was cancelled without a refund, Demand Planning counts the units and Creative Planning does not; `stats.cancelled_units` shows exactly how many, so the two can be reconciled. This has not been measured on live data (that needs the approved read-only comparison script).
+
+## Railway environment variables
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `SHOPIFY_SHOP_DOMAIN` | for Shopify seasonality | e.g. `thewndrr.myshopify.com` |
+| `SHOPIFY_ADMIN_TOKEN` | for Shopify seasonality | read-only custom-app token (`read_orders`, plus `read_all_orders` to see beyond 60 days). Server only; never sent to the browser |
+| `SHOPIFY_SALES_LOOKBACK_DAYS` | optional | default 730 |
+| `SHOPIFY_API_VERSION` | optional | default 2025-10 |
+| `SEASONAL_SALES_SOURCE` | optional | `auto` (default), `shopify` (no fallback), `apparelmagic` |
+
+With none of these set, nothing changes: Planning uses ApparelMagic online sales and says so. No variable is needed for the active-ad coverage, High Stocks or review-workflow changes.

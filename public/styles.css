@@ -3071,3 +3071,23 @@ td.mp-name > .mp-name-stack{vertical-align:middle;max-width:calc(100% - 46px);}
 .po-row .btn { margin-left: auto; }
 
 .plan-cov-uncertain { background: #fff1d6; color: #8a5a00; }
+
+/* compact seasonal explanation + monthly units (Batch 11 follow-up) */
+.plan-season { margin: 8px 0; font-size: 12.5px; }
+.plan-season-why { margin: 4px 0 6px; padding-left: 18px; }
+.plan-season-why li { margin: 2px 0; }
+.plan-months { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 3px; max-width: 560px; align-items: end; }
+.plan-mo { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; min-height: 62px; padding: 2px 0; border-radius: 4px; border: 1px solid transparent; }
+.plan-mo i { display: block; width: 70%; background: #8aa4c8; border-radius: 2px 2px 0 0; }
+.plan-mo-n { font-size: 10px; font-variant-numeric: tabular-nums; color: #3b4452; }
+.plan-mo-l { font-size: 9.5px; color: #6b7280; white-space: nowrap; }
+.plan-mo.now { border-color: #2a4d8f; }
+.plan-mo.ahead { background: #eef4ff; }
+.plan-mo.gap i { background: repeating-linear-gradient(45deg, #c9d3e3, #c9d3e3 3px, #e8edf5 3px, #e8edf5 6px); }
+.plan-mo.spike i { background: transparent; border: 1px dashed #8aa4c8; }
+.plan-mo.off { opacity: .35; }
+.plan-months-key { margin-top: 4px; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .plan-mo i { background: #5f7ba3; } :root:not([data-theme="light"]) .plan-mo-n { color: #c8d0dc; } :root:not([data-theme="light"]) .plan-mo.ahead { background: #1d2a40; } }
+
+.plan-source { font-size: 12px; color: #4b5563; margin: 6px 0; }
+.plan-source-off, .plan-source-warn { color: #8a5a00; }

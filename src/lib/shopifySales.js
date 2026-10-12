@@ -17,6 +17,16 @@
 // with no SKU) are left out. A SKU is attached to a style by the LONGEST known style code it starts with (the catalogue is the source of truth, so a
 // size suffix is never guessed at); units that match no known style are counted and reported, never silently dropped.
 //
+// SAME DEFINITIONS AS DEMAND PLANNING (its Shopify sales feed + Sales Cadence screen), checked against its code:
+//   units      LineItem.currentQuantity on the order's creation day in the shop's own time zone; monthly totals are the sum of those days by calendar month
+//   SKU->style the 11-character modern style code (W + 2-digit year + 2 letters + 3 digits + 3-letter colour), exactly Demand Planning's rule for modern SKUs;
+//              a longer/older SKU is attached to the longest KNOWN style code it starts with instead of guessing at a size suffix
+//   category   Shopify's own Product type, upper-cased (the category the Cadence screen groups by); the RETURN product type (returns cover) is excluded
+//   refunds    currentQuantity already excludes refunded / removed units, attributed to the original order day (so a later return never moves a month)
+// ONE DELIBERATE DIFFERENCE: Demand Planning does not filter on cancellation (it relies on currentQuantity), this module also leaves out orders with
+// cancelledAt set and test orders. The two agree whenever a cancelled order was refunded. The units on cancelled / test orders are COUNTED and reported
+// (stats.cancelled_units / test_units) so the difference is visible and reconcilable, never hidden.
+//
 // WHAT IT CANNOT KNOW: stock-outs and promotions are not in an order feed. Those are handled downstream (seasonality.js leaves out a month that looks
 // like a stock-out and divides a store-wide promotion surge out), and this module says so in its result rather than claiming otherwise.
 //
@@ -29,6 +39,8 @@ const DEFAULT_LOOKBACK_DAYS = 730;
 const DEFAULT_TTL_MS = 12 * 60 * 60 * 1000;
 const MAX_WAIT_MS = 12 * 60 * 1000;
 const NON_PRODUCT_SKUS = new Set(['ORDPRO', 'OS']);
+const MODERN_STYLE_RE = /^W\d{2}[A-Z]{2}\d{3}[A-Z]{3}/; // same pattern as Demand Planning's styleFromSku()
+const EXCLUDED_CATEGORIES = new Set(['RETURN']); // service lines (returns cover), not products
 const DOMAIN_RE = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/i;
 
 function envConfig(env = process.env) {
@@ -65,6 +77,8 @@ function makeStyleMapper(knownStyles) {
     if (memo.has(sku)) return memo.get(sku);
     let hit = null;
     for (let len = Math.min(sku.length, 16); len >= 8; len -= 1) { const c = sku.slice(0, len); if (known.has(c)) { hit = c; break; } }
+    // not in the catalogue (retired / pre-release): Demand Planning's rule for a modern SKU, so store-wide totals still agree with it
+    if (!hit && sku.length >= 11 && MODERN_STYLE_RE.test(sku)) hit = sku.slice(0, 11);
     memo.set(sku, hit);
     return hit;
   };
@@ -76,7 +90,7 @@ function bulkQuery(sinceDay) {
     bulkOperationRunQuery(query: """
       { orders(query: "created_at:>='${sinceDay}'") { edges { node {
           id createdAt cancelledAt test
-          lineItems { edges { node { sku currentQuantity } } }
+          lineItems { edges { node { sku currentQuantity product { productType } } } }
       } } } }
     """) { bulkOperation { id status } userErrors { field message } }
   }`;
@@ -93,18 +107,22 @@ function isAllowedDownloadUrl(urlStr) {
 // Aggregate NDJSON lines (an async iterable of strings) in TWO streaming passes. Shopify does not guarantee a parent order row precedes its line-item
 // rows, so pass 1 learns every order's store-local day (and whether it counts); pass 2 adds up the line items. Neither pass holds the file in memory.
 async function aggregate({ pass1, pass2, dayOf, mapStyle, sinceDay }) {
-  const orderDay = new Map(); // order id -> day, or null when the order does not count
-  const stats = { orders: 0, cancelled_orders: 0, test_orders: 0, lines: 0, unresolved_lines: 0, kept_units: 0, non_product_units: 0, unmapped_units: 0, unmapped_skus: 0, refunded_or_removed_lines: 0 };
+  const orderDay = new Map(); // order id -> store-local day, or 'cancelled' / 'test' when the order does not count
+  const stats = {
+    orders: 0, cancelled_orders: 0, test_orders: 0, lines: 0, unresolved_lines: 0, kept_units: 0, non_product_units: 0, excluded_category_units: 0,
+    cancelled_units: 0, test_units: 0, unmapped_units: 0, unmapped_skus: 0, refunded_or_removed_lines: 0,
+  };
   for await (const line of pass1()) {
     if (!line.trim()) continue;
     let r; try { r = JSON.parse(line); } catch (e) { continue; }
     if (r.__parentId || !r.id || !r.createdAt) continue;
     stats.orders += 1;
-    if (r.cancelledAt) { stats.cancelled_orders += 1; orderDay.set(r.id, null); continue; }
-    if (r.test) { stats.test_orders += 1; orderDay.set(r.id, null); continue; }
+    if (r.cancelledAt) { stats.cancelled_orders += 1; orderDay.set(r.id, 'cancelled'); continue; }
+    if (r.test) { stats.test_orders += 1; orderDay.set(r.id, 'test'); continue; }
     orderDay.set(r.id, dayOf(r.createdAt));
   }
   const byStyle = new Map(); // style -> { 'YYYY-MM-DD': units }
+  const catUnits = new Map(); // style -> Map(PRODUCT TYPE -> units)
   const unmapped = new Map();
   let firstDay = null; let lastDay = null;
   for await (const line of pass2()) {
@@ -114,26 +132,33 @@ async function aggregate({ pass1, pass2, dayOf, mapStyle, sinceDay }) {
     stats.lines += 1;
     if (!orderDay.has(r.__parentId)) { stats.unresolved_lines += 1; continue; }
     const day = orderDay.get(r.__parentId);
-    if (!day || day < sinceDay) continue; // a cancelled / test order, or the padding days before the window
     const qty = Number(r.currentQuantity) || 0;
+    if (day === 'cancelled' || day === 'test') { if (qty > 0) stats[day === 'cancelled' ? 'cancelled_units' : 'test_units'] += qty; continue; }
+    if (!day || day < sinceDay) continue; // the padding days before the window
     if (qty <= 0) { stats.refunded_or_removed_lines += 1; continue; }
     const sku = String(r.sku || '').trim().toUpperCase();
     if (!sku || NON_PRODUCT_SKUS.has(sku)) { stats.non_product_units += qty; continue; }
+    const ptype = String((r.product && r.product.productType) || '').trim().toUpperCase();
+    if (EXCLUDED_CATEGORIES.has(ptype)) { stats.excluded_category_units += qty; continue; }
     const style = mapStyle(sku);
     if (!style) { stats.unmapped_units += qty; unmapped.set(sku, (unmapped.get(sku) || 0) + qty); continue; }
     if (!byStyle.has(style)) byStyle.set(style, {});
     const d = byStyle.get(style); d[day] = (d[day] || 0) + qty;
+    if (ptype) { if (!catUnits.has(style)) catUnits.set(style, new Map()); const cm = catUnits.get(style); cm.set(ptype, (cm.get(ptype) || 0) + qty); }
     stats.kept_units += qty;
     if (!firstDay || day < firstDay) firstDay = day;
     if (!lastDay || day > lastDay) lastDay = day;
   }
   stats.unmapped_skus = unmapped.size;
   stats.top_unmapped = [...unmapped.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
-  return { byStyle, stats, firstDay, lastDay };
+  // each style's category = the Shopify product type that carried most of its units
+  const categories = new Map();
+  catUnits.forEach((cm, style) => { categories.set(style, [...cm.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0][0]); });
+  return { byStyle, categories, stats, firstDay, lastDay };
 }
 
 // Turn per-day units into the shape Planning already uses: style -> { qty7, qty30, qty365, months }, plus the window the data really covers.
-function toSalesByStyle(byStyle, { today, sinceDay, firstDay, tz, stats, source = 'shopify' }) {
+function toSalesByStyle(byStyle, { today, sinceDay, firstDay, tz, stats, categories = new Map(), source = 'shopify' }) {
   const out = new Map();
   const d7 = addDays(today, -6); const d30 = addDays(today, -29); const d365 = addDays(today, -364);
   byStyle.forEach((days, style) => {
@@ -149,6 +174,7 @@ function toSalesByStyle(byStyle, { today, sinceDay, firstDay, tz, stats, source 
   // The window starts where orders really start. If the token cannot see back as far as asked (no read_all_orders: 60 days), the window is short and
   // seasonality will say "insufficient data" rather than reading missing history as weak sales.
   const from = firstDay && firstDay > sinceDay ? firstDay : sinceDay;
+  out.categories = categories; // style -> Shopify product type (the category Demand Planning's Sales Cadence groups by)
   out.window = { from, to: today, days: daysBetweenInclusive(from, today), source, requested_from: sinceDay, tz, stats };
   return out;
 }
@@ -213,7 +239,7 @@ async function fetchSalesByStyle({ client, knownStyles, tz = 'Australia/Melbourn
   if (!url) return toSalesByStyle(new Map(), { today, sinceDay, firstDay: null, tz, stats: { orders: 0, kept_units: 0 } });
   const agg = await aggregate({ pass1: () => client.openLines(url), pass2: () => client.openLines(url), dayOf, mapStyle: makeStyleMapper(knownStyles), sinceDay });
   if (agg.stats.orders > 0 && agg.stats.unresolved_lines / Math.max(1, agg.stats.lines) > 0.02) throw new Error('too many Shopify line items could not be matched to their orders; refusing to use this export');
-  return toSalesByStyle(agg.byStyle, { today, sinceDay, firstDay: agg.firstDay, tz, stats: agg.stats });
+  return toSalesByStyle(agg.byStyle, { today, sinceDay, firstDay: agg.firstDay, tz, stats: agg.stats, categories: agg.categories });
 }
 
 // Read the shop's own time zone (one tiny query).

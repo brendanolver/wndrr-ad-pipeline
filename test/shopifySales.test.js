@@ -242,3 +242,75 @@ test('the current-month fold only applies to a one-year window (a two-year windo
   assert.equal(two.seasonality.available, true);
   assert.ok(!two.seasonality.months.some((m) => m === '2026-10'), 'the month in progress is not treated as a complete month');
 });
+
+// ── same definitions as Demand Planning (its sales feed + Sales Cadence screen) ──
+// Demand Planning's styleFromSku(), copied verbatim from its index.html (V2 branch), as the reference the mapper must agree with for modern SKUs.
+function dpStyleFromSku(sku) {
+  if (!sku) return '';
+  const u = sku.toUpperCase().trim();
+  if (/^W\d{2}[A-Z]{2}\d{3}[A-Z]{3}/.test(u) && u.length >= 11) return u.slice(0, 11);
+  for (const sz of ['XXXXL', 'XXXL', 'XXL', 'XL', 'XXS', 'XS', 'OS', 'S', 'M', 'L']) { if (u.endsWith(sz)) return u.slice(0, u.length - sz.length); }
+  return u.replace(/\d{2}$/, '');
+}
+test('SKU -> style agrees with Demand Planning for every modern SKU, whether or not the style is in the catalogue (including colours that end in a size letter)', () => {
+  const colours = ['BLK', 'WHT', 'OYS', 'WHM', 'LEM', 'BLO', 'BRO', 'STO', 'VIO', 'NAV'];
+  const sizes = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', 'OS', '28', '30', ''];
+  const noCatalogue = S.makeStyleMapper([]); const withCatalogue = S.makeStyleMapper(colours.map((c) => `W26HA006${c}`));
+  for (const c of colours) for (const sz of sizes) {
+    const sku = `W26HA006${c}${sz}`;
+    assert.equal(noCatalogue(sku), dpStyleFromSku(sku), `${sku} without a catalogue`);
+    assert.equal(withCatalogue(sku), dpStyleFromSku(sku), `${sku} with the catalogue`);
+  }
+});
+test('an older SKU form is attached by the catalogue when known, and REPORTED (not guessed) when not', () => {
+  assert.equal(S.makeStyleMapper(['W256A002ASS'])('W256A002ASSL'), 'W256A002ASS');
+  assert.equal(S.makeStyleMapper([])('W256A002ASSL'), null);
+});
+
+function orderLines(rows) { // rows: [id, createdAt, { cancelledAt, test }, [[sku, qty, productType]]]
+  const out = [];
+  rows.forEach(([id, createdAt, flags, items]) => {
+    out.push(j({ id, createdAt, cancelledAt: (flags || {}).cancelledAt || null, test: !!(flags || {}).test }));
+    items.forEach(([sku, qty, ptype]) => out.push(j({ __parentId: id, sku, currentQuantity: qty, product: ptype === undefined ? null : { productType: ptype } })));
+  });
+  return out;
+}
+const DAYLINES = orderLines([
+  ['o1', '2026-09-30T14:30:00Z', {}, [['W26AA001BLKS', 3, 'Tees'], ['W26AA001BLKM', 2, 'tees'], ['W26BB002WHTS', 4, 'SWEATS']]], // 1 Oct store-local
+  ['o2', '2026-10-02T01:00:00Z', {}, [['W26AA001BLKL', 0, 'TEES']]],                                                         // fully refunded
+  ['o3', '2026-10-03T01:00:00Z', { cancelledAt: '2026-10-03T02:00:00Z' }, [['W26AA001BLKS', 6, 'TEES']]],                   // cancelled, NOT refunded
+  ['o4', '2026-10-04T01:00:00Z', { test: true }, [['W26BB002WHTS', 7, 'SWEATS']]],
+  ['o5', '2026-10-05T01:00:00Z', {}, [['RETURNCOVER', 5, 'RETURN'], ['ORDPRO', 5, ''], ['W26BB002WHTM', 1, 'SWEATS']]],
+]);
+test('reconciliation with Demand Planning: same units for refunds / service lines, and cancelled / test units reported so the difference is explicit', async () => {
+  const agg = await S.aggregate({ pass1: () => gen(DAYLINES), pass2: () => gen(DAYLINES), dayOf, mapStyle: S.makeStyleMapper(KNOWN), sinceDay: '2026-01-01' });
+  // Demand Planning's feed total over the same data = currentQuantity of every non-service line, cancelled orders included unless refunded
+  const dpTotal = 3 + 2 + 4 + 0 + 6 + 7 + 1; // o1 (9) + o2 (0) + o3 (6) + o4 (7) + o5 product line (1)
+  const s = agg.stats;
+  assert.equal(s.kept_units + s.cancelled_units + s.test_units, dpTotal, 'kept + cancelled + test = what Demand Planning would count');
+  assert.equal(s.kept_units, 3 + 2 + 4 + 1); assert.equal(s.cancelled_units, 6); assert.equal(s.test_units, 7);
+  assert.equal(s.excluded_category_units, 5, 'the RETURN product type is excluded, as Demand Planning does'); assert.equal(s.non_product_units, 5);
+  assert.deepEqual(agg.byStyle.get('W26AA001BLK'), { '2026-10-01': 5 }); // monthly = sum of days
+  assert.deepEqual(agg.byStyle.get('W26BB002WHT'), { '2026-10-01': 4, '2026-10-05': 1 });
+});
+test('category = Shopify product type upper-cased (the Sales Cadence grouping): the type carrying most of a style\'s units', async () => {
+  const lines = orderLines([['a', '2026-09-30T14:30:00Z', {}, [['W26AA001BLKS', 5, 'Tees'], ['W26AA001BLKM', 1, 'Tops']]]]);
+  const agg = await S.aggregate({ pass1: () => gen(lines), pass2: () => gen(lines), dayOf, mapStyle, sinceDay: '2026-01-01' });
+  assert.equal(agg.categories.get('W26AA001BLK'), 'TEES');
+  const out = S.toSalesByStyle(agg.byStyle, { today: '2026-10-12', sinceDay: '2025-10-13', firstDay: agg.firstDay, tz: TZ, stats: agg.stats, categories: agg.categories });
+  assert.equal(out.categories.get('W26AA001BLK'), 'TEES');
+});
+test('Planning groups a product by its Shopify product type when the source is Shopify, else by the ApparelMagic category', async () => {
+  const shop = synth('shopify', '2025-10', 12); shop.categories = new Map(FAMS.map((f) => [f.style_codes[0], 'SHOP TYPE']));
+  const ctx = await ctxWith(shop);
+  assert.ok([...ctx.seasonality.categories.keys()].includes('SHOP TYPE') && !ctx.seasonality.categories.has('TEES'), 'categories come from Shopify');
+  assert.equal(ctx.salesSource.category_source, 'shopify_product_type');
+  const am = await ctxWith(synth('apparelmagic', '2025-10', 12));
+  assert.ok(am.seasonality.categories.has('TEES')); assert.equal(am.salesSource.category_source, 'apparelmagic_category');
+});
+test('cancelled / test units are stated as a definition difference, not as missing data', async () => {
+  const s = synth('shopify', '2025-10', 12, { requested_from: '2025-10-13', stats: { cancelled_units: 40, test_units: 2 } });
+  const ds = pc.dataStatus(await ctxWith(s));
+  assert.equal(ds.seasonality.incomplete, false, 'a definition difference is not incompleteness');
+  assert.match(ds.seasonality.note, /42 units on cancelled or test orders are excluded/); assert.deepEqual(ds.seasonality.definitions.length, 1);
+});
