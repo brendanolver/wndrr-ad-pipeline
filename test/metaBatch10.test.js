@@ -303,12 +303,12 @@ test('approved colours: MOF CPA and TOF Frequency use the stated ranges; every o
 });
 test('Meta Performance colour guide: one collapsed control generated from the active rules; Triple Whale is not touched', () => {
   const app = code('public/app.js');
-  assert.match(app, /<details class="mp-health-guide"><summary title="What the colour dots mean">ⓘ Colour guide<\/summary>/);
+  assert.match(app, /<details class="mp-health-guide"><summary title="What the colours mean">ⓘ Colour guide<\/summary>/);
   assert.match(app, /CPA is Meta-reported \(Triple Whale is not connected yet\)/);
   assert.doesNotMatch(app.slice(app.indexOf('<details class="mp-health-guide">') - 200, app.indexOf('<details class="mp-health-guide">') + 1800), /Colour dots are used on/, 'the long paragraph is gone');
   assert.match(app, /Meeting the benchmark/);
-  assert.match(app, /Missing the benchmark by up to 20%/);
-  assert.match(app, /Missing the benchmark by more than 20%/);
+  assert.match(app, /Missing the benchmark by up to (20|\$\{tol\})%/); // Batch 12: the tolerance now comes from the active health rules (default 20)
+  assert.match(app, /Missing the benchmark by more than (20|\$\{tol\})%/);
   const files = fs.readdirSync(path.join(__dirname, '..', 'src', 'lib')).concat(fs.readdirSync(path.join(__dirname, '..', 'src', 'routes')));
   assert.ok(!files.some((f) => /triple|whale/i.test(f)), 'no Triple Whale integration exists in this batch');
   assert.doesNotMatch(code('src/lib/metaFunnelHealth.js'), /triple|whale|TRIPLEWHALE/i);
