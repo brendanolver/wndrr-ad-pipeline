@@ -2,22 +2,22 @@
 // own creative workflow), and must not assume a product has launched just because the warehouse holds stock of it.
 //
 // WHAT IS KNOWN ABOUT WNDRR'S DATA (verified in the code that reads it; see docs/launch-status.md):
-//   * ApparelMagic has NO product-status or release-date field that this app reads. The style's `mid_code` is a free-text date that WNDRR is believed to repurpose
-//     as a launch date (a claim inherited from the Demand Planning integration; NOT verified, and it may be a planned delivery or buy date rather than the official
-//     launch). It is held PER STYLE (= per colourway); '0' / blank mean "none". Until the team verifies it (setting launch_date_verified), a FUTURE date still keeps a
-//     product out (the safe direction) but a PASSED date is not proof of launch. An inventory receipt, purchase order date or warehouse arrival date is NOT a launch date.
+//   * ApparelMagic has NO product-status or release-date field that this app reads. WNDRR has CONFIRMED that the style's `mid_code` IS the official launch date. It is
+//     held PER STYLE (= per colourway), is free text, and '0' / blank mean "none". An inventory receipt, purchase order date or warehouse arrival date is NOT a launch
+//     date and is never read as one. (If the confirmation ever needs withdrawing, setting launch_date_verified to 0 stops a PASSED date counting as proof.)
 //   * Upcoming Drops live in this database (styles.drop_id -> drops.launch_date).
 //   * Shopify (status / publication) is the only direct evidence a product is on sale, but its credentials are not configured in production, so it is an OPTIONAL
 //     input here (`shopify`), used only when a caller supplies it.
 //
 // EVIDENCE USED, strongest first (a product is judged from what is KNOWN, never from what is missing):
 //   1. a manual launch-status override (product_launch_overrides), set by a person
-//   2. Shopify, when supplied: DRAFT = not launched, ARCHIVED = discontinued, ACTIVE and published = on sale (corroborates; it never overrides a future date)
+//   2. Shopify, when supplied: DRAFT = not launched, ARCHIVED = discontinued, ACTIVE and published = on sale (corroborates only: neither a published listing nor sales EVER override a
+//      future official ApparelMagic launch date)
 //   3. an Upcoming Drop the product belongs to: a future drop date = not launched
-//   4. ApparelMagic's date (mid_code) for the colourway: a future date = not launched (always); a PASSED date counts as launched ONLY once launch_date_verified is on; a date that cannot be read = UNKNOWN (never guessed)
+//   4. ApparelMagic's date (mid_code) for the colourway: a future date = not launched (always); a PASSED date = launched (while launch_date_verified is on, the default; off = a passed date is not proof); a date that cannot be read = UNKNOWN (never guessed)
 //      a past date = launched, unless it passed only a few days ago with no sales yet (a planned date passing does not prove the product went live: UNKNOWN)
 //   5. the CORE product group in ApparelMagic (an established evergreen range) with no future date
-//   6. a past Upcoming Drop (while the date field is unverified only a NAMED drop counts: unnamed drops are auto-created from the date field itself)
+//   6. a past Upcoming Drop (if the date field were ever marked unverified, only a NAMED drop would count: unnamed drops are auto-created from the date field)
 //   7. sustained sales, ONLY when the sales setting allows it. Sales alone are not proof: they can include pre-launch, staff, gifting or seeding orders.
 // NEVER used on their own: stock quantity, zero sales, "last creative = never", or stock arriving at the warehouse. With no usable evidence the status is
 // UNKNOWN: flagged for a person to verify, never recommended, never silently treated as launched.
@@ -26,9 +26,9 @@
 const STATUSES = ['launched', 'unlaunched', 'upcoming_restock', 'discontinued', 'unknown'];
 const DEFAULTS = {
   sales_launch_units: 10, // units sold before sales count as (weak) evidence
-  date_verified: false, // the team has confirmed the ApparelMagic date field IS the official launch date; until then a PASSED date is not proof (a future date still excludes)
+  date_verified: true, // WNDRR has CONFIRMED that ApparelMagic's mid_code IS the official launch date. Setting it off (launch_date_verified = 0) makes a PASSED date non-proof again (a future date always excludes)
   sales_confirms_launch: false, // sales alone confirm a launch only when this is on
-  settle_days: 21, // a launch date this recent with no sales is verified rather than assumed
+  settle_days: 0, // optional: a launch date that passed fewer than this many days ago with nothing sold yet is verified rather than assumed (0 = off: an official date that has passed means launched)
   restock_min_on_order: 30, low_stock_units: 30,
 };
 const ymd = (d) => (d instanceof Date ? d.toISOString().slice(0, 10) : d ? String(d).slice(0, 10) : null);

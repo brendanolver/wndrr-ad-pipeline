@@ -114,6 +114,12 @@ async function computeHighStockProducts(deps = {}) {
     // real-style-code check additionally excludes non-apparel catalogue
     // entries (shipping/return protection add-ons, etc.).
     const eligibleStyleCodes = [];
+    // a person's manual "launched" status wins over a launch date that is still ahead, so it must be known before the date pre-filter below
+    let handLaunched = new Set();
+    try {
+      const lcEarly = deps.launch || await weeklyLoader.loadLaunchContext(pool, []);
+      handLaunched = new Set([...lcEarly.overrides.entries()].filter(([, o]) => o && o.status === 'launched').map(([k]) => k));
+    } catch (e) { handLaunched = new Set(); }
     for (const [styleCode, details] of am.amDetails.entries()) {
       if (details.isCore || apparelmagic.isAdExcludedCategory(details)) continue;
       if (!apparelmagic.isWndrrStyleCode(styleCode)) continue;
@@ -121,11 +127,12 @@ async function computeHighStockProducts(deps = {}) {
       // not excluded on this basis alone.
       if (details.launchDate) {
         const daysSinceLaunch = Math.floor((Date.now() - details.launchDate.getTime()) / 86400000);
-        if (daysSinceLaunch < 0) { // a launch date still ahead: unlaunched, reported (not silently dropped) and never recommended here
+        const byHand = handLaunched.has(styleCode) || handLaunched.has(apparelmagic.deriveProductCode(styleCode));
+        if (daysSinceLaunch < 0 && !byHand) { // a launch date still ahead: unlaunched, reported (not silently dropped) and never recommended here
           preExcluded.push({ key: apparelmagic.deriveProductCode(styleCode), name: details.productName || styleCode, status: 'unlaunched', detail: `ApparelMagic launch date ${details.launchDate.toISOString().slice(0, 10)} is still ahead.`, in_upcoming_drop: false, colourways: [styleCode] });
           continue;
         }
-        if (daysSinceLaunch < HIGH_STOCK_MIN_DAYS_SINCE_LAUNCH) continue;
+        if (daysSinceLaunch < HIGH_STOCK_MIN_DAYS_SINCE_LAUNCH && !byHand) continue;
       }
 
       const soh = am.amStock.get(styleCode) ?? 0;

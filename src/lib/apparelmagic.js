@@ -359,10 +359,9 @@ function pickFrontBack(images) {
   return { layout: 'single', main, front: main, back: null, count: imgs.length };
 }
 
-// mid_code: a free-text date field that WNDRR's AM account is BELIEVED to repurpose as a per-style date (cited from the demandplanning V2 integration; that claim
-// has NOT been independently verified, and it is not known whether the date is the OFFICIAL launch, a planned delivery or a buy date -- Shopify shows products that
-// were put on sale well before/after a month implied elsewhere). It is therefore only used as an unverified hint (see launchStatus.js, setting
-// launch_date_verified). CORE membership is the AM product group. '0' in mid_code means empty, not a real date.
+// mid_code is WNDRR's OFFICIAL product launch date (confirmed by WNDRR, Oct 2026), held per style (= colourway) as free text; '0' / blank means none. (Earlier code
+// comments cited the Demand Planning integration for this; it is now confirmed directly.) Launch logic lives in launchStatus.js. CORE membership is the AM product
+// group. '0' in mid_code means empty, not a real date.
 const CORE_GROUPS = new Set(['AA CORE STYLES', 'ACCESSORIES CURRENT']);
 function normGroupName(g) {
   return String(g || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();

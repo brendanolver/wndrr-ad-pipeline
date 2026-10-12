@@ -581,9 +581,11 @@ async function computePlan({ now = new Date(), isAdmin = false } = {}, deps = {}
     const lc = deps.launch !== undefined ? deps.launch : await weeklyLoader.loadLaunchContext(pool, families.flatMap((f) => f.style_codes || []));
     if (lc) {
       const todayStr = new Date(now).toISOString().slice(0, 10);
+      const stg = (deps.planningDeps && deps.planningDeps.settings) || await planningContext.loadSettings(pool).catch(() => null);
+      const launchCfg = launchLib.fromConfig((stg && stg.creative_planning_config) || {});
       families = families.filter((f) => {
         const styles = (f.style_codes || []).map((c) => launchInputs.forStyle(c, { amDetails, salesByStyle: null, drops: lc.drops, overrides: lc.overrides }));
-        const res = launchLib.assessFamily({ styles, familyOverride: lc.overrides.get(f.product_code) || null }, todayStr);
+        const res = launchLib.assessFamily({ styles, familyOverride: lc.overrides.get(f.product_code) || null }, todayStr, launchCfg);
         if (res.status === 'unlaunched' || res.status === 'discontinued') { launchExcluded.push({ product_code: f.product_code, product_name: f.name, status: res.status, detail: res.detail, in_upcoming_drop: res.in_upcoming_drop }); return false; }
         return true;
       });

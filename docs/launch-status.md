@@ -5,7 +5,7 @@ This is the investigation record for "High Stocks recommends products that have 
 ## 1. What ApparelMagic actually exposes (read from the code that reads it)
 
 * The app reads one crawl of ApparelMagic `GET /products`. The fields it keeps per **style** (one style = one colourway; the 8-character product code groups colourways) are: `style_number`, `description` (name and colour), images, `mid_code`, `group`, `category`, `color_code`, `size_range_id`.
-* **`mid_code` is NOT verified as WNDRR's official launch date.** An earlier version of this document (and the Batch 13 code) said it was "confirmed in production". That claim traces back to one commit message (`2f6b076`) citing the Demand Planning repo's V2 branch; no ApparelMagic record, field documentation or WNDRR statement in this repository confirms it, and this build environment has no ApparelMagic credentials to look. What the code actually knows: `mid_code` is a free-text field, per style (colourway), where `0`/blank means none, and many values resemble dates. Whether a date there is the **official launch**, a **planned delivery**, a **buy/season date** or something else is **unverified**. The app now treats it accordingly (section 4a).
+* **`mid_code` is WNDRR's official product launch date. This was CONFIRMED by WNDRR (12 Oct 2026).** History, for the record: Batch 13 first asserted it as "confirmed in production" on the strength of a single old commit message (`2f6b076`) that cited the Demand Planning repo; that was not independent evidence, so a follow-up change treated the field as unverified until WNDRR confirmed it directly. It is now confirmed and the setting `launch_date_verified` defaults to ON. It is held **per style (= colourway)**, as free text; `0` or blank means "none".
 * **There is no product status, release date or available-from field that the app reads.** Nothing was assumed to exist. An inventory receipt date, purchase order date or warehouse arrival date is **not** a launch date and is never used as one.
 * `group` = `AA CORE STYLES` / `ACCESSORIES CURRENT` marks the CORE range; `category` is the product type (Accessories are excluded from ad planning).
 * *Not verified, and cannot be from the build environment:* the live ApparelMagic records of the five named products. The build environment has no ApparelMagic credentials. **The new read-only check (Settings → Planning → "Check a product's launch evidence", tick "Include raw ApparelMagic fields") shows, in production, exactly what ApparelMagic holds for any product, including every date-like or status-like field its record carries**, so the question "what does ApparelMagic say about Loan Shark?" can be answered in seconds without anyone guessing.
@@ -24,7 +24,7 @@ Shopify credentials are still **not** configured in production, and none were ad
 
 (Older Shopify drafts exist for last year's Revival and Hexed styles, W25 style codes; those are separate and unrelated to the current colourways.)
 
-**This conflicts with the statement that these five have not launched.** Shopify has all five ACTIVE and published with steady weekly sales since August, and the stock figures equal the ones shown in High Stocks exactly. Either (a) the team means a different kind of "launch" (for example a campaign or hero launch) that does not stop the product being on sale, (b) these were set live early, or (c) the five are a different, genuinely unreleased set of colourways or styles. This cannot be settled from code. **Decision for the team:** if they are meant to be treated as not launched, mark each *Not launched* in the verification list (or add a manual status), or give them a future launch date in ApparelMagic; the app will then exclude them.
+**This looked like a conflict with the statement that these five have not launched, and it is explained by the confirmed rule:** Shopify availability and sales are not the official launch (section 4a). Shopify has all five ACTIVE and published with steady weekly sales since August, and the stock figures equal the ones shown in High Stocks exactly. Either (a) the team means a different kind of "launch" (for example a campaign or hero launch) that does not stop the product being on sale, (b) these were set live early, or (c) the five are a different, genuinely unreleased set of colourways or styles. This cannot be settled from code. **What decides it:** the official `mid_code` date. A future date excludes them whatever Shopify shows; if ApparelMagic holds a passed or missing date for a product the team considers unlaunched, correct the date in ApparelMagic (or set a manual *Not launched* status).
 
 ## 3. Why Batch 12 let them through
 
@@ -35,7 +35,7 @@ Batch 12 judged a colourway launched when **any** of: a past ApparelMagic date, 
 1. A person's manual status wins.
 2. Shopify, only when supplied (not configured today): DRAFT = not launched, ARCHIVED = discontinued; ACTIVE and published corroborates a launch but never overrides a future date.
 3. An Upcoming Drop dated in the future = not launched (its creative is handled in Upcoming Drops).
-4. An ApparelMagic date (`mid_code`, **unverified**; see 4a): future = not launched; **unreadable = unknown** (never guessed; years outside 2015-2100 and impossible dates count as unreadable); past = launched, unless it passed fewer than 21 days ago (configurable) with nothing sold yet, in which case it is *unknown* ("a planned date passing does not prove it went live").
+4. The official ApparelMagic launch date (`mid_code`): future = not launched, **always** (neither a published Shopify listing nor sales history can override it); **unreadable = unknown** (never guessed; years outside 2015-2100 and impossible dates count as unreadable); past = launched. (An optional extra check, `launch_settle_days`, can send a date that passed only a few days ago with nothing sold yet to verification; it is OFF by default now that the date is official.)
 5. CORE product group with no future date = launched (an established range).
 6. A past Upcoming Drop = launched.
 7. **Sales alone do not prove a launch** (pre-launch, staff and seeding orders look identical). They only count when the setting *Sales alone confirm a launch* is switched on (off by default).
@@ -45,21 +45,23 @@ Colourways are judged one by one; a product with some launched and some unlaunch
 
 **Why this is not a manual-classification job:** a product needs a person only when ApparelMagic has no readable date, it is not in the CORE group, and there is no Upcoming Drop. Products with a past date, a future date, an Upcoming Drop, or the CORE group are classified automatically. The verification list is ordered by stock, and each row shows the evidence.
 
-## 4a. Verification status of the date field, and the safe fallback (follow-up to Batch 13)
+## 4a. How the confirmed launch date is used (the rules, as implemented)
 
-Setting **Settings → Planning → Launch status → "ApparelMagic mid_code is verified as the OFFICIAL launch date"** (`launch_date_verified`, **off by default**).
+Setting **Settings → Planning → Launch status → "ApparelMagic mid_code is the OFFICIAL launch date"** (`launch_date_verified`) is **ON by default**. Existing production settings are untouched: nothing is written to the database, a stored value is respected exactly as stored (an explicit `0` would switch the confirmation off), and the new default simply applies where no value is stored. The optional "settle" check (`launch_settle_days`) is now **0 = off** by default, because the date is official: a date that has passed means launched.
 
-| mid_code holds | Field NOT verified (default) | Field verified |
-| --- | --- | --- |
-| a future date | **not launched** (kept out: the safe direction) | not launched |
-| a passed date | **not proof**. Unknown unless other evidence exists (manual status, Shopify published, CORE group, a **named** past drop). Goes to "Products requiring launch verification" | launched (with the 21-day settle check) |
-| unreadable text / blank | unknown | unknown |
+| `mid_code` holds | Result |
+| --- | --- |
+| a **future** date | **Not launched.** Left out of High Stocks, Core and ordinary Weekly Plan recommendations (reported, never silently dropped; handled in Upcoming Drops). Neither Shopify publication/ACTIVE status nor sales history overrides it |
+| a **passed** date | **Launched** (subject to a manual override) |
+| missing (blank / `0`) | CORE group → launched; otherwise the existing evidence (manual status, Shopify where supplied, a past drop); with none: **verification workflow** |
+| invalid / unreadable text | **Verification workflow** ("Products requiring launch verification"), never guessed |
 
-Unnamed drops are created automatically *from* `mid_code` clusters, so while the field is unverified a past unnamed drop is not independent evidence either. A drop a person named is.
+* Evaluated **per colourway**: a product with a launched White and a future Navy is launched; the Navy colourway is left out and named.
+* A **manual launch status** still wins in both directions (a person can mark a future-dated product launched, or a passed one not launched). High Stocks' older date pre-filter was changed so that a manual "launched" status is honoured there too.
+* Shopify, where supplied, can only *add* proof for products with no date, or mark DRAFT = not launched / ARCHIVED = discontinued. It never turns a future official date into a launch.
+* If the confirmation ever needs withdrawing, set `launch_date_verified` to 0: a passed date then stops counting as proof and those products go to verification.
 
-**Information needed to verify the field** (any one is enough): (1) the WNDRR team confirming what `mid_code` is used for in ApparelMagic and who fills it in; (2) the raw ApparelMagic record of a product whose official launch date is known, via Settings → Planning → "Check a product's launch evidence" with "Include raw ApparelMagic fields" ticked; (3) a list of 5-10 recent products with their official launch dates to compare against their `mid_code`. If `mid_code` does not match, the correct field (or a Shopify/other source) is wired in instead.
-
-## 4b. What Shopify shows (read-only, 12 Oct 2026) about the five products
+## 4b. What Shopify showed (read-only, 12 Oct 2026) about the five products, and what it means now that mid_code is official
 
 These are **facts from Shopify**; what the team *means* by "launched" is not in any data source we can read.
 
@@ -78,6 +80,8 @@ These are **facts from Shopify**; what the team *means* by "launched" is not in 
 * **Colourways differ**: for example Revival Hood Sweat Moon Grey (W26GE023, Jul-26) published 30 Jun, while Black/Charcoal (W26HE016, Aug-26) published 22 Jul. Per-colourway judgement is therefore required, and the app already does it.
 * Older W25 Revival/Hexed drafts (Black, Charcoal, Baby Blue) are unrelated last-year styles.
 
+**What this means with the confirmed rule.** Shopify publication and sales are early-availability facts, not the launch date. If ApparelMagic's `mid_code` for these colourways is in the future, the app now keeps them out whatever Shopify shows; if it is in the past, they are launched. The real `mid_code` values could not be read from the build environment: run **Settings → Planning → "Check a product's launch evidence"** (tick "Include raw ApparelMagic fields") for each of the five in production to see them. The tests use hypothetical dates and prove the rule, not the data.
+
 **What this does and does not establish.** It establishes that the five are *on sale and selling* and that for three of them that happened ahead of Shopify's own planned delivery month. It does **not** establish an *official launch date* for any of them. The distinction the team draws ("official launch" vs "available") is real in the data: **publish date**, **planned delivery month**, **sales history** and **official launch** are four different things, and only the first three are readable today.
 
 ## 5. Product role is separate from creative priority
@@ -94,5 +98,5 @@ A product can carry several roles. The role never changes the priority: a season
 ## 6. Rollout and safety
 
 * No migration was needed for launch status (the Batch 12 `product_launch_overrides` table is used unchanged). New settings live in the existing `creative_planning_config` JSON; stored values are untouched.
-* Expect the verification list to be non-empty on first load: every product without a readable date, CORE membership or drop that previously slid through on sales will appear there. Review it once; confirmations are stored as manual statuses.
+* Expect the verification list to hold only products with a missing or unreadable `mid_code` (and no CORE group, past named drop or manual status): they previously slid through on sales alone. Review it once; confirmations are stored as manual statuses.
 * To keep the Batch 12 behaviour deliberately, switch on *Sales alone confirm a launch* in Settings → Planning → Launch status.
