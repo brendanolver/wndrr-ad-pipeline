@@ -2302,7 +2302,8 @@ async function mmSessConfirm() {
   mmRv.busy = true; mmSessSetBusy(true);
   let ok = false;
   try {
-    const firstReview = !s.state.has(key) && !ctx.saved;
+    // a creative that was only SKIPPED earlier has never been classified: confirming it is a first review (a correction is a change to a saved classification)
+    const firstReview = !ctx.saved && (!s.state.has(key) || s.state.get(key) === 'skipped');
     const payload = mmRvPayload(f);
     payload.ad_setup_id = f.adSetupId || null; // only if a person linked one in this modal
     payload.offer_name_copies = firstReview; // a correction never offers (or applies) anything to other creatives
