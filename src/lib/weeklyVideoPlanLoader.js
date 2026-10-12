@@ -52,19 +52,7 @@ function roleOf({ isCore, lstyles, season, today, newDropDays }) {
   return roles.map((r) => ({ ...r, label: ROLE_LABEL[r.key] }));
 }
 
-async function loadLaunchContext(db, styleCodes) {
-  const drops = new Map();
-  const overrides = new Map();
-  try {
-    const r = await db.query(`SELECT s.style_code, d.name, to_char(d.launch_date, 'YYYY-MM-DD') AS launch_date FROM styles s JOIN drops d ON d.id = s.drop_id WHERE s.style_code = ANY($1::text[])`, [styleCodes]);
-    r.rows.forEach((x) => drops.set(x.style_code, { name: x.name, launch_date: x.launch_date }));
-  } catch (e) { /* drops unavailable: launch status simply has less evidence */ }
-  try {
-    const r = await db.query(`SELECT DISTINCT ON (product_code) product_code, status, note FROM product_launch_overrides WHERE removed_at IS NULL ORDER BY product_code, id DESC`);
-    r.rows.forEach((x) => overrides.set(x.product_code, { status: x.status, note: x.note }));
-  } catch (e) { /* none */ }
-  return { drops, overrides };
-}
+const { loadLaunchContext } = require('./launchContext'); // moved (Batch 14): shared by the opportunity engine, High Stocks and Core
 
 // → { available, reason?, week_start, plan, production (week totals), settings, config, data, vocab_note }
 async function computeWeeklyVideoPlan({ weekStart, today, deps = {} } = {}) {

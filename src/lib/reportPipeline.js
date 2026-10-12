@@ -214,6 +214,12 @@ async function buildStyleTiersUncached() {
     return Math.round(total);
   }
 
+  // the sales export covers about a year: a product whose first sale is at the very start of the window may have launched long before it, so its "first 28 days" are
+  // not its real launch (censored). Its tier is still Demand Planning's own number; only the launch-vs-now comparison is withheld for such products.
+  let windowStartDay = null;
+  for (const r of rows) if (!windowStartDay || r.day < windowStartDay) windowStartDay = r.day;
+  const censorBefore = windowStartDay ? new Date(new Date(windowStartDay).getTime() + 6 * 86400000).toISOString().slice(0, 10) : null;
+
   const interim = [];
   for (const [styleCode, skus] of styleSkus.entries()) {
     let firstSaleDay = null;
@@ -223,7 +229,7 @@ async function buildStyleTiersUncached() {
       }
     }
     if (!firstSaleDay) {
-      interim.push({ styleCode, firstSaleDay: null, cohortWeek: null, isNew: false, units4w: 0, projectedUnits: 0, effectiveDays: null, skus });
+      interim.push({ styleCode, firstSaleDay: null, cohortWeek: null, isNew: false, units4w: 0, projectedUnits: 0, effectiveDays: null, skus, daysElapsed: null, units28: 0, units28prev: 0 });
       continue;
     }
     const fsdMs = new Date(firstSaleDay).setHours(0, 0, 0, 0);
@@ -238,7 +244,10 @@ async function buildStyleTiersUncached() {
     const effectiveDays = isNew ? Math.max(daysElapsed, 1) : 28;
     const projectedUnits = isNew ? Math.round((unitsActual / effectiveDays) * 28) : units4w;
 
-    interim.push({ styleCode, firstSaleDay, cohortWeek, isNew, units4w, projectedUnits, effectiveDays, skus });
+    // Batch 14 (additive): the latest two 28-day windows, so a product's CURRENT pace can be compared with its own first 28 days (units4w) without a second pass
+    const units28 = skusUnitsInWindow(skus, todayMs - 27 * 86400000, todayMs);
+    const units28prev = skusUnitsInWindow(skus, todayMs - 55 * 86400000, todayMs - 28 * 86400000);
+    interim.push({ styleCode, firstSaleDay, cohortWeek, isNew, units4w, projectedUnits, effectiveDays, skus, daysElapsed, units28, units28prev });
   }
 
   // Cohort full-28-day stats (completed products only), per cohortWeek.
@@ -282,7 +291,8 @@ async function buildStyleTiersUncached() {
       }
     }
     const tier = getPerfTier(indexScore, !p.firstSaleDay);
-    tiers.set(p.styleCode, { tier, indexScore });
+    // tier / indexScore are Demand Planning's own classification (unchanged); the rest is read-only context from the same sales rows
+    tiers.set(p.styleCode, { tier, indexScore, firstSaleDay: p.firstSaleDay, daysSinceFirstSale: p.daysElapsed === undefined ? null : p.daysElapsed, units4w: p.units4w, units28: p.units28 || 0, units28prev: p.units28prev || 0, isNew: !!p.isNew, censored: !!(p.firstSaleDay && censorBefore && p.firstSaleDay <= censorBefore) });
   }
   return tiers;
 }

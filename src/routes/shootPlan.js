@@ -6,7 +6,12 @@ const apparelmagic = require('../lib/apparelmagic');
 const { fetchAmData } = require('../lib/planningData');
 
 const router = express.Router();
-const bust = () => { try { require('./weeklyVideoPlan').invalidate(); } catch (e) { /* cache only */ } };
+const bust = () => {
+  try { require('./weeklyVideoPlan').invalidate(); } catch (e) { /* cache only */ }
+  try { require('../lib/planningOpportunitiesLoader').invalidate(); } catch (e) { /* cache only */ }
+};
+const progressLib = require('../lib/shootPlanProgress');
+const MAX_CONCEPTS = 10;
 
 const STOCK_STATUSES = ['in_office', 'needs_to_be_brought_in'];
 const SOURCES = ['core', 'high_stock', 'drop', 'promotion', 'manual'];
@@ -19,6 +24,24 @@ function dateStr(d) {
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
+}
+
+// Makes sure an item has at least `want` live concepts (creative_assets that were not killed): the planning step asked for that many distinct concepts, so each
+// is its own Concept Development record (counted once, whatever products it is later adapted for). Never removes or renames an existing concept.
+async function ensureConcepts(client, item, want, { baseName, creator, createdByUserId, conceptType, assignee, editingOwner, format }) {
+  const have = (await client.query("SELECT count(*)::int AS n FROM creative_assets WHERE shoot_plan_item_id = $1 AND concept_dev_status <> 'killed'", [item.id])).rows[0].n;
+  if (have >= want) return 0;
+  const firstStyle = (await client.query('SELECT style_id FROM shoot_plan_item_styles WHERE shoot_plan_item_id = $1 ORDER BY style_id LIMIT 1', [item.id])).rows[0];
+  let made = 0;
+  for (let n = have + 1; n <= want; n += 1) {
+    const a = await insertCreativeAsset(client, {
+      style_id: firstStyle ? firstStyle.style_id : null, concept_name: `${baseName} (${n})`, concept_classification: 'new_experimental', format: FORMATS.includes(format) ? format : 'video',
+      strategy_owner: creator, status: 'awaiting_concept_development', created_by_user_id: createdByUserId, concept_type: conceptType || null, concept_assignee: assignee || null, editing_owner: editingOwner || null,
+    });
+    await client.query('UPDATE creative_assets SET shoot_plan_item_id = $1 WHERE id = $2', [item.id, a.id]);
+    made += 1;
+  }
+  return made;
 }
 
 router.get('/', async (req, res, next) => {
@@ -111,9 +134,12 @@ router.post('/', async (req, res, next) => {
     promotion_stage_id, week_start, format, concept_name, concept_type, concept_assignee, editing_owner,
     videos, recommended_videos, video_mix, recommendation_snapshot,
   } = req.body || {};
-  const requestedVideos = videos === undefined || videos === null ? 1 : Number(videos);
-  if (!Number.isInteger(requestedVideos) || requestedVideos < 1 || requestedVideos > 50) {
-    return res.status(400).json({ error: 'videos must be a whole number from 1 to 50' });
+  // Batch 14: the team plans CONCEPTS (distinct creative ideas), not videos. `concepts` is the number of distinct concepts to start for this product now (each is
+  // its own Concept Development record); `videos` is the older name for the same number and is still accepted.
+  const rawConcepts = req.body && req.body.concepts !== undefined && req.body.concepts !== null ? req.body.concepts : videos;
+  const requestedVideos = rawConcepts === undefined || rawConcepts === null ? 1 : Number(rawConcepts);
+  if (!Number.isInteger(requestedVideos) || requestedVideos < 1 || requestedVideos > MAX_CONCEPTS) {
+    return res.status(400).json({ error: `concepts must be a whole number from 1 to ${MAX_CONCEPTS}` });
   }
   if (recommended_videos !== undefined && recommended_videos !== null && (!Number.isInteger(Number(recommended_videos)) || Number(recommended_videos) < 0 || Number(recommended_videos) > 50)) {
     return res.status(400).json({ error: 'recommended_videos must be a whole number from 0 to 50' });
@@ -178,6 +204,11 @@ router.post('/', async (req, res, next) => {
         for (const c of trimmedColourways) {
           await client.query(`INSERT INTO shoot_plan_item_styles (shoot_plan_item_id, style_id, size, colour_label) VALUES ($1, $2, $3, $4) ON CONFLICT (shoot_plan_item_id, style_id) DO NOTHING`,
             [ex.id, Number(c.style_id), c.size && String(c.size).trim() ? String(c.size).trim() : null, c.colour_label || null]);
+        }
+        {
+          const baseName = (concept_name && concept_name.trim()) || (quick_note && quick_note.trim()) || (product_name ? `New Concept — ${product_name}` : 'New Concept');
+          const cu = await client.query('SELECT user_id FROM content_creators WHERE LOWER(name) = LOWER($1) AND user_id IS NOT NULL', [creator.trim()]);
+          await ensureConcepts(client, ex, requestedVideos, { baseName, creator: creator.trim(), createdByUserId: cu.rows[0] ? cu.rows[0].user_id : null, conceptType: concept_type, assignee: concept_assignee, editingOwner: editing_owner, format });
         }
         await client.query('COMMIT'); bust();
         const refreshed = (await pool.query('SELECT * FROM shoot_plan_items WHERE id = $1', [ex.id])).rows[0];
@@ -254,6 +285,7 @@ router.post('/', async (req, res, next) => {
       );
     }
 
+    await ensureConcepts(client, item, requestedVideos, { baseName: resolvedConceptName, creator: trimmedCreator, createdByUserId, conceptType: trimmedConceptType, assignee: concept_assignee, editingOwner: editing_owner, format });
     await client.query('COMMIT'); bust();
     res.status(201).json({
       ...item,
@@ -423,6 +455,38 @@ router.delete('/:id', async (req, res, next) => {
   } catch (err) {
     next(err);
   }
+});
+
+
+// ── Batch 14: weekly CONCEPT progress + adapting one concept for several products ─────────────────────────────────────────────────────────────────────────────
+// Read-only: derived from the production records that already exist (see lib/shootPlanProgress.js for exactly what is counted and how a stage is decided).
+router.get('/progress', async (req, res, next) => {
+  try {
+    const week = req.query.week_start;
+    if (week !== undefined && !WEEK_RE.test(week)) return res.status(400).json({ error: 'week_start must be YYYY-MM-DD' });
+    const ymdNow = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
+    const weekStart = week || require('../lib/planningOpportunitiesLoader').mondayOf(ymdNow);
+    const t = (await pool.query('SELECT weekly_new_concept_target AS t FROM planning_settings WHERE id = 1')).rows[0];
+    const target = t && Number.isInteger(t.t) ? t.t : 15;
+    res.json(await progressLib.loadWeeklyProgress(pool, weekStart, { target }));
+  } catch (err) { next(err); }
+});
+
+// One concept adapted for another product: the concept stays ONE record (and one count); this records the extra product so both products show the concept.
+router.post('/concepts/:id/products', async (req, res, next) => {
+  try {
+    const { product_code, product_name, shoot_plan_item_id, reason } = req.body || {};
+    const link = await progressLib.linkConceptToProduct(pool, { assetId: Number(req.params.id), productCode: product_code, productName: product_name, shootPlanItemId: shoot_plan_item_id || null, reason: reason || null, userId: req.user && req.user.id });
+    bust();
+    res.status(201).json(link);
+  } catch (err) { if (err.status) return res.status(err.status).json({ error: err.message }); next(err); }
+});
+router.delete('/concepts/:id/products/:productCode', async (req, res, next) => {
+  try {
+    const n = await progressLib.unlinkConceptProduct(pool, { assetId: Number(req.params.id), productCode: req.params.productCode });
+    bust();
+    res.json({ removed: n });
+  } catch (err) { next(err); }
 });
 
 module.exports = router;
