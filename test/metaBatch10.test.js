@@ -303,7 +303,7 @@ test('approved colours: MOF CPA and TOF Frequency use the stated ranges; every o
 });
 test('Meta Performance colour guide: one collapsed control generated from the active rules; Triple Whale is not touched', () => {
   const app = code('public/app.js');
-  assert.match(app, /<details class="mp-health-guide"><summary title="What the colours mean">ⓘ Colour guide<\/summary>/);
+  assert.match(app, /<details class="mp-health-guide"><summary title="What the colours mean"><svg[^>]*>[\s\S]*?<\/svg>Colour guide<\/summary>/); // Batch 14: a toolbar button with an icon
   assert.match(app, /CPA is Meta-reported \(Triple Whale is not connected yet\)/);
   assert.doesNotMatch(app.slice(app.indexOf('<details class="mp-health-guide">') - 200, app.indexOf('<details class="mp-health-guide">') + 1800), /Colour dots are used on/, 'the long paragraph is gone');
   assert.match(app, /Meeting the benchmark/);
