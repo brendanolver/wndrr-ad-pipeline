@@ -28,12 +28,12 @@ let state = {
   contentCreators: [],
   conceptDevLocations: [],
   conceptTypes: [],
-  highStockProducts: [], highStockExpandedProducts: new Set(),
+  highStockProducts: [], highStockFamilies: [], highStockExcluded: [], highStockExpandedFamilies: new Set(), highStockCollapsedFamilies: new Set(), highStockExpandedProducts: new Set(),
   // Monday Planning's 3-step guided workflow (Core/High Stocks/Shoot Plan)
   // -- always starts at Core on load (not persisted to localStorage): this
   // is a recurring weekly ritual, not a session to resume, so a stale
   // mid-flow step from a prior visit would only confuse.
-  planningStep: 'core',
+  planningStep: 'weekly',
   promotions: [], currentPromotionId: null, currentPromotion: null,
   weeklyShootPlanConfirmation: null,
   // Set by "Edit Plan" on the confirmed handoff card -- lets the team keep
@@ -2684,6 +2684,18 @@ function cpFactsHtml(c) {
   return `<div class="cp-facts">${facts.join('')}</div>`;
 }
 
+// ONE headline priority per product (Batch 12): the weekly plan's category (Shoot now / Coming up / Monitor / No action) when the plan is available,
+// otherwise the Core engine's own priority. The Batch 11 "level" and the engine priority stay as inner signals and are never shown beside it, so a card
+// can no longer read "CRITICAL" and "Low priority" at once.
+function cpHeadlineBadgeHtml(c, enginePriority) {
+  if (c.weekly && c.weekly.category) {
+    const cat = (typeof WP_CAT_BY_KEY !== 'undefined' && WP_CAT_BY_KEY[c.weekly.category]) || null;
+    const n = c.weekly.recommended_videos;
+    return `<span class="wp-badge ${cat ? cat.cls : ''}" data-headline-priority title="${escapeHtml(c.weekly.headline || '')}">${escapeHtml(c.weekly.category_label || c.weekly.category)}${c.weekly.category === 'SHOOT_NOW' && n ? ` · ${n} video${n === 1 ? '' : 's'}` : ''}</span>`;
+  }
+  return enginePriority ? `<span class="co-pri pri-${enginePriority.toLowerCase()}" data-headline-priority>${escapeHtml(enginePriority.toUpperCase())}</span>` : '';
+}
+
 // ── Planning priority (Batch 11): level badge, season / stock / coverage chips and a plain-language "why" list ──
 // All of it comes from the server's `planning` assessment on a card / High Stock row; nothing is computed here.
 function planLevelBadge(pl) {
@@ -2767,9 +2779,9 @@ function cpCardHtml(c) {
     <article class="cp-tile pri-${escapeHtml((c.priority || 'info').toLowerCase())}" data-cp-key="${escapeHtml(c.key)}" data-cp-open="${escapeHtml(c.key)}" tabindex="0" role="button" aria-label="${escapeHtml(c.product.product_name)} — ${escapeHtml(c.headline)}">
       ${cpImagesHtml(c)}
       <div class="cp-tile-body">
-        <div class="cp-tile-head"><span class="cp-tile-name" title="${escapeHtml(c.product.product_name)}">${escapeHtml(c.product.product_name)}</span>${priority ? `<span class="co-pri pri-${priority.toLowerCase()}">${escapeHtml(priority.toUpperCase())}</span>` : ''}</div>
+        <div class="cp-tile-head"><span class="cp-tile-name" title="${escapeHtml(c.product.product_name)}">${escapeHtml(c.product.product_name)}</span>${cpHeadlineBadgeHtml(c, priority)}</div>
         <div class="cp-tile-rec">${escapeHtml(c.headline)}${c.product.category ? ` <span class="cp-tile-cat">· ${escapeHtml(c.product.category.toLowerCase())}</span>` : ''}</div>
-        ${c.planning ? `<div class="plan-tile-line">${planLevelBadge(c.planning)}</div>${planChipsHtml(c.planning)}` : ''}
+        ${c.planning ? planChipsHtml(c.planning) : ''}
         <dl class="cp-tile-facts">
           <div><dt>Stock</dt><dd>${cpNum(c.stock.units)}</dd></div>
           <div><dt>Sales</dt><dd>${s ? escapeHtml(s.label.replace('Selling ', '')) : '—'}${s && s.tier ? ` <span class="hint">${escapeHtml(s.tier)}</span>` : ''}</dd></div>
@@ -2799,10 +2811,11 @@ function cpDetailHtml(c) {
       <div class="cp-detail-main">
         <div class="co-card-head"><span class="co-product">${escapeHtml(c.product.product_name)}</span>
           ${c.product.category ? `<span class="co-type">${escapeHtml(c.product.category.toLowerCase())}</span>` : ''}
-          ${c.priority && c.priority !== 'Info' ? `<span class="co-pri pri-${c.priority.toLowerCase()}">${escapeHtml(c.priority.toUpperCase())}</span>` : ''}</div>
+          ${cpHeadlineBadgeHtml(c, c.priority && c.priority !== 'Info' ? c.priority : null)}</div>
         <h3 class="co-title">${escapeHtml(c.headline)}</h3>
         <p class="co-expl">${escapeHtml(c.why)}</p>
-        ${c.planning ? `${planLevelBadge(c.planning)}${planChipsHtml(c.planning)}${planSeasonHtml(c.planning)}${planWhyHtml(c.planning)}` : ''}
+        ${c.weekly ? `<div class="cp-weekly-line"><b>${escapeHtml(c.weekly.headline)}</b></div>` : ''}
+        ${c.planning ? `${planChipsHtml(c.planning)}${planSeasonHtml(c.planning)}${planWhyHtml(c.planning)}` : ''}
         ${cpFactsHtml(c)}
         ${c.stock.size_warning ? `<div class="co-note cp-size-warn">⚠ ${escapeHtml(c.stock.size_warning)}</div>` : ''}
         ${note}
@@ -2939,6 +2952,7 @@ async function cpShoot(c) {
   try {
     const preset = await api(`/core-creative-plan/shoot-preset?product_code=${encodeURIComponent(c.product.product_code)}`);
     preset.opportunity = { key: c.key, title: c.headline, explanation: c.why, priority: c.priority, concept: c.concept ? c.concept.label : null, media: c.concept ? c.concept.media : null };
+    if (c.weekly && c.weekly.category === 'SHOOT_NOW' && c.weekly.remaining > 0) preset.videosDefault = c.weekly.remaining;
     openShootPlanModal(preset);
   } catch (e) {
     toast(e.message, true);
@@ -3955,6 +3969,8 @@ async function loadAll() {
     state.shootPlan = shootPlan;
     state.contentCreators = contentCreators;
     state.highStockProducts = highStockRes.products;
+    state.highStockFamilies = highStockRes.families || [];
+    state.highStockExcluded = highStockRes.excluded_unlaunched || [];
     state.highStockPlanningData = highStockRes.planning_data || null;
     state.promotions = promotions;
     state.weeklyShootPlanConfirmation = weeklyConfirmation;
@@ -3993,6 +4009,8 @@ async function loadAll() {
         console.error(`loadAll: ${renderStep.name} failed`, e);
       }
     });
+    // The weekly video plan reads the catalogue, stock and Meta evidence, so it loads on its own: a slow or unavailable plan never delays the rest.
+    if (typeof loadWeeklyVideoPlan === 'function') loadWeeklyVideoPlan();
   } catch (e) {
     toast(e.message, true);
   }
@@ -4017,6 +4035,7 @@ async function loadPlanningWeek() {
     state.shootPlanEditMode = false;
     renderPlanning();
     renderPlanningShootSummary();
+    if (typeof loadWeeklyVideoPlan === 'function') loadWeeklyVideoPlan();
   } catch (e) {
     toast(e.message, true);
   }
@@ -4272,7 +4291,7 @@ function renderPlanning() {
 // loaded by loadAll(). Upcoming Drops and Promotions used to be steps 3
 // and 4 here -- they're now their own sidebar tabs (#tab-drops /
 // #tab-promotions), so this workflow is Core/High Stocks/Shoot Plan only.
-const PLANNING_STEPS = ['core', 'high-stocks', 'shoot-plan'];
+const PLANNING_STEPS = ['weekly', 'core', 'high-stocks', 'shoot-plan'];
 function setPlanningStep(key) {
   state.planningStep = key;
   document.querySelectorAll('.planning-step-btn').forEach((btn) => btn.classList.toggle('active', btn.dataset.step === key));
@@ -4632,7 +4651,7 @@ async function toggleWeeklyProgress(field) {
 // that still exist) -- their Mark as Reviewed buttons are still real,
 // relocated to #tab-drops/#tab-promotions, and still painted from here.
 const PLANNING_STEP_REVIEW_FIELD = { core: 'core_reviewed', 'high-stocks': 'high_stock_reviewed', drops: 'drops_reviewed', promotions: 'promotions_reviewed' };
-const PLANNING_STEP_LABELS = { core: '1 Core', 'high-stocks': '2 High Stocks', 'shoot-plan': '3 Shoot Plan' };
+const PLANNING_STEP_LABELS = { weekly: 'Weekly Plan', core: '1 Core', 'high-stocks': '2 High Stocks', 'shoot-plan': '3 Shoot Plan' };
 const PLANNING_REVIEW_BTN_IDS = { core: 'core-review-btn', 'high-stocks': 'high-stocks-review-btn', drops: 'drops-review-btn', promotions: 'promotions-review-btn' };
 
 function renderPlanningStepNav() {
@@ -6514,6 +6533,49 @@ function highStockActionHtml(p, selectedCodes) {
   return `<button type="button" class="btn btn-primary btn-sm" onclick="shootThisWeekForHighStock('${p.style_code}')">+ Shoot</button>`;
 }
 
+// One row per PRODUCT FAMILY (Batch 12): stock is counted once for the product, the colourways sit underneath, and the headline priority is the single
+// weekly-plan category. Products that have not launched are not listed here at all (see highStockExcludedHtml).
+function highStockFamilyOpen(f) {
+  const many = (f.colourways || []).length > 1;
+  return many ? state.highStockExpandedFamilies.has(f.key) : !state.highStockCollapsedFamilies.has(f.key);
+}
+function toggleHighStockFamily(key) {
+  const f = (state.highStockFamilies || []).find((x) => x.key === key);
+  const many = f && (f.colourways || []).length > 1;
+  const set = many ? state.highStockExpandedFamilies : state.highStockCollapsedFamilies;
+  if (set.has(key)) set.delete(key); else set.add(key);
+  renderHighStockProducts();
+}
+function highStockFamilyHtml(f, selectedCodes) {
+  const open = highStockFamilyOpen(f);
+  const many = f.colourways.length > 1;
+  const thumb = f.image_url ? `<img class="high-stock-thumb" src="${escapeHtml(f.image_url)}" alt="">` : '<span class="high-stock-thumb high-stock-noimg">🖼</span>';
+  const w = f.weekly;
+  const cat = w && typeof WP_CAT_BY_KEY !== 'undefined' ? WP_CAT_BY_KEY[w.category] : null;
+  const badge = w ? `<span class="wp-badge ${cat ? cat.cls : ''}" data-headline-priority title="${escapeHtml(w.headline || '')}">${escapeHtml(w.category_label || w.category)}${w.category === 'SHOOT_NOW' && w.recommended_videos ? ` · ${w.recommended_videos} video${w.recommended_videos === 1 ? '' : 's'}` : ''}</span>` : '';
+  const flag = f.launch && f.launch.needs_check ? `<span class="wp-chip wp-warn" title="${escapeHtml(f.launch.detail || '')}">Launch status unconfirmed</span>` : '';
+  const stockText = many ? `${cpNum(f.soh_total)} units across ${f.colourways.length} colourways` : `${cpNum(f.soh_total)} units`;
+  return `
+    <div class="high-stock-family${open ? ' open' : ''}" data-hs-family="${escapeHtml(f.key)}">
+      <div class="high-stock-family-head" role="button" tabindex="0" aria-expanded="${open}" onclick="toggleHighStockFamily('${escapeHtml(f.key)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleHighStockFamily('${escapeHtml(f.key)}');}">
+        <span class="accordion-arrow ${open ? 'open' : ''}">&#9656;</span>
+        ${thumb}
+        <span class="high-stock-family-name">${escapeHtml(f.name)}</span>
+        ${badge}${flag}
+        <span class="high-stock-family-stock" title="Stock is counted once for the product, not once per colourway">${stockText}</span>
+      </div>
+      ${f.planning ? `<div class="high-stock-family-chips">${planChipsHtml(f.planning)}</div>` : ''}
+      ${open ? `<div class="high-stock-family-body">${f.colourways.map((p) => highStockProductRowHtml(p, selectedCodes)).join('')}</div>` : ''}
+    </div>`;
+}
+function highStockExcludedHtml() {
+  const ex = state.highStockExcluded || [];
+  if (!ex.length) return '';
+  return `<details class="high-stock-excluded" id="high-stock-excluded"><summary>${ex.length} product${ex.length === 1 ? '' : 's'} excluded &mdash; not launched yet</summary>
+    <ul>${ex.map((e) => `<li><b>${escapeHtml(e.name)}</b> <span class="hint">${escapeHtml(e.status === 'discontinued' ? 'Discontinued' : 'Not launched')}${e.detail ? ` · ${escapeHtml(e.detail)}` : ''}${e.in_upcoming_drop ? ' · planned in Upcoming Drops' : ''}</span></li>`).join('')}</ul>
+    <div class="hint">These are planned through Upcoming Drops and are never recommended here, so the same product is not required twice.</div></details>`;
+}
+
 function highStockProductRowHtml(p, selectedCodes) {
   const thumb = p.image_url
     ? `<img class="high-stock-thumb" src="${p.image_url}" alt="">`
@@ -6527,7 +6589,6 @@ function highStockProductRowHtml(p, selectedCodes) {
           <span class="accordion-arrow ${isOpen ? 'open' : ''}">&#9656;</span>
           ${thumb}
           <span class="core-shoot-review-name">${escapeHtml(displayName)}</span>
-          ${p.planning ? planLevelBadge(p.planning) : ''}
         </div>
         <div class="high-stock-row-value">${p.soh}</div>
         <div class="high-stock-row-value">${p.sell_through_7d_pct}%</div>
@@ -6551,9 +6612,11 @@ function renderHighStockProducts() {
   const selectedCodes = new Set(state.shootPlan.map((i) => i.product_code));
 
   const list = document.getElementById('high-stock-list');
+  const families = state.highStockFamilies || [];
   list.innerHTML = state.highStockProducts.length
-    ? planSourceLineHtml(state.highStockPlanningData) + highStockHeaderHtml() + state.highStockProducts.map((p) => highStockProductRowHtml(p, selectedCodes)).join('')
-    : '<div class="attention-empty">No Platinum/Rocket products currently meet the High Stock threshold.</div>';
+    ? planSourceLineHtml(state.highStockPlanningData) + highStockExcludedHtml() + highStockHeaderHtml()
+      + (families.length ? families.map((f) => highStockFamilyHtml(f, selectedCodes)).join('') : state.highStockProducts.map((p) => highStockProductRowHtml(p, selectedCodes)).join(''))
+    : `${highStockExcludedHtml()}<div class="attention-empty">No Platinum/Rocket products currently meet the High Stock threshold.</div>`;
 
   renderHighStockStepFooter();
 }
@@ -6708,6 +6771,8 @@ function openShootPlanModal(preset) {
     : '';
   applyShootPlanSizeDefaults();
   updateShootPlanSampleStatusVisibility();
+  // Weekly Plan (Batch 12): how many videos, the recommendation behind it and its editable creative mix (weekly-plan.js).
+  if (typeof wpPrepareShootModal === 'function') wpPrepareShootModal(preset);
   openModal('shoot-plan-modal');
 }
 
@@ -6833,11 +6898,16 @@ async function saveShootPlanItem() {
     image_url: headerImage?.image_url || null,
     week_start: planningWeekStart(),
   };
+  if (typeof wpShootPayloadExtras === 'function') {
+    const extras = wpShootPayloadExtras(shootPlanModalContext);
+    if (extras.error) return toast(extras.error, true);
+    Object.assign(payload, extras.fields);
+  }
   try {
     const created = await api('/shoot-plan', { method: 'POST', body: JSON.stringify(payload) });
     const fromOpportunity = shootPlanModalContext.opportunity;
     closeModal('shoot-plan-modal');
-    toast('Added to Shoot Plan');
+    toast(created && created.merged ? 'Merged into the existing Shoot Plan entry for this product' : 'Added to Shoot Plan');
     if (fromOpportunity) {
       // The person just confirmed the shoot from a recommendation -> record it as done (traceable via the note).
       try { await cpSetState(fromOpportunity.key, 'acted_on', 'Added to Shoot Plan', { priority: fromOpportunity.priority, severity: 0, headline: fromOpportunity.title, why: fromOpportunity.explanation }); } catch (err) { /* best effort */ }
@@ -8294,6 +8364,7 @@ function shootPlanProductRowHtml(item) {
           <span class="shoot-plan-pathway-chip">${escapeHtml(shootPlanRequirementLabel(item))}</span>
         </div>
         <div class="shoot-plan-style-chips">${chips}</div>
+        ${typeof wpShootPlanVideosHtml === 'function' ? wpShootPlanVideosHtml(item, readOnly) : ''}
         ${item.quick_note ? `<div class="shoot-plan-idea">💡 ${escapeHtml(item.quick_note)}</div>` : ''}
       </div>
       <div class="shoot-plan-row-actions">${editSizesBtn}${removeBtn}</div>
@@ -8349,8 +8420,8 @@ function renderShootPlanStep() {
   // count, so this bar stays a glance-length summary, not another stat row.
   const confirmedActive = Boolean(state.weeklyShootPlanConfirmation) && !state.shootPlanEditMode;
   document.getElementById('shoot-plan-summary-stats').innerHTML = confirmedActive
-    ? `<span><strong>${total}</strong> Product${total === 1 ? '' : 's'}</span><span class="shoot-plan-summary-sep">&middot;</span><span><strong>${samplesRequired}</strong> Sample${samplesRequired === 1 ? '' : 's'}</span><span class="shoot-plan-summary-sep">&middot;</span><span class="shoot-plan-summary-sent">&#10003; Sent to Content</span>`
-    : `<span><strong>${total}</strong> Product${total === 1 ? '' : 's'} Selected</span><span class="shoot-plan-summary-sep">&middot;</span><span><strong>${samplesRequired}</strong> Sample${samplesRequired === 1 ? '' : 's'} Required</span><span class="shoot-plan-summary-sep">&middot;</span><span><strong>0</strong> Sent to Content</span>`;
+    ? `<span><strong>${total}</strong> Product${total === 1 ? '' : 's'}</span><span class="shoot-plan-summary-sep">&middot;</span>${wpVideosStatHtml()}<span class="shoot-plan-summary-sep">&middot;</span><span><strong>${samplesRequired}</strong> Sample${samplesRequired === 1 ? '' : 's'}</span><span class="shoot-plan-summary-sep">&middot;</span><span class="shoot-plan-summary-sent">&#10003; Sent to Content</span>`
+    : `<span><strong>${total}</strong> Product${total === 1 ? '' : 's'} Selected</span><span class="shoot-plan-summary-sep">&middot;</span>${wpVideosStatHtml()}<span class="shoot-plan-summary-sep">&middot;</span><span><strong>${samplesRequired}</strong> Sample${samplesRequired === 1 ? '' : 's'} Required</span><span class="shoot-plan-summary-sep">&middot;</span><span><strong>0</strong> Sent to Content</span>`;
 
   document.getElementById('shoot-plan-grouped').innerHTML =
     shootPlanGroupedHtml('Nothing planned yet this week — use + Shoot This Week on a Core, High Stock, Upcoming Drop, or Promotion product to add one.');
@@ -8363,6 +8434,7 @@ function renderShootPlanStep() {
     `${total} product${total === 1 ? '' : 's'} will be added to the content workflow.`;
 
   renderWeeklyShootPlanConfirmation();
+  if (typeof renderProductionHeader === 'function') renderProductionHeader(); // planned / sent totals come from this same list
 }
 
 // Formats a confirmation timestamp with both date and time, since "sent
@@ -16775,6 +16847,7 @@ function renderPlanningSettingsForm() {
   document.getElementById('high-stock-min-soh-input').value = state.planningSettings.high_stock_min_soh;
   document.getElementById('min-active-ads-input').value = state.planningSettings.min_active_ads_per_product ?? 5;
   loadPriorityOverrides();
+  if (typeof renderWeeklyPlanSettings === 'function') renderWeeklyPlanSettings();
   document.getElementById('default-shoot-top-size-input').value = state.planningSettings.default_shoot_top_size;
   document.getElementById('default-shoot-bottom-alpha-size-input').value = state.planningSettings.default_shoot_bottom_alpha_size;
   document.getElementById('default-shoot-bottom-waist-size-input').value = state.planningSettings.default_shoot_bottom_waist_size;
@@ -16803,7 +16876,10 @@ async function saveMinActiveAds() {
     toast('Minimum active ads saved');
     const res = await api('/high-stock-products');
     state.highStockProducts = res.products;
+    state.highStockFamilies = res.families || [];
+    state.highStockExcluded = res.excluded_unlaunched || [];
     renderHighStockProducts();
+    if (typeof loadWeeklyVideoPlan === 'function') loadWeeklyVideoPlan(true);
     if (typeof loadCorePlan === 'function') loadCorePlan(true);
   } catch (e) {
     toast(e.message, true);
@@ -16827,7 +16903,7 @@ async function loadPriorityOverrides() {
 function renderPriorityOverrides() {
   const host = document.getElementById('po-list');
   host.innerHTML = PO.overrides.length
-    ? PO.overrides.map((o) => `<div class="po-row"><b>${escapeHtml(o.product_name || o.product_code)}</b> <span class="plan-chip plan-exception">${escapeHtml(o.kind_label)}</span>${o.note ? ` <span class="hint">${escapeHtml(o.note)}</span>` : ''}${o.until ? ` <span class="hint">until ${escapeHtml(o.until)}</span>` : ''}<button type="button" class="btn btn-ghost btn-sm" data-po-remove="${o.id}">Remove</button></div>`).join('')
+    ? PO.overrides.map((o) => `<div class="po-row"><b>${escapeHtml(o.product_name || o.product_code)}</b> <span class="plan-chip plan-exception">${escapeHtml(o.kind_label)}</span>${o.note ? ` <span class="hint">${escapeHtml(o.note)}</span>` : ''}${o.until ? ` <span class="hint">until ${escapeHtml(o.until)}</span>` : ''}${o.videos !== null && o.videos !== undefined ? ` <span class="plan-chip plan-exception" title="Number of videos fixed by hand">${o.videos} video${o.videos === 1 ? '' : 's'}</span>` : ''}<button type="button" class="btn btn-ghost btn-sm" data-po-remove="${o.id}">Remove</button></div>`).join('')
     : '<div class="attention-empty">No overrides. Priority comes from stock, season, ad coverage and sales alone.</div>';
 }
 
@@ -16847,9 +16923,9 @@ async function poSearch() {
 async function poAdd() {
   if (!PO.pick) return toast('Search for a product and choose it first', true);
   try {
-    await api('/creative-priority-overrides', { method: 'POST', body: JSON.stringify({ product_code: PO.pick, kind: document.getElementById('po-kind').value, note: document.getElementById('po-note').value, until_date: document.getElementById('po-until').value || null }) });
+    await api('/creative-priority-overrides', { method: 'POST', body: JSON.stringify({ product_code: PO.pick, kind: document.getElementById('po-kind').value, note: document.getElementById('po-note').value, until_date: document.getElementById('po-until').value || null, videos: document.getElementById('po-videos').value === '' ? null : Number(document.getElementById('po-videos').value) }) });
     PO.pick = null;
-    ['po-product-q', 'po-note', 'po-until'].forEach((id) => { document.getElementById(id).value = ''; });
+    ['po-product-q', 'po-note', 'po-until', 'po-videos'].forEach((id) => { document.getElementById(id).value = ''; });
     document.getElementById('po-matches').innerHTML = '';
     toast('Override added');
     await loadPriorityOverrides();
@@ -16864,7 +16940,10 @@ async function saveHighStockMinSoh() {
     toast('High Stock Minimum SOH saved');
     const res = await api('/high-stock-products');
     state.highStockProducts = res.products;
+    state.highStockFamilies = res.families || [];
+    state.highStockExcluded = res.excluded_unlaunched || [];
     renderHighStockProducts();
+    if (typeof loadWeeklyVideoPlan === 'function') loadWeeklyVideoPlan(true);
   } catch (e) {
     toast(e.message, true);
   }

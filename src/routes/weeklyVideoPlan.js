@@ -20,6 +20,43 @@ router.get('/', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// A recommendation becomes a Shoot Plan entry only when a person chooses it. The Shoot Plan stores colourways by local style id, and a product the
+// pipeline has never worked with has no local row yet, so this creates the missing local `styles` rows (idempotent, local database only, never AM or
+// Shopify) for the colourways of ONE product the person is about to plan, and returns what the Shoot Plan modal needs. It creates no production record.
+router.post('/prepare-shoot', async (req, res, next) => {
+  try {
+    const key = String((req.body && req.body.key) || '').trim();
+    if (!key) return res.status(400).json({ error: 'key is required' });
+    const deps = req.app && req.app.locals && req.app.locals.weeklyPlanDeps ? req.app.locals.weeklyPlanDeps : {};
+    const plan = await loader.getWeeklyPlan(req.body.week_start, { fresh: false, deps });
+    if (!plan.available) return res.status(409).json({ error: plan.reason || 'The weekly plan is not available' });
+    const prod = (plan.products || []).find((p) => p.key === key);
+    if (!prod) {
+      const ex = (plan.excluded || []).find((p) => p.key === key);
+      return res.status(ex ? 409 : 404).json({ error: ex ? `${ex.name} has not launched, so it cannot be planned for a shoot.` : 'Product not found in the weekly plan' });
+    }
+    const am = deps.am || await require('../lib/planningData').fetchAmData();
+    const apparelmagic = require('../lib/apparelmagic');
+    const usable = (prod.colourways || []).filter((c) => c.launch_status !== 'unlaunched' && c.launch_status !== 'discontinued');
+    if (!usable.length) return res.status(409).json({ error: 'No launched colourways to plan' });
+    for (const c of usable) {
+      const d = am.amDetails && am.amDetails.get(c.style_code);
+      await pool.query("INSERT INTO styles (style_code, name, tier) VALUES ($1, $2, 'new_drop') ON CONFLICT (style_code) DO NOTHING", [c.style_code, (d && d.productName) || prod.name || c.style_code]);
+    }
+    const rows = await pool.query('SELECT id, style_code FROM styles WHERE style_code = ANY($1::text[])', [usable.map((c) => c.style_code)]);
+    const idBy = new Map(rows.rows.map((r) => [r.style_code, r.id]));
+    const colours = usable.filter((c) => idBy.has(c.style_code)).map((c) => {
+      const sizing = apparelmagic.resolveStyleSizing(am.amDetails, am.amSizeRanges, c.style_code);
+      return { style_id: idBy.get(c.style_code), style_code: c.style_code, colour_label: c.colour_label, image_url: c.image_url, soh: c.soh, sizes: sizing.sizes, sizing_system: sizing.system };
+    });
+    res.json({
+      key: prod.key, product_code: (prod.codes && prod.codes[0]) || null, product_name: prod.name, category: prod.category_name || null, colours,
+      recommended_videos: prod.recommended_videos, net_recommended: prod.net_recommended, remaining: prod.remaining, category_label: prod.category_label,
+      mix: prod.mix || null, headline: prod.headline, snapshot: { week_start: plan.week_start, category: prod.category, score: prod.score, recommended_videos: prod.recommended_videos, net_recommended: prod.net_recommended, reasons: (prod.reasons || []).slice(0, 8).map((r) => r.text), taken_at: new Date().toISOString() },
+    });
+  } catch (err) { next(err); }
+});
+
 // the tuning, grouped, with defaults and allowed ranges, for Settings
 router.get('/config', async (req, res, next) => {
   try {

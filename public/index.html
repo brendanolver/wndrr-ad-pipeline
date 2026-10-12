@@ -346,14 +346,20 @@
              to be steps 3 and 4 here -- they're now their own sidebar
              sections (see #tab-drops / #tab-promotions below), reusing this
              exact same list/detail markup unchanged, just relocated. -->
+        <div id="planning-production-header" class="prod-header" aria-live="polite"></div>
         <div class="planning-steps">
-          <button type="button" class="planning-step-btn active" data-step="core">1 Core</button>
+          <button type="button" class="planning-step-btn active" data-step="weekly">Weekly Plan</button>
+          <button type="button" class="planning-step-btn" data-step="core">1 Core</button>
           <button type="button" class="planning-step-btn" data-step="high-stocks">2 High Stocks</button>
           <button type="button" class="planning-step-btn" data-step="shoot-plan">3 Shoot Plan</button>
         </div>
         <div class="planning-shoot-summary" id="planning-shoot-summary">0 products selected · 0 samples required</div>
 
-        <div class="planning-step-panel active" data-step="core" id="planning-step-core">
+        <div class="planning-step-panel active" data-step="weekly" id="planning-step-weekly">
+          <div id="weekly-plan" class="weekly-plan"></div>
+        </div>
+
+        <div class="planning-step-panel" data-step="core" id="planning-step-core">
           <!-- Core creative plan: what to make next for CORE products, and why (see loadCorePlan). -->
           <div id="core-plan" class="core-plan"></div>
           <details class="co-how core-browse"><summary>Browse all Core products and plan a shoot manually</summary>
@@ -1385,6 +1391,52 @@
         </div>
 
         <div class="planning-section-header">
+          <h2>Weekly Video Production</h2>
+          <span class="admin-note">How many videos the team aims to produce each week. The Weekly Plan recommends only worthwhile videos and never pads to reach this number.</span>
+        </div>
+        <div class="settings-field-row">
+          <label for="weekly-video-target-input">Weekly video target (20&ndash;30)</label>
+          <input type="number" id="weekly-video-target-input" min="20" max="30" step="1">
+          <button class="btn btn-primary btn-sm" id="weekly-video-target-save-btn">Save</button>
+        </div>
+
+        <div class="planning-section-header">
+          <h2>Seasonal look-ahead</h2>
+          <span class="admin-note">How far ahead a seasonal lift counts. A season starting within the first window is a strong reason to shoot now, within the second a small one, beyond it none. Seasonality never overrides strong current sales.</span>
+        </div>
+        <div class="settings-field-row">
+          <label for="season-immediate-days-input">Immediate window (days)</label>
+          <input type="number" id="season-immediate-days-input" min="1" max="28" step="1">
+          <label for="season-secondary-days-input">Secondary window (days)</label>
+          <input type="number" id="season-secondary-days-input" min="2" max="56" step="1">
+          <button class="btn btn-primary btn-sm" id="season-days-save-btn">Save</button>
+        </div>
+
+        <div class="planning-section-header">
+          <h2>Creative recommendations</h2>
+          <span class="admin-note">How many videos each product gets, how much ad data counts as evidence, and where the Shoot now / Coming up / Monitor lines sit. Every value has an allowed range and a default; nothing here is a business target.</span>
+        </div>
+        <div id="wpc-groups" class="wpc-groups"></div>
+        <div class="settings-field-row wpc-actions">
+          <button class="btn btn-primary btn-sm" id="wpc-save-btn">Save recommendation settings</button>
+          <button class="btn btn-ghost btn-sm" id="wpc-reset-btn">Reset to defaults</button>
+          <span class="hint" id="wpc-status" role="status"></span>
+        </div>
+
+        <div class="planning-section-header">
+          <h2>Launch status</h2>
+          <span class="admin-note">Products are treated as launched when they have sold, are in stock with no future launch date, or have been marked here. Use this when the system cannot tell (it flags those products). This is a note in this pipeline only: nothing changes in Shopify or ApparelMagic.</span>
+        </div>
+        <div class="po-add-row">
+          <input type="text" id="lo-product-q" placeholder="Search product name or code" autocomplete="off">
+          <select id="lo-status"><option value="launched">Launched</option><option value="unlaunched">Not launched</option><option value="discontinued">Discontinued</option></select>
+          <input type="text" id="lo-note" placeholder="Note (optional)" maxlength="300">
+          <button class="btn btn-primary btn-sm" id="lo-add-btn">+ Add</button>
+        </div>
+        <div id="lo-matches" class="po-matches"></div>
+        <div id="lo-list" class="po-list"></div>
+
+        <div class="planning-section-header">
           <h2>Priority Overrides</h2>
           <span class="admin-note">Business reasons that lift (or hold) a product's creative priority whatever its stock, season or coverage: an upcoming drop, a confirmed restock, a promotion, a strategic launch or a manual priority. They only change ranking and its explanation; they never create or change creative.</span>
         </div>
@@ -1393,6 +1445,7 @@
           <select id="po-kind"></select>
           <input type="text" id="po-note" placeholder="Note (optional)" maxlength="300">
           <input type="date" id="po-until" title="Optional end date">
+          <input type="number" id="po-videos" min="0" max="50" step="1" placeholder="Videos (optional)" title="Fix the number of videos recommended for this product (0 to 50)">
           <button class="btn btn-primary btn-sm" id="po-add-btn">+ Add override</button>
         </div>
         <div id="po-matches" class="po-matches"></div>
@@ -2088,6 +2141,25 @@
 <!-- Monday Planning fast-path: decide a product needs shooting this week
      without the full Creative Job form (no talent/location/props/scripts
      yet -- that's handled later once a concept exists). -->
+<div id="shoot-plan-videos-modal" class="modal-backdrop">
+  <div class="modal modal-sm">
+    <div class="modal-header">
+      <h3>Videos for this product</h3>
+      <button class="modal-close" aria-label="Close" onclick="closeModal('shoot-plan-videos-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <label>Videos to produce
+        <input type="number" id="shoot-plan-videos-edit" min="1" max="50" step="1" inputmode="numeric" aria-describedby="shoot-plan-videos-edit-hint">
+        <span class="hint" id="shoot-plan-videos-edit-hint"></span>
+      </label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('shoot-plan-videos-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="wpSaveVideos()">Save</button>
+    </div>
+  </div>
+</div>
+
 <div id="shoot-plan-modal" class="modal-backdrop">
   <div class="modal">
     <div class="modal-header">
@@ -2110,6 +2182,12 @@
           <option value="in_office">In Office</option>
         </select>
       </label>
+      <div id="shoot-plan-recommendation" class="wp-modal-reco" style="display:none;"></div>
+      <label>Videos to produce
+        <input type="number" id="shoot-plan-videos" min="1" max="50" step="1" value="1" inputmode="numeric" aria-describedby="shoot-plan-videos-hint">
+        <span class="hint" id="shoot-plan-videos-hint">One video = one concept. Several videos can be planned for the same product.</span>
+      </label>
+      <div id="shoot-plan-mix" class="wp-mix" style="display:none;"></div>
       <label>Colourways &amp; sizes needed
         <div class="shoot-plan-colours-toolbar">
           <button type="button" class="btn btn-ghost btn-sm" onclick="selectAllShootPlanColours(true)">Select All</button>
@@ -3780,5 +3858,6 @@
 </div>
 
 <script src="app.js"></script>
+<script src="weekly-plan.js"></script>
 </body>
 </html>
