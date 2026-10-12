@@ -29,12 +29,23 @@ const ALLOCATION = {
   launch_sales_min_units: 10,    // units sold needed before sales are even considered
   launch_settle_days: 0,         // optional extra check: a launch date that passed less than this many days ago with no sales yet is verified, not assumed (0 = off: a passed official date means launched)
   new_drop_days: 60,             // a product that launched within this many days is labelled a New drop
+  // Opportunities (Batch 14: Core / High Stocks). PROVISIONAL starting points to tune against real weeks; none is a performance benchmark (those are in Meta Performance settings).
+  test_period_days: 14,          // a new creative is "still testing" this many days after it was created: it is not judged and no more creative is recommended on its account
+  recent_creative_days: 30,      // a creative newer than this is "recently launched" (so a clear weak result is "recently launched and underperforming")
+  stale_creative_days: 90,       // a creative older than this that is not performing is "old / stale"
+  opp_min_recent_units: 8,       // units sold in the last 30 days before a product counts as having demand today
+  opp_min_stock_units: 30,       // sellable units below this: never a creative recommendation (nothing to sell)
+  revival_decline_pct: 50,       // High Stocks: the last 28 days sell below this % of the product's first 28 days = momentum lost
+  revival_min_age_days: 56,      // High Stocks: a product must have sold for at least this many days so its first and latest 28 days do not overlap
+  revival_min_cover_weeks: 6,    // High Stocks: weeks of stock at the current pace needed to justify more creative investment
 };
 const ALLOC_LIMITS = {
   videos_high_need_strong: [0, 20], videos_high_need_ok: [0, 20], videos_high_need_low: [0, 20], videos_medium_need_strong: [0, 20], videos_medium_need_ok: [0, 20], videos_medium_need_low: [0, 20],
   videos_low_need_strong: [0, 20], videos_low_need_ok: [0, 20], videos_low_need_low: [0, 20], max_videos_per_product: [1, 20], shoot_now_min_score: [10, 150], coming_up_min_score: [5, 150], monitor_min_score: [0, 100],
   strong_sales_percentile: [50, 95], weak_sales_percentile: [5, 50], creative_age_stale_days: [14, 365], creative_age_old_days: [30, 730], pipeline_lookback_weeks: [1, 26],
   creative_saturation_count: [4, 100], videos_when_saturated: [0, 20], slow_mover_weeks_cover: [8, 104], videos_slow_mover: [0, 20],
+  test_period_days: [3, 60], recent_creative_days: [7, 120], stale_creative_days: [30, 365], opp_min_recent_units: [1, 500], opp_min_stock_units: [0, 2000],
+  revival_decline_pct: [10, 95], revival_min_age_days: [28, 365], revival_min_cover_weeks: [1, 52],
   launch_date_verified: [0, 1], launch_sales_confirms: [0, 1], launch_sales_min_units: [1, 1000], launch_settle_days: [0, 90], new_drop_days: [14, 180],
 };
 const ALLOC_LABEL = {
@@ -46,6 +57,9 @@ const ALLOC_LABEL = {
   creative_age_stale_days: 'Creative is ageing after (days)', creative_age_old_days: 'Creative is old after (days)', pipeline_lookback_weeks: 'Count videos still in production from the last (weeks)',
   creative_saturation_count: 'Well supplied once this many unique creatives are running', videos_when_saturated: 'Most videos for a well-supplied product (unless its creative is fatigued)',
   slow_mover_weeks_cover: 'Slow mover when stock would last longer than (weeks)', videos_slow_mover: 'Most videos for a slow mover',
+  test_period_days: 'A new creative is "still testing" for (days after it was created)', recent_creative_days: 'A creative is "recently launched" for (days)', stale_creative_days: 'A non-performing creative older than this is "old" (days)',
+  opp_min_recent_units: 'Units sold in the last 30 days for a product to count as having demand', opp_min_stock_units: 'Sellable units needed before creative is recommended',
+  revival_decline_pct: 'High Stocks: momentum lost when the last 28 days sell below this % of the first 28 days', revival_min_age_days: 'High Stocks: product must have been selling for at least (days)', revival_min_cover_weeks: 'High Stocks: weeks of stock needed to justify a refresh',
   launch_date_verified: 'ApparelMagic mid_code is the OFFICIAL launch date (1 = confirmed by WNDRR, 0 = treat as unverified: a passed date is not proof)', launch_sales_confirms: 'Sales alone confirm a launch (1 = yes, 0 = a person confirms)', launch_sales_min_units: 'Units sold before sales count as launch evidence',
   launch_settle_days: 'Optional: check a launch date that passed less than this many days ago with no sales (days, 0 = off)', new_drop_days: 'A product is a New drop for this many days after launch',
 };
@@ -73,12 +87,10 @@ function resolve(stored = {}) {
 
 // the settings the UI shows, grouped the way staff think about them, with the default and the allowed range of each. `advanced` groups are collapsed in Settings.
 const GROUPS = [
-  { key: 'weekly', title: 'Weekly production', help: 'How much any one product can take from the week, and how earlier unfinished videos are counted. The weekly video target itself is set above.', keys: ['max_videos_per_product', 'pipeline_lookback_weeks'] },
-  { key: 'coverage', title: 'Creative coverage', help: 'What enough creative means for a product, beyond the minimum number of active ads.', keys: ['min_performing_creatives', 'creative_age_stale_days', 'creative_age_old_days', 'creative_saturation_count', 'videos_when_saturated', 'slow_mover_weeks_cover', 'videos_slow_mover'] },
+  { key: 'opportunities', title: 'Opportunities (Core and High Stocks)', help: 'When a product counts as needing new creative this week. A new creative is given time to gather data before another is recommended; products that are out of stock, out of season or not selling are not recommended. These are starting points to tune, not performance targets.', keys: ['min_performing_creatives', 'test_period_days', 'recent_creative_days', 'stale_creative_days', 'opp_min_recent_units', 'opp_min_stock_units', 'strong_sales_percentile', 'weak_sales_percentile'] },
+  { key: 'revival', title: 'High Stocks revival', help: 'How a proven (Platinum or Rocket) product is judged to have lost momentum and be worth a creative refresh.', keys: ['revival_decline_pct', 'revival_min_age_days', 'revival_min_cover_weeks'] },
   { key: 'evidence', title: 'Performance evidence', help: 'How much spend and time an ad needs before it is judged against the approved benchmarks. The benchmarks themselves are in Settings, Meta Performance.', keys: ['window_days', 'trend_days', 'min_spend', 'min_impressions', 'min_trend_spend', 'trend_decline_pct'] },
   { key: 'launch', title: 'Launch status', help: 'What counts as proof that a product has officially launched. WNDRR has confirmed that the ApparelMagic mid_code is the official launch date: a future date keeps a product out of every recommendation, a passed date means launched (unless a person overrides it), and neither Shopify nor sales history can override a future date. Products with a missing or unreadable date and no other evidence are listed for verification, not recommended.', keys: ['launch_date_verified', 'launch_sales_confirms', 'launch_sales_min_units', 'launch_settle_days', 'new_drop_days'] },
-  { key: 'scoring', title: 'Recommendation scoring', advanced: true, help: 'Where the Shoot now, Coming up and Monitor lines sit and how demand is ranked. Change these only after watching a few weeks of recommendations.', keys: ['shoot_now_min_score', 'coming_up_min_score', 'monitor_min_score', 'strong_sales_percentile', 'weak_sales_percentile'] },
-  { key: 'videos', title: 'Video quantities', advanced: true, help: 'How many videos a product gets for each combination of need and demand.', keys: Object.keys(ALLOCATION).filter((k) => k.startsWith('videos_') && !['videos_when_saturated', 'videos_slow_mover'].includes(k)) },
 ];
 const describe = (config) => GROUPS.map((g) => ({ key: g.key, title: g.title, help: g.help, advanced: !!g.advanced, fields: g.keys.map((k) => ({ key: k, label: LABEL[k], value: config[k], default: DEFAULTS[k], min: LIMITS[k][0], max: LIMITS[k][1] })) }));
 

@@ -3240,6 +3240,31 @@ CREATE TABLE IF NOT EXISTS product_launch_overrides (
 CREATE INDEX IF NOT EXISTS idx_product_launch_overrides_product ON product_launch_overrides(product_code) WHERE removed_at IS NULL;
 
 -- =====================================================================
+-- Batch 14: Core -> High Stocks -> Shoot Plan with a weekly CONCEPT target
+-- =====================================================================
+-- All additive and idempotent. Nothing is dropped or rewritten: planning_settings.weekly_video_target (Batch 12) stays in place, unused by the app, so
+-- history and any rollback are preserved.
+--
+-- The team's weekly goal (planning_settings.weekly_new_concept_target, default 15, in the schema since the Planning phase) is a number of distinct creative CONCEPTS
+-- (not products, not video exports). A concept is one creative_assets row. That existing setting is reused: no second target is introduced.
+
+-- One concept can be adapted for several products. The concept stays ONE creative_assets row (so it is counted once); each extra product it is adapted for is
+-- recorded here, optionally with the Shoot Plan item that holds that product's colourways / samples. Counting concepts never looks at this table.
+CREATE TABLE IF NOT EXISTS concept_product_links (
+  id SERIAL PRIMARY KEY,
+  creative_asset_id INTEGER NOT NULL REFERENCES creative_assets(id) ON DELETE CASCADE,
+  product_code VARCHAR(64) NOT NULL,
+  product_name VARCHAR(255),
+  shoot_plan_item_id INTEGER REFERENCES shoot_plan_items(id) ON DELETE SET NULL,
+  reason_snapshot JSONB,
+  created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (creative_asset_id, product_code)
+);
+CREATE INDEX IF NOT EXISTS idx_concept_product_links_product ON concept_product_links(product_code);
+CREATE INDEX IF NOT EXISTS idx_concept_product_links_item ON concept_product_links(shoot_plan_item_id);
+
+-- =====================================================================
 -- Approved Ad Matching concepts + historical-spelling aliases
 -- =====================================================================
 -- The concept list Ad Matching offers is the people-approved vocabulary: meta_matching_vocab rows of kind 'concept'. The 40 approved
@@ -3337,28 +3362,3 @@ INSERT INTO meta_matching_concept_aliases (alias, alias_key, approved_name, remo
   ('TALKTHROUGH', 'talkthrough', 'TALK THROUGH', false),
   ('FLATLAY PHOTO', 'flatlay photo', 'FLAT LAY', false)
 ON CONFLICT (alias_key) DO NOTHING;
-
--- =====================================================================
--- Batch 14: Core -> High Stocks -> Shoot Plan with a weekly CONCEPT target
--- =====================================================================
--- All additive and idempotent. Nothing is dropped or rewritten: planning_settings.weekly_video_target (Batch 12) stays in place, unused by the app, so
--- history and any rollback are preserved.
---
--- The team's weekly goal (planning_settings.weekly_new_concept_target, default 15, in the schema since the Planning phase) is a number of distinct creative CONCEPTS
--- (not products, not video exports). A concept is one creative_assets row. That existing setting is reused: no second target is introduced.
-
--- One concept can be adapted for several products. The concept stays ONE creative_assets row (so it is counted once); each extra product it is adapted for is
--- recorded here, optionally with the Shoot Plan item that holds that product's colourways / samples. Counting concepts never looks at this table.
-CREATE TABLE IF NOT EXISTS concept_product_links (
-  id SERIAL PRIMARY KEY,
-  creative_asset_id INTEGER NOT NULL REFERENCES creative_assets(id) ON DELETE CASCADE,
-  product_code VARCHAR(64) NOT NULL,
-  product_name VARCHAR(255),
-  shoot_plan_item_id INTEGER REFERENCES shoot_plan_items(id) ON DELETE SET NULL,
-  reason_snapshot JSONB,
-  created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (creative_asset_id, product_code)
-);
-CREATE INDEX IF NOT EXISTS idx_concept_product_links_product ON concept_product_links(product_code);
-CREATE INDEX IF NOT EXISTS idx_concept_product_links_item ON concept_product_links(shoot_plan_item_id);
