@@ -3623,7 +3623,7 @@ body{background:var(--bg);color:var(--text);}
 /* ═══ Creative-first Meta Performance: actual ad creative thumbnails + preview modal ═══════════════════════════════════════════
    The thumbnail is the creative of THAT ad (Meta's own cover for the ad's creative id), never a Shopify product image. 64 x 64, object-fit: cover, rounded,
    with a small video / carousel marker; with no cover it is a neutral tile naming the format (no broken-image icon). */
-.mp-table.mp-perf .cc-thumb{width:64px;height:64px;border-radius:10px;flex:0 0 64px;}
+.mp-table.mp-perf .cc-thumb,.mp-table.mp-perf td.mp-creative-cell .cc-thumb,.mp-table.mp-perf td.mp-name .cc-thumb{width:64px;height:64px;border-radius:10px;flex:0 0 64px;}
 .mp-table.mp-perf th:nth-child(2){width:88px;}
 .mp-table.mp-perf td.mp-creative-cell{padding:8px 6px 8px 10px;vertical-align:middle;}
 .cc-thumb img{object-fit:cover;}
@@ -3645,3 +3645,6 @@ body{background:var(--bg);color:var(--text);}
 .ap-actions{align-items:center;}
 .ap-secondary{display:flex;gap:14px;margin:0 0 8px;font-size:12px;}
 .ap-dynamic-note{background:var(--amber-light);color:#7a4a05;border-radius:8px;padding:8px 10px;}
+.ap-info{margin-top:6px;}
+.ap-context .mp-detail-h{margin-top:12px;}
+.ap-context .mp-detail-h:first-child{margin-top:0;}

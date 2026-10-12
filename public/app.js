@@ -1211,7 +1211,8 @@ function mpRenderFreshness() {
   if (f.is_refreshing) note = '<span class="mp-fresh-busy">Refreshing…</span>';
   else if (!f.auto_enabled) note = `<span class="mp-fresh-off" title="${escapeHtml(f.auto_disabled_reason || '')}">Automatic refresh is off</span>`;
   else if (f.additive.needs_backfill) note = '<span class="mp-fresh-off" title="Older days in this period were never synced; only a manual backfill can fill them.">Older days need a manual backfill</span>';
-  el.innerHTML = `<span class="mp-fresh-text" title="${escapeHtml(parts.join(' · '))}">${escapeHtml(parts[0])}${parts.length > 1 ? ' <i class="mp-fresh-more">+' + (parts.length - 1) + '</i>' : ''}</span> ${note} <button type="button" class="btn btn-ghost btn-sm" id="mp-refresh-now" ${f.is_refreshing ? 'disabled' : ''}>Refresh now</button>`;
+  const shown = parts.filter((x, i) => i === 0 || /in progress/.test(x)); const hidden = parts.length - shown.length;
+  el.innerHTML = `<span class="mp-fresh-text" title="${escapeHtml(parts.join(' · '))}">${escapeHtml(shown.join(' · '))}${hidden ? ' <i class="mp-fresh-more">+' + hidden + '</i>' : ''}</span> ${note} <button type="button" class="btn btn-ghost btn-sm" id="mp-refresh-now" ${f.is_refreshing ? 'disabled' : ''}>Refresh now</button>`;
 }
 async function mpCheckFreshness() {
   try {
