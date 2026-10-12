@@ -24,6 +24,7 @@ const ALLOCATION = {
   slow_mover_weeks_cover: 26,    // stock that would take longer than this to sell at the current pace (weeks) = slow mover
   videos_slow_mover: 1,          // most videos for a slow mover (creative may not be what is holding it back)
   // launch status (Batch 13): what counts as proof that a product has gone on sale
+  launch_date_verified: 0,       // 1 = the team has confirmed the ApparelMagic mid_code field IS the official launch date (0 = a passed date does not prove a launch; a future date still keeps a product out)
   launch_sales_confirms: 0,      // 1 = sustained sales alone count as launched when ApparelMagic has no launch date (0 = such products wait for a person to confirm)
   launch_sales_min_units: 10,    // units sold needed before sales are even considered
   launch_settle_days: 21,        // a launch date that passed less than this many days ago with no sales yet is verified, not assumed
@@ -34,7 +35,7 @@ const ALLOC_LIMITS = {
   videos_low_need_strong: [0, 20], videos_low_need_ok: [0, 20], videos_low_need_low: [0, 20], max_videos_per_product: [1, 20], shoot_now_min_score: [10, 150], coming_up_min_score: [5, 150], monitor_min_score: [0, 100],
   strong_sales_percentile: [50, 95], weak_sales_percentile: [5, 50], creative_age_stale_days: [14, 365], creative_age_old_days: [30, 730], pipeline_lookback_weeks: [1, 26],
   creative_saturation_count: [4, 100], videos_when_saturated: [0, 20], slow_mover_weeks_cover: [8, 104], videos_slow_mover: [0, 20],
-  launch_sales_confirms: [0, 1], launch_sales_min_units: [1, 1000], launch_settle_days: [0, 90], new_drop_days: [14, 180],
+  launch_date_verified: [0, 1], launch_sales_confirms: [0, 1], launch_sales_min_units: [1, 1000], launch_settle_days: [0, 90], new_drop_days: [14, 180],
 };
 const ALLOC_LABEL = {
   videos_high_need_strong: 'High need + strong demand: videos', videos_high_need_ok: 'High need + steady demand: videos', videos_high_need_low: 'High need + weak demand: videos',
@@ -45,7 +46,7 @@ const ALLOC_LABEL = {
   creative_age_stale_days: 'Creative is ageing after (days)', creative_age_old_days: 'Creative is old after (days)', pipeline_lookback_weeks: 'Count videos still in production from the last (weeks)',
   creative_saturation_count: 'Well supplied once this many unique creatives are running', videos_when_saturated: 'Most videos for a well-supplied product (unless its creative is fatigued)',
   slow_mover_weeks_cover: 'Slow mover when stock would last longer than (weeks)', videos_slow_mover: 'Most videos for a slow mover',
-  launch_sales_confirms: 'Sales alone confirm a launch (1 = yes, 0 = a person confirms)', launch_sales_min_units: 'Units sold before sales count as launch evidence',
+  launch_date_verified: 'ApparelMagic mid_code is verified as the OFFICIAL launch date (1 = yes, 0 = not verified: a passed date is not proof)', launch_sales_confirms: 'Sales alone confirm a launch (1 = yes, 0 = a person confirms)', launch_sales_min_units: 'Units sold before sales count as launch evidence',
   launch_settle_days: 'Check a launch date that passed less than this many days ago with no sales (days)', new_drop_days: 'A product is a New drop for this many days after launch',
 };
 
@@ -75,7 +76,7 @@ const GROUPS = [
   { key: 'weekly', title: 'Weekly production', help: 'How much any one product can take from the week, and how earlier unfinished videos are counted. The weekly video target itself is set above.', keys: ['max_videos_per_product', 'pipeline_lookback_weeks'] },
   { key: 'coverage', title: 'Creative coverage', help: 'What enough creative means for a product, beyond the minimum number of active ads.', keys: ['min_performing_creatives', 'creative_age_stale_days', 'creative_age_old_days', 'creative_saturation_count', 'videos_when_saturated', 'slow_mover_weeks_cover', 'videos_slow_mover'] },
   { key: 'evidence', title: 'Performance evidence', help: 'How much spend and time an ad needs before it is judged against the approved benchmarks. The benchmarks themselves are in Settings, Meta Performance.', keys: ['window_days', 'trend_days', 'min_spend', 'min_impressions', 'min_trend_spend', 'trend_decline_pct'] },
-  { key: 'launch', title: 'Launch status', help: 'What counts as proof that a product has gone on sale. Products without proof are listed for verification, not recommended.', keys: ['launch_sales_confirms', 'launch_sales_min_units', 'launch_settle_days', 'new_drop_days'] },
+  { key: 'launch', title: 'Launch status', help: 'What counts as proof that a product has officially launched. An ApparelMagic date is NOT trusted as the official launch date until the team verifies the field (leave this at 0 until then): a future date still keeps a product out, but a passed date alone sends it to the verification list. Products without proof are listed for verification, not recommended.', keys: ['launch_date_verified', 'launch_sales_confirms', 'launch_sales_min_units', 'launch_settle_days', 'new_drop_days'] },
   { key: 'scoring', title: 'Recommendation scoring', advanced: true, help: 'Where the Shoot now, Coming up and Monitor lines sit and how demand is ranked. Change these only after watching a few weeks of recommendations.', keys: ['shoot_now_min_score', 'coming_up_min_score', 'monitor_min_score', 'strong_sales_percentile', 'weak_sales_percentile'] },
   { key: 'videos', title: 'Video quantities', advanced: true, help: 'How many videos a product gets for each combination of need and demand.', keys: Object.keys(ALLOCATION).filter((k) => k.startsWith('videos_') && !['videos_when_saturated', 'videos_slow_mover'].includes(k)) },
 ];

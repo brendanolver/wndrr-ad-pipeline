@@ -2,9 +2,10 @@
 // own creative workflow), and must not assume a product has launched just because the warehouse holds stock of it.
 //
 // WHAT IS KNOWN ABOUT WNDRR'S DATA (verified in the code that reads it; see docs/launch-status.md):
-//   * ApparelMagic has NO product-status or release-date field that this app reads. WNDRR repurposes the style's `mid_code` as its Launch Date (confirmed in the
-//     Demand Planning app). It is held PER STYLE (= per colourway), is free text, and '0' / blank mean "none". Nothing else in the style record is a date this
-//     app uses; an inventory receipt, purchase order date or warehouse arrival date is NOT a launch date and is never read as one.
+//   * ApparelMagic has NO product-status or release-date field that this app reads. The style's `mid_code` is a free-text date that WNDRR is believed to repurpose
+//     as a launch date (a claim inherited from the Demand Planning integration; NOT verified, and it may be a planned delivery or buy date rather than the official
+//     launch). It is held PER STYLE (= per colourway); '0' / blank mean "none". Until the team verifies it (setting launch_date_verified), a FUTURE date still keeps a
+//     product out (the safe direction) but a PASSED date is not proof of launch. An inventory receipt, purchase order date or warehouse arrival date is NOT a launch date.
 //   * Upcoming Drops live in this database (styles.drop_id -> drops.launch_date).
 //   * Shopify (status / publication) is the only direct evidence a product is on sale, but its credentials are not configured in production, so it is an OPTIONAL
 //     input here (`shopify`), used only when a caller supplies it.
@@ -13,10 +14,10 @@
 //   1. a manual launch-status override (product_launch_overrides), set by a person
 //   2. Shopify, when supplied: DRAFT = not launched, ARCHIVED = discontinued, ACTIVE and published = on sale (corroborates; it never overrides a future date)
 //   3. an Upcoming Drop the product belongs to: a future drop date = not launched
-//   4. ApparelMagic's launch date for the colourway: a future date = not launched; a date that cannot be read = UNKNOWN (never guessed)
+//   4. ApparelMagic's date (mid_code) for the colourway: a future date = not launched (always); a PASSED date counts as launched ONLY once launch_date_verified is on; a date that cannot be read = UNKNOWN (never guessed)
 //      a past date = launched, unless it passed only a few days ago with no sales yet (a planned date passing does not prove the product went live: UNKNOWN)
 //   5. the CORE product group in ApparelMagic (an established evergreen range) with no future date
-//   6. a past Upcoming Drop
+//   6. a past Upcoming Drop (while the date field is unverified only a NAMED drop counts: unnamed drops are auto-created from the date field itself)
 //   7. sustained sales, ONLY when the sales setting allows it. Sales alone are not proof: they can include pre-launch, staff, gifting or seeding orders.
 // NEVER used on their own: stock quantity, zero sales, "last creative = never", or stock arriving at the warehouse. With no usable evidence the status is
 // UNKNOWN: flagged for a person to verify, never recommended, never silently treated as launched.
@@ -25,6 +26,7 @@
 const STATUSES = ['launched', 'unlaunched', 'upcoming_restock', 'discontinued', 'unknown'];
 const DEFAULTS = {
   sales_launch_units: 10, // units sold before sales count as (weak) evidence
+  date_verified: false, // the team has confirmed the ApparelMagic date field IS the official launch date; until then a PASSED date is not proof (a future date still excludes)
   sales_confirms_launch: false, // sales alone confirm a launch only when this is on
   settle_days: 21, // a launch date this recent with no sales is verified rather than assumed
   restock_min_on_order: 30, low_stock_units: 30,
@@ -38,6 +40,7 @@ function fromConfig(c = {}) {
   return {
     ...DEFAULTS,
     ...(c.launch_sales_min_units !== undefined ? { sales_launch_units: Number(c.launch_sales_min_units) } : {}),
+    ...(c.launch_date_verified !== undefined ? { date_verified: Number(c.launch_date_verified) === 1 } : {}),
     ...(c.launch_sales_confirms !== undefined ? { sales_confirms_launch: Number(c.launch_sales_confirms) === 1 } : {}),
     ...(c.launch_settle_days !== undefined ? { settle_days: Number(c.launch_settle_days) } : {}),
   };
@@ -66,7 +69,7 @@ function assessStyle(input, today, cfg = DEFAULTS) {
   if (shopify) add('shopify', `Shopify status ${shopify.status}${shopify.published_at ? `, published ${ymd(shopify.published_at)}` : ', not published'}.`, shopify.status === 'ARCHIVED' ? 'discontinued' : shopify.status === 'DRAFT' ? 'unlaunched' : shopify.published_at && ymd(shopify.published_at) <= t ? 'launched' : 'unknown');
   if (dropDate) add('drop', `Upcoming Drop${drop.name ? ` "${drop.name}"` : ''} dated ${dropDate}.`, dropDate >= t ? 'unlaunched' : 'launched');
   if (launchDateRaw && launchDateReadable === false) add('apparelmagic_date', `ApparelMagic launch date "${launchDateRaw}" could not be read as a date.`, 'unknown');
-  else if (ld) add('apparelmagic_date', `ApparelMagic launch date ${ld}${ld > t ? ' is still ahead' : ' has passed'}.`, ld > t ? 'unlaunched' : 'launched');
+  else if (ld) add('apparelmagic_date', `ApparelMagic mid_code holds ${ld}${ld > t ? ' (still ahead)' : ' (has passed)'}${c.date_verified ? '' : '. That field is NOT verified as the official launch date, so a passed date is not treated as proof'}.`, ld > t ? 'unlaunched' : c.date_verified ? 'launched' : 'unverified');
   else add('apparelmagic_date', 'ApparelMagic has no launch date for this colourway.', 'none');
   if (isCore) add('core_group', 'In the ApparelMagic CORE product group (an established range).', 'launched');
   if (sold !== null) add('sales', sold > 0 ? `${sold} units sold in the sales history${first ? `, first in ${first}` : ''}. Sales can include pre-launch, staff or seeding orders.` : 'No sales in the sales history (this proves nothing either way).', sold >= c.sales_launch_units ? 'sales_only' : 'none');
@@ -78,7 +81,9 @@ function assessStyle(input, today, cfg = DEFAULTS) {
   if (dropDate && dropDate >= t) return { ...done('unlaunched', 'upcoming_drop', `Part of the upcoming drop${drop.name ? ` "${drop.name}"` : ''} launching ${dropDate}; its creative is handled in Upcoming Drops.`, 'confirmed'), drop };
   if (ld && ld > t) return done('unlaunched', 'launch_date', `ApparelMagic launch date ${ld} is still ahead.`, 'confirmed');
   if (launchDateRaw && launchDateReadable === false) return done('unknown', 'unreadable_date', `ApparelMagic holds a launch date ("${launchDateRaw}") that cannot be read, so it is not assumed to have passed. Please confirm.`, 'none');
-  if (ld && ld <= t) {
+  if (ld && ld <= t && !c.date_verified) {
+    // the field's meaning is unverified: it may be a planned delivery or buy date, not the day the product officially launched. Fall through to the other evidence.
+  } else if (ld && ld <= t) {
     const age = daysBetween(ld, t);
     const since = unitsSince(months, ld);
     if (age < c.settle_days && (since === null ? sold === 0 : since === 0)) return done('unknown', 'date_just_passed', `ApparelMagic launch date ${ld} passed ${age} day${age === 1 ? '' : 's'} ago and nothing has sold yet. A planned date passing does not prove it went live. Please confirm.`, 'low');
@@ -87,11 +92,13 @@ function assessStyle(input, today, cfg = DEFAULTS) {
   }
   if (shopify && shopify.status === 'ACTIVE' && shopify.published_at && ymd(shopify.published_at) <= t) return done('launched', 'shopify', `Active in Shopify since ${ymd(shopify.published_at)}.`, 'confirmed');
   if (isCore) return done('launched', 'core_group', 'In the ApparelMagic CORE product group, an established range with no future launch date.', 'group');
-  if (dropDate && dropDate < t) return done('launched', 'past_drop', `Its drop launched ${dropDate}.`, 'date_only');
+  if (dropDate && dropDate < t && (c.date_verified || (drop && drop.name))) return done('launched', 'past_drop', `Its drop launched ${dropDate}.`, 'date_only');
   if (sold !== null && sold >= c.sales_launch_units) {
     if (c.sales_confirms_launch) return done('launched', 'sales', `${sold} units sold and sales are allowed to confirm a launch, so it is treated as on sale.`, 'sales_only');
-    return done('unknown', 'sales_only', `No launch date is recorded. ${sold} units have sold${first ? ` since ${first}` : ''}, but sales alone do not prove a launch (they can include pre-launch, staff or seeding orders). Please confirm.`, 'sales_only');
+    if (!(ld && ld <= t)) return done('unknown', 'sales_only', `No launch date is recorded. ${sold} units have sold${first ? ` since ${first}` : ''}, but sales alone do not prove a launch (they can include pre-launch, staff or seeding orders). Please confirm.`, 'sales_only');
   }
+  if (ld && ld <= t) return done('unknown', 'unverified_date', `ApparelMagic's mid_code holds ${ld}, but that field has not been verified as the official launch date (it may be a planned delivery or buy date), so a passed date is not proof${sold ? ` and ${sold} units sold does not prove a launch either (early availability looks the same)` : ''}. Please confirm.`, 'unverified');
+  if (dropDate && dropDate < t) return done('unknown', 'unverified_date', `Its unnamed drop (${dropDate}) was created from the ApparelMagic date field, which is not verified as the official launch date. Please confirm.`, 'unverified');
   return done('unknown', 'none', 'No launch date, drop or sustained sales to confirm it has launched. Stock alone does not prove it.', 'none');
 }
 

@@ -8,6 +8,7 @@ const AM = require('../src/lib/apparelmagic');
 const LI = require('../src/lib/launchInputs');
 const TODAY = '2026-10-12';
 const fam = (styles, extra = {}, cfg) => L.assessFamily({ styles, ...extra }, TODAY, cfg);
+const V = (o = {}) => L.fromConfig({ launch_date_verified: 1, ...o }); // the team has verified the ApparelMagic date field
 const d = (s) => new Date(`${s}T00:00:00Z`);
 
 // ── ApparelMagic launch dates: reading the field ──────────────────────────────────────
@@ -23,15 +24,15 @@ test('a future ApparelMagic launch date = unlaunched (excluded), even with lots 
   assert.equal(f.status, 'unlaunched'); assert.equal(f.eligible, false); assert.match(f.detail, /still ahead/); assert.equal(f.confidence, 'confirmed');
 });
 test('a PAST launch date = launched, and zero sales do not change that once the date has settled', () => {
-  const f = fam([{ style_code: 'W26DD001BLK', launchDate: d('2026-03-01'), qty: 0 }]);
+  const f = fam([{ style_code: 'W26DD001BLK', launchDate: d('2026-03-01'), qty: 0 }], {}, V());
   assert.equal(f.status, 'launched'); assert.equal(f.basis, 'launch_date'); assert.equal(f.confidence, 'date_only');
-  assert.equal(fam([{ style_code: 'W26DD001BLK', launchDate: d('2026-03-01'), qty: 12 }]).confidence, 'confirmed', 'a past date with sales is the strongest signal');
+  assert.equal(fam([{ style_code: 'W26DD001BLK', launchDate: d('2026-03-01'), qty: 12 }], {}, V()).confidence, 'confirmed', 'a past date with sales is the strongest signal');
 });
 test('a planned date that passed only days ago with nothing sold is NOT assumed live: unknown, to be verified', () => {
-  const f = fam([{ style_code: 'W26DE001BLK', launchDate: d('2026-10-08'), qty: 0, months: {} }]);
+  const f = fam([{ style_code: 'W26DE001BLK', launchDate: d('2026-10-08'), qty: 0, months: {} }], {}, V());
   assert.equal(f.status, 'unknown'); assert.equal(f.needs_check, true); assert.match(f.detail, /does not prove it went live/);
-  assert.equal(fam([{ style_code: 'W26DE001BLK', launchDate: d('2026-10-08'), qty: 5, months: { '2026-10': 5 } }]).status, 'launched', 'but once it has sold it is plainly on sale');
-  assert.equal(fam([{ style_code: 'W26DE001BLK', launchDate: d('2026-10-08'), qty: 0, months: {} }], {}, L.fromConfig({ launch_settle_days: 0 })).status, 'launched', 'the settle window is configurable');
+  assert.equal(fam([{ style_code: 'W26DE001BLK', launchDate: d('2026-10-08'), qty: 5, months: { '2026-10': 5 } }], {}, V()).status, 'launched', 'but once it has sold it is plainly on sale');
+  assert.equal(fam([{ style_code: 'W26DE001BLK', launchDate: d('2026-10-08'), qty: 0, months: {} }], {}, V({ launch_settle_days: 0 })).status, 'launched', 'the settle window is configurable');
 });
 test('an unreadable launch date is UNKNOWN (flagged), never treated as past or future', () => {
   const f = fam([{ style_code: 'W26DF001BLK', launchDate: null, launchDateRaw: '1 Nov', launchDateReadable: false, qty: 300 }]);
@@ -59,9 +60,9 @@ test('a product in the ApparelMagic CORE group is an established range: launched
 // ── Upcoming Drops, conflicts, overrides ───────────────────────────────────────────────
 test('an upcoming drop wins over a past ApparelMagic date and sales: unlaunched, "handled in Upcoming Drops"', () => {
   const drop = { launch_date: '2026-10-20', name: 'Drop 24' };
-  const f = fam([{ style_code: 'W26EE001BLK', launchDate: d('2026-01-01'), qty: 500, drop }]);
+  const f = fam([{ style_code: 'W26EE001BLK', launchDate: d('2026-01-01'), qty: 500, drop }], {}, V());
   assert.equal(f.status, 'unlaunched'); assert.equal(f.in_upcoming_drop, true); assert.match(f.detail, /Upcoming Drops/);
-  assert.equal(fam([{ style_code: 'W26EE001BLK', launchDate: null, qty: 0, drop: { launch_date: '2026-06-01' } }]).status, 'launched', 'a past drop = launched');
+  assert.equal(fam([{ style_code: 'W26EE001BLK', launchDate: null, qty: 0, drop: { launch_date: '2026-06-01', name: 'Drop 20' } }]).status, 'launched', 'a past NAMED drop (made by a person) = launched');
 });
 test('conflicting signals: a future ApparelMagic date beats sales; a manual override beats everything; Shopify DRAFT beats a past date', () => {
   assert.equal(fam([{ style_code: 'W26CF001BLK', launchDate: d('2026-12-01'), qty: 900, months: { '2026-09': 900 } }]).status, 'unlaunched');
@@ -82,7 +83,7 @@ test('manual override wins and is explained; discontinued is excluded', () => {
 
 // ── colourways, restock, evidence ──────────────────────────────────────────────────────
 test('colourways are judged one by one: launched + unlaunched colour = launched, the unlaunched colour is noted and left out', () => {
-  const f = fam([{ style_code: 'W26GG001BLK', launchDate: d('2026-02-01') }, { style_code: 'W26GG001WHT', launchDate: d('2026-12-01') }]);
+  const f = fam([{ style_code: 'W26GG001BLK', launchDate: d('2026-02-01') }, { style_code: 'W26GG001WHT', launchDate: d('2026-12-01') }], {}, V());
   assert.equal(f.status, 'launched'); assert.match(f.detail, /1 colourway\(s\) have not launched/);
   assert.equal(f.by_style.find((x) => x.style_code === 'W26GG001WHT').status, 'unlaunched');
   const all = fam([{ style_code: 'W26GH001BLK', launchDate: d('2026-12-01') }, { style_code: 'W26GH001WHT', launchDate: d('2026-12-01') }]);
@@ -90,10 +91,10 @@ test('colourways are judged one by one: launched + unlaunched colour = launched,
 });
 test('upcoming restock: launched, out or low, with a real order on the way', () => {
   const base = [{ style_code: 'W26HH001BLK', launchDate: d('2026-01-01') }];
-  const f = fam(base, { stock: { known: true, units: 5 }, onOrder: 120 });
+  const f = fam(base, { stock: { known: true, units: 5 }, onOrder: 120 }, V());
   assert.equal(f.status, 'upcoming_restock'); assert.equal(f.eligible, true); assert.equal(f.restock, true);
-  assert.equal(fam(base, { stock: { known: true, units: 5 }, onOrder: 10 }).status, 'launched');
-  assert.equal(fam(base, { stock: { known: true, units: 500 }, onOrder: 500 }).status, 'launched');
+  assert.equal(fam(base, { stock: { known: true, units: 5 }, onOrder: 10 }, V()).status, 'launched');
+  assert.equal(fam(base, { stock: { known: true, units: 500 }, onOrder: 500 }, V()).status, 'launched');
 });
 test('no colourways -> unknown; and every verdict carries the full evidence list (what was found, including what was missing)', () => {
   assert.equal(fam([]).status, 'unknown');
@@ -109,4 +110,31 @@ test('launchInputs builds the same evidence from the catalogue for every caller 
   const b = LI.forStyle('W26IN002BLK', { amDetails, salesByStyle, drops: new Map([['W26IN002BLK', { launch_date: '2026-11-01' }]]), overrides: new Map([['W26IN002BLK', { status: 'launched' }]]) });
   assert.equal(b.isCore, true); assert.equal(b.qty, 50); assert.deepEqual(b.months, { '2026-04': 50 }); assert.equal(b.drop.launch_date, '2026-11-01'); assert.equal(b.override.status, 'launched');
   assert.equal(LI.forStyle('W26IN001BLK', { amDetails, salesByStyle: null }).qty, null, 'sales unavailable = unknown, not zero');
+});
+
+// ── the ApparelMagic date field is NOT verified as the official launch date (default) ──────
+test('DEFAULT: a PASSED ApparelMagic date is NOT proof of launch (the field may be a planned delivery / buy date): unknown, sent to verification, never recommended', () => {
+  const f = fam([{ style_code: 'W26IA006BLK', launchDate: d('2026-08-24'), launchDateRaw: '24-08-26', launchDateReadable: true, qty: 57, months: { '2026-08': 20, '2026-09': 37 } }]);
+  assert.equal(f.status, 'unknown'); assert.equal(f.basis, 'unverified_date'); assert.equal(f.eligible, false); assert.equal(f.needs_check, true);
+  assert.match(f.detail, /not been verified as the official launch date/); assert.match(f.detail, /early availability looks the same/);
+  const ev = f.by_style[0].evidence.find((e) => e.source === 'apparelmagic_date');
+  assert.equal(ev.verdict, 'unverified'); assert.match(ev.text, /NOT verified/);
+});
+test('DEFAULT: a FUTURE ApparelMagic date still keeps the product out (the safe direction), and sales never override it', () => {
+  const f = fam([{ style_code: 'W26KA901BLK', launchDate: d('2026-11-15'), qty: 300, months: { '2026-09': 300 } }]);
+  assert.equal(f.status, 'unlaunched'); assert.equal(f.eligible, false);
+});
+test('DEFAULT: other evidence still works without the date field: manual status, Shopify published, CORE group, a NAMED past drop; an UNNAMED drop (auto-made from the date field) does not', () => {
+  assert.equal(fam([{ style_code: 'W26IA006BLK', launchDate: d('2026-08-24'), override: { status: 'launched' } }]).status, 'launched');
+  assert.equal(fam([{ style_code: 'W26IA006BLK', launchDate: d('2026-08-24'), shopify: { status: 'ACTIVE', published_at: '2026-08-24T23:02:00Z' } }]).status, 'launched');
+  assert.equal(fam([{ style_code: 'W26CO001BLK', launchDate: d('2026-01-01'), isCore: true }]).status, 'launched');
+  assert.equal(fam([{ style_code: 'W26ND001BLK', launchDate: null, drop: { launch_date: '2026-06-01', name: 'Summer Drop' } }]).status, 'launched');
+  const unnamed = fam([{ style_code: 'W26UD001BLK', launchDate: null, drop: { launch_date: '2026-06-01', name: null } }]);
+  assert.equal(unnamed.status, 'unknown'); assert.match(unnamed.detail, /unnamed drop/);
+});
+test('the setting is registered, bounded and OFF by default; turning it on restores date-based launches', () => {
+  const C = require('../src/lib/creativePlanningConfig');
+  assert.equal(C.DEFAULTS.launch_date_verified, 0); assert.deepEqual(C.LIMITS.launch_date_verified, [0, 1]); assert.match(C.LABEL.launch_date_verified, /not verified/);
+  assert.equal(L.fromConfig({}).date_verified, false); assert.equal(L.fromConfig({ launch_date_verified: 1 }).date_verified, true);
+  assert.equal(fam([{ style_code: 'W26VV001BLK', launchDate: d('2026-03-01'), qty: 20 }], {}, V()).status, 'launched');
 });

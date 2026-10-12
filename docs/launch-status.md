@@ -5,7 +5,7 @@ This is the investigation record for "High Stocks recommends products that have 
 ## 1. What ApparelMagic actually exposes (read from the code that reads it)
 
 * The app reads one crawl of ApparelMagic `GET /products`. The fields it keeps per **style** (one style = one colourway; the 8-character product code groups colourways) are: `style_number`, `description` (name and colour), images, `mid_code`, `group`, `category`, `color_code`, `size_range_id`.
-* **`mid_code` is WNDRR's Launch Date.** WNDRR repurposes it (confirmed in production in the Demand Planning app, and relied on for Upcoming Drops suggestions). It is **per style / colourway**, free text, and `0` or blank means "none".
+* **`mid_code` is NOT verified as WNDRR's official launch date.** An earlier version of this document (and the Batch 13 code) said it was "confirmed in production". That claim traces back to one commit message (`2f6b076`) citing the Demand Planning repo's V2 branch; no ApparelMagic record, field documentation or WNDRR statement in this repository confirms it, and this build environment has no ApparelMagic credentials to look. What the code actually knows: `mid_code` is a free-text field, per style (colourway), where `0`/blank means none, and many values resemble dates. Whether a date there is the **official launch**, a **planned delivery**, a **buy/season date** or something else is **unverified**. The app now treats it accordingly (section 4a).
 * **There is no product status, release date or available-from field that the app reads.** Nothing was assumed to exist. An inventory receipt date, purchase order date or warehouse arrival date is **not** a launch date and is never used as one.
 * `group` = `AA CORE STYLES` / `ACCESSORIES CURRENT` marks the CORE range; `category` is the product type (Accessories are excluded from ad planning).
 * *Not verified, and cannot be from the build environment:* the live ApparelMagic records of the five named products. The build environment has no ApparelMagic credentials. **The new read-only check (Settings → Planning → "Check a product's launch evidence", tick "Include raw ApparelMagic fields") shows, in production, exactly what ApparelMagic holds for any product, including every date-like or status-like field its record carries**, so the question "what does ApparelMagic say about Loan Shark?" can be answered in seconds without anyone guessing.
@@ -35,7 +35,7 @@ Batch 12 judged a colourway launched when **any** of: a past ApparelMagic date, 
 1. A person's manual status wins.
 2. Shopify, only when supplied (not configured today): DRAFT = not launched, ARCHIVED = discontinued; ACTIVE and published corroborates a launch but never overrides a future date.
 3. An Upcoming Drop dated in the future = not launched (its creative is handled in Upcoming Drops).
-4. An ApparelMagic launch date: future = not launched; **unreadable = unknown** (never guessed; years outside 2015-2100 and impossible dates count as unreadable); past = launched, unless it passed fewer than 21 days ago (configurable) with nothing sold yet, in which case it is *unknown* ("a planned date passing does not prove it went live").
+4. An ApparelMagic date (`mid_code`, **unverified**; see 4a): future = not launched; **unreadable = unknown** (never guessed; years outside 2015-2100 and impossible dates count as unreadable); past = launched, unless it passed fewer than 21 days ago (configurable) with nothing sold yet, in which case it is *unknown* ("a planned date passing does not prove it went live").
 5. CORE product group with no future date = launched (an established range).
 6. A past Upcoming Drop = launched.
 7. **Sales alone do not prove a launch** (pre-launch, staff and seeding orders look identical). They only count when the setting *Sales alone confirm a launch* is switched on (off by default).
@@ -44,6 +44,41 @@ Batch 12 judged a colourway launched when **any** of: a past ApparelMagic date, 
 Colourways are judged one by one; a product with some launched and some unlaunched colourways is launched and the unlaunched colours are noted.
 
 **Why this is not a manual-classification job:** a product needs a person only when ApparelMagic has no readable date, it is not in the CORE group, and there is no Upcoming Drop. Products with a past date, a future date, an Upcoming Drop, or the CORE group are classified automatically. The verification list is ordered by stock, and each row shows the evidence.
+
+## 4a. Verification status of the date field, and the safe fallback (follow-up to Batch 13)
+
+Setting **Settings → Planning → Launch status → "ApparelMagic mid_code is verified as the OFFICIAL launch date"** (`launch_date_verified`, **off by default**).
+
+| mid_code holds | Field NOT verified (default) | Field verified |
+| --- | --- | --- |
+| a future date | **not launched** (kept out: the safe direction) | not launched |
+| a passed date | **not proof**. Unknown unless other evidence exists (manual status, Shopify published, CORE group, a **named** past drop). Goes to "Products requiring launch verification" | launched (with the 21-day settle check) |
+| unreadable text / blank | unknown | unknown |
+
+Unnamed drops are created automatically *from* `mid_code` clusters, so while the field is unverified a past unnamed drop is not independent evidence either. A drop a person named is.
+
+**Information needed to verify the field** (any one is enough): (1) the WNDRR team confirming what `mid_code` is used for in ApparelMagic and who fills it in; (2) the raw ApparelMagic record of a product whose official launch date is known, via Settings → Planning → "Check a product's launch evidence" with "Include raw ApparelMagic fields" ticked; (3) a list of 5-10 recent products with their official launch dates to compare against their `mid_code`. If `mid_code` does not match, the correct field (or a Shopify/other source) is wired in instead.
+
+## 4b. What Shopify shows (read-only, 12 Oct 2026) about the five products
+
+These are **facts from Shopify**; what the team *means* by "launched" is not in any data source we can read.
+
+| Colourway (style code) | Shopify published (UTC) | Planned delivery month (`custom.delivery_month`) | First sales week |
+| --- | --- | --- | --- |
+| Slammed Box Fit Tee Black/White (W26HA002) | 10 Aug 2026 | Aug-26 | w/c 10 Aug |
+| Revival Heavy Weight Tee Faded Black/Moon Grey (W26HA009) | 10 Aug 2026 | Aug-26 | w/c 10 Aug |
+| Loan Shark Box Fit Tee Black/White (W26IA006) | 24 Aug 2026 23:02 (25 Aug AEST) | **Sep-26** | w/c 24 Aug (first order 27 Aug) |
+| Hexed Box Fit Tee Navy/White (W26IA004) | 24 Aug 2026 23:01 | **Sep-26** | w/c 24 Aug |
+| Faction Box Fit Tee Faded Black (W26IA020) | 31 Aug 2026 | **Sep-26** | w/c 31 Aug |
+
+* **No sale occurred before a colourway's publish date.** First sales start the week it is published. So these are not pre-launch leaks; they are normal public sales of products that are live on the store.
+* **Channel mix since 1 Aug (556 orders across the five): ~95% Online Store**, plus Redo (returns/exchange app), Shop, and Facebook & Instagram. No POS, wholesale, draft-order or staff channel. In the first 12 Loan Shark orders sampled: all `web` or Facebook channel, none test orders, two used discount codes, none carried staff or seeding tags (this is a sample, not an audit of all 556).
+* **It is not pre-order selling.** Inventory policy is DENY (cannot sell beyond stock) and stock existed.
+* **Shopify carries its own planned delivery month**, and it is encoded in the style code: the letter after the year (`W26` + **G/H/I/K**...) matches `custom.delivery_month` (G=Jul, H=Aug, I=Sep, K=Nov, checked on 25 products across G, H, I and K; the `W26K...` Nov-26 products are all unpublished drafts). Loan Shark, Hexed and Faction are **Sep-26** products that went on sale in late August, i.e. **before their planned delivery month**: strong evidence of **early availability**. Slammed and Revival Heavy Weight Tee are **Aug-26** products published in August, which does not on its face explain "not launched".
+* **Colourways differ**: for example Revival Hood Sweat Moon Grey (W26GE023, Jul-26) published 30 Jun, while Black/Charcoal (W26HE016, Aug-26) published 22 Jul. Per-colourway judgement is therefore required, and the app already does it.
+* Older W25 Revival/Hexed drafts (Black, Charcoal, Baby Blue) are unrelated last-year styles.
+
+**What this does and does not establish.** It establishes that the five are *on sale and selling* and that for three of them that happened ahead of Shopify's own planned delivery month. It does **not** establish an *official launch date* for any of them. The distinction the team draws ("official launch" vs "available") is real in the data: **publish date**, **planned delivery month**, **sales history** and **official launch** are four different things, and only the first three are readable today.
 
 ## 5. Product role is separate from creative priority
 

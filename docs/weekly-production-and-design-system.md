@@ -67,7 +67,7 @@ Per unique creative (same Meta creative id, or a "- Copy" of the same name, coun
 
 ## Launch status
 
-A product is **launched** when it has sold, or is in stock with a launch date in the past, or has been marked launched by hand; **unlaunched** when its ApparelMagic launch date is in the future, it belongs to an upcoming Drop, or it has been marked so by hand; **discontinued** only by hand; otherwise **unknown** (flagged, held at Monitor, never assumed). Unlaunched products leave High Stocks, Core and the Weekly Plan, and stay in Upcoming Drops. Stock, zero sales or "Last creative: never" are never used to guess.
+(Superseded by docs/launch-status.md section 4a: the ApparelMagic date field is unverified and a passed date is no longer proof.) A product is **launched** when it has sold, or is in stock with a launch date in the past, or has been marked launched by hand; **unlaunched** when its ApparelMagic launch date is in the future, it belongs to an upcoming Drop, or it has been marked so by hand; **discontinued** only by hand; otherwise **unknown** (flagged, held at Monitor, never assumed). Unlaunched products leave High Stocks, Core and the Weekly Plan, and stay in Upcoming Drops. Stock, zero sales or "Last creative: never" are never used to guess.
 
 ## Database (additive, idempotent)
 

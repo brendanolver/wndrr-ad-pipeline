@@ -107,7 +107,7 @@ router.get('/launch-evidence', async (req, res, next) => {
       }
       out.push({ key: f.key, name: f.name, product_codes: f.codes, status: fam.status, basis: fam.basis, confidence: fam.confidence, detail: fam.detail, stock_total: stockUnits, on_order: onOrder, in_upcoming_drop: fam.in_upcoming_drop, colourways: perStyle });
     }
-    res.json({ query: q, today, thresholds: cfg, shopify_evidence: !!(lc.shopify || deps.shopifyEvidence), note: 'Read-only. Shopify publication status is not part of this unless Shopify credentials are configured.', products: out });
+    res.json({ query: q, today, thresholds: cfg, shopify_evidence: !!(lc.shopify || deps.shopifyEvidence), date_field_verified: cfg.date_verified, note: `Read-only. Shopify publication status is not part of this unless Shopify credentials are configured. The ApparelMagic mid_code field is ${cfg.date_verified ? 'marked as verified' : 'NOT verified'} as the official launch date${cfg.date_verified ? '' : ': a passed date is shown as evidence but is not treated as proof of launch (a future date still keeps a product out)'}.`, products: out });
   } catch (err) { next(err); }
 });
 
