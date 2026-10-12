@@ -830,14 +830,19 @@ function mpRenderSummary(sum) {
 
   const cmp = sum.compare;
   const bothComplete = !!cmp && cov.missing_days === 0 && cmp.coverage.missing_days === 0 && cmp.coverage.status !== 'none';
-  document.getElementById('mp-kpis').innerHTML = MP_KPIS.map((def) => `
+  const kpiCard = (def) => `
     <div class="mp-kpi">
       <div class="mp-kpi-label">${def.label}</div>
       <div class="mp-kpi-value" title="${escapeHtml(String(sum.totals[def.key] === null || sum.totals[def.key] === undefined ? 'Not available' : sum.totals[def.key]))}">${mpFmt(sum.totals[def.key], def.fmt)}</div>
       ${cmp ? (mpDelta(def, sum.totals[def.key], cmp.totals[def.key], bothComplete) || '<div class="mp-kpi-delta"></div>') : ''}
-    </div>`).join('') +
-    mpReachTilesHtml(sum.reach_frequency) +
-    `<div class="mp-secondary" style="grid-column:1 / -1;">
+    </div>`;
+  // two panels, as in the design: money on one side, traffic / delivery on the other. Every card is one of the same real figures as before (nothing added or dropped).
+  const FIN = ['spend', 'purchases', 'cpa', 'purchase_value', 'roas'];
+  const group = (cls, title, inner) => `<section class="mp-kpi-group ${cls}"><h3 class="mp-kpi-group-title">${title}</h3><div class="mp-kpi-row">${inner}</div></section>`;
+  document.getElementById('mp-kpis').innerHTML =
+    group('mp-kpi-fin', 'Financial performance', MP_KPIS.filter((d) => FIN.includes(d.key)).map(kpiCard).join('')) +
+    group('mp-kpi-traffic', 'Traffic &amp; delivery', MP_KPIS.filter((d) => !FIN.includes(d.key)).map(kpiCard).join('') + mpReachTilesHtml(sum.reach_frequency)) +
+    `<div class="mp-secondary">
        <span>Ads with activity <b>${Number(sum.totals.ads_with_activity).toLocaleString('en-AU')}</b></span>
      </div>`;
 
@@ -1337,6 +1342,8 @@ function ccThumbFill(el, t) {
   const kind = t && t.kind ? t.kind : '';
   el.dataset.kind = kind;
   el.dataset.label = CC_KIND_LABEL[kind] || 'No preview';
+  const line = kind && el.closest('tr') && el.closest('tr').querySelector('.mp-campaign-line');
+  if (line && !line.querySelector('.mp-format')) line.insertAdjacentHTML('beforeend', `<span class="mp-format">${CC_KIND_LABEL[kind]}</span>`);
   if (!t || t.state !== 'ok' || !t.thumb_url) { el.classList.toggle('cc-thumb-none', !!(t && t.state === 'unavailable')); return; }
   el.classList.remove('cc-thumb-none');
   const badge = kind === 'video' ? CC_BADGE_PLAY : kind === 'carousel' ? CC_BADGE_MULTI('Carousel') : kind === 'dynamic' ? CC_BADGE_MULTI('Dynamic creative: several assets') : '';

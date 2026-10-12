@@ -182,7 +182,7 @@
          src/lib/metaPerformance.js for why. -->
     <section id="tab-meta-performance" class="tab-panel">
       <div class="mp-top">
-        <h2>Meta Performance</h2>
+        <div class="mp-title-block"><h2>Meta Performance</h2><div class="mp-subtitle">Performance of WNDRR Meta ads across all campaigns</div></div>
         <!-- Performance | Ad Matching: one area, two views (no extra top-level
              sidebar item). Performance is the original page, unchanged. -->
         <div class="mp-subnav" id="mp-subnav" role="tablist">
@@ -251,7 +251,13 @@
         <div class="mp-health-note" id="mp-health-note" style="display:none;"></div>
         <div class="mp-table-wrap">
         <table class="mp-table mp-perf">
+          <colgroup><col style="width:64px"><col style="width:88px"><col style="min-width:300px"><col style="width:84px"><col style="width:104px"><col style="width:84px"><col style="width:78px"><col style="width:112px"><col style="width:70px"><col style="width:86px"><col style="width:80px"><col style="width:96px"><col style="width:76px"><col style="width:88px"><col style="width:94px"></colgroup>
           <thead>
+            <tr class="mp-group-row" aria-hidden="true">
+              <td colspan="4" class="mp-group-details">Ad details</td>
+              <td colspan="5" class="mp-group-fin">Financial performance</td>
+              <td colspan="6" class="mp-group-traffic">Traffic &amp; delivery</td>
+            </tr>
             <tr>
               <th class="mp-th-funnel" title="Funnel position, read from the literal TOF / TOM / MOF in the campaign name. Unknown is never guessed.">Funnel</th>
               <th class="mp-th-creative">Creative</th>
