@@ -723,7 +723,7 @@ const MP_KPIS = [
   { key: 'roas', label: 'ROAS', fmt: 'roas', better: 'up' },
   { key: 'add_to_cart', label: 'Adds to Cart', fmt: 'int', better: 'up' },
   { key: 'cost_per_atc', label: 'Cost / ATC', fmt: 'money', better: 'down' },
-  { key: 'outbound_ctr', label: 'Outbound CTR', fmt: 'pct', better: 'up' },
+  { key: 'outbound_ctr', label: 'Outbound CTR', fmt: 'pct', better: null }, // no approved benchmark: a move is shown, never judged
   // CPM = cost per 1,000 impressions (total spend / total impressions x 1,000, not an average of ad CPMs). No CPM benchmark is approved, so it is never coloured or judged.
   { key: 'cpm', label: 'CPM', fmt: 'money', better: null },
 ];
@@ -792,14 +792,19 @@ function mpRenderCoverage(cov, label) {
   return '';
 }
 
-function mpDelta(def, cur, prev, ok) {
-  if (!ok || cur === null || prev === null || !(prev > 0)) return '';
+// The comparison under a summary figure: the change, then what it is against. Colour = whether the move is FAVOURABLE for that metric (def.better); a metric with no
+// agreed direction (Amount Spent, CPM, Outbound CTR, Reach, Frequency) is shown neutral. Unavailable / missing data is stated, never turned into a percentage.
+function mpDelta(def, cur, prev, ok, vs) {
+  const na = (why) => `<div class="mp-kpi-delta unavailable" title="${escapeHtml(why)}"><span class="mp-kpi-pct">—</span><span class="mp-kpi-vs">${escapeHtml(vs || 'vs previous period')} unavailable</span></div>`;
+  if (!ok) return na('The previous period is not fully synced, so there is nothing reliable to compare against.');
+  if (cur === null || cur === undefined || prev === null || prev === undefined || !(prev > 0)) return na('There is no previous-period value to compare against.');
   const pct = ((cur - prev) / prev) * 100;
-  if (!Number.isFinite(pct)) return '';
+  if (!Number.isFinite(pct)) return na('There is no previous-period value to compare against.');
+  const r = Math.round(pct);
   const arrow = pct > 0 ? '▲' : pct < 0 ? '▼' : '•';
-  let cls = '';
-  if (def.better && pct !== 0) cls = (pct > 0) === (def.better === 'up') ? 'good' : 'bad';
-  return `<div class="mp-kpi-delta ${cls}" title="Previous: ${escapeHtml(String(prev))}">${arrow} ${Math.abs(pct).toFixed(1)}% vs prev</div>`;
+  let cls = 'neutral';
+  if (def.better && r !== 0) cls = (pct > 0) === (def.better === 'up') ? 'good' : 'bad';
+  return `<div class="mp-kpi-delta ${cls}" title="Previous period: ${escapeHtml(String(prev))}"><span class="mp-kpi-pct">${arrow} ${Math.abs(r)}%</span><span class="mp-kpi-vs">${escapeHtml(vs || 'vs previous period')}</span></div>`;
 }
 
 function mpRenderSummary(sum) {
@@ -807,10 +812,9 @@ function mpRenderSummary(sum) {
   if (sum.today) mpState.today = sum.today;
   const rbl = document.getElementById('mp-range-btn-label'); if (rbl) rbl.textContent = sum.preset === 'custom' ? mpRangeLabel(sum.range.since, sum.range.until) : sum.label;
   mpState.currency = sum.freshness.currency;
-  document.getElementById('mp-range-line').textContent =
-    `${sum.label} · ${mpRange(sum.range, true)} · ${sum.timezone.replace('_', ' ')} time`;
-  document.getElementById('mp-fresh').textContent = sum.freshness.last_synced_at
-    ? `Last synced: ${mpDateTime(sum.freshness.last_synced_at)}`
+  document.getElementById('mp-range-line').textContent = `${mpRange(sum.range, true)} · ${sum.timezone}`;
+  document.getElementById('mp-fresh-text').textContent = sum.freshness.last_synced_at
+    ? `Last updated ${mpDateTime(sum.freshness.last_synced_at)}`
     : 'Never synced';
 
   const cov = sum.coverage;
@@ -832,21 +836,21 @@ function mpRenderSummary(sum) {
 
   const cmp = sum.compare;
   const bothComplete = !!cmp && cov.missing_days === 0 && cmp.coverage.missing_days === 0 && cmp.coverage.status !== 'none';
+  // "vs previous 7 days": the length of the period being compared against
+  const prevDays = cmp ? mpDaysBetween(cmp.range.since, cmp.range.until) : 0;
+  const vsText = prevDays === 1 ? 'vs previous day' : `vs previous ${prevDays} days`;
   const kpiCard = (def) => `
     <div class="mp-kpi">
       <div class="mp-kpi-label">${def.label}</div>
       <div class="mp-kpi-value" title="${escapeHtml(String(sum.totals[def.key] === null || sum.totals[def.key] === undefined ? 'Not available' : sum.totals[def.key]))}">${mpFmt(sum.totals[def.key], def.fmt)}</div>
-      ${cmp ? (mpDelta(def, sum.totals[def.key], cmp.totals[def.key], bothComplete) || '<div class="mp-kpi-delta"></div>') : ''}
+      ${cmp ? mpDelta(def, sum.totals[def.key], cmp.totals[def.key], bothComplete, vsText) : ''}
     </div>`;
   // two panels, as in the design: money on one side, traffic / delivery on the other. Every card is one of the same real figures as before (nothing added or dropped).
   const FIN = ['spend', 'purchases', 'cpa', 'purchase_value', 'roas'];
   const group = (cls, title, inner) => `<section class="mp-kpi-group ${cls}"><h3 class="mp-kpi-group-title">${title}</h3><div class="mp-kpi-row">${inner}</div></section>`;
   document.getElementById('mp-kpis').innerHTML =
     group('mp-kpi-fin', 'Financial performance', MP_KPIS.filter((d) => FIN.includes(d.key)).map(kpiCard).join('')) +
-    group('mp-kpi-traffic', 'Traffic &amp; delivery', MP_KPIS.filter((d) => !FIN.includes(d.key)).map(kpiCard).join('') + mpReachTilesHtml(sum.reach_frequency)) +
-    `<div class="mp-secondary">
-       <span>Ads with activity <b>${Number(sum.totals.ads_with_activity).toLocaleString('en-AU')}</b></span>
-     </div>`;
+    group('mp-kpi-traffic', 'Traffic &amp; delivery', MP_KPIS.filter((d) => !FIN.includes(d.key)).map(kpiCard).join('') + mpReachTilesHtml(sum.reach_frequency, cmp ? vsText : null));
 
   mpRenderDpaNote(sum.dpa);
   mpState.reach = sum.reach_frequency;
@@ -917,8 +921,8 @@ function mpRenderBenchStrip(res) {
     lines.push(`<li><b>${f} ${LAB[m]}</b> ${bands.map((b) => `<span class="mp-health mp-health-${escapeHtml(b.state)}"></span>${escapeHtml(fmtBand(m, b.text))}`).join(' · ')} <small>(${escapeHtml(((h.matrix[f][m].windows || []).map((w) => w.text).join('; ')) || 'any period')})</small></li>`);
   }));
   hn.style.display = '';
-  hn.innerHTML = `<details class="mp-bench-details"><summary title="The approved benchmarks the cell colours use">Benchmarks in use</summary><div class="mp-bench-strip" id="mp-bench-strip">${groups}${reachMissing ? '<div class="mp-bench-group mp-bench-warn">Frequency and Reach for this period have not been loaded yet, so they show without colour until they are (use Refresh).</div>' : ''}</div></details>
-    <details class="mp-health-guide"><summary title="What the colours mean">ⓘ Colour guide</summary>
+  hn.innerHTML = `<details class="mp-bench-details"><summary title="The approved benchmarks the cell colours use"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 20V10M10 20V4M16 20v-8"/><path d="M2 20h20"/></svg>Benchmarks in use</summary><div class="mp-bench-strip" id="mp-bench-strip">${groups}${reachMissing ? '<div class="mp-bench-group mp-bench-warn">Frequency and Reach for this period have not been loaded yet, so they show without colour until they are (use Refresh).</div>' : ''}</div></details>
+    <details class="mp-health-guide"><summary title="What the colours mean"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>Colour guide</summary>
       <ul>${lines.join('') || '<li>No benchmark is active.</li>'}</ul>
       <div class="mp-health-foot">Green = meets the benchmark · orange = misses it by up to ${h.tolerance_pct || 20}% · red = misses it by more. A value better than the target (for example a CPA under $40) stays green. ${unjudged ? `${unjudged.toLocaleString('en-AU')} ad${unjudged === 1 ? '' : 's'} in this view ha${unjudged === 1 ? 's' : 've'} an Unknown or Mixed funnel (campaign name without a single TOF / TOM / MOF), so never ${unjudged === 1 ? 'gets' : 'get'} a colour. ` : ''}CPA is Meta-reported (Triple Whale is not connected yet). ${state.currentUser && state.currentUser.role === 'admin' ? '<a href="#" data-open-bench-settings>Edit benchmarks in Settings</a>' : ''}</div></details>`;
   const link = hn.querySelector('[data-open-bench-settings]');
@@ -1274,12 +1278,17 @@ function mpReachCell(v, kind) {
   if (v === null || v === undefined) return '<span class="mp-na" title="Load Reach &amp; Frequency for this period">—</span>';
   return kind === 'freq' ? mpFreq(v) : Number(v).toLocaleString('en-AU');
 }
-function mpReachTilesHtml(rf) {
+function mpReachTilesHtml(rf, vs) {
   const val = (v, kind) => (rf && rf.available ? (kind === 'freq' ? mpFreq(v) : Number(v).toLocaleString('en-AU')) : '<span class="mp-na">—</span>');
-  const sub = !rf ? '' : rf.available ? (rf.stale ? 'as of ' + escapeHtml(mpDateTime(rf.pulled_at)) + ' (may have changed)' : 'as of ' + escapeHtml(mpDateTime(rf.pulled_at)))
+  const asOf = rf && rf.available ? (rf.stale ? 'as of ' + mpDateTime(rf.pulled_at) + ' (may have changed)' : 'as of ' + mpDateTime(rf.pulled_at)) : '';
+  const status = !rf ? '' : rf.available ? ''
     : rf.state === 'filtered' ? 'whole account only' : rf.state === 'loading' ? 'loading from Meta…' : rf.state === 'failed' ? 'unavailable' : 'not loaded';
-  return `<div class="mp-kpi"><div class="mp-kpi-label">Reach</div><div class="mp-kpi-value">${val(rf && rf.reach, 'int')}</div><div class="mp-kpi-delta">${sub}</div></div>
-    <div class="mp-kpi"><div class="mp-kpi-label">Frequency</div><div class="mp-kpi-value">${val(rf && rf.frequency, 'freq')}</div><div class="mp-kpi-delta">${sub}</div></div>`;
+  // Reach / Frequency are unique-people figures Meta computes per period: the previous period's cannot be derived from stored daily rows, so no change is shown for them
+  const sub = status ? `<div class="mp-kpi-delta unavailable"><span class="mp-kpi-pct">—</span><span class="mp-kpi-vs">${escapeHtml(status)}</span></div>`
+    : vs ? `<div class="mp-kpi-delta unavailable" title="Reach and Frequency are unique-people figures Meta calculates for each period; the previous period's are not stored, so no change is shown."><span class="mp-kpi-pct">—</span><span class="mp-kpi-vs">${escapeHtml(vs)} unavailable</span></div>` : '';
+  const tip = (what) => (asOf ? ` title="${escapeHtml(what + ' ' + asOf)}"` : '');
+  return `<div class="mp-kpi"><div class="mp-kpi-label">Reach</div><div class="mp-kpi-value"${tip('Reach')}>${val(rf && rf.reach, 'int')}</div>${sub}</div>
+    <div class="mp-kpi"><div class="mp-kpi-label">Frequency</div><div class="mp-kpi-value"${tip('Frequency')}>${val(rf && rf.frequency, 'freq')}</div>${sub}</div>`;
 }
 function mpRangeBody() {
   return mpState.preset === 'custom' ? { preset: 'custom', since: mpState.customSince, until: mpState.customUntil } : { preset: mpState.preset };
@@ -1332,7 +1341,11 @@ function mpRenderFreshness() {
   else if (!f.auto_enabled) note = `<span class="mp-fresh-off" title="${escapeHtml(f.auto_disabled_reason || '')}">Automatic refresh is off</span>`;
   else if (f.additive.needs_backfill) note = '<span class="mp-fresh-off" title="Older days in this period were never synced; only a manual backfill can fill them.">Older days need a manual backfill</span>';
   const shown = parts.filter((x, i) => i === 0 || /in progress/.test(x)); const hidden = parts.length - shown.length;
-  el.innerHTML = `<span class="mp-fresh-text" title="${escapeHtml(parts.join(' · '))}">${escapeHtml(shown.join(' · '))}${hidden ? ' <i class="mp-fresh-more">+' + hidden + '</i>' : ''}</span> ${note} <button type="button" class="btn btn-ghost btn-sm" id="mp-refresh-now" ${f.is_refreshing ? 'disabled' : ''}>Refresh now</button>`;
+  const txt = document.getElementById('mp-fresh-text');
+  txt.title = parts.join(' · ');
+  txt.innerHTML = `${escapeHtml(shown.join(' · ').replace(/^Stats updated /, 'Last updated '))}${hidden ? ' <i class="mp-fresh-more">+' + hidden + '</i>' : ''}`;
+  document.getElementById('mp-fresh-note').innerHTML = note ? ` ${note}` : '';
+  const rb = document.getElementById('mp-refresh-now'); if (rb) rb.disabled = !!f.is_refreshing;
 }
 async function mpCheckFreshness() {
   try {
@@ -1684,6 +1697,7 @@ function mpSetView(view) {
   mmState.view = view;
   document.querySelectorAll('.mp-subnav-btn').forEach((b) => b.classList.toggle('active', b.dataset.mpView === view));
   document.getElementById('mp-view-performance').style.display = view === 'performance' ? '' : 'none';
+  document.getElementById('mp-perf-controls').style.display = view === 'performance' ? '' : 'none';
   document.getElementById('mp-view-matching').style.display = view === 'matching' ? '' : 'none';
   loadMetaPerformanceArea();
 }
