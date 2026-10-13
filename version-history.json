@@ -2,6 +2,15 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.0.6",
+      "date": "2026-10-13",
+      "title": "Performance Benchmarks redesign",
+      "changes": [
+        "Settings → Meta Performance → Performance Benchmarks is redesigned: a colour guide, one section per funnel (TOF, TOM, MOF) with six benchmark cards each, and a right-hand editor with a live colour preview.",
+        "Set or edit a target from its card; several reporting windows per measure are shown together in the card. Change history is now a collapsed section at the bottom. All existing benchmarks, rules and history are unchanged."
+      ]
+    },
+    {
       "version": "1.0.5",
       "date": "2026-10-13",
       "title": "Funnel checkboxes and per-funnel benchmarks",

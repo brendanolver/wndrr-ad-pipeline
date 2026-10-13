@@ -1636,36 +1636,55 @@
         <details class="mbench-history"><summary>Change history</summary><div id="mcls-history"></div></details>
       </div>
 
-      <!-- Meta Performance benchmarks (admin-only; GET/POST/PUT/DELETE /api/meta-performance/benchmarks). A row is one target for a funnel +
-           metric (+ optional reporting window); the colour bands are always derived from it by the 20% rule. -->
+      <!-- Performance Benchmarks (admin-only; GET/POST/PUT/DELETE /api/meta-performance/benchmarks). Same data and rules as before: a benchmark is one target for a funnel +
+           measure (+ optional reporting window); the colour bands are derived from it by the tolerance rule. This is the redesigned view: three funnel sections of six cards,
+           a right-hand editing drawer with a live colour preview, and a collapsed change history. -->
       <div class="settings-panel" id="settings-panel-meta-benchmarks">
-        <div class="planning-section-header">
-          <h2>Performance benchmarks</h2>
-          <span class="admin-note">Targets behind the green / orange / red cells on Meta Performance. Green meets the target, orange misses it by up to 20%, red by more. CPA is Meta-reported (Triple Whale is not connected).</span>
-        </div>
-        <ul class="mbench-rules" id="mbench-rules">
-          <li><b>Each funnel has its own benchmarks.</b> Choose TOF, TOM or MOF below. Every ad on Meta Performance is judged only against the benchmarks of <em>its own</em> funnel, even when several funnels are shown together. One funnel's benchmark is never borrowed by another.</li>
-          <li><b>Leave a benchmark unset and that measure stays neutral.</b> A measure with no benchmark for a funnel is never coloured, and nothing is estimated. Only two targets were pre-approved (MOF CPA and TOF Frequency); everything else is yours to set.</li>
-          <li><b>Which side is good depends on the measure.</b> CPA and CPM: lower is better. ROAS, Outbound CTR and Reach: higher is better. Frequency: lower is better, or give it an acceptable range (lowest and highest).</li>
-          <li><b>A benchmark with a reporting window is judged only inside that window.</b> A 3&ndash;5-day Frequency target is not applied to a 7-day period: the value shows neutral, and the tooltip says why.</li>
-        </ul>
-        <div id="mbench-grid" class="mbench-grid"></div>
-        <div class="mbench-form" id="mbench-form">
-          <div class="mbench-form-title" id="mbench-form-title">Add a benchmark</div>
-          <div class="mbench-fields">
-            <label>Funnel<select id="mbench-funnel"><option>TOF</option><option>TOM</option><option>MOF</option></select></label>
-            <label>Metric<select id="mbench-metric"><option value="cpa">CPA ($ AUD, lower is better)</option><option value="roas">ROAS (× , higher is better)</option><option value="outbound_ctr">Outbound CTR (%, higher is better)</option><option value="cpm">CPM ($ AUD, lower is better)</option><option value="reach">Reach (people, higher is better)</option><option value="frequency">Frequency (×, lower is better, or a range)</option></select></label>
-            <label class="mbench-lo" id="mbench-lo-wrap" style="display:none;">Lowest acceptable <span class="mbench-opt">(optional)</span><input type="number" id="mbench-lo" step="any" min="0" placeholder="e.g. 1.2"></label>
-            <label><span id="mbench-target-label">Target</span><input type="number" id="mbench-target" step="any" min="0" placeholder="e.g. 60"></label>
-            <label>Reporting window<select id="mbench-window"><option value="any">Any period</option><option value="custom">Only periods of…</option></select></label>
-            <span class="mbench-window-fields" id="mbench-window-fields" style="display:none;"><label>from <input type="number" id="mbench-min" min="1" step="1" placeholder="days"></label><label>to <input type="number" id="mbench-max" min="1" step="1" placeholder="days"></label></span>
-            <label class="mbench-check"><input type="checkbox" id="mbench-inclusive" checked> <span id="mbench-inclusive-label">A value exactly on the target is green</span></label>
-            <label>Orange up to<input type="number" id="mbench-tol" min="0" max="100" step="1" value="20"><small>% beyond the target</small></label>
+        <div class="mb-head">
+          <div>
+            <h2>Performance Benchmarks</h2>
+            <p class="mb-sub">Set performance targets for each advertising funnel. These benchmarks power the colour indicators on the Meta Performance page.</p>
           </div>
-          <div class="mbench-form-actions"><button type="button" class="btn btn-primary btn-sm" id="mbench-save">Save benchmark</button><button type="button" class="btn btn-ghost btn-sm" id="mbench-cancel" style="display:none;">Cancel edit</button><span class="mbench-msg" id="mbench-msg"></span></div>
-          <div class="mbench-hint">A benchmark with a reporting window is judged only for periods inside it (for example a 3–5 day Frequency target is never applied to a 7-day period). Add a separate benchmark for another window if you have an approved target for it.</div>
+          <button type="button" class="btn btn-ghost mb-help-btn" id="mbench-help-btn" aria-expanded="false" aria-controls="mbench-help"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 .9-1 1.7M12 17h.01"/></svg>How benchmarks work</button>
         </div>
-        <details class="mbench-history"><summary>Change history</summary><div id="mbench-history"></div></details>
+        <div class="mb-help" id="mbench-help" hidden>
+          <ul class="mbench-rules" id="mbench-rules">
+            <li><b>Each funnel has its own benchmarks.</b> Every ad on Meta Performance is judged only against the benchmarks of <em>its own</em> funnel (TOF, TOM or MOF), even when several funnels are shown together. One funnel's benchmark is never borrowed by another.</li>
+            <li><b>Leave a benchmark unset and that measure stays neutral.</b> A measure with no benchmark for a funnel is never coloured, and nothing is estimated. Only two targets were pre-approved (MOF CPA and TOF Frequency); everything else is yours to set.</li>
+            <li><b>Which side is good depends on the measure.</b> CPA and CPM: lower is better. ROAS, Outbound CTR and Reach: higher is better. Frequency: lower is better, or give it an acceptable range (lowest and highest).</li>
+            <li><b>Green, orange, red.</b> Green meets the target. Orange misses it by up to the tolerance you set (20% unless you change it). Red misses it by more. A value better than the target (for example a CPA well under target) stays green.</li>
+            <li><b>A benchmark with a reporting window is judged only inside that window.</b> A 3&ndash;5-day Frequency target is not applied to a 7-day period: the value shows neutral, and the tooltip says why. Add another window to give the same measure a target for a different period length.</li>
+          </ul>
+        </div>
+        <div class="mb-guide" role="note">
+          <div class="mb-guide-item"><i class="mb-dot green"></i><div><b>Green</b><span>Meets or exceeds target</span></div></div>
+          <div class="mb-guide-item"><i class="mb-dot orange"></i><div><b>Orange</b><span>Within the configured tolerance</span></div></div>
+          <div class="mb-guide-item"><i class="mb-dot red"></i><div><b>Red</b><span>Outside the configured tolerance</span></div></div>
+          <div class="mb-guide-note"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg><span>Benchmarks are evaluated independently for each funnel. CPA and CPM: lower is better. ROAS, CTR and Reach: higher is better. Frequency: lower is better, or within a range.</span></div>
+        </div>
+        <div class="mbench-flash" id="mbench-flash" role="status" aria-live="polite"></div>
+        <div id="mbench-grid" class="mbench-grid"></div>
+        <details class="mbench-history mb-history"><summary><span class="mb-history-ic"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="6" y="4" width="12" height="17" rx="2"/><path d="M9 4h6v3H9zM9 12h6M9 16h4"/></svg></span><span><b>Change history</b><small>View recent changes to performance benchmarks.</small></span></summary><div id="mbench-history"></div></details>
+
+        <div class="mbench-scrim" id="mbench-scrim" hidden></div>
+        <aside class="mbench-drawer" id="mbench-form" hidden role="dialog" aria-modal="true" aria-labelledby="mbench-form-title">
+          <div class="mbd-head"><h3 id="mbench-form-title">Edit Benchmark</h3><button type="button" class="mbd-x" id="mbench-close" aria-label="Close">&times;</button></div>
+          <div class="mbd-funnel" id="mbench-drawer-funnel"></div>
+          <div class="mbd-body">
+            <!-- funnel and measure are chosen by the card that was clicked; kept as hidden controls so the saved values come from one place -->
+            <span hidden><select id="mbench-funnel"><option>TOF</option><option>TOM</option><option>MOF</option></select><select id="mbench-metric"><option value="cpa">CPA</option><option value="roas">ROAS</option><option value="outbound_ctr">Outbound CTR</option><option value="cpm">CPM</option><option value="reach">Reach</option><option value="frequency">Frequency</option></select></span>
+            <label class="mbd-field">Target type<select id="mbench-kind"></select><small id="mbench-kind-hint"></small></label>
+            <label class="mbd-field"><span id="mbench-target-label">Target</span><input type="number" id="mbench-target" step="any" min="0" placeholder="e.g. 60"></label>
+            <label class="mbd-field" id="mbench-lo-wrap" hidden>Lowest acceptable<input type="number" id="mbench-lo" step="any" min="0" placeholder="e.g. 1.2"></label>
+            <label class="mbd-field">Reporting window<select id="mbench-window"><option value="any">Any period</option><option value="custom">Only periods of…</option></select><small>This target only applies to this reporting window.</small></label>
+            <span class="mbench-window-fields" id="mbench-window-fields" style="display:none;"><label>from <input type="number" id="mbench-min" min="1" step="1" placeholder="days"></label><label>to <input type="number" id="mbench-max" min="1" step="1" placeholder="days"></label><span class="mbd-days">days</span></span>
+            <label class="mbd-field">Orange tolerance<span class="mbd-pct"><input type="number" id="mbench-tol" min="0" max="100" step="1" value="20"><i>%</i></span><small id="mbench-tol-hint"></small></label>
+            <label class="mbench-check"><input type="checkbox" id="mbench-inclusive" checked> <span id="mbench-inclusive-label">A value exactly on the target counts as green</span></label>
+            <div class="mbench-preview" id="mbench-preview"></div>
+          </div>
+          <div class="mbd-extra" id="mbench-extra"></div>
+          <div class="mbd-foot"><span class="mbench-msg" id="mbench-msg" role="alert"></span><button type="button" class="btn btn-ghost" id="mbench-cancel">Cancel</button><button type="button" class="btn btn-primary" id="mbench-save">Save Benchmark</button></div>
+        </aside>
       </div>
 
       <div class="settings-panel" id="settings-panel-meta-mapping">

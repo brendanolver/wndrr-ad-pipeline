@@ -574,11 +574,18 @@ document.getElementById('mcls-add-name').addEventListener('keydown', (e) => { if
 // ── Settings -> Meta Performance: editable benchmarks ───────────────────
 // One target per funnel + metric (+ optional reporting window). The server derives the bands (20% rule), validates every field, audits each
 // change and answers with the whole grid again, so what is shown here is always what the dashboard uses.
-const MBENCH = { data: null, editing: null, funnel: 'TOF' };
+const MBENCH = { data: null, editing: null };
 const MBENCH_LABEL = { cpa: 'CPA', roas: 'ROAS', outbound_ctr: 'Outbound CTR', cpm: 'CPM', reach: 'Reach', frequency: 'Frequency' };
+const MBENCH_FUNNEL_INFO = {
+  TOF: ['Top of Funnel', 'Awareness and customer acquisition. Typically higher reach and lower conversion.'],
+  TOM: ['Top of Mid', 'Consideration and engagement. Typically balanced reach and conversion.'],
+  MOF: ['Middle of Funnel', 'Conversion and revenue. Typically lower reach and higher conversion.'],
+};
+const MBENCH_DIRECTION = { cpa: 'lower', cpm: 'lower', frequency: 'lower', roas: 'higher', outbound_ctr: 'higher', reach: 'higher' };
 const mbenchFmt = (metric, v) => {
-  const n = Number(v).toLocaleString('en-AU', { maximumFractionDigits: 4 });
-  if (metric === 'cpa' || metric === 'cpm') return `$${n}`;
+  const money = metric === 'cpa' || metric === 'cpm';
+  const n = Number(v).toLocaleString('en-AU', money ? { minimumFractionDigits: 2, maximumFractionDigits: 2 } : { maximumFractionDigits: 4 });
+  if (money) return `$${n}`;
   if (metric === 'roas' || metric === 'frequency') return `${n}×`;
   if (metric === 'outbound_ctr') return `${n}%`;
   return n;
@@ -595,105 +602,182 @@ function mbenchTargetText(r) {
   return `${sym} ${mbenchFmt(r.metric, r.target)}`;
 }
 function mbenchMsg(text, kind) { const el = document.getElementById('mbench-msg'); if (el) { el.textContent = text || ''; el.className = `mbench-msg${kind ? ` ${kind}` : ''}`; } }
-// One funnel at a time (tabs): a row per measure showing that funnel's benchmark, or "Not set". Each ad on Meta Performance is judged only by ITS funnel's rows.
+// A short confirmation shown on the page itself (the drawer is closed after a save)
+function mbenchToast(text, kind) { const el = document.getElementById('mbench-flash'); if (!el) return; el.textContent = text || ''; el.className = `mbench-flash${text ? ' on' : ''}${kind ? ` ${kind}` : ''}`; if (text) { clearTimeout(mbenchToast.t); mbenchToast.t = setTimeout(() => { el.className = 'mbench-flash'; el.textContent = ''; }, 5000); } }
+
+// Three funnel sections of six cards. A card shows the saved target (or a dash), which side is good, every reporting window that has a benchmark, and one action.
+function mbenchCard(f, m, d) {
+  const rows = d.benchmarks.filter((b) => b.funnel === f && b.metric === m.key);
+  const dir = m.key === 'frequency' ? 'Lower is better (or a range)' : (m.direction === 'lower' ? 'Lower is better' : 'Higher is better');
+  const live = rows.some((b) => b.active);
+  const dot = `<span class="mbc-dot ${rows.length ? (live ? 'set' : 'off') : 'unset'}" title="${rows.length ? (live ? 'A benchmark is set' : 'Benchmark turned off') : 'No benchmark set'}"></span>`;
+  let body;
+  if (!rows.length) {
+    body = `<div class="mbc-value mbc-none" aria-label="Not set">—</div><button type="button" class="mbc-act" data-mb-add="${f}|${m.key}">+ Set target</button>`;
+  } else if (rows.length === 1) {
+    const b = rows[0];
+    body = `<div class="mbc-value${b.active ? '' : ' mbc-off'}">${escapeHtml(mbenchTargetText(b))}</div>
+      <div class="mbc-win">${escapeHtml(mbenchWindowText(b))}${b.active ? '' : ' · turned off'}</div>
+      <div class="mbc-actrow"><button type="button" class="mbc-act" data-mb-edit="${b.id}">Edit target →</button><button type="button" class="mbc-sub" data-mb-add="${f}|${m.key}" title="Add a separate target for another reporting window">+ Add window</button></div>`;
+  } else {
+    body = `<ul class="mbc-wins">${rows.map((b) => `<li class="${b.active ? '' : 'off'}"><span class="mbc-w-val">${escapeHtml(mbenchTargetText(b))}</span><span class="mbc-w-win">${escapeHtml(mbenchWindowText(b))}${b.active ? '' : ' · off'}</span><button type="button" class="mbc-act mbc-act-sm" data-mb-edit="${b.id}" aria-label="Edit ${escapeHtml(m.label)} target for ${escapeHtml(mbenchWindowText(b))}">Edit →</button></li>`).join('')}</ul>
+      <div class="mbc-actrow"><button type="button" class="mbc-sub" data-mb-add="${f}|${m.key}">+ Add window</button></div>`;
+  }
+  return `<article class="mbc${rows.length ? ' is-set' : ''}" data-mb-card="${f}|${m.key}"><header class="mbc-head"><h4>${escapeHtml(m.label)}</h4>${dot}</header><div class="mbc-dir">${dir}</div>${body}</article>`;
+}
 function mbenchRender() {
   const d = MBENCH.data; const grid = document.getElementById('mbench-grid');
   if (!d || !grid) return;
   const LAB = Object.fromEntries(d.metrics.map((m) => [m.key, m.label]));
-  const f = MBENCH.funnel;
-  const nSet = (fn) => d.benchmarks.filter((b) => b.funnel === fn && b.active).length;
-  const tabs = `<div class="mbench-tabs" role="tablist" aria-label="Funnel">${d.funnels.map((fn) => `<button type="button" role="tab" class="mbench-tab${fn === f ? ' active' : ''}" aria-selected="${fn === f}" data-mb-funnel="${fn}">${fn}<small>${nSet(fn)} set</small></button>`).join('')}</div>`;
-  const rowsHtml = d.metrics.map((m) => {
-    const rows = d.benchmarks.filter((b) => b.funnel === f && b.metric === m.key);
-    const dirText = m.key === 'frequency' ? 'lower is better, or a range' : (m.direction === 'lower' ? 'lower is better' : 'higher is better');
-    const items = rows.map((b) => `<div class="mbench-item${b.active ? '' : ' off'}">
-        <span class="mbench-target"><b>${escapeHtml(mbenchTargetText(b))}</b> <small>${escapeHtml(mbenchWindowText(b))}${b.active ? '' : ' · off'}</small></span>
-        <span class="mbench-bands" title="Orange up to ${b.tolerance_pct}% beyond the target; red beyond that"><i class="mp-health mp-health-green"></i><i class="mp-health mp-health-orange"></i><i class="mp-health mp-health-red"></i> ${b.tolerance_pct}%</span>
-        <span class="mbench-acts"><button type="button" class="link-btn" data-mb-edit="${b.id}">Edit</button><button type="button" class="link-btn" data-mb-toggle="${b.id}">${b.active ? 'Turn off' : 'Turn on'}</button><button type="button" class="link-btn danger" data-mb-del="${b.id}">Remove</button></span>
-      </div>`).join('');
-    return `<tr><th scope="row">${escapeHtml(m.label)}<small>${dirText}</small></th><td>${items || '<span class="mbench-none">Not set — shows a neutral value</span>'}<button type="button" class="link-btn mbench-add" data-mb-add="${f}|${m.key}">${rows.length ? '+ Add another window' : '+ Set benchmark'}</button></td></tr>`;
+  grid.innerHTML = d.funnels.map((f) => {
+    const set = d.metrics.filter((m) => d.benchmarks.some((b) => b.funnel === f && b.metric === m.key && b.active)).length;
+    const [name, desc] = MBENCH_FUNNEL_INFO[f] || [f, ''];
+    return `<section class="mbf mbf-${f}" data-mb-funnel-section="${f}" aria-label="${f} benchmarks">
+      <header class="mbf-head"><span class="mbf-tag">${f}</span><div class="mbf-title"><h3>${escapeHtml(name)}</h3><p>${escapeHtml(desc)}</p></div><span class="mbf-count">${set} of ${d.metrics.length} benchmarks set</span></header>
+      <div class="mbf-cards">${d.metrics.map((m) => mbenchCard(f, m, d)).join('')}</div></section>`;
   }).join('');
-  grid.innerHTML = `${tabs}<table class="mbench-table mbench-table-funnel" aria-label="${f} benchmarks"><thead><tr><th>${f} measure</th><th>Benchmark</th></tr></thead><tbody>${rowsHtml}</tbody></table>`;
   const hist = document.getElementById('mbench-history');
   if (hist) {
-    const nm = (v) => (v ? `${v.funnel} ${LAB[v.metric] || v.metric} ${v.target_min != null ? `${v.target_min}–` : ''}${v.target}${v.min_days != null || v.max_days != null ? ` (${v.min_days || '…'}–${v.max_days || '…'} d)` : ''}${v.active === false ? ' [off]' : ''}` : '');
-    hist.innerHTML = d.history.length ? `<ul>${d.history.map((h) => `<li><b>${escapeHtml(h.action)}</b> ${escapeHtml(nm(h.after) || nm(h.before))}${h.action === 'update' && h.before ? ` <small>(was ${escapeHtml(nm(h.before))})</small>` : ''} <small>· ${escapeHtml(h.user || 'system')} · ${escapeHtml(new Date(h.at).toLocaleString('en-AU', { timeZone: MP_TZ, day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }))}</small></li>`).join('')}</ul>` : '<div class="mbench-none">No changes yet.</div>';
+    const nm = (v) => (v ? `${mbenchFmtShort(v)}` : '');
+    const when = (iso) => new Date(iso).toLocaleString('en-AU', { timeZone: MP_TZ, day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+    const verb = { create: 'Added', update: 'Changed', delete: 'Removed', seed: 'Set (approved default)' };
+    hist.innerHTML = d.history.length ? `<ul class="mbh-list">${d.history.map((h) => {
+      const cur = h.after || h.before;
+      const label = cur ? `${cur.funnel} ${LAB[cur.metric] || cur.metric}` : 'Benchmark';
+      const change = h.action === 'update' && h.before && h.after ? `${nm(h.before)} → ${nm(h.after)}` : nm(h.after || h.before);
+      return `<li><b>${escapeHtml(verb[h.action] || h.action)}</b> ${escapeHtml(label)} <span class="mbh-change">${escapeHtml(change)}</span><small>${escapeHtml(h.user || 'System')} · ${escapeHtml(when(h.at))}</small></li>`;
+    }).join('')}</ul>` : '<div class="mbench-none">No changes yet.</div>';
   }
 }
-function mbenchResetForm() {
-  MBENCH.editing = null;
-  document.getElementById('mbench-form-title').textContent = 'Add a benchmark';
-  document.getElementById('mbench-target').value = ''; document.getElementById('mbench-lo').value = ''; document.getElementById('mbench-window').value = 'any'; document.getElementById('mbench-window-fields').style.display = 'none';
-  document.getElementById('mbench-min').value = ''; document.getElementById('mbench-max').value = ''; document.getElementById('mbench-inclusive').checked = true; document.getElementById('mbench-tol').value = '20';
-  document.getElementById('mbench-funnel').disabled = false; document.getElementById('mbench-metric').disabled = false;
-  document.getElementById('mbench-cancel').style.display = 'none'; mbenchInclusiveLabel();
+// "≤ $60.00 · any period" for the change history
+function mbenchFmtShort(v) {
+  if (!v || v.target == null) return '';
+  const t = { ...v, target: Number(v.target), target_min: v.target_min == null ? null : Number(v.target_min), direction: MBENCH_DIRECTION[v.metric] };
+  return `${mbenchTargetText(t)} · ${mbenchWindowText(t)}${v.active === false ? ' · off' : ''}`;
 }
-function mbenchInclusiveLabel() {
-  const m = document.getElementById('mbench-metric').value;
-  const lower = ['cpa', 'cpm', 'frequency'].includes(m);
-  const range = m === 'frequency' && document.getElementById('mbench-lo').value !== '';
-  document.getElementById('mbench-lo-wrap').style.display = m === 'frequency' ? '' : 'none';
-  document.getElementById('mbench-target-label').textContent = m === 'frequency' ? 'Highest acceptable' : 'Target';
-  document.getElementById('mbench-inclusive-label').textContent = range ? 'A value exactly at the highest acceptable is green' : lower ? 'A value exactly on the target is green (≤ target)' : 'A value exactly on the target is green (≥ target)';
+
+// ── the editing drawer ──
+const mbenchEl = (id) => document.getElementById(id);
+function mbenchOpenDrawer() { mbenchEl('mbench-form').hidden = false; mbenchEl('mbench-scrim').hidden = false; requestAnimationFrame(() => { mbenchEl('mbench-form').classList.add('open'); mbenchEl('mbench-target').focus(); }); }
+function mbenchCloseDrawer() {
+  const f = mbenchEl('mbench-form'); f.classList.remove('open'); f.hidden = true; mbenchEl('mbench-scrim').hidden = true; MBENCH.editing = null; mbenchMsg('');
 }
+// Fill the drawer for a funnel + measure; `b` = the saved benchmark being edited, or null for a new one
+function mbenchFill(f, metric, b) {
+  MBENCH.editing = b ? b.id : null;
+  const label = MBENCH_LABEL[metric] || metric;
+  mbenchEl('mbench-funnel').value = f; mbenchEl('mbench-metric').value = metric;
+  mbenchEl('mbench-form-title').textContent = `${b ? 'Edit' : 'Set'} ${label} Benchmark`;
+  mbenchEl('mbench-drawer-funnel').innerHTML = `<span class="mbf-tag mbf-tag-${f}">${f}</span><span>${escapeHtml((MBENCH_FUNNEL_INFO[f] || [f])[0])}</span>`;
+  const kind = mbenchEl('mbench-kind');
+  const opts = metric === 'frequency' ? [['lower', 'Below target (lower is better)'], ['range', 'Acceptable range']] : [[MBENCH_DIRECTION[metric], MBENCH_DIRECTION[metric] === 'lower' ? 'Below target (lower is better)' : 'Above target (higher is better)']];
+  kind.innerHTML = opts.map(([v, t]) => `<option value="${v}">${t}</option>`).join('');
+  kind.disabled = opts.length === 1;
+  kind.value = b && b.target_min != null ? 'range' : opts[0][0];
+  mbenchEl('mbench-target').value = b ? b.target : '';
+  mbenchEl('mbench-lo').value = b && b.target_min != null ? b.target_min : '';
+  mbenchEl('mbench-tol').value = b ? b.tolerance_pct : '20';
+  mbenchEl('mbench-inclusive').checked = b ? b.inclusive : true;
+  const custom = !!b && (b.min_days != null || b.max_days != null);
+  mbenchEl('mbench-window').value = custom ? 'custom' : 'any'; mbenchEl('mbench-window-fields').style.display = custom ? '' : 'none';
+  mbenchEl('mbench-min').value = b && b.min_days != null ? b.min_days : ''; mbenchEl('mbench-max').value = b && b.max_days != null ? b.max_days : '';
+  const extra = mbenchEl('mbench-extra');
+  extra.innerHTML = b ? `<button type="button" class="link-btn" data-mb-toggle="${b.id}">${b.active ? 'Turn this benchmark off' : 'Turn this benchmark on'}</button><button type="button" class="link-btn danger" data-mb-del="${b.id}">Remove</button>` : '';
+  mbenchMsg(''); mbenchSyncForm();
+}
+// labels, which fields apply and the colour preview all follow the chosen target type
+function mbenchSyncForm() {
+  const metric = mbenchEl('mbench-metric').value; const kind = mbenchEl('mbench-kind').value;
+  const label = MBENCH_LABEL[metric] || '';
+  const range = kind === 'range';
+  mbenchEl('mbench-lo-wrap').hidden = !range;
+  mbenchEl('mbench-target-label').textContent = range ? `Highest acceptable ${label}` : `Target ${label}`;
+  mbenchEl('mbench-kind-hint').textContent = range ? 'Flag ads whose frequency is outside this range.' : kind === 'lower' ? `Flag ads where ${label} is higher than this value.` : `Flag ads where ${label} is lower than this value.`;
+  mbenchEl('mbench-tol-hint').textContent = `Show orange when performance is within ${mbenchEl('mbench-tol').value || 0}% of the target.`;
+  mbenchEl('mbench-inclusive-label').textContent = range ? 'A value exactly at either end counts as green' : kind === 'lower' ? 'A value exactly on the target counts as green' : 'A value exactly on the target counts as green';
+  mbenchPreview();
+}
+// Mirrors the server's rule (metaFunnelHealth.percentRule / rangeRule) so what is previewed is what the colours do.
+function mbenchBands({ kind, target, lo, tol, inclusive }) {
+  const p = tol / 100; const r6 = (x) => Math.round(x * 1e6) / 1e6;
+  if (kind === 'range') {
+    if (!(lo >= 0) || !(target >= lo)) return null;
+    const lim = [r6(lo * (1 - p)), r6(target * (1 + p))];
+    return { green: { text: `${lo} to ${target}`, v: [lo, target] }, orange: { text: `${lim[0]} to ${lo}, and ${target} to ${lim[1]}` }, red: { text: `Below ${lim[0]} or above ${lim[1]}` }, range: true };
+  }
+  if (kind === 'lower') { const lim = r6(target * (1 + p)); return { green: { text: `${inclusive ? '≤' : '<'} ${target}` }, orange: { text: `${inclusive ? '>' : '≥'} ${target} up to ${lim}` }, red: { text: `> ${lim}` } }; }
+  const lim = r6(target * (1 - p));
+  return { green: { text: `${inclusive ? '≥' : '>'} ${target}` }, orange: { text: `${lim} up to ${inclusive ? '<' : '≤'} ${target}` }, red: { text: `< ${lim}` } };
+}
+function mbenchPreview() {
+  const el = mbenchEl('mbench-preview'); if (!el) return;
+  const metric = mbenchEl('mbench-metric').value;
+  const target = Number(mbenchEl('mbench-target').value); const lo = mbenchEl('mbench-lo').value === '' ? NaN : Number(mbenchEl('mbench-lo').value);
+  const tol = mbenchEl('mbench-tol').value === '' ? 20 : Number(mbenchEl('mbench-tol').value);
+  if (mbenchEl('mbench-target').value === '' || !Number.isFinite(target) || target < 0 || !Number.isFinite(tol) || tol < 0 || tol > 100) { el.innerHTML = '<div class="mbp-empty">Enter a target to preview the colours.</div>'; return; }
+  const kind = mbenchEl('mbench-kind').value;
+  const bands = mbenchBands({ kind, target, lo, tol, inclusive: mbenchEl('mbench-inclusive').checked });
+  if (!bands) { el.innerHTML = '<div class="mbp-empty">The lowest acceptable value must be 0 or more and not above the highest.</div>'; return; }
+  // reuse the same unit formatting as the cards: swap each number in the band text for its formatted value
+  const fmt = (txt) => txt.replace(/-?\d+(?:\.\d+)?/g, (n) => mbenchFmt(metric, Number(n)));
+  const names = { green: 'Better than target', orange: `Within ${tol}%`, red: 'Below target' };
+  el.innerHTML = `<div class="mbp-title">Preview <small>(${escapeHtml(kind === 'range' ? 'acceptable range' : kind === 'lower' ? 'lower is better' : 'higher is better')}, ${tol}% tolerance)</small></div>
+    <div class="mbp-tiles">${['green', 'orange', 'red'].map((s) => `<div class="mbp-tile mbp-${s}" data-band="${s}"><b>${escapeHtml(fmt(bands[s].text))}</b><span>${s === 'green' && bands.range ? 'Inside the range' : names[s]}</span></div>`).join('')}</div>`;
+}
+
 async function loadMetaBenchmarksPanel() {
-  try { MBENCH.data = await api('/meta-performance/benchmarks'); mbenchRender(); mbenchMsg(''); }
-  catch (e) { mbenchMsg(`Could not load benchmarks: ${e.message}`, 'err'); }
+  try { MBENCH.data = await api('/meta-performance/benchmarks'); mbenchRender(); }
+  catch (e) { mbenchToast(`Could not load benchmarks: ${e.message}`, 'err'); }
 }
 async function mbenchSend(method, path, body) {
   const res = await api(`/meta-performance/benchmarks${path}`, { method, body: body ? JSON.stringify(body) : undefined });
   MBENCH.data = res; mbenchRender(); return res;
 }
-document.getElementById('mbench-metric').addEventListener('change', mbenchInclusiveLabel);
-document.getElementById('mbench-lo').addEventListener('input', mbenchInclusiveLabel);
-document.getElementById('mbench-window').addEventListener('change', (e) => { document.getElementById('mbench-window-fields').style.display = e.target.value === 'custom' ? '' : 'none'; });
-document.getElementById('mbench-cancel').addEventListener('click', () => { mbenchResetForm(); mbenchMsg(''); });
-document.getElementById('mbench-save').addEventListener('click', async () => {
-  const win = document.getElementById('mbench-window').value === 'custom';
+['mbench-kind', 'mbench-target', 'mbench-lo', 'mbench-tol', 'mbench-inclusive'].forEach((id) => mbenchEl(id).addEventListener(id === 'mbench-kind' || id === 'mbench-inclusive' ? 'change' : 'input', mbenchSyncForm));
+mbenchEl('mbench-window').addEventListener('change', (e) => { mbenchEl('mbench-window-fields').style.display = e.target.value === 'custom' ? '' : 'none'; });
+mbenchEl('mbench-cancel').addEventListener('click', mbenchCloseDrawer);
+mbenchEl('mbench-close').addEventListener('click', mbenchCloseDrawer);
+mbenchEl('mbench-scrim').addEventListener('click', mbenchCloseDrawer);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !mbenchEl('mbench-form').hidden) mbenchCloseDrawer(); });
+mbenchEl('mbench-help-btn').addEventListener('click', () => { const h = mbenchEl('mbench-help'); h.hidden = !h.hidden; mbenchEl('mbench-help-btn').setAttribute('aria-expanded', String(!h.hidden)); });
+mbenchEl('mbench-save').addEventListener('click', async () => {
+  const win = mbenchEl('mbench-window').value === 'custom';
+  const range = mbenchEl('mbench-kind').value === 'range';
   const body = {
-    funnel: document.getElementById('mbench-funnel').value, metric: document.getElementById('mbench-metric').value, target: document.getElementById('mbench-target').value,
-    min_days: win ? document.getElementById('mbench-min').value : null, max_days: win ? document.getElementById('mbench-max').value : null,
-    inclusive: document.getElementById('mbench-inclusive').checked, tolerance_pct: document.getElementById('mbench-tol').value,
-    target_min: document.getElementById('mbench-metric').value === 'frequency' && document.getElementById('mbench-lo').value !== '' ? document.getElementById('mbench-lo').value : null,
+    funnel: mbenchEl('mbench-funnel').value, metric: mbenchEl('mbench-metric').value, target: mbenchEl('mbench-target').value,
+    min_days: win ? mbenchEl('mbench-min').value : null, max_days: win ? mbenchEl('mbench-max').value : null,
+    inclusive: mbenchEl('mbench-inclusive').checked, tolerance_pct: mbenchEl('mbench-tol').value,
+    target_min: range && mbenchEl('mbench-lo').value !== '' ? mbenchEl('mbench-lo').value : null,
   };
+  if (range && body.target_min === null) { mbenchMsg('Enter the lowest acceptable value for a range.', 'err'); return; }
   if (win && !body.min_days && !body.max_days) { mbenchMsg('Enter at least one day count for the window, or choose “Any period”.', 'err'); return; }
   mbenchMsg('Saving…');
+  const editing = MBENCH.editing;
   try {
-    if (MBENCH.editing) await mbenchSend('PUT', `/${MBENCH.editing}`, body); else await mbenchSend('POST', '', body);
-    MBENCH.funnel = body.funnel; mbenchRender();
-    mbenchMsg(MBENCH.editing ? 'Saved.' : 'Benchmark added.', 'ok'); mbenchResetForm();
-  } catch (e) { mbenchMsg(e.message, 'err'); }
+    if (editing) await mbenchSend('PUT', `/${editing}`, body); else await mbenchSend('POST', '', body);
+    mbenchCloseDrawer();
+    mbenchToast(`${body.funnel} ${MBENCH_LABEL[body.metric]} benchmark ${editing ? 'saved' : 'added'}.`, 'ok');
+  } catch (e) { mbenchMsg(e.message, 'err'); } // the server's validation message (for example a duplicate window) stays in the drawer
 });
-document.getElementById('mbench-grid').addEventListener('click', async (e) => {
-  const t = e.target.closest('button'); if (!t) return;
+// cards + drawer actions
+async function mbenchAction(t) {
   const d = MBENCH.data; if (!d) return;
-  if (t.dataset.mbFunnel) { MBENCH.funnel = t.dataset.mbFunnel; mbenchRender(); return; }
   try {
-    if (t.dataset.mbAdd) {
-      const [f, m] = t.dataset.mbAdd.split('|'); mbenchResetForm();
-      document.getElementById('mbench-funnel').value = f; document.getElementById('mbench-metric').value = m; mbenchInclusiveLabel();
-      document.getElementById('mbench-target').focus(); document.getElementById('mbench-form').scrollIntoView({ block: 'nearest' });
-    } else if (t.dataset.mbEdit) {
-      const b = d.benchmarks.find((x) => String(x.id) === t.dataset.mbEdit); if (!b) return;
-      MBENCH.editing = b.id; document.getElementById('mbench-form-title').textContent = `Edit ${b.funnel} ${MBENCH_LABEL[b.metric] || b.metric} benchmark`;
-      document.getElementById('mbench-lo').value = b.target_min != null ? b.target_min : '';
-      document.getElementById('mbench-funnel').value = b.funnel; document.getElementById('mbench-metric').value = b.metric;
-      document.getElementById('mbench-funnel').disabled = true; document.getElementById('mbench-metric').disabled = true;
-      document.getElementById('mbench-target').value = b.target; document.getElementById('mbench-inclusive').checked = b.inclusive; document.getElementById('mbench-tol').value = b.tolerance_pct;
-      const custom = b.min_days != null || b.max_days != null;
-      document.getElementById('mbench-window').value = custom ? 'custom' : 'any'; document.getElementById('mbench-window-fields').style.display = custom ? '' : 'none';
-      document.getElementById('mbench-min').value = b.min_days != null ? b.min_days : ''; document.getElementById('mbench-max').value = b.max_days != null ? b.max_days : '';
-      document.getElementById('mbench-cancel').style.display = ''; mbenchInclusiveLabel(); document.getElementById('mbench-target').focus();
-    } else if (t.dataset.mbToggle) {
+    if (t.dataset.mbAdd) { const [f, m] = t.dataset.mbAdd.split('|'); mbenchFill(f, m, null); mbenchOpenDrawer(); }
+    else if (t.dataset.mbEdit) { const b = d.benchmarks.find((x) => String(x.id) === t.dataset.mbEdit); if (!b) return; mbenchFill(b.funnel, b.metric, b); mbenchOpenDrawer(); }
+    else if (t.dataset.mbToggle) {
       const b = d.benchmarks.find((x) => String(x.id) === t.dataset.mbToggle); if (!b) return;
-      await mbenchSend('PUT', `/${b.id}`, { active: !b.active }); mbenchMsg(b.active ? 'Turned off — values for it now show uncoloured.' : 'Turned on.', 'ok');
+      await mbenchSend('PUT', `/${b.id}`, { active: !b.active }); mbenchCloseDrawer();
+      mbenchToast(b.active ? 'Turned off — values for it now show uncoloured on Meta Performance.' : 'Turned on.', 'ok');
     } else if (t.dataset.mbDel) {
       const b = d.benchmarks.find((x) => String(x.id) === t.dataset.mbDel); if (!b) return;
-      if (!confirm(`Remove the ${b.funnel} ${b.metric} benchmark (${mbenchTargetText(b)}, ${mbenchWindowText(b)})? Values will show uncoloured. This only affects colours, and the change is kept in the history.`)) return;
-      await mbenchSend('DELETE', `/${b.id}`); mbenchMsg('Removed.', 'ok');
+      if (!confirm(`Remove the ${b.funnel} ${MBENCH_LABEL[b.metric] || b.metric} benchmark (${mbenchTargetText(b)}, ${mbenchWindowText(b)})? Values will show uncoloured. This only affects colours, and the change is kept in the history.`)) return;
+      await mbenchSend('DELETE', `/${b.id}`); mbenchCloseDrawer(); mbenchToast('Benchmark removed.', 'ok');
     }
-  } catch (err) { mbenchMsg(err.message, 'err'); }
-});
+  } catch (err) { mbenchMsg(err.message, 'err'); mbenchToast(err.message, 'err'); }
+}
+mbenchEl('mbench-grid').addEventListener('click', (e) => { const t = e.target.closest('button'); if (t) mbenchAction(t); });
+mbenchEl('mbench-extra').addEventListener('click', (e) => { const t = e.target.closest('button'); if (t) mbenchAction(t); });
 
 // ── Meta Performance V1 (admin-only page) ──────────────────────────────
 // Reads /api/meta-performance/* (summary, ads, ads/:id, freshness), which query
