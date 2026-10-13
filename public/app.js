@@ -857,7 +857,7 @@ const mpState = {
 const mpFilterQuery = () => `${mpState.dpa ? '&dpa=include' : ''}${mpState.funnel && mpState.funnel !== 'all' ? `&funnel=${encodeURIComponent(mpState.funnel)}` : ''}${mpState.campaign ? `&campaign_id=${encodeURIComponent(mpState.campaign)}` : ''}`;
 // the table's funnel checkboxes: nothing is sent when all three are ticked (= the complete table, including ads with no TOF / TOM / MOF in the campaign name)
 const mpFunnelsQuery = () => (mpState.funnels.length === MP_FUNNEL_KEYS.length ? '' : `&funnels=${mpState.funnels.length ? mpState.funnels.join(',') : 'none'}`);
-const mpFiltered = () => (mpState.funnel && mpState.funnel !== 'all') || !!mpState.campaign;
+const mpFiltered = () => (mpState.funnel && mpState.funnel !== 'all') || !!mpState.campaign || mpState.funnels.length !== MP_FUNNEL_KEYS.length;
 const MP_FUNNEL_LABEL = { TOF: 'TOF', TOM: 'TOM', MOF: 'MOF', multiple: 'Mixed', unknown: 'Unknown' };
 function mpFunnelBadge(f) {
   const k = f || 'unknown';
@@ -873,7 +873,7 @@ const MP_KPIS = [
   { key: 'roas', label: 'ROAS', fmt: 'roas', better: 'up' },
   { key: 'add_to_cart', label: 'Adds to Cart', fmt: 'int', better: 'up' },
   { key: 'cost_per_atc', label: 'Cost / ATC', fmt: 'money', better: 'down' },
-  { key: 'outbound_ctr', label: 'Outbound CTR', fmt: 'pct', better: null }, // no approved benchmark: a move is shown, never judged
+  { key: 'outbound_ctr', label: 'Outbound CTR', fmt: 'pct', better: null, pp: true }, // no approved benchmark: a move is shown, never judged
   // CPM = cost per 1,000 impressions (total spend / total impressions x 1,000, not an average of ad CPMs). No CPM benchmark is approved, so it is never coloured or judged.
   { key: 'cpm', label: 'CPM', fmt: 'money', better: null },
 ];
@@ -945,6 +945,7 @@ function mpRenderCoverage(cov, label) {
 // The comparison under a summary figure: the change, then what it is against. Colour = whether the move is FAVOURABLE for that metric (def.better); a metric with no
 // agreed direction (Amount Spent, CPM, Outbound CTR, Reach, Frequency) is shown neutral. Unavailable / missing data is stated, never turned into a percentage.
 function mpDelta(def, cur, prev, ok, vs) {
+  if (def && def.pp) return mpDeltaPp(def, cur, prev, ok, vs);
   const na = (why) => `<div class="mp-kpi-delta unavailable" title="${escapeHtml(why)}"><span class="mp-kpi-pct">—</span> <span class="mp-kpi-vs">${escapeHtml(vs || 'vs previous period')} unavailable</span></div>`;
   if (!ok) return na('The previous period is not fully synced, so there is nothing reliable to compare against.');
   if (cur === null || cur === undefined || prev === null || prev === undefined || !(prev > 0)) return na('There is no previous-period value to compare against.');
@@ -970,6 +971,17 @@ function mpExact(t, key) {
   }
 }
 
+// A rate (Outbound CTR) moves in PERCENTAGE POINTS: 0.74% vs 0.54% is +0.2pp, not +37%. Shown only when both values are real.
+function mpDeltaPp(def, cur, prev, ok, vs) {
+  const na = (why) => `<div class="mp-kpi-delta unavailable" title="${escapeHtml(why)}"><span class="mp-kpi-pct">—</span> <span class="mp-kpi-vs">${escapeHtml(vs || 'vs previous')} unavailable</span></div>`;
+  if (!ok) return na('The previous period is not fully synced, so there is nothing reliable to compare against.');
+  if (cur === null || cur === undefined || prev === null || prev === undefined || !Number.isFinite(cur) || !Number.isFinite(prev)) return na('There is no previous-period value to compare against.');
+  const d = Math.round((cur - prev) * 10) / 10;
+  const arrow = d === 0 ? '→' : d > 0 ? '↑' : '↓';
+  let cls = 'neutral'; if (def.better && d !== 0) cls = (d > 0) === (def.better === 'up') ? 'good' : 'bad';
+  return `<div class="mp-kpi-delta ${cls}" title="Previous period: ${escapeHtml(String(prev))}%"><span class="mp-kpi-pct">${arrow} ${Math.abs(d).toFixed(1)}pp</span> <span class="mp-kpi-vs">${escapeHtml(vs || 'vs previous')}</span></div>`;
+}
+
 function mpRenderSummary(sum) {
   mpState.range = sum.range;
   if (sum.today) mpState.today = sum.today;
@@ -986,7 +998,7 @@ function mpRenderSummary(sum) {
   document.getElementById('mp-coverage').innerHTML = mpRenderCoverage(cov, 'the');
 
   if (cov.status === 'none') {
-    body.style.display = 'none';
+    body.classList.add('mp-nodata'); // the summary cards and table hide, but the filters (date range included) stay so another period can be chosen
     empty.style.display = '';
     empty.innerHTML = `<strong>No Meta data has been synced for this period yet</strong>
       ${escapeHtml(mpRange(sum.range, true))} isn't in WNDRR's stored Meta data, so there is nothing to report
@@ -995,13 +1007,14 @@ function mpRenderSummary(sum) {
     return false;
   }
   empty.style.display = 'none';
-  body.style.display = '';
+  body.classList.remove('mp-nodata');
 
   const cmp = sum.compare;
   const bothComplete = !!cmp && cov.missing_days === 0 && cmp.coverage.missing_days === 0 && cmp.coverage.status !== 'none';
   // "vs previous 7 days": the length of the period being compared against
   const prevDays = cmp ? mpDaysBetween(cmp.range.since, cmp.range.until) : 0;
-  const vsText = prevDays === 1 ? 'vs previous day' : `vs previous ${prevDays} days`;
+  const vsText = 'vs previous'; // short so ten cards fit on one row; the exact previous period is shown in the line under the filters
+  void prevDays;
   const exact = mpExact;
   const kpiCard = (def) => `
     <div class="mp-kpi">
@@ -1023,9 +1036,10 @@ function mpRenderSummary(sum) {
   if (mpFiltered()) {
     const bits = [];
     if (mpState.funnel !== 'all') bits.push(`funnel: ${MP_FUNNEL_LABEL[mpState.funnel] || mpState.funnel}`);
+    if (mpState.funnels.length !== MP_FUNNEL_KEYS.length) bits.push(mpState.funnels.length ? `funnels: ${mpState.funnels.join(' + ')}` : 'no funnels selected');
     if (mpState.campaign) { const o = document.querySelector(`#mp-campaign option[value="${mpState.campaign}"]`); bits.push(`campaign: ${o ? o.textContent.split(' · ')[0] : mpState.campaign}`); }
     fnote.style.display = '';
-    fnote.innerHTML = `Filtered to ${escapeHtml(bits.join(' · '))} — the numbers above and the table cover only these ads. <button type="button" class="link-btn" id="mp-filter-clear">Clear filter</button>`;
+    fnote.innerHTML = `Showing ${escapeHtml(bits.join(' · '))} — the summary cards and the table cover the same ads. <button type="button" class="link-btn" id="mp-filter-clear">Clear filter</button>`;
   } else { fnote.style.display = 'none'; fnote.innerHTML = ''; }
   const cl = document.getElementById('mp-compare-line');
   if (!cmp) {
@@ -1221,7 +1235,7 @@ async function loadMetaPerformance() {
   if (!state.currentUser || state.currentUser.role !== 'admin') return;
   if (mmState.view === 'best') return loadBestAds();
   const id = ++mpState.reqId;
-  const qs = `${mpRangeQuery()}${mpState.compare ? '&compare=1' : ''}${mpFilterQuery()}`;
+  const qs = `${mpRangeQuery()}${mpState.compare ? '&compare=1' : ''}${mpFilterQuery()}${mpFunnelsQuery()}`; // the funnel checkboxes narrow the headline figures AND the table: one filtered dataset
   try {
     const sum = await api(`/meta-performance/summary?${qs}`);
     if (id !== mpState.reqId) return;
@@ -1231,7 +1245,7 @@ async function loadMetaPerformance() {
     if (hasData) await loadMetaPerformanceAds();
   } catch (e) {
     if (id !== mpState.reqId) return;
-    document.getElementById('mp-body').style.display = 'none';
+    document.getElementById('mp-body').classList.add('mp-nodata');
     const empty = document.getElementById('mp-empty');
     empty.style.display = '';
     empty.innerHTML = `<strong>Couldn't load Meta performance</strong>${escapeHtml(e.message)}`;
@@ -1467,7 +1481,7 @@ function mpReachTilesHtml(rf, vs) {
     : status ? `<div class="mp-kpi-status">${escapeHtml(status)}</div>` : '';
   const tip = (what) => (asOf ? ` title="${escapeHtml(what + ' ' + asOf)}"` : '');
   return `<div class="mp-kpi"><div class="mp-kpi-label">Reach</div><div class="mp-kpi-value"${tip('Reach')}>${val(rf && rf.reach, 'int')}</div>${sub}</div>
-    <div class="mp-kpi"><div class="mp-kpi-label">Frequency</div><div class="mp-kpi-value"${tip('Frequency')}>${val(rf && rf.frequency, 'freq')}</div>${sub}</div>`;
+`;  // Frequency is no longer a summary card (it stays in the table); Reach is still Meta's own unique-people figure, never a sum of ads
 }
 function mpRangeBody() {
   return mpState.preset === 'custom' ? { preset: 'custom', since: mpState.customSince, until: mpState.customUntil } : { preset: mpState.preset };
@@ -1525,6 +1539,7 @@ function mpRenderFreshness() {
   txt.innerHTML = `${escapeHtml(shown.join(' · ').replace(/^Stats updated /, 'Last updated '))}${hidden ? ' <i class="mp-fresh-more">+' + hidden + '</i>' : ''}`;
   document.getElementById('mp-fresh-note').innerHTML = note ? ` ${note}` : '';
   const rb = document.getElementById('mp-refresh-now'); if (rb) rb.disabled = !!f.is_refreshing;
+  const dot = el.querySelector('.mp-fresh-dot'); if (dot) dot.className = `mp-fresh-dot ${f.is_refreshing ? 'busy' : (f.auto_enabled && f.additive && f.additive.last_synced_at ? 'ok' : 'idle')}`;
 }
 async function mpCheckFreshness() {
   try {
@@ -1580,7 +1595,7 @@ document.addEventListener('click', (e) => {
   const cfb = e.target.closest('#mm-modal-body [data-conflict-creative]');
   if (cfb && cfb.dataset.conflictCreative) { closeModal('meta-match-modal'); openConflictModal(cfb.dataset.conflictCreative); return; }
   if (e.target.id === 'mp-refresh-now') mpRefreshNow();
-  if (e.target.id === 'mp-filter-clear') { mpState.funnel = 'all'; mpState.campaign = ''; mpState.page = 1; document.getElementById('mp-campaign').value = ''; loadMetaPerformance(); }
+  if (e.target.id === 'mp-filter-clear') { mpState.funnel = 'all'; mpState.funnels = [...MP_FUNNEL_KEYS]; try { localStorage.setItem('wndrr.mp.funnels', JSON.stringify(mpState.funnels)); } catch (err) { /* ignore */ } mpSyncFunnelUi(); mpState.campaign = ''; mpState.page = 1; document.getElementById('mp-campaign').value = ''; loadMetaPerformance(); }
 });
 
 // Campaign / funnel filter. Funnel comes only from literal TOF / TOM / MOF tokens in the campaign name; anything else is
@@ -1613,7 +1628,7 @@ function mpSyncFunnelUi() {
 function mpSetFunnels(list) {
   mpState.funnels = MP_FUNNEL_KEYS.filter((f) => list.includes(f));
   try { localStorage.setItem('wndrr.mp.funnels', JSON.stringify(mpState.funnels)); } catch (e) { /* remembering is a convenience */ }
-  mpState.page = 1; mpSyncFunnelUi(); loadMetaPerformanceAds();
+  mpState.page = 1; mpSyncFunnelUi(); loadMetaPerformance(); // summary cards + table
 }
 document.querySelectorAll('#mp-funnel-group input[type=checkbox]').forEach((c) => c.addEventListener('change', () => mpSetFunnels([...document.querySelectorAll('#mp-funnel-group input:checked')].map((x) => x.value))));
 document.getElementById('mp-funnel-all').addEventListener('click', () => mpSetFunnels(MP_FUNNEL_KEYS));
@@ -2011,6 +2026,20 @@ const MP_VIEW_TITLES = {
   best: ['Best Ads', 'Your strongest unique creatives, with duplicate Meta ads grouped together'],
   matching: ['Meta Performance', 'Performance of WNDRR Meta ads across all campaigns'],
 };
+// The date range + Previous period controls live in the Ad Performance toolbar on the Performance page and under the header on Best Ads (Best Ads is unchanged).
+// The same DOM nodes are moved (never copied), so every handler and the open calendar keep working.
+function mpPlaceDateControls(view) {
+  const wrap = document.querySelector('.mp-range-wrap'); const cmp = document.querySelector('label.mp-compare'); const line = document.getElementById('mp-range-line');
+  if (!wrap || !cmp || !line) return;
+  const to = (el, slotId) => { const slot = document.getElementById(slotId); if (slot && el.parentNode !== slot) slot.appendChild(el); };
+  if (view === 'best') {
+    to(wrap, 'mp-best-date-slot'); to(cmp, 'mp-best-date-slot'); to(line, 'mp-best-range-slot');
+  } else {
+    to(wrap, 'mp-ap-date-slot'); to(cmp, 'mp-ap-compare-slot');
+    const slot = document.querySelector('.mp-ap-date'); if (slot && line.parentNode !== slot) slot.appendChild(line);
+  }
+  const bc = document.getElementById('mp-best-controls'); if (bc) bc.style.display = view === 'best' ? '' : 'none';
+}
 function mpSyncChrome() {
   const view = mmState.view;
   const t = MP_VIEW_TITLES[view] || MP_VIEW_TITLES.performance;
@@ -2024,6 +2053,7 @@ function mpSyncChrome() {
   document.getElementById('mp-view-performance').style.display = view === 'performance' ? '' : 'none';
   document.getElementById('mp-view-best').style.display = view === 'best' ? '' : 'none';
   document.getElementById('mp-perf-controls').style.display = view === 'matching' ? 'none' : '';
+  mpPlaceDateControls(view);
   const dpaBox = document.getElementById('mp-dpa'); if (dpaBox) dpaBox.checked = !!mpState.dpa;
   document.getElementById('mp-view-matching').style.display = view === 'matching' ? '' : 'none';
 }

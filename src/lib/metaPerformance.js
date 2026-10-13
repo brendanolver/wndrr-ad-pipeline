@@ -371,13 +371,16 @@ function parseFilter(query = {}) {
   const campaignId = CAMPAIGN_ID_RE.test(String(query.campaign_id || '')) ? String(query.campaign_id) : null;
   // Dynamic Product Ads are left out of creative performance by default (lib/metaDpa.js); ?dpa=include brings them back for reporting. Nothing is deleted.
   const dpa = dpaLib.parseDpaMode(query);
-  return { funnel, campaignId, dpa, excludeDpa: dpa === 'exclude', active: !!(funnel || campaignId) };
+  // the Ad Performance funnel checkboxes (?funnels=TOF,TOM, or none): the page's headline figures and its table cover the same selected funnels. null = no restriction (nothing sent, or all three)
+  const funnels = parseFunnelList(query.funnels);
+  return { funnel, funnels, campaignId, dpa, excludeDpa: dpa === 'exclude', active: !!(funnel || funnels || campaignId) };
 }
 // Restricts an insights table (alias given) to the ads in the filter; params are appended to `params`.
 function adFilterSql(filter, params, alias = 'd') {
   if (!filter || !(filter.active || filter.excludeDpa)) return '';
   const conds = [];
   if (filter.funnel) { params.push(filter.funnel); conds.push(`COALESCE(mc.funnel, 'unknown') = $${params.length}`); }
+  if (filter.funnels) { params.push(filter.funnels); conds.push(`COALESCE(mc.funnel, 'unknown') = ANY($${params.length}::text[])`); }
   if (filter.campaignId) { params.push(filter.campaignId); conds.push(`fa.meta_campaign_id = $${params.length}`); }
   if (filter.excludeDpa) conds.push(dpaLib.notDpaPredicate('fa', 'mc'));
   return ` AND ${alias}.meta_ad_id IN (SELECT fa.meta_ad_id FROM meta_ads fa LEFT JOIN meta_campaigns mc ON mc.meta_campaign_id = fa.meta_campaign_id WHERE ${conds.join(' AND ')})`;
@@ -447,7 +450,7 @@ async function getSummary(parsed, now = new Date(), filter = null) {
     freshness,
     // Exact range-level Reach/Frequency from the cache (null + status until loaded).
     reach_frequency: reachStore.summaryFrom(await reachStore.getStatus(parsed.range, parsed.today, { now: now.getTime() })),
-    filter: filter && filter.active ? { funnel: filter.funnel, campaign_id: filter.campaignId } : null,
+    filter: filter && filter.active ? { funnel: filter.funnel, funnels: filter.funnels, campaign_id: filter.campaignId } : null,
     dpa,
     compare: null,
   };
@@ -457,7 +460,7 @@ async function getSummary(parsed, now = new Date(), filter = null) {
     // Exact Reach / Frequency is a unique-people figure Meta computes for the WHOLE account over the period; it cannot be
     // derived for a funnel / campaign subset from daily rows or from per-ad reach, so it is withheld rather than faked.
     out.reach_frequency = { available: false, state: 'filtered', reach: null, frequency: null, pulled_at: null, stale: false, includes_today: false, last_error: null, source: 'meta_range',
-      reason: 'Exact Reach and Frequency are only available for the whole account. Clear the funnel / campaign filter to see them.' };
+      reason: 'Exact Reach and Frequency are unique-people figures Meta only supplies for the whole account, so they cannot be shown (or added up from ads) for a funnel / campaign selection. Select all funnels and all campaigns to see them.' };
   }
   if (parsed.compareRange) {
     const [prevTotals, prevCoverage] = await Promise.all([

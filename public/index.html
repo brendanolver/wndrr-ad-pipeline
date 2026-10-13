@@ -189,10 +189,10 @@
          Thumbstop/Hold Rate are intentionally absent -- see
          src/lib/metaPerformance.js for why. -->
     <section id="tab-meta-performance" class="tab-panel">
-      <div class="mp-top">
+      <div class="mp-top mp-top3">
         <div class="mp-title-block"><h2 id="mp-page-title">Meta Performance</h2><div class="mp-subtitle" id="mp-page-subtitle">Performance of WNDRR Meta ads across all campaigns</div></div>
         <div class="mp-top-right">
-          <!-- Performance | Ad Matching: one area, two views (no extra top-level sidebar item). -->
+          <!-- Performance | Best Ads | Ad Matching: one area, three views (no extra top-level sidebar item). -->
           <div class="mp-subnav" id="mp-subnav" role="tablist">
             <button type="button" class="mp-subnav-btn active" data-mp-view="performance" role="tab">Performance</button>
             <button type="button" class="mp-subnav-btn" data-mp-view="best" role="tab">Best Ads</button>
@@ -200,8 +200,37 @@
           </div>
         </div>
         <div class="mp-perf-controls" id="mp-perf-controls">
-    <div class="mp-controls">
-      <!-- Date range: one dropdown (as in the design) holding the same preset buttons as before plus a two-month calendar. Presets apply at once; a calendar selection applies on Update. -->
+          <div class="mp-fresh" id="mp-fresh">
+            <div class="mp-fresh-meta"><div class="mp-fresh-line"><span class="mp-fresh-dot" aria-hidden="true"></span><span class="mp-fresh-text" id="mp-fresh-text"></span></div><div id="mp-fresh-note"></div></div>
+            <button type="button" class="btn btn-ghost btn-sm mp-refresh-btn" id="mp-refresh-now"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>Refresh now</button>
+          </div>
+        </div>
+      </div>
+      <!-- Best Ads keeps the date range / Previous period controls up here (JS moves them between this slot and the Ad Performance toolbar) -->
+      <div class="mp-best-controls" id="mp-best-controls" style="display:none;"><div class="mp-controls" id="mp-best-date-slot"></div><div id="mp-best-range-slot"></div></div>
+
+      <div id="mp-view-performance">
+      <div id="mp-coverage"></div>
+      <div id="mp-empty" class="mp-empty" style="display:none;"></div>
+
+      <div id="mp-body">
+        <div class="mp-kpis" id="mp-kpis"></div>
+        <div class="mp-compare-line" id="mp-compare-line"></div>
+
+        <!-- Reach & Frequency are unique-people figures (never summed from daily rows): loaded from Meta on request for the selected period. -->
+        <div class="mp-filter-note" id="mp-filter-note" style="display:none;"></div>
+        <div class="mp-reach-bar" id="mp-reach-bar"></div>
+        <div class="mp-campaign-hint" id="mp-campaign-hint"></div>
+        <div class="mp-table-toolbar mp-ap-toolbar">
+          <div class="mp-ap-head">
+            <h3 class="mp-ap-title">Ad Performance</h3>
+            <span class="mp-table-count" id="mp-table-count"></span>
+            <div class="mp-health-note" id="mp-health-note" style="display:none;"></div>
+          </div>
+          <div class="mp-ap-grid">
+            <div class="mp-ap-f mp-ap-date">
+              <div class="mp-ap-lab">Date range <svg class="ic mp-fgroup-info" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/><title>The date range drives the summary cards and the table. Dates are in Australia/Sydney time.</title></svg></div>
+              <div id="mp-ap-date-slot">
       <div class="mp-range-wrap">
         <button type="button" class="mp-range-btn" id="mp-range-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="mp-range-pop">
           <svg class="ic" aria-hidden="true" focusable="false"><use href="#i-calendar"></use></svg><span id="mp-range-btn-label">Last 7 Days</span>
@@ -245,57 +274,36 @@
           </div>
         </div>
       </div>
-      <label class="mp-compare mp-compare-pill" title="Show how each figure moved against the period immediately before"><input type="checkbox" id="mp-compare"> <span>Previous period</span></label>
-    </div>
-          <div class="mp-fresh" id="mp-fresh">
-            <button type="button" class="btn btn-ghost btn-sm" id="mp-refresh-now">Refresh now</button>
-            <div class="mp-fresh-meta">
-              <div class="mp-fresh-line"><span class="mp-fresh-text" id="mp-fresh-text"></span><span id="mp-fresh-note"></span></div>
+              </div>
               <div class="mp-range-line" id="mp-range-line">&nbsp;</div>
             </div>
-          </div>
-        </div>
-      </div>
-
-      <div id="mp-view-performance">
-      <div id="mp-coverage"></div>
-      <div id="mp-empty" class="mp-empty" style="display:none;"></div>
-
-      <div id="mp-body">
-        <div class="mp-kpis" id="mp-kpis"></div>
-        <div class="mp-compare-line" id="mp-compare-line"></div>
-
-        <!-- Reach & Frequency are unique-people figures (never summed from daily rows): loaded from Meta on request for the selected period. -->
-        <div class="mp-filter-note" id="mp-filter-note" style="display:none;"></div>
-        <div class="mp-reach-bar" id="mp-reach-bar"></div>
-        <div class="mp-campaign-hint" id="mp-campaign-hint"></div>
-        <div class="mp-table-toolbar mp-ap-toolbar">
-          <div class="mp-ap-head">
-            <h3 class="mp-ap-title">Ad Performance</h3>
-            <span class="mp-table-count" id="mp-table-count"></span>
-            <div class="mp-health-note" id="mp-health-note" style="display:none;"></div>
-          </div>
-          <div class="mp-ap-filters">
-            <input type="search" id="mp-search" placeholder="Search ad name, Meta Ad ID, product or concept" autocomplete="off">
-            <select id="mp-status" aria-label="Status filter">
-              <option value="all">All statuses</option>
-              <option value="active">Active</option>
-              <option value="paused">Paused</option>
-              <option value="other">Other</option>
-            </select>
-            <!-- Campaign / funnel context: filters the table AND the headline metrics (see mpFilterQuery) -->
-            <fieldset class="mp-fgroup" id="mp-funnel-group">
-              <legend>Funnel <svg class="ic mp-fgroup-info" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/><title>Choose which funnels' ads the table shows. The summary cards above keep covering the whole reporting scope. Each ad is judged against its own funnel's benchmarks.</title></svg></legend>
-              <div class="mp-fgroup-row">
+            <div class="mp-ap-f mp-ap-funnel">
+              <div class="mp-ap-lab">Funnel <svg class="ic mp-fgroup-info" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/><title>Choose which funnels' ads the table shows. The summary cards above keep covering the whole reporting scope. Each ad is judged against its own funnel's benchmarks.</title></svg></div>
+              <div class="mp-fgroup" id="mp-funnel-group" role="group" aria-label="Funnel filter">
+                <div class="mp-fgroup-row">
                 <label class="mp-fchk mp-fchk-TOF"><input type="checkbox" value="TOF" checked><span>TOF</span></label>
                 <label class="mp-fchk mp-fchk-TOM"><input type="checkbox" value="TOM" checked><span>TOM</span></label>
                 <label class="mp-fchk mp-fchk-MOF"><input type="checkbox" value="MOF" checked><span>MOF</span></label>
                 <button type="button" class="mp-fall" id="mp-funnel-all">Select all</button>
                 <span class="mp-fcount" id="mp-funnel-count" aria-live="polite">3 of 3 selected</span>
               </div>
-            </fieldset>
-            <select id="mp-campaign" aria-label="Campaign filter"><option value="">All campaigns</option></select>
-            <label class="mp-inline-check" title="Dynamic Product Ads are excluded by default. They stay stored; this only changes what is shown."><input type="checkbox" id="mp-dpa"> Include DPAs</label>
+              </div>
+            </div>
+            <div class="mp-ap-f"><label class="mp-ap-lab" for="mp-status">Status</label>
+              <select id="mp-status" aria-label="Status filter">
+                <option value="all">All statuses</option>
+                <option value="active">Active</option>
+                <option value="paused">Paused</option>
+                <option value="other">Other</option>
+              </select></div>
+            <div class="mp-ap-f"><label class="mp-ap-lab" for="mp-campaign">Campaign</label><select id="mp-campaign" aria-label="Campaign filter"><option value="">All campaigns</option></select></div>
+            <div class="mp-ap-f mp-ap-search"><label class="mp-ap-lab" for="mp-search">Search ads</label><span class="mp-search-box"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input type="search" id="mp-search" placeholder="Ad name, Meta Ad ID, product or concept…" autocomplete="off"></span></div>
+          </div>
+          <div class="mp-ap-row2">
+            <div id="mp-ap-compare-slot">
+      <label class="mp-compare mp-compare-pill" title="Show how each figure moved against the period immediately before"><input type="checkbox" id="mp-compare"> <span>Previous period</span></label>
+            </div>
+            <label class="mp-inline-check" title="Dynamic Product Ads are excluded by default. They stay stored; this only changes what is shown."><input type="checkbox" id="mp-dpa"> <span>Include DPAs</span> <svg class="ic mp-fgroup-info" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg></label>
             <span class="mp-dpa-note" id="mp-dpa-note"></span>
           </div>
         </div>

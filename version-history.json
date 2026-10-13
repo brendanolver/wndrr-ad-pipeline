@@ -2,6 +2,15 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.1.1",
+      "date": "2026-10-13",
+      "title": "Meta Performance header, KPI row and filters redesign",
+      "changes": [
+        "Meta Performance: the navigation is centred, the date range and Previous period moved into the Ad Performance filters (Date range, Funnel, Status, Campaign, Search ads; Previous period, Include DPAs and the DPA note below).",
+        "The summary is now ten compact cards in one row (Frequency stays in the table), and the funnel selection narrows the summary cards as well as the table. Outbound CTR changes are shown in percentage points."
+      ]
+    },
+    {
       "version": "1.1.0",
       "date": "2026-10-13",
       "title": "Red-only benchmarks",
