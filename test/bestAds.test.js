@@ -5,15 +5,15 @@ const assert = require('node:assert/strict');
 const perf = require('../src/lib/metaPerformance');
 const thumbs = require('../src/lib/metaCreativeThumbs');
 
-test('defaults: Purchase Value, $500 minimum spend, 5 purchases for CPA / ROAS, 24 per page', () => {
-  assert.deepEqual(perf.parseBestQuery({}), { rank: 'purchase_value', minSpend: 500, minPurchases: 5, status: 'all', q: '', page: 1, pageSize: 24 });
+test('defaults: Purchase Value, $500 minimum spend, 5 purchases for CPA / ROAS, 20 per page', () => {
+  assert.deepEqual(perf.parseBestQuery({}), { rank: 'purchase_value', minSpend: 500, minPurchases: 5, status: 'all', q: '', page: 1, pageSize: 20 });
 });
 
 test('only known rankings are accepted; CPA ranks lowest first, everything else highest first', () => {
   assert.equal(perf.parseBestQuery({ rank: 'drop table' }).rank, 'purchase_value');
-  assert.deepEqual(Object.keys(perf.BEST_RANKS).sort(), ['cpa', 'purchase_value', 'purchases', 'reach', 'roas', 'spend']);
+  assert.deepEqual(Object.keys(perf.BEST_RANKS).sort(), ['cpa', 'purchase_value', 'purchases', 'roas', 'spend']); // no Reach: it cannot be combined across ads
   assert.equal(perf.BEST_RANKS.cpa.dir, 'asc');
-  for (const k of ['purchase_value', 'purchases', 'roas', 'spend', 'reach']) assert.equal(perf.BEST_RANKS[k].dir, 'desc');
+  for (const k of ['purchase_value', 'purchases', 'roas', 'spend']) assert.equal(perf.BEST_RANKS[k].dir, 'desc');
 });
 
 test('minimum spend may be zero but never negative or non-numeric; paging is bounded', () => {
@@ -36,4 +36,17 @@ test('large covers: a 600px lookup, and nothing is fetched from Meta while autom
   assert.equal(calls, 0);
   assert.equal(off.stats.meta_calls, 0);
   assert.equal(off.thumbs.a1.state, 'pending');
+});
+
+test('creative grouping uses the Ad Matching copy-suffix rule (only trailing suffixes, any dash / case / repeats)', () => {
+  const { normaliseAdName } = require('../src/lib/metaNameCopies');
+  const base = '#301_26-WK23_02-06_MOTIF 1/4 ZIP_SWEATS_HUMOUR_Video_Single_*_CONCRETE FLAT LAY_Product';
+  for (const suffix of [' - Copy', ' - Copy 2', ' – Copy 4', ' - Copy - Copy 2', ' - Copy – Copy 2', ' — copy', ' − COPY 12', '  -  Copy  ']) {
+    assert.equal(normaliseAdName(base + suffix).base, base, suffix);
+  }
+  // not suffixes: meaningful parts of the name are never removed
+  for (const name of ['Copy of ' + base, base + ' (Copy)', base + '-Copy', base + ' - Copy of it', base + ' - Hook 2']) assert.equal(normaliseAdName(name).base, name);
+  assert.notEqual(normaliseAdName(base).base, normaliseAdName(base.replace('Product', 'Hook 2') + ' - Copy').base);
+  // the SQL version used for grouping is the same expression family
+  assert.match(perf.creativeKeySql('a'), /copy\(\\s\*\[0-9\]\{1,3\}\)\?\)\+/i);
 });

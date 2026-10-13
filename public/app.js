@@ -699,7 +699,7 @@ const mpState = {
   sort: 'spend',
   dir: 'desc',
   page: 1,
-  pageSize: 25,
+  pageSize: 20,
   range: null,
   currency: null,
   reqId: 0,
@@ -1039,17 +1039,22 @@ function mpRenderAds(res) {
       </tr>`).join('');
     ccHydrateThumbs(body);
   }
+  mpRenderPager(res);
+}
+
+// "Showing 1–20 of 447 ads" plus numbered pages (first, last and a window around the current one). Always shown when there are ads, so the total is visible even on one page.
+function mpRenderPager(res) {
   const pager = document.getElementById('mp-pager');
-  if (res.total_pages <= 1) {
-    pager.innerHTML = '';
-  } else {
-    const from = (res.page - 1) * res.page_size + 1;
-    const to = Math.min(res.total, res.page * res.page_size);
-    pager.innerHTML = `
-      <button type="button" class="btn btn-ghost btn-sm" id="mp-prev" ${res.page <= 1 ? 'disabled' : ''}>← Prev</button>
-      <span>${from.toLocaleString('en-AU')}–${to.toLocaleString('en-AU')} of ${res.total.toLocaleString('en-AU')} · page ${res.page} of ${res.total_pages}</span>
-      <button type="button" class="btn btn-ghost btn-sm" id="mp-next" ${res.page >= res.total_pages ? 'disabled' : ''}>Next →</button>`;
-  }
+  if (!res.total) { pager.innerHTML = ''; return; }
+  const n = (v) => v.toLocaleString('en-AU');
+  const from = (res.page - 1) * res.page_size + 1;
+  const to = Math.min(res.total, res.page * res.page_size);
+  const pages = new Set([1, res.total_pages, res.page - 2, res.page - 1, res.page, res.page + 1, res.page + 2]);
+  const list = [...pages].filter((x) => x >= 1 && x <= res.total_pages).sort((a, b) => a - b);
+  let nums = ''; let last = 0;
+  list.forEach((x) => { if (x - last > 1) nums += '<span class="mp-pg-gap" aria-hidden="true">…</span>'; nums += `<button type="button" class="mp-pg${x === res.page ? ' active' : ''}" data-mp-page="${x}" ${x === res.page ? 'aria-current="page"' : ''} aria-label="Page ${x}">${x}</button>`; last = x; });
+  pager.innerHTML = `<span class="mp-pager-count">Showing ${n(from)}–${n(to)} of ${n(res.total)} ads</span>
+    ${res.total_pages > 1 ? `<nav class="mp-pager-nav" aria-label="Pages"><button type="button" class="btn btn-ghost btn-sm" id="mp-prev" ${res.page <= 1 ? 'disabled' : ''}>← Prev</button>${nums}<button type="button" class="btn btn-ghost btn-sm" id="mp-next" ${res.page >= res.total_pages ? 'disabled' : ''}>Next →</button></nav>` : ''}`;
 }
 
 async function loadMetaPerformanceAds() {
@@ -1283,8 +1288,10 @@ document.querySelectorAll('.mp-table th[data-sort]').forEach((th) => {
   });
 });
 document.getElementById('mp-pager').addEventListener('click', (e) => {
-  if (e.target.id === 'mp-prev' && mpState.page > 1) mpState.page -= 1;
-  else if (e.target.id === 'mp-next') mpState.page += 1;
+  const pg = e.target.closest('[data-mp-page]');
+  if (e.target.closest('#mp-prev') && mpState.page > 1) mpState.page -= 1;
+  else if (e.target.closest('#mp-next')) mpState.page += 1;
+  else if (pg) mpState.page = Number(pg.dataset.mpPage);
   else return;
   loadMetaPerformanceAds();
 });
@@ -1573,6 +1580,9 @@ function apSkeleton(adId) {
 async function openAdPreview(adId, ctx, refresh) {
   apState.adId = adId; apState.ctx = ctx || null; apState.card = 0; apState.showMeta = false; apState.userToggled = false;
   if (!refresh) apState.retried = false;
+  if (!(ctx && ctx.backTo)) apState.backTo = null;
+  apState.group = null;
+  if (ctx && ctx.group) apLoadGroup(ctx);
   const body = document.getElementById('ap-body');
   document.getElementById('ap-title').textContent = 'Ad preview';
   const warm = refresh ? null : apFresh(adId);
@@ -1724,15 +1734,80 @@ function renderAdPreview() {
         <button type="button" class="btn btn-ghost apm-btn apm-close" onclick="closeAdPreview()" data-ap-close>Close</button>
       </div></section>`;
 
+  const grp = apState.ctx && apState.ctx.group;
+  if (grp) document.getElementById('ap-title').textContent = grp.name || name;
+  const back = apState.backTo ? `<button type="button" class="apm-link apg-back" onclick="apBackToCreative()">← Back to creative</button>` : '';
+  const rightCol = grp ? apGroupHtml(grp, actions) : `${details}${perf}${actions}`;
   document.getElementById('ap-body').innerHTML = `
     <div class="apm-layout">
       <section class="apm-left">
-        <div class="apm-left-head"><h3>Ad Preview</h3>${modeSwitch}${counter}</div>
+        <div class="apm-left-head"><h3>${grp ? 'Creative Preview' : 'Ad Preview'}</h3>${back}${modeSwitch}${counter}</div>
         <div class="ap-media apm-stage" id="ap-media">${media}</div>
         ${strip}${dynNote}${foot}
       </section>
-      <div class="apm-right">${details}${perf}${actions}</div>
+      <div class="apm-right">${rightCol}</div>
     </div>`;
+}
+
+// ── Best Ads creative detail: combined performance, the TOF / TOM / MOF split and every underlying Meta ad ──
+async function apLoadGroup(ctx) {
+  const g = ctx.group;
+  apState.group = { loading: true, key: g.key };
+  try {
+    const data = await api(`/meta-performance/best-ads/creative?${g.query}`);
+    if (!apState.ctx || apState.ctx.group !== g) return; // another preview was opened meanwhile
+    apState.group = { data, key: g.key };
+  } catch (e) {
+    if (!apState.ctx || apState.ctx.group !== g) return;
+    apState.group = { error: e.message, key: g.key };
+  }
+  if (apState.data) renderAdPreview();
+}
+function apOpenMember(adId) {
+  const gd = apState.group && apState.group.data; const a = gd && gd.ads.find((x) => x.meta_ad_id === adId);
+  if (!a) return;
+  apState.backTo = { adId: apState.adId, ctx: apState.ctx };
+  openAdPreview(adId, { metrics: { spend: a.spend, purchases: a.purchases, cpa: a.cpa, roas: a.roas }, range: gd.range, funnel: a.funnel, backTo: true });
+}
+function apBackToCreative() {
+  const b = apState.backTo; if (!b) return;
+  apState.backTo = null;
+  openAdPreview(b.adId, { ...b.ctx, backTo: false });
+}
+function apGroupHtml(grp, actions) {
+  const st = apState.group;
+  if (!st || st.loading) return `<section class="apm-card"><div class="apm-card-head"><h3>Creative</h3></div><div class="mp-table-empty">Loading this creative's performance…</div></section>${actions}`;
+  if (st.error) return `<section class="apm-card"><div class="apm-card-head"><h3>Creative</h3></div><div class="mp-table-empty">${escapeHtml(st.error)}</div></section>${actions}`;
+  const d = st.data; const c = d.creative; const t = d.totals;
+  const range = `<span class="apm-muted">${escapeHtml(mpRange(d.range, true))}</span>`;
+  const statusChip = `<span class="ba-status ${c.status}">${BA_STATUS_LABEL[c.status] || 'Other'}</span>`;
+  const tile = (l, v, f) => `<div class="apm-metric"><div class="apm-metric-l">${l}</div><div class="apm-metric-v">${mpFmt(v, f)}</div></div>`;
+  const head = `<section class="apm-card">
+      <div class="apm-card-head"><h3>Creative</h3>${statusChip}</div>
+      <div class="apg-name" title="${apAttr(c.creative_name)}">${escapeHtml(c.creative_name)}</div>
+      <div class="apg-sub"><b>${c.ad_count} Meta ad${c.ad_count === 1 ? '' : 's'}</b>${c.funnels.length ? ` · ${c.funnels.map(mpFunnelBadge).join('')}` : ''}${c.products.length ? ` · ${escapeHtml(c.products.slice(0, 3).join(', '))}` : ''}</div>
+    </section>`;
+  const combined = `<section class="apm-card">
+      <div class="apm-card-head"><h3>Combined Performance</h3>${range}</div>
+      <div class="apm-metrics apg-combined">${tile('Purchase Value', t.purchase_value, 'money')}${tile('Purchases', t.purchases, 'int')}${tile('Amount Spent', t.spend, 'money')}${tile('CPA', t.cpa, 'money')}${tile('ROAS', t.roas, 'roas')}</div>
+    </section>`;
+  const FL = { TOF: 'TOF', TOM: 'TOM', MOF: 'MOF', multiple: 'Mixed', unknown: 'Unknown' };
+  const frow = (f) => `<tr><td>${mpFunnelBadge(f.funnel)}</td><td class="num">${f.ad_count}</td><td class="num">${mpFmt(f.spend, 'money')}</td><td class="num">${mpFmt(f.purchases, 'int')}</td><td class="num">${mpFmt(f.cpa, 'money')}</td><td class="num">${mpFmt(f.purchase_value, 'money')}</td><td class="num">${mpFmt(f.roas, 'roas')}</td></tr>`;
+  const byFunnel = `<section class="apm-card">
+      <div class="apm-card-head"><h3>Performance by Funnel</h3></div>
+      <table class="apg-table" aria-label="Performance by funnel"><thead><tr><th>Funnel</th><th class="num">Ads</th><th class="num">Spend</th><th class="num">Purchases</th><th class="num">CPA</th><th class="num">Purchase Value</th><th class="num">ROAS</th></tr></thead><tbody>${d.funnels.map(frow).join('')}</tbody></table>
+    </section>`;
+  const arow = (a) => `<div class="apg-ad" data-apg-ad="${apAttr(a.meta_ad_id)}">
+      <div class="apg-ad-top"><div class="apg-ad-name" title="${apAttr(a.ad_name || '')}">${escapeHtml(a.ad_name || '(unnamed ad)')}</div>${mpStatusChip(a.effective_status)}</div>
+      <div class="apg-ad-meta">${mpFunnelBadge(a.funnel)}<span class="apm-mono" title="Meta Ad ID">${escapeHtml(a.meta_ad_id)}</span><button type="button" class="apm-copy" data-copy="${apAttr(a.meta_ad_id)}" data-copy-what="Meta Ad ID" aria-label="Copy Meta Ad ID" title="Copy Meta Ad ID">${APM_ICON.copy || 'Copy'}</button><span class="apg-camp" title="${apAttr(a.campaign_name || '')}">${escapeHtml(a.campaign_name || (a.campaign_id ? `Campaign ${a.campaign_id}` : '—'))}</span></div>
+      <div class="apg-ad-nums"><span><i>Spend</i>${mpFmt(a.spend, 'money')}</span><span><i>Purchases</i>${mpFmt(a.purchases, 'int')}</span><span><i>CPA</i>${mpFmt(a.cpa, 'money')}</span><span><i>Purchase Value</i>${mpFmt(a.purchase_value, 'money')}</span><span><i>ROAS</i>${mpFmt(a.roas, 'roas')}</span>
+        <button type="button" class="btn btn-ghost btn-sm apg-open" onclick="apOpenMember('${apAttr(a.meta_ad_id)}')">Preview</button></div>
+    </div>`;
+  const ads = `<section class="apm-card">
+      <div class="apm-card-head"><h3>Meta Ads (${d.ads.length})</h3><span class="apm-muted">Original names and IDs</span></div>
+      <div class="apg-ads">${d.ads.map(arow).join('')}</div>
+    </section>`;
+  return `${head}${combined}${byFunnel}${ads}${actions}`;
 }
 function apFormatLabel(c) {
   if (c.dynamic) return `Dynamic creative${(c.cards || []).length ? ` (${c.cards.length} assets)` : ''}`;
@@ -1776,7 +1851,7 @@ function loadMetaPerformanceArea() {
 // Page title / subtitle, in-page tabs and the sidebar sub-menu all follow the one view (performance | best | matching).
 const MP_VIEW_TITLES = {
   performance: ['Meta Performance', 'Performance of WNDRR Meta ads across all campaigns'],
-  best: ['Best Ads', 'Your top performing Meta ads ranked by purchase value'],
+  best: ['Best Ads', 'Your strongest unique creatives, with duplicate Meta ads grouped together'],
   matching: ['Meta Performance', 'Performance of WNDRR Meta ads across all campaigns'],
 };
 function mpSyncChrome() {
@@ -17752,9 +17827,10 @@ const BA_KPIS = [
   { key: 'spend', label: 'Amount Spent', fmt: 'money', better: null },
   { key: 'roas', label: 'ROAS', fmt: 'roas', better: 'up' },
 ];
+const BA_PAGE_SIZE = 20;
 const baState = {
   rank: 'purchase_value', funnel: 'all', campaign: '', status: 'all', minSpend: 500, minPurchases: 5, q: '', layout: 'grid',
-  page: 1, ads: [], adsById: new Map(), data: null, reqId: 0, loading: false, campaignsFor: '', io: null, playing: null,
+  page: 1, ads: [], adsByKey: new Map(), data: null, reqId: 0, loading: false, campaignsFor: '', io: null, playing: null,
 };
 const baMedia = new Map(); // adId -> { state, kind, thumb_url, video_url }
 const baMediaAsked = new Set();
@@ -17763,8 +17839,16 @@ function baQuery(page) {
   const p = [mpRangeQuery()];
   if (mpState.compare) p.push('compare=1');
   p.push(`rank=${encodeURIComponent(baState.rank)}`, `min_spend=${encodeURIComponent(baState.minSpend)}`, `min_purchases=${encodeURIComponent(baState.minPurchases)}`,
-    `status=${baState.status}`, `page=${page}`, 'page_size=24');
+    `status=${baState.status}`, `page=${page}`, `page_size=${BA_PAGE_SIZE}`);
   if (baState.q) p.push(`q=${encodeURIComponent(baState.q)}`);
+  if (baState.funnel !== 'all') p.push(`funnel=${encodeURIComponent(baState.funnel)}`);
+  if (baState.campaign) p.push(`campaign_id=${encodeURIComponent(baState.campaign)}`);
+  if (mpState.dpa) p.push('dpa=include');
+  return p.join('&');
+}
+// the filters that decide WHICH ads a creative counts (not search / minimum spend): the detail view uses the same ones so its numbers agree with the card
+function baDetailQuery(key) {
+  const p = [mpRangeQuery(), `key=${encodeURIComponent(key)}`, `status=${baState.status}`];
   if (baState.funnel !== 'all') p.push(`funnel=${encodeURIComponent(baState.funnel)}`);
   if (baState.campaign) p.push(`campaign_id=${encodeURIComponent(baState.campaign)}`);
   if (mpState.dpa) p.push('dpa=include');
@@ -17810,31 +17894,32 @@ function baKpiHtml(data) {
 }
 
 function baFormatMoney0(n) { try { return new Intl.NumberFormat('en-AU', { style: 'currency', currency: mpState.currency || 'AUD', maximumFractionDigits: 0 }).format(n); } catch (e) { return `$${Math.round(n)}`; } }
+const BA_STATUS_LABEL = { active: 'Active', paused: 'Paused', mixed: 'Mixed', other: 'Other' };
 
+// One card = one unique creative (its Meta ads grouped by name without trailing copy suffixes). The cover is the creative's biggest-spending ad.
 function baCardHtml(a) {
-  const id = escapeHtml(a.meta_ad_id);
-  const status = a.effective_status === 'ACTIVE' ? 'Active' : (a.effective_status || '').includes('PAUSED') ? 'Paused' : 'Other';
-  const statusCls = status.toLowerCase();
-  const rankLabel = a.rank;
-  const hero = baState.data && baState.data.rank.used === 'purchase_value' ? ' ba-hero-ranked' : '';
-  return `<article class="ba-card" data-ba-card="${id}">
-    <div class="ba-media" data-ba-media="${id}">
-      <button type="button" class="ba-media-btn" data-ba-open="${id}" aria-label="Open the ad preview for ${escapeHtml(a.ad_name || a.meta_ad_id)}"><span class="ba-ph"><span class="ba-ph-text"></span></span></button>
-      <span class="ba-rank" title="Rank ${rankLabel}">#${rankLabel}</span>
+  const key = apAttr(a.creative_key);
+  const rep = escapeHtml(a.rep_ad_id);
+  const funnels = (a.funnels || []).map(mpFunnelBadge).join('');
+  const prod = (a.products || []).length ? `<div class="ba-product" title="${apAttr(a.products.join(', '))}">${escapeHtml(a.products.slice(0, 2).join(', '))}${a.products.length > 2 ? ` +${a.products.length - 2}` : ''}</div>` : '';
+  const adsLabel = `${a.ad_count} Meta ad${a.ad_count === 1 ? '' : 's'}`;
+  return `<article class="ba-card" data-ba-card="${key}">
+    <div class="ba-media" data-ba-media="${rep}">
+      <button type="button" class="ba-media-btn" data-ba-open="${key}" aria-label="Open details for ${apAttr(a.creative_name)}"><span class="ba-ph"><span class="ba-ph-text"></span></span></button>
+      <span class="ba-rank" title="Rank ${a.rank}">#${a.rank}</span>
       <span class="ba-kind" hidden></span>
     </div>
     <div class="ba-body">
-      <div class="ba-badges">${mpFunnelBadge(a.funnel)}<span class="ba-status ${statusCls}">${status}</span></div>
-      <h4 class="ba-name" title="${escapeHtml(a.ad_name || '')}${a.campaign_name ? ` — ${escapeHtml(a.campaign_name)}` : ''}">${escapeHtml(a.ad_name || '(unnamed ad)')}</h4>
-      <div class="ba-hero${hero}"><span class="ba-hero-label">Purchase Value</span><strong class="ba-hero-value">${mpFmt(a.purchase_value, 'money')}</strong></div>
+      <div class="ba-badges">${funnels}<span class="ba-status ${a.status}">${BA_STATUS_LABEL[a.status] || 'Other'}</span><span class="ba-adcount" title="Individual Meta ads grouped into this creative">${adsLabel}</span></div>
+      <h4 class="ba-name" title="${apAttr(a.creative_name)}">${escapeHtml(a.creative_name)}</h4>
+      <div class="ba-hero"><span class="ba-hero-label">Purchase Value</span><strong class="ba-hero-value">${mpFmt(a.purchase_value, 'money')}</strong></div>
       <dl class="ba-metrics">
         <div><dt>Purchases</dt><dd>${mpFmt(a.purchases, 'int')}</dd></div>
         <div><dt>CPA</dt><dd>${mpFmt(a.cpa, 'money')}</dd></div>
-        <div><dt>Reach</dt><dd>${a.reach === null || a.reach === undefined ? '<span class="mp-na" title="Per-ad Reach for this period has not been loaded from Meta">—</span>' : Number(a.reach).toLocaleString('en-AU')}</dd></div>
         <div><dt>Amount Spent</dt><dd>${mpFmt(a.spend, 'money')}</dd></div>
+        <div><dt>ROAS</dt><dd>${mpFmt(a.roas, 'roas')}</dd></div>
       </dl>
-      <div class="ba-foot"><div class="ba-roas"><span>ROAS</span><strong>${mpFmt(a.roas, 'roas')}</strong></div>
-        <button type="button" class="ba-details" data-ba-open="${id}">View Full Details <span aria-hidden="true">→</span></button></div>
+      <div class="ba-foot">${prod || '<div class="ba-product ba-product-none"></div>'}<button type="button" class="ba-details" data-ba-open="${key}">View Details <span aria-hidden="true">→</span></button></div>
     </div>
   </article>`;
 }
@@ -17849,38 +17934,36 @@ function baRangeText(r) {
 }
 function baShownLine(d) {
   const n = baState.ads.length;
-  return `Showing ${n.toLocaleString('en-AU')} of ${d.total.toLocaleString('en-AU')} ads · Ranked by ${d.rank.label} · ${baRangeText(d.range)}`;
+  return `Showing ${n.toLocaleString('en-AU')} of ${d.total.toLocaleString('en-AU')} creatives · Ranked by ${d.rank.label} · ${baRangeText(d.range)}`;
 }
 
 function baRender(d, appended) {
   const grid = document.getElementById('ba-grid');
   const pop = d.population;
   document.getElementById('ba-kpis').innerHTML = baKpiHtml(d);
-  document.getElementById('ba-scope').innerHTML = `Totals above cover <strong>all ${pop.ads.toLocaleString('en-AU')} ad${pop.ads === 1 ? '' : 's'}</strong> that match these filters (including the minimum spend), not only the cards shown below.`;
+  document.getElementById('ba-scope').innerHTML = `Totals above cover <strong>all ${pop.creatives.toLocaleString('en-AU')} creative${pop.creatives === 1 ? '' : 's'}</strong> (${pop.ads.toLocaleString('en-AU')} Meta ads) that match these filters, including the minimum spend, not only the cards shown below.`;
   const ruleBits = [];
-  if (d.rank.fallback) ruleBits.push(`<span class="ba-rule-warn">${escapeHtml(d.rank.fallback.reason)}</span>`);
   if (d.rules.text) ruleBits.push(escapeHtml(d.rules.text));
-  if (d.rules.purchases_rule && pop.excluded_by_rule > 0) ruleBits.push(`${pop.excluded_by_rule.toLocaleString('en-AU')} ad${pop.excluded_by_rule === 1 ? '' : 's'} left out by this rule.`);
-  if (d.reach_info && d.reach_info.state === 'ready' && d.reach_info.source === 'meta_range' && d.rank.used === 'reach') ruleBits.push(`Reach loaded from Meta ${mpDateTime(d.reach_info.pulled_at)}.`);
+  if (d.rules.purchases_rule && pop.excluded_by_rule > 0) ruleBits.push(`${pop.excluded_by_rule.toLocaleString('en-AU')} creative${pop.excluded_by_rule === 1 ? '' : 's'} left out by this rule.`);
   document.getElementById('ba-rule').innerHTML = ruleBits.join(' ');
   document.getElementById('ba-rule').style.display = ruleBits.length ? '' : 'none';
-  document.getElementById('ba-summary').textContent = d.total ? baShownLine(d) : `0 ads · Ranked by ${d.rank.label} · ${baRangeText(d.range)}`;
+  document.getElementById('ba-summary').textContent = d.total ? baShownLine(d) : `0 creatives · Ranked by ${d.rank.label} · ${baRangeText(d.range)}`;
   const state = document.getElementById('ba-state');
   const cov = d.coverage || {};
   if (!d.total) {
     let title; let body;
     if (cov.status === 'none') { title = 'Meta data is not available for this period'; body = 'No Meta stats have been synced for these dates yet. Try a more recent range, or use Refresh now.'; }
-    else if (pop.ads === 0 && pop.below_min_spend > 0) { title = 'No ads meet the minimum spend'; body = `${pop.below_min_spend.toLocaleString('en-AU')} ad${pop.below_min_spend === 1 ? '' : 's'} ran in this period but spent less than ${baFormatMoney0(d.rules.min_spend)}. Lower the minimum spend to see ${pop.below_min_spend === 1 ? 'it' : 'them'}.`; }
-    else if (pop.ads > 0) { title = 'No ads meet this ranking rule'; body = `${d.rules.text || 'The ranking needs data these ads do not have.'} Lower the limits or choose a different ranking.`; }
-    else { title = 'No ads match these filters'; body = 'Try clearing the search, funnel, campaign or status filters.'; }
+    else if (pop.creatives === 0 && pop.below_min_spend > 0) { title = 'No creatives meet the minimum spend'; body = `${pop.below_min_spend.toLocaleString('en-AU')} creative${pop.below_min_spend === 1 ? '' : 's'} ran in this period but spent less than ${baFormatMoney0(d.rules.min_spend)}. Lower the minimum spend to see ${pop.below_min_spend === 1 ? 'it' : 'them'}.`; }
+    else if (pop.creatives > 0) { title = 'No creatives meet this ranking rule'; body = `${d.rules.text || 'The ranking needs data these creatives do not have.'} Lower the limits or choose a different ranking.`; }
+    else { title = 'No creatives match these filters'; body = 'Try clearing the search, funnel, campaign or status filters.'; }
     state.className = 'ba-state ba-state-empty'; state.style.display = '';
     state.innerHTML = `<strong>${escapeHtml(title)}</strong><span>${escapeHtml(body)}</span>`;
   } else { state.style.display = 'none'; }
-  const html = d.ads.map(baCardHtml).join('');
+  const html = d.creatives.map(baCardHtml).join('');
   if (appended) grid.insertAdjacentHTML('beforeend', html); else grid.innerHTML = html;
   const more = document.getElementById('ba-more');
   const left = d.total - baState.ads.length;
-  more.innerHTML = left > 0 ? `<button type="button" class="btn btn-ghost" id="ba-show-more">Show ${Math.min(24, left)} more ads <span class="ba-more-left">(${left.toLocaleString('en-AU')} remaining)</span></button>` : '';
+  more.innerHTML = left > 0 ? `<button type="button" class="btn btn-ghost" id="ba-show-more">Load more <span class="ba-more-left">(${Math.min(BA_PAGE_SIZE, left)} of ${left.toLocaleString('en-AU')} remaining)</span></button>` : '';
   baObserveMedia(grid);
 }
 
@@ -17892,9 +17975,9 @@ async function loadBestAds(page) {
   const grid = document.getElementById('ba-grid');
   const state0 = document.getElementById('ba-state');
   if (!append) {
-    baState.page = 1; baState.ads = []; baState.adsById = new Map();
+    baState.page = 1; baState.ads = []; baState.adsByKey = new Map();
     state0.className = 'ba-state'; state0.style.display = 'none';
-    if (!baState.data) { grid.innerHTML = Array.from({ length: 8 }, () => '<div class="ba-card ba-skel" aria-hidden="true"><div class="ba-media"></div><div class="ba-body"><i></i><i></i><i></i></div></div>').join(''); document.getElementById('ba-summary').textContent = 'Loading best ads…'; }
+    if (!baState.data) { grid.innerHTML = Array.from({ length: 8 }, () => '<div class="ba-card ba-skel" aria-hidden="true"><div class="ba-media"></div><div class="ba-body"><i></i><i></i><i></i></div></div>').join(''); document.getElementById('ba-summary').textContent = 'Loading best creatives…'; }
     else { grid.classList.add('ba-loading'); }
   } else { const b = document.getElementById('ba-show-more'); if (b) { b.disabled = true; b.textContent = 'Loading…'; } }
   baState.loading = true;
@@ -17906,7 +17989,7 @@ async function loadBestAds(page) {
     mpState.range = d.range; if (d.today) mpState.today = d.today;
     const rbl = document.getElementById('mp-range-btn-label'); if (rbl) rbl.textContent = d.preset === 'custom' ? mpRangeLabel(d.range.since, d.range.until) : d.label;
     document.getElementById('mp-range-line').textContent = `${mpRange(d.range, true)} · ${d.timezone}`;
-    d.ads.forEach((a) => { baState.ads.push(a); baState.adsById.set(a.meta_ad_id, a); });
+    d.creatives.forEach((a) => { baState.ads.push(a); baState.adsByKey.set(a.creative_key, a); });
     document.getElementById('ba-coverage').innerHTML = mpRenderCoverage(d.coverage, 'Best Ads');
     baRender(d, append);
     if (!append) { baLoadCampaigns(); mpCheckFreshness(); }
@@ -17986,9 +18069,11 @@ function baStop(adId, failed) {
   btn.classList.remove('is-playing'); if (failed) { el.classList.remove('ba-playable'); btn.querySelectorAll('.ba-play').forEach((x) => x.remove()); const t = baMedia.get(adId); if (t) baMedia.set(adId, { ...t, video_url: null }); }
   if (baState.playing === adId) baState.playing = null;
 }
-function baOpen(adId) {
-  const a = baState.adsById.get(adId); const d = baState.data;
-  ccOpenViewer(adId, a && d ? { metrics: { spend: a.spend, purchases: a.purchases, cpa: a.cpa, roas: a.roas, outbound_ctr: a.outbound_ctr, reach: a.reach, frequency: a.frequency }, range: d.range, funnel: a.funnel } : undefined);
+// A creative opens the existing Ad Preview modal (its biggest-spending ad is the preview) with the creative's combined performance, funnel split and every Meta ad on the right.
+function baOpen(key) {
+  const a = baState.adsByKey.get(key); const d = baState.data;
+  if (!a || !d) return;
+  ccOpenViewer(a.rep_ad_id, { group: { key: a.creative_key, name: a.creative_name, ad_count: a.ad_count, query: baDetailQuery(a.creative_key) }, range: d.range, funnel: null });
 }
 
 // ── Controls ──
@@ -18007,7 +18092,7 @@ document.addEventListener('click', (e) => {
   if (e.target.closest('#ba-retry')) { loadBestAds(); return; }
   if (e.target.closest('#ba-show-more')) { loadBestAds(baState.page + 1); return; }
   const pl = e.target.closest('[data-ba-play]');
-  if (pl) { e.preventDefault(); e.stopPropagation(); if (!baPlay(pl.dataset.baPlay)) baOpen(pl.dataset.baPlay); return; }
+  if (pl) { e.preventDefault(); e.stopPropagation(); if (!baPlay(pl.dataset.baPlay)) { const card = pl.closest('[data-ba-card]'); if (card) baOpen(card.dataset.baCard); } return; }
   const op = e.target.closest('#mp-view-best [data-ba-open]');
   if (op) { e.preventDefault(); if (!op.closest('.ba-media-btn.is-playing')) baOpen(op.dataset.baOpen); }
 });

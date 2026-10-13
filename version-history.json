@@ -2,6 +2,16 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.0.4",
+      "date": "2026-10-13",
+      "title": "Performance & Best Ads refinement",
+      "changes": [
+        "Performance: 20 ads per page with numbered pagination and a visible total; search now covers ad name, Meta Ad ID, product and concept across the whole dataset.",
+        "Best Ads now shows unique creatives: Meta ads whose names differ only by trailing Copy suffixes are grouped into one card with combined Purchase Value, Purchases, Amount Spent, CPA and ROAS.",
+        "Clicking a creative shows its performance by funnel (TOF / TOM / MOF) and every underlying Meta ad, each with its own preview."
+      ]
+    },
+    {
       "version": "1.0.3",
       "date": "2026-10-13",
       "title": "Best Ads page",

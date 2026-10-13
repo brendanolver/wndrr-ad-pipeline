@@ -1,23 +1,24 @@
-# Best Ads (Meta Performance > Best Ads)
+# Meta Performance: Performance vs Best Ads
 
-A gallery of the best individual Meta ads for the selected period. It is a **presentation layer over the same stored Meta data** as the Performance page: no new data source, no new attribution, no scoring or "winner" logic.
+* **Performance** = individual Meta ad analysis (every Meta Ad ID is its own row).
+* **Best Ads** = unique creatives, with duplicate Meta ads grouped into one card.
+* **Ad Matching** = creative identification and matching (unchanged).
 
-## Navigation
-Sidebar: Meta Performance expands to **Performance / Best Ads / Ad Matching** (the same area, three views; the in-page tabs match). The date range, Previous period, Refresh now and Include DPAs choices are shared (`mpState`), so they carry across pages. Default range: Last 7 Days (Australia/Sydney).
+## Performance (search engine for individual ads)
+20 ads per page, numbered pagination and "Showing 1–20 of N ads". The whole matching dataset is paged in SQL (nothing is limited to 20 records). **Search** runs across the entire dataset: full ad name, exact Meta Ad ID, product name / code (Ad Matching classification) and creative / concept name (concept type or label), and returns to page 1 when search or any filter changes. Filters, sorting (default Amount Spent, highest first), summary cards, benchmarks, thumbnails, preview, date range, previous period and DPA exclusion are unchanged. **No grouping here**: "Copy" ads stay separate rows.
 
-## Ranking (`getBestAds`, `GET /api/meta-performance/best-ads`, admin only)
-* Every card is **one Meta ad** (never grouped by creative or product). Ranking runs over the **whole eligible set** in the database; the page loads 24 at a time ("Show more").
-* Rank by: Purchase Value (default, highest first), Purchases, CPA (lowest first), Reach, Amount Spent, ROAS. Ties: higher Purchase Value, then higher spend, then Ad ID.
-* **Minimum spend** (default $500, editable, 0 allowed) applies to the whole page, including the KPI totals.
-* **CPA / ROAS** additionally need at least **5 purchases** (editable "Min. purchases"), so one lucky sale cannot top the list; the rule and how many ads it left out are shown on the page.
-* **Reach** only ranks when per-ad Reach exists for the period (single day, or a range already loaded from Meta). Otherwise the page says so and ranks by Purchase Value; it never invents Reach.
-* Filters: Funnel (All/TOF/TOM/MOF), Campaign, Status (All/Active/Paused), Search (ad name, product name, exact Meta Ad ID), Include DPAs (existing DPA detection, `src/lib/metaDpa.js`).
+## Best Ads (unique creatives)
+**Grouping rule** = the ad name with trailing copy suffixes removed, using exactly Ad Matching's rule (`src/lib/metaNameCopies.js` `normaliseAdName`): only a trailing `- Copy`, `– Copy 2`, `- Copy - Copy 2` (any dash, any capitalisation, repeated) is removed; the remainder must match exactly, so a different hook / concept / format / variation id (or a "Copy of ..." prefix) is a different creative, and an ad with no name is its own creative. The same rule is expressed in SQL (`creativeKeySql`) so grouping, ranking, paging and totals all run in the database; the unit test and `b15-db` check the two stay identical.
 
-## KPI cards
-Purchase Value, Purchases, CPA, Amount Spent, ROAS for the **same ad population the filters describe** (not just the cards shown; the page says how many ads that is). With Previous period on, the change is like-for-like (the same ads in the equal-length period before) and only shown when both periods are fully synced; Amount Spent is neutral, the others use the favourable / unfavourable colour. No progress bars or benchmark colouring.
+**No new tables and no stored grouping.** The group is derived at read time from `meta_ads.ad_name`; original names, ad IDs, matching records and attribution are never modified.
 
-## Covers
-Large (600px) covers come from the same Meta read as the table thumbnails, requested only for cards near the screen, in batches, cached separately (`meta_creative_thumbs.large_url`, additive columns) and reusing the full preview cache where it already holds an image. Videos play inline (one at a time) only when a playable file is already cached; otherwise clicking opens the existing **Ad Preview modal** for the same ad and date range. Missing covers show a plain placeholder, never a stock image. With automatic Meta refresh off nothing is fetched.
+* Combined figures are sums of the member ads' stored sums (no double counting). CPA = spend / purchases and ROAS = purchase value / spend are derived from the sums, never averaged. Reach / Frequency are not combined (audience overlap); they stay on individual ads in Performance.
+* Ranking (default Purchase Value, highest first; also Purchases, CPA lowest first, ROAS, Amount Spent) runs over the whole eligible set. Minimum spend (default $500, 0 allowed) applies to the creative's **combined** spend; CPA / ROAS also need a minimum number of combined purchases (default 5, editable).
+* Ad-level filters (Funnel, Campaign, Status, Include DPAs) choose which Meta ads count towards a creative, so a card under a TOF filter shows only its TOF ads. Search chooses creatives: if any member ad matches (name, product, concept, Meta Ad ID) the creative is shown with all its counted ads.
+* Cards: ranked, preview of the creative's biggest-spending ad (existing cover / preview behaviour), clean name, product, funnel badges (e.g. TOF + TOM), "N Meta ads", Active / Paused / Mixed, Purchase Value hero, Purchases, CPA, Amount Spent, ROAS. First 20 creatives, then Load more; the summary counts creatives ("Showing 20 of 142 creatives"). KPI totals cover the same creatives; Previous period is like for like.
 
-## Not changed
-Meta API auth, the Performance page and its calculations, Ad Matching, funnel classification, the Ad Preview modal, creative media caching, settings and historical data.
+## Creative detail
+Clicking a card opens the existing Ad Preview modal (preview of the representative ad on the left). The right column shows the combined performance, **Performance by Funnel** (only funnels that ran: TOF / TOM / MOF, with ads, spend, purchases, CPA, purchase value, ROAS) and **every underlying Meta ad** with its original name, Meta Ad ID, funnel, campaign, status and metrics. "Preview" opens that ad's ordinary preview (with a way back to the creative), where View Ad on Meta is available. Endpoint: `GET /api/meta-performance/best-ads/creative` (admin only; same ad-level filters as the card).
+
+## Large covers
+Unchanged from the previous release: 600px covers requested lazily in batches and cached separately; videos play inline only from an already-cached playable file.

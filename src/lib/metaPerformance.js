@@ -503,7 +503,7 @@ function parseAdsQuery(query) {
   const dir = String(query.dir).toLowerCase() === 'asc' ? 'asc' : 'desc';
   const status = Object.prototype.hasOwnProperty.call(STATUS_FILTERS, query.status) ? query.status : 'all';
   const q = String(query.q || '').trim().slice(0, 200);
-  const pageSize = Math.min(100, Math.max(1, parseInt(query.page_size, 10) || 25));
+  const pageSize = Math.min(100, Math.max(1, parseInt(query.page_size, 10) || 20));
   const page = Math.max(1, parseInt(query.page, 10) || 1);
   return { sort, dir, status, q, pageSize, page };
 }
@@ -533,11 +533,8 @@ async function getAds(parsed, query) {
   if (filter.campaignId) { params.push(filter.campaignId); where.push(`a.meta_campaign_id = $${params.length}`); }
   if (filter.excludeDpa) where.push(dpaLib.notDpaPredicate('a', 'mc'));
   if (opts.q) {
-    params.push(`%${escapeLike(opts.q)}%`);
-    const like = `$${params.length}`;
-    // Name match, or an exact Meta Ad ID paste.
-    params.push(opts.q);
-    where.push(`(a.ad_name ILIKE ${like} ESCAPE '\\' OR a.meta_ad_id = $${params.length})`);
+    // ad name, exact Meta Ad ID, product name / code, creative / concept name (adSearchSql)
+    where.push(adSearchSql(params, opts.q));
   }
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const cte = `
@@ -646,22 +643,43 @@ async function getAds(parsed, query) {
   };
 }
 
-// ── Best Ads (a presentation layer over the same stored data) ───────────────────────────────────────────────────────────────────────
-// Individual Meta ads ranked across the WHOLE eligible set (never just the page that happens to be loaded), with the same attribution, metric definitions, DPA rule,
-// funnel / campaign filters and Reach sources as the Performance table. Nothing is grouped or de-duplicated: one card = one Meta ad id.
-//   * Rank by: Purchase Value / Purchases / Amount Spent / ROAS (highest first), CPA (lowest first), Reach (highest first, only where this period's per-ad Reach is available).
-//   * Minimum spend (default $500, 0 allowed) limits the population. CPA and ROAS rankings additionally need a minimum number of purchases (default 5) so an ad with one
-//     lucky sale cannot win; ads with no purchases have no CPA at all. The rule used is returned so the page can show it.
-//   * The headline totals are for the SAME population (all ads that match the filters), and the previous-period totals are for those same ads (like for like).
+// ── Best Ads: unique CREATIVES (a presentation layer over the same stored data) ───────────────────────────────────────────────────────
+// One creative is often duplicated in Meta (new campaigns, ad sets, funnels), which makes the same creative appear many times. Best Ads groups the individual Meta ads of a period
+// into one card per creative and ranks the groups across the WHOLE eligible set. Nothing here changes an ad, its name, its attribution or its matching: it is a read-time view.
+//   * Grouping key = the ad name with trailing copy suffixes removed -- THE SAME rule Ad Matching uses to offer duplicates (lib/metaNameCopies.normaliseAdName: only a trailing
+//     "- Copy" / "– Copy 2" / "- Copy - Copy 2" (any dash, any capitalisation) is removed; hooks, concepts, formats and variation ids are never touched; the rest must match
+//     exactly). creativeKeySql() is that rule expressed in SQL so grouping, ranking, paging and totals all run in the database; test/creativeGrouping.test.js and
+//     qa/b15-db keep the two implementations identical. An ad with no name is its own creative. Every Meta Ad ID stays reachable (the detail view lists them).
+//   * Combined figures are SUMS of the member ads' stored sums (so no ad is counted twice); CPA = spend / purchases and ROAS = purchase value / spend are derived from those sums,
+//     never averaged. Reach / Frequency are NOT combined (people overlap between ads): they stay on the individual ads in Performance.
+//   * Ad-level filters (status, funnel, campaign, DPA) pick which ads are counted; Search picks creatives (any member ad matching shows the creative with all its counted ads);
+//     the minimum spend applies to the creative's combined spend. CPA / ROAS rankings additionally need a minimum number of combined purchases (default 5).
+//   * The headline totals are for the SAME population (all creatives that match), and the previous-period totals are for those same ads (like for like).
 const BEST_RANKS = {
-  purchase_value: { dir: 'desc', sql: 'agg.purchase_value', label: 'Purchase Value' },
-  purchases: { dir: 'desc', sql: 'agg.purchases', label: 'Purchases' },
-  cpa: { dir: 'asc', sql: 'agg.spend / NULLIF(agg.purchases, 0)', label: 'CPA', needsPurchases: true },
-  roas: { dir: 'desc', sql: 'agg.purchase_value / NULLIF(agg.spend, 0)', label: 'ROAS', needsPurchases: true },
-  spend: { dir: 'desc', sql: 'agg.spend', label: 'Amount Spent' },
-  reach: { dir: 'desc', sql: null, label: 'Reach', needsReach: true },
+  purchase_value: { dir: 'desc', sql: 'g.purchase_value', label: 'Purchase Value' },
+  purchases: { dir: 'desc', sql: 'g.purchases', label: 'Purchases' },
+  cpa: { dir: 'asc', sql: 'g.spend / NULLIF(g.purchases, 0)', label: 'CPA', needsPurchases: true },
+  roas: { dir: 'desc', sql: 'g.purchase_value / NULLIF(g.spend, 0)', label: 'ROAS', needsPurchases: true },
+  spend: { dir: 'desc', sql: 'g.spend', label: 'Amount Spent' },
 };
-const BEST_DEFAULTS = { min_spend: 500, min_purchases: 5, page_size: 24, max_page_size: 60 };
+const BEST_DEFAULTS = { min_spend: 500, min_purchases: 5, page_size: 20, max_page_size: 60 };
+
+// The creative a Meta ad belongs to, as SQL (alias = the meta_ads alias). Mirrors metaNameCopies.normaliseAdName exactly.
+const COPY_SUFFIX_SQL = String.raw`(\s+[-–—−]\s+copy(\s*[0-9]{1,3})?)+\s*$`;
+function creativeKeySql(alias = 'a') {
+  const trimmed = `regexp_replace(COALESCE(${alias}.ad_name, ''), '^\\s+|\\s+$', '', 'g')`;
+  return `COALESCE(NULLIF(regexp_replace(regexp_replace(${trimmed}, '${COPY_SUFFIX_SQL}', '', 'i'), '\\s+$', '', 'g'), ''), 'ad:' || ${alias}.meta_ad_id)`;
+}
+
+// Search (Performance and Best Ads): ad name, exact Meta Ad ID, product name / code, and the creative / concept name where one has been classified.
+function adSearchSql(params, q, alias = 'a') {
+  params.push(`%${escapeLike(q)}%`); const like = `$${params.length}`;
+  params.push(q); const exact = `$${params.length}`;
+  return `(${alias}.ad_name ILIKE ${like} ESCAPE '\\' OR ${alias}.meta_ad_id = ${exact}
+    OR EXISTS (SELECT 1 FROM meta_ad_products sp WHERE sp.meta_ad_id = ${alias}.meta_ad_id AND (sp.product_name ILIKE ${like} ESCAPE '\\' OR sp.product_code ILIKE ${like} ESCAPE '\\'))
+    OR EXISTS (SELECT 1 FROM meta_ad_classifications sc LEFT JOIN concept_types sct ON sct.id = sc.concept_type_id
+                WHERE sc.meta_ad_id = ${alias}.meta_ad_id AND (sc.concept_label ILIKE ${like} ESCAPE '\\' OR sct.name ILIKE ${like} ESCAPE '\\')))`;
+}
 
 function parseBestQuery(query = {}) {
   const rank = Object.prototype.hasOwnProperty.call(BEST_RANKS, query.rank) ? query.rank : 'purchase_value';
@@ -678,78 +696,93 @@ function parseBestQuery(query = {}) {
   };
 }
 
-async function getBestAds(parsed, query) {
-  const o = parseBestQuery(query);
-  const filter = parseFilter(query);
-  const spec = BEST_RANKS[o.rank];
-  const reachStatus = await reachStore.getStatus(parsed.range, parsed.today);
-  const reachFrom = reachStatus.ad_values;
-  const pullId = reachFrom === 'meta_range' ? Number(reachStatus.pull_id) : null;
-  const reachJoin = pullId ? `LEFT JOIN meta_ad_range_reach rr ON rr.pull_id = ${pullId} AND rr.meta_ad_id = agg.meta_ad_id` : '';
-  const reachSel = pullId ? 'rr.reach AS rr_reach, rr.frequency AS rr_frequency' : 'NULL::bigint AS rr_reach, NULL::numeric AS rr_frequency';
-  const reachExpr = pullId ? 'rr.reach' : 'agg.day_reach';
-  // Reach can only rank when this period's per-ad Reach exists; otherwise the page says so and ranks by Purchase Value (never silently by something else)
-  let used = o.rank;
-  let fallback = null;
-  if (spec.needsReach && !reachFrom) { used = 'purchase_value'; fallback = { requested: 'reach', used: 'purchase_value', reason: 'Per-ad Reach for this period has not been loaded from Meta yet (use Refresh now), so the ads are ranked by Purchase Value instead.' }; }
-  const useSpec = BEST_RANKS[used];
-  const rankSql = used === 'reach' ? reachExpr : useSpec.sql;
+const FUNNEL_ORDER = ['TOF', 'TOM', 'MOF', 'multiple', 'unknown'];
+const sortFunnels = (list) => [...new Set(list)].sort((a, b) => FUNNEL_ORDER.indexOf(a) - FUNNEL_ORDER.indexOf(b));
+// Active / Paused when every counted ad agrees, Mixed when they differ
+function groupStatus(statuses) {
+  const list = [...new Set((statuses || []).map((s) => s || 'UNKNOWN'))];
+  if (list.length === 1) return list[0] === 'ACTIVE' ? 'active' : list[0].includes('PAUSED') ? 'paused' : 'other';
+  return 'mixed';
+}
 
-  const params = [parsed.range.since, parsed.range.until, o.minSpend];
+// the shared CTEs: one row per Meta ad in the period (filters applied), then one row per creative (min spend + search applied)
+function bestCtes(o, filter, range, withSearch) {
+  const params = [range.since, range.until, o.minSpend];
   const where = [];
   if (o.status === 'active') where.push(STATUS_FILTERS.active);
   if (o.status === 'paused') where.push(STATUS_FILTERS.paused);
   if (filter.funnel) { params.push(filter.funnel); where.push(`COALESCE(mc.funnel, 'unknown') = $${params.length}`); }
   if (filter.campaignId) { params.push(filter.campaignId); where.push(`a.meta_campaign_id = $${params.length}`); }
   if (filter.excludeDpa) where.push(dpaLib.notDpaPredicate('a', 'mc'));
-  if (o.q) {
-    params.push(`%${escapeLike(o.q)}%`); const like = `$${params.length}`;
-    params.push(o.q); const exact = `$${params.length}`;
-    where.push(`(a.ad_name ILIKE ${like} ESCAPE '\\' OR a.meta_ad_id = ${exact} OR EXISTS (SELECT 1 FROM meta_ad_products bp WHERE bp.meta_ad_id = a.meta_ad_id AND bp.product_name ILIKE ${like} ESCAPE '\\'))`);
-  }
-  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  const cte = `
+  const qMatch = withSearch && o.q ? adSearchSql(params, o.q) : 'true';
+  const sql = `
     WITH agg AS (
       SELECT d.meta_ad_id,
              SUM(d.spend) AS spend, SUM(d.purchases) AS purchases,
              SUM(d.purchase_value) AS purchase_value, SUM(d.add_to_cart) AS add_to_cart,
-             SUM(d.outbound_clicks) AS outbound_clicks, SUM(d.impressions) AS impressions,
-             MAX(d.reach) AS day_reach, MAX(d.frequency) AS day_frequency
+             SUM(d.outbound_clicks) AS outbound_clicks, SUM(d.impressions) AS impressions
         FROM meta_ad_insights_daily d
        WHERE d.insight_date BETWEEN $1 AND $2
        GROUP BY d.meta_ad_id
-      HAVING ${ACTIVITY} AND SUM(d.spend) >= $3
+      HAVING ${ACTIVITY}
+    ), base AS (
+      SELECT agg.*, a.ad_name, a.effective_status, a.meta_campaign_id, mc.name AS campaign_name, COALESCE(mc.funnel, 'unknown') AS funnel,
+             ${creativeKeySql('a')} AS gkey, (${qMatch}) AS q_match
+        FROM agg JOIN meta_ads a ON a.meta_ad_id = agg.meta_ad_id
+        LEFT JOIN meta_campaigns mc ON mc.meta_campaign_id = a.meta_campaign_id
+        ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+    ), g AS (
+      SELECT gkey, COUNT(*) AS ad_count, COUNT(DISTINCT meta_campaign_id) AS campaign_count,
+             SUM(spend) AS spend, SUM(purchases) AS purchases, SUM(purchase_value) AS purchase_value, SUM(add_to_cart) AS add_to_cart,
+             SUM(outbound_clicks) AS outbound_clicks, SUM(impressions) AS impressions,
+             array_agg(DISTINCT funnel) AS funnels, array_agg(DISTINCT effective_status) AS statuses,
+             (array_agg(meta_ad_id ORDER BY spend DESC, meta_ad_id ASC))[1] AS rep_ad_id
+        FROM base
+       GROUP BY gkey
+      HAVING SUM(spend) >= $3 AND bool_or(q_match)
     )`;
-  const joins = 'FROM agg JOIN meta_ads a ON a.meta_ad_id = agg.meta_ad_id LEFT JOIN meta_campaigns mc ON mc.meta_campaign_id = a.meta_campaign_id';
-  // 1. the whole population these filters describe: its totals are the headline figures
-  const popRes = await pool.query(
-    `${cte} SELECT COUNT(*) AS n, COALESCE(SUM(agg.spend),0) AS spend, COALESCE(SUM(agg.purchases),0) AS purchases, COALESCE(SUM(agg.purchase_value),0) AS purchase_value,
-            COALESCE(SUM(agg.add_to_cart),0) AS add_to_cart, COALESCE(SUM(agg.outbound_clicks),0) AS outbound_clicks, COALESCE(SUM(agg.impressions),0) AS impressions
-       ${joins} ${whereSql}`, params);
-  const pr = popRes.rows[0];
-  const popAds = num(pr.n);
+  return { sql, params };
+}
+
+async function getBestAds(parsed, query) {
+  const o = parseBestQuery(query);
+  const filter = parseFilter(query);
+  const spec = BEST_RANKS[o.rank];
+  const { sql: cte, params } = bestCtes(o, filter, parsed.range, true);
+  // 1. the whole population these filters describe (creatives that pass the minimum spend): its totals are the headline figures
+  const pr = (await pool.query(
+    `${cte} SELECT COUNT(*) AS n, COALESCE(SUM(ad_count),0) AS ads, COALESCE(SUM(spend),0) AS spend, COALESCE(SUM(purchases),0) AS purchases, COALESCE(SUM(purchase_value),0) AS purchase_value,
+            COALESCE(SUM(add_to_cart),0) AS add_to_cart, COALESCE(SUM(outbound_clicks),0) AS outbound_clicks, COALESCE(SUM(impressions),0) AS impressions FROM g`, params)).rows[0];
+  const popCreatives = num(pr.n);
   const totals = deriveMetrics(pr);
   // 2. eligibility for the chosen ranking (the rule is shown on the page)
-  const elig = [];
-  if (useSpec.needsPurchases) elig.push(`agg.purchases >= ${Math.max(1, o.minPurchases)} AND agg.spend > 0`);
-  if (used === 'reach') elig.push(`${reachExpr} IS NOT NULL`);
-  const eligSql = elig.length ? `${whereSql ? `${whereSql} AND` : 'WHERE'} ${elig.join(' AND ')}` : whereSql;
-  const eligN = elig.length ? num((await pool.query(`${cte} SELECT COUNT(*) AS n ${joins} ${reachJoin} ${eligSql}`, params)).rows[0].n) : popAds;
-  // ads that WOULD have been in the population without the minimum-spend rule (so "none meet the minimum" can be told apart from "no ads at all")
+  const eligSql = spec.needsPurchases ? `WHERE g.purchases >= ${Math.max(1, o.minPurchases)} AND g.spend > 0` : '';
+  const eligN = spec.needsPurchases ? num((await pool.query(`${cte} SELECT COUNT(*) AS n FROM g ${eligSql}`, params)).rows[0].n) : popCreatives;
+  // creatives that WOULD be in the population without the minimum-spend rule (so "none meet the minimum" can be told apart from "no creatives at all")
   let belowMin = 0;
   if (o.minSpend > 0) {
     const p0 = params.slice(); p0[2] = 0;
-    belowMin = Math.max(0, num((await pool.query(`${cte} SELECT COUNT(*) AS n ${joins} ${whereSql}`, p0)).rows[0].n) - popAds);
+    belowMin = Math.max(0, num((await pool.query(`${cte} SELECT COUNT(*) AS n FROM g`, p0)).rows[0].n) - popCreatives);
   }
-  // 3. one page of the ranked eligible ads
+  // 3. one page of ranked creatives
   const listParams = [...params, o.pageSize, (o.page - 1) * o.pageSize];
   const { rows } = await pool.query(
     `${cte}
-     SELECT agg.*, a.ad_name, a.effective_status, a.meta_campaign_id, mc.name AS campaign_name, COALESCE(mc.funnel, 'unknown') AS funnel, ${reachSel},
-            (SELECT array_agg(DISTINCT bp.product_name ORDER BY bp.product_name) FROM meta_ad_products bp WHERE bp.meta_ad_id = a.meta_ad_id AND bp.product_name IS NOT NULL) AS products
-       ${joins} ${reachJoin} ${eligSql}
-      ORDER BY ${rankSql} ${useSpec.dir} NULLS LAST, agg.purchase_value DESC, agg.spend DESC, agg.meta_ad_id ASC
+     SELECT g.*, rep.ad_name AS rep_ad_name
+       FROM g LEFT JOIN meta_ads rep ON rep.meta_ad_id = g.rep_ad_id
+       ${eligSql}
+      ORDER BY ${spec.sql} ${spec.dir} NULLS LAST, g.purchase_value DESC, g.spend DESC, g.gkey ASC
       LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`, listParams);
+  // products of the creatives on this page (every member ad's classification, de-duplicated)
+  const productsByKey = new Map();
+  if (rows.length) {
+    const pp = [...params, rows.map((r) => r.gkey)];
+    const pres = await pool.query(
+      `${cte} SELECT b.gkey, array_agg(DISTINCT p.product_name ORDER BY p.product_name) AS products
+                FROM base b JOIN meta_ad_products p ON p.meta_ad_id = b.meta_ad_id
+               WHERE b.gkey = ANY($${pp.length}) AND p.product_name IS NOT NULL GROUP BY b.gkey`, pp);
+    pres.rows.forEach((r) => productsByKey.set(r.gkey, r.products));
+  }
   // 4. previous period, for the SAME ads (like for like), only when both periods are fully synced
   let prev = null;
   if (parsed.compareRange) {
@@ -763,31 +796,75 @@ async function getBestAds(parsed, query) {
                 COALESCE(SUM(d.outbound_clicks),0) AS outbound_clicks, COALESCE(SUM(d.impressions),0) AS impressions
            FROM meta_ad_insights_daily d
           WHERE d.insight_date BETWEEN $${pp.length - 1} AND $${pp.length}
-            AND d.meta_ad_id IN (SELECT agg.meta_ad_id ${joins} ${whereSql})`, pp);
+            AND d.meta_ad_id IN (SELECT b.meta_ad_id FROM base b WHERE b.gkey IN (SELECT gkey FROM g))`, pp);
       prev.totals = deriveMetrics(r.rows[0]);
     }
   }
   const coverage = await getCoverage(parsed.range, new Date());
-  const minRuleText = useSpec.needsPurchases
-    ? `${useSpec.label} ranking only includes ads with at least ${Math.max(1, o.minPurchases)} purchases and at least $${o.minSpend.toLocaleString('en-AU')} spent, so an ad with one lucky sale cannot top the list. Both limits can be changed.`
-    : used === 'reach' ? 'Reach ranking only includes ads that have a Reach figure for this period.' : null;
+  const ruleText = spec.needsPurchases
+    ? `${spec.label} ranking only includes creatives with at least ${Math.max(1, o.minPurchases)} purchases and at least $${o.minSpend.toLocaleString('en-AU')} spent, so one lucky sale cannot top the list. Both limits can be changed.`
+    : null;
   return {
     range: parsed.range, preset: parsed.preset, label: parsed.label, timezone: REPORTING_TIMEZONE, today: parsed.today,
-    rank: { requested: o.rank, used, label: useSpec.label, dir: useSpec.dir, fallback },
-    rules: { min_spend: o.minSpend, min_purchases: o.minPurchases, purchases_rule: !!useSpec.needsPurchases, text: minRuleText },
+    rank: { requested: o.rank, used: o.rank, label: spec.label, dir: spec.dir },
+    rules: { min_spend: o.minSpend, min_purchases: o.minPurchases, purchases_rule: !!spec.needsPurchases, text: ruleText },
     filter: { funnel: filter.funnel, campaign_id: filter.campaignId, status: o.status, q: o.q },
     dpa: await getDpaInfo(parsed.range, filter),
     page: o.page, page_size: o.pageSize,
     total: eligN, total_pages: Math.max(1, Math.ceil(eligN / o.pageSize)),
-    population: { ads: popAds, totals: { ...totals, ads_with_activity: popAds }, previous: prev, below_min_spend: belowMin, excluded_by_rule: Math.max(0, popAds - eligN) },
+    population: { creatives: popCreatives, ads: num(pr.ads), totals: { ...totals, ads_with_activity: num(pr.ads) }, previous: prev, below_min_spend: belowMin, excluded_by_rule: Math.max(0, popCreatives - eligN) },
     coverage,
-    reach_info: { state: reachFrom ? 'ready' : reachStatus.state, source: reachFrom, pulled_at: reachStatus.pulled_at, stale: reachFrom === 'meta_range' && reachStatus.stale },
-    ads: rows.map((r, i) => ({
+    creatives: rows.map((r, i) => ({
       rank: (o.page - 1) * o.pageSize + i + 1,
-      meta_ad_id: r.meta_ad_id, ad_name: r.ad_name, effective_status: r.effective_status,
-      campaign_id: r.meta_campaign_id || null, campaign_name: r.campaign_name || null, funnel: r.funnel,
-      products: r.products || [],
-      ...deriveMetrics(r), ...adReach(reachFrom, r),
+      creative_key: r.gkey,
+      creative_name: r.gkey.startsWith('ad:') ? (r.rep_ad_name || r.gkey) : r.gkey,
+      products: productsByKey.get(r.gkey) || [],
+      funnels: sortFunnels(r.funnels),
+      ad_count: num(r.ad_count), campaign_count: num(r.campaign_count),
+      status: groupStatus(r.statuses),
+      rep_ad_id: r.rep_ad_id,
+      ...deriveMetrics(r),
+    })),
+  };
+}
+
+// One creative in detail: combined figures, the TOF / TOM / MOF split, and every underlying Meta ad (all of them, with their own original names and ids).
+// Uses the same ad-level filters as the card the person clicked (so the numbers agree), but not the search or the minimum spend.
+async function getBestCreative(parsed, query) {
+  const key = String(query.key || '').slice(0, 600);
+  if (!key) throw new HttpError(400, 'A creative is required');
+  const o = parseBestQuery({ ...query, min_spend: '0', q: '' });
+  const filter = parseFilter(query);
+  const { sql: cte, params } = bestCtes(o, filter, parsed.range, false);
+  const p = [...params, key];
+  const { rows } = await pool.query(
+    `${cte} SELECT b.*, (SELECT array_agg(DISTINCT sp.product_name ORDER BY sp.product_name) FROM meta_ad_products sp WHERE sp.meta_ad_id = b.meta_ad_id AND sp.product_name IS NOT NULL) AS products
+       FROM base b WHERE b.gkey = $${p.length} ORDER BY b.spend DESC, b.meta_ad_id ASC`, p);
+  if (!rows.length) throw new HttpError(404, 'No ads for this creative in this period');
+  const sum = (list) => deriveMetrics(list.reduce((t, r) => ({
+    spend: num(t.spend) + num(r.spend), purchases: num(t.purchases) + num(r.purchases), purchase_value: num(t.purchase_value) + num(r.purchase_value),
+    add_to_cart: num(t.add_to_cart) + num(r.add_to_cart), outbound_clicks: num(t.outbound_clicks) + num(r.outbound_clicks), impressions: num(t.impressions) + num(r.impressions),
+  }), {}));
+  const byFunnel = new Map();
+  rows.forEach((r) => { if (!byFunnel.has(r.funnel)) byFunnel.set(r.funnel, []); byFunnel.get(r.funnel).push(r); });
+  const funnels = sortFunnels([...byFunnel.keys()]).map((f) => ({ funnel: f, ad_count: byFunnel.get(f).length, ...sum(byFunnel.get(f)) }));
+  const rep = rows[0];
+  return {
+    range: parsed.range,
+    creative: {
+      creative_key: key,
+      creative_name: key.startsWith('ad:') ? (rep.ad_name || key) : key,
+      ad_count: rows.length,
+      status: groupStatus(rows.map((r) => r.effective_status)),
+      funnels: funnels.map((f) => f.funnel),
+      products: [...new Set(rows.flatMap((r) => r.products || []))],
+      rep_ad_id: rep.meta_ad_id,
+    },
+    totals: sum(rows),
+    funnels,
+    ads: rows.map((r) => ({
+      meta_ad_id: r.meta_ad_id, ad_name: r.ad_name, funnel: r.funnel, campaign_id: r.meta_campaign_id || null, campaign_name: r.campaign_name || null,
+      effective_status: r.effective_status, ...deriveMetrics(r),
     })),
   };
 }
@@ -862,6 +939,9 @@ module.exports = {
   getSummary,
   getAds,
   getBestAds,
+  getBestCreative,
+  creativeKeySql,
+  adSearchSql,
   parseBestQuery,
   BEST_RANKS,
   getAdDetail,

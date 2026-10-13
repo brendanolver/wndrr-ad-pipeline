@@ -276,7 +276,7 @@
             <div class="mp-health-note" id="mp-health-note" style="display:none;"></div>
           </div>
           <div class="mp-ap-filters">
-            <input type="search" id="mp-search" placeholder="Search ad name or Meta Ad ID" autocomplete="off">
+            <input type="search" id="mp-search" placeholder="Search ad name, Meta Ad ID, product or concept" autocomplete="off">
             <select id="mp-status" aria-label="Status filter">
               <option value="all">All statuses</option>
               <option value="active">Active</option>
@@ -337,8 +337,7 @@
               <option value="purchase_value">Purchase Value</option>
               <option value="purchases">Purchases</option>
               <option value="cpa">CPA (lowest first)</option>
-              <option value="reach">Reach</option>
-              <option value="spend">Amount Spent</option>
+  <option value="spend">Amount Spent</option>
               <option value="roas">ROAS</option>
             </select></label>
           <label class="ba-f"><span>Funnel</span>
@@ -354,7 +353,7 @@
           <label class="ba-f ba-f-minp" id="ba-minp-wrap" style="display:none;"><span>Min. purchases</span>
             <input type="number" id="ba-min-purchases" min="1" step="1" inputmode="numeric" value="5" aria-label="Minimum purchases (CPA and ROAS ranking)"></label>
           <label class="ba-f ba-f-search"><span>Search</span>
-            <input type="search" id="ba-search" placeholder="Ad name, product or Meta Ad ID" autocomplete="off" aria-label="Search"></label>
+            <input type="search" id="ba-search" placeholder="Creative name, product or Meta Ad ID" autocomplete="off" aria-label="Search"></label>
           <label class="mp-inline-check ba-dpa" title="Dynamic Product Ads are excluded by default. They stay stored; this only changes what is shown."><input type="checkbox" id="ba-dpa"> Include DPAs</label>
         </div>
         <div class="ba-rule" id="ba-rule"></div>
@@ -368,7 +367,7 @@
         <div class="ba-state" id="ba-state" style="display:none;"></div>
         <div class="ba-grid" id="ba-grid" data-layout="grid"></div>
         <div class="ba-more" id="ba-more"></div>
-        <div class="mp-footnote">Ranked from the same Meta-reported figures as the Performance page (Purchase ROAS = Purchase Value ÷ Amount Spent; attribution 7-day click + 1-day view, provisional). Each card is one Meta ad — ads are never grouped or merged, even when they share a creative.</div>
+        <div class="mp-footnote">Ranked from the same Meta-reported figures as the Performance page (Purchase ROAS = Purchase Value ÷ Amount Spent; attribution 7-day click + 1-day view, provisional). Each card is one unique creative: Meta ads whose names differ only by trailing “Copy” suffixes are grouped (the same rule Ad Matching uses). Combined CPA and ROAS are calculated from the summed totals. Reach and Frequency can’t be combined across ads (people overlap), so they stay on the individual ads in Performance.</div>
       </div><!-- /#mp-view-best -->
 
       <!-- Ad Matching: classify Meta ads into Product(s) / Concept / Creative

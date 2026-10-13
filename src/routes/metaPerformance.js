@@ -43,6 +43,7 @@ router.get('/ads', handle((req) => perf.getAds(perf.parseRangeParams(req.query),
 // GET /api/meta-performance/best-ads?preset=|since=&until=&rank=purchase_value|purchases|cpa|roas|spend|reach&min_spend=500&min_purchases=5
 //     &funnel=&campaign_id=&status=all|active|paused&q=&dpa=include&compare=1&page=&page_size=
 router.get('/best-ads', handle((req) => perf.getBestAds(perf.parseRangeParams(req.query), req.query)));
+router.get('/best-ads/creative', handle((req) => perf.getBestCreative(perf.parseRangeParams(req.query), req.query)));
 
 // Detail for one ad over the range, with its daily breakdown.
 // GET /api/meta-performance/ads/:metaAdId?preset=|since=&until=
