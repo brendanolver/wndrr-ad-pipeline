@@ -53,6 +53,21 @@ const SCORE = {
   momentum_launch: { strong: 8, steady: 4 }, recency: { none: 3, stale: 5, aged: 2 },
 };
 
+// ACCOUNT-level uncertainty from unidentified Meta ads (recently delivering ads whose name / campaign / creative lookup failed). Nothing identifies WHICH product such an ad
+// belongs to, so it is weighed by the share of recent non-DPA spend it carries (configurable lines, see creativePlanningConfig), not treated as a blanket unknown:
+//   none    nothing unidentified
+//   low     below unresolved_spend_note_pct: a data-quality warning only
+//   medium  from the note line: a "no creative running" finding is held at Medium
+//   high    from unresolved_spend_block_pct (or share unknown): a "no creative running" finding becomes "not enough data"; findings resting on existing creative problems are held at Medium
+function unresolvedAssessment(cov, cfg) {
+  const n = num(cov && cov.unresolved);
+  if (!n) return { n: 0, level: 'none', share: 0 };
+  const share = cov.unresolved_share_pct === undefined || cov.unresolved_share_pct === null ? null : num(cov.unresolved_share_pct);
+  const level = share === null || share >= cfg.unresolved_spend_block_pct ? 'high' : share >= cfg.unresolved_spend_note_pct ? 'medium' : 'low';
+  return { n, level, share };
+}
+const unresolvedText = (u) => `${plural(u.n, 'recently delivering Meta ad')} could not be identified${u.share === null ? '' : `, carrying ${u.share}% of recent spend`} (${u.level} account-level uncertainty)`;
+
 // percentile bands over the candidates being compared: shown as "rank among peers" (information only: the decision uses ABSOLUTE units, see planningDemand.js)
 function salesBands(products, cfg) {
   const pool = products.filter((p) => p.sales && p.sales.available && p.launch && p.launch.eligible && num(p.stock && p.stock.units) >= cfg.opp_min_stock_units);
@@ -155,6 +170,7 @@ function evaluate(p, cfg, today, mode = 'core') {
     recency: { by_phase: sum.by, newest_age_days: sum.newest_age_days, newest_source: sum.newest_source, testing_until: sum.testing_until },
     pipeline: p.pipeline ? { planned: p.pipeline.in_flight || 0, by_stage: p.pipeline.by_stage || {}, uploaded_recent: (p.pipeline.uploaded || []).length, this_week: p.pipeline.this_week || 0 } : null,
   };
+  const unr = unresolvedAssessment(p.coverage, cfg);
   const factsOf = (extra = {}) => {
     const u30 = p.sales && p.sales.available ? Math.round(num(p.sales.units30)) : null;
     return {
@@ -169,7 +185,7 @@ function evaluate(p, cfg, today, mode = 'core') {
       active_ads: p.coverage && p.coverage.known ? p.coverage.active_ads : null, unique_creatives: sum.total, performing: sum.performing, weak: sum.weak, declining: sum.declining, softening: sum.softening, testing: sum.testing,
       unrated: sum.unrated, unjudged: sum.unjudged, newest_creative_days: sum.newest_age_days, newest_creative_source: sum.newest_source, testing_until: sum.testing_until,
       top_creative_spend_share: ev.top_spend_share, top_creative_purchase_share: ev.top_purchase_share, meaningful_creatives: ev.meaningful, distinct_concepts: ev.distinct_concepts,
-      matching: p.coverage && p.coverage.known ? (num(p.coverage.possible) > 0 || num(p.coverage.unresolved) > 0 ? 'uncertain' : 'confirmed') : 'unknown', matching_pending: p.coverage ? num(p.coverage.possible) : null, unresolved_identities: p.coverage ? num(p.coverage.unresolved) : null,
+      matching: p.coverage && p.coverage.known ? (num(p.coverage.possible) > 0 || ['medium', 'high'].includes(unr.level) ? 'uncertain' : 'confirmed') : 'unknown', unresolved_level: unr.level, unresolved_share_pct: unr.share === undefined ? null : unr.share, matching_pending: p.coverage ? num(p.coverage.possible) : null, unresolved_identities: p.coverage ? num(p.coverage.unresolved) : null,
       launch_age_days: p.launch_age_days === undefined ? null : p.launch_age_days, size_warning: stk.size_note || null,
       sales_complete: dq.sales_complete === undefined ? null : dq.sales_complete, sales_sources_disagree: !!(dq.discrepancy && dq.discrepancy.flag),
       ...extra,
@@ -251,7 +267,7 @@ function evaluate(p, cfg, today, mode = 'core') {
   // 6. stock sufficiency
   stk = stockInfo();
   if (!gate('stock_cover', !['short'].includes(stk.band), (stk.notes || []).join(' '))) {
-    return done('low_stock', `${units(p.stock.units)} units is only ${stk.cover_weeks} weeks of stock at the current pace (${cfg.stock_min_cover_weeks} needed for creative to pay off).${num(p.stock.on_order) > 0 ? ` ${units(p.stock.on_order)} are on order.` : ''}`, { revival });
+    return done('low_stock', `${units(p.stock.units)} units is only ${stk.cover_weeks} weeks of stock at the current pace (${stk.min_weeks === undefined ? cfg.stock_min_cover_weeks : stk.min_weeks} needed for creative to pay off${stk.min_weeks > cfg.stock_min_cover_weeks ? `: ${cfg.creative_lead_time_days} days to get new creative live plus a ${cfg.test_period_days} day test period` : ''}).${num(p.stock.on_order) > 0 ? ` ${units(p.stock.on_order)} are on order.` : ''}`, { revival });
   }
   if (!gate('stock_not_excess', !(stk.band === 'excess' && demand.level === 'weak'), (stk.notes || []).join(' '))) {
     return done('weak_demand', `${units(p.stock.units)} units is ${stk.cover_weeks} weeks of stock against ${units(u30)} units a month. Large unsold stock with weak demand is not a reason for more creative: demand, not creative, is the constraint.`, { revival });
@@ -287,18 +303,18 @@ function evaluate(p, cfg, today, mode = 'core') {
   }
   // unresolved suggested matches are uncertainty, never a confirmed absence of creative
   const needsComplete = gap && ['confirmed_gap', 'underperforming', 'stale', 'thin', 'concentration', 'diversity'].includes(gap.type);
-  // ads that delivered recently but whose identity (name, campaign, creative) could not be read from Meta cannot be placed on any product: until they resolve, an
-  // absence of creative cannot be confirmed for any product (Batch 27 follow-up)
-  const unresolvedIds = num(p.coverage && p.coverage.unresolved);
-  if (needsComplete && possible === 0 && unresolvedIds > 0) {
-    gate('matching', false, `${plural(unresolvedIds, 'recently delivering Meta ad')} could not be identified (ad lookup failed).`);
-    return done('insufficient_data', `Matching is uncertain: ${plural(unresolvedIds, 'recently delivering Meta ad')} could not be identified (the Meta lookup for ${unresolvedIds === 1 ? 'its' : 'their'} name, campaign and creative failed), so ${unresolvedIds === 1 ? 'it' : 'any of them'} may be running creative for this product (${gap.type === 'confirmed_gap' ? 'it would not be a gap' : 'the picture may be different'}). The next Meta sync retries them; no shoot is recommended on an incomplete count.`, { revival });
-  }
   if (needsComplete && possible > 0) {
     gate('matching', false, `${plural(possible, 'active ad')} awaiting review suggested for this product.`);
     return done('insufficient_data', `Matching is uncertain: ${plural(possible, 'active Meta ad')} awaiting review ${possible === 1 ? 'is' : 'are'} suggested for this product and could change its creative count (${gap.type === 'confirmed_gap' ? 'it would not be a gap' : 'the picture may be different'}). Review them in Ad Matching first; no shoot is recommended on an incomplete count.`, { revival });
   }
-  gate('matching', true, possible > 0 ? `${plural(possible, 'suggested ad')} awaiting review (does not change this finding).` : 'Every active ad for this product is matched or reviewed.');
+  // Unidentified Meta ads (see unresolvedAssessment). Only a finding that rests ENTIRELY on "nothing is running for this product" is made uncertain, and only when the unidentified
+  // delivery is material; findings resting on existing creative problems stay (held at Medium when it is material). Never a speculative product match.
+  const unidentifiedBlocks = unr.level === 'high' && gap && gap.type === 'confirmed_gap';
+  if (unidentifiedBlocks) {
+    gate('matching', false, `${unresolvedText(unr)}.`);
+    return done('insufficient_data', `Matching is uncertain: ${unresolvedText(unr)} (the Meta lookup for their name, campaign and creative failed), so ${unr.n === 1 ? 'it' : 'any of them'} may be running creative for this product and a "no creative running" finding cannot be confirmed (it would not be a gap). The next Meta sync retries them; the line for this is ${cfg.unresolved_spend_block_pct}% of recent spend (Settings, Planning). No shoot is recommended on an incomplete count.`, { revival });
+  }
+  gate('matching', true, possible > 0 ? `${plural(possible, 'suggested ad')} awaiting review (does not change this finding).` : unr.n > 0 ? `${unresolvedText(unr)}: ${unr.level === 'low' ? 'a data-quality warning, below the' : 'above the'} ${cfg.unresolved_spend_note_pct}% line.` : 'Every active ad for this product is matched or reviewed.');
   if (!gap) {
     const benchmarkMissing = sum.total > 0 && sum.unrated >= Math.ceil(sum.total / 2);
     const why = benchmarkMissing ? 'Most of its creatives have data but no approved benchmark applies to their funnel, so they cannot be called good or bad (no benchmark is invented).' : sum.total > 0 ? 'Its creatives have too little delivery to judge.' : 'There is no creative evidence either way.';
@@ -340,6 +356,10 @@ function evaluate(p, cfg, today, mode = 'core') {
   if (dq.discrepancy && dq.discrepancy.flag) cap(`Held at Medium: the two sales sources disagree (${dq.discrepancy.text}).`);
   if (season && season.exception) cap('Held at Medium: out of season, qualifying only on an exception.');
   if (mode === 'revival' && demand.level !== 'strong' && demand.trend === 'weakening') cap('Held at Medium: a revival whose sales are still weakening.');
+  if (unr.level === 'medium' && gap.type === 'confirmed_gap') cap(`Held at Medium: ${unresolvedText(unr)}, so "no creative running" rests on an assumption that none of them is for this product.`);
+  if (unr.level === 'high' && gap.type !== 'confirmed_gap') cap(`Held at Medium: ${unresolvedText(unr)}; the creative problem found is real, but the full creative picture is not.`);
+  // a short selling window scaled to 30 days is an estimate: High needs strong demand then (steady demand stays Medium). Uses the existing strong-demand line, no new number.
+  if (cfg.momentum_high_requires_strong && demand.partial && demand.level === 'steady') cap(`Held at Medium: only ${demand.live_days} days of sales, scaled to about ${Math.round(demand.eq30)} units in 30 days. That is steady, not strong (${cfg.demand_strong_units}+), and a short window is an estimate rather than an observation.`);
   if (dq.sales_complete === false || (dq.discrepancy && dq.discrepancy.flag)) { /* priority already capped */ }
   const dir = directionOf(p, sum);
   const age = sum.newest_age_days;
@@ -363,7 +383,7 @@ function evaluate(p, cfg, today, mode = 'core') {
   why.push({ k: 'stock', text: (stk.notes || []).join(' ') });
   why.push({ k: 'season', text: `${season ? season.reasons.join(' ') : 'Season not assessed.'}` });
   if (ev.notes.length) why.push({ k: 'distribution', text: ev.notes.join(' ') });
-  why.push({ k: 'matching', text: possible > 0 ? `${plural(possible, 'suggested ad')} still awaiting review for this product; the findings above rest on confirmed ads.` : 'Every active ad for this product is matched or reviewed (confirmed or auto-matched ads only; DPAs are not counted).' });
+  why.push({ k: 'matching', text: (possible > 0 ? `${plural(possible, 'suggested ad')} still awaiting review for this product; the findings above rest on confirmed ads.` : 'Every active ad for this product is matched or reviewed (confirmed or auto-matched ads only; DPAs are not counted).') + (unr.n > 0 ? ` Account-level: ${unresolvedText(unr)}${unr.level === 'low' ? '. That is a data-quality warning only.' : '; this finding is held at Medium until they are identified.'}` : '') });
   if (flight > 0) why.push({ k: 'production', text: `${plural(flight, 'concept')} already in the Shoot Plan pipeline (${stagesText()}); this would be additional, not a duplicate.` });
   if (dir) why.push({ k: 'direction', text: dir.text });
   const other = [];
@@ -393,6 +413,14 @@ function evaluate(p, cfg, today, mode = 'core') {
   };
 }
 
+// Display order of the result lists: actionable first (by status), then score, then, among EQUAL scores, the higher 30-day units, then name. Demand points stop growing at the strong line,
+// so strong sellers of very different size can tie on score; the tie-break shows the bigger commercial opportunity first. It is only an ORDER: no score or priority changes.
+const STATUS_RANK = { act: 0, testing: 1, in_production: 2, insufficient_data: 3, covered: 4, momentum_ok: 4, out_of_season: 5, weak_demand: 6, low_stock: 7, too_new: 8, no_proven_demand: 9, not_recent: 10, unavailable: 11, launch_unknown: 12, not_launched: 13 };
+function compareItems(a, b) {
+  const ra = STATUS_RANK[a.status] === undefined ? 99 : STATUS_RANK[a.status]; const rb = STATUS_RANK[b.status] === undefined ? 99 : STATUS_RANK[b.status];
+  return (ra - rb) || (b.score - a.score) || (num(b.facts && b.facts.units30) - num(a.facts && a.facts.units30)) || String(a.name).localeCompare(String(b.name));
+}
+
 // run the engine over every candidate; computes the peer-rank bands first. mode: 'core' | 'revival' | 'momentum'
 function assessAll(products, cfg, today, mode = 'core') {
   const bands = salesBands(products, cfg);
@@ -403,4 +431,4 @@ function assessAll(products, cfg, today, mode = 'core') {
   return { bands, items: out };
 }
 
-module.exports = { STATUS_LABEL, OPP_LABEL, SCORE, salesBands, bandOf, coverWeeks, gapOf, directionOf, evaluate, assessAll, priorityOf };
+module.exports = { STATUS_LABEL, OPP_LABEL, SCORE, salesBands, bandOf, coverWeeks, gapOf, directionOf, evaluate, assessAll, priorityOf, unresolvedAssessment, compareItems };

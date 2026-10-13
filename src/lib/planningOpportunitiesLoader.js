@@ -161,7 +161,7 @@ async function computeOpportunities({ now = new Date(), deps = {} } = {}) {
     return {
       key: f.key, name: f.name, category: f.category, codes: f.codes, style_codes: f.style_codes, is_core: f.is_core, image_url: (r.colourways.find((c) => c.image_url) || {}).image_url || null,
       launch: r.launch, launch_age_days: r.launch_age_days, launch_date: r.launch_date, stock: r.stock, sales: r.sales, data_quality: r.quality, tier: r.tier, tierState,
-      coverage: cov ? { known: true, active_ads: active, possible, unresolved: cov.unresolved_identities || 0, uncertain: !!(cls && cls.state === 'uncertain'), min: settings.min_active_ads } : { known: false, min: settings.min_active_ads },
+      coverage: cov ? { known: true, active_ads: active, possible, unresolved: cov.unresolved_identities || 0, unresolved_share_pct: cov.unresolved_share_pct === undefined ? null : cov.unresolved_share_pct, uncertain: !!(cls && cls.state === 'uncertain'), min: settings.min_active_ads } : { known: false, min: settings.min_active_ads },
       creatives: ev.creatives || [], history: h, pipeline: pipeFor(f), seasonData: g ? g.status : (ctx.seasonality && ctx.seasonality.available ? 'insufficient_data' : null), seasonEvidence: g && g.evidence ? g.evidence : null,
     };
   };
@@ -204,8 +204,7 @@ async function computeOpportunities({ now = new Date(), deps = {} } = {}) {
     (pick.placement === 'core' ? coreItems : pick.placement === 'high_stocks' ? hsItems : momentumItems).push(item);
   });
 
-  const rank = { act: 0, testing: 1, in_production: 2, insufficient_data: 3, covered: 4, momentum_ok: 4, out_of_season: 5, weak_demand: 6, low_stock: 7, too_new: 8, no_proven_demand: 9, not_recent: 10, unavailable: 11, launch_unknown: 12, not_launched: 13 };
-  const order = (a, b) => (rank[a.status] - rank[b.status]) || (b.score - a.score) || String(a.name).localeCompare(String(b.name));
+  const order = opp.compareItems;
   coreItems.sort(order); hsItems.sort(order); momentumItems.sort(order);
   const countBy = (items) => { const c = {}; items.forEach((i) => { c[i.status] = (c[i.status] || 0) + 1; }); return c; };
 
@@ -245,15 +244,21 @@ async function computeOpportunities({ now = new Date(), deps = {} } = {}) {
   const failedRecent = window && Array.isArray(window.failed_days) ? window.failed_days.filter((d) => d < 30) : [];
   const incompleteFamilies = rows.filter((r) => r.quality && r.quality.sales_complete === false && (r.launch.eligible)).length;
   const disagree = rows.filter((r) => r.quality && r.quality.discrepancy && r.quality.discrepancy.flag).length;
+  let leadTime = null;
+  try { leadTime = await require('./productionLeadTime').measureLeadTime(db); } catch (e) { leadTime = { error: true, note: 'The production lead time could not be measured.' }; }
   const dataQuality = {
     recent_sales: { source: 'ApparelMagic online sales (customers ONLINE SALES and ICONIC ONLINE SALES; approved orders net of cancellations)', available: !!salesByStyle, fetched_at: window ? window.fetched_at || null : iso(amStatus.sales && amStatus.sales.fetchedAt), failed_requests: window ? window.failed_requests || 0 : null, total_requests: window ? window.total_requests || null : null, failed_days_last_30: failedRecent.length, complete: salesByStyle ? (failedRecent.length === 0 && !(window && window.failed_requests > 0 && !Array.isArray(window.failed_days))) : null },
     launch_pace: { source: 'Shopify export through Demand Planning (Platinum / Rocket tiers, first and latest 28 days); not changed by Planning', available: tierState === 'ok', fetched_at: iso(tierStatus.fetchedAt) },
     stock: { source: 'ApparelMagic sellable stock (summed over every colourway and season code of the product)', fetched_at: iso(amStatus.stock && amStatus.stock.fetchedAt), size_data: sizeField ? `by size (field ${sizeField})` : 'not available from ApparelMagic' },
-    meta: { source: 'Meta-reported insights and ad status (Triple Whale is not connected and is not substituted); DPAs excluded', last_successful_sync: metaSync, unresolved_ad_identities: cov ? cov.unresolved_identities || 0 : null, ads_status_as_of: ctx.coverage && ctx.coverage.available ? ctx.coverage.status_as_of : null, awaiting_review: mem ? mem.awaiting_review : null, active_ads: mem ? mem.active_ads : null },
+    meta: { source: 'Meta-reported insights and ad status (Triple Whale is not connected and is not substituted); DPAs excluded', last_successful_sync: metaSync, unresolved_ad_identities: cov ? cov.unresolved_identities || 0 : null, unresolved_share_pct: cov ? cov.unresolved_share_pct || 0 : null, unresolved_level: cov ? opp.unresolvedAssessment({ unresolved: cov.unresolved_identities || 0, unresolved_share_pct: cov.unresolved_share_pct }, cfg).level : null, ads_status_as_of: ctx.coverage && ctx.coverage.available ? ctx.coverage.status_as_of : null, awaiting_review: mem ? mem.awaiting_review : null, active_ads: mem ? mem.active_ads : null },
+    production_lead_time: leadTime, creative_lead_time_days_setting: cfg.creative_lead_time_days,
     families_with_incomplete_recent_sales: incompleteFamilies, families_with_disagreeing_sources: disagree,
   };
   if (mem && mem.awaiting_review > 0) notes.push(`${mem.awaiting_review} of ${mem.active_ads} active Meta ads (${mem.share_awaiting_review}%) are still awaiting review in Ad Matching; products they may belong to show "Not enough data" rather than a shortage.`);
-  if (ctx.coverage && ctx.coverage.available && ctx.coverage.unresolved_identities > 0) notes.push(`${ctx.coverage.unresolved_identities} Meta ads that delivered in the last 14 days could not be identified (their name, campaign and creative lookup failed), so no product is confirmed as lacking creative until the next Meta sync resolves them.`);
+  if (ctx.coverage && ctx.coverage.available && ctx.coverage.unresolved_identities > 0) {
+    const ua = opp.unresolvedAssessment({ unresolved: ctx.coverage.unresolved_identities, unresolved_share_pct: ctx.coverage.unresolved_share_pct }, cfg);
+    notes.push(`${ctx.coverage.unresolved_identities} Meta ads that delivered in the last 14 days could not be identified (their name, campaign and creative lookup failed). They carry ${ctx.coverage.unresolved_share_pct}% of recent non-DPA spend (${ua.level} account-level uncertainty; lines: ${cfg.unresolved_spend_note_pct}% and ${cfg.unresolved_spend_block_pct}%). ${ua.level === 'low' ? 'This is a data-quality warning only: recommendations are unchanged.' : ua.level === 'medium' ? '"No creative running" findings are held at Medium until they are identified.' : '"No creative running" findings are shown as not enough data, and other creative findings are held at Medium, until they are identified.'} Nothing identifies which products they belong to, so no match is guessed.`);
+  }
   if (!ctx.coverage || !ctx.coverage.available) notes.push((ctx.coverage && ctx.coverage.reason) || 'Meta ad data is unavailable, so no product can be confirmed as needing creative.');
   if (tierState !== 'ok') notes.push(tierReason);
   if (tiers) notes.push('Platinum / Rocket are Demand Planning\'s own classification (first 28 days of sales against products that first sold the same week). Products that first sold before the start of the ~12-month sales export cannot be compared with their launch.');

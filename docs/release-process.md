@@ -10,6 +10,12 @@ Changes are merged into `main` automatically once they pass the checks below, wi
 4. Merge into `main` as a fast-forward and push. Never force-push, never rewrite history. If `main` moved, bring it into the branch, re-run the checks, then merge.
 5. Check the Railway deployment for that commit reports success, and report: the commit, the version, the test results and anything that could not be verified.
 
+## Branches and deployment
+
+* Only `main` deploys to production (Railway). Pushing a `batchN` development branch to `origin` does not deploy; the Railway trigger is configured in Railway, not in this repository (`railway.json` sets the build and start command only), so confirm it before relying on that.
+* A batch can be held for approval: the standing rule above does not override an explicit instruction not to merge. Batch 27 is such a batch: it lives on `origin/batch27-planning-intelligence` and is not merged.
+* Every release records its version with `npm run bump` (see `docs/versioning.md`).
+
 ## Stop and ask first (do not merge automatically) when
 
 * a test fails beyond the baseline, or a check could not be run;

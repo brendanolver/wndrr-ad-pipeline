@@ -79,7 +79,18 @@ launch dates, Meta data or benchmarks produce "insufficient data" with the reaso
 
 ## Meta ad identity completeness (Batch 27 follow-up)
 
-The sync reads each new ad's name, campaign and creative by ad id (one `GET /{id}` per ad; Meta removes the root `GET /?ids=` request on 27 Oct 2026). A lookup that fails is no longer
-silent: it is recorded in `meta_ad_identity_lookups` (`error` = could not be read, retried by later syncs; `not_found` = Meta says it no longer exists, never retried), the run is marked
-`completeness = 'partial'` beside its unchanged `status`, and Planning treats any ad that delivered in the last 14 days but is still unidentified as **uncertainty**: a product's missing
-creative is not "confirmed" until they resolve (reason: "Matching is uncertain: N recently delivering Meta ads could not be identified"). Products with enough performing creative are unaffected.
+The sync reads each new ad's name, campaign and creative by ad id (one `GET /{id}` per ad; Meta removes the root `GET /?ids=` request on 27 Oct 2026).
+
+* **No error is read as "deleted".** Meta's "cannot be loaded" error (code 100, subcode 33) means any of: the object does not exist, the token lacks permission, it belongs to another account, or the id is invalid. So a refused lookup is recorded as `inaccessible` (cause unknown) and a failed read as `error`; both are **unresolved**, in `meta_ad_identity_lookups`, and the run is marked `completeness = 'partial'` beside its unchanged `status`. An ad that really has been deleted stops delivering and leaves Planning's 14-day window by itself.
+* **Retries are bounded.** At most `META_IDENTITY_MAX_PER_SYNC` (300) ads are looked up per sync; an ad that has failed `META_IDENTITY_MAX_AUTO_ATTEMPTS` (3) times is retried at most every `META_IDENTITY_RETRY_HOURS` (24); skipped ads stay unresolved and are reported as "not asked this time". A call that gets 10 failures in a row with no success stops (a token problem, not 1,000 problems).
+* **Planning treats unidentified ads as account-level uncertainty, weighed by spend.** Nothing identifies which product an unidentified ad belongs to (the Insights read carries no name), so no match is guessed. The share of the last 14 days' non-DPA spend they carry sets the level (Settings, Planning): below `unresolved_spend_note_pct` (1%) a data-quality warning only; from there a "no creative running" finding is held at Medium; from `unresolved_spend_block_pct` (5%), or when the share is unknown, it becomes "not enough data", and findings resting on existing creative problems are held at Medium. Products with enough effective creative, and findings supported by independent creative evidence, are not suppressed. Both lines are provisional and explained in the settings.
+
+## Meta API request protection (Batch 27 follow-up)
+
+`metaRequestGuard.js` is shared by every Meta caller: one rate-limit cooldown; the reporting sync has priority (thumbnail and share-link reads do not call Meta while a sync runs); lower-priority lookups share a per-minute budget (`META_LOW_PRIORITY_LOOKUPS_PER_MINUTE`, 120); a failed read is remembered in memory only, backing off 1 min, 5, 15, 60 (refused reads start at 10 min), never stored as "unavailable". A call stops at the first rate-limit or authentication response. No retries. The Graph API version is unchanged.
+
+## High priority, short windows and stock runway (Batch 27 follow-up)
+
+* High needs a creative need AND demand. Strong demand (50+ units in 30 days) scores the same however large it is, so strong sellers of very different size tie; the lists now show the bigger one first among equal scores (an order only).
+* A product with fewer than 30 days of selling is judged on a window scaled to 30 days, which is an estimate. For it, **High needs strong demand** (`momentum_high_requires_strong`, on by default, using the existing strong line): 11 units in 13 days is about 25 in 30 days, steady, so Medium; 60 units in 12 days is strong, so High.
+* Stock must outlast the time to get creative live. `creative_lead_time_days` (0 = off) adds lead time + test period to the minimum cover. It is **off by default**: no lead time is invented. The measured median (concept created to first uploaded live, from `status_history`) is shown in the data-quality section so a figure can be chosen from evidence.

@@ -34,7 +34,11 @@ router.get('/', async (req, res, next) => {
 });
 
 // GET /api/opportunities/launch-cohort?date=YYYY-MM-DD -> every product officially launched (ApparelMagic mid_code) on that date, or in the whole recent-launch window when no date is
-// given, with its stock, recent sales and what Planning currently says about it. Read-only; nothing is written or fetched.
+// given, with its stock, recent sales and what Planning currently says about it.
+// It writes nothing, but it is NOT free of external reads: it uses the same loader as GET /api/opportunities (getOpportunities, 5-minute memo). With a warm memo it answers from memory;
+// with a cold memo, or with ?fresh=1 (which discards the memo), the loader recomputes everything, and that reads the ApparelMagic stock / catalogue / on-order / size caches and the
+// sales window and the Shopify-export tiers through THEIR caches (12 h and 3 h): any cache that has expired is refetched from ApparelMagic / the pipeline, which can be slow. It never
+// calls Meta (Meta data is read from this application's own database). Prefer it without ?fresh=1.
 router.get('/launch-cohort', async (req, res, next) => {
   try {
     const deps = req.app && req.app.locals && req.app.locals.opportunityDeps ? req.app.locals.opportunityDeps : undefined;

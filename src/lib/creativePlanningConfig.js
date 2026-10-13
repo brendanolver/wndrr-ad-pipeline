@@ -62,6 +62,20 @@ const ALLOCATION = {
   sales_discrepancy_min_units: 10, // ... and by at least this many units
   priority_high_min: 65,         // score for High
   priority_medium_min: 45,       // score for Medium (below it: Low)
+  // Batch 27 follow-up. UNIDENTIFIED Meta ads (delivered in the last 14 days, but the lookup of their name / campaign / creative failed) cannot be placed on any product. They are
+  // weighed by the share of the account's recent (non-DPA) spend they carry, not counted as one blanket "unknown":
+  //   below the note line      a data-quality warning only (nothing changes)
+  //   note line .. block line  a "no creative running" recommendation is held at Medium (it rests on an assumption that nothing unidentified is running for that product)
+  //   at or above block line   that recommendation becomes "not enough data"; recommendations resting on existing creative problems are held at Medium instead
+  // PROVISIONAL: 1% is the share below which no single missing ad could plausibly be a product's only creative; 5% is when the unidentified delivery is comparable to a mid-sized campaign.
+  unresolved_spend_note_pct: 1,
+  unresolved_spend_block_pct: 5,
+  // A new launch is judged on a SHORT window scaled to 30 days. Scaling a few days of sales up is an estimate, not an observation, so for a launch (or any product with under 30 days
+  // of selling) High priority needs STRONG demand (demand_strong_units); steady demand is held at Medium. 1 = on, 0 = off.
+  momentum_high_requires_strong: 1,
+  // Days from "concept planned" to "creative live and gathering data" that stock must outlast, in ADDITION to the test period. 0 = off (only stock_min_cover_weeks applies). Not defaulted
+  // to a guess: WNDRR's measured median is shown on the Planning page (from production timestamps) so a figure can be chosen from evidence.
+  creative_lead_time_days: 0,
 };
 const ALLOC_LIMITS = {
   videos_high_need_strong: [0, 20], videos_high_need_ok: [0, 20], videos_high_need_low: [0, 20], videos_medium_need_strong: [0, 20], videos_medium_need_ok: [0, 20], videos_medium_need_low: [0, 20],
@@ -73,7 +87,7 @@ const ALLOC_LIMITS = {
   demand_steady_units: [2, 500], demand_strong_units: [5, 2000], trend_pct: [5, 90], trend_min_weekly_units: [0, 100], revival_min_recent_units: [1, 500], revival_min_pace_pct: [0, 95],
   stock_min_cover_weeks: [0, 26], stock_overstock_weeks: [4, 104], stock_excess_weeks: [8, 260], season_override_units: [5, 1000], season_pattern_index: [110, 300],
   momentum_window_days: [14, 180], momentum_min_days_live: [1, 28], concentration_share_pct: [50, 99], concentration_min_spend: [0, 5000], meaningful_share_pct: [1, 50], min_distinct_concepts: [1, 10],
-  concept_known_pct: [10, 100], sales_discrepancy_pct: [10, 200], sales_discrepancy_min_units: [1, 500], priority_high_min: [30, 100], priority_medium_min: [10, 99],
+  concept_known_pct: [10, 100], sales_discrepancy_pct: [10, 200], sales_discrepancy_min_units: [1, 500], priority_high_min: [30, 100], priority_medium_min: [10, 99], unresolved_spend_note_pct: [0.1, 50], unresolved_spend_block_pct: [0.5, 100], momentum_high_requires_strong: [0, 1], creative_lead_time_days: [0, 120],
   launch_date_verified: [0, 1], launch_sales_confirms: [0, 1], launch_sales_min_units: [1, 1000], launch_settle_days: [0, 90], new_drop_days: [14, 180],
 };
 const ALLOC_LABEL = {
@@ -96,6 +110,8 @@ const ALLOC_LABEL = {
   concentration_share_pct: 'Concentration: share of spend on one creative (%)', concentration_min_spend: 'Concentration: spend needed in the window ($)', meaningful_share_pct: 'A creative has meaningful delivery from this share of spend (%)',
   min_distinct_concepts: 'Distinct concepts wanted among meaningful creatives', concept_known_pct: 'Share of spend with a concept recorded before diversity is judged (%)',
   sales_discrepancy_pct: 'Sales sources disagree when they differ by (%)', sales_discrepancy_min_units: 'Sales sources disagree when they differ by at least (units)', priority_high_min: 'Score for High priority', priority_medium_min: 'Score for Medium priority',
+  unresolved_spend_note_pct: 'Unidentified Meta ads: share of recent spend (%) from which a no-creative recommendation is held at Medium', unresolved_spend_block_pct: 'Unidentified Meta ads: share of recent spend (%) from which a no-creative recommendation becomes not enough data',
+  momentum_high_requires_strong: 'Recent launches (under 30 days of selling): High priority needs strong demand (1 = yes, 0 = no)', creative_lead_time_days: 'Days for new creative to go from planned to live, which stock must outlast with the test period (0 = off)',
   launch_date_verified: 'ApparelMagic mid_code is the OFFICIAL launch date (1 = confirmed by WNDRR, 0 = treat as unverified: a passed date is not proof)', launch_sales_confirms: 'Sales alone confirm a launch (1 = yes, 0 = a person confirms)', launch_sales_min_units: 'Units sold before sales count as launch evidence',
   launch_settle_days: 'Optional: check a launch date that passed less than this many days ago with no sales (days, 0 = off)', new_drop_days: 'A product is a New drop for this many days after launch',
 };
@@ -118,6 +134,7 @@ function resolve(stored = {}) {
   if (out.coming_up_min_score >= out.shoot_now_min_score) { out.coming_up_min_score = Math.max(5, out.shoot_now_min_score - 5); issues.push('coming_up_min_score must be below shoot_now_min_score'); }
   if (out.monitor_min_score >= out.coming_up_min_score) { out.monitor_min_score = Math.max(0, out.coming_up_min_score - 5); issues.push('monitor_min_score must be below coming_up_min_score'); }
   if (out.priority_medium_min >= out.priority_high_min) { out.priority_medium_min = Math.max(10, out.priority_high_min - 10); issues.push('priority_medium_min must be below priority_high_min'); }
+  if (out.unresolved_spend_note_pct >= out.unresolved_spend_block_pct) { out.unresolved_spend_note_pct = Math.max(0.1, out.unresolved_spend_block_pct / 2); issues.push('unresolved_spend_note_pct must be below unresolved_spend_block_pct'); }
   if (out.demand_steady_units >= out.demand_strong_units) { out.demand_steady_units = Math.max(2, out.demand_strong_units - 5); issues.push('demand_steady_units must be below demand_strong_units'); }
   if (out.stock_overstock_weeks >= out.stock_excess_weeks) { out.stock_overstock_weeks = Math.max(4, out.stock_excess_weeks - 8); issues.push('stock_overstock_weeks must be below stock_excess_weeks'); }
   if (out.weak_sales_percentile >= out.strong_sales_percentile) { out.weak_sales_percentile = Math.max(5, out.strong_sales_percentile - 10); issues.push('weak_sales_percentile must be below strong_sales_percentile'); }
@@ -127,9 +144,9 @@ function resolve(stored = {}) {
 // the settings the UI shows, grouped the way staff think about them, with the default and the allowed range of each. `advanced` groups are collapsed in Settings.
 const GROUPS = [
   { key: 'opportunities', title: 'Opportunities (Core and High Stocks)', help: 'When a product counts as needing new creative this week. A new creative is given time to gather data before another is recommended; products that are out of stock, out of season or not selling are not recommended. These are starting points to tune, not performance targets.', keys: ['min_performing_creatives', 'test_period_days', 'recent_creative_days', 'stale_creative_days', 'opp_min_recent_units', 'opp_min_stock_units', 'strong_sales_percentile', 'weak_sales_percentile'] },
-  { key: 'demand', title: 'Demand, stock and season', help: 'How much current selling is needed before creative is worth making, how stock cover is judged (enough stock is needed; a lot of stock is not a reason), and when an out-of-season product can still qualify. Absolute units matter as well as percentage change.', keys: ['demand_steady_units', 'demand_strong_units', 'trend_pct', 'trend_min_weekly_units', 'stock_min_cover_weeks', 'stock_overstock_weeks', 'stock_excess_weeks', 'season_override_units', 'season_pattern_index', 'priority_high_min', 'priority_medium_min'] },
-  { key: 'momentum', title: 'Protect Momentum (recent launches)', help: 'Recent launches that are selling well but have too little effective creative. Age comes from the official ApparelMagic launch date; sales are normalised per day so a half-complete period is never compared with a full one.', keys: ['momentum_window_days', 'momentum_min_days_live'] },
-  { key: 'concentration', title: 'Creative concentration, diversity and data quality', help: 'When one creative carries most of a product\'s delivery, when the creative is too similar, and when two sales sources disagree.', keys: ['concentration_share_pct', 'concentration_min_spend', 'meaningful_share_pct', 'min_distinct_concepts', 'concept_known_pct', 'sales_discrepancy_pct', 'sales_discrepancy_min_units'] },
+  { key: 'demand', title: 'Demand, stock and season', help: 'How much current selling is needed before creative is worth making, how stock cover is judged (enough stock is needed; a lot of stock is not a reason), and when an out-of-season product can still qualify. Absolute units matter as well as percentage change.', keys: ['creative_lead_time_days', 'demand_steady_units', 'demand_strong_units', 'trend_pct', 'trend_min_weekly_units', 'stock_min_cover_weeks', 'stock_overstock_weeks', 'stock_excess_weeks', 'season_override_units', 'season_pattern_index', 'priority_high_min', 'priority_medium_min'] },
+  { key: 'momentum', title: 'Protect Momentum (recent launches)', help: 'Recent launches that are selling well but have too little effective creative. Age comes from the official ApparelMagic launch date; sales are normalised per day so a half-complete period is never compared with a full one.', keys: ['momentum_high_requires_strong', 'momentum_window_days', 'momentum_min_days_live'] },
+  { key: 'concentration', title: 'Creative concentration, diversity and data quality', help: 'When one creative carries most of a product\'s delivery, when the creative is too similar, and when two sales sources disagree.', keys: ['unresolved_spend_note_pct', 'unresolved_spend_block_pct', 'concentration_share_pct', 'concentration_min_spend', 'meaningful_share_pct', 'min_distinct_concepts', 'concept_known_pct', 'sales_discrepancy_pct', 'sales_discrepancy_min_units'] },
   { key: 'revival', title: 'High Stocks revival', help: 'How a proven (Platinum or Rocket) product is judged to have lost momentum and be worth a creative refresh.', keys: ['revival_decline_pct', 'revival_min_age_days', 'revival_min_cover_weeks', 'revival_min_recent_units', 'revival_min_pace_pct'] },
   { key: 'evidence', title: 'Performance evidence', help: 'How much spend and time an ad needs before it is judged against the approved benchmarks. The benchmarks themselves are in Settings, Meta Performance.', keys: ['window_days', 'trend_days', 'min_spend', 'min_impressions', 'min_trend_spend', 'trend_decline_pct'] },
   { key: 'launch', title: 'Launch status', help: 'What counts as proof that a product has officially launched. WNDRR has confirmed that the ApparelMagic mid_code is the official launch date: a future date keeps a product out of every recommendation, a passed date means launched (unless a person overrides it), and neither Shopify nor sales history can override a future date. Products with a missing or unreadable date and no other evidence are listed for verification, not recommended.', keys: ['launch_date_verified', 'launch_sales_confirms', 'launch_sales_min_units', 'launch_settle_days', 'new_drop_days'] },
