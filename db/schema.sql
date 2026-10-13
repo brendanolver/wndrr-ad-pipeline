@@ -1664,6 +1664,11 @@ WHERE u.email = 'mark@kohindustries.com'
 ALTER TABLE shoot_plan_items DROP CONSTRAINT IF EXISTS shoot_plan_items_source_check;
 ALTER TABLE shoot_plan_items ADD CONSTRAINT shoot_plan_items_source_check
   CHECK (source IN ('core', 'high_stock', 'drop', 'promotion', 'manual'));
+-- Batch 27: Protect Momentum (a recent launch selling well with too little effective creative) is its own recommendation source so the Shoot Plan, ad naming and the
+-- toolkit can say so. ADDITIVE: the check is widened (every existing row stays valid) and no row is changed.
+ALTER TABLE shoot_plan_items DROP CONSTRAINT IF EXISTS shoot_plan_items_source_check;
+ALTER TABLE shoot_plan_items ADD CONSTRAINT shoot_plan_items_source_check
+  CHECK (source IN ('core', 'high_stock', 'drop', 'promotion', 'manual', 'momentum'));
 
 -- =====================================================================
 -- Part C: Final Approval -> Ad Setup -> Approved (Meta ad structuring,

@@ -32,13 +32,17 @@ const DEFAULTS = {
   min_trend_spend: 40,      // each half needs this spend before the two are compared
   trend_decline_pct: 25,    // a relative worsening this large is a "decline" (a trend threshold, NOT a performance target)
   min_performing_creatives: 3, // unique creatives that should be performing before coverage is called healthy (editable, provisional)
+  // Batch 27: credible fatigue compares the last fatigue_days with the fatigue_days before (not 7-day halves), needs real delivery in BOTH, and never rests on CPA alone
+  fatigue_days: 14,            // each side of the fatigue comparison
+  fatigue_min_impressions: 10000, // impressions needed in each side (small samples swing)
+  fatigue_min_purchases: 3,    // purchases needed in each side before CPA / ROAS are compared
 };
 const LIMITS = {
-  window_days: [7, 60], trend_days: [3, 30], min_spend: [0, 5000], min_impressions: [0, 1000000], min_trend_spend: [0, 5000], trend_decline_pct: [5, 90], min_performing_creatives: [0, 50],
+  window_days: [7, 60], trend_days: [3, 30], min_spend: [0, 5000], min_impressions: [0, 1000000], min_trend_spend: [0, 5000], trend_decline_pct: [5, 90], min_performing_creatives: [0, 50], fatigue_days: [7, 30], fatigue_min_impressions: [1000, 1000000], fatigue_min_purchases: [1, 100],
 };
 const LABEL = {
   window_days: 'Evidence window (days)', trend_days: 'Trend comparison (days per half)', min_spend: 'Minimum spend before judging an ad ($)', min_impressions: 'Minimum impressions before judging',
-  min_trend_spend: 'Minimum spend in each half to compare trends ($)', trend_decline_pct: 'Decline that counts as fatigue (%)', min_performing_creatives: 'Performing creatives wanted per product',
+  min_trend_spend: 'Minimum spend in each half to compare trends ($)', trend_decline_pct: 'Decline that counts as fatigue (%)', min_performing_creatives: 'Performing creatives wanted per product', fatigue_days: 'Fatigue comparison (days per side)', fatigue_min_impressions: 'Minimum impressions in each fatigue side', fatigue_min_purchases: 'Minimum purchases in each fatigue side',
 };
 
 function resolveConfig(stored = {}) {
@@ -66,7 +70,7 @@ const ctrOf = (m) => (num(m.impressions) > 0 ? num(m.clicks) / num(m.impressions
 // pure: judge ONE creative (metrics already pooled over its ads in the product).
 //   m       { total: bundle, recent: bundle, prior: bundle, delivery_rows }   funnel 'TOF'|'TOM'|'MOF'|null
 //   ctx     { rules, coded, config }  (rules / coded from metaBenchmarks.getEffective())
-function judgeCreative({ total, recent, prior, delivery_rows = 0, funnel = null }, { rules = health.effectiveRules(), coded = health.COLOUR_CODED, config = DEFAULTS } = {}) {
+function judgeCreative({ total, recent, prior, fatigue_recent = null, fatigue_prior = null, delivery_rows = 0, funnel = null }, { rules = health.effectiveRules(), coded = health.COLOUR_CODED, config = DEFAULTS } = {}) {
   const cfg = { ...DEFAULTS, ...config };
   const reasons = [];
   const base = { funnel, spend: Math.round(num(total.spend) * 100) / 100, purchases: num(total.purchases), impressions: num(total.impressions), cpa: cpaOf(total), roas: roasOf(total), ctr: ctrOf(total) };
@@ -92,28 +96,40 @@ function judgeCreative({ total, recent, prior, delivery_rows = 0, funnel = null 
       else if (lower) return { ...base, state: 'insufficient', reasons: [`No purchase yet on ${money(total.spend)}: not enough spend to say it is over the approved ${funnel} CPA limit.`] };
     }
   }
-  // relative trend: the creative against ITSELF (never a target)
-  let decline = null;
-  const rec = recent || {}; const pri = prior || {};
-  if (num(rec.spend) >= cfg.min_trend_spend && num(pri.spend) >= cfg.min_trend_spend) {
-    const pct = cfg.trend_decline_pct / 100;
-    const rc = cpaOf(rec); const pc = cpaOf(pri); const rr = roasOf(rec); const pr = roasOf(pri); const rt = ctrOf(rec); const pt = ctrOf(pri);
-    if (rc !== null && pc !== null && rc >= pc * (1 + pct)) decline = { metric: 'CPA', from: pc, to: rc, text: `CPA rose from ${money(pc)} to ${money(rc)} (up ${Math.round((rc / pc - 1) * 100)}%)` };
-    else if (rr !== null && pr !== null && rr <= pr * (1 - pct)) decline = { metric: 'ROAS', from: pr, to: rr, text: `ROAS fell from ${pr.toFixed(2)} to ${rr.toFixed(2)} (down ${Math.round((1 - rr / pr) * 100)}%)` };
-    else if (rt !== null && pt !== null && num(rec.impressions) >= cfg.min_impressions / 2 && num(pri.impressions) >= cfg.min_impressions / 2 && rt <= pt * (1 - pct)) decline = { metric: 'CTR', from: pt, to: rt, text: `outbound CTR fell from ${(pt * 100).toFixed(2)}% to ${(rt * 100).toFixed(2)}%` };
+  // relative trend: the creative against ITSELF (never a target), over two equal fatigue windows (default the last 14 days vs the 14 before; the 7-day halves are only a
+  // fallback for callers that cannot supply them). Batch 27: a worsening is CREDIBLE FATIGUE only with real delivery in BOTH windows and corroboration. A CPA that
+  // moved 25% while the ad is still within its approved benchmark is "softening" (shown, never counted against it), and CPA alone is never enough:
+  //   credible = (CPA up or ROAS down) AND outbound CTR down      two independent indicators moving together
+  //          or  (CPA up or ROAS down) AND it WAS within the benchmark and is now over it    the benchmark itself says it crossed the line
+  const fr = fatigue_recent || recent || {}; const fp = fatigue_prior || prior || {};
+  const pct = cfg.trend_decline_pct / 100;
+  const enough = num(fr.spend) >= cfg.min_spend && num(fp.spend) >= cfg.min_spend && num(fr.impressions) >= cfg.fatigue_min_impressions && num(fp.impressions) >= cfg.fatigue_min_impressions;
+  const buys = num(fr.purchases) >= cfg.fatigue_min_purchases && num(fp.purchases) >= cfg.fatigue_min_purchases;
+  const rc = cpaOf(fr); const pc = cpaOf(fp); const rr = roasOf(fr); const pr = roasOf(fp); const rt = ctrOf(fr); const pt = ctrOf(fp);
+  const cpaUp = enough && buys && rc !== null && pc !== null && rc >= pc * (1 + pct);
+  const roasDown = enough && buys && rr !== null && pr !== null && rr <= pr * (1 - pct);
+  const ctrDown = enough && rt !== null && pt !== null && rt <= pt * (1 - pct);
+  const priorCls = funnel && rules && pc !== null ? health.classify(funnel, 'cpa', pc, {}, { rules, coded }) : null;
+  const crossed = priorCls === 'green' && (cls === 'orange' || cls === 'red');
+  const spendSignals = [];
+  if (cpaUp) spendSignals.push(`CPA rose from ${money(pc)} to ${money(rc)} (up ${Math.round((rc / pc - 1) * 100)}%)`);
+  if (roasDown) spendSignals.push(`ROAS fell from ${pr.toFixed(2)} to ${rr.toFixed(2)} (down ${Math.round((1 - rr / pr) * 100)}%)`);
+  if (ctrDown) spendSignals.push(`outbound CTR fell from ${(pt * 100).toFixed(2)}% to ${(rt * 100).toFixed(2)}%`);
+  const trend = { days: fatigue_recent ? cfg.fatigue_days : cfg.trend_days, enough_delivery: enough, enough_purchases: buys, cpa_up: cpaUp, roas_down: roasDown, ctr_down: ctrDown, crossed_benchmark: crossed, signals: spendSignals, credible_fatigue: false, softening: false };
+  if ((cpaUp || roasDown) && (ctrDown || crossed)) {
+    trend.credible_fatigue = true;
+    reasons.push(`Credible fatigue: ${spendSignals.join('; ')} (last ${trend.days} days vs the ${trend.days} before, with enough delivery in both). ${crossed ? `It was within the approved ${funnel} CPA limit before and is now ${cls === 'red' ? 'over' : 'marginally over'} it.` : 'Two independent indicators worsened together.'}`);
+    return { ...base, state: 'declining', severity: cls === 'red' ? 'clear' : cls === 'orange' ? 'marginal' : 'relative', decline: { signals: spendSignals }, benchmark: cls, trend, reasons };
   }
-  if (decline) {
-    // once good (benchmark green before) and now worse is the clearest fatigue; relative-only declines are labelled as relative
-    const priorCls = funnel && rules && cpaOf(pri) !== null ? health.classify(funnel, 'cpa', cpaOf(pri), {}, { rules, coded }) : null;
-    reasons.push(`Declining against its own earlier results: ${decline.text} (last ${cfg.trend_days} days vs the ${cfg.trend_days} before). This compares the ad with itself, not with a target.`);
-    if (priorCls === 'green' && (cls === 'orange' || cls === 'red')) reasons.push(`It was within the approved ${funnel} CPA limit before and is now ${cls === 'red' ? 'over' : 'marginally over'} it.`);
-    return { ...base, state: 'declining', severity: cls === 'red' ? 'clear' : cls === 'orange' ? 'marginal' : 'relative', decline, benchmark: cls, reasons };
+  if (spendSignals.length) {
+    trend.softening = true;
+    reasons.push(`Softening, not fatigue: ${spendSignals.join('; ')}. ${cls === 'green' ? 'It is still within the approved benchmark, so it still counts as performing.' : 'There is no second indicator or benchmark crossing, so it is not called fatigued.'}`);
   }
-  if (cls === 'green') return { ...base, state: 'performing', benchmark: 'green', reasons: [`${basis}: within the approved ${funnel} CPA limit.`] };
-  if (cls === 'orange') return { ...base, state: 'underperforming', severity: 'marginal', benchmark: 'orange', reasons: [`${basis}: marginally over the approved ${funnel} CPA limit.`] };
-  if (cls === 'red') return { ...base, state: 'underperforming', severity: 'clear', benchmark: 'red', reasons: [`${basis}: over the approved ${funnel} CPA limit.`] };
+  if (cls === 'green') return { ...base, state: 'performing', benchmark: 'green', trend, reasons: [`${basis}: within the approved ${funnel} CPA limit.`, ...reasons] };
+  if (cls === 'orange') return { ...base, state: 'underperforming', severity: 'marginal', benchmark: 'orange', trend, reasons: [`${basis}: marginally over the approved ${funnel} CPA limit.`, ...reasons] };
+  if (cls === 'red') return { ...base, state: 'underperforming', severity: 'clear', benchmark: 'red', trend, reasons: [`${basis}: over the approved ${funnel} CPA limit.`, ...reasons] };
   reasons.push(funnel ? `Enough data (${money(total.spend)} spent), but there is no approved ${funnel} CPA benchmark, so it is neither called good nor bad.` : 'Enough data, but its funnel (TOF / TOM / MOF) is unknown or mixed, so no approved benchmark applies.');
-  return { ...base, state: 'unrated', reasons };
+  return { ...base, state: 'unrated', trend, reasons };
 }
 
 // pure: roll creatives up to a product.  creatives: [{ key, state, ads: n, ... }]; pending: active ads awaiting review (Batch 11 uncertainty)
@@ -157,6 +173,10 @@ async function loadProductAdPerformance(families, { db, rules, coded, config = D
   const priorTo = addDays(recentFrom, -1);
   const priorFrom = addDays(priorTo, -(cfg.trend_days - 1));
   const from = addDays(end, -(cfg.window_days - 1));
+  const fatFrom = addDays(end, -(cfg.fatigue_days - 1));      // the last fatigue_days ...
+  const fatPriorTo = addDays(fatFrom, -1);
+  const fatPriorFrom = addDays(fatPriorTo, -(cfg.fatigue_days - 1)); // ... and the same number of days before them
+  const joinFrom = fatPriorFrom < from ? fatPriorFrom : from;
   const codeToFamily = new Map();
   families.forEach((f) => (f.codes || [f.key]).forEach((c) => codeToFamily.set(c, f.key)));
   const codes = [...codeToFamily.keys()];
@@ -166,8 +186,12 @@ async function loadProductAdPerformance(families, { db, rules, coded, config = D
     `SELECT m.meta_ad_id, m.ad_name, m.meta_creative_id, m.created_time, c.funnel,
             cl.concept_label, cl.creator_name, cl.creative_style_id, cl.media_type,
             (SELECT array_agg(DISTINCT p.product_code) FROM meta_ad_products p WHERE p.meta_ad_id = m.meta_ad_id) AS product_codes,
-            COUNT(d.meta_ad_id)::int AS delivery_rows,
-            COALESCE(SUM(d.spend),0) AS t_spend, COALESCE(SUM(d.impressions),0) AS t_imp, COALESCE(SUM(d.outbound_clicks),0) AS t_clk, COALESCE(SUM(d.purchases),0) AS t_pur, COALESCE(SUM(d.purchase_value),0) AS t_val,
+            COUNT(d.meta_ad_id) FILTER (WHERE d.insight_date >= $2)::int AS delivery_rows,
+            COALESCE(SUM(d.spend) FILTER (WHERE d.insight_date >= $2),0) AS t_spend, COALESCE(SUM(d.impressions) FILTER (WHERE d.insight_date >= $2),0) AS t_imp, COALESCE(SUM(d.outbound_clicks) FILTER (WHERE d.insight_date >= $2),0) AS t_clk, COALESCE(SUM(d.purchases) FILTER (WHERE d.insight_date >= $2),0) AS t_pur, COALESCE(SUM(d.purchase_value) FILTER (WHERE d.insight_date >= $2),0) AS t_val,
+            COALESCE(SUM(d.spend) FILTER (WHERE d.insight_date >= $7),0) AS f_spend, COALESCE(SUM(d.impressions) FILTER (WHERE d.insight_date >= $7),0) AS f_imp, COALESCE(SUM(d.outbound_clicks) FILTER (WHERE d.insight_date >= $7),0) AS f_clk,
+            COALESCE(SUM(d.purchases) FILTER (WHERE d.insight_date >= $7),0) AS f_pur, COALESCE(SUM(d.purchase_value) FILTER (WHERE d.insight_date >= $7),0) AS f_val,
+            COALESCE(SUM(d.spend) FILTER (WHERE d.insight_date BETWEEN $8 AND $9),0) AS g_spend, COALESCE(SUM(d.impressions) FILTER (WHERE d.insight_date BETWEEN $8 AND $9),0) AS g_imp, COALESCE(SUM(d.outbound_clicks) FILTER (WHERE d.insight_date BETWEEN $8 AND $9),0) AS g_clk,
+            COALESCE(SUM(d.purchases) FILTER (WHERE d.insight_date BETWEEN $8 AND $9),0) AS g_pur, COALESCE(SUM(d.purchase_value) FILTER (WHERE d.insight_date BETWEEN $8 AND $9),0) AS g_val,
             COALESCE(SUM(d.spend) FILTER (WHERE d.insight_date >= $4),0) AS r_spend, COALESCE(SUM(d.impressions) FILTER (WHERE d.insight_date >= $4),0) AS r_imp, COALESCE(SUM(d.outbound_clicks) FILTER (WHERE d.insight_date >= $4),0) AS r_clk,
             COALESCE(SUM(d.purchases) FILTER (WHERE d.insight_date >= $4),0) AS r_pur, COALESCE(SUM(d.purchase_value) FILTER (WHERE d.insight_date >= $4),0) AS r_val,
             COALESCE(SUM(d.spend) FILTER (WHERE d.insight_date BETWEEN $5 AND $6),0) AS p_spend, COALESCE(SUM(d.impressions) FILTER (WHERE d.insight_date BETWEEN $5 AND $6),0) AS p_imp, COALESCE(SUM(d.outbound_clicks) FILTER (WHERE d.insight_date BETWEEN $5 AND $6),0) AS p_clk,
@@ -175,12 +199,12 @@ async function loadProductAdPerformance(families, { db, rules, coded, config = D
        FROM meta_ads m
        LEFT JOIN meta_ad_classifications cl ON cl.meta_ad_id = m.meta_ad_id
        LEFT JOIN meta_campaigns c ON c.meta_campaign_id = m.meta_campaign_id
-       LEFT JOIN meta_ad_insights_daily d ON d.meta_ad_id = m.meta_ad_id AND d.insight_date BETWEEN $2 AND $3
+       LEFT JOIN meta_ad_insights_daily d ON d.meta_ad_id = m.meta_ad_id AND d.insight_date BETWEEN $10 AND $3
       WHERE m.effective_status = 'ACTIVE' AND m.match_status IN ('confirmed', 'auto_matched') AND NOT COALESCE(cl.excluded_from_intelligence, false)
         AND NOT COALESCE((${dpaLib.dpaPredicate('m', 'c')}), false)
         AND EXISTS (SELECT 1 FROM meta_ad_products p WHERE p.meta_ad_id = m.meta_ad_id AND p.product_code = ANY($1::text[]))
       GROUP BY m.meta_ad_id, m.ad_name, m.meta_creative_id, m.created_time, c.funnel, cl.concept_label, cl.creator_name, cl.creative_style_id, cl.media_type`,
-    [codes, from, end, recentFrom, priorFrom, priorTo])).rows;
+    [codes, from, end, recentFrom, priorFrom, priorTo, fatFrom, fatPriorFrom, fatPriorTo, joinFrom])).rows;
 
   const per = new Map(); // familyKey -> Map(groupKey -> pooled)
   rows.forEach((r) => {
@@ -189,12 +213,12 @@ async function loadProductAdPerformance(families, { db, rules, coded, config = D
     fams.forEach((fk) => {
       if (!per.has(fk)) per.set(fk, new Map());
       const g = per.get(fk); const key = creativeGroupKey(r, nameCopies);
-      if (!g.has(key)) g.set(key, { key, ads: [], total: { spend: 0, impressions: 0, clicks: 0, purchases: 0, value: 0 }, recent: { spend: 0, impressions: 0, clicks: 0, purchases: 0, value: 0 }, prior: { spend: 0, impressions: 0, clicks: 0, purchases: 0, value: 0 }, delivery_rows: 0, funnels: new Set(), concept: null, creator: null, style: null, media: null, created: null, shared: false });
+      if (!g.has(key)) g.set(key, { key, ads: [], total: { spend: 0, impressions: 0, clicks: 0, purchases: 0, value: 0 }, recent: { spend: 0, impressions: 0, clicks: 0, purchases: 0, value: 0 }, prior: { spend: 0, impressions: 0, clicks: 0, purchases: 0, value: 0 }, fatigue_recent: { spend: 0, impressions: 0, clicks: 0, purchases: 0, value: 0 }, fatigue_prior: { spend: 0, impressions: 0, clicks: 0, purchases: 0, value: 0 }, delivery_rows: 0, funnels: new Set(), concept: null, creator: null, style: null, media: null, created: null, shared: false });
       const x = g.get(key);
       x.ads.push({ id: r.meta_ad_id, name: r.ad_name, shared });
       if (shared) x.shared = true;
       x.delivery_rows += r.delivery_rows;
-      [['total', 't'], ['recent', 'r'], ['prior', 'p']].forEach(([w, p]) => { x[w].spend += num(r[`${p}_spend`]); x[w].impressions += num(r[`${p}_imp`]); x[w].clicks += num(r[`${p}_clk`]); x[w].purchases += num(r[`${p}_pur`]); x[w].value += num(r[`${p}_val`]); });
+      [['total', 't'], ['recent', 'r'], ['prior', 'p'], ['fatigue_recent', 'f'], ['fatigue_prior', 'g']].forEach(([w, p]) => { x[w].spend += num(r[`${p}_spend`]); x[w].impressions += num(r[`${p}_imp`]); x[w].clicks += num(r[`${p}_clk`]); x[w].purchases += num(r[`${p}_pur`]); x[w].value += num(r[`${p}_val`]); });
       if (r.funnel) x.funnels.add(r.funnel);
       x.concept = x.concept || r.concept_label || null; x.creator = x.creator || r.creator_name || null; x.style = x.style || r.creative_style_id || null; x.media = x.media || r.media_type || null;
       if (r.created_time && (!x.created || new Date(r.created_time) < new Date(x.created))) x.created = r.created_time;
@@ -205,7 +229,7 @@ async function loadProductAdPerformance(families, { db, rules, coded, config = D
     const entry = out.get(fk);
     g.forEach((x) => {
       const funnel = x.funnels.size === 1 ? [...x.funnels][0] : null; // a creative running in several funnels is not judged against one funnel's benchmark
-      const verdict = judgeCreative({ total: x.total, recent: x.recent, prior: x.prior, delivery_rows: x.delivery_rows, funnel: JUDGED(funnel) }, { rules, coded, config: cfg });
+      const verdict = judgeCreative({ total: x.total, recent: x.recent, prior: x.prior, fatigue_recent: x.fatigue_recent, fatigue_prior: x.fatigue_prior, delivery_rows: x.delivery_rows, funnel: JUDGED(funnel) }, { rules, coded, config: cfg });
       entry.creatives.push({ ...verdict, key: x.key, ads: x.ads, ad_count: x.ads.length, concept: x.concept, creator: x.creator, style_id: x.style, media: x.media, created: x.created, shared: x.shared, mixed_funnels: x.funnels.size > 1 });
     });
     entry.ads = [...g.values()].reduce((s, x) => s + x.ads.length, 0);
@@ -226,7 +250,7 @@ function mergeNameCopies(groups, nameCopies) {
     const baseKey = byName.get(String(nameCopies.baseOf(copyAd.name)).trim().toLowerCase());
     if (!baseKey || baseKey === k || !groups.has(baseKey)) return;
     const t = groups.get(baseKey);
-    ['total', 'recent', 'prior'].forEach((w) => { Object.keys(t[w]).forEach((m) => { t[w][m] += g[w][m]; }); });
+    ['total', 'recent', 'prior', 'fatigue_recent', 'fatigue_prior'].forEach((w) => { Object.keys(t[w]).forEach((m) => { t[w][m] += g[w][m]; }); });
     t.ads.push(...g.ads); t.delivery_rows += g.delivery_rows; g.funnels.forEach((f) => t.funnels.add(f)); t.shared = t.shared || g.shared;
     t.concept = t.concept || g.concept; t.creator = t.creator || g.creator; t.style = t.style || g.style; t.media = t.media || g.media;
     if (g.created && (!t.created || new Date(g.created) < new Date(t.created))) t.created = g.created;

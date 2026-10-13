@@ -14,7 +14,7 @@ const progressLib = require('../lib/shootPlanProgress');
 const MAX_CONCEPTS = 10;
 
 const STOCK_STATUSES = ['in_office', 'needs_to_be_brought_in'];
-const SOURCES = ['core', 'high_stock', 'drop', 'promotion', 'manual'];
+const SOURCES = ['core', 'high_stock', 'drop', 'promotion', 'manual', 'momentum'];
 const WEEK_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 // Same local-date-safety reasoning as shooting.js/editing.js's own dateStr.
@@ -191,11 +191,11 @@ router.post('/', async (req, res, next) => {
     // The same product selected again this week (from Core, High Stocks or by hand) is ONE production record, never a duplicate: the existing item keeps
     // its concept and gains any new colourways, and its planned video count is raised to the number asked for (never lowered here: PATCH /:id/videos is
     // the explicit way to change a quantity). Drops and Promotions keep their own items and workflows.
-    const DEDUPE_SOURCES = [null, undefined, 'core', 'high_stock', 'manual'];
+    const DEDUPE_SOURCES = [null, undefined, 'core', 'high_stock', 'manual', 'momentum'];
     if (product_code && !promotion_stage_id && DEDUPE_SOURCES.includes(source)) {
       const existing = await client.query(
         `SELECT * FROM shoot_plan_items WHERE product_code = $1 AND week_start = COALESCE($2::date, date_trunc('week', now())::date) AND promotion_stage_id IS NULL
-            AND (source IS NULL OR source IN ('core', 'high_stock', 'manual')) ORDER BY id LIMIT 1 FOR UPDATE`, [product_code, week_start || null]);
+            AND (source IS NULL OR source IN ('core', 'high_stock', 'manual', 'momentum')) ORDER BY id LIMIT 1 FOR UPDATE`, [product_code, week_start || null]);
       if (existing.rows.length) {
         const ex = existing.rows[0];
         const raised = Math.max(ex.planned_videos || 1, requestedVideos);

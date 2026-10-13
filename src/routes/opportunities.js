@@ -18,7 +18,7 @@ router.get('/', async (req, res, next) => {
     const t = (await pool.query('SELECT weekly_new_concept_target AS t FROM planning_settings WHERE id = 1')).rows[0];
     const target = t && Number.isInteger(t.t) ? t.t : 15;
     const prog = await progressLib.loadWeeklyProgress(pool, data.week_start, { target });
-    const qualified = data.core.actionable + data.high_stocks.actionable;
+    const qualified = data.core.actionable + data.high_stocks.actionable + (data.momentum ? data.momentum.actionable : 0);
     const stillNeeded = prog.remaining;
     res.json({
       ...data,
@@ -30,6 +30,20 @@ router.get('/', async (req, res, next) => {
             : `${stillNeeded} more concept${stillNeeded === 1 ? '' : 's'} needed to reach ${target}. ${qualified} product${qualified === 1 ? '' : 's'} currently qualify for new creative; each can support more than one genuinely different concept. If that is not enough the shortfall is real: the list is never padded.`,
       },
     });
+  } catch (err) { next(err); }
+});
+
+// GET /api/opportunities/launch-cohort?date=YYYY-MM-DD -> every product officially launched (ApparelMagic mid_code) on that date, or in the whole recent-launch window when no date is
+// given, with its stock, recent sales and what Planning currently says about it. Read-only; nothing is written or fetched.
+router.get('/launch-cohort', async (req, res, next) => {
+  try {
+    const deps = req.app && req.app.locals && req.app.locals.opportunityDeps ? req.app.locals.opportunityDeps : undefined;
+    const data = await loader.getOpportunities({ fresh: !!req.query.fresh, deps });
+    if (!data.available) return res.json(data);
+    const date = req.query.date ? String(req.query.date) : null;
+    if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
+    const list = (data.recent_launches || []).filter((r) => !date || r.launch_date === date);
+    res.json({ available: true, date, window_days: data.config.momentum_window_days, count: list.length, products: list, note: 'Launch dates are the official ApparelMagic mid_code; sales are ApparelMagic online sales (not the Shopify first-sale date).' });
   } catch (err) { next(err); }
 });
 
@@ -47,7 +61,7 @@ router.post('/prepare-shoot', async (req, res, next) => {
     const deps = req.app && req.app.locals && req.app.locals.opportunityDeps ? req.app.locals.opportunityDeps : undefined;
     const data = await loader.getOpportunities({ deps });
     if (!data.available) return res.status(409).json({ error: data.reason || 'Opportunities are not available' });
-    const item = [...data.core.items, ...data.high_stocks.items].find((i) => i.key === key);
+    const item = [...data.core.items, ...data.high_stocks.items, ...((data.momentum && data.momentum.items) || [])].find((i) => i.key === key);
     if (!item) return res.status(404).json({ error: 'Product not found in the opportunity lists' });
     if (['not_launched', 'launch_unknown'].includes(item.status)) return res.status(409).json({ error: `${item.name} has not launched (or its launch is not confirmed), so it cannot be planned for a shoot.` });
     const usable = (item.colourways || []).filter((c) => c.launch_status !== 'unlaunched' && c.launch_status !== 'discontinued');
@@ -65,9 +79,9 @@ router.post('/prepare-shoot', async (req, res, next) => {
     });
     // what already exists for this product this week, so the modal can say so instead of creating a duplicate
     res.json({
-      key: item.key, product_code: item.product_code, product_name: item.name, category: item.category || null, colours, source: item.kinds.includes('core') ? 'core' : 'high_stock',
+      key: item.key, product_code: item.product_code, product_name: item.name, category: item.category || null, colours, source: item.kinds.includes('momentum') ? 'momentum' : item.kinds.includes('core') ? 'core' : 'high_stock',
       kinds: item.kinds, tags: item.tags, status: item.status, headline: item.headline,
-      snapshot: { generated_at: data.generated_at, week_start: data.week_start, kinds: item.kinds, status: item.status, priority: item.priority, score: item.score, reason: item.reason, headline: item.headline, why: (item.why || []).map((w) => w.text), direction: item.direction ? item.direction.text : null },
+      snapshot: { generated_at: data.generated_at, week_start: data.week_start, kinds: item.kinds, status: item.status, priority: item.priority, score: item.score, opportunity_type: item.opportunity_label || null, classification: item.classification || null, also_qualifies: item.also_qualifies || [], reason: item.reason, headline: item.headline, why: (item.why || []).map((w) => w.text), direction: item.direction ? item.direction.text : null },
       pipeline: item.pipeline,
     });
   } catch (err) { next(err); }

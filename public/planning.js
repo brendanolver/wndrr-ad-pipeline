@@ -30,7 +30,7 @@ const PL_VIEWS = [
   { key: 'covered', label: 'Working', statuses: ['covered', 'momentum_ok'], hint: 'Enough creative is performing, or sales have not lost momentum.' },
   { key: 'data', label: 'Not enough data', statuses: ['insufficient_data', 'unavailable'], hint: 'Matching or Meta data cannot confirm a gap, so no shoot is recommended.' },
   { key: 'season', label: 'Out of season', statuses: ['out_of_season'], hint: 'Not relevant to the current selling period.' },
-  { key: 'other', label: 'Not a creative priority', statuses: ['weak_demand', 'low_stock', 'too_new', 'no_proven_demand', 'not_launched', 'launch_unknown'], hint: 'Not selling, low stock, too new, or not launched.' },
+  { key: 'other', label: 'Not a creative priority', statuses: ['weak_demand', 'low_stock', 'too_new', 'no_proven_demand', 'not_recent', 'not_launched', 'launch_unknown'], hint: 'Not selling enough, low or excess stock, too new, or not launched.' },
 ];
 
 let plSeq = 0;
@@ -94,97 +94,272 @@ function renderProductionHeader() {
     <div class="prod-note">${p ? (p.remaining > 0 ? `${p.remaining} more concept${p.remaining === 1 ? '' : 's'} needed to reach ${target}.` : `Target of ${target} concepts reached.`) : 'Concept progress is loading.'}${carry ? ` ${plPlural(carry, 'unfinished concept')} carried over from earlier weeks (not counted as new).` : ''}</div>`;
 }
 
-// ── opportunity cards ────────────────────────────────────────────────────────────────
+// ── opportunity tables (Core, High Stocks and Protect momentum share one compact layout) ─────────────────────────────
+// One row per product, one primary recommendation each (the server picks it: src/lib/planningPrimary.js). Row cells use the same subtle tints as Meta Performance
+// (green = healthy, orange = needs attention, red = a CONFIRMED problem or gap, none = neutral or not enough data: missing data is never red). A row opens to the full evidence.
+state.oppSort = { core: null, high: null };
+state.oppFilter = { core: { priority: '', type: '' }, high: { priority: '', type: '' } };
+state.oppLimit = { core: 50, high: 50 };
+const PL_PAGE = 50;
 const plChip = (text, cls, title) => `<span class="pl-chip${cls ? ` ${cls}` : ''}"${title ? ` title="${plEsc(title)}"` : ''}>${plEsc(text)}</span>`;
-function plAgeText(days) { return days === null || days === undefined ? 'none found' : days === 0 ? 'today' : days >= 60 ? `${Math.round(days / 30)} months ago` : `${plPlural(days, 'day')} ago`; }
+const PL_TREND_LABEL = { improving: 'Improving', weakening: 'Weakening', stable: 'Stable', unknown: 'n/a' };
+const PL_TREND_ORDER = { improving: 3, stable: 2, weakening: 1, unknown: 0 };
+const PL_PRIO_ORDER = { High: 3, Medium: 2, Low: 1 };
 
-function plFacts(it) {
+function plAgeText(days) { return days === null || days === undefined ? 'none found' : days === 0 ? 'today' : days >= 60 ? `${Math.round(days / 30)} months ago` : `${plPlural(days, 'day')} ago`; }
+const plCell = (cls, html, title) => `<td class="pt-num${cls ? ` pt-${cls}` : ''}"${title ? ` title="${plEsc(title)}"` : ''}>${html}</td>`;
+const plNone = '<span class="pt-na">&ndash;</span>';
+const plMin = () => (state.opportunities && state.opportunities.config && state.opportunities.config.min_performing_creatives) || 3;
+
+// ── cell logic (colour only where the evidence is sufficient) ──
+function plStockCell(it) {
   const f = it.facts || {};
-  const bits = [];
-  if (f.stock_units !== null && f.stock_units !== undefined) bits.push(`<span>Stock <b>${plNum(f.stock_units)}</b>${f.cover_weeks ? ` <i>(${f.cover_weeks}w)</i>` : ''}</span>`);
-  if (f.units30 !== null && f.units30 !== undefined) bits.push(`<span>Sold 30d <b>${plNum(f.units30)}</b></span>`);
-  if (f.initial28 !== null && f.initial28 !== undefined && f.recent28 !== null && f.recent28 !== undefined) bits.push(`<span>Launch 28d <b>${plNum(f.initial28)}</b> &rarr; now <b>${plNum(f.recent28)}</b></span>`);
-  bits.push(`<span>Creatives <b>${f.unique_creatives}</b>${f.unique_creatives ? ` <i>(${f.performing} performing${f.declining ? `, ${f.declining} declining` : ''}${f.weak ? `, ${f.weak} weak` : ''}${f.testing ? `, ${f.testing} testing` : ''})</i>` : ''}</span>`);
-  bits.push(`<span>Last new <b>${plEsc(plAgeText(f.newest_creative_days))}</b></span>`);
-  return `<div class="opp-facts">${bits.join('')}</div>`;
+  if (f.stock_units === null || f.stock_units === undefined) return plCell('', plNone, 'Stock has not loaded');
+  const band = f.stock_band;
+  const cls = band === 'healthy' ? 'green' : ['short', 'short_restock', 'slow'].includes(band) ? 'orange' : '';
+  const title = it.stock && it.stock.notes ? it.stock.notes.join(' ') : '';
+  return plCell(cls, `<b>${plNum(f.stock_units)}</b>${f.cover_weeks !== null && f.cover_weeks !== undefined ? `<small>${f.cover_weeks}w cover</small>` : ''}`, title);
+}
+function plSalesCell(it, key) {
+  const f = it.facts || {}; const v = key === 'u7' ? f.units7 : f.units30;
+  if (v === null || v === undefined) return plCell('', plNone, 'Sales have not loaded');
+  let cls = '';
+  if (key === 'u30') cls = f.demand_level === 'strong' ? 'green' : f.demand_level === 'weak' || f.demand_level === 'very_weak' ? 'orange' : '';
+  const partial = key === 'u30' && f.demand_basis === 'since_launch' ? `<small>${f.days_on_sale}d on sale</small>` : '';
+  return plCell(cls, `<b>${plNum(v)}</b>${partial}`, key === 'u30' ? ((it.demand && it.demand.evidence) || []).join(' ') : 'Last 7 days including today (ApparelMagic online sales)');
+}
+function plTrendCell(it) {
+  const t = (it.facts || {}).sales_trend || 'unknown';
+  const cls = t === 'improving' ? 'green' : t === 'weakening' ? 'orange' : '';
+  const arrow = t === 'improving' ? '&uarr; ' : t === 'weakening' ? '&darr; ' : '';
+  return plCell(cls, `${arrow}${PL_TREND_LABEL[t]}`, ((it.demand && it.demand.evidence) || []).filter((x) => /Last 7 days/.test(x)).join(' ') || 'Not enough days or units to judge direction');
+}
+function plActiveCell(it) {
+  const f = it.facts || {};
+  if (f.active_ads === null || f.active_ads === undefined) return plCell('', plNone, 'Meta ad data is unavailable');
+  const uncertain = f.matching === 'uncertain';
+  const cls = f.unique_creatives === 0 && !uncertain ? 'red' : '';
+  return plCell(cls, `<b>${f.unique_creatives}</b><small>${plPlural(f.active_ads, 'ad')}${uncertain ? ` +${f.matching_pending} unreviewed` : ''}</small>`, uncertain ? `${f.matching_pending} active ad(s) awaiting review are suggested for this product, so this count may be incomplete` : 'Distinct creatives running (confirmed or auto-matched ads, DPAs excluded)');
+}
+function plEffectiveCell(it) {
+  const f = it.facts || {}; const min = plMin();
+  if (f.active_ads === null || f.active_ads === undefined) return plCell('', plNone, 'Meta ad data is unavailable');
+  let cls = '';
+  if (f.performing >= min) cls = 'green';
+  else if (f.performing > 0) cls = 'orange';
+  else if (f.unique_creatives > 0 && (f.weak > 0 || f.declining > 0)) cls = 'red';
+  else if (f.unique_creatives === 0 && f.matching !== 'uncertain') cls = 'red';
+  const extra = [f.declining ? `${f.declining} fatigued` : '', f.testing ? `${f.testing} testing` : '', f.unrated ? `${f.unrated} unrated` : ''].filter(Boolean).join(', ');
+  return plCell(cls, `<b>${f.performing}</b>/${f.unique_creatives}${extra ? `<small>${plEsc(extra)}</small>` : ''}`, `Performing against the approved benchmark, of the creatives running (${min} wanted). Unrated = no approved benchmark for the funnel; never counted as good or bad.`);
+}
+function plLastCell(it) {
+  const d = (it.facts || {}).newest_creative_days;
+  const cls = d === null || d === undefined ? '' : d >= 90 ? 'orange' : d <= 30 ? 'green' : '';
+  return plCell(cls, d === null || d === undefined ? '<span class="pt-na">none found</span>' : plEsc(plAgeText(d)), d === null || d === undefined ? 'No matched Meta ad or upload record' : `Newest creative: ${(it.facts || {}).newest_creative_source === 'production' ? "WNDRR's production record" : 'Meta ad creation date'}`);
+}
+function plOppCell(it) {
+  const act = it.actionable;
+  const label = act ? it.opportunity_label : it.status_label;
+  return `<td class="pt-opp${act ? '' : ' pt-opp-quiet'}"><span class="pt-opp-label">${plEsc(label)}</span>${it.also_qualifies && it.also_qualifies.length ? `<small>also: ${plEsc(it.also_qualifies.map((a) => a.label).join(', '))}</small>` : ''}</td>`;
+}
+function plPrioCell(it) {
+  return `<td class="pt-prio">${it.actionable && it.priority ? `<span class="opp-priority" data-priority="${plEsc(it.priority)}" title="Score ${it.score} of 100">${plEsc(it.priority)}</span>` : plNone}</td>`;
+}
+function plActionCell(it) {
+  const ro = plReadOnly();
+  const blocked = ['not_launched', 'launch_unknown', 'unavailable'].includes(it.status);
+  if (ro || blocked) return '<td class="pt-action"></td>';
+  return `<td class="pt-action">${it.actionable
+    ? `<button type="button" class="btn btn-primary btn-sm" data-opp-plan="${plEsc(it.key)}">Add to Shoot Plan</button>`
+    : `<button type="button" class="btn btn-ghost btn-sm" data-opp-plan="${plEsc(it.key)}" title="Not a current recommendation (${plEsc(it.status_label)}). It is planned only if you choose to.">Plan anyway</button>`}</td>`;
+}
+function plProductCell(it, view) {
+  const tags = (it.tags || []).map((t) => plChip(t, t === 'Platinum' ? 'pl-chip-plat' : t === 'Rocket' ? 'pl-chip-rocket' : '')).join('');
+  const thumb = it.image_url ? `<img src="${plEsc(it.image_url)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.remove()">` : '';
+  const cls = view === 'momentum' && !it.is_core ? '<small class="pt-class">Not Core: recent launch</small>' : '';
+  return `<td class="pt-product"><div class="pt-pwrap"><span class="pt-chev" aria-hidden="true"></span><span class="pt-thumb">${thumb}</span><span class="pt-name"><b>${plEsc(it.name)}</b><small>${plEsc(it.category || '')}</small>${cls}<span class="pt-tags">${tags}</span></span></div></td>`;
+}
+function plTierCell(it) {
+  const t = (it.facts || {}).tier;
+  return `<td class="pt-tier">${t ? plChip(t === 'platinum' ? 'Platinum' : t === 'rocket' ? 'Rocket' : t, t === 'platinum' ? 'pl-chip-plat' : t === 'rocket' ? 'pl-chip-rocket' : '', `Demand Planning classification (index ${(it.facts || {}).tier_index})`) : plNone}</td>`;
+}
+function plPaceCell(it) {
+  const rv = it.revival; const f = it.facts || {};
+  if (!rv && (f.initial28 === null || f.initial28 === undefined)) return plCell('', plNone, 'Its first 28 days of selling cannot be read (older than the sales export, or too little history)');
+  const a = rv ? rv.initial28 : f.initial28; const b = rv ? rv.recent28 : f.recent28; const pct = rv ? rv.ratio_pct : (a > 0 ? Math.round((b / a) * 100) : null);
+  const cls = pct === null ? '' : pct >= 50 ? 'green' : pct >= 10 ? 'orange' : '';
+  return plCell(cls, `<b>${plNum(a)}</b> &rarr; <b>${plNum(b)}</b><small>${pct === null ? 'no baseline' : `First 28d &rarr; latest 28d &middot; current pace ${pct}%`}</small>`, `First 28 days of selling: ${plNum(a)} units. Latest 28 days: ${plNum(b)} units${pct === null ? '' : `. Current pace is ${pct}% of the initial launch pace`}. Shopify export (Demand Planning). This is a sales comparison only: it does not mean the creative has worn out.`);
+}
+function plSeasonCell(it) {
+  const s = it.season; if (!s) return plCell('', plNone, 'Season not assessed');
+  const cls = s.state === 'in_season' ? 'green' : s.state === 'out_of_season' ? 'orange' : '';
+  return plCell(cls, plEsc(s.label), (s.reasons || []).join(' '));
+}
+const plShortDate = (d) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d)); return m ? `${Number(m[3])} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(m[2]) - 1]} ${m[1]}` : String(d); };
+function plLaunchedCell(it) {
+  const d = it.launch_date; const a = it.launch_age_days;
+  return plCell('', d ? `<b>${plEsc(plShortDate(d))}</b><small>${plPlural(a, 'day')} ago</small>` : plNone, 'Official launch date: ApparelMagic mid_code');
+}
+function plSinceCell(it) {
+  const f = it.facts || {};
+  if (f.since_launch_units === null || f.since_launch_units === undefined) return plCell('', plNone, 'Sales since launch are not available');
+  const avg = f.days_on_sale ? Math.round((f.since_launch_units / f.days_on_sale) * 10) / 10 : null;
+  const cls = f.demand_level === 'strong' ? 'green' : f.demand_level === 'weak' || f.demand_level === 'very_weak' ? 'orange' : '';
+  return plCell(cls, `<b>${plNum(f.since_launch_units)}</b><small>${avg === null ? '' : `${avg}/day`}</small>`, `Units since the official launch date (${f.days_on_sale} days on sale; a part period is normalised per day, never compared with a full month)`);
 }
 
+// column sets: label, key (sort + header), cell builder
+const PL_COLS = {
+  core: [
+    { key: 'product', label: 'Product', w: 'pt-w-product', cell: plProductCell, sort: (i) => String(i.name).toLowerCase() },
+    { key: 'stock', label: 'Available stock', cell: (i) => plStockCell(i), sort: (i) => (i.facts || {}).stock_units },
+    { key: 'u7', label: 'Sales 7d', cell: (i) => plSalesCell(i, 'u7'), sort: (i) => (i.facts || {}).units7 },
+    { key: 'u30', label: 'Sales 30d', cell: (i) => plSalesCell(i, 'u30'), sort: (i) => (i.facts || {}).units30 },
+    { key: 'trend', label: 'Sales trend', cell: plTrendCell, sort: (i) => PL_TREND_ORDER[(i.facts || {}).sales_trend || 'unknown'] },
+    { key: 'active', label: 'Active creatives', cell: plActiveCell, sort: (i) => (i.facts || {}).unique_creatives },
+    { key: 'effective', label: 'Effective creatives', cell: plEffectiveCell, sort: (i) => (i.facts || {}).performing },
+    { key: 'last', label: 'Last new creative', w: 'pt-w-last', cell: plLastCell, sort: (i) => (i.facts || {}).newest_creative_days },
+    { key: 'opp', label: 'Opportunity type', w: 'pt-w-opp', cell: plOppCell, sort: (i) => String(i.actionable ? i.opportunity_label : i.status_label) },
+    { key: 'priority', label: 'Priority', w: 'pt-w-prio', cell: plPrioCell, sort: (i) => (i.actionable ? PL_PRIO_ORDER[i.priority] * 1000 + i.score : -1) },
+    { key: 'action', label: 'Action', w: 'pt-w-action', cell: plActionCell },
+  ],
+  high: [
+    { key: 'product', label: 'Product', w: 'pt-w-product', cell: plProductCell, sort: (i) => String(i.name).toLowerCase() },
+    { key: 'tier', label: 'Demand tier', cell: plTierCell, sort: (i) => (i.facts || {}).tier_index },
+    { key: 'stock', label: 'Available stock', cell: (i) => plStockCell(i), sort: (i) => (i.facts || {}).stock_units },
+    { key: 'u30', label: 'Sales 30d', cell: (i) => plSalesCell(i, 'u30'), sort: (i) => (i.facts || {}).units30 },
+    { key: 'pace', label: 'Launch pace vs now', cell: plPaceCell, sort: (i) => (i.revival ? i.revival.ratio_pct : null) },
+    { key: 'season', label: 'Seasonality', w: 'pt-w-season', cell: plSeasonCell, sort: (i) => (i.season ? i.season.weight : null) },
+    { key: 'effective', label: 'Effective creatives', cell: plEffectiveCell, sort: (i) => (i.facts || {}).performing },
+    { key: 'opp', label: 'Opportunity type', w: 'pt-w-opp', cell: plOppCell, sort: (i) => String(i.actionable ? i.opportunity_label : i.status_label) },
+    { key: 'priority', label: 'Priority', w: 'pt-w-prio', cell: plPrioCell, sort: (i) => (i.actionable ? PL_PRIO_ORDER[i.priority] * 1000 + i.score : -1) },
+    { key: 'action', label: 'Action', w: 'pt-w-action', cell: plActionCell },
+  ],
+  momentum: [
+    { key: 'product', label: 'Product', w: 'pt-w-product', cell: (i) => plProductCell(i, 'momentum'), sort: (i) => String(i.name).toLowerCase() },
+    { key: 'launched', label: 'Official launch', cell: plLaunchedCell, sort: (i) => i.launch_age_days },
+    { key: 'stock', label: 'Available stock', cell: (i) => plStockCell(i), sort: (i) => (i.facts || {}).stock_units },
+    { key: 'since', label: 'Sold since launch', cell: plSinceCell, sort: (i) => (i.facts || {}).since_launch_units },
+    { key: 'u7', label: 'Sales 7d', cell: (i) => plSalesCell(i, 'u7'), sort: (i) => (i.facts || {}).units7 },
+    { key: 'trend', label: 'Sales trend', cell: plTrendCell, sort: (i) => PL_TREND_ORDER[(i.facts || {}).sales_trend || 'unknown'] },
+    { key: 'active', label: 'Active creatives', cell: plActiveCell, sort: (i) => (i.facts || {}).unique_creatives },
+    { key: 'effective', label: 'Effective creatives', cell: plEffectiveCell, sort: (i) => (i.facts || {}).performing },
+    { key: 'opp', label: 'Opportunity type', w: 'pt-w-opp', cell: plOppCell, sort: (i) => String(i.actionable ? i.opportunity_label : i.status_label) },
+    { key: 'priority', label: 'Priority', w: 'pt-w-prio', cell: plPrioCell, sort: (i) => (i.actionable ? PL_PRIO_ORDER[i.priority] * 1000 + i.score : -1) },
+    { key: 'action', label: 'Action', w: 'pt-w-action', cell: plActionCell },
+  ],
+};
+const plColsFor = (mode) => (mode === 'core' && state.oppView.core === 'momentum' ? PL_COLS.momentum : PL_COLS[mode]);
+
+// ── expandable evidence ──
+function plSection(title, body) { return body ? `<section class="pt-sec"><h5>${plEsc(title)}</h5>${body}</section>` : ''; }
+const plList = (arr) => `<ul>${arr.filter(Boolean).map((x) => `<li>${plEsc(x)}</li>`).join('')}</ul>`;
 function plPipelineLine(it) {
   const p = it.pipeline;
   if (!p || !p.planned) return '';
   const st = p.by_stage || {};
   const parts = PL_STAGE_ORDER.filter((k) => st[k]).map((k) => `${st[k]} ${PL_STAGE_LABEL[k].toLowerCase()}`);
-  return `<div class="opp-pipeline">In the Shoot Plan pipeline: ${plEsc(parts.join(', ') || `${p.planned} in progress`)}</div>`;
+  return `In the Shoot Plan pipeline: ${parts.join(', ') || `${p.planned} in progress`}.${p.uploaded_recent ? ` ${plPlural(p.uploaded_recent, 'concept')} uploaded recently.` : ''}`;
+}
+function plDetailHtml(it, mode, cols) {
+  const act = it.actionable; const f = it.facts || {}; const dq = it.data_quality || {};
+  const why = (it.why || []);
+  const byKey = (k) => (why.find((w) => w.k === k) || {}).text;
+  const reco = act
+    ? `<p class="pt-summary">${plEsc(byKey('summary') || it.headline)}</p>${plList([byKey('gap'), byKey('performing'), byKey('recent'), it.direction ? `Creative direction: ${it.direction.text}` : 'No creative direction is supported by this product\'s own data yet.'])}${it.other_explanations && it.other_explanations.length ? `<p class="pt-sub">Other possible reasons for a sales change</p>${plList(it.other_explanations)}` : ''}`
+    : `<p class="pt-summary">${plEsc(it.reason || '')}</p>`;
+  const sales = plList([...(it.demand && it.demand.evidence ? it.demand.evidence : []), f.units7 !== null && f.units7 !== undefined ? `Units: ${plNum(f.units7)} in 7 days${f.units14 !== null && f.units14 !== undefined ? `, ${plNum(f.units14)} in 14 days` : ''}, ${plNum(f.units30)} in 30 days (ApparelMagic online sales; each window includes today, a part day).` : '', it.revival ? `Launch pace: ${plNum(it.revival.initial28)} units in the first 28 days, ${plNum(it.revival.recent28)} in the latest 28 (${it.revival.ratio_pct === null ? 'no baseline' : `${it.revival.ratio_pct}% of launch pace`}), from the Shopify export (Demand Planning). A drop in sales is not automatically creative fatigue.` : '', ...(dq.sales_notes || []), dq.discrepancy ? `Sources: ${dq.discrepancy.text}.` : ''].filter(Boolean));
+  const stock = plList(it.stock && it.stock.notes ? it.stock.notes : []);
+  const seas = it.season ? plList([...(it.season.reasons || []), `Source: ${it.season.source === 'sales_pattern' ? 'its own monthly sales pattern' : it.season.source === 'category_prior' ? "WNDRR's Australian category rule (not measured sales)" : 'no seasonal rule applies'}.`]) : '';
+  const cre = (it.creatives || []).length
+    ? `<table class="pt-mini"><thead><tr><th>Creative</th><th>Phase</th><th>Age</th><th class="num">Spend</th><th class="num">CPA</th><th>Detail</th></tr></thead><tbody>${it.creatives.slice(0, 10).map((c) => `<tr><td>${plEsc(c.concept || 'unclassified')}${c.ads > 1 ? ` <small>${c.ads} ads</small>` : ''}</td><td>${plEsc(c.label)}</td><td>${plEsc(plAgeText(c.age_days))}</td><td class="num">${c.spend ? `$${plNum(Math.round(c.spend))}` : plNone}</td><td class="num">${c.cpa ? `$${plNum(Math.round(c.cpa))}` : plNone}</td><td>${plEsc((c.reasons || [])[0] || '')}</td></tr>`).join('')}</tbody></table>`
+    : '<p class="hint">No active creative with delivery for this product (confirmed ads only).</p>';
+  const creative = `${cre}${it.evidence && it.evidence.notes && it.evidence.notes.length ? plList(it.evidence.notes) : ''}<p class="hint">Judged against the approved Meta Performance benchmarks only (Meta-reported CPA; Triple Whale is not connected and is never substituted). DPAs are not counted. A relative worsening within the benchmark is "softening", not fatigue.</p>`;
+  const matching = plList([byKey('matching'), f.matching === 'uncertain' ? `${f.matching_pending} suggested ad(s) are awaiting review in Ad Matching, so a creative gap cannot be confirmed yet.` : '']);
+  const production = plList([plPipelineLine(it), it.also_qualifies && it.also_qualifies.length ? `Also qualifies as: ${it.also_qualifies.map((a) => `${a.label} (${a.priority || '-'}, score ${a.score})`).join('; ')}. One primary recommendation is shown.` : '', it.classification ? `Classification: ${it.classification}.` : '']);
+  const score = act && it.score_parts ? `<table class="pt-mini"><tbody>${it.score_parts.map((p) => `<tr><td>${plEsc(p.label)}</td><td class="num">${p.points >= 0 ? '+' : ''}${p.points}${p.max ? `<small> / ${p.max}</small>` : ''}</td></tr>`).join('')}<tr class="pt-total"><td>Score</td><td class="num">${it.score} / 100</td></tr></tbody></table>${(it.caps || []).length ? plList(it.caps) : ''}<p class="hint">High ${(state.opportunities.config || {}).priority_high_min || 65}+, Medium ${(state.opportunities.config || {}).priority_medium_min || 45}+. High needs strong or steady demand and complete data.</p>` : '';
+  const elig = (it.eligibility || []).length ? `<ul class="pt-elig">${it.eligibility.map((e) => `<li class="${e.ok ? 'ok' : 'no'}"><b>${e.ok ? 'Met' : 'Not met'}</b> ${plEsc(e.text)}</li>`).join('')}</ul>` : '';
+  const q = state.opportunities && state.opportunities.data && state.opportunities.data.quality;
+  const fresh = q ? plList([`Recent sales: ${q.recent_sales.source}. Read ${q.recent_sales.fetched_at ? plAgeStamp(q.recent_sales.fetched_at) : 'not yet'}${q.recent_sales.failed_requests ? `; ${q.recent_sales.failed_requests} daily requests failed` : ''}.`, `Launch pace and tier: ${q.launch_pace.source}. ${q.launch_pace.fetched_at ? `Read ${plAgeStamp(q.launch_pace.fetched_at)}.` : 'Not loaded.'}`, `Meta: last successful sync ${q.meta.last_successful_sync ? plAgeStamp(q.meta.last_successful_sync) : 'unknown'}; ad status as of ${q.meta.ads_status_as_of ? plAgeStamp(q.meta.ads_status_as_of) : 'unknown'}.`]) : '';
+  return `<tr class="pt-detail-row"><td colspan="${cols.length}"><div class="pt-detail">
+    ${plSection(act ? 'Why it is recommended' : 'Why it is not recommended', reco)}${plSection('Sales evidence', sales)}${plSection('Stock evidence', stock)}${plSection('Seasonal assessment', seas)}
+    ${plSection('Creative performance', creative)}${plSection('Matching confidence', matching)}${plSection('Existing production', production)}${plSection('Score breakdown', score)}${plSection('Eligibility rules', elig)}${plSection('Data freshness', fresh)}
+  </div></td></tr>`;
+}
+function plAgeStamp(iso) {
+  const t = Date.parse(iso); if (!Number.isFinite(t)) return 'unknown';
+  const m = Math.round((Date.now() - t) / 60000);
+  return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 2880 ? `${Math.round(m / 60)} hours ago` : `${Math.round(m / 1440)} days ago`;
 }
 
-function plCardHtml(it, mode) {
-  const open = !!state.oppOpen[`${mode}:${it.key}`];
-  const act = it.actionable;
-  const ro = plReadOnly();
-  const blocked = ['not_launched', 'launch_unknown', 'unavailable'].includes(it.status);
-  const button = ro || blocked ? '' : act
-    ? `<button type="button" class="btn btn-primary btn-sm" data-opp-plan="${plEsc(it.key)}">Add to Shoot Plan</button>`
-    : `<button type="button" class="btn btn-ghost btn-sm" data-opp-plan="${plEsc(it.key)}" title="This product is not a current recommendation (${plEsc(it.status_label)}). It is planned only if you choose to.">Plan anyway</button>`;
-  const tags = (it.tags || []).map((t) => plChip(t, t === 'Platinum' ? 'pl-chip-plat' : t === 'Rocket' ? 'pl-chip-rocket' : '')).join('');
-  const why = act ? `<ul class="opp-why">${(it.why || []).map((w) => `<li data-why="${plEsc(w.k)}">${plEsc(w.text)}</li>`).join('')}</ul>` : '';
-  const dir = act ? `<div class="opp-direction">${it.direction ? `<b>Creative direction</b> ${plEsc(it.direction.text)}` : '<span class="hint">No creative direction is supported by this product\'s own data yet.</span>'}</div>` : '';
-  const other = act && it.other_explanations && it.other_explanations.length ? `<div class="opp-other"><b>Other possible reasons for the sales change</b><ul>${it.other_explanations.map((x) => `<li>${plEsc(x)}</li>`).join('')}</ul></div>` : '';
-  const cre = it.creatives && it.creatives.length ? `<div class="opp-creatives"><b>Creatives</b><ul>${it.creatives.slice(0, 8).map((c) => `<li>${plEsc(c.label)}${c.concept ? ` &middot; ${plEsc(c.concept)}` : ''}${c.age_days !== null && c.age_days !== undefined ? ` &middot; ${plEsc(plAgeText(c.age_days))}` : ''}${c.cpa ? ` &middot; $${Math.round(c.cpa)} CPA` : ''}</li>`).join('')}</ul></div>` : '';
-  const reason = !act ? `<div class="opp-reason">${plEsc(it.reason || '')}</div>` : '';
-  const thumb = it.image_url ? `<img src="${plEsc(it.image_url)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.remove()">` : '';
-  return `<article class="opp-card" data-opp-key="${plEsc(it.key)}" data-status="${plEsc(it.status)}">
-    <div class="opp-thumb" aria-hidden="true">${thumb}</div>
-    <div class="opp-body">
-      <div class="opp-title"><span class="opp-name">${plEsc(it.name)}</span>${it.category ? `<span class="opp-cat">${plEsc(it.category)}</span>` : ''}${tags}${act && it.priority ? `<span class="opp-priority" data-priority="${plEsc(it.priority)}" title="Priority ${plEsc(it.priority)} (score ${it.score})">${plEsc(it.priority)}</span>` : `<span class="opp-status">${plEsc(it.status_label)}</span>`}</div>
-      ${act ? `<div class="opp-headline">${plEsc(it.headline)}</div>` : reason}
-      ${plFacts(it)}${plPipelineLine(it)}
-      <details class="opp-more" data-opp-details="${plEsc(mode)}:${plEsc(it.key)}"${open ? ' open' : ''}><summary>${act ? 'Why this product' : 'Evidence'}</summary>${act ? why + dir + other : ''}${cre}</details>
-    </div>
-    <div class="opp-action">${button}</div>
-  </article>`;
+// ── filters, sort, rendering ──
+const PL_VIEWS_CORE_EXTRA = { key: 'momentum', label: 'Protect momentum', source: 'momentum', hint: 'Recent launches (official ApparelMagic launch date) selling well with too little effective creative. They are not official Core products.' };
+function plViewsFor(mode) { return mode === 'core' ? [PL_VIEWS[0], PL_VIEWS_CORE_EXTRA, ...PL_VIEWS.slice(1)] : PL_VIEWS; }
+function plItemsFor(mode, data) {
+  const view = plViewsFor(mode).find((v) => v.key === state.oppView[mode]) || PL_VIEWS[0];
+  const src = view.source === 'momentum' ? ((state.opportunities.momentum && state.opportunities.momentum.items) || []) : data.items.filter((i) => view.statuses.includes(i.status));
+  const q = state.oppQuery[mode].trim().toLowerCase(); const fl = state.oppFilter[mode];
+  let items = src.filter((i) => (!q || String(i.name).toLowerCase().includes(q) || String(i.category || '').toLowerCase().includes(q)) && (!fl.priority || i.priority === fl.priority) && (!fl.type || (i.actionable ? i.opportunity_label : i.status_label) === fl.type));
+  const sort = state.oppSort[mode];
+  if (sort) {
+    const col = plColsFor(mode).find((c) => c.key === sort.key);
+    if (col && col.sort) items = items.slice().sort((a, b) => { const x = col.sort(a); const y = col.sort(b); const nx = x === null || x === undefined; const ny = y === null || y === undefined; if (nx && ny) return 0; if (nx) return 1; if (ny) return -1; return (typeof x === 'string' ? x.localeCompare(y) : x - y) * (sort.dir === 'asc' ? 1 : -1); });
+  }
+  return { view, items, src };
 }
-
 function plToolbarHtml(mode, data) {
   const counts = data.counts || {};
-  const n = (v) => v.statuses.reduce((s, k) => s + (counts[k] || 0), 0);
+  const n = (v) => (v.source === 'momentum' ? ((state.opportunities.momentum && state.opportunities.momentum.actionable) || 0) : v.statuses.reduce((s, k) => s + (counts[k] || 0), 0));
   const cur = state.oppView[mode];
   return `<div class="opp-toolbar" role="tablist" aria-label="${mode === 'core' ? 'Core' : 'High Stocks'} views">
-    ${PL_VIEWS.map((v) => `<button type="button" role="tab" class="opp-view${v.key === cur ? ' active' : ''}" data-opp-view="${mode}:${v.key}" aria-selected="${v.key === cur}" title="${plEsc(v.hint)}">${plEsc(v.label)} <b>${n(v)}</b></button>`).join('')}
+    ${plViewsFor(mode).map((v) => `<button type="button" role="tab" class="opp-view${v.key === cur ? ' active' : ''}" data-opp-view="${mode}:${v.key}" aria-selected="${v.key === cur}" title="${plEsc(v.hint)}">${plEsc(v.label)} <b>${n(v)}</b></button>`).join('')}
     <input type="search" class="opp-search" data-opp-search="${mode}" placeholder="Search products" value="${plEsc(state.oppQuery[mode])}" aria-label="Search products">
   </div>`;
 }
-
+function plFilterBar(mode, src) {
+  const fl = state.oppFilter[mode];
+  const types = [...new Set(src.map((i) => (i.actionable ? i.opportunity_label : i.status_label)).filter(Boolean))].sort();
+  return `<div class="pt-filters"><label>Priority <select data-opp-filter="${mode}:priority"><option value="">All</option>${['High', 'Medium', 'Low'].map((p) => `<option value="${p}"${fl.priority === p ? ' selected' : ''}>${p}</option>`).join('')}</select></label>
+    <label>Opportunity <select data-opp-filter="${mode}:type"><option value="">All</option>${types.map((t) => `<option value="${plEsc(t)}"${fl.type === t ? ' selected' : ''}>${plEsc(t)}</option>`).join('')}</select></label>
+    ${fl.priority || fl.type || state.oppSort[mode] ? `<button type="button" class="link-btn" data-opp-reset="${mode}">Clear filters and sort</button>` : ''}</div>`;
+}
+function plTableHtml(mode, items, cols) {
+  const sort = state.oppSort[mode];
+  const head = cols.map((c) => `<th class="${c.w || ''}${c.sort ? ' pt-sortable' : ''}${sort && sort.key === c.key ? ' sorted' : ''}"${c.sort ? ` data-opp-sort="${mode}:${c.key}" role="button" tabindex="0" aria-sort="${sort && sort.key === c.key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}"` : ''}>${plEsc(c.label)}${sort && sort.key === c.key ? `<span class="pt-arrow">${sort.dir === 'asc' ? '&uarr;' : '&darr;'}</span>` : ''}</th>`).join('');
+  const limit = state.oppLimit[mode] || PL_PAGE;
+  const body = items.slice(0, limit).map((it) => {
+    const open = !!state.oppOpen[`${mode}:${it.key}`];
+    return `<tr class="pt-row${open ? ' open' : ''}${it.actionable ? '' : ' pt-quiet'}" data-opp-row="${mode}:${plEsc(it.key)}" data-status="${plEsc(it.status)}">${cols.map((c) => c.cell(it)).join('')}</tr>${open ? plDetailHtml(it, mode, cols) : ''}`;
+  }).join('');
+  return `<div class="pt-wrap"><table class="pt-table pt-${plEsc(mode)}"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>${items.length > limit ? `<div class="pt-more"><button type="button" class="btn btn-ghost btn-sm" data-opp-more="${mode}">Show ${Math.min(PL_PAGE, items.length - limit)} more (${items.length - limit} hidden)</button></div>` : ''}<div class="pt-count">${items.length} product${items.length === 1 ? '' : 's'}</div>`;
+}
 function plListHtml(mode, data) {
-  const view = PL_VIEWS.find((v) => v.key === state.oppView[mode]) || PL_VIEWS[0];
-  const q = state.oppQuery[mode].trim().toLowerCase();
-  const items = data.items.filter((i) => view.statuses.includes(i.status) && (!q || String(i.name).toLowerCase().includes(q) || String(i.category || '').toLowerCase().includes(q)));
-  if (!items.length) {
+  const { view, items, src } = plItemsFor(mode, data);
+  if (!src.length || !items.length) {
     const empty = view.key === 'act'
       ? `No ${mode === 'core' ? 'Core' : 'High Stocks'} product currently needs new creative.${state.opportunities && state.opportunities.shortfall ? ` ${plEsc(state.opportunities.shortfall.text)}` : ''}`
-      : `Nothing here. ${view.hint}`;
-    return `<div class="attention-empty opp-empty">${empty}</div>`;
+      : src.length ? 'No product matches the filters.' : `Nothing here. ${view.hint}`;
+    return `${src.length ? plFilterBar(mode, src) : ''}<div class="attention-empty opp-empty">${empty}</div>`;
   }
-  return `<div class="opp-list">${items.map((i) => plCardHtml(i, mode)).join('')}</div>`;
+  return `${view.key === 'momentum' ? `<div class="opp-intro">${plEsc(view.hint)} Age comes from the official ApparelMagic launch date; sales are normalised per day on sale, so a part-period is never compared with a full month. These are labelled "Not Core" and are never relabelled as Core products.</div>` : ''}${plFilterBar(mode, src)}${plTableHtml(mode, items, plColsFor(mode))}`;
 }
-
 function plBannerHtml(data, mode) {
   const sf = state.opportunities && state.opportunities.shortfall;
   const act = data.actionable;
   const line = `<b>${act}</b> ${mode === 'core' ? 'Core' : 'High Stocks'} product${act === 1 ? '' : 's'} need${act === 1 ? 's' : ''} new creative now.`;
-  return `<div class="opp-summary"><span>${line}</span>${sf ? `<span class="hint">${plEsc(sf.text)}</span>` : ''}<button type="button" class="btn btn-ghost btn-sm" data-opp-refresh title="Recalculate from the latest sales, stock and Meta data">Refresh</button></div>`;
+  const q = state.opportunities && state.opportunities.data && state.opportunities.data.quality;
+  const flags = q ? [q.recent_sales.complete === false ? `<span class="pt-flag" title="Some daily ApparelMagic sales requests failed, so recent sales may be under-counted. No High priority is given on incomplete sales.">Sales may be incomplete</span>` : '', q.families_with_disagreeing_sources ? `<span class="pt-flag" title="ApparelMagic online sales and the Shopify export differ a lot for these products; they are held at Medium.">${q.families_with_disagreeing_sources} with disagreeing sales sources</span>` : ''].join('') : '';
+  return `<div class="opp-summary"><span>${line}</span>${flags}${sf ? `<span class="hint">${plEsc(sf.text)}</span>` : ''}<button type="button" class="btn btn-ghost btn-sm" data-opp-refresh title="Recalculate from the latest sales, stock and Meta data">Refresh</button></div>`;
 }
-
 function plNotesHtml() {
   const o = state.opportunities;
   if (!o || !o.data || !o.data.notes || !o.data.notes.length) return '';
   return `<details class="opp-notes"><summary>Data and rules (${o.data.notes.length})</summary><ul>${o.data.notes.map((n) => `<li>${plEsc(n)}</li>`).join('')}</ul></details>`;
 }
-
 function plUnavailableHtml(mode) {
   const o = state.opportunities;
   return `<div class="co-empty">${plEsc(state.opportunitiesError || (o && o.reason) || 'Opportunities are loading…')}</div>`;
 }
-
 function plRenderCore() {
   const host = document.getElementById('core-plan');
   if (!host) return;
@@ -212,7 +387,7 @@ function plRenderHighStocks() {
   const hs = o.high_stocks;
   const tierNote = hs.tier_state !== 'ok' ? `<div class="opp-tier-note" role="note">${plEsc(hs.tier_note || 'The Platinum / Rocket classification is unavailable.')} High Stocks cannot recommend a product without it.</div>` : '';
   host.innerHTML = `<div class="opp-panel" data-opp-panel="high">
-    <div class="opp-intro">Previously successful (Platinum or Rocket) products that have lost momentum and still have the stock to justify fresh creative. Stock alone is never a reason.</div>
+    <div class="opp-intro">Previously successful (Platinum or Rocket) products that have lost momentum, still sell enough to be revived, and have the stock to justify fresh creative. A product that has almost stopped selling is not a revival, and a bigger drop is not a stronger case. Past success and stock alone are never a reason.</div>
     ${tierNote}${plBannerHtml(hs, 'high')}${plToolbarHtml('high', hs)}${plListHtml('high', hs)}${plLaunchReviewHtml(o.launch_review)}${plNotesHtml()}</div>`;
   const f = document.getElementById('high-stock-step-footer-count');
   if (f) f.textContent = `${hs.actionable} product${hs.actionable === 1 ? '' : 's'} need creative`;
@@ -238,23 +413,37 @@ async function plConfirmLaunch(code, name) {
 }
 
 // ── interactions ─────────────────────────────────────────────────────────────────────
+const plRerender = (mode) => { if (mode === 'core') plRenderCore(); else plRenderHighStocks(); };
 document.addEventListener('click', (ev) => {
   const view = ev.target.closest('[data-opp-view]');
-  if (view) { const [mode, key] = view.dataset.oppView.split(':'); state.oppView[mode] = key; if (mode === 'core') plRenderCore(); else plRenderHighStocks(); return; }
+  if (view) { const [mode, key] = view.dataset.oppView.split(':'); state.oppView[mode] = key; state.oppSort[mode] = null; state.oppLimit[mode] = PL_PAGE; state.oppFilter[mode] = { priority: '', type: '' }; plRerender(mode); return; }
   if (ev.target.closest('[data-opp-refresh]')) { plLoadOpportunities(true); return; }
   const plan = ev.target.closest('[data-opp-plan]');
   if (plan) { plPlan(plan.dataset.oppPlan); return; }
+  const sort = ev.target.closest('[data-opp-sort]');
+  if (sort) { const [mode, key] = sort.dataset.oppSort.split(':'); const cur = state.oppSort[mode]; state.oppSort[mode] = !cur || cur.key !== key ? { key, dir: 'desc' } : cur.dir === 'desc' ? { key, dir: 'asc' } : null; plRerender(mode); return; }
+  const reset = ev.target.closest('[data-opp-reset]');
+  if (reset) { const mode = reset.dataset.oppReset; state.oppSort[mode] = null; state.oppFilter[mode] = { priority: '', type: '' }; plRerender(mode); return; }
+  const more = ev.target.closest('[data-opp-more]');
+  if (more) { const mode = more.dataset.oppMore; state.oppLimit[mode] = (state.oppLimit[mode] || PL_PAGE) + PL_PAGE; plRerender(mode); return; }
+  const row = ev.target.closest('[data-opp-row]');
+  if (row && !ev.target.closest('button, a, input, select')) { const id = row.dataset.oppRow; state.oppOpen[id] = !state.oppOpen[id]; plRerender(id.split(':')[0]); }
 });
-document.addEventListener('toggle', (ev) => {
-  const d = ev.target;
-  if (d && d.dataset && d.dataset.oppDetails) state.oppOpen[d.dataset.oppDetails] = d.open;
-}, true);
+document.addEventListener('keydown', (ev) => {
+  const t = ev.target;
+  if ((ev.key === 'Enter' || ev.key === ' ') && t && t.dataset && t.dataset.oppSort) { ev.preventDefault(); t.click(); }
+});
+document.addEventListener('change', (ev) => {
+  const f = ev.target.closest && ev.target.closest('[data-opp-filter]');
+  if (!f) return;
+  const [mode, field] = f.dataset.oppFilter.split(':'); state.oppFilter[mode][field] = f.value; state.oppLimit[mode] = PL_PAGE; plRerender(mode);
+});
 document.addEventListener('input', (ev) => {
   const s = ev.target.closest && ev.target.closest('[data-opp-search]');
   if (!s) return;
   const mode = s.dataset.oppSearch; state.oppQuery[mode] = s.value;
   const pos = s.selectionStart;
-  if (mode === 'core') plRenderCore(); else plRenderHighStocks();
+  plRerender(mode);
   const again = document.querySelector(`[data-opp-search="${mode}"]`); if (again) { again.focus(); try { again.setSelectionRange(pos, pos); } catch (e) { /* not supported */ } }
 });
 

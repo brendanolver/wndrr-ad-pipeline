@@ -71,6 +71,7 @@ function summarize(creatives, today, cfg, { uploads = [] } = {}) {
     performing: by.performing + by.recent_performing,
     weak: list.filter((c) => c.state === 'underperforming').length, declining: by.declining,
     stale: list.filter((c) => c.phase === 'stale' && c.state !== 'underperforming').length, testing: by.testing, unrated: by.unrated, unjudged: by.unjudged,
+    softening: list.filter((c) => c.trend && c.trend.softening).length, // worsening against itself but not credibly fatigued: shown, never counted against the ad
     clear_weak: list.filter((c) => c.state === 'underperforming' && c.severity !== 'marginal').length,
     newest_age_days: newest.length ? Math.min(...newest) : null,
     newest_source: newest.length === 0 ? null : (newestUpload !== null && (newestMeta === null || newestUpload <= newestMeta)) ? 'production' : 'meta',

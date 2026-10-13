@@ -6,9 +6,10 @@
 //   local database          Meta ads / insights (unique creatives, approved benchmarks), launch overrides + drops, the Shoot Plan production records, settings
 // A piece that cannot be loaded is reported (data.notes / the item status says "unavailable") and is never replaced by an unrelated number.
 //
-// One product (a "family": its colourways and season codes) is evaluated once. CORE families are listed under Core; non-Core Platinum / Rocket families under
-// High Stocks; a CORE product that also qualifies as a High Stocks revival stays ONE item in Core and carries the revival evidence and a High Stocks tag, so a
-// product never appears twice.
+// One product (a "family": its colourways and season codes) is evaluated for every opportunity type it could qualify for (core, High Stocks revival, Protect
+// Momentum) and shown ONCE, with one primary recommendation (lib/planningPrimary.js). Official Core products (ApparelMagic group AA CORE STYLES) always stay in
+// Core and keep that identity; a High Stocks result never replaces a Core result. Non-Core Platinum / Rocket products are High Stocks; recent launches that qualify
+// for Protect Momentum and are not Core are listed in their own `momentum` list (shown as a view inside the Core step, labelled "Not Core: recent launch").
 const { pool } = require('../db');
 const apparelmagic = require('./apparelmagic');
 const planningContext = require('./planningContext');
@@ -23,6 +24,8 @@ const season = require('./seasonRelevance');
 const progress = require('./shootPlanProgress');
 const coverageLib = require('./activeAdCoverage');
 const nameCopies = require('./metaNameCopies');
+const planningSales = require('./planningSales');
+const primaryLib = require('./planningPrimary');
 const { ymdInZone, REPORTING_TIMEZONE } = require('./metaPerformance');
 
 const MEMO_MS = 5 * 60 * 1000;
@@ -87,32 +90,47 @@ async function computeOpportunities({ now = new Date(), deps = {} } = {}) {
   const lc = deps.launch || await loadLaunchContext(db, allStyles);
   const launchCfg = launch.fromConfig(settings.creative_planning_config || {});
   const stockOf = (f) => ({ known: f.style_codes.some((c) => am.amStock.has(c)), units: f.style_codes.reduce((s, c) => s + Math.max(0, Number(am.amStock.get(c)) || 0), 0), on_order: am.amOnOrder ? f.style_codes.reduce((s, c) => s + Math.max(0, Number(am.amOnOrder.get(c)) || 0), 0) : 0 });
-  const salesOf = (f) => {
-    if (!salesByStyle) return { available: false };
-    const t = { available: true, units7: 0, units30: 0, units365: 0 };
-    f.style_codes.forEach((c) => { const e = salesByStyle.get(c); if (e) { t.units7 += e.qty7 || 0; t.units30 += e.qty30 || 0; t.units365 += e.qty365 || 0; } });
-    return t;
+  const window = salesByStyle && salesByStyle.window ? salesByStyle.window : null;
+  // size availability is a WARNING only and only where ApparelMagic exposes stock by size (the field is verified in production, never assumed): never loaded cold
+  let sizesByStyle = null; let sizeField = null;
+  try {
+    if (deps.sizesByStyle !== undefined) { sizesByStyle = deps.sizesByStyle; sizeField = sizesByStyle ? 'injected' : null; }
+    else if (apparelmagic.configured() && apparelmagic.getAmCacheStatus().stock && apparelmagic.getAmCacheStatus().stock.hasData) { const ss = await apparelmagic.getStockSizes(); sizesByStyle = ss.sizes && ss.sizes.size ? ss.sizes : null; sizeField = ss.sizeField || null; }
+  } catch (e) { sizesByStyle = null; }
+  const sizesOf = (f) => {
+    if (!sizesByStyle) return null;
+    const { orderSizes, sizeHealth } = require('./coreCreativePlan');
+    const m = new Map();
+    f.style_codes.forEach((c) => { const sm = sizesByStyle.get(c); if (sm) sm.forEach((q, sz) => m.set(sz, (m.get(sz) || 0) + Math.max(0, num(q)))); });
+    return m.size ? sizeHealth(orderSizes(m.entries(), [])) : null;
   };
   const rows = families.map((f) => {
-    const stock = stockOf(f); const sales = salesOf(f);
+    const stock = stockOf(f);
     const lstyles = f.style_codes.map((c) => launchInputs.forStyle(c, { amDetails: am.amDetails, salesByStyle, drops: lc.drops, overrides: lc.overrides, shopify: lc.shopify || deps.shopifyEvidence || null }));
     const l = launch.assessFamily({ styles: lstyles, familyOverride: lc.overrides.get(f.key) || null, stock: { known: stock.known, units: stock.units }, onOrder: stock.on_order }, today, launchCfg);
     const ft = familyTier(f, tiers);
+    const launchDate = planningSales.familyLaunchDate(l, am.amDetails);
+    const fs = planningSales.familySales({ style_codes: f.style_codes, salesByStyle, window, launchDate, today, tierSales: ft.sales, cfg });
+    const launchAge = launchDate ? planningSales.daysBetween(launchDate, today) : null;
     const lsByStyle = new Map(l.by_style.map((x) => [x.style_code, x.status]));
     const colourways = f.style_codes.map((c) => ({ style_code: c, colour_label: apparelmagic.resolveColourLabel(am.amDetails, c), image_url: (am.amDetails.get(c) || {}).imageUrl || null, launch_status: lsByStyle.get(c) || null, soh: Math.max(0, Number(am.amStock.get(c)) || 0) }));
-    return { f, stock, sales: { ...sales, ...(ft.sales || {}), initial28: ft.sales ? ft.sales.initial28 : null, recent28: ft.sales ? ft.sales.recent28 : null, age_days: ft.sales ? ft.sales.age_days : null }, launch: l, tier: ft.tier, colourways };
+    return { f, stock: { ...stock, sizes: sizesOf(f) }, sales: fs.sales, quality: fs.quality, launch: l, launch_date: launchDate, launch_age_days: launchAge, tier: ft.tier, colourways };
   });
 
-  // who is a candidate: launched, enough stock, and either CORE or a Platinum / Rocket product above the High Stocks threshold
+  // who is evaluated for what:
+  //   core      every official Core family (ApparelMagic group AA CORE STYLES): the classification is never inferred from sales, stock or age
+  //   revival   Platinum / Rocket families (Demand Planning's classification) with enough stock: High Stocks for non-Core; for a Core family it is only supplementary evidence
+  //   momentum  families officially launched (mid_code) within momentum_window_days with enough stock: no tier, decline or 56 days needed
   const hsMin = Math.max(num(settings.high_stock_min_soh), cfg.opp_min_stock_units);
   const isTierOk = (r) => r.tier && ['platinum', 'rocket'].includes(r.tier.tier);
+  const isRecent = (r) => r.launch.eligible && r.launch_age_days !== null && r.launch_age_days >= 0 && r.launch_age_days <= cfg.momentum_window_days && r.stock.known && r.stock.units >= cfg.opp_min_stock_units;
   const coreRows = rows.filter((r) => r.f.is_core);
-  const hsRows = rows.filter((r) => !r.f.is_core && isTierOk(r) && r.stock.known && r.stock.units >= hsMin);
-  const coreRevivalRows = coreRows.filter((r) => isTierOk(r) && r.stock.units >= hsMin);
-  const need = new Map(); [...coreRows, ...hsRows].forEach((r) => { if (r.launch.eligible && r.stock.known && r.stock.units >= cfg.opp_min_stock_units) need.set(r.f.key, r.f); });
+  const revivalRows = rows.filter((r) => isTierOk(r) && r.stock.known && r.stock.units >= hsMin);
+  const momentumRows = rows.filter(isRecent);
+  const need = new Map(); [...coreRows, ...revivalRows, ...momentumRows].forEach((r) => { if (r.launch.eligible && r.stock.known && r.stock.units >= cfg.opp_min_stock_units) need.set(r.f.key, r.f); });
   const evFamilies = [...need.values()].map((f) => ({ key: f.key, codes: f.codes }));
 
-  // creative evidence (confirmed ads; DPAs excluded), history, the Shoot Plan pipeline
+  // creative evidence (confirmed ads; DPAs excluded), history (includes paused winners), the Shoot Plan pipeline
   const benchmarks = deps.benchmarks || await require('./metaBenchmarks').getEffective();
   const evidence = deps.performance || (ctx.coverage && ctx.coverage.available ? await perf.loadProductAdPerformance(evFamilies, { db, rules: benchmarks.rules, coded: benchmarks.coded, config: cfg, today, nameCopies }) : new Map());
   const hist = deps.history || (ctx.coverage && ctx.coverage.available ? await history.loadCreativeHistory(evFamilies, { db, rules: benchmarks.rules, coded: benchmarks.coded, today, config: cfg, nameCopies }) : new Map());
@@ -136,47 +154,59 @@ async function computeOpportunities({ now = new Date(), deps = {} } = {}) {
   const toInput = (r) => {
     const f = r.f; const ev = evidence.get(f.key) || { creatives: [], ads: 0 };
     const active = cov ? (cov.by_family.get(f.key) || 0) : 0; const possible = cov ? ((cov.pending_by_family && cov.pending_by_family.get(f.key)) || 0) : 0;
+    // ANY awaiting-review ad suggested for this product makes its picture uncertain (the old rule needed enough of them to reach the minimum)
     const cls = cov ? coverageLib.classify({ confirmed: active, possible, unattributed: cov.unattributed_pending || 0, min: settings.min_active_ads }) : null;
     const g = ctx.seasonality && ctx.seasonality.available ? ctx.seasonality.groups.get(f.key) : null;
     const h = hist.get(f.key) || { winners: [] };
     return {
       key: f.key, name: f.name, category: f.category, codes: f.codes, style_codes: f.style_codes, is_core: f.is_core, image_url: (r.colourways.find((c) => c.image_url) || {}).image_url || null,
-      launch: r.launch, stock: r.stock, sales: r.sales, tier: r.tier, tierState,
+      launch: r.launch, launch_age_days: r.launch_age_days, launch_date: r.launch_date, stock: r.stock, sales: r.sales, data_quality: r.quality, tier: r.tier, tierState,
       coverage: cov ? { known: true, active_ads: active, possible, uncertain: !!(cls && cls.state === 'uncertain'), min: settings.min_active_ads } : { known: false, min: settings.min_active_ads },
-      creatives: ev.creatives || [], history: h, pipeline: pipeFor(f), seasonData: g ? g.status : (ctx.seasonality && ctx.seasonality.available ? 'insufficient_data' : null),
+      creatives: ev.creatives || [], history: h, pipeline: pipeFor(f), seasonData: g ? g.status : (ctx.seasonality && ctx.seasonality.available ? 'insufficient_data' : null), seasonEvidence: g && g.evidence ? g.evidence : null,
     };
   };
 
-  // two-phase so the seasonal exception ("selling strongly now") can use the sales band
-  const run = (rowSet, mode) => {
+  const runMode = (rowSet, mode) => {
     const inputs = rowSet.map(toInput);
     const bands = opp.salesBands(inputs, cfg);
-    return inputs.map((p) => {
+    return new Map(inputs.map((p) => {
       const band = opp.bandOf(p, bands, cfg);
-      const s = season.assess({ category: p.category, name: p.name, month, data: p.seasonData, strongSellingNow: band === 'strong' });
-      return opp.evaluate({ ...p, salesBand: band, season: s }, cfg, today, mode);
-    });
+      // season is assessed WITHOUT the strong-selling exception: the engine decides an exception from absolute units and creative evidence
+      const s = season.assess({ category: p.category, name: p.name, month, data: p.seasonData, dataEvidence: p.seasonEvidence, patternIndex: cfg.season_pattern_index });
+      return [p.key, opp.evaluate({ ...p, salesBand: band, season: s }, cfg, today, mode)];
+    }));
   };
-  const coreEvals = run(coreRows, 'core');
-  const coreRevEvals = new Map(run(coreRevivalRows, 'revival').map((e) => [e.key, e]));
-  const hsEvals = run(hsRows, 'revival');
+  const coreEvals = runMode(coreRows, 'core');
+  const revivalEvals = runMode(revivalRows, 'revival');
+  const momentumEvals = runMode(momentumRows, 'momentum');
 
   const colourFor = (key) => (rows.find((r) => r.f.key === key) || {}).colourways || [];
-  const decorate = (e, extra = {}) => ({ ...e, product_code: (e.codes && e.codes[0]) || e.key, colourways: colourFor(e.key), ...extra });
-  // a CORE product that is also a High Stocks revival stays ONE item: the revival evidence wins when it is the action
+  const rowFor = (key) => rows.find((r) => r.f.key === key);
   const tierTag = (e) => (e.facts && e.facts.tier === 'platinum' ? 'Platinum' : e.facts && e.facts.tier === 'rocket' ? 'Rocket' : null);
-  const coreItems = coreEvals.map((e) => {
-    const rev = coreRevEvals.get(e.key) || null;
-    const tags = ['Core']; if (tierTag(e)) tags.push(tierTag(e));
-    if (rev && rev.status === 'act' && e.status !== 'act') return decorate({ ...rev, kind: 'core', kinds: ['core', 'high_stock'], tags: [...tags, 'High Stocks revival'] });
-    if (rev && rev.status === 'act' && e.status === 'act') return decorate({ ...e, kinds: ['core', 'high_stock'], tags: [...tags, 'High Stocks revival'], revival: rev.revival, other_explanations: rev.other_explanations, why: [...e.why, ...rev.why.filter((w) => ['demand', 'stock'].includes(w.k)).map((w) => ({ ...w, k: `revival_${w.k}` }))] });
-    return decorate({ ...e, kinds: ['core'], tags });
+  // one primary result per family
+  const coreItems = []; const hsItems = []; const momentumItems = [];
+  const keys = new Set([...coreRows, ...revivalRows, ...momentumRows].map((r) => r.f.key));
+  keys.forEach((key) => {
+    const r = rowFor(key);
+    const pick = primaryLib.choosePrimary({ is_core: r.f.is_core, core: coreEvals.get(key) || null, revival: revivalEvals.get(key) || null, momentum: momentumEvals.get(key) || null });
+    if (!pick.primary) return;
+    const e = pick.primary;
+    const tags = [];
+    if (r.f.is_core) tags.push('Core'); if (tierTag(e)) tags.push(tierTag(e));
+    if (e.mode === 'revival') tags.push('High Stocks'); if (e.mode === 'momentum') tags.push(r.f.is_core ? 'Protect momentum' : 'Recent launch');
+    const kinds = pick.placement === 'core' ? ['core'] : pick.placement === 'high_stocks' ? ['high_stock'] : ['momentum'];
+    if (pick.placement === 'core' && e.mode === 'momentum') kinds.push('momentum');
+    const item = {
+      ...e, product_code: (e.codes && e.codes[0]) || e.key, colourways: colourFor(key), kinds, tags, placement: pick.placement, also_qualifies: pick.also, evaluated_as: pick.evaluated,
+      classification: r.f.is_core ? 'Official Core (ApparelMagic group AA CORE STYLES)' : (e.mode === 'momentum' ? 'Not Core: recent launch' : 'Not Core: Platinum / Rocket'),
+      launch_date: r.launch_date, launch_age_days: r.launch_age_days,
+    };
+    (pick.placement === 'core' ? coreItems : pick.placement === 'high_stocks' ? hsItems : momentumItems).push(item);
   });
-  const hsItems = hsEvals.map((e) => decorate({ ...e, kinds: ['high_stock'], tags: [e.facts.tier === 'platinum' ? 'Platinum' : 'Rocket'] }));
 
-  const rank = { act: 0, testing: 1, in_production: 2, insufficient_data: 3, covered: 4, momentum_ok: 4, out_of_season: 5, weak_demand: 6, low_stock: 7, too_new: 8, no_proven_demand: 9, unavailable: 10, launch_unknown: 11, not_launched: 12 };
+  const rank = { act: 0, testing: 1, in_production: 2, insufficient_data: 3, covered: 4, momentum_ok: 4, out_of_season: 5, weak_demand: 6, low_stock: 7, too_new: 8, no_proven_demand: 9, not_recent: 10, unavailable: 11, launch_unknown: 12, not_launched: 13 };
   const order = (a, b) => (rank[a.status] - rank[b.status]) || (b.score - a.score) || String(a.name).localeCompare(String(b.name));
-  coreItems.sort(order); hsItems.sort(order);
+  coreItems.sort(order); hsItems.sort(order); momentumItems.sort(order);
   const countBy = (items) => { const c = {}; items.forEach((i) => { c[i.status] = (c[i.status] || 0) + 1; }); return c; };
 
   // launch review: only products that matter (stock or recent sales) go to a person; the long historical tail does not
@@ -192,21 +222,55 @@ async function computeOpportunities({ now = new Date(), deps = {} } = {}) {
     note: unknown.length > relevantUnknown.length ? `${unknown.length - relevantUnknown.length} products with no readable launch date have no stock, no open order and no sales in the last 30 days: they are historical catalogue entries and are not asked of the team.` : null,
   };
 
+  // every family officially launched within the Protect Momentum window, whatever happened to it (so a launch such as a 1 October drop can be checked product by product)
+  const placed = new Map([...coreItems, ...hsItems, ...momentumItems].map((i) => [i.key, i]));
+  const recentLaunches = rows.filter((r) => r.launch_age_days !== null && r.launch_age_days >= 0 && r.launch_age_days <= cfg.momentum_window_days).map((r) => {
+    const it = placed.get(r.f.key) || null;
+    return {
+      key: r.f.key, name: r.f.name, category: r.f.category, is_core: r.f.is_core, launch_date: r.launch_date, launch_age_days: r.launch_age_days, launch_status: r.launch.status,
+      stock_units: r.stock.known ? r.stock.units : null, units7: r.sales.available ? Math.round(num(r.sales.units7)) : null, units14: r.sales.available ? Math.round(num(r.sales.units14)) : null, units30: r.sales.available ? Math.round(num(r.sales.units30)) : null,
+      since_launch_units: r.sales.available ? r.sales.since_launch : null, avg_daily_since_launch: r.sales.available ? r.sales.avg_daily_since_launch : null, tier: r.tier ? r.tier.tier : null,
+      evaluated: !!it, placement: it ? it.placement : null, status: it ? it.status : (r.stock.known && r.stock.units < cfg.opp_min_stock_units ? 'low_stock' : 'not_evaluated'), status_label: it ? it.status_label : null,
+      opportunity_type: it ? it.opportunity_label : null, priority: it ? it.priority : null, reason: it ? it.reason : null,
+    };
+  }).sort((a, b) => String(a.launch_date).localeCompare(String(b.launch_date)) || String(a.name).localeCompare(String(b.name)));
+
+  // data quality and freshness: every source named, with when it was last read and what is missing
   const mem = ctx.coverage && ctx.coverage.available && ctx.coverage.reliability ? ctx.coverage.reliability : null;
+  let metaSync = null;
+  try { const r = await db.query("SELECT max(finished_at) AS at FROM meta_sync_runs WHERE status = 'success'"); metaSync = r.rows[0] && r.rows[0].at ? new Date(r.rows[0].at).toISOString() : null; } catch (e) { metaSync = null; }
+  const amStatus = apparelmagic.getAmCacheStatus ? apparelmagic.getAmCacheStatus() : {};
+  const tierStatus = require('./amCache').cacheStatus('pipelineStyleTiers');
+  const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
+  const failedRecent = window && Array.isArray(window.failed_days) ? window.failed_days.filter((d) => d < 30) : [];
+  const incompleteFamilies = rows.filter((r) => r.quality && r.quality.sales_complete === false && (r.launch.eligible)).length;
+  const disagree = rows.filter((r) => r.quality && r.quality.discrepancy && r.quality.discrepancy.flag).length;
+  const dataQuality = {
+    recent_sales: { source: 'ApparelMagic online sales (customers ONLINE SALES and ICONIC ONLINE SALES; approved orders net of cancellations)', available: !!salesByStyle, fetched_at: window ? window.fetched_at || null : iso(amStatus.sales && amStatus.sales.fetchedAt), failed_requests: window ? window.failed_requests || 0 : null, total_requests: window ? window.total_requests || null : null, failed_days_last_30: failedRecent.length, complete: salesByStyle ? (failedRecent.length === 0 && !(window && window.failed_requests > 0 && !Array.isArray(window.failed_days))) : null },
+    launch_pace: { source: 'Shopify export through Demand Planning (Platinum / Rocket tiers, first and latest 28 days); not changed by Planning', available: tierState === 'ok', fetched_at: iso(tierStatus.fetchedAt) },
+    stock: { source: 'ApparelMagic sellable stock (summed over every colourway and season code of the product)', fetched_at: iso(amStatus.stock && amStatus.stock.fetchedAt), size_data: sizeField ? `by size (field ${sizeField})` : 'not available from ApparelMagic' },
+    meta: { source: 'Meta-reported insights and ad status (Triple Whale is not connected and is not substituted); DPAs excluded', last_successful_sync: metaSync, ads_status_as_of: ctx.coverage && ctx.coverage.available ? ctx.coverage.status_as_of : null, awaiting_review: mem ? mem.awaiting_review : null, active_ads: mem ? mem.active_ads : null },
+    families_with_incomplete_recent_sales: incompleteFamilies, families_with_disagreeing_sources: disagree,
+  };
   if (mem && mem.awaiting_review > 0) notes.push(`${mem.awaiting_review} of ${mem.active_ads} active Meta ads (${mem.share_awaiting_review}%) are still awaiting review in Ad Matching; products they may belong to show "Not enough data" rather than a shortage.`);
   if (!ctx.coverage || !ctx.coverage.available) notes.push((ctx.coverage && ctx.coverage.reason) || 'Meta ad data is unavailable, so no product can be confirmed as needing creative.');
   if (tierState !== 'ok') notes.push(tierReason);
   if (tiers) notes.push('Platinum / Rocket are Demand Planning\'s own classification (first 28 days of sales against products that first sold the same week). Products that first sold before the start of the ~12-month sales export cannot be compared with their launch.');
-  notes.push('Seasonal rule: tees, shorts, swim and lightweight shirts are in season approaching Australian summer; winter trackpants and heavy fleece are not; jeans and long pants are neutral. This is a WNDRR rule, not measured sales; a measured sales pattern outranks it.');
-  notes.push('Dynamic Product Ads are not counted as creative coverage.');
+  if (!dataQuality.recent_sales.complete && salesByStyle) notes.push(`Recent ApparelMagic sales may be under-counted: ${failedRecent.length ? `${failedRecent.length} of the last 30 days could not be read` : `${window.failed_requests} daily requests failed`}. No product is given High priority on incomplete sales.`);
+  if (disagree) notes.push(`${disagree} products show a large difference between ApparelMagic online sales and the Shopify export for the latest 28 days; they are held at Medium priority. (ApparelMagic also includes ICONIC online sales, so small differences are normal.)`);
+  notes.push('Recent sales (7 / 14 / 30 days, since launch) come from ApparelMagic online sales; launch pace (first 28 days vs latest 28 days) and Platinum / Rocket come from the Shopify export (Demand Planning). They are never blended. Windows include today, a part day.');
+  notes.push('Seasonal rule: Australian calendar. Tees, shorts, short-sleeve shirts, swim are in season approaching summer; hoods, sweats, trackpants are not; 1/4 zips and long sleeves layer in autumn / winter / spring; jeans and pants are neutral. A measured sales pattern is used when reliable, but a Black Friday / Christmas peak is not a season. Out-of-season products qualify only on compelling current sales plus creative evidence.');
+  notes.push('Dynamic Product Ads are not counted as creative coverage or concepts.');
+  if (!sizeField) notes.push('Stock by size is not exposed by ApparelMagic here, so size availability does not affect recommendations.');
 
   return {
     available: true, generated_at: now.toISOString(), today, week_start: weekStart,
-    config: { min_performing_creatives: cfg.min_performing_creatives, test_period_days: cfg.test_period_days, recent_creative_days: cfg.recent_creative_days, stale_creative_days: cfg.stale_creative_days, opp_min_recent_units: cfg.opp_min_recent_units, opp_min_stock_units: cfg.opp_min_stock_units, revival_decline_pct: cfg.revival_decline_pct, revival_min_cover_weeks: cfg.revival_min_cover_weeks, high_stock_min_soh: hsMin },
+    config: { min_performing_creatives: cfg.min_performing_creatives, test_period_days: cfg.test_period_days, recent_creative_days: cfg.recent_creative_days, stale_creative_days: cfg.stale_creative_days, opp_min_recent_units: cfg.opp_min_recent_units, opp_min_stock_units: cfg.opp_min_stock_units, revival_decline_pct: cfg.revival_decline_pct, revival_min_cover_weeks: cfg.revival_min_cover_weeks, revival_min_age_days: cfg.revival_min_age_days, revival_min_recent_units: cfg.revival_min_recent_units, revival_min_pace_pct: cfg.revival_min_pace_pct, demand_steady_units: cfg.demand_steady_units, demand_strong_units: cfg.demand_strong_units, momentum_window_days: cfg.momentum_window_days, stock_min_cover_weeks: cfg.stock_min_cover_weeks, high_stock_min_soh: hsMin, priority_high_min: cfg.priority_high_min, priority_medium_min: cfg.priority_medium_min },
     core: { items: coreItems, counts: countBy(coreItems), total: coreItems.length, actionable: coreItems.filter((i) => i.actionable).length },
     high_stocks: { items: hsItems, counts: countBy(hsItems), total: hsItems.length, actionable: hsItems.filter((i) => i.actionable).length, tier_state: tierState, tier_note: tierReason },
-    launch_review: launchReview,
-    data: { notes, config_issues: configIssues, coverage_reliability: mem, season_source: ctx.salesSource ? ctx.salesSource.label : null, benchmarks_source: benchmarks.source || null },
+    momentum: { items: momentumItems, counts: countBy(momentumItems), total: momentumItems.length, actionable: momentumItems.filter((i) => i.actionable).length },
+    launch_review: launchReview, recent_launches: recentLaunches,
+    data: { notes, config_issues: configIssues, coverage_reliability: mem, season_source: ctx.salesSource ? ctx.salesSource.label : null, benchmarks_source: benchmarks.source || null, quality: dataQuality },
   };
 }
 

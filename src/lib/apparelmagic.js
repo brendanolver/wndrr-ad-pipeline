@@ -197,6 +197,7 @@ async function fetchOnOrderByStyleUncached() {
 // with bounded concurrency below rather than serially.
 const AM_ONLINE_CUSTOMERS = ['ONLINE SALES', 'ICONIC ONLINE SALES'];
 const SALES_WINDOW_DAYS = 365;
+const SALES_DAILY_DAYS = 120; // per-day units kept for the most recent days (sales since a recent launch)
 const SALES_TTL = 12 * 60 * 60 * 1000; // ~730-request crawl -- twice a day, not per request
 const SALES_CONCURRENCY = 10;
 // Same prefix pattern confirmed live in demandplanning V2 (AM_PRODUCT_STYLE_RE)
@@ -239,17 +240,19 @@ async function fetchSalesByStyleUncached() {
     }
   }
 
-  const salesByStyle = new Map(); // style_code -> { qty7, qty30, qty365, months: { 'YYYY-MM': units } }
+  const salesByStyle = new Map(); // style_code -> { qty7, qty14, qty30, qty365, months: { 'YYYY-MM': units }, daily: { daysAgo: units } (last SALES_DAILY_DAYS days, sparse) }
   // calendar month of each crawled day, so the SAME crawl also yields monthly units per style (Creative Planning's seasonality reads these)
   const monthOfDaysAgo = (daysAgo) => { const d = new Date(today); d.setUTCDate(d.getUTCDate() - daysAgo); return d.toISOString().slice(0, 7); };
   function addQty(style, daysAgo, qty) {
     if (qty <= 0) return;
     let entry = salesByStyle.get(style);
     if (!entry) {
-      entry = { qty7: 0, qty30: 0, qty365: 0, months: {} };
+      entry = { qty7: 0, qty14: 0, qty30: 0, qty365: 0, months: {}, daily: {} };
       salesByStyle.set(style, entry);
     }
     if (daysAgo < 7) entry.qty7 += qty;
+    if (daysAgo < 14) entry.qty14 += qty; // Batch 27: additive (7 / 30 / 365 are unchanged)
+    if (daysAgo < SALES_DAILY_DAYS) entry.daily[daysAgo] = (entry.daily[daysAgo] || 0) + qty; // Batch 27: lets recent launches be measured since their official launch date
     if (daysAgo < 30) entry.qty30 += qty;
     entry.qty365 += qty;
     const ym = monthOfDaysAgo(daysAgo);
@@ -257,15 +260,16 @@ async function fetchSalesByStyleUncached() {
   }
 
   let failedRequests = 0; // a day that could not be read is UNDER-counted: tracked and reported, never silent
+  const failedDays = new Set(); // daysAgo values with at least one failed request (Batch 27: so recent windows can say they are incomplete)
   await runWithConcurrency(jobs, SALES_CONCURRENCY, async ({ daysAgo, customer, usDate }) => {
     let result;
     try {
       result = await amRequest('GET', 'orders', { customer_name: customer, date: usDate });
     } catch {
-      failedRequests += 1;
+      failedRequests += 1; failedDays.add(daysAgo);
       return; // one bad day/customer combo shouldn't fail the whole crawl
     }
-    if (result.status !== 200) { failedRequests += 1; return; }
+    if (result.status !== 200) { failedRequests += 1; failedDays.add(daysAgo); return; }
     const orders = result.data?.response || [];
     for (const order of orders) {
       if ((order.credit_status || '') !== 'Approved') continue;
@@ -280,7 +284,7 @@ async function fetchSalesByStyleUncached() {
 
   // what period the numbers cover (the crawl is exactly SALES_WINDOW_DAYS back from today), so seasonality knows how much history it really has
   const from = new Date(today); from.setUTCDate(from.getUTCDate() - (SALES_WINDOW_DAYS - 1));
-  salesByStyle.window = { from: from.toISOString().slice(0, 10), to: today.toISOString().slice(0, 10), days: SALES_WINDOW_DAYS, customers: AM_ONLINE_CUSTOMERS.slice(), source: 'apparelmagic', total_requests: jobs.length, failed_requests: failedRequests };
+  salesByStyle.window = { from: from.toISOString().slice(0, 10), to: today.toISOString().slice(0, 10), days: SALES_WINDOW_DAYS, customers: AM_ONLINE_CUSTOMERS.slice(), source: 'apparelmagic', total_requests: jobs.length, failed_requests: failedRequests, failed_days: [...failedDays].sort((a, b) => a - b), fetched_at: new Date().toISOString(), today: today.toISOString().slice(0, 10) };
   return salesByStyle; // Map<style_code, { qty7, qty30, qty365, months }> + .window
 }
 

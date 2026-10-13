@@ -1,26 +1,33 @@
-// Creative OPPORTUNITIES: which products genuinely need new creative THIS WEEK, and why. One engine behind both Core and High Stocks (Batch 14); the same
-// product that qualifies for both appears ONCE (see merge in the loader).
+// Creative OPPORTUNITIES: which products genuinely need new creative THIS WEEK, and why. One engine behind Core, High Stocks and Protect Momentum.
 //
 // PURPOSE: every item in the actionable list is something the team can act on immediately, with the reason stated from data. Anything that is NOT an action
 // still has a status that says why (testing / in production / already covered / not enough data / out of season / low stock / not selling), so nothing is
 // silently dropped and nothing is padded in to reach a number.
 //
+// THREE EVALUATION MODES (a product can be evaluated in several internally; the loader picks ONE primary result, see planningOpportunitiesLoader.js):
+//   core       an official Core product (ApparelMagic group AA CORE STYLES): current demand + creative need
+//   revival    High Stocks: a Platinum / Rocket product (Demand Planning's classification) that has lost momentum AND still sells enough to be revived
+//   momentum   Protect Momentum: a recent launch (official mid_code date within momentum_window_days) selling well with too little effective creative.
+//              No decline, no Platinum/Rocket and no 56 days of history are required: its sales are normalised per day on sale.
+//
 // GATES, in order (the first that applies decides a non-action status):
-//   1. launched          ApparelMagic mid_code (lib/launchStatus.js). Not launched / not known -> never an opportunity (reported elsewhere).
-//   2. stock             below opp_min_stock_units sellable units -> low_stock (nothing to sell)
-//   3. season            lib/seasonRelevance.js: out of season (unless selling strongly now) -> out_of_season
-//   4. demand            (Core) fewer than opp_min_recent_units sold in the last 30 days -> weak_demand. Low sell-through is NOT taken to mean "more creative is needed".
-//   5. in production     concepts for this product already planned / filming / editing / approved and not yet uploaded -> in_production (no further ask)
-//   6. creative          lib/productAdPerformance.js verdicts (approved benchmarks only) read through lib/creativeRecency.js:
-//        enough performing creatives                                -> covered
-//        new creative still inside its test period (Meta or WNDRR's own upload record) -> testing (re-assessed after the test period)
-//        Meta data unavailable, or awaiting-review ads suggested for this product could close the gap -> insufficient_data (NEVER a shoot on missing data)
-//        otherwise a CONFIRMED gap: no creative / over the approved CPA / fatigue / stale -> act
-// A "thin" shortfall (some performing creative, fewer than wanted, nothing weak) only becomes an action when demand is strong.
-// High Stocks adds the REVIVAL gates (tier Platinum / Rocket from Demand Planning's classification, momentum lost against the product's own first 28 days,
-// enough stock cover) and lists other explanations for a sales decline instead of blaming creative.
+//   1. launched         ApparelMagic mid_code (lib/launchStatus.js). Not launched / not known -> never an opportunity.
+//   2. stock            below opp_min_stock_units sellable units -> low_stock
+//   3. sales            not loaded -> insufficient_data (never a guess)
+//   4. season           lib/seasonRelevance.js: out of season -> out_of_season, unless current demand is compelling (units AND creative evidence): see seasonException
+//   5. demand           core: at least opp_min_recent_units in 30 days. revival: at least revival_min_recent_units, and at least revival_min_pace_pct of its own launch pace.
+//                       momentum: at least demand_steady_units (30-day equivalent, normalised for days on sale)
+//        revival also: Platinum / Rocket tier, a readable first-28-day baseline, 56+ days of selling (so the first and latest 28 days do not overlap), the last
+//                       28 days below revival_decline_pct of the first 28 days, and revival_min_cover_weeks of stock
+//   6. stock sufficiency enough weeks of cover for creative to pay off; a LOT of stock with only weak demand is not a reason: see planningDemand.js
+//   7. creative         lib/productAdPerformance.js verdicts (approved benchmarks only), lib/creativeEvidence.js (concentration, diversity), read through
+//                       lib/creativeRecency.js; concepts already testing or in production count as supply but do not block a strongly selling product
+// PRIORITY is a 0-100 score of demand, creative need, stock, season and (per mode) history, with explicit caps (weak demand, incomplete data, disagreeing sales
+// sources, an out-of-season exception): High needs strong or steady demand AND complete data. Every component is returned in score_parts.
 // Pure: no database, no network, no clock (today is passed in).
 const recency = require('./creativeRecency');
+const demandLib = require('./planningDemand');
+const evidenceLib = require('./creativeEvidence');
 
 const num = (v) => Number(v) || 0;
 const plural = (n, one, many) => `${n} ${n === 1 ? one : (many || `${one}s`)}`;
@@ -29,11 +36,24 @@ const units = (v) => Math.round(num(v)).toLocaleString('en-AU');
 
 const STATUS_LABEL = {
   act: 'Needs creative now', testing: 'New creative testing', in_production: 'In production', covered: 'Creative is working', insufficient_data: 'Not enough data',
-  out_of_season: 'Out of season', low_stock: 'Low stock', weak_demand: 'Not selling', not_launched: 'Not launched', launch_unknown: 'Launch not confirmed',
-  no_proven_demand: 'No proven demand', too_new: 'Too new to compare', momentum_ok: 'Still selling well', unavailable: 'Data unavailable',
+  out_of_season: 'Out of season', low_stock: 'Low stock', weak_demand: 'Not selling enough', not_launched: 'Not launched', launch_unknown: 'Launch not confirmed',
+  no_proven_demand: 'No proven demand', too_new: 'Too new to compare', momentum_ok: 'Still selling well', unavailable: 'Data unavailable', not_recent: 'Not a recent launch',
+};
+const OPP_LABEL = {
+  confirmed_gap: 'Creative gap', creative_gap: 'Creative gap', underperforming: 'Underperforming creative', fatigue: 'Creative fatigue', concentration: 'Concentrated creative', diversity: 'Low concept diversity',
+  stale: 'Stale creative', thin: 'Thin creative coverage', revive: 'Revive momentum', protect_momentum: 'Protect momentum',
 };
 
-// percentile bands over the candidates being compared: strong / steady / weak (+ the units behind them). Percentiles come from settings.
+// SCORE: documented in docs/planning-intelligence.md. Points are hardcoded on purpose (they are weights, not thresholds); every cutoff lives in creativePlanningConfig.
+const SCORE = {
+  demand: { strong: 32, steady: 20, weak: 8, very_weak: 0, improving: 6, weakening: -6, max: 38 },
+  need: { confirmed_gap: 28, fatigue: 24, underperforming_clear: 22, underperforming_marginal: 14, concentration: 18, diversity: 12, stale: 14, thin: 8, supply_penalty: -8 },
+  season: { in_season: 15, shoulder: 8, neutral: 6, exception: 3, out_of_season: 0 },
+  core_tier: { platinum: 6, rocket: 4 }, revival_tier: { platinum: 10, rocket: 7 }, recoverability: [[35, 8], [20, 6], [10, 3], [0, 0]],
+  momentum_launch: { strong: 8, steady: 4 }, recency: { none: 3, stale: 5, aged: 2 },
+};
+
+// percentile bands over the candidates being compared: shown as "rank among peers" (information only: the decision uses ABSOLUTE units, see planningDemand.js)
 function salesBands(products, cfg) {
   const pool = products.filter((p) => p.sales && p.sales.available && p.launch && p.launch.eligible && num(p.stock && p.stock.units) >= cfg.opp_min_stock_units);
   const vals = pool.map((p) => num(p.sales.units30)).sort((a, b) => a - b);
@@ -54,28 +74,37 @@ function bandOf(p, bands, cfg) {
 // weeks of stock at the current pace (30-day units); null when nothing is selling
 const coverWeeks = (stock, u30) => (num(u30) > 0 ? Math.round((num(stock) / (num(u30) / (30 / 7))) * 10) / 10 : null);
 
-// the creative gap, from the recency summary: { type, text, severity } | null when no CONFIRMED gap exists
-function gapOf(sum, p, cfg) {
+// the creative gap, from the recency summary + distribution: { type, severity, text } | null when no CONFIRMED gap exists.
+// Types, most urgent first: confirmed_gap, fatigue, underperforming, concentration, diversity, stale, thin. (confirmed_underperformance is kept as an alias of underperforming.)
+function gapOf(sum, p, cfg, ev = null, demand = null) {
   const min = cfg.min_performing_creatives;
-  const parts = [];
-  if (sum.total === 0) return { type: 'confirmed_gap', severity: 'high', text: 'No unique creative is running for this product (confirmed ads only).' };
+  if (sum.total === 0) {
+    const paused = ((p.history && p.history.winners) || []).filter((w) => !w.running_now);
+    return { type: 'confirmed_gap', severity: 'high', text: `No unique creative is running for this product (confirmed ads only).${paused.length ? ` ${plural(paused.length, 'creative')} that performed before ${paused.length === 1 ? 'is' : 'are'} paused or finished.` : ''}` };
+  }
   const bits = [];
   if (sum.performing) bits.push(`${sum.performing} performing`);
-  if (sum.declining) bits.push(`${sum.declining} declining against ${sum.declining === 1 ? 'its' : 'their'} own results`);
+  if (sum.declining) bits.push(`${sum.declining} showing credible fatigue`);
+  if (sum.softening) bits.push(`${sum.softening} softening but still within benchmark`);
   if (sum.weak) bits.push(`${sum.weak} over the approved CPA limit${sum.clear_weak ? ` (${sum.clear_weak} clearly)` : ''}`);
   if (sum.stale && !sum.weak) bits.push(`${sum.stale} old with little delivery`);
   if (sum.testing) bits.push(`${sum.testing} still testing`);
   if (sum.unrated) bits.push(`${sum.unrated} with no approved benchmark`);
   if (sum.unjudged) bits.push(`${sum.unjudged} with too little data to judge`);
   const roll = `${plural(sum.total, 'unique creative')}: ${bits.join(', ')}.`;
-  if (sum.declining > 0 && sum.performing < min) return { type: 'fatigue', severity: 'high', text: `Creative fatigue: ${roll}` };
-  if (sum.weak > 0 && sum.performing < min) return { type: 'confirmed_underperformance', severity: sum.clear_weak ? 'high' : 'medium', text: `Confirmed underperformance: ${roll}` };
+  const topKey = ev && ev.top ? ev.top.key : null;
+  const topFatigued = topKey && (sum.list || []).some((c) => c.key === topKey && c.state === 'declining');
+  if (sum.declining > 0 && (sum.performing < min || topFatigued)) return { type: 'fatigue', severity: 'high', text: `Credible creative fatigue${topFatigued ? ' in the leading ad' : ''}: ${roll}` };
+  if (sum.weak > 0 && sum.performing < min) return { type: 'underperforming', severity: sum.clear_weak ? 'high' : 'medium', text: `Confirmed underperformance: ${roll}` };
+  const demandOk = !demand || ['steady', 'strong'].includes(demand.level);
+  if (ev && ev.concentrated && demandOk) return { type: 'concentration', severity: 'medium', text: `Creative delivery is concentrated: ${ev.notes.find((n) => /carries|only one creative/.test(n)) || ''} ${roll}`.replace(/\s+/g, ' ').trim() };
+  if (ev && ev.low_diversity && demandOk) return { type: 'diversity', severity: 'medium', text: `Too little concept diversity: ${ev.notes.find((n) => /share/.test(n)) || ''} ${roll}`.replace(/\s+/g, ' ').trim() };
   if (sum.stale > 0 && sum.performing === 0) {
     const age = sum.newest_age_days;
     return { type: 'stale', severity: 'medium', text: `Creative is old: ${roll}${age !== null ? ` The newest was launched ${plural(age, 'day')} ago.` : ''}` };
   }
   if (sum.performing > 0 && sum.performing < min && sum.weak === 0 && sum.declining === 0) return { type: 'thin', severity: 'low', text: `Thin coverage: ${plural(sum.performing, 'creative')} performing, ${min} wanted. ${roll}` };
-  return null; // only unrated / unjudged creatives: nothing confirmed
+  return null; // only unrated / unjudged creatives, or enough performing creatives and nothing wrong: nothing confirmed
 }
 
 // a creative direction ONLY where the product's own data supports one
@@ -83,171 +112,281 @@ function directionOf(p, sum) {
   const winners = ((p.history && p.history.winners) || []).filter((w) => w.concept && !w.running_now);
   if (winners.length) {
     const w = winners[0];
-    return { basis: 'product_history', text: `Re-make or refresh the "${w.concept}" concept${w.media ? ` (${String(w.media).toLowerCase()})` : ''}: it previously ran at ${w.cpa !== null && w.cpa !== undefined ? `${money(w.cpa)} CPA ` : ''}on ${money(w.spend)} spend and is no longer running.` };
+    return { basis: 'product_history', text: `Re-make or refresh the "${w.concept}" concept${w.media ? ` (${String(w.media).toLowerCase()})` : ''}: it previously ran at ${w.cpa !== null && w.cpa !== undefined ? `${money(w.cpa)} CPA ` : ''}on ${money(w.spend)} spend and is paused or no longer running.` };
   }
   const perf = (sum.list || []).find((c) => (c.phase === 'performing' || c.phase === 'recent_performing') && c.concept);
-  if (perf) return { basis: 'current_performer', text: `Build on the "${perf.concept}" concept: it is performing for this product${perf.cpa ? ` (${money(perf.cpa)} CPA)` : ''}.` };
+  if (perf) return { basis: 'current_performer', text: `Build on the "${perf.concept}" concept: it is performing for this product${perf.cpa ? ` (${money(perf.cpa)} CPA)` : ''}. Try a genuinely different concept alongside it.` };
   const weak = (sum.list || []).filter((c) => (c.phase === 'weak' || c.phase === 'recent_weak') && c.severity !== 'marginal' && c.concept);
   if (weak.length) return { basis: 'avoid', text: `Try something other than the "${weak[0].concept}" concept: it is clearly over the approved CPA limit for this product.` };
   return null;
 }
 
-// the 6 facts the card quotes, kept together so the UI never has to compute anything
-function factsOf(p, sum, cfg, extra = {}) {
-  const u30 = p.sales && p.sales.available ? Math.round(num(p.sales.units30)) : null;
-  return {
-    stock_units: p.stock && p.stock.known ? Math.round(num(p.stock.units)) : null, on_order: p.stock ? Math.round(num(p.stock.on_order)) : null,
-    cover_weeks: p.stock && p.stock.known && u30 !== null ? coverWeeks(p.stock.units, u30) : null,
-    units7: p.sales && p.sales.available ? Math.round(num(p.sales.units7)) : null, units30: u30,
-    initial28: p.sales && p.sales.initial28 !== undefined ? p.sales.initial28 : null, recent28: p.sales && p.sales.recent28 !== undefined ? p.sales.recent28 : null,
-    sales_band: p.salesBand || 'unknown', tier: p.tier ? p.tier.tier : null, tier_index: p.tier ? p.tier.index : null,
-    season: p.season ? p.season.label : null, season_source: p.season ? p.season.source : null,
-    active_ads: p.coverage && p.coverage.known ? p.coverage.active_ads : null, unique_creatives: sum.total, performing: sum.performing, weak: sum.weak, declining: sum.declining, testing: sum.testing,
-    unrated: sum.unrated, unjudged: sum.unjudged, newest_creative_days: sum.newest_age_days, newest_creative_source: sum.newest_source, testing_until: sum.testing_until,
-    ...extra,
-  };
+function priorityOf(score, cfg) {
+  const hi = cfg && cfg.priority_high_min !== undefined ? cfg.priority_high_min : 65;
+  const md = cfg && cfg.priority_medium_min !== undefined ? cfg.priority_medium_min : 45;
+  return score >= hi ? 'High' : score >= md ? 'Medium' : 'Low';
 }
 
-function priorityOf(score) { return score >= 65 ? 'High' : score >= 45 ? 'Medium' : 'Low'; }
-
-// MAIN. mode: 'core' | 'revival'.  → opportunity (always returned; check .status / .actionable)
+// MAIN. mode: 'core' | 'revival' | 'momentum'.  → opportunity (always returned; check .status / .actionable)
 function evaluate(p, cfg, today, mode = 'core') {
   const sum = recency.summarize(p.creatives || [], today, cfg, { uploads: (p.pipeline && p.pipeline.uploaded) || [] });
+  const ev = evidenceLib.distribution(sum.list, cfg);
+  // a recent launch is measured from its OFFICIAL launch date: units since launch (not the 30-day window, which can include pre-launch orders) over the days on sale
+  const recentLaunch = mode === 'momentum' && Number.isFinite(Number(p.launch_age_days)) && p.sales && p.sales.available;
+  const liveDays = recentLaunch ? Number(p.launch_age_days) + 1 : (p.sales && p.sales.days_live !== undefined ? p.sales.days_live : null);
+  const sinceLaunch = recentLaunch && p.sales.since_launch !== undefined && p.sales.since_launch !== null ? num(p.sales.since_launch) : null;
+  const dIn = p.sales && p.sales.available ? {
+    available: true,
+    units7: sinceLaunch !== null && liveDays < 30 ? Math.min(num(p.sales.units7), sinceLaunch) : p.sales.units7,
+    units14: p.sales.units14 === undefined || p.sales.units14 === null ? null : (sinceLaunch !== null && liveDays < 30 ? Math.min(num(p.sales.units14), sinceLaunch) : p.sales.units14),
+    units30: sinceLaunch !== null && liveDays < 30 ? sinceLaunch : p.sales.units30,
+    days_live: recentLaunch ? liveDays : (p.sales.days_live === undefined ? null : p.sales.days_live), since_launch: sinceLaunch,
+  } : { available: false };
+  const demand = demandLib.demandOf(dIn, cfg);
+  const stockInfo = (extraPace) => demandLib.stockOf(p.stock && p.stock.known ? { known: true, units: p.stock.units, on_order: p.stock.on_order } : { known: false }, extraPace === undefined ? demand.pace_weekly : extraPace, cfg, p.stock && p.stock.sizes ? p.stock.sizes : null);
+  let stk = stockInfo();
+  const dq = p.data_quality || {};
+  const trace = [];
+  const gate = (key, ok, text) => { trace.push({ key, ok, text }); return ok; };
+
   const base = {
     key: p.key, name: p.name, category: p.category || null, image_url: p.image_url || null, codes: p.codes || [], style_codes: p.style_codes || [], is_core: !!p.is_core,
-    kind: mode === 'revival' ? 'high_stock' : 'core', recency: { by_phase: sum.by, newest_age_days: sum.newest_age_days, newest_source: sum.newest_source, testing_until: sum.testing_until },
+    kind: mode === 'revival' ? 'high_stock' : mode === 'momentum' ? 'momentum' : 'core', mode,
+    recency: { by_phase: sum.by, newest_age_days: sum.newest_age_days, newest_source: sum.newest_source, testing_until: sum.testing_until },
     pipeline: p.pipeline ? { planned: p.pipeline.in_flight || 0, by_stage: p.pipeline.by_stage || {}, uploaded_recent: (p.pipeline.uploaded || []).length, this_week: p.pipeline.this_week || 0 } : null,
+  };
+  const factsOf = (extra = {}) => {
+    const u30 = p.sales && p.sales.available ? Math.round(num(p.sales.units30)) : null;
+    return {
+      stock_units: p.stock && p.stock.known ? Math.round(num(p.stock.units)) : null, on_order: p.stock ? Math.round(num(p.stock.on_order)) : null,
+      cover_weeks: stk.known ? stk.cover_weeks : null, stock_band: stk.band || null,
+      units7: p.sales && p.sales.available ? Math.round(num(p.sales.units7)) : null, units14: p.sales && p.sales.available && p.sales.units14 !== undefined && p.sales.units14 !== null ? Math.round(num(p.sales.units14)) : null, units30: u30,
+      demand_level: demand.level, sales_trend: demand.trend, demand_basis: demand.basis, units30_equivalent: demand.eq30 === undefined ? null : demand.eq30, weekly_pace: demand.pace_weekly === undefined ? null : demand.pace_weekly,
+      days_on_sale: demand.live_days === undefined ? null : demand.live_days, since_launch_units: p.sales && p.sales.since_launch !== undefined ? p.sales.since_launch : null,
+      initial28: p.sales && p.sales.initial28 !== undefined ? p.sales.initial28 : null, recent28: p.sales && p.sales.recent28 !== undefined ? p.sales.recent28 : null,
+      sales_band: p.salesBand || 'unknown', tier: p.tier ? p.tier.tier : null, tier_index: p.tier ? p.tier.index : null,
+      season: p.season ? p.season.label : null, season_source: p.season ? p.season.source : null, season_state: p.season ? p.season.state : null,
+      active_ads: p.coverage && p.coverage.known ? p.coverage.active_ads : null, unique_creatives: sum.total, performing: sum.performing, weak: sum.weak, declining: sum.declining, softening: sum.softening, testing: sum.testing,
+      unrated: sum.unrated, unjudged: sum.unjudged, newest_creative_days: sum.newest_age_days, newest_creative_source: sum.newest_source, testing_until: sum.testing_until,
+      top_creative_spend_share: ev.top_spend_share, top_creative_purchase_share: ev.top_purchase_share, meaningful_creatives: ev.meaningful, distinct_concepts: ev.distinct_concepts,
+      matching: p.coverage && p.coverage.known ? (num(p.coverage.possible) > 0 ? 'uncertain' : 'confirmed') : 'unknown', matching_pending: p.coverage ? num(p.coverage.possible) : null,
+      launch_age_days: p.launch_age_days === undefined ? null : p.launch_age_days, size_warning: stk.size_note || null,
+      sales_complete: dq.sales_complete === undefined ? null : dq.sales_complete, sales_sources_disagree: !!(dq.discrepancy && dq.discrepancy.flag),
+      ...extra,
+    };
   };
   const done = (status, reason, extra = {}) => ({
     ...base, status, status_label: STATUS_LABEL[status] || status, actionable: status === 'act', priority: null, score: 0, headline: reason, why: [], reason,
-    facts: factsOf(p, sum, cfg, extra.facts || {}), gap: null, direction: null, ...extra, facts: factsOf(p, sum, cfg, extra.facts || {}),
+    gap: null, direction: null, opportunity_type: null, opportunity_label: null, ...extra,
+    demand, stock: stk, season: p.season || null, evidence: ev, data_quality: dq, eligibility: trace.slice(), facts: factsOf(extra.facts || {}),
   });
 
   // 1. launched
-  if (!p.launch || !p.launch.eligible) {
+  if (!gate('launched', !!(p.launch && p.launch.eligible), p.launch ? p.launch.detail : 'Launch status is unknown.')) {
     return done(p.launch && p.launch.needs_check ? 'launch_unknown' : 'not_launched', p.launch ? p.launch.detail : 'Launch status is unknown.');
   }
+  if (mode === 'momentum') {
+    const age = p.launch_age_days;
+    if (!gate('recent_launch', age !== null && age !== undefined && age >= 0 && age <= cfg.momentum_window_days, age === null || age === undefined ? 'No official launch date (ApparelMagic mid_code) to measure a recent launch from.' : `Launched ${plural(age, 'day')} ago (official mid_code date); a recent launch is within ${cfg.momentum_window_days} days.`)) {
+      return done('not_recent', age === null || age === undefined ? 'It has no official launch date (ApparelMagic mid_code), so it cannot be treated as a recent launch.' : `Launched ${plural(age, 'day')} ago: older than the ${cfg.momentum_window_days}-day Protect Momentum window.`);
+    }
+  }
   // 2. stock
-  if (!p.stock || !p.stock.known) return done('unavailable', 'Stock has not loaded, so the product cannot be assessed.');
-  if (num(p.stock.units) < cfg.opp_min_stock_units) {
+  if (!p.stock || !p.stock.known) { gate('stock_known', false, 'Stock has not loaded.'); return done('unavailable', 'Stock has not loaded, so the product cannot be assessed.'); }
+  if (!gate('stock_minimum', num(p.stock.units) >= cfg.opp_min_stock_units, `${units(p.stock.units)} sellable units (${units(cfg.opp_min_stock_units)} needed before creative is worth making).`)) {
     return done('low_stock', `${units(p.stock.units)} sellable units, below the ${units(cfg.opp_min_stock_units)} needed before creative is worth making.${num(p.stock.on_order) > 0 ? ` ${units(p.stock.on_order)} are on order.` : ''}`);
   }
-  // 3. season
-  if (p.season && !p.season.relevant) return done('out_of_season', `${p.season.label}. ${p.season.reasons[0] || ''}`.trim(), { season: p.season });
-  // sales evidence
-  if (!p.sales || !p.sales.available) return done('insufficient_data', 'Sales data has not loaded, so demand cannot be judged.');
+  // 3. sales
+  if (!gate('sales_loaded', !!(p.sales && p.sales.available), 'Recent sales have loaded.')) return done('insufficient_data', 'Sales data has not loaded, so demand cannot be judged.');
   const u30 = num(p.sales.units30);
+  if (demand.level === 'too_early') { gate('days_on_sale', false, demand.evidence[0]); return done('too_new', demand.evidence[0]); }
 
+  // 4. season: out of season is excluded unless CURRENT demand AND creative evidence justify an exception (absolute units, never a percentile)
+  let season = p.season || null;
+  if (season && !season.relevant) {
+    const creativeEvidence = sum.performing > 0 || ((p.history && p.history.winners) || []).length > 0;
+    const compelling = demand.level === 'strong' && num(demand.eq30) >= cfg.season_override_units && demand.trend !== 'weakening' && creativeEvidence;
+    if (compelling) {
+      season = { ...season, relevant: true, exception: true, label: 'Out of season (exception)', weight: 0.2, reasons: [...(season.reasons || []), `Exception: it still sells ${units(demand.eq30)} units in 30 days (${cfg.season_override_units}+ needed), is not weakening, and there is creative evidence that works for it, so current demand outranks the calendar.`] };
+      gate('season', true, `Out of season but compelling current demand: ${units(demand.eq30)} units in 30 days with creative evidence.`);
+    } else {
+      gate('season', false, `${season.label}. ${(season.reasons || [])[0] || ''} Exception needs ${cfg.season_override_units}+ units in 30 days, demand that is not weakening, and creative evidence; it has ${units(num(demand.eq30))} units${creativeEvidence ? '' : ' and no creative evidence'}.`);
+      return done('out_of_season', `${season.label}. ${(season.reasons || [])[0] || ''}`.trim(), { season });
+    }
+  } else if (season) gate('season', true, `${season.label}.`);
+
+  // 5. demand + mode gates
   let revival = null;
   if (mode === 'revival') {
-    // tier / history gates
-    if (p.tierState !== 'ok') return done('unavailable', 'The Platinum / Rocket classification is unavailable (the Report Pipeline that feeds it is not configured or has not loaded), so proven demand cannot be checked.');
-    if (!p.tier || !['platinum', 'rocket'].includes(p.tier.tier)) return done('no_proven_demand', `No proven demand: Demand Planning classifies it as ${p.tier ? p.tier.tier.charAt(0).toUpperCase() + p.tier.tier.slice(1) : 'unclassified'}, not Platinum or Rocket. High stock alone is not a reason for more creative.`);
+    if (p.tierState !== 'ok') { gate('tier', false, 'Platinum / Rocket classification unavailable.'); return done('unavailable', 'The Platinum / Rocket classification is unavailable (the Report Pipeline that feeds it is not configured or has not loaded), so proven demand cannot be checked.'); }
+    if (!gate('tier', !!(p.tier && ['platinum', 'rocket'].includes(p.tier.tier)), `Demand Planning classes it as ${p.tier ? p.tier.tier : 'unclassified'}.`)) return done('no_proven_demand', `No proven demand: Demand Planning classifies it as ${p.tier ? p.tier.tier.charAt(0).toUpperCase() + p.tier.tier.slice(1) : 'unclassified'}, not Platinum or Rocket. High stock alone is not a reason for more creative.`);
     const age = p.sales.age_days;
-    if (age === null || age === undefined || p.sales.initial28 === null || p.sales.initial28 === undefined) return done('insufficient_data', 'Its first 28 days of sales cannot be read, so launch performance cannot be compared with now.');
-    if (age < cfg.revival_min_age_days) return done('too_new', `Selling for only ${plural(age, 'day')}: needs ${cfg.revival_min_age_days} before its first 28 days and latest 28 days can be compared.`);
+    if (!gate('baseline', !(age === null || age === undefined || p.sales.initial28 === null || p.sales.initial28 === undefined), 'Its first 28 days of sales are readable.')) return done('insufficient_data', 'Its first 28 days of sales cannot be read, so launch performance cannot be compared with now.');
+    if (!gate('history_56', age >= cfg.revival_min_age_days, `${plural(age, 'day')} of selling history (${cfg.revival_min_age_days} needed so the first and latest 28 days do not overlap).`)) return done('too_new', `Selling for only ${plural(age, 'day')}: needs ${cfg.revival_min_age_days} before its first 28 days and latest 28 days can be compared.`);
     const ratio = p.sales.initial28 > 0 ? num(p.sales.recent28) / p.sales.initial28 : null;
     const pct = ratio === null ? null : Math.round(ratio * 100);
-    const weeks = coverWeeks(p.stock.units, p.sales.recent28 !== null && p.sales.recent28 !== undefined ? p.sales.recent28 : u30);
-    revival = { tier: p.tier.tier, index: p.tier.index, initial28: p.sales.initial28, recent28: num(p.sales.recent28), ratio_pct: pct, weeks, age_days: age };
-    if (ratio !== null && ratio * 100 >= cfg.revival_decline_pct) {
+    const weeks = demandLib.stockOf({ known: true, units: p.stock.units, on_order: p.stock.on_order }, Math.max(demand.pace_weekly || 0, num(p.sales.recent28) / 4), cfg).cover_weeks;
+    revival = { tier: p.tier.tier, index: p.tier.index, initial28: p.sales.initial28, recent28: num(p.sales.recent28), ratio_pct: pct, weeks, age_days: age, source: 'Shopify export (Demand Planning)' };
+    if (!gate('momentum_lost', !(ratio !== null && ratio * 100 >= cfg.revival_decline_pct), `Last 28 days are ${pct === null ? 'n/a' : `${pct}%`} of the first 28 days (revival considered below ${cfg.revival_decline_pct}%).`)) {
       return done('momentum_ok', `${p.tier.tier === 'platinum' ? 'Platinum' : 'Rocket'}: the last 28 days sold ${units(num(p.sales.recent28))} against ${units(p.sales.initial28)} in its first 28 days (${pct}% of launch pace), above the ${cfg.revival_decline_pct}% line, so it has not lost momentum.`, { revival });
     }
-    if (weeks !== null && weeks < cfg.revival_min_cover_weeks) {
+    // current demand: a historically strong product must STILL sell enough to be a realistic revival, and not be so far below its own launch pace that nothing is left to revive
+    if (!gate('revival_demand', u30 >= cfg.revival_min_recent_units, `${units(u30)} units in the last 30 days (${cfg.revival_min_recent_units} needed to be a realistic revival).`)) {
+      return done('weak_demand', `Only ${units(u30)} unit${u30 === 1 ? '' : 's'} sold in the last 30 days (a revival needs ${cfg.revival_min_recent_units}). It was ${p.tier.tier === 'platinum' ? 'Platinum' : 'Rocket'} once, but there is too little current demand to revive: past success is not a reason for urgent creative.`, { revival });
+    }
+    if (!gate('revival_pace', pct === null || pct >= cfg.revival_min_pace_pct, `Selling at ${pct === null ? 'n/a' : `${pct}%`} of its launch pace (${cfg.revival_min_pace_pct}% needed).`)) {
+      return done('weak_demand', `It is selling at only ${pct}% of its own launch pace (${cfg.revival_min_pace_pct}% is the lowest worth reviving): a deeper decline is not a stronger opportunity.`, { revival });
+    }
+    if (!gate('revival_cover', weeks === null || weeks >= cfg.revival_min_cover_weeks, `${weeks === null ? 'n/a' : `${weeks} weeks`} of stock at the current pace (${cfg.revival_min_cover_weeks} needed).`)) {
       return done('low_stock', `${units(p.stock.units)} units is only ${weeks} weeks of stock at the current pace (${cfg.revival_min_cover_weeks} needed to justify a refresh).`, { revival });
     }
-  } else if (u30 < cfg.opp_min_recent_units) {
+  } else if (mode === 'momentum') {
+    if (!gate('momentum_demand', num(demand.eq30) >= cfg.demand_steady_units, `${units(demand.eq30)} units in a 30-day equivalent (${cfg.demand_steady_units} needed for a recent launch to be worth protecting).`)) {
+      return done('weak_demand', `A recent launch (${plural(p.launch_age_days, 'day')} on sale) selling about ${units(demand.eq30)} units in a 30-day equivalent: below the ${cfg.demand_steady_units} that shows genuine demand. It is not recommended just for being new.`);
+    }
+  } else if (!gate('core_demand', demand.level !== 'very_weak', `${units(u30)} units in the last 30 days (${cfg.opp_min_recent_units} needed to count as having demand).`)) {
     return done('weak_demand', `Only ${units(u30)} unit${u30 === 1 ? '' : 's'} sold in the last 30 days (a product needs ${cfg.opp_min_recent_units} to count as having demand). Slow sales on their own are not a reason for more creative.`);
   }
 
-  // 5. already in production
-  const flight = p.pipeline ? num(p.pipeline.in_flight) : 0;
-  if (flight > 0 && sum.performing < cfg.min_performing_creatives) {
-    const st = (p.pipeline && p.pipeline.by_stage) || {};
-    const stages = [['planned', 'planned'], ['awaiting_production', 'awaiting production'], ['filmed', 'filmed'], ['edited', 'edited'], ['approved', 'approved']].filter(([k]) => st[k]).map(([k, l]) => `${st[k]} ${l}`).join(', ');
-    return done('in_production', `${plural(flight, 'concept')} already in the Shoot Plan pipeline (${stages || 'in progress'}). Nothing more is needed until they are uploaded and have data.`, { revival });
+  // 6. stock sufficiency
+  stk = stockInfo();
+  if (!gate('stock_cover', !['short'].includes(stk.band), (stk.notes || []).join(' '))) {
+    return done('low_stock', `${units(p.stock.units)} units is only ${stk.cover_weeks} weeks of stock at the current pace (${cfg.stock_min_cover_weeks} needed for creative to pay off).${num(p.stock.on_order) > 0 ? ` ${units(p.stock.on_order)} are on order.` : ''}`, { revival });
+  }
+  if (!gate('stock_not_excess', !(stk.band === 'excess' && demand.level === 'weak'), (stk.notes || []).join(' '))) {
+    return done('weak_demand', `${units(p.stock.units)} units is ${stk.cover_weeks} weeks of stock against ${units(u30)} units a month. Large unsold stock with weak demand is not a reason for more creative: demand, not creative, is the constraint.`, { revival });
   }
 
-  // 6. creative evidence
-  if (!p.coverage || !p.coverage.known) return done('insufficient_data', 'Meta ad data is unavailable, so existing creative cannot be judged. No shoot is recommended on missing data.', { revival });
-  const gap = gapOf(sum, p, cfg);
-  if (sum.performing >= cfg.min_performing_creatives && !(sum.declining >= sum.performing)) {
-    return done('covered', `${sum.performing} of ${plural(sum.total, 'unique creative')} are performing against the approved benchmark (${cfg.min_performing_creatives} wanted)${sum.newest_age_days !== null ? `; the newest was launched ${plural(sum.newest_age_days, 'day')} ago` : ''}. No new creative is needed now.`, { revival });
+  // 7. creative evidence
+  const flight = p.pipeline ? num(p.pipeline.in_flight) : 0;
+  const min = cfg.min_performing_creatives;
+  const stagesText = () => { const st = (p.pipeline && p.pipeline.by_stage) || {}; return [['planned', 'planned'], ['awaiting_production', 'awaiting production'], ['filmed', 'filmed'], ['edited', 'edited'], ['approved', 'approved']].filter(([k]) => st[k]).map(([k, l]) => `${st[k]} ${l}`).join(', ') || 'in progress'; };
+  if (!p.coverage || !p.coverage.known) {
+    gate('meta_data', false, 'Meta ad data is unavailable.');
+    if (flight > 0) return done('in_production', `${plural(flight, 'concept')} already in the Shoot Plan pipeline (${stagesText()}).`, { revival });
+    return done('insufficient_data', 'Meta ad data is unavailable, so existing creative cannot be judged. No shoot is recommended on missing data.', { revival });
   }
-  if (sum.testing > 0 || sum.recent_uploads > 0) {
-    const until = sum.testing_until;
-    const what = sum.testing > 0 ? `${plural(sum.testing, 'creative')} launched in the last ${cfg.test_period_days} days ${sum.testing === 1 ? 'is' : 'are'} still gathering data` : `${plural(sum.recent_uploads, 'concept')} uploaded in the last ${cfg.test_period_days} days (WNDRR's production record) ${sum.recent_uploads === 1 ? 'is' : 'are'} still gathering data`;
-    return done('testing', `${what}. No further creative is recommended until ${until || 'the test period ends'}; it will then be re-assessed.`, { revival });
+  gate('meta_data', true, 'Meta ad data is available (Meta-reported CPA; Triple Whale is not connected and is not substituted).');
+  const gap = gapOf(sum, p, cfg, ev, demand);
+  const testingN = sum.testing + sum.recent_uploads;
+  const supply = sum.performing + testingN + flight;
+  const possible = num(p.coverage.possible);
+  const performingEnough = sum.performing >= min;
+
+  if (performingEnough && !gap) {
+    return done('covered', `${sum.performing} of ${plural(sum.total, 'unique creative')} are performing against the approved benchmark (${min} wanted)${ev.top_spend_share !== null ? `, the leading ad carries ${ev.top_spend_share}% of the spend` : ''}${sum.newest_age_days !== null ? `; the newest was launched ${plural(sum.newest_age_days, 'day')} ago` : ''}. No new creative is needed now.`, { revival });
   }
-  if (p.coverage.uncertain && sum.performing < cfg.min_performing_creatives) {
-    return done('insufficient_data', `Matching is uncertain: ${plural(p.coverage.possible, 'active Meta ad')} awaiting review ${p.coverage.possible === 1 ? 'is' : 'are'} suggested for this product and could change its creative count. Review them in Ad Matching first; no shoot is recommended on an incomplete count.`, { revival });
+  // concepts already testing or in production count as supply; they only silence the product when they are enough or when demand is not strong
+  if ((testingN > 0 || flight > 0) && (supply >= min || demand.level !== 'strong')) {
+    if (testingN > 0) {
+      const until = sum.testing_until;
+      const what = sum.testing > 0 ? `${plural(sum.testing, 'creative')} launched in the last ${cfg.test_period_days} days ${sum.testing === 1 ? 'is' : 'are'} still gathering data` : `${plural(sum.recent_uploads, 'concept')} uploaded in the last ${cfg.test_period_days} days (WNDRR's production record) ${sum.recent_uploads === 1 ? 'is' : 'are'} still gathering data`;
+      return done('testing', `${what}${flight > 0 ? `, and ${plural(flight, 'concept')} ${flight === 1 ? 'is' : 'are'} in the Shoot Plan pipeline` : ''}. ${supply >= min ? `With ${sum.performing} performing that is ${supply} creatives in play (${min} wanted)` : 'Demand is not strong enough to add more now'}: no further creative is recommended until ${until || 'the test period ends'}; it will then be re-assessed.`, { revival });
+    }
+    return done('in_production', `${plural(flight, 'concept')} already in the Shoot Plan pipeline (${stagesText()}). ${supply >= min ? `With ${sum.performing} performing that is ${supply} creatives in play (${min} wanted)` : 'Demand is not strong enough to add more now'}: nothing more is needed until they are uploaded and have data.`, { revival });
   }
+  // unresolved suggested matches are uncertainty, never a confirmed absence of creative
+  const needsComplete = gap && ['confirmed_gap', 'underperforming', 'stale', 'thin', 'concentration', 'diversity'].includes(gap.type);
+  if (needsComplete && possible > 0) {
+    gate('matching', false, `${plural(possible, 'active ad')} awaiting review suggested for this product.`);
+    return done('insufficient_data', `Matching is uncertain: ${plural(possible, 'active Meta ad')} awaiting review ${possible === 1 ? 'is' : 'are'} suggested for this product and could change its creative count (${gap.type === 'confirmed_gap' ? 'it would not be a gap' : 'the picture may be different'}). Review them in Ad Matching first; no shoot is recommended on an incomplete count.`, { revival });
+  }
+  gate('matching', true, possible > 0 ? `${plural(possible, 'suggested ad')} awaiting review (does not change this finding).` : 'Every active ad for this product is matched or reviewed.');
   if (!gap) {
-    const why = sum.total > 0 && sum.unrated === sum.total ? 'Its creatives have data but no approved benchmark applies to their funnel, so they cannot be called good or bad.' : sum.total > 0 ? 'Its creatives have too little delivery to judge.' : 'There is no creative evidence either way.';
+    const benchmarkMissing = sum.total > 0 && sum.unrated >= Math.ceil(sum.total / 2);
+    const why = benchmarkMissing ? 'Most of its creatives have data but no approved benchmark applies to their funnel, so they cannot be called good or bad (no benchmark is invented).' : sum.total > 0 ? 'Its creatives have too little delivery to judge.' : 'There is no creative evidence either way.';
     return done('insufficient_data', `${why} No shoot is recommended on missing data.`, { revival });
   }
-  if (gap.type === 'thin' && p.salesBand !== 'strong' && mode !== 'revival') {
-    return done('covered', `${gap.text} Demand is ${p.salesBand === 'steady' ? 'steady' : 'not strong'}, so a thin shortfall alone does not justify action this week.`, { revival });
+  if (gap.type === 'thin' && demand.level !== 'strong' && mode === 'core') {
+    return done('covered', `${gap.text} Demand is ${demand.level === 'steady' ? 'steady' : 'modest'}, so a thin shortfall alone does not justify action this week.`, { revival });
   }
 
   // ACT: score and explain
-  const score = (() => {
-    let s = 0; const parts = [];
-    const add = (pts, label) => { s += pts; parts.push({ label, points: pts }); };
-    if (mode === 'revival') {
-      add(p.tier.tier === 'platinum' ? 22 : 16, `${p.tier.tier === 'platinum' ? 'Platinum' : 'Rocket'} classification`);
-      const drop = revival.ratio_pct === null ? 0 : Math.max(0, Math.min(25, Math.round((cfg.revival_decline_pct - revival.ratio_pct) / 2) + 8));
-      add(drop, 'Momentum lost against launch pace');
-    } else {
-      add(p.salesBand === 'strong' ? 30 : 15, p.salesBand === 'strong' ? 'Strong current sales' : 'Steady current sales');
-      if (p.tier && ['platinum', 'rocket'].includes(p.tier.tier)) add(p.tier.tier === 'platinum' ? 8 : 5, `${p.tier.tier === 'platinum' ? 'Platinum' : 'Rocket'} classification`);
-    }
-    add({ confirmed_gap: 30, fatigue: 28, confirmed_underperformance: gap.severity === 'high' ? 24 : 14, stale: 18, thin: 10 }[gap.type] || 0, { confirmed_gap: 'No creative running', fatigue: 'Creative fatigue', confirmed_underperformance: 'Confirmed underperformance', stale: 'Old creative', thin: 'Thin coverage' }[gap.type]);
-    const w = coverWeeks(p.stock.units, mode === 'revival' ? (revival.recent28 || u30) : u30);
-    add(w === null ? 6 : w >= 8 ? 10 : w >= 4 ? 5 : 0, 'Stock cover');
-    add(p.season && p.season.state === 'in_season' ? 10 : p.season && p.season.exception ? 5 : p.season && p.season.state === 'shoulder' ? 4 : 0, 'Season');
-    if (sum.newest_age_days === null) add(4, 'No new creative on record');
-    else if (sum.newest_age_days >= cfg.stale_creative_days) add(6, 'No new creative for a long time');
-    else if (sum.newest_age_days >= cfg.recent_creative_days) add(3, 'No recent creative');
-    return { score: Math.min(100, s), parts };
-  })();
+  const parts = []; let score = 0;
+  const add = (pts, label, max) => { score += pts; parts.push({ label, points: pts, ...(max ? { max } : {}) }); };
+  const dBase = SCORE.demand[demand.level] || 0;
+  const dTrend = demand.trend === 'improving' ? SCORE.demand.improving : demand.trend === 'weakening' ? SCORE.demand.weakening : 0;
+  add(Math.max(0, Math.min(SCORE.demand.max, dBase + dTrend)), `Current demand: ${demand.level.replace('_', ' ')}${demand.trend !== 'unknown' && demand.trend !== 'stable' ? `, ${demand.trend}` : ''}`, SCORE.demand.max);
+  const needKey = gap.type === 'underperforming' ? (gap.severity === 'high' ? 'underperforming_clear' : 'underperforming_marginal') : gap.type;
+  add(SCORE.need[needKey] || 0, `Creative need: ${(OPP_LABEL[gap.type] || gap.type).toLowerCase()}`, 28);
+  if (supply > 0 && supply < min) add(SCORE.need.supply_penalty, `${plural(supply, 'creative')} already testing or in production`);
+  add(stk.points, `Stock: ${stk.band.replace('_', ' ')}${stk.cover_weeks !== null && stk.cover_weeks !== undefined ? ` (${stk.cover_weeks} weeks)` : ''}`, 10);
+  const sKey = !season ? 'neutral' : season.exception ? 'exception' : season.state;
+  add(SCORE.season[sKey] === undefined ? 0 : SCORE.season[sKey], `Season: ${season ? season.label.toLowerCase() : 'not assessed'}`, 15);
+  if (mode === 'revival') {
+    add(SCORE.revival_tier[p.tier.tier] || 0, `${p.tier.tier === 'platinum' ? 'Platinum' : 'Rocket'} classification`, 10);
+    const rec = SCORE.recoverability.find(([min0]) => (revival.ratio_pct === null ? 0 : revival.ratio_pct) >= min0);
+    add(rec ? rec[1] : 0, `Recoverability: still at ${revival.ratio_pct === null ? 'n/a' : `${revival.ratio_pct}%`} of launch pace (a deeper decline earns less, not more)`, 8);
+  } else if (mode === 'momentum') {
+    add(SCORE.momentum_launch[demand.level] || 0, 'Launch strength', 8);
+  } else if (p.tier && SCORE.core_tier[p.tier.tier]) add(SCORE.core_tier[p.tier.tier], `${p.tier.tier === 'platinum' ? 'Platinum' : 'Rocket'} classification`, 6);
+  if (sum.newest_age_days === null) add(SCORE.recency.none, 'No new creative on record', 5);
+  else if (sum.newest_age_days >= cfg.stale_creative_days) add(SCORE.recency.stale, 'No new creative for a long time', 5);
+  else if (sum.newest_age_days >= cfg.recent_creative_days) add(SCORE.recency.aged, 'No recent creative', 5);
+  score = Math.min(100, Math.max(0, score));
+
+  // caps: High needs strong or steady demand AND complete, consistent data
+  let priority = priorityOf(score, cfg); const caps = [];
+  const cap = (text) => { if (priority === 'High') priority = 'Medium'; caps.push(text); };
+  if (demand.level === 'weak') cap('Held at Medium: demand is only modest.');
+  if (dq.sales_complete === false) cap(`Held at Medium: recent sales may be under-counted (${(dq.sales_notes || ['some daily sales requests failed'])[0]}).`);
+  if (dq.discrepancy && dq.discrepancy.flag) cap(`Held at Medium: the two sales sources disagree (${dq.discrepancy.text}).`);
+  if (season && season.exception) cap('Held at Medium: out of season, qualifying only on an exception.');
+  if (mode === 'revival' && demand.level !== 'strong' && demand.trend === 'weakening') cap('Held at Medium: a revival whose sales are still weakening.');
+  if (dq.sales_complete === false || (dq.discrepancy && dq.discrepancy.flag)) { /* priority already capped */ }
   const dir = directionOf(p, sum);
   const age = sum.newest_age_days;
+
+  // explanations: one plain sentence, then the evidence
+  const demandWord = demand.level === 'strong' ? 'Strong' : demand.level === 'steady' ? 'Steady' : 'Modest';
+  const stockWord = stk.band === 'healthy' ? 'sufficient stock' : stk.band === 'slow' ? 'plenty of stock' : stk.band === 'short_restock' ? 'stock with a restock on order' : 'stock';
+  const creativeWord = { confirmed_gap: 'no effective creative running', underperforming: 'existing creative underperforming', fatigue: 'credible creative fatigue', concentration: 'creative delivery concentrated in one ad', diversity: 'too little concept diversity', stale: 'only old creative that is no longer delivering', thin: 'limited effective creative' }[gap.type];
+  const trendWord = demand.trend === 'improving' ? ' and improving' : demand.trend === 'weakening' ? ' but weakening' : '';
+  let summary;
+  if (mode === 'revival') summary = `Previously successful ${p.tier.tier === 'platinum' ? 'Platinum' : 'Rocket'} product still selling ${units(u30)} units a month (${revival.ratio_pct === null ? 'n/a' : `${revival.ratio_pct}%`} of its launch pace) with ${stockWord} and ${creativeWord}.`;
+  else if (mode === 'momentum') summary = `${demandWord} recent launch (${plural(p.launch_age_days, 'day')} on sale${trendWord}) with ${stockWord} and ${creativeWord}.`;
+  else summary = `${demandWord} recent sales${trendWord}, ${stockWord} and ${creativeWord}.`;
   const why = [];
+  why.push({ k: 'summary', text: summary });
   why.push({ k: 'gap', text: gap.text });
-  why.push({ k: 'performing', text: `${sum.performing} of the ${cfg.min_performing_creatives} performing creatives wanted are in place.` });
+  why.push({ k: 'performing', text: `${sum.performing} of the ${min} performing creatives wanted are in place${supply > sum.performing ? `; ${supply - sum.performing} more ${supply - sum.performing === 1 ? 'is' : 'are'} testing or in production` : ''}.` });
   why.push({ k: 'recent', text: age === null ? 'Last new creative: none found (neither a matched Meta ad nor an upload record).' : `Last new creative: ${plural(age, 'day')} ago (${sum.newest_source === 'production' ? "WNDRR's production record" : 'Meta ad creation date'}). ${age > cfg.test_period_days ? 'It is past its test period, so it has been judged.' : ''}`.trim() });
-  if (mode === 'revival') {
-    why.push({ k: 'demand', text: `${revival.tier === 'platinum' ? 'Platinum' : 'Rocket'} (index ${revival.index}): ${units(revival.initial28)} units in its first 28 days, ${units(revival.recent28)} in the last 28 (${revival.ratio_pct === null ? 'no baseline' : `${revival.ratio_pct}% of launch pace`}).` });
-    why.push({ k: 'stock', text: `${units(p.stock.units)} units left${revival.weeks !== null ? `, about ${revival.weeks} weeks at the current pace` : ' with no current sales pace to measure cover'}.` });
-  } else {
-    why.push({ k: 'demand', text: `${p.salesBand === 'strong' ? 'Selling strongly' : 'Selling steadily'}: ${units(u30)} units in the last 30 days, ${units(p.stock.units)} in stock${coverWeeks(p.stock.units, u30) !== null ? ` (about ${coverWeeks(p.stock.units, u30)} weeks)` : ''}.` });
-  }
-  why.push({ k: 'season', text: p.season ? `${p.season.label}.` : 'Season not assessed.' });
+  why.push({ k: 'demand', text: `${demand.evidence.join(' ')}${demand.basis === '30d' ? ` ${units(u30)} units in 30 days${p.sales.units7 !== undefined ? `, ${units(p.sales.units7)} in 7 days` : ''}.` : ''} (Source: ApparelMagic online sales.)` });
+  if (mode === 'revival') why.push({ k: 'revival', text: `${revival.tier === 'platinum' ? 'Platinum' : 'Rocket'} (index ${revival.index}): ${units(revival.initial28)} units in its first 28 days, ${units(revival.recent28)} in the latest 28 (${revival.ratio_pct === null ? 'no baseline' : `${revival.ratio_pct}% of launch pace`}). (Source: Shopify export, Demand Planning.) A drop in sales is not automatically creative fatigue.` });
+  why.push({ k: 'stock', text: (stk.notes || []).join(' ') });
+  why.push({ k: 'season', text: `${season ? season.reasons.join(' ') : 'Season not assessed.'}` });
+  if (ev.notes.length) why.push({ k: 'distribution', text: ev.notes.join(' ') });
+  why.push({ k: 'matching', text: possible > 0 ? `${plural(possible, 'suggested ad')} still awaiting review for this product; the findings above rest on confirmed ads.` : 'Every active ad for this product is matched or reviewed (confirmed or auto-matched ads only; DPAs are not counted).' });
+  if (flight > 0) why.push({ k: 'production', text: `${plural(flight, 'concept')} already in the Shoot Plan pipeline (${stagesText()}); this would be additional, not a duplicate.` });
   if (dir) why.push({ k: 'direction', text: dir.text });
   const other = [];
   if (mode === 'revival') {
-    if (p.season && p.season.state !== 'in_season') other.push(`Season: ${p.season.label.toLowerCase()}, which can lower sales regardless of creative.`);
-    if (sum.performing >= 1) other.push(`${plural(sum.performing, 'creative')} is still performing, so creative fatigue does not explain the whole decline.`);
+    if (season && season.state !== 'in_season') other.push(`Season: ${season.label.toLowerCase()}, which can lower sales regardless of creative.`);
+    if (sum.performing >= 1) other.push(`${plural(sum.performing, 'creative')} ${sum.performing === 1 ? 'is' : 'are'} still performing, so creative fatigue does not explain the whole decline.`);
     if (p.coverage.active_ads < (p.coverage.min || 5)) other.push(`Only ${plural(p.coverage.active_ads, 'active ad')} support it, so reach may be limited rather than creative being worn out.`);
-    other.push('Price, markdowns, size availability and site changes are not measured here and could also explain the change.');
+    other.push('Meta spend, price, markdowns, size availability and stock-outs are not measured here and could also explain the change.');
   }
   const headline = {
-    confirmed_gap: `No creative running · ${units(u30)} units in 30 days`,
-    fatigue: `Creative fading: ${sum.declining} declining · ${units(u30)} units in 30 days`,
-    confirmed_underperformance: `${sum.weak} creative${sum.weak === 1 ? '' : 's'} over the approved CPA limit, ${sum.performing} performing`,
+    confirmed_gap: `No effective creative running · ${units(u30)} units in 30 days`,
+    fatigue: `Credible creative fatigue · ${units(u30)} units in 30 days`,
+    underperforming: `${sum.weak} creative${sum.weak === 1 ? '' : 's'} over the approved CPA limit, ${sum.performing} performing`,
+    concentration: `Delivery concentrated: leading ad carries ${ev.top_spend_share === null ? 'most' : `${ev.top_spend_share}%`} of spend`,
+    diversity: `${ev.meaningful} creatives but ${ev.distinct_concepts} concept${ev.distinct_concepts === 1 ? '' : 's'}`,
     stale: `Creative is old${age !== null ? ` (newest ${age} days)` : ''} and none is performing`,
-    thin: `Only ${sum.performing} of ${cfg.min_performing_creatives} wanted creatives performing`,
+    thin: `Only ${sum.performing} of ${min} wanted creatives performing`,
   }[gap.type];
+  const oppType = mode === 'revival' ? 'revive' : mode === 'momentum' ? 'protect_momentum' : gap.type;
   return {
-    ...base, status: 'act', status_label: STATUS_LABEL.act, actionable: true, priority: priorityOf(score.score), score: score.score, score_parts: score.parts,
-    headline: mode === 'revival' ? `${revival.tier === 'platinum' ? 'Platinum' : 'Rocket'} lost momentum (${revival.ratio_pct === null ? 'n/a' : `${revival.ratio_pct}% of launch pace`}) · ${headline}` : headline,
-    why, reason: gap.text, gap, direction: dir, other_explanations: other, revival, facts: factsOf(p, sum, cfg, {}),
-    creatives: sum.list.map((c) => ({ key: c.key, phase: c.phase, label: c.label, age_days: c.age_days, concept: c.concept || null, cpa: c.cpa || null, spend: c.spend, ads: c.ad_count })),
+    ...base, status: 'act', status_label: STATUS_LABEL.act, actionable: true, priority, score, score_parts: parts, caps,
+    opportunity_type: oppType, opportunity_label: OPP_LABEL[oppType],
+    headline: mode === 'revival' ? `${revival.tier === 'platinum' ? 'Platinum' : 'Rocket'} at ${revival.ratio_pct === null ? 'n/a' : `${revival.ratio_pct}%`} of launch pace · ${headline}` : mode === 'momentum' ? `Recent launch (${plural(p.launch_age_days, 'day')}) · ${headline}` : headline,
+    why, reason: gap.text, gap, direction: dir, other_explanations: other, revival,
+    demand, stock: stk, season, evidence: ev, data_quality: dq, eligibility: trace.slice(), facts: factsOf({}),
+    creatives: sum.list.map((c) => ({ key: c.key, phase: c.phase, label: c.label, age_days: c.age_days, concept: c.concept || null, cpa: c.cpa || null, spend: c.spend, purchases: c.purchases, ads: c.ad_count, state: c.state, softening: !!(c.trend && c.trend.softening), reasons: c.reasons || [] })),
   };
 }
 
-// run the engine over every candidate; computes sales bands first. kinds: 'core' (default) or 'revival'
+// run the engine over every candidate; computes the peer-rank bands first. mode: 'core' | 'revival' | 'momentum'
 function assessAll(products, cfg, today, mode = 'core') {
   const bands = salesBands(products, cfg);
   const out = products.map((p) => {
@@ -257,4 +396,4 @@ function assessAll(products, cfg, today, mode = 'core') {
   return { bands, items: out };
 }
 
-module.exports = { STATUS_LABEL, salesBands, bandOf, coverWeeks, gapOf, directionOf, evaluate, assessAll, priorityOf };
+module.exports = { STATUS_LABEL, OPP_LABEL, SCORE, salesBands, bandOf, coverWeeks, gapOf, directionOf, evaluate, assessAll, priorityOf };

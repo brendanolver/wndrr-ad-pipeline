@@ -58,11 +58,11 @@ const CTA_LABELS = {
   shop_the_sale: 'Shop the Sale',
 };
 
-// shoot_plan_items.source ('core'|'high_stock'|'drop'|'promotion'|'manual')
+// shoot_plan_items.source ('core'|'high_stock'|'drop'|'promotion'|'manual'|'momentum')
 // is the universal origin discriminator -- this is the auto-detect rule an
 // admin can override on the Ad Setup record afterward.
 function detectAdCategory(source) {
-  if (source === 'drop') return 'new_drop';
+  if (source === 'drop' || source === 'momentum') return 'new_drop'; // Protect Momentum = a recent launch
   if (source === 'promotion') return 'promotion';
   if (source === 'core' || source === 'high_stock') return 'core';
   return 'organic_first'; // 'manual' or no shoot_plan_item at all

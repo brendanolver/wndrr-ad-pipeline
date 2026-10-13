@@ -8852,8 +8852,8 @@ async function saveAdHocConcept() {
 // with that button for attention.
 // 'other' catches any pre-migration item whose source is NULL, so it never
 // silently vanishes from the total.
-const SHOOT_PLAN_SOURCE_LABELS = { core: 'CORE', high_stock: 'HIGH STOCK', drop: 'UPCOMING DROPS', promotion: 'PROMOTIONS', other: 'OTHER' };
-const SHOOT_PLAN_SOURCE_ORDER = ['core', 'high_stock', 'drop', 'promotion', 'other'];
+const SHOOT_PLAN_SOURCE_LABELS = { core: 'CORE', high_stock: 'HIGH STOCK', momentum: 'PROTECT MOMENTUM', drop: 'UPCOMING DROPS', promotion: 'PROMOTIONS', other: 'OTHER' };
+const SHOOT_PLAN_SOURCE_ORDER = ['core', 'high_stock', 'momentum', 'drop', 'promotion', 'other'];
 
 // The creative pathway a product's source implies -- fixed copy for
 // Core/Drops per the brief, "Cover Requirement" reused verbatim from the
@@ -8863,6 +8863,7 @@ function shootPlanRequirementLabel(item) {
     case 'core': return 'Develop New Concepts';
     case 'drop': return 'Proven Concepts Already Assigned';
     case 'high_stock': return 'Creative Refresh (High Stock)';
+    case 'momentum': return 'Protect Momentum (recent launch)';
     case 'promotion': return item.promotion_stage_name ? `Cover Requirement — ${item.promotion_stage_name}` : 'Cover Requirement';
     default: return '—';
   }

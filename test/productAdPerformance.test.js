@@ -41,15 +41,34 @@ test('no approved benchmark for TOF / TOM CPA: enough data is "unrated", never p
   assert.equal(judge(B(400, 2), null).state, 'unrated');
   assert.match(judge(B(400, 2), null).reasons[0], /unknown or mixed/);
 });
-test('declining: clearly worse than its OWN earlier results (CPA, ROAS or CTR), labelled as relative, not as a target', () => {
-  const prior = B(300, 6); const recent = B(300, 3);                  // CPA $50 -> $100
-  const d = P.judgeCreative({ total: B(600, 9), recent, prior, delivery_rows: 14, funnel: 'MOF' }, {});
-  assert.equal(d.state, 'declining'); assert.equal(d.decline.metric, 'CPA'); assert.match(d.reasons[0], /compares the ad with itself, not with a target/);
-  assert.ok(d.reasons.some((t) => /within the approved MOF CPA limit before/.test(t)), 'it was green before and is now over');
-  const roasFall = P.judgeCreative({ total: B(600, 9, 40000, 800, 1800), recent: { spend: 300, impressions: 20000, clicks: 400, purchases: 3, value: 600 }, prior: { spend: 300, impressions: 20000, clicks: 400, purchases: 3, value: 1200 }, delivery_rows: 14, funnel: 'TOF' }, {});
-  assert.equal(roasFall.state, 'declining'); assert.equal(roasFall.decline.metric, 'ROAS'); assert.equal(roasFall.severity, 'relative', 'no approved TOF benchmark: purely relative');
-  const ctr = P.judgeCreative({ total: B(400, 0, 40000, 400), recent: B(200, 0, 20000, 120), prior: B(200, 0, 20000, 280), delivery_rows: 14, funnel: 'TOF' }, {});
-  assert.equal(ctr.state, 'declining'); assert.equal(ctr.decline.metric, 'CTR');
+// Batch 27: "declining" now means CREDIBLE fatigue only. A relative worsening is shown as "softening" and never costs a creative its "performing" label.
+test('credible fatigue: the ad crossed the approved benchmark (green before, over it now) with enough delivery in both windows', () => {
+  const prior = B(300, 6); const recent = B(300, 3);                  // CPA $50 (green) -> $100 (red)
+  const d = P.judgeCreative({ total: B(600, 9), recent, prior, fatigue_recent: recent, fatigue_prior: prior, delivery_rows: 14, funnel: 'MOF' }, {});
+  assert.equal(d.state, 'declining'); assert.equal(d.trend.credible_fatigue, true); assert.equal(d.trend.crossed_benchmark, true);
+  assert.match(d.reasons[0], /Credible fatigue/); assert.ok(d.reasons.some((t) => /within the approved MOF CPA limit before/.test(t)));
+});
+test('credible fatigue: CPA up AND CTR down together (two independent indicators), even with no approved benchmark', () => {
+  const prior = { spend: 300, impressions: 30000, clicks: 600, purchases: 6, value: 900 }; const recent = { spend: 300, impressions: 30000, clicks: 330, purchases: 4, value: 600 }; // CPA 50 -> 75, CTR 2.0% -> 1.1%
+  const d = P.judgeCreative({ total: B(600, 10, 60000, 930), recent, prior, fatigue_recent: recent, fatigue_prior: prior, delivery_rows: 14, funnel: 'TOF' }, {});
+  assert.equal(d.state, 'declining'); assert.equal(d.severity, 'relative', 'no approved TOF CPA benchmark: purely relative');
+});
+test('a 25% CPA rise while STILL within the approved benchmark is softening, not fatigue: the ad still counts as performing', () => {
+  const prior = B(200, 5); const recent = B(250, 5);                  // CPA $40 -> $50: +25%, both green
+  const d = P.judgeCreative({ total: B(450, 10), recent, prior, fatigue_recent: recent, fatigue_prior: prior, delivery_rows: 14, funnel: 'MOF' }, {});
+  assert.equal(d.state, 'performing'); assert.equal(d.trend.softening, true); assert.equal(d.trend.credible_fatigue, false);
+  assert.ok(d.reasons.some((t) => /Softening, not fatigue/.test(t)));
+});
+test('CPA alone is never enough without a benchmark crossing, and thin windows are never compared', () => {
+  const prior = B(300, 6); const recent = B(300, 4);                  // CPA 50 -> 75 (the 14-day total of $67 is now over the MOF limit): credible with enough delivery ...
+  assert.equal(P.judgeCreative({ total: B(600, 9), recent, prior, fatigue_recent: recent, fatigue_prior: prior, delivery_rows: 14, funnel: 'MOF' }, {}).state, 'declining');
+  // ... and the same worsening while the 14-day CPA stays within the benchmark is only softening
+  assert.equal(P.judgeCreative({ total: B(600, 10), recent, prior, fatigue_recent: recent, fatigue_prior: prior, delivery_rows: 14, funnel: 'MOF' }, {}).state, 'performing');
+  // ... but not when the windows have too few impressions or purchases to trust
+  const thinI = P.judgeCreative({ total: B(600, 9), recent: B(300, 4, 3000), prior: B(300, 6, 3000), fatigue_recent: B(300, 4, 3000), fatigue_prior: B(300, 6, 3000), delivery_rows: 14, funnel: 'MOF' }, {});
+  assert.notEqual(thinI.state, 'declining');
+  const thinP = P.judgeCreative({ total: B(600, 5), recent: B(300, 2), prior: B(300, 3), fatigue_recent: B(300, 2), fatigue_prior: B(300, 3), delivery_rows: 14, funnel: 'MOF' }, {});
+  assert.notEqual(thinP.state, 'declining', 'fewer than the minimum purchases in each window');
 });
 test('a small wobble is not a decline; and a half with too little spend is never compared', () => {
   assert.notEqual(P.judgeCreative({ total: B(600, 9), recent: B(300, 5), prior: B(300, 6), delivery_rows: 14, funnel: 'MOF' }, {}).state, 'declining');

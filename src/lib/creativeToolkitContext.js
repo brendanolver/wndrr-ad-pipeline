@@ -185,7 +185,7 @@ async function buildContext(shootPlanItemId) {
   const colourLabels = styles.map((s) => s.colour_label || s.style_code).filter(Boolean);
 
   let metrics = { lines: [], reason: null };
-  if (item.source === 'core') metrics = await coreMetrics(item.product_code);
+  if (item.source === 'core' || item.source === 'momentum') metrics = await coreMetrics(item.product_code);
   else if (item.source === 'high_stock') metrics = await highStockMetrics(item.product_code);
   else if (item.source === 'drop') metrics = await dropMetrics(item, styles);
   else if (item.source === 'promotion') metrics = await promotionMetrics(item);
