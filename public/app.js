@@ -1459,7 +1459,7 @@ document.getElementById('mp-campaign').addEventListener('change', (e) => { mpSta
 const apState = { adId: null, ctx: null, data: null, card: 0, retried: false, showMeta: false };
 function mpOpenPreview(adId) {
   const a = mpState.adsById.get(adId);
-  openAdPreview(adId, a ? { metrics: { spend: a.spend, purchases: a.purchases, cpa: a.cpa, outbound_ctr: a.outbound_ctr, reach: a.reach, frequency: a.frequency }, range: mpState.range } : null);
+  openAdPreview(adId, a ? { metrics: { spend: a.spend, purchases: a.purchases, cpa: a.cpa, roas: a.roas, outbound_ctr: a.outbound_ctr, reach: a.reach, frequency: a.frequency }, range: mpState.range, funnel: a.funnel } : null);
 }
 function closeAdPreview() {
   const body = document.getElementById('ap-body');
@@ -1472,7 +1472,7 @@ function closeAdPreview() {
 // the in-app image/video player is the fallback; "View Ad on Meta" is offered whenever Meta supplied a link.
 function ccOpenViewer(adId, ctx) {
   const a = mpState.adsById && mpState.adsById.get(adId);
-  const metrics = ctx !== undefined ? ctx : (a ? { metrics: { spend: a.spend, purchases: a.purchases, cpa: a.cpa, outbound_ctr: a.outbound_ctr, reach: a.reach, frequency: a.frequency }, range: mpState.range } : null);
+  const metrics = ctx !== undefined ? ctx : (a ? { metrics: { spend: a.spend, purchases: a.purchases, cpa: a.cpa, roas: a.roas, outbound_ctr: a.outbound_ctr, reach: a.reach, frequency: a.frequency }, range: mpState.range, funnel: a.funnel } : null);
   return openAdPreview(adId, metrics);
 }
 
@@ -1595,17 +1595,40 @@ function apMediaHtml(m, idx) {
 }
 function apGoCard(delta) {
   const cards = (apState.data.creative.cards || []);
+  if (!cards.length) return;
   apState.card = (apState.card + delta + cards.length) % cards.length;
+  apState.showMeta = false; // Meta's own frame shows ONE combination; moving between assets shows that asset in the app
   renderAdPreview();
 }
-function apToggleMeta() { apState.showMeta = !apState.showMeta; apState.userToggled = true; renderAdPreview(); }
+function apPickAsset(i) { apState.card = i; apState.showMeta = false; renderAdPreview(); }
+function apSetMode(meta) { apState.showMeta = !!meta; apState.userToggled = true; renderAdPreview(); }
+function apToggleMeta() { apSetMode(!apState.showMeta); }
+// attribute-safe escaping (escapeHtml alone leaves quotes alone, which is fine between tags but not inside an attribute value)
+const apAttr = (v) => escapeHtml(v).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+document.addEventListener('click', (e) => {
+  const b = e.target.closest && e.target.closest('[data-copy]');
+  if (b) apCopy(b.dataset.copy, b.dataset.copyWhat || 'Text');
+});
+function apCopy(text, what) {
+  const done = () => toast(`${what} copied`);
+  const fallback = () => { const t = document.createElement('textarea'); t.value = text; t.style.position = 'fixed'; t.style.opacity = '0'; document.body.appendChild(t); t.select(); try { document.execCommand('copy'); done(); } catch (e) { toast('Could not copy', true); } t.remove(); };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, fallback); else fallback();
+}
+function apToggleFullName(btn) {
+  const box = document.getElementById('apm-fullname-full');
+  if (!box) return;
+  const open = box.hidden;
+  box.hidden = !open;
+  btn.setAttribute('aria-expanded', String(open));
+  btn.querySelector('span').textContent = open ? 'Hide full ad name' : 'View full ad name';
+}
 function apMediaFailed() {
   // The in-app media failed: prefer Meta's own preview when there is one; otherwise Meta's signed media links may have
   // expired -- reload once automatically, then explain.
   if (!apState.showMeta && apState.data && apState.data.creative.preview_iframe_src) { apState.showMeta = true; renderAdPreview(); return; }
   if (!apState.retried) { apState.retried = true; openAdPreview(apState.adId, apState.ctx, true); return; }
   const m = document.getElementById('ap-media');
-  if (m) m.insertAdjacentHTML('beforeend', '<div class="ap-note">This preview could not be played in the app. Use "View Ad on Meta" or try Reload.</div>');
+  if (m) m.insertAdjacentHTML('beforeend', '<div class="ap-note">This preview could not be played in the app. Use "View Ad on Meta" or try Refresh Preview.</div>');
 }
 // Meta renders its preview on request, so the frame can take a moment: show the cover + a spinner until it has loaded.
 function apIframeHtml(c) {
@@ -1613,68 +1636,98 @@ function apIframeHtml(c) {
   return `<div class="ap-iframe-wrap">${cover ? `<img class="ap-iframe-cover" src="${escapeHtml(cover)}" alt="" referrerpolicy="no-referrer">` : ''}<div class="ap-iframe-loading">Loading Meta's preview…</div>
     <iframe class="ap-iframe" src="${escapeHtml(c.preview_iframe_src)}" sandbox="allow-scripts allow-same-origin allow-popups" allow="autoplay; fullscreen" onload="this.parentNode.classList.add('loaded')"></iframe></div>`;
 }
+const APM_ICON = {
+  ext: '<svg class="apm-ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>',
+  refresh: '<svg class="apm-ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>',
+  copy: '<svg class="apm-ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a1 1 0 0 1 1-1h9"/></svg>',
+  info: '<svg class="apm-ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>',
+  chev: '<svg class="apm-ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 9l6 6 6-6"/></svg>',
+  prev: '<svg class="apm-ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M15 6l-6 6 6 6"/></svg>',
+  next: '<svg class="apm-ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 6l6 6-6 6"/></svg>',
+};
+// The ad preview modal: LEFT = the real Meta preview (what the ad looks like), RIGHT = Ad Details, Performance (the selected date range, same figures as the table), Links & Actions.
+// Everything shown comes from the existing sources (the cached Meta creative fetch and the figures the table already holds); nothing is invented.
 function renderAdPreview() {
   const d = apState.data;
   const c = d.creative;
   const ad = d.ad;
-  document.getElementById('ap-title').textContent = ad.ad_name || '(unnamed ad)';
+  const x = apState.ctx && apState.ctx.metrics;
+  const name = ad.ad_name || '(unnamed ad)';
+  document.getElementById('ap-title').textContent = name;
+  const cards = c.kind === 'carousel' || c.dynamic ? (c.cards || []) : [];
+  const multi = cards.length > 1;
+  const hasMeta = !!c.preview_iframe_src;
+  const hasApp = c.kind === 'carousel' ? cards.length > 0 : !!(c.main && (c.main.video_url || c.main.image_url));
+  const metaMode = apState.showMeta && hasMeta;
+  if (apState.card >= cards.length) apState.card = 0;
+
+  // ── the preview itself ──
   let media = '';
-  const playable = c.kind === 'carousel' ? (c.cards || []).length > 0 : !!(c.main && (c.main.video_url || c.main.image_url));
-  if (apState.showMeta && c.preview_iframe_src) {
-    media = apIframeHtml(c);
-  } else if (c.kind === 'carousel' && (c.cards || []).length) {
-    const card = c.cards[apState.card] || c.cards[0];
-    media = `<div class="ap-carousel">${apMediaHtml(card)}
-      <div class="ap-carousel-nav"><button type="button" class="btn btn-ghost btn-sm" onclick="apGoCard(-1)">&larr;</button>
-        <span>Card ${apState.card + 1} of ${c.cards.length}${card.title ? ' · ' + escapeHtml(card.title) : ''}</span>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="apGoCard(1)">&rarr;</button></div></div>`;
-  } else if (playable) {
+  if (metaMode) media = apIframeHtml(c);
+  else if (cards.length) {
+    const card = cards[apState.card] || cards[0];
+    media = apMediaHtml(card) || '<div class="ap-note">This asset has no image or video Meta lets us show.</div>';
+  } else if (hasApp) {
     media = apMediaHtml(c.main);
     if (c.kind === 'video' && !c.main.video_url) media += '<div class="ap-note">Meta did not provide a playable file for this video, so only the cover image is shown.</div>';
-  } else if (c.preview_iframe_src) {
-    media = apIframeHtml(c);
-  } else if (c.thumbnail_url) {
-    media = `<img class="ap-img" src="${escapeHtml(c.thumbnail_url)}" referrerpolicy="no-referrer" alt="Ad creative thumbnail">`;
-  } else {
-    media = '<div class="ap-note">No preview is available for this ad from Meta.</div>';
-  }
-  const openLink = c.share_link || c.preview_iframe_src;
-  const x = apState.ctx && apState.ctx.metrics;
+  } else if (hasMeta) media = apIframeHtml(c);
+  else if (c.thumbnail_url) media = `<img class="ap-img" src="${apAttr(c.thumbnail_url)}" referrerpolicy="no-referrer" alt="Ad creative thumbnail">`;
+  else media = '<div class="ap-note">No preview is available for this ad from Meta.</div>';
+
+  const modeSwitch = hasMeta && (hasApp || cards.length) ? `<div class="apm-seg" role="group" aria-label="Preview type">
+      <button type="button" class="${metaMode ? 'on' : ''}" onclick="apSetMode(true)" aria-pressed="${metaMode}" title="Meta's own rendering of the ad (copy, branding and call to action)">Meta preview</button>
+      <button type="button" class="${metaMode ? '' : 'on'}" onclick="apSetMode(false)" aria-pressed="${!metaMode}" title="The image or video in the app's own player">In-app player</button></div>` : '';
+  const counter = multi ? `<div class="apm-count"><button type="button" class="apm-arrow" onclick="apGoCard(-1)" aria-label="Previous asset">${APM_ICON.prev}</button><span>${apState.card + 1} / ${cards.length}</span><button type="button" class="apm-arrow" onclick="apGoCard(1)" aria-label="Next asset">${APM_ICON.next}</button></div>` : '';
+  const thumb = (card, i) => { const u = card.image_url || card.poster_url; return `<button type="button" class="apm-asset${!metaMode && i === apState.card ? ' on' : ''}" onclick="apPickAsset(${i})" aria-label="Asset ${i + 1} of ${cards.length}${card.type === 'video' ? ' (video)' : ''}">${u ? `<img src="${apAttr(u)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : `<span class="apm-asset-ph">${card.type === 'video' ? 'Video' : 'Image'}</span>`}${card.type === 'video' ? '<span class="apm-asset-play" aria-hidden="true">&#9654;</span>' : ''}</button>`; };
+  const strip = multi ? `<div class="apm-assets"><div class="apm-assets-head"><b>${c.dynamic ? 'Creative assets' : 'Carousel cards'}</b>${c.dynamic ? ' <span class="apm-muted">(Dynamic creative)</span>' : ''}<span class="apm-muted apm-assets-n">${cards.length} available</span></div><div class="apm-assets-row">${cards.map(thumb).join('')}</div></div>` : '';
+  const dynNote = c.dynamic ? `<div class="apm-note">${APM_ICON.info}<span>Dynamic creative: This is one representative combination. Customers may see different assets, text or placements.</span></div>` : '';
+  const foot = `<div class="apm-foot">Loaded from Meta ${escapeHtml(mpDateTime(c.fetched_at))}${c.cached ? ' (saved copy)' : ''}. Media links expire; Refresh Preview fetches fresh ones.${d.warning ? ` ${escapeHtml(d.warning)}` : ''}</div>`;
+
+  // ── Ad Details ──
   const dash = (v) => (v ? escapeHtml(v) : '—');
   const products = (ad.products || []).length ? ad.products.map(escapeHtml).join(', ') : '—';
-  const fmt = apFormatLabel(c);
-  const dynamicNote = c.dynamic
-    ? '<div class="ap-note ap-dynamic-note"><b>Dynamic creative.</b> Meta assembles this ad from several images / videos and shows each viewer a different combination, so this is one representative preview, not what every viewer sees.</div>' : '';
+  const funnel = ad.funnel || (apState.ctx && apState.ctx.funnel) || null;
+  const adId = ad.meta_ad_id || apState.adId;
+  const adSet = c.adset_name ? escapeHtml(c.adset_name) : (ad.adset_id ? `<span title="The ad set name loads from Meta when the preview is refreshed">Ad set ${escapeHtml(ad.adset_id)}</span>` : '—');
+  const campaign = ad.campaign_name ? escapeHtml(ad.campaign_name) : (ad.campaign_id ? `Campaign ${escapeHtml(ad.campaign_id)}` : '—');
+  const details = `<section class="apm-card">
+      <div class="apm-card-head"><h3>Ad Details</h3>${mpStatusChip(ad.effective_status)}</div>
+      <dl class="apm-grid">
+        <div><dt>Product</dt><dd>${products}</dd></div>
+        <div><dt>Creative Format</dt><dd>${escapeHtml(apFormatLabel(c))}</dd></div>
+        <div><dt>Funnel</dt><dd>${funnel ? mpFunnelBadge(funnel) : '—'}</dd></div>
+        <div><dt>Ad Set</dt><dd>${adSet}</dd></div>
+        <div><dt>Campaign</dt><dd>${campaign}</dd></div>
+        <div><dt>Full Ad Name</dt><dd><span class="apm-copyrow"><span class="apm-trunc" title="${apAttr(name)}">${escapeHtml(name)}</span><button type="button" class="apm-copy" data-copy="${apAttr(name)}" data-copy-what="Ad name" aria-label="Copy ad name" title="Copy ad name">${APM_ICON.copy}</button></span>
+          <button type="button" class="apm-link" onclick="apToggleFullName(this)" aria-expanded="false"><span>View full ad name</span>${APM_ICON.chev}</button>
+          <div class="apm-fullname" id="apm-fullname-full" hidden>${escapeHtml(name)}</div></dd></div>
+        <div><dt>Meta Ad ID</dt><dd><span class="apm-copyrow"><span class="apm-mono" data-ap-ad-id>${escapeHtml(adId)}</span><button type="button" class="apm-copy" data-copy="${apAttr(adId)}" data-copy-what="Meta Ad ID" aria-label="Copy Meta Ad ID" title="Copy Meta Ad ID">${APM_ICON.copy}</button></span></dd></div>
+      </dl></section>`;
+
+  // ── Performance (only where the caller supplied the figures, i.e. the admin Meta Performance table) ──
+  const tiles = x ? [['Amount Spent', 'spend', 'money'], ['Purchases', 'purchases', 'int'], ['CPA', 'cpa', 'money'], ['ROAS', 'roas', 'roas'], ['Reach', 'reach', 'reach'], ['Frequency', 'frequency', 'freq']].filter(([, k]) => x[k] !== undefined) : [];
+  const perf = tiles.length ? `<section class="apm-card">
+      <div class="apm-card-head"><h3>Performance</h3>${apState.ctx.range ? `<span class="apm-muted">${escapeHtml(mpRange(apState.ctx.range, true))}</span>` : ''}</div>
+      <div class="apm-metrics">${tiles.map(([l, k, f]) => `<div class="apm-metric"><div class="apm-metric-l">${l}</div><div class="apm-metric-v">${f === 'reach' ? mpReachCell(x[k], 'int') : f === 'freq' ? mpReachCell(x[k], 'freq') : mpFmt(x[k], f)}</div></div>`).join('')}</div></section>` : '';
+
+  // ── Links & Actions ──
+  const openLink = c.share_link || c.preview_iframe_src;
+  const actions = `<section class="apm-card">
+      <div class="apm-card-head"><h3>Links &amp; Actions</h3></div>
+      <div class="apm-actions">
+        ${openLink ? `<a class="btn btn-primary apm-btn" href="${apAttr(openLink)}" target="_blank" rel="noopener noreferrer" data-ap-view-meta>${APM_ICON.ext}View Ad on Meta</a>` : '<span class="hint" data-ap-no-link>Meta did not supply a preview link for this ad.</span>'}
+        <button type="button" class="btn btn-ghost apm-btn" onclick="openAdPreview('${escapeHtml(apState.adId)}', apState.ctx, true)" data-ap-refresh>${APM_ICON.refresh}Refresh Preview</button>
+        <button type="button" class="btn btn-ghost apm-btn apm-close" onclick="closeAdPreview()" data-ap-close>Close</button>
+      </div></section>`;
+
   document.getElementById('ap-body').innerHTML = `
-    <div class="ap-layout">
-      <div class="ap-media" id="ap-media">${media}${dynamicNote}</div>
-      <div class="ap-context">
-        <div class="mp-detail-h">Ad information</div>
-        <dl class="mp-detail-grid ap-info">
-          <div class="ap-info-wide"><dt>Ad name</dt><dd class="ap-fullname">${dash(ad.ad_name)}</dd></div>
-          <div><dt>Meta Ad ID</dt><dd class="ap-mono">${escapeHtml(ad.meta_ad_id || apState.adId)}</dd></div>
-          <div><dt>Status</dt><dd>${mpStatusChip(ad.effective_status)}</dd></div>
-          <div class="ap-info-wide"><dt>Campaign</dt><dd>${ad.campaign_name ? escapeHtml(ad.campaign_name) : (ad.campaign_id ? `Campaign ${escapeHtml(ad.campaign_id)}` : '—')}</dd></div>
-          <div class="ap-info-wide"><dt>Ad set</dt><dd>${c.adset_name ? escapeHtml(c.adset_name) : (ad.adset_id ? `<span title="The ad set name loads from Meta when the preview is reloaded">Ad set ${escapeHtml(ad.adset_id)}</span>` : '—')}</dd></div>
-          <div><dt>Creative format</dt><dd>${escapeHtml(fmt)}</dd></div>
-          <div><dt>Product</dt><dd>${products}</dd></div>
-        </dl>
-        ${x ? `<div class="mp-detail-h">${apState.ctx.range ? escapeHtml(mpRange(apState.ctx.range, true)) : 'Performance'}</div>
-        <div class="mp-detail-metrics">
-          ${[['Spend', mpFmt(x.spend, 'money')], ['Purchases', mpFmt(x.purchases, 'int')], ['CPA', mpFmt(x.cpa, 'money')], ['Outbound CTR', mpFmt(x.outbound_ctr, 'pct')],
-            ['Reach', mpReachCell(x.reach, 'int')], ['Frequency', mpReachCell(x.frequency, 'freq')]].map(([l, v]) => `<div class="mp-kpi"><div class="mp-kpi-label">${l}</div><div class="mp-kpi-value">${v}</div></div>`).join('')}
-        </div>` : ''}
-        <div class="ap-actions">
-          ${openLink ? `<a class="btn btn-primary btn-sm" href="${escapeHtml(openLink)}" target="_blank" rel="noopener noreferrer" data-ap-view-meta>View Ad on Meta</a>` : '<span class="hint" data-ap-no-link>Meta did not supply a preview link for this ad.</span>'}
-          <button type="button" class="btn btn-ghost btn-sm" onclick="closeAdPreview()" data-ap-close>Close</button>
-        </div>
-        <div class="ap-secondary">
-          ${c.preview_iframe_src && playable ? `<button type="button" class="link-btn" onclick="apToggleMeta()">${apState.showMeta ? 'Show in-app player' : "Show Meta's own preview"}</button>` : ''}
-          <button type="button" class="link-btn" onclick="openAdPreview('${escapeHtml(apState.adId)}', apState.ctx, true)">Reload</button>
-        </div>
-        ${d.warning ? `<div class="ap-note">${escapeHtml(d.warning)}</div>` : ''}
-        <div class="hint">Loaded from Meta ${escapeHtml(mpDateTime(c.fetched_at))}${c.cached ? ' (saved copy)' : ''}. Media links expire; Reload fetches fresh ones.</div>
-      </div>
+    <div class="apm-layout">
+      <section class="apm-left">
+        <div class="apm-left-head"><h3>Ad Preview</h3>${modeSwitch}${counter}</div>
+        <div class="ap-media apm-stage" id="ap-media">${media}</div>
+        ${strip}${dynNote}${foot}
+      </section>
+      <div class="apm-right">${details}${perf}${actions}</div>
     </div>`;
 }
 function apFormatLabel(c) {

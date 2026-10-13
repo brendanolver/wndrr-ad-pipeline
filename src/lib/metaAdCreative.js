@@ -232,7 +232,7 @@ async function fetchFromMeta(adId, creativeId, deps = {}, opts = {}) {
 // Ad + the context shown beside the creative (product/concept; money is added by the caller for admins only).
 async function adContext(adId, db = pool) {
   const r = await db.query(
-    `SELECT m.meta_ad_id, m.ad_name, m.meta_creative_id, m.effective_status, m.match_status, m.meta_adset_id, m.meta_campaign_id, mc.name AS campaign_name,
+    `SELECT m.meta_ad_id, m.ad_name, m.meta_creative_id, m.effective_status, m.match_status, m.meta_adset_id, m.meta_campaign_id, mc.name AS campaign_name, mc.funnel AS campaign_funnel,
             c.concept_label, c.creator_name, c.media_type,
             COALESCE((SELECT json_agg(p.product_name ORDER BY p.product_code) FROM meta_ad_products p WHERE p.meta_ad_id = m.meta_ad_id), '[]') AS products
        FROM meta_ads m LEFT JOIN meta_ad_classifications c ON c.meta_ad_id = m.meta_ad_id LEFT JOIN meta_campaigns mc ON mc.meta_campaign_id = m.meta_campaign_id WHERE m.meta_ad_id = $1`,
@@ -258,7 +258,7 @@ async function getCreative(adId, { refresh = false, prefetch = false, now = Date
     ad: {
       meta_ad_id: ad.meta_ad_id, ad_name: ad.ad_name, effective_status: ad.effective_status, match_status: ad.match_status,
       products: ad.products || [], concept: ad.concept_label || null, creator: ad.creator_name || null, media_type: ad.media_type || null,
-      campaign_id: ad.meta_campaign_id || null, campaign_name: ad.campaign_name || null, adset_id: ad.meta_adset_id || null,
+      campaign_id: ad.meta_campaign_id || null, campaign_name: ad.campaign_name || null, adset_id: ad.meta_adset_id || null, funnel: ad.campaign_funnel || null,
     },
     creative: payload,
     ...extra,

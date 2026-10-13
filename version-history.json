@@ -2,6 +2,16 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.0.2",
+      "date": "2026-10-13",
+      "title": "Meta ad preview: redesigned two-column modal",
+      "changes": [
+        "The ad preview now shows the real Meta preview on the left (with Meta preview / In-app player switch and an asset strip when Meta gives several assets) and Ad Details, Performance and Links & Actions on the right.",
+        "Meta Ad ID and the full ad name can be copied; Refresh Preview refreshes only the preview.",
+        "Dynamic creative now has a short note instead of a warning panel."
+      ]
+    },
+    {
       "version": "1.0.1",
       "date": "2026-10-13",
       "title": "Meta Performance: clearer KPI comparisons, ad names, row hover",
