@@ -2,6 +2,14 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.0.8",
+      "date": "2026-10-13",
+      "title": "Green-only benchmarks",
+      "changes": [
+        "Benchmarks can now be green only: highlight a value green when it meets a threshold (for example Reach of 20,000 or more) and leave it uncoloured otherwise, with no orange or red."
+      ]
+    },
+    {
       "version": "1.0.7",
       "date": "2026-10-13",
       "title": "Benchmarks are optional",

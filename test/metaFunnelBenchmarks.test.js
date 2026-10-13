@@ -51,3 +51,13 @@ test('the table\'s funnel checkboxes: nothing / all three = no restriction, a su
     assert.deepEqual(q('none'), []); assert.equal(q('garbage'), null);
   }
 });
+
+test('"green only": green when the target is met, otherwise no colour (never orange or red)', () => {
+  const rows = [row('TOF', 'reach', 20000, { highlight_only: true }), row('TOM', 'cpa', 60, { highlight_only: true }), row('MOF', 'reach', 20000)];
+  assert.equal(cls(rows, 'TOF', 'reach', 25000), 'green'); assert.equal(cls(rows, 'TOF', 'reach', 20000), 'green');
+  assert.equal(cls(rows, 'TOF', 'reach', 19999), null); assert.equal(cls(rows, 'TOF', 'reach', 100), null);
+  assert.equal(cls(rows, 'TOM', 'cpa', 55), 'green'); assert.equal(cls(rows, 'TOM', 'cpa', 61), null); assert.equal(cls(rows, 'TOM', 'cpa', 500), null);
+  // the same target without the option still has orange and red
+  assert.equal(cls(rows, 'MOF', 'reach', 17000), 'orange'); assert.equal(cls(rows, 'MOF', 'reach', 100), 'red');
+  assert.deepEqual(Object.keys(bench.ruleOf(row('TOF', 'reach', 20000, { highlight_only: true }))).filter((k) => ['green', 'orange', 'red'].includes(k)), ['green']);
+});

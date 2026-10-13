@@ -27,7 +27,7 @@ const intOrNull = (v) => {
 
 function publicRow(r) {
   return {
-    id: r.id, funnel: r.funnel, metric: r.metric, min_days: r.min_days, max_days: r.max_days, target: num(r.target), target_min: num(r.target_min), inclusive: !!r.inclusive,
+    id: r.id, funnel: r.funnel, metric: r.metric, min_days: r.min_days, max_days: r.max_days, target: num(r.target), target_min: num(r.target_min), highlight_only: !!r.highlight_only, inclusive: !!r.inclusive,
     tolerance_pct: num(r.tolerance_pct), active: !!r.active, note: r.note || null, direction: DIRECTION[r.metric], unit: UNIT[r.metric],
     updated_at: r.updated_at ? new Date(r.updated_at).toISOString() : null, updated_by_user_id: r.updated_by_user_id || null,
   };
@@ -40,6 +40,8 @@ function ruleOf(row) {
   const rule = row.metric === 'frequency' && min !== null
     ? health.rangeRule({ min, max: Number(row.target), inclusive: !!row.inclusive, pct: Number(row.tolerance_pct) })
     : health.percentRule({ direction: DIRECTION[row.metric], target: Number(row.target), inclusive: !!row.inclusive, pct: Number(row.tolerance_pct) });
+  // "Green only": the value is highlighted green when it meets the target and is otherwise left uncoloured (no orange, no red). Used where a number is a threshold to notice, not a target to miss (for example Reach).
+  if (row.highlight_only) { delete rule.orange; delete rule.red; }
   rule.window = (row.min_days || row.max_days) ? { min_days: row.min_days || null, max_days: row.max_days || null } : null;
   return rule;
 }
@@ -118,6 +120,7 @@ function cleanInput(body, { partial = false } = {}) {
     if (!Number.isFinite(tol) || tol < 0 || tol > 100) throw new HttpError(400, 'Tolerance must be between 0 and 100 percent');
     out.tolerance_pct = tol;
   }
+  if (b.highlight_only !== undefined) out.highlight_only = !!b.highlight_only;
   if (b.active !== undefined) out.active = !!b.active;
   if (b.note !== undefined) out.note = b.note === null ? null : String(b.note).slice(0, 500);
   return out;
@@ -134,9 +137,9 @@ async function create(body, userId) {
   try {
     await client.query('BEGIN');
     const r = await client.query(
-      `INSERT INTO meta_performance_benchmarks (funnel, metric, min_days, max_days, target, target_min, inclusive, tolerance_pct, active, note, created_by_user_id, updated_by_user_id)
-       VALUES ($1,$2,$3,$4,$5,$11,$6,$7,$8,$9,$10,$10) RETURNING *`,
-      [v.funnel, v.metric, v.min_days, v.max_days, v.target, v.inclusive, v.tolerance_pct, v.active === undefined ? true : v.active, v.note || null, userId || null, v.target_min === undefined ? null : v.target_min]
+      `INSERT INTO meta_performance_benchmarks (funnel, metric, min_days, max_days, target, target_min, inclusive, tolerance_pct, active, note, created_by_user_id, updated_by_user_id, highlight_only)
+       VALUES ($1,$2,$3,$4,$5,$11,$6,$7,$8,$9,$10,$10,$12) RETURNING *`,
+      [v.funnel, v.metric, v.min_days, v.max_days, v.target, v.inclusive, v.tolerance_pct, v.active === undefined ? true : v.active, v.note || null, userId || null, v.target_min === undefined ? null : v.target_min, !!v.highlight_only]
     );
     await record(client, r.rows[0].id, 'create', null, r.rows[0], userId);
     await client.query('COMMIT');
@@ -160,9 +163,9 @@ async function update(id, body, userId) {
     if (num(next.target_min) !== null && (next.metric !== 'frequency' || num(next.target_min) > Number(next.target))) throw new HttpError(400, next.metric !== 'frequency' ? 'An acceptable range is only available for Frequency' : 'The lowest acceptable value cannot be above the highest');
     if (next.min_days !== null && next.max_days !== null && next.min_days > next.max_days) throw new HttpError(400, 'The window’s first day count cannot be larger than its last');
     const r = await client.query(
-      `UPDATE meta_performance_benchmarks SET funnel=$2, metric=$3, min_days=$4, max_days=$5, target=$6, inclusive=$7, tolerance_pct=$8, active=$9, note=$10, updated_by_user_id=$11, target_min=$12, updated_at=now()
+      `UPDATE meta_performance_benchmarks SET funnel=$2, metric=$3, min_days=$4, max_days=$5, target=$6, inclusive=$7, tolerance_pct=$8, active=$9, note=$10, updated_by_user_id=$11, target_min=$12, highlight_only=$13, updated_at=now()
         WHERE id=$1 RETURNING *`,
-      [id, next.funnel, next.metric, next.min_days, next.max_days, next.target, next.inclusive, next.tolerance_pct, next.active, next.note, userId || null, num(next.target_min)]
+      [id, next.funnel, next.metric, next.min_days, next.max_days, next.target, next.inclusive, next.tolerance_pct, next.active, next.note, userId || null, num(next.target_min), !!next.highlight_only]
     );
     await record(client, id, 'update', cur, r.rows[0], userId);
     await client.query('COMMIT');

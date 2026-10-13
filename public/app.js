@@ -590,7 +590,8 @@ const mbenchFmt = (metric, v) => {
   if (metric === 'outbound_ctr') return `${n}%`;
   return n;
 };
-const mbenchWindowText = (r) => {
+const mbenchWindowText = (r) => (r.highlight_only ? `${mbenchWindowBase(r)} · green only` : mbenchWindowBase(r));
+const mbenchWindowBase = (r) => {
   if (r.min_days == null && r.max_days == null) return 'any period';
   if (r.min_days != null && r.max_days != null) return r.min_days === r.max_days ? `${r.min_days}-day periods` : `${r.min_days}–${r.max_days}-day periods`;
   return r.min_days != null ? `${r.min_days}+ day periods` : `periods up to ${r.max_days} days`;
@@ -677,6 +678,8 @@ function mbenchFill(f, metric, b) {
   mbenchEl('mbench-target').value = b ? b.target : '';
   mbenchEl('mbench-lo').value = b && b.target_min != null ? b.target_min : '';
   mbenchEl('mbench-tol').value = b ? b.tolerance_pct : '20';
+  // Reach is a number to notice rather than a target to miss, so a new Reach benchmark starts as "green only"
+  mbenchEl('mbench-style').value = b ? (b.highlight_only ? 'green' : 'bands') : (metric === 'reach' ? 'green' : 'bands');
   mbenchEl('mbench-inclusive').checked = b ? b.inclusive : true;
   const custom = !!b && (b.min_days != null || b.max_days != null);
   mbenchEl('mbench-window').value = custom ? 'custom' : 'any'; mbenchEl('mbench-window-fields').style.display = custom ? '' : 'none';
@@ -693,6 +696,9 @@ function mbenchSyncForm() {
   mbenchEl('mbench-lo-wrap').hidden = !range;
   mbenchEl('mbench-target-label').textContent = range ? `Highest acceptable ${label}` : `Target ${label}`;
   mbenchEl('mbench-kind-hint').textContent = range ? 'Flag ads whose frequency is outside this range.' : kind === 'lower' ? `Flag ads where ${label} is higher than this value.` : `Flag ads where ${label} is lower than this value.`;
+  const greenOnly = mbenchEl('mbench-style').value === 'green';
+  mbenchEl('mbench-tol-wrap').hidden = greenOnly;
+  mbenchEl('mbench-style-hint').textContent = greenOnly ? `Ads are highlighted green when ${label} ${range ? 'is inside the range' : kind === 'lower' ? 'is at or below the target' : 'reaches the target'}; otherwise they have no colour.` : 'Green when it meets the target, orange when close, red when further off.';
   mbenchEl('mbench-tol-hint').textContent = `Show orange when performance is within ${mbenchEl('mbench-tol').value || 0}% of the target.`;
   mbenchEl('mbench-inclusive-label').textContent = range ? 'A value exactly at either end counts as green' : kind === 'lower' ? 'A value exactly on the target counts as green' : 'A value exactly on the target counts as green';
   mbenchPreview();
@@ -716,11 +722,17 @@ function mbenchPreview() {
   const tol = mbenchEl('mbench-tol').value === '' ? 20 : Number(mbenchEl('mbench-tol').value);
   if (mbenchEl('mbench-target').value === '' || !Number.isFinite(target) || target <= 0 || !Number.isFinite(tol) || tol < 0 || tol > 100) { el.innerHTML = '<div class="mbp-empty">Enter a target above 0 to preview the colours.</div>'; return; }
   const kind = mbenchEl('mbench-kind').value;
+  const greenOnly = mbenchEl('mbench-style').value === 'green';
   const bands = mbenchBands({ kind, target, lo, tol, inclusive: mbenchEl('mbench-inclusive').checked });
   if (!bands) { el.innerHTML = '<div class="mbp-empty">The lowest acceptable value must be 0 or more and not above the highest.</div>'; return; }
   // reuse the same unit formatting as the cards: swap each number in the band text for its formatted value
   const fmt = (txt) => txt.replace(/-?\d+(?:\.\d+)?/g, (n) => mbenchFmt(metric, Number(n)));
   const names = { green: 'Better than target', orange: `Within ${tol}%`, red: 'Below target' };
+  if (greenOnly) {
+    el.innerHTML = `<div class="mbp-title">Preview <small>(green only)</small></div>
+      <div class="mbp-tiles mbp-tiles-2"><div class="mbp-tile mbp-green" data-band="green"><b>${escapeHtml(fmt(bands.green.text))}</b><span>${bands.range ? 'Highlighted green' : 'Highlighted green'}</span></div><div class="mbp-tile mbp-none" data-band="none"><b>Otherwise</b><span>No colour</span></div></div>`;
+    return;
+  }
   el.innerHTML = `<div class="mbp-title">Preview <small>(${escapeHtml(kind === 'range' ? 'acceptable range' : kind === 'lower' ? 'lower is better' : 'higher is better')}, ${tol}% tolerance)</small></div>
     <div class="mbp-tiles">${['green', 'orange', 'red'].map((s) => `<div class="mbp-tile mbp-${s}" data-band="${s}"><b>${escapeHtml(fmt(bands[s].text))}</b><span>${s === 'green' && bands.range ? 'Inside the range' : names[s]}</span></div>`).join('')}</div>`;
 }
@@ -733,7 +745,7 @@ async function mbenchSend(method, path, body) {
   const res = await api(`/meta-performance/benchmarks${path}`, { method, body: body ? JSON.stringify(body) : undefined });
   MBENCH.data = res; mbenchRender(); return res;
 }
-['mbench-kind', 'mbench-target', 'mbench-lo', 'mbench-tol', 'mbench-inclusive'].forEach((id) => mbenchEl(id).addEventListener(id === 'mbench-kind' || id === 'mbench-inclusive' ? 'change' : 'input', mbenchSyncForm));
+['mbench-kind', 'mbench-style', 'mbench-target', 'mbench-lo', 'mbench-tol', 'mbench-inclusive'].forEach((id) => mbenchEl(id).addEventListener(['mbench-kind', 'mbench-style', 'mbench-inclusive'].includes(id) ? 'change' : 'input', mbenchSyncForm));
 mbenchEl('mbench-window').addEventListener('change', (e) => { mbenchEl('mbench-window-fields').style.display = e.target.value === 'custom' ? '' : 'none'; });
 mbenchEl('mbench-cancel').addEventListener('click', mbenchCloseDrawer);
 mbenchEl('mbench-close').addEventListener('click', mbenchCloseDrawer);
@@ -748,6 +760,7 @@ mbenchEl('mbench-save').addEventListener('click', async () => {
     min_days: win ? mbenchEl('mbench-min').value : null, max_days: win ? mbenchEl('mbench-max').value : null,
     inclusive: mbenchEl('mbench-inclusive').checked, tolerance_pct: mbenchEl('mbench-tol').value,
     target_min: range && mbenchEl('mbench-lo').value !== '' ? mbenchEl('mbench-lo').value : null,
+    highlight_only: mbenchEl('mbench-style').value === 'green',
   };
   if (!(Number(body.target) > 0)) { mbenchMsg('Enter a target above 0, or Cancel to leave this measure unset.', 'err'); return; }
   if (range && body.target_min === null) { mbenchMsg('Enter the lowest acceptable value for a range.', 'err'); return; }

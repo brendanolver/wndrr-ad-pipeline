@@ -1678,7 +1678,8 @@
             <label class="mbd-field" id="mbench-lo-wrap" hidden>Lowest acceptable<input type="number" id="mbench-lo" step="any" min="0" placeholder="e.g. 1.2"></label>
             <label class="mbd-field">Reporting window<select id="mbench-window"><option value="any">Any period</option><option value="custom">Only periods of…</option></select><small>This target only applies to this reporting window.</small></label>
             <span class="mbench-window-fields" id="mbench-window-fields" style="display:none;"><label>from <input type="number" id="mbench-min" min="1" step="1" placeholder="days"></label><label>to <input type="number" id="mbench-max" min="1" step="1" placeholder="days"></label><span class="mbd-days">days</span></span>
-            <label class="mbd-field">Orange tolerance<span class="mbd-pct"><input type="number" id="mbench-tol" min="0" max="100" step="1" value="20"><i>%</i></span><small id="mbench-tol-hint"></small></label>
+            <label class="mbd-field">Colours<select id="mbench-style"><option value="bands">Green, orange and red</option><option value="green">Green only (no orange or red)</option></select><small id="mbench-style-hint"></small></label>
+            <label class="mbd-field" id="mbench-tol-wrap">Orange tolerance<span class="mbd-pct"><input type="number" id="mbench-tol" min="0" max="100" step="1" value="20"><i>%</i></span><small id="mbench-tol-hint"></small></label>
             <label class="mbench-check"><input type="checkbox" id="mbench-inclusive" checked> <span id="mbench-inclusive-label">A value exactly on the target counts as green</span></label>
             <div class="mbench-preview" id="mbench-preview"></div>
           </div>

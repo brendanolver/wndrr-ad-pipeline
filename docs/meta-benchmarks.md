@@ -15,5 +15,8 @@ This extends the existing benchmark system (table `meta_performance_benchmarks`,
 * **Change history** is a collapsed section at the bottom: what changed (added / changed / removed), previous → new value, who and when. No history is deleted.
 * "How benchmarks work" holds the detailed explanation instead of permanent text.
 
+## Green only (highlight a threshold)
+For a number you want to notice rather than a target you can miss (typically **Reach**, e.g. "highlight green at 20,000 or more"), choose **Colours: Green only** in the editor (the default for a new Reach benchmark). The value is green when it meets the target and has no colour otherwise: never orange or red. Available for every measure and for Frequency ranges; stored as `highlight_only`.
+
 ## Data model (additive)
-`meta_performance_benchmarks`: the metric check is widened to the six measures (existing rows untouched) and an optional `target_min` column holds a Frequency range's lower bound. No data is deleted or rewritten.
+`meta_performance_benchmarks`: the metric check is widened to the six measures (existing rows untouched) and an optional `target_min` column holds a Frequency range's lower bound, and `highlight_only` (default false) marks a green-only benchmark. No data is deleted or rewritten.
