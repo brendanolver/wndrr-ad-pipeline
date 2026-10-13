@@ -93,7 +93,8 @@ function cleanInput(body, { partial = false } = {}) {
   }
   if (!partial || b.target !== undefined) {
     const t = num(b.target);
-    if (t === null || !Number.isFinite(t) || t < 0 || t > 1e9) throw new HttpError(400, 'Enter a target number (0 or more)');
+    // a target of 0 would colour every ad red (lower is better) or green (higher is better), which is never what is meant: a benchmark is optional, so leave the measure unset instead
+    if (t === null || !Number.isFinite(t) || t <= 0 || t > 1e9) throw new HttpError(400, 'Enter a target above 0, or leave this measure unset (a benchmark is optional)');
     out.target = t;
   }
   if (b.target_min !== undefined) {

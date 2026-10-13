@@ -39,6 +39,8 @@ test('validation: range only for Frequency and low <= high; unknown metrics refu
   assert.throws(() => bench.cleanInput({ funnel: 'TOF', metric: 'cpa', target: 60, target_min: 10 }), /only available for Frequency/);
   assert.throws(() => bench.cleanInput({ funnel: 'TOF', metric: 'frequency', target: 1, target_min: 2 }), /cannot be above/);
   assert.throws(() => bench.cleanInput({ funnel: 'TOF', metric: 'bogus', target: 1 }), /Metric must be/);
+  assert.throws(() => bench.cleanInput({ funnel: 'TOF', metric: 'cpa', target: 0 }), /above 0, or leave this measure unset/, 'a benchmark is optional: a target of 0 is refused rather than colouring everything');
+  assert.throws(() => bench.cleanInput({ funnel: 'TOF', metric: 'cpa', target: '' }), /above 0/);
   assert.equal(bench.cleanInput({ funnel: 'TOF', metric: 'frequency', target: 2, target_min: 1.2 }).target_min, 1.2);
 });
 

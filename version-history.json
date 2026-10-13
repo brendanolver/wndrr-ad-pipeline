@@ -2,6 +2,14 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.0.7",
+      "date": "2026-10-13",
+      "title": "Benchmarks are optional",
+      "changes": [
+        "Performance Benchmarks: any benchmark can be cleared back to unset (a Clear link on the card and in the editor), and a target of 0 is no longer accepted."
+      ]
+    },
+    {
       "version": "1.0.6",
       "date": "2026-10-13",
       "title": "Performance Benchmarks redesign",

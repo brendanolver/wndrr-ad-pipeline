@@ -618,7 +618,7 @@ function mbenchCard(f, m, d) {
     const b = rows[0];
     body = `<div class="mbc-value${b.active ? '' : ' mbc-off'}">${escapeHtml(mbenchTargetText(b))}</div>
       <div class="mbc-win">${escapeHtml(mbenchWindowText(b))}${b.active ? '' : ' · turned off'}</div>
-      <div class="mbc-actrow"><button type="button" class="mbc-act" data-mb-edit="${b.id}">Edit target →</button><button type="button" class="mbc-sub" data-mb-add="${f}|${m.key}" title="Add a separate target for another reporting window">+ Add window</button></div>`;
+      <div class="mbc-actrow"><button type="button" class="mbc-act" data-mb-edit="${b.id}">Edit target →</button><span class="mbc-subs"><button type="button" class="mbc-sub" data-mb-del="${b.id}" title="Remove this benchmark so ${escapeHtml(m.label)} is not judged for ${f} (it shows without colour)">Clear</button><button type="button" class="mbc-sub" data-mb-add="${f}|${m.key}" title="Add a separate target for another reporting window">+ Add window</button></span></div>`;
   } else {
     body = `<ul class="mbc-wins">${rows.map((b) => `<li class="${b.active ? '' : 'off'}"><span class="mbc-w-val">${escapeHtml(mbenchTargetText(b))}</span><span class="mbc-w-win">${escapeHtml(mbenchWindowText(b))}${b.active ? '' : ' · off'}</span><button type="button" class="mbc-act mbc-act-sm" data-mb-edit="${b.id}" aria-label="Edit ${escapeHtml(m.label)} target for ${escapeHtml(mbenchWindowText(b))}">Edit →</button></li>`).join('')}</ul>
       <div class="mbc-actrow"><button type="button" class="mbc-sub" data-mb-add="${f}|${m.key}">+ Add window</button></div>`;
@@ -682,7 +682,7 @@ function mbenchFill(f, metric, b) {
   mbenchEl('mbench-window').value = custom ? 'custom' : 'any'; mbenchEl('mbench-window-fields').style.display = custom ? '' : 'none';
   mbenchEl('mbench-min').value = b && b.min_days != null ? b.min_days : ''; mbenchEl('mbench-max').value = b && b.max_days != null ? b.max_days : '';
   const extra = mbenchEl('mbench-extra');
-  extra.innerHTML = b ? `<button type="button" class="link-btn" data-mb-toggle="${b.id}">${b.active ? 'Turn this benchmark off' : 'Turn this benchmark on'}</button><button type="button" class="link-btn danger" data-mb-del="${b.id}">Remove</button>` : '';
+  extra.innerHTML = b ? `<button type="button" class="link-btn" data-mb-toggle="${b.id}">${b.active ? 'Turn this benchmark off' : 'Turn this benchmark on'}</button><button type="button" class="link-btn danger" data-mb-del="${b.id}" title="Remove it so this measure is not judged for this funnel">Clear benchmark (leave unset)</button>` : '<span class="mbd-optional">Benchmarks are optional. Cancel to leave this measure unset: it simply shows without colour.</span>';
   mbenchMsg(''); mbenchSyncForm();
 }
 // labels, which fields apply and the colour preview all follow the chosen target type
@@ -714,7 +714,7 @@ function mbenchPreview() {
   const metric = mbenchEl('mbench-metric').value;
   const target = Number(mbenchEl('mbench-target').value); const lo = mbenchEl('mbench-lo').value === '' ? NaN : Number(mbenchEl('mbench-lo').value);
   const tol = mbenchEl('mbench-tol').value === '' ? 20 : Number(mbenchEl('mbench-tol').value);
-  if (mbenchEl('mbench-target').value === '' || !Number.isFinite(target) || target < 0 || !Number.isFinite(tol) || tol < 0 || tol > 100) { el.innerHTML = '<div class="mbp-empty">Enter a target to preview the colours.</div>'; return; }
+  if (mbenchEl('mbench-target').value === '' || !Number.isFinite(target) || target <= 0 || !Number.isFinite(tol) || tol < 0 || tol > 100) { el.innerHTML = '<div class="mbp-empty">Enter a target above 0 to preview the colours.</div>'; return; }
   const kind = mbenchEl('mbench-kind').value;
   const bands = mbenchBands({ kind, target, lo, tol, inclusive: mbenchEl('mbench-inclusive').checked });
   if (!bands) { el.innerHTML = '<div class="mbp-empty">The lowest acceptable value must be 0 or more and not above the highest.</div>'; return; }
@@ -749,6 +749,7 @@ mbenchEl('mbench-save').addEventListener('click', async () => {
     inclusive: mbenchEl('mbench-inclusive').checked, tolerance_pct: mbenchEl('mbench-tol').value,
     target_min: range && mbenchEl('mbench-lo').value !== '' ? mbenchEl('mbench-lo').value : null,
   };
+  if (!(Number(body.target) > 0)) { mbenchMsg('Enter a target above 0, or Cancel to leave this measure unset.', 'err'); return; }
   if (range && body.target_min === null) { mbenchMsg('Enter the lowest acceptable value for a range.', 'err'); return; }
   if (win && !body.min_days && !body.max_days) { mbenchMsg('Enter at least one day count for the window, or choose “Any period”.', 'err'); return; }
   mbenchMsg('Saving…');
@@ -771,8 +772,8 @@ async function mbenchAction(t) {
       mbenchToast(b.active ? 'Turned off — values for it now show uncoloured on Meta Performance.' : 'Turned on.', 'ok');
     } else if (t.dataset.mbDel) {
       const b = d.benchmarks.find((x) => String(x.id) === t.dataset.mbDel); if (!b) return;
-      if (!confirm(`Remove the ${b.funnel} ${MBENCH_LABEL[b.metric] || b.metric} benchmark (${mbenchTargetText(b)}, ${mbenchWindowText(b)})? Values will show uncoloured. This only affects colours, and the change is kept in the history.`)) return;
-      await mbenchSend('DELETE', `/${b.id}`); mbenchCloseDrawer(); mbenchToast('Benchmark removed.', 'ok');
+      if (!confirm(`Clear the ${b.funnel} ${MBENCH_LABEL[b.metric] || b.metric} benchmark (${mbenchTargetText(b)}, ${mbenchWindowText(b)})? It will be left unset, so those values show without colour. This only affects colours, and the change is kept in the history.`)) return;
+      await mbenchSend('DELETE', `/${b.id}`); mbenchCloseDrawer(); mbenchToast(`${b.funnel} ${MBENCH_LABEL[b.metric] || b.metric} benchmark cleared — it is now unset.`, 'ok');
     }
   } catch (err) { mbenchMsg(err.message, 'err'); mbenchToast(err.message, 'err'); }
 }
