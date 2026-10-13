@@ -265,6 +265,7 @@ function showApp() {
   applySidebarModuleAccess();
   loadAll();
   vhLoad();
+  urRefreshCount();
   // Dashboard is ALWAYS the landing screen -- a fresh visit and a full browser
   // refresh alike. Previously the URL hash (#promotions/..., #drops/...) that
   // switchTab/the promotion views write survived a refresh, and this startup
@@ -368,6 +369,7 @@ function switchTab(name) {
   // reliably shows up without a full page reload.
   if (name === 'shooting') refreshCurrentShootingView();
   if (name === 'reference-library') loadReferenceLibraryPage();
+  if (name === 'update-requests') loadUpdateRequests();
   // Meta Performance reads stored data only (never Meta) -- refetched on every visit so a sync just run from Settings shows up.
   if (name === 'meta-performance') loadMetaPerformanceArea();
   // Same reasoning as Shooting above -- Editing is the direct downstream
@@ -18293,4 +18295,140 @@ document.addEventListener('click', (e) => {
   if (pl) { e.preventDefault(); e.stopPropagation(); if (!baPlay(pl.dataset.baPlay)) { const card = pl.closest('[data-ba-card]'); if (card) baOpen(card.dataset.baCard); } return; }
   const op = e.target.closest('#mp-view-best [data-ba-open]');
   if (op) { e.preventDefault(); if (!op.closest('.ba-media-btn.is-playing')) baOpen(op.dataset.baOpen); }
+});
+
+// ── Update Requests ─────────────────────────────────────────────────────
+// A shared board: anyone signed in can ask for an app change or report a UX issue (text, priority, pasted / attached screenshots or PDFs). Everyone sees every request;
+// editing, resolving and deleting is limited to the person who raised it and admins (the server enforces that; the buttons just follow `can_modify`).
+const UR = { status: 'open', data: null, editing: null, pending: [], existing: [], removed: [], busy: false };
+const UR_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec'];
+const urDate = (iso) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? '' : `${d.getDate()} ${UR_MONTHS[d.getMonth()]} ${d.getFullYear()}`; };
+const urMB = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+function urMsg(text, isError) { const el = document.getElementById('ur-msg'); if (el) { el.textContent = text || ''; el.className = `ur-form-msg${text ? (isError ? ' error' : ' ok') : ''}`; } }
+
+async function loadUpdateRequests() {
+  try {
+    const d = await api(`/update-requests?status=${UR.status}`);
+    UR.data = d;
+    const sel = document.getElementById('ur-priority');
+    if (sel && !sel.options.length) {
+      sel.innerHTML = d.priorities.map((p) => `<option value="${p.key}">${p.key} · ${escapeHtml(p.label)}</option>`).join('');
+      sel.value = 'P3';
+    }
+    urRenderList(); urRenderAttachments(); urSetCount(d.counts.open);
+    document.getElementById('ur-count-open').textContent = d.counts.open;
+    document.getElementById('ur-count-resolved').textContent = d.counts.resolved;
+  } catch (err) { const l = document.getElementById('ur-list'); if (l) l.innerHTML = `<div class="ur-empty">Could not load requests: ${escapeHtml(err.message)}</div>`; }
+}
+function urSetCount(n) { const b = document.getElementById('ur-open-count'); if (b) { b.textContent = n; b.hidden = !n; } }
+async function urRefreshCount() { try { const d = await api('/update-requests?status=open'); urSetCount(d.counts.open); } catch (_) { /* badge only */ } }
+
+function urAttachChips(atts) {
+  if (!atts || !atts.length) return '';
+  return `<div class="ur-atts">${atts.map((a) => a.type === 'application/pdf'
+    ? `<a class="ur-att ur-att-pdf" href="${a.url}" target="_blank" rel="noopener" title="${escapeHtml(a.name)}"><svg class=ic aria-hidden=true focusable=false><use href=#i-paperclip></use></svg><span>${escapeHtml(a.name)}</span><small>${urMB(a.size)}</small></a>`
+    : `<a class="ur-att ur-att-img" href="${a.url}" target="_blank" rel="noopener" title="${escapeHtml(a.name)}"><img src="${a.url}" alt="${escapeHtml(a.name)}" loading="lazy"></a>`).join('')}</div>`;
+}
+
+function urRenderList() {
+  const host = document.getElementById('ur-list'); const d = UR.data;
+  if (!host || !d) return;
+  if (!d.requests.length) { host.innerHTML = `<div class="ur-empty">${UR.status === 'open' ? 'No open requests. Anything you would like changed in the app? Add it above.' : 'Nothing has been resolved yet.'}</div>`; return; }
+  host.innerHTML = d.requests.map((r) => {
+    const acts = r.can_modify
+      ? `<button type="button" class="ur-btn" data-ur-act="edit" data-ur-id="${r.id}">Edit</button>
+         <button type="button" class="ur-btn" data-ur-act="${r.status === 'open' ? 'resolve' : 'reopen'}" data-ur-id="${r.id}">${r.status === 'open' ? 'Resolve' : 'Reopen'}</button>
+         <button type="button" class="ur-btn" data-ur-act="delete" data-ur-id="${r.id}">Delete</button>` : '';
+    const meta = `requested by ${escapeHtml(r.requested_by)} · ${urDate(r.created_at)}${r.status === 'resolved' ? ` · resolved${r.resolved_by ? ` by ${escapeHtml(r.resolved_by)}` : ''} ${urDate(r.resolved_at)}` : ''}`;
+    return `<div class="ur-row${r.status === 'resolved' ? ' is-resolved' : ''}" data-ur-row="${r.id}">
+      <div class="ur-row-main"><div class="ur-row-body">${escapeHtml(r.body)}</div>${urAttachChips(r.attachments)}<div class="ur-row-meta">${meta}</div></div>
+      <div class="ur-row-side"><span class="ur-pill ur-${r.priority.toLowerCase()}">${r.priority} · ${escapeHtml(r.priority_label)}</span>${acts}</div>
+    </div>`;
+  }).join('');
+}
+
+function urRenderAttachments() {
+  const host = document.getElementById('ur-attach-list'); if (!host) return;
+  const kept = UR.existing.filter((a) => !UR.removed.includes(a.id));
+  const chip = (html, key, kind) => `<span class="ur-chip">${html}<button type="button" class="ur-chip-x" data-ur-rm="${kind}:${key}" aria-label="Remove attachment">&times;</button></span>`;
+  host.innerHTML = kept.map((a) => chip(a.type === 'application/pdf' ? `<svg class=ic aria-hidden=true focusable=false><use href=#i-paperclip></use></svg><span>${escapeHtml(a.name)}</span>` : `<img src="${a.url}" alt=""><span>${escapeHtml(a.name)}</span>`, a.id, 'old')).join('')
+    + UR.pending.map((a, i) => chip(a.type === 'application/pdf' ? `<svg class=ic aria-hidden=true focusable=false><use href=#i-paperclip></use></svg><span>${escapeHtml(a.name)}</span>` : `<img src="${a.data}" alt=""><span>${escapeHtml(a.name)}</span>`, i, 'new')).join('');
+}
+
+function urReadFile(file) {
+  return new Promise((resolve) => {
+    const max = (UR.data && UR.data.limits.max_file_bytes) || 5242880; const maxFiles = (UR.data && UR.data.limits.max_files) || 6;
+    if (!/^(image\/(png|jpeg|gif|webp)|application\/pdf)$/.test(file.type)) { urMsg('Only images (PNG, JPG, GIF, WebP) and PDFs can be attached.', true); return resolve(); }
+    if (file.size > max) { urMsg(`${file.name || 'That file'} is over ${urMB(max)}.`, true); return resolve(); }
+    if (UR.existing.filter((a) => !UR.removed.includes(a.id)).length + UR.pending.length >= maxFiles) { urMsg(`A request can have at most ${maxFiles} attachments.`, true); return resolve(); }
+    const fr = new FileReader();
+    fr.onload = () => { UR.pending.push({ name: file.name || `screenshot-${Date.now()}.${file.type === 'application/pdf' ? 'pdf' : file.type.split('/')[1]}`, type: file.type, data: fr.result }); urMsg(''); resolve(); };
+    fr.onerror = () => { urMsg('That file could not be read.', true); resolve(); };
+    fr.readAsDataURL(file);
+  });
+}
+async function urAddFiles(files) { for (const f of Array.from(files || [])) await urReadFile(f); urRenderAttachments(); }
+
+function urResetForm() {
+  UR.editing = null; UR.pending = []; UR.existing = []; UR.removed = [];
+  document.getElementById('ur-body').value = ''; document.getElementById('ur-priority').value = 'P3';
+  document.getElementById('ur-form-title').textContent = 'Request an update or report a UX issue';
+  document.getElementById('ur-submit').textContent = 'Submit request'; document.getElementById('ur-cancel').hidden = true;
+  document.getElementById('ur-file').value = ''; urRenderAttachments();
+}
+
+async function urSubmit() {
+  if (UR.busy) return;
+  const body = document.getElementById('ur-body').value.trim();
+  if (!body) { urMsg('Describe what you would like changed or fixed.', true); return; }
+  const priority = document.getElementById('ur-priority').value;
+  UR.busy = true; const btn = document.getElementById('ur-submit'); btn.disabled = true; urMsg('Saving…');
+  try {
+    if (UR.editing) await api(`/update-requests/${UR.editing}`, { method: 'PATCH', body: JSON.stringify({ body, priority, remove_attachment_ids: UR.removed, add_attachments: UR.pending.map((a) => ({ name: a.name, data: a.data })) }) });
+    else await api('/update-requests', { method: 'POST', body: JSON.stringify({ body, priority, attachments: UR.pending.map((a) => ({ name: a.name, data: a.data })) }) });
+    const was = UR.editing; urResetForm(); urMsg(was ? 'Changes saved.' : 'Thanks — your request has been added.');
+    if (UR.status !== 'open') { UR.status = 'open'; urSyncTabs(); }
+    await loadUpdateRequests();
+  } catch (err) { urMsg(err.message, true); } finally { UR.busy = false; btn.disabled = false; }
+}
+
+function urSyncTabs() { document.querySelectorAll('#ur-tabs .ur-tab').forEach((t) => t.classList.toggle('active', t.dataset.urStatus === UR.status)); }
+
+async function urAction(act, id) {
+  const r = UR.data && UR.data.requests.find((x) => x.id === id); if (!r) return;
+  try {
+    if (act === 'edit') {
+      UR.editing = id; UR.pending = []; UR.removed = []; UR.existing = r.attachments.slice();
+      document.getElementById('ur-body').value = r.body; document.getElementById('ur-priority').value = r.priority;
+      document.getElementById('ur-form-title').textContent = 'Edit request'; document.getElementById('ur-submit').textContent = 'Save changes'; document.getElementById('ur-cancel').hidden = false;
+      urRenderAttachments(); urMsg('');
+      document.getElementById('ur-form').scrollIntoView({ behavior: 'smooth', block: 'start' }); document.getElementById('ur-body').focus();
+      return;
+    }
+    if (act === 'delete') {
+      if (!(await confirmDialog('Delete this request? This cannot be undone.'))) return;
+      await api(`/update-requests/${id}`, { method: 'DELETE' }); if (UR.editing === id) urResetForm();
+    } else {
+      await api(`/update-requests/${id}`, { method: 'PATCH', body: JSON.stringify({ status: act === 'resolve' ? 'resolved' : 'open' }) });
+    }
+    await loadUpdateRequests();
+  } catch (err) { toast(err.message, true); }
+}
+
+document.addEventListener('click', (e) => {
+  const act = e.target.closest('[data-ur-act]'); if (act) { urAction(act.dataset.urAct, Number(act.dataset.urId)); return; }
+  const tab = e.target.closest('#ur-tabs .ur-tab'); if (tab) { UR.status = tab.dataset.urStatus; urSyncTabs(); loadUpdateRequests(); return; }
+  const rm = e.target.closest('[data-ur-rm]');
+  if (rm) { const [kind, key] = rm.dataset.urRm.split(':'); if (kind === 'old') UR.removed.push(Number(key)); else UR.pending.splice(Number(key), 1); urRenderAttachments(); return; }
+  if (e.target.closest('#ur-attach-btn')) { document.getElementById('ur-file').click(); return; }
+  if (e.target.closest('#ur-submit')) { urSubmit(); return; }
+  if (e.target.closest('#ur-cancel')) { urResetForm(); urMsg(''); }
+});
+document.getElementById('ur-file').addEventListener('change', (e) => { urAddFiles(e.target.files).then(() => { e.target.value = ''; }); });
+// Pasting a screenshot anywhere on this page attaches it (text pastes are left alone).
+document.addEventListener('paste', (e) => {
+  if (!document.getElementById('tab-update-requests').classList.contains('active')) return;
+  const files = Array.from((e.clipboardData && e.clipboardData.files) || []);
+  if (!files.length) return;
+  e.preventDefault(); urAddFiles(files);
 });

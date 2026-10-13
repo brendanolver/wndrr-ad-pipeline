@@ -56,10 +56,13 @@ const metaArchiveRoutes = require('./routes/metaArchive');
 const creativeOpportunitiesRoutes = require('./routes/creativeOpportunities');
 const adCreativeRoutes = require('./routes/adCreative');
 const coreCreativePlanRoutes = require('./routes/coreCreativePlan');
+const updateRequestRoutes = require('./routes/updateRequests');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Update Requests carry screenshots / PDFs as base64, so it gets its own larger JSON limit (mounted before the default parser).
+app.use('/api/update-requests', cookieParser(), express.json({ limit: '40mb' }), requireAuth, updateRequestRoutes);
 app.use(express.json());
 app.use(cookieParser());
 

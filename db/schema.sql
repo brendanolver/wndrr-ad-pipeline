@@ -3282,6 +3282,32 @@ CREATE TABLE IF NOT EXISTS concept_product_links (
 CREATE INDEX IF NOT EXISTS idx_concept_product_links_product ON concept_product_links(product_code);
 CREATE INDEX IF NOT EXISTS idx_concept_product_links_item ON concept_product_links(shoot_plan_item_id);
 
+-- Update Requests: a shared board where anyone signed in can ask for an app change or report a UX issue. Additive; attachments (images / PDFs, 5 MB each) live in the database so they survive redeploys.
+CREATE TABLE IF NOT EXISTS update_requests (
+  id SERIAL PRIMARY KEY,
+  body TEXT NOT NULL,
+  priority VARCHAR(2) NOT NULL DEFAULT 'P3' CHECK (priority IN ('P1','P2','P3','P4')),
+  status VARCHAR(10) NOT NULL DEFAULT 'open' CHECK (status IN ('open','resolved')),
+  created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_by_name VARCHAR(255),
+  resolved_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  resolved_by_name VARCHAR(255),
+  resolved_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_update_requests_status ON update_requests(status, priority, created_at DESC);
+CREATE TABLE IF NOT EXISTS update_request_attachments (
+  id SERIAL PRIMARY KEY,
+  request_id INTEGER NOT NULL REFERENCES update_requests(id) ON DELETE CASCADE,
+  file_name VARCHAR(160) NOT NULL,
+  mime_type VARCHAR(40) NOT NULL,
+  size_bytes INTEGER NOT NULL,
+  data BYTEA NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_update_request_attachments_request ON update_request_attachments(request_id);
+
 -- =====================================================================
 -- Approved Ad Matching concepts + historical-spelling aliases
 -- =====================================================================
