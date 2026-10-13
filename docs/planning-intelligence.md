@@ -76,3 +76,10 @@ Every item exposes its score parts, caps and the eligibility rules it met.
 
 ApparelMagic sales are fetched one day and customer per request. Failed days inside the last 30 are recorded; the item then reports "under-counted" and cannot be High. Missing sales, stock,
 launch dates, Meta data or benchmarks produce "insufficient data" with the reason, never a guess and never red.
+
+## Meta ad identity completeness (Batch 27 follow-up)
+
+The sync reads each new ad's name, campaign and creative by ad id (one `GET /{id}` per ad; Meta removes the root `GET /?ids=` request on 27 Oct 2026). A lookup that fails is no longer
+silent: it is recorded in `meta_ad_identity_lookups` (`error` = could not be read, retried by later syncs; `not_found` = Meta says it no longer exists, never retried), the run is marked
+`completeness = 'partial'` beside its unchanged `status`, and Planning treats any ad that delivered in the last 14 days but is still unidentified as **uncertainty**: a product's missing
+creative is not "confirmed" until they resolve (reason: "Matching is uncertain: N recently delivering Meta ads could not be identified"). Products with enough performing creative are unaffected.

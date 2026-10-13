@@ -169,7 +169,7 @@ function evaluate(p, cfg, today, mode = 'core') {
       active_ads: p.coverage && p.coverage.known ? p.coverage.active_ads : null, unique_creatives: sum.total, performing: sum.performing, weak: sum.weak, declining: sum.declining, softening: sum.softening, testing: sum.testing,
       unrated: sum.unrated, unjudged: sum.unjudged, newest_creative_days: sum.newest_age_days, newest_creative_source: sum.newest_source, testing_until: sum.testing_until,
       top_creative_spend_share: ev.top_spend_share, top_creative_purchase_share: ev.top_purchase_share, meaningful_creatives: ev.meaningful, distinct_concepts: ev.distinct_concepts,
-      matching: p.coverage && p.coverage.known ? (num(p.coverage.possible) > 0 ? 'uncertain' : 'confirmed') : 'unknown', matching_pending: p.coverage ? num(p.coverage.possible) : null,
+      matching: p.coverage && p.coverage.known ? (num(p.coverage.possible) > 0 || num(p.coverage.unresolved) > 0 ? 'uncertain' : 'confirmed') : 'unknown', matching_pending: p.coverage ? num(p.coverage.possible) : null, unresolved_identities: p.coverage ? num(p.coverage.unresolved) : null,
       launch_age_days: p.launch_age_days === undefined ? null : p.launch_age_days, size_warning: stk.size_note || null,
       sales_complete: dq.sales_complete === undefined ? null : dq.sales_complete, sales_sources_disagree: !!(dq.discrepancy && dq.discrepancy.flag),
       ...extra,
@@ -287,6 +287,13 @@ function evaluate(p, cfg, today, mode = 'core') {
   }
   // unresolved suggested matches are uncertainty, never a confirmed absence of creative
   const needsComplete = gap && ['confirmed_gap', 'underperforming', 'stale', 'thin', 'concentration', 'diversity'].includes(gap.type);
+  // ads that delivered recently but whose identity (name, campaign, creative) could not be read from Meta cannot be placed on any product: until they resolve, an
+  // absence of creative cannot be confirmed for any product (Batch 27 follow-up)
+  const unresolvedIds = num(p.coverage && p.coverage.unresolved);
+  if (needsComplete && possible === 0 && unresolvedIds > 0) {
+    gate('matching', false, `${plural(unresolvedIds, 'recently delivering Meta ad')} could not be identified (ad lookup failed).`);
+    return done('insufficient_data', `Matching is uncertain: ${plural(unresolvedIds, 'recently delivering Meta ad')} could not be identified (the Meta lookup for ${unresolvedIds === 1 ? 'its' : 'their'} name, campaign and creative failed), so ${unresolvedIds === 1 ? 'it' : 'any of them'} may be running creative for this product (${gap.type === 'confirmed_gap' ? 'it would not be a gap' : 'the picture may be different'}). The next Meta sync retries them; no shoot is recommended on an incomplete count.`, { revival });
+  }
   if (needsComplete && possible > 0) {
     gate('matching', false, `${plural(possible, 'active ad')} awaiting review suggested for this product.`);
     return done('insufficient_data', `Matching is uncertain: ${plural(possible, 'active Meta ad')} awaiting review ${possible === 1 ? 'is' : 'are'} suggested for this product and could change its creative count (${gap.type === 'confirmed_gap' ? 'it would not be a gap' : 'the picture may be different'}). Review them in Ad Matching first; no shoot is recommended on an incomplete count.`, { revival });

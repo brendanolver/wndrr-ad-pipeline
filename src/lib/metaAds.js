@@ -314,14 +314,91 @@ async function metaGetAllPages(path, params, onPage, maxPages = 200) {
   return { pages, stoppedReason: 'max_pages' };
 }
 
-// Read several objects by stable ID in ONE Graph call (`/?ids=a,b,c`),
-// returning the raw { id: object } map. Callers keep batches small
-// (Meta allows up to 50 ids per request). Read-only.
-async function metaGetByIds(ids, fields, params = {}) {
-  const result = await metaGet('/', { ...params, ids: ids.join(','), fields });
-  if (result.status !== 200) throw buildMetaApiError(result, 'Meta ad lookup');
-  return result.data && typeof result.data === 'object' ? result.data : {};
+// Read several objects by stable ID, returning the { id: object } map callers have always received.
+//
+// WHY NOT `GET /?ids=a,b,c`: Meta removes root-level `?ids=` requests from every remaining Graph API version on 27 Oct 2026 (they will return an
+// error). The supported replacements are one request per object or Meta's JSON batch endpoint. This uses one plain GET per object (`GET /{id}?fields=`)
+// through metaGet: the same read path the preview code already uses in production, still GET-only (the no-writes guard), the token still added in one place.
+// Meta's batch endpoint was not chosen: each sub-request counts toward rate limits exactly as an individual one does (Meta docs), so it saves HTTP round trips
+// but not rate budget, and it needs a POST transport and per-item error parsing that cannot be verified here without credentials.
+//
+// Request volume: this is now one call per id (it was one call per 50). Calls run with a small fixed concurrency, and stop at the first rate-limit or
+// authentication response (nothing else would work either). There is NO retry of any kind (unchanged).
+//
+// Outcome per id (see metaGetByIdsDetailed):
+//   ok          object returned
+//   not_found   deleted / does not exist / not visible to this token (permanent: never worth repeating every page view)
+//   error       anything else (network, 5xx, transient): the object's state is UNKNOWN, not absent
+const IDS_CONCURRENCY = 4;
+const FAILURES = Symbol('metaGetByIds.failures');
+const AUTH_CODES = new Set([102, 190]);
+
+function classifyObjectFailure(result) {
+  const error = (result.data && typeof result.data === 'object' && result.data.error) || {};
+  const code = numOrNull(error.code); const sub = numOrNull(error.error_subcode);
+  if (isRateLimitResponse(result.status, error)) return 'rate_limited';
+  if (result.status === 401 || AUTH_CODES.has(code)) return 'auth';
+  // 100/33 = "object does not exist, cannot be loaded due to missing permissions, or does not support this operation"; 803 = alias/ID does not exist
+  if (result.status === 404 || (code === 100 && sub === 33) || code === 803) return 'not_found';
+  return 'error';
 }
+
+async function metaGetByIdsDetailed(ids, fields, params = {}, { concurrency = IDS_CONCURRENCY, get = metaGet } = {}) {
+  const list = [...new Set((ids || []).map((x) => String(x)).filter(Boolean))];
+  const out = { requested: list.length, calls: 0, data: {}, failures: {}, skipped: [], aborted: null };
+  let next = 0;
+  const worker = async () => {
+    while (!out.aborted) {
+      const i = next; next += 1;
+      if (i >= list.length) return;
+      const id = list[i];
+      let result;
+      out.calls += 1;
+      try {
+        result = await get(`/${encodeURIComponent(id)}`, { ...params, fields });
+      } catch (err) {
+        out.failures[id] = { kind: 'error', status: null, code: null, subcode: null, message: safeText(err && err.message) };
+        continue;
+      }
+      if (result.status === 200 && result.data && typeof result.data === 'object' && !result.data.error) {
+        if (Object.keys(result.data).length) out.data[id] = result.data;
+        else out.failures[id] = { kind: 'not_found', status: 200, code: null, subcode: null, message: 'Meta returned no object for this id' };
+        continue;
+      }
+      const kind = classifyObjectFailure(result);
+      const e = buildMetaApiError(result, 'Meta object lookup');
+      if (kind === 'rate_limited' || kind === 'auth') { out.aborted = e; out.failures[id] = { kind, status: e.status, code: e.metaCode, subcode: e.metaSubcode, message: e.message }; return; }
+      out.failures[id] = { kind, status: e.status, code: e.metaCode, subcode: e.metaSubcode, message: e.message };
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, list.length || 1)) }, worker));
+  // ids never asked for because a rate-limit / auth response stopped the run
+  out.skipped = list.filter((id) => !(id in out.data) && !(id in out.failures));
+  return out;
+}
+
+// Contract kept: resolves to the { id: object } map of what Meta returned, and throws a MetaApiError when the lookup could not be done.
+//   * rate limit / auth response  -> throws it (callers already stop on err.rateLimited); everything fetched before it is on err.partial
+//   * every id failed for a non-"not found" reason (the old whole-request failure) -> throws the first such error
+//   * otherwise -> the map of successes (partial success preserved). Per-id failures ride along under metaGetByIds.FAILURES so a caller can tell
+//     "deleted / inaccessible" from "could not be read": { [id]: { kind: 'not_found' | 'error', message, code, subcode } }
+async function metaGetByIds(ids, fields, params = {}, deps = {}) {
+  const r = await metaGetByIdsDetailed(ids, fields, params, deps);
+  if (r.aborted) { r.aborted.partial = r.data; r.aborted.failures = r.failures; throw r.aborted; }
+  const failed = Object.entries(r.failures);
+  if (r.requested > 0 && !Object.keys(r.data).length) {
+    const firstHard = failed.find(([, f]) => f.kind === 'error');
+    if (firstHard) {
+      const [, f] = firstHard;
+      const e = new MetaApiError(f.message, { status: f.status, code: f.code, subcode: f.subcode });
+      e.failures = r.failures;
+      throw e;
+    }
+  }
+  Object.defineProperty(r.data, FAILURES, { value: r.failures, enumerable: false });
+  return r.data;
+}
+metaGetByIds.FAILURES = FAILURES;
 
 module.exports = {
   configured,
@@ -332,6 +409,8 @@ module.exports = {
   accountPath,
   metaGetAllPages,
   metaGetByIds,
+  metaGetByIdsDetailed,
+  classifyObjectFailure,
   buildMetaApiError,
   MetaApiError,
   RATE_LIMIT_MESSAGE,

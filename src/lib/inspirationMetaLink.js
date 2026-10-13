@@ -79,8 +79,8 @@ async function report(db = pool) {
   };
 }
 
-// EXPLICIT admin action: read each candidate ad's preview_shareable_link from Meta (read-only), 50 per call, and store it.
-// Highest-spend ads first; `limit` caps one press (default 500 ads = 10 calls). Resumable: ads already looked up are skipped.
+// EXPLICIT admin action: read each candidate ad's preview_shareable_link from Meta (read-only), one read per ad (Meta removes the multi-id request on 27 Oct 2026), and store it.
+// Highest-spend ads first; `limit` caps one press (default 500 ads = 500 reads). Resumable: ads already looked up are skipped.
 async function lookupShareLinks({ limit = 500 } = {}, deps = {}) {
   const db = deps.db || pool;
   const configured = deps.configured ? deps.configured() : metaAds.configured();
@@ -93,12 +93,15 @@ async function lookupShareLinks({ limit = 500 } = {}, deps = {}) {
         AND EXISTS (SELECT 1 FROM meta_ad_insights_daily d WHERE d.meta_ad_id = a.meta_ad_id AND d.spend > 0)
       ORDER BY (SELECT COALESCE(sum(d.spend), 0) FROM meta_ad_insights_daily d WHERE d.meta_ad_id = a.meta_ad_id) DESC, a.meta_ad_id
       LIMIT $1`, [cap])).rows.map((r) => r.meta_ad_id);
-  const out = { asked: 0, stored: 0, without_link: 0, calls: 0, rate_limited: false };
+  const out = { asked: 0, stored: 0, without_link: 0, calls: 0, rate_limited: false, failed: 0 };
   for (let i = 0; i < cands.length; i += 50) {
     const batch = cands.slice(i, i + 50);
     let data;
-    try { out.calls += 1; data = await getByIds(batch, 'preview_shareable_link'); } catch (err) { if (err && err.rateLimited) { out.rate_limited = true; break; } continue; }
+    try { out.calls += batch.length; data = await getByIds(batch, 'preview_shareable_link'); } catch (err) { if (err && err.rateLimited) { out.rate_limited = true; break; } continue; }
+    const failures = (data && data[metaAds.metaGetByIds.FAILURES]) || {};
     for (const id of batch) {
+      // an ad whose read FAILED is unknown, not "without a link": it is left to be looked up again
+      if (failures[id] && failures[id].kind === 'error') { out.failed += 1; continue; }
       out.asked += 1;
       const link = data && data[id] && data[id].preview_shareable_link;
       if (link) {

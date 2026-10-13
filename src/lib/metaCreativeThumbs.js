@@ -79,14 +79,17 @@ async function getThumbs(adIds, { now = Date.now() } = {}, deps = {}) {
       const batch = need.slice(i, i + BATCH);
       let data;
       try {
-        stats.meta_calls += 1; stats.creatives_asked += batch.length;
+        stats.meta_calls += batch.length; stats.creatives_asked += batch.length;
         data = await getByIds(batch, FIELDS, THUMB_PARAMS);
       } catch (err) {
         if (err && err.rateLimited) { stats.rate_limited = true; break; }
         data = null; // this batch failed: remember nothing, serve what we have
       }
       if (!data) continue;
+      const failures = data[metaAds.metaGetByIds.FAILURES] || {};
       for (const cid of batch) {
+        // a creative whose read FAILED (not "does not exist") is unknown: remember nothing, so it is asked for again rather than cached as unavailable
+        if (failures[cid] && failures[cid].kind === 'error') continue;
         const s = summarise(data[cid]);
         const ok = !!s.thumb_url;
         const exp = ok ? expiresAtFor([s.thumb_url], now) : null;
@@ -152,9 +155,11 @@ async function getLargeThumbs(adIds, { now = Date.now() } = {}, deps = {}) {
     for (let i = 0; i < need.length; i += BATCH) {
       const batch = need.slice(i, i + BATCH);
       let data;
-      try { stats.meta_calls += 1; stats.creatives_asked += batch.length; data = await getByIds(batch, FIELDS, LARGE_PARAMS); } catch (err) { if (err && err.rateLimited) { stats.rate_limited = true; break; } data = null; }
+      try { stats.meta_calls += batch.length; stats.creatives_asked += batch.length; data = await getByIds(batch, FIELDS, LARGE_PARAMS); } catch (err) { if (err && err.rateLimited) { stats.rate_limited = true; break; } data = null; }
       if (!data) continue;
+      const failures = data[metaAds.metaGetByIds.FAILURES] || {};
       for (const cid of batch) {
+        if (failures[cid] && failures[cid].kind === 'error') continue; // read failed: unknown, not "unavailable"
         const s = summarise(data[cid]);
         const exp = s.thumb_url ? expiresAtFor([s.thumb_url], now) : null;
         await db.query(

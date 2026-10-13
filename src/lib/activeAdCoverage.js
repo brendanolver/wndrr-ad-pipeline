@@ -67,6 +67,9 @@ function pendingByFamily(families, pending) {
   return { by_family: out, unattributed };
 }
 
+// recent delivery window for an unresolved identity to matter (days)
+const UNRESOLVED_WINDOW_DAYS = 14;
+
 async function loadActiveAdCoverage(families, { db = pool, min, now = new Date() } = {}) {
   const meta = (await db.query('SELECT count(*)::int AS ads, max(last_seen_at) AS last_seen FROM meta_ads')).rows[0];
   if (!meta.ads) return { available: false, reason: 'No Meta ads are stored yet, so active ad counts are unavailable', min };
@@ -95,15 +98,25 @@ async function loadActiveAdCoverage(families, { db = pool, min, now = new Date()
   const trustedActive = (await db.query(
     `SELECT count(DISTINCT m.meta_ad_id)::int AS n FROM meta_ads m LEFT JOIN meta_ad_classifications c ON c.meta_ad_id = m.meta_ad_id
       WHERE m.effective_status = 'ACTIVE' AND m.match_status IN ('confirmed', 'auto_matched') AND NOT COALESCE(c.excluded_from_intelligence, false) AND ${dpaLib.notDpaStandalone('m')}`)).rows[0].n;
+  // Ads that DELIVERED recently but whose identity (name, campaign, creative) could not be read from Meta: id-only shells. They have no status and no product,
+  // so none of the counts above can see them, yet any of them may be a running creative for a product. Ads Meta says no longer exist are not counted. Absence of
+  // creative is therefore never "confirmed" while any of these exist.
+  const since = new Date(now.getTime() - UNRESOLVED_WINDOW_DAYS * DAY).toISOString().slice(0, 10);
+  const unresolved = (await db.query(
+      `SELECT count(*)::int AS n FROM meta_ads m
+        LEFT JOIN meta_ad_identity_lookups l ON l.meta_ad_id = m.meta_ad_id
+       WHERE m.ad_name IS NULL AND COALESCE(l.state, 'error') <> 'not_found'
+         AND EXISTS (SELECT 1 FROM meta_ad_insights_daily d WHERE d.meta_ad_id = m.meta_ad_id AND d.insight_date >= $1 AND d.spend > 0)`, [since])).rows[0].n;
   const activeTotal = trustedActive + pendingRows.length;
   const lastSeen = meta.last_seen ? new Date(meta.last_seen) : null;
   const staleDays = lastSeen ? Math.floor((now.getTime() - lastSeen.getTime()) / DAY) : null;
   return {
-    available: true, min, by_family: countByFamily(families, pairs), pending_by_family: pend.by_family, unattributed_pending: pend.unattributed,
+    available: true, min, by_family: countByFamily(families, pairs), pending_by_family: pend.by_family, unattributed_pending: pend.unattributed, unresolved_identities: unresolved,
     reliability: {
       active_ads: activeTotal, confirmed_or_auto: trustedActive, awaiting_review: pendingRows.length, awaiting_review_without_product: pend.unattributed,
       share_awaiting_review: activeTotal ? Math.round((pendingRows.length / activeTotal) * 1000) / 10 : 0,
       complete: pendingRows.length === 0,
+      unresolved_identities: unresolved, identities_complete: unresolved === 0,
     }, status_as_of: lastSeen ? lastSeen.toISOString() : null, stale_days: staleDays,
     stale: staleDays !== null && staleDays > 3, total_active_links: pairs.length,
     note: 'Counts distinct ACTIVE Meta ads (confirmed or auto-matched to the product, not excluded); paused, archived and deleted ads are not counted. Active ads still awaiting review are reported separately: until they are reviewed a product\'s count may be incomplete.',

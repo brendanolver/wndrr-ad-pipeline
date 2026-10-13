@@ -299,31 +299,54 @@ async function ensureIdentitiesForPage(adIds, needLookup, counters) {
   }
 }
 
-// Fetches metadata for ONLY the given ad ids, in batches of up to 50 per
-// call (`/?ids=...`) -- never a full-account listing. A rate limit aborts
-// (thrown); any other failure leaves those ads as id-only shells (their
-// daily rows are already safely stored) and is reported, not fatal.
-async function lookupMissingAds(ids) {
-  const out = { requested: ids.length, resolved: 0, unresolved: 0, calls: 0 };
+// Fetches metadata for ONLY the given ad ids (one read per ad: Meta removes the root `/?ids=` request on 27 Oct 2026, see metaAds.metaGetByIds) --
+// never a full-account listing. A rate limit / auth response aborts (thrown, after the ads already read are stored); any other failure leaves
+// those ads as id-only shells (their daily rows are already safely stored). Since Batch 27 a failure is no longer silent: every ad that could
+// not be resolved is recorded in meta_ad_identity_lookups and counted by cause, so the run can say it is PARTIAL:
+//   not_found  Meta says the ad does not exist / is not visible to this token: permanent, does not make the run partial
+//   failed     the read itself failed (network, 5xx, ...): the ad's identity is UNKNOWN, the run is partial, a later sync retries it (it is still a shell)
+async function lookupMissingAds(ids, deps = {}) {
+  const db = deps.db || pool;
+  const getByIds = deps.metaGetByIds || metaGetByIds;
+  const upsert = deps.upsertAd || upsertAd;
+  const out = { requested: ids.length, resolved: 0, unresolved: 0, not_found: 0, failed: 0, calls: 0, failed_ids: [] };
+  const recordFailure = async (id, f) => {
+    await db.query(
+      `INSERT INTO meta_ad_identity_lookups (meta_ad_id, state, last_error_code, last_error_message)
+       VALUES ($1,$2,$3,$4)
+       ON CONFLICT (meta_ad_id) DO UPDATE SET state = EXCLUDED.state, attempts = meta_ad_identity_lookups.attempts + 1, last_attempt_at = now(),
+              last_error_code = EXCLUDED.last_error_code, last_error_message = EXCLUDED.last_error_message`,
+      [id, f.kind === 'not_found' ? 'not_found' : 'error', f.code === undefined ? null : f.code, f.message ? String(f.message).slice(0, 300) : null]);
+  };
+  const resolveOne = async (id, row) => {
+    await upsert(adFromMeta(row));
+    await db.query('DELETE FROM meta_ad_identity_lookups WHERE meta_ad_id = $1', [id]);
+    out.resolved += 1;
+  };
   for (let i = 0; i < ids.length; i += AD_LOOKUP_BATCH) {
     const batch = ids.slice(i, i + AD_LOOKUP_BATCH);
-    let map;
+    let map; let failures = {};
     try {
-      out.calls += 1;
-      map = await metaGetByIds(batch, AD_FIELDS);
+      out.calls += batch.length;
+      map = await getByIds(batch, AD_FIELDS);
+      failures = (map && map[metaGetByIds.FAILURES]) || {};
     } catch (err) {
-      if (err.rateLimited) throw err;
-      out.unresolved += batch.length;
+      if (err.rateLimited || (err.partial && err.metaCode !== undefined && err.metaCode !== null && [102, 190].includes(err.metaCode))) {
+        // keep what was read before the stop, then abort (the rest stay shells and are retried by the next sync)
+        for (const id of batch) { const row = err.partial && err.partial[id]; if (row && row.id) await resolveOne(id, row); }
+        throw err;
+      }
+      const f = { kind: 'error', code: err.metaCode === undefined ? null : err.metaCode, message: err.message };
+      for (const id of batch) { await recordFailure(id, f); out.failed += 1; out.unresolved += 1; if (out.failed_ids.length < 20) out.failed_ids.push(id); }
       continue;
     }
     for (const id of batch) {
       const row = map[id];
-      if (row && row.id) {
-        await upsertAd(adFromMeta(row));
-        out.resolved += 1;
-      } else {
-        out.unresolved += 1;
-      }
+      if (row && row.id) { await resolveOne(id, row); continue; }
+      const f = failures[id] || { kind: 'not_found', message: 'Meta returned no object for this id' };
+      await recordFailure(id, f);
+      out.unresolved += 1;
+      if (f.kind === 'not_found') out.not_found += 1; else { out.failed += 1; if (out.failed_ids.length < 20) out.failed_ids.push(id); }
     }
   }
   return out;
@@ -403,6 +426,15 @@ async function startRunExclusive({ runType, since, until, userId }) {
   }
 }
 
+// 'partial' when ad identity lookups FAILED (their ads are missing name / campaign / creative until a later sync resolves them). Ads Meta says no longer exist
+// (not_found) are reported but do not make a run partial. status is left untouched (see the schema comment).
+function describeCompleteness(lookup) {
+  if (lookup.failed > 0) {
+    return { completeness: 'partial', note: `${lookup.failed} of ${lookup.requested} ad identity lookups failed, so those ads have no name, campaign or creative yet and cannot be matched to a product; the next sync retries them.${lookup.not_found ? ` ${lookup.not_found} more no longer exist on Meta.` : ''}` };
+  }
+  return { completeness: 'complete', note: lookup.not_found ? `${lookup.not_found} ads seen in Insights no longer exist on Meta (not retried).` : null };
+}
+
 // Job A: routine performance sync for [since, until], logged start-to-
 // finish in meta_sync_runs regardless of outcome.
 //   account settings (1 call) -> daily ad-level Insights (paged) -> for ads
@@ -423,6 +455,7 @@ async function runSync({ since, until, runType = 'default', userId = null }) {
     await upsertAccountSettings(accountInfo);
     const insights = await fetchAndUpsertInsights(since, until, accountInfo.currency);
     const lookup = await lookupMissingAds(insights.needLookup);
+    const completeness = describeCompleteness(lookup);
     // Campaign NAMES (one read-only paged call) -- best effort: a failure here never fails the performance sync.
     let campaigns = null;
     try { campaigns = await require('./metaCampaigns').refreshCampaigns(); } catch (e) { noteRateLimit(e); campaigns = { error: true }; }
@@ -437,15 +470,18 @@ async function runSync({ since, until, runType = 'default', userId = null }) {
       `UPDATE meta_sync_runs SET
          ads_discovered = $1, ads_inserted = $2, ads_updated = $3,
          daily_rows_inserted = $4, daily_rows_updated = $5,
-         status = 'success', finished_at = now()
+         status = 'success', finished_at = now(),
+         completeness = $7, ads_unresolved = $8, lookup_failed = $9, lookup_not_found = $10, completeness_note = $11
        WHERE id = $6`,
-      [adsDiscovered, adsInserted, adsUpdated, insights.inserted, insights.updated, runId]
+      [adsDiscovered, adsInserted, adsUpdated, insights.inserted, insights.updated, runId,
+        completeness.completeness, lookup.unresolved, lookup.failed, lookup.not_found, completeness.note]
     );
     return {
       run_id: runId, range: { since, until },
       daily_rows_seen: insights.rowsSeen, daily_rows_inserted: insights.inserted, daily_rows_updated: insights.updated,
       new_ads_identified: insights.newIdentities,
-      ad_metadata_lookups: { requested: lookup.requested, resolved: lookup.resolved, unresolved: lookup.unresolved, calls: lookup.calls },
+      ad_metadata_lookups: { requested: lookup.requested, resolved: lookup.resolved, unresolved: lookup.unresolved, not_found: lookup.not_found, failed: lookup.failed, calls: lookup.calls },
+      completeness: completeness.completeness, completeness_note: completeness.note,
       campaigns,
     };
   } catch (err) {
@@ -735,4 +771,6 @@ module.exports = {
   rederiveConversions,
   conversionAliasTotals,
   adInventoryDiagnostics,
+  lookupMissingAds,
+  describeCompleteness,
 };

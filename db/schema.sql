@@ -2582,6 +2582,28 @@ CREATE TABLE IF NOT EXISTS meta_sync_runs (
 );
 CREATE INDEX IF NOT EXISTS idx_meta_sync_runs_started_at ON meta_sync_runs(started_at);
 
+-- Batch 27 follow-up: sync COMPLETENESS, recorded beside (never instead of) status. status stays 'running' / 'success' / 'failed' because freshness, auto-sync and
+-- Planning all read status = 'success'. completeness: 'complete' = every ad seen in Insights has its identity (or Meta says it no longer exists);
+-- 'partial' = some ad identity lookups FAILED, so those ads are missing name / campaign / creative and cannot be matched to a product yet.
+-- NULL = a run recorded before this was tracked (unknown, not "complete"). All additive and idempotent.
+ALTER TABLE meta_sync_runs ADD COLUMN IF NOT EXISTS completeness VARCHAR(10) CHECK (completeness IN ('complete', 'partial'));
+ALTER TABLE meta_sync_runs ADD COLUMN IF NOT EXISTS ads_unresolved INTEGER;
+ALTER TABLE meta_sync_runs ADD COLUMN IF NOT EXISTS lookup_failed INTEGER;
+ALTER TABLE meta_sync_runs ADD COLUMN IF NOT EXISTS lookup_not_found INTEGER;
+ALTER TABLE meta_sync_runs ADD COLUMN IF NOT EXISTS completeness_note TEXT;
+
+-- One row per ad whose identity lookup did not succeed, removed again the moment the ad resolves. 'error' = the lookup FAILED (unknown, retried by later syncs
+-- because the ad is still an id-only shell); 'not_found' = Meta says the ad does not exist / is not visible (permanent: does not hold Planning back).
+CREATE TABLE IF NOT EXISTS meta_ad_identity_lookups (
+  meta_ad_id VARCHAR(64) PRIMARY KEY,
+  state VARCHAR(12) NOT NULL CHECK (state IN ('error', 'not_found')),
+  attempts INTEGER NOT NULL DEFAULT 1,
+  first_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_error_code INTEGER,
+  last_error_message TEXT
+);
+
 -- 'inventory' = the explicit full ad-inventory refresh (no Insights pulled),
 -- logged here for visibility but EXCLUDED from sync-coverage calculations
 -- (metaPerformance.getCoverage only counts 'default'/'backfill'). Databases
