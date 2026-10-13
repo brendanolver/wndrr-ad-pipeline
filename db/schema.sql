@@ -3142,8 +3142,11 @@ END $$;
 -- Batch 16: independent benchmarks per funnel for more measures. ADDITIVE and safe to repeat: the metric check is widened (every existing row stays valid) and an optional
 -- lowest acceptable value (target_min) lets Frequency carry an acceptable RANGE. No existing row is changed.
 ALTER TABLE meta_performance_benchmarks DROP CONSTRAINT IF EXISTS meta_performance_benchmarks_metric_check;
+-- Batch 20: every table measure except Amount Spent and Purchases can have a benchmark. The metric column is widened (VARCHAR(12) -> 24, existing values unchanged) and the check lists them all.
+ALTER TABLE meta_performance_benchmarks ALTER COLUMN metric TYPE VARCHAR(24);
+ALTER TABLE meta_performance_benchmarks DROP CONSTRAINT IF EXISTS meta_performance_benchmarks_metric_check;
 ALTER TABLE meta_performance_benchmarks ADD CONSTRAINT meta_performance_benchmarks_metric_check
-  CHECK (metric IN ('cpa', 'frequency', 'reach', 'roas', 'outbound_ctr', 'cpm'));
+  CHECK (metric IN ('cpa', 'frequency', 'reach', 'roas', 'outbound_ctr', 'cpm', 'purchase_value', 'add_to_cart', 'cost_per_atc'));
 ALTER TABLE meta_performance_benchmarks ADD COLUMN IF NOT EXISTS target_min NUMERIC(14,4) CHECK (target_min IS NULL OR target_min >= 0);
 -- Batch 19: "green only" benchmarks (highlight a value green when it meets the target; otherwise leave it uncoloured). Additive; existing rows default to the normal green / orange / red.
 ALTER TABLE meta_performance_benchmarks ADD COLUMN IF NOT EXISTS highlight_only BOOLEAN NOT NULL DEFAULT false;

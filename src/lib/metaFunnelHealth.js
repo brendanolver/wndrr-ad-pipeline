@@ -92,7 +92,7 @@ const RULES = {
 };
 const JUDGED_FUNNELS = ['TOF', 'TOM', 'MOF'];
 // every measure a benchmark can be set for (Settings > Meta Performance); a measure is only ever coloured where a benchmark has actually been configured
-const METRICS = ['cpa', 'roas', 'outbound_ctr', 'cpm', 'reach', 'frequency'];
+const METRICS = ['cpa', 'purchase_value', 'roas', 'add_to_cart', 'cost_per_atc', 'outbound_ctr', 'cpm', 'reach', 'frequency']; // table order; Amount Spent and Purchases are deliberately not benchmarkable
 const STATES = ['red', 'orange', 'green'];
 
 // The two benchmarks WNDRR has APPROVED. A configured override can never change them (it may only supply the still-pending metrics).
@@ -227,7 +227,7 @@ function describe(rule) {
 // [{ state, text, cond }] green -> orange -> red, for the compact colour guide in the UI
 const bandsOf = (rule) => ['green', 'orange', 'red'].filter((s) => rule[s] !== undefined).map((s) => ({ state: s, text: condText(rule[s]), cond: rule[s] }));
 
-const METRIC_LABEL = { cpa: 'CPA', roas: 'ROAS', outbound_ctr: 'Outbound CTR', cpm: 'CPM', reach: 'Reach', frequency: 'Frequency' };
+const METRIC_LABEL = { cpa: 'CPA', purchase_value: 'Purchase Value', roas: 'ROAS', add_to_cart: 'Adds to Cart', cost_per_atc: 'Cost / ATC', outbound_ctr: 'Outbound CTR', cpm: 'CPM', reach: 'Reach', frequency: 'Frequency' };
 // the green side of a rule as a short symbol: '≤ 60', '< 2', '≥ 50000' (the UI adds units)
 const targetSymbol = (rule) => {
   const g = rule.green || {};

@@ -575,15 +575,16 @@ document.getElementById('mcls-add-name').addEventListener('keydown', (e) => { if
 // One target per funnel + metric (+ optional reporting window). The server derives the bands (20% rule), validates every field, audits each
 // change and answers with the whole grid again, so what is shown here is always what the dashboard uses.
 const MBENCH = { data: null, editing: null };
-const MBENCH_LABEL = { cpa: 'CPA', roas: 'ROAS', outbound_ctr: 'Outbound CTR', cpm: 'CPM', reach: 'Reach', frequency: 'Frequency' };
+const MBENCH_LABEL = { cpa: 'CPA', purchase_value: 'Purchase Value', roas: 'ROAS', add_to_cart: 'Adds to Cart', cost_per_atc: 'Cost / ATC', outbound_ctr: 'Outbound CTR', cpm: 'CPM', reach: 'Reach', frequency: 'Frequency' };
 const MBENCH_FUNNEL_INFO = {
   TOF: ['Top of Funnel', 'Awareness and customer acquisition. Typically higher reach and lower conversion.'],
   TOM: ['Top of Mid', 'Consideration and engagement. Typically balanced reach and conversion.'],
   MOF: ['Middle of Funnel', 'Conversion and revenue. Typically lower reach and higher conversion.'],
 };
-const MBENCH_DIRECTION = { cpa: 'lower', cpm: 'lower', frequency: 'lower', roas: 'higher', outbound_ctr: 'higher', reach: 'higher' };
+const MBENCH_DIRECTION = { cpa: 'lower', cpm: 'lower', cost_per_atc: 'lower', frequency: 'lower', purchase_value: 'higher', roas: 'higher', add_to_cart: 'higher', outbound_ctr: 'higher', reach: 'higher' };
+const MBENCH_MONEY = ['cpa', 'cpm', 'cost_per_atc', 'purchase_value'];
 const mbenchFmt = (metric, v) => {
-  const money = metric === 'cpa' || metric === 'cpm';
+  const money = MBENCH_MONEY.includes(metric);
   const n = Number(v).toLocaleString('en-AU', money ? { minimumFractionDigits: 2, maximumFractionDigits: 2 } : { maximumFractionDigits: 4 });
   if (money) return `$${n}`;
   if (metric === 'roas' || metric === 'frequency') return `${n}×`;
@@ -1052,9 +1053,9 @@ function mpRenderBenchStrip(res) {
   const h = res.health;
   if (!h || !h.matrix) { hn.style.display = 'none'; return; }
   const per = h.period || {};
-  const LAB = { cpa: 'CPA', roas: 'ROAS', outbound_ctr: 'Outbound CTR', cpm: 'CPM', reach: 'Reach', frequency: 'Frequency' };
+  const LAB = { cpa: 'CPA', purchase_value: 'Purchase Value', roas: 'ROAS', add_to_cart: 'Adds to Cart', cost_per_atc: 'Cost / ATC', outbound_ctr: 'Outbound CTR', cpm: 'CPM', reach: 'Reach', frequency: 'Frequency' };
   const MET = Object.keys(LAB);
-  const isMoney = (m) => m === 'cpa' || m === 'cpm';
+  const isMoney = (m) => ['cpa', 'cpm', 'cost_per_atc', 'purchase_value'].includes(m);
   const money = (m, t) => (isMoney(m) ? String(t).replace(/(\d+(?:\.\d+)?)/g, '$$$1') : String(t).replace(/(\d{4,})/, (x) => Number(x).toLocaleString('en-AU')) + (m === 'roas' ? '×' : m === 'outbound_ctr' ? '%' : ''));
   // measures nobody has set a benchmark for (in any funnel) are summarised on one line instead of three empty groups
   const anySet = (m) => ['TOF', 'TOM', 'MOF'].some((f) => h.matrix[f][m].state !== 'no_benchmark');
@@ -1125,7 +1126,7 @@ function mpRenderAds(res) {
       if (!healthOn) return '';
       const hh = res.health;
       const fn = a.funnel;
-      const label = { cpa: 'CPA', roas: 'ROAS', outbound_ctr: 'Outbound CTR', cpm: 'CPM', frequency: 'Frequency', reach: 'Reach' }[metric];
+      const label = { cpa: 'CPA', purchase_value: 'Purchase Value', roas: 'ROAS', add_to_cart: 'Adds to Cart', cost_per_atc: 'Cost / ATC', outbound_ctr: 'Outbound CTR', cpm: 'CPM', frequency: 'Frequency', reach: 'Reach' }[metric];
       if (h) return h === 'green' ? `${fn} ${label}: meeting the benchmark` : h === 'orange' ? `${fn} ${label}: missing the benchmark by up to ${hh.tolerance_pct || 20}%` : `${fn} ${label}: missing the benchmark by more than ${hh.tolerance_pct || 20}%`;
       if (fn !== 'TOF' && fn !== 'TOM' && fn !== 'MOF') return 'Funnel is unknown or mixed (the campaign name has no single TOF / TOM / MOF), so this ad is never coloured';
       const cell = hh.matrix && hh.matrix[fn] && hh.matrix[fn][metric];
@@ -1166,10 +1167,10 @@ function mpRenderAds(res) {
         ${cell('mp-c-fin', '', mpFmt(a.spend, 'money'), 'spend', null, a, bar(a.spend, sc.spend_max))}
         ${cell('mp-c-fin', '', mpFmt(a.purchases, 'int'), 'purchases', 'up', a, bar(a.purchases, sc.purchases_max))}
         ${cell('mp-c-fin', why(a, 'cpa', a.cpa_health), metric(a.cpa_health, mpFmt(a.cpa, 'money')), 'cpa', 'down', a)}
-        ${cell('mp-c-fin', 'Meta purchase conversion value (omni_purchase) for this period', mpFmt(a.purchase_value, 'money'), 'purchase_value', 'up', a)}
+        ${cell('mp-c-fin', why(a, 'purchase_value', a.purchase_value_health) || 'Meta purchase conversion value (omni_purchase) for this period', metric(a.purchase_value_health, mpFmt(a.purchase_value, 'money')), 'purchase_value', 'up', a)}
         ${cell('mp-c-fin', why(a, 'roas', a.roas_health) || 'Meta purchase ROAS = purchase value ÷ amount spent. It is only coloured where a benchmark has been set for this ad\'s funnel.', metric(a.roas_health, mpFmt(a.roas, 'roas')), 'roas', 'up', a)}
-        ${cell('mp-c-tr', '', mpFmt(a.add_to_cart, 'int'), 'add_to_cart', 'up', a)}
-        ${cell('mp-c-tr', '', mpFmt(a.cost_per_atc, 'money'), 'cost_per_atc', 'down', a)}
+        ${cell('mp-c-tr', why(a, 'add_to_cart', a.add_to_cart_health), metric(a.add_to_cart_health, mpFmt(a.add_to_cart, 'int')), 'add_to_cart', 'up', a)}
+        ${cell('mp-c-tr', why(a, 'cost_per_atc', a.cost_per_atc_health), metric(a.cost_per_atc_health, mpFmt(a.cost_per_atc, 'money')), 'cost_per_atc', 'down', a)}
         ${cell('mp-c-tr', why(a, 'outbound_ctr', a.outbound_ctr_health), metric(a.outbound_ctr_health, mpFmt(a.outbound_ctr, 'pct')), 'outbound_ctr', 'up', a)}
         ${cell('mp-c-tr mp-cpm', why(a, 'cpm', a.cpm_health) || 'CPM = Amount Spent ÷ Impressions × 1,000. It is only coloured where a benchmark has been set for this ad\'s funnel.', a.impressions > 0 ? metric(a.cpm_health, mpFmt(a.cpm, 'money')) : '<span class="mp-na" title="No impressions in this period">—</span>', 'cpm', null, a)}
         ${cell(`mp-c-tr${a.funnel === 'TOF' ? ' mp-reach-key' : ''}`, why(a, 'reach', a.reach_health) || (a.funnel === 'TOF' ? 'Reach is the key measure for TOF' : ''), metric(a.reach_health, mpReachCell(a.reach, 'int')), null, null, a)}

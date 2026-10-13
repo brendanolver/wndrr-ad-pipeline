@@ -651,6 +651,9 @@ async function getAds(parsed, query) {
       roas_health: funnelHealth.classify(a.funnel, 'roas', a.roas, { days: healthDays }, healthCtx),
       outbound_ctr_health: funnelHealth.classify(a.funnel, 'outbound_ctr', a.outbound_ctr, { days: healthDays }, healthCtx),
       cpm_health: funnelHealth.classify(a.funnel, 'cpm', a.cpm, { days: healthDays }, healthCtx),
+      purchase_value_health: funnelHealth.classify(a.funnel, 'purchase_value', a.purchase_value, { days: healthDays }, healthCtx),
+      add_to_cart_health: funnelHealth.classify(a.funnel, 'add_to_cart', a.add_to_cart, { days: healthDays }, healthCtx),
+      cost_per_atc_health: funnelHealth.classify(a.funnel, 'cost_per_atc', a.cost_per_atc, { days: healthDays }, healthCtx),
     })),
     health: { ...funnelHealth.status({ range: parsed.range, rules: bench.rules, coded: bench.coded, source: bench.source === 'settings' ? 'settings' : null }), funnel_counts: funnelCounts },
     reach_info: {

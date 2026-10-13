@@ -13,8 +13,8 @@ const { HttpError } = require('./metaPerformance');
 const FUNNELS = health.JUDGED_FUNNELS;
 const METRICS = health.METRICS;
 // which side of the target is better (frequency may also be given an acceptable range, see target_min)
-const DIRECTION = { cpa: 'lower', roas: 'higher', outbound_ctr: 'higher', cpm: 'lower', reach: 'higher', frequency: 'lower' };
-const UNIT = { cpa: '$ AUD', roas: '×', outbound_ctr: '%', cpm: '$ AUD', reach: 'people', frequency: '×' };
+const DIRECTION = { cpa: 'lower', purchase_value: 'higher', roas: 'higher', add_to_cart: 'higher', cost_per_atc: 'lower', outbound_ctr: 'higher', cpm: 'lower', reach: 'higher', frequency: 'lower' };
+const UNIT = { cpa: '$ AUD', purchase_value: '$ AUD', roas: '×', add_to_cart: 'adds', cost_per_atc: '$ AUD', outbound_ctr: '%', cpm: '$ AUD', reach: 'people', frequency: '×' };
 const CACHE_MS = 5000;
 let cache = null;
 
@@ -90,7 +90,7 @@ function cleanInput(body, { partial = false } = {}) {
   }
   if (!partial || b.metric !== undefined) {
     const m = String(b.metric || '').toLowerCase();
-    if (!METRICS.includes(m)) throw new HttpError(400, 'Metric must be CPA, ROAS, Outbound CTR, CPM, Reach or Frequency');
+    if (!METRICS.includes(m)) throw new HttpError(400, 'Metric must be one of CPA, Purchase Value, ROAS, Adds to Cart, Cost / ATC, Outbound CTR, CPM, Reach or Frequency');
     out.metric = m;
   }
   if (!partial || b.target !== undefined) {

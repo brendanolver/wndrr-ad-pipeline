@@ -9,9 +9,10 @@ const perf = require('../src/lib/metaPerformance');
 const row = (funnel, metric, target, extra = {}) => ({ funnel, metric, target, target_min: null, inclusive: true, tolerance_pct: 20, active: true, min_days: null, max_days: null, ...extra });
 const cls = (rows, f, m, v, days = 7) => { const c = bench.compile(rows); return health.classify(f, m, v, { days }, { rules: c.rules, coded: c.coded }); };
 
-test('six measures, each with its good direction', () => {
-  assert.deepEqual(health.METRICS, ['cpa', 'roas', 'outbound_ctr', 'cpm', 'reach', 'frequency']);
-  assert.deepEqual(bench.DIRECTION, { cpa: 'lower', roas: 'higher', outbound_ctr: 'higher', cpm: 'lower', reach: 'higher', frequency: 'lower' });
+test('nine measures (every table measure except Amount Spent and Purchases), each with its good direction', () => {
+  assert.deepEqual(health.METRICS, ['cpa', 'purchase_value', 'roas', 'add_to_cart', 'cost_per_atc', 'outbound_ctr', 'cpm', 'reach', 'frequency']);
+  assert.ok(!health.METRICS.includes('spend') && !health.METRICS.includes('purchases'), 'Amount Spent and Purchases are not benchmarkable');
+  assert.deepEqual(bench.DIRECTION, { cpa: 'lower', purchase_value: 'higher', roas: 'higher', add_to_cart: 'higher', cost_per_atc: 'lower', outbound_ctr: 'higher', cpm: 'lower', reach: 'higher', frequency: 'lower' });
 });
 
 test('the same value is judged by each funnel\'s own benchmark, and by none where nothing is set', () => {
@@ -60,4 +61,11 @@ test('"green only": green when the target is met, otherwise no colour (never ora
   // the same target without the option still has orange and red
   assert.equal(cls(rows, 'MOF', 'reach', 17000), 'orange'); assert.equal(cls(rows, 'MOF', 'reach', 100), 'red');
   assert.deepEqual(Object.keys(bench.ruleOf(row('TOF', 'reach', 20000, { highlight_only: true }))).filter((k) => ['green', 'orange', 'red'].includes(k)), ['green']);
+});
+
+test('Purchase Value, Adds to Cart and Cost / ATC can be benchmarked per funnel', () => {
+  const rows = [row('TOF', 'purchase_value', 2000), row('TOF', 'add_to_cart', 150), row('TOF', 'cost_per_atc', 5), row('TOM', 'cost_per_atc', 3)];
+  assert.equal(cls(rows, 'TOF', 'purchase_value', 2500), 'green'); assert.equal(cls(rows, 'TOF', 'purchase_value', 1700), 'orange'); assert.equal(cls(rows, 'TOF', 'purchase_value', 1000), 'red');
+  assert.equal(cls(rows, 'TOF', 'add_to_cart', 174), 'green'); assert.equal(cls(rows, 'TOF', 'add_to_cart', 100), 'red');
+  assert.equal(cls(rows, 'TOF', 'cost_per_atc', 4.74), 'green'); assert.equal(cls(rows, 'TOF', 'cost_per_atc', 6), 'orange'); assert.equal(cls(rows, 'TOM', 'cost_per_atc', 4.74), 'red'); assert.equal(cls(rows, 'MOF', 'cost_per_atc', 4.74), null);
 });
