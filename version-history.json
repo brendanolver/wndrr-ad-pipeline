@@ -2,6 +2,16 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.1.3",
+      "date": "2026-10-13",
+      "title": "Best Ads calendar fixed",
+      "changes": [
+        "The Best Ads date range calendar now opens fully in view, left-aligned under its button, instead of running off the left edge over the sidebar",
+        "The popover is also clamped on the left edge as well as the right at any window width",
+        "The last-updated text in the header can no longer run under Refresh now"
+      ]
+    },
+    {
       "version": "1.1.2",
       "date": "2026-10-13",
       "title": "Date range popover clean-up",

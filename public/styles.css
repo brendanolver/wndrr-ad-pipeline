@@ -4393,3 +4393,11 @@ body{background:var(--bg);color:var(--text);}
 .mp-cal-actions{margin-top:14px;padding-top:12px;border-top:1px solid var(--border);}
 .mp-cal-actions .btn{height:36px;}
 @media (max-width:760px){.mp-range-pop{width:auto;}.mp-range-presets{overflow-x:auto;}}
+
+/* Best Ads: the date popover opens left-aligned under its button like on Performance, and the header's last-updated text can never run under the Refresh button */
+#mp-best-controls .mp-range-pop{left:0;right:auto;z-index:40;}
+#mp-best-controls .mp-range-wrap{position:relative;}
+.mp-top3 .mp-fresh-meta{min-width:0;max-width:100%;}
+.mp-top3 .mp-fresh-line{min-width:0;}
+.mp-top3 .mp-fresh-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:280px;}
+.mp-top3 .mp-refresh-btn{flex:0 0 auto;}

@@ -1334,6 +1334,7 @@ function mpCalFit() {
   const r = pop.getBoundingClientRect(); const margin = 16;
   const over = r.right - (window.innerWidth - margin);
   if (over > 0) { const cs = parseFloat(getComputedStyle(pop).left) || 0; pop.style.left = `${Math.max(cs - over, -(r.left - margin))}px`; pop.style.right = 'auto'; }
+  else if (r.left < margin) { const cs = parseFloat(getComputedStyle(pop).left) || 0; pop.style.left = `${cs + (margin - r.left)}px`; pop.style.right = 'auto'; }
 }
 window.addEventListener('resize', () => { if (mpCal.open) mpCalFit(); });
 function mpCalClose() {
