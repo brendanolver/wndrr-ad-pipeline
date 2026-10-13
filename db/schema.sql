@@ -2976,6 +2976,10 @@ CREATE TABLE IF NOT EXISTS meta_creative_thumbs (
   fetched_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Best Ads gallery (Batch 14): a LARGER cover per creative (600px) is cached next to the small table thumbnail, so the table keeps its light 256px covers and the gallery is sharp.
+ALTER TABLE meta_creative_thumbs ADD COLUMN IF NOT EXISTS large_url TEXT;
+ALTER TABLE meta_creative_thumbs ADD COLUMN IF NOT EXISTS large_expires_at TIMESTAMPTZ;
+
 -- Meta's own shareable preview link per ad (the fb.me/adspreview/... links the Inspiration Library holds).
 -- Looked up read-only on an explicit admin action; an EXACT URL match is the deterministic link back to the ad.
 CREATE TABLE IF NOT EXISTS meta_ad_share_links (

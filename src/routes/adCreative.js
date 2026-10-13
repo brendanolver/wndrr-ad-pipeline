@@ -30,7 +30,9 @@ router.post('/thumbnails', async (req, res, next) => {
   try {
     const ids = Array.isArray(req.body && req.body.ad_ids) ? req.body.ad_ids.map(String).filter((i) => AD_ID_RE.test(i)) : [];
     if (!ids.length) return res.status(400).json({ error: 'ad_ids is required' });
-    const { thumbs: t, stats } = await thumbs.getThumbs(ids);
+    // size: 'large' = the Best Ads gallery's bigger covers (cached separately; the table keeps its small ones)
+    const large = req.body && req.body.size === 'large';
+    const { thumbs: t, stats } = large ? await thumbs.getLargeThumbs(ids) : await thumbs.getThumbs(ids);
     return res.json({ thumbs: t, paused: stats.paused || null });
   } catch (err) { return next(err); }
 });

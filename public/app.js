@@ -361,6 +361,7 @@ function switchTab(name) {
   document.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
   document.querySelectorAll('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === `tab-${name}`));
   autoExpandSidebarGroupForTab(name);
+  if (typeof mpSyncChrome === 'function' && typeof mmState !== 'undefined') mpSyncChrome();
   // Shooting is the direct downstream consumer of an action just taken on
   // Tuesday Review (Approve for Shooting) -- unlike every other tab, it
   // needs a fresh fetch on every visit so a concept approved a moment ago
@@ -817,6 +818,19 @@ function mpDelta(def, cur, prev, ok, vs) {
   return `<div class="mp-kpi-delta ${cls}" title="Previous period: ${escapeHtml(String(prev))}"><span class="mp-kpi-pct">${arrow} ${shown.toFixed(1)}%</span> <span class="mp-kpi-vs">${escapeHtml(vs || 'vs previous period')}</span></div>`;
 }
 
+// % changes are computed from the raw sums (not from values already rounded to two decimals), so 2.14 vs 1.50 cannot drift a tenth of a point
+function mpExact(t, key) {
+  const sp = Number(t.spend), pu = Number(t.purchases), pv = Number(t.purchase_value), at = Number(t.add_to_cart), cl = Number(t.outbound_clicks), im = Number(t.impressions);
+  switch (key) {
+    case 'cpa': return pu > 0 ? sp / pu : null;
+    case 'roas': return sp > 0 ? pv / sp : null;
+    case 'cost_per_atc': return at > 0 ? sp / at : null;
+    case 'outbound_ctr': return im > 0 ? (cl / im) * 100 : null;
+    case 'cpm': return im > 0 ? (sp / im) * 1000 : null;
+    default: return t[key];
+  }
+}
+
 function mpRenderSummary(sum) {
   mpState.range = sum.range;
   if (sum.today) mpState.today = sum.today;
@@ -849,18 +863,7 @@ function mpRenderSummary(sum) {
   // "vs previous 7 days": the length of the period being compared against
   const prevDays = cmp ? mpDaysBetween(cmp.range.since, cmp.range.until) : 0;
   const vsText = prevDays === 1 ? 'vs previous day' : `vs previous ${prevDays} days`;
-  // % changes are computed from the raw sums (not from values already rounded to two decimals), so 2.14 vs 1.50 cannot drift a tenth of a point
-  const exact = (t, key) => {
-    const sp = Number(t.spend), pu = Number(t.purchases), pv = Number(t.purchase_value), at = Number(t.add_to_cart), cl = Number(t.outbound_clicks), im = Number(t.impressions);
-    switch (key) {
-      case 'cpa': return pu > 0 ? sp / pu : null;
-      case 'roas': return sp > 0 ? pv / sp : null;
-      case 'cost_per_atc': return at > 0 ? sp / at : null;
-      case 'outbound_ctr': return im > 0 ? (cl / im) * 100 : null;
-      case 'cpm': return im > 0 ? (sp / im) * 1000 : null;
-      default: return t[key];
-    }
-  };
+  const exact = mpExact;
   const kpiCard = (def) => `
     <div class="mp-kpi">
       <div class="mp-kpi-label">${def.label}</div>
@@ -1065,6 +1068,7 @@ async function loadMetaPerformanceAds() {
 
 async function loadMetaPerformance() {
   if (!state.currentUser || state.currentUser.role !== 'admin') return;
+  if (mmState.view === 'best') return loadBestAds();
   const id = ++mpState.reqId;
   const qs = `${mpRangeQuery()}${mpState.compare ? '&compare=1' : ''}${mpFilterQuery()}`;
   try {
@@ -1387,7 +1391,7 @@ async function mpCheckFreshness() {
     // a period that includes today keeps checking while the page is open (the server decides if anything is actually due)
     if (f.includes_today && !mpState.freshTimer) {
       mpState.freshTimer = setInterval(() => {
-        const open = document.getElementById('tab-meta-performance').classList.contains('active') && mmState.view === 'performance' && document.visibilityState === 'visible';
+        const open = document.getElementById('tab-meta-performance').classList.contains('active') && mmState.view !== 'matching' && document.visibilityState === 'visible';
         if (open) mpCheckFreshness();
       }, 60 * 1000);
     }
@@ -1765,18 +1769,44 @@ const MM_FILTERS = [
 ];
 
 function loadMetaPerformanceArea() {
+  mpSyncChrome();
   if (mmState.view === 'matching') loadMetaMatching(); else loadMetaPerformance();
+}
+
+// Page title / subtitle, in-page tabs and the sidebar sub-menu all follow the one view (performance | best | matching).
+const MP_VIEW_TITLES = {
+  performance: ['Meta Performance', 'Performance of WNDRR Meta ads across all campaigns'],
+  best: ['Best Ads', 'Your top performing Meta ads ranked by purchase value'],
+  matching: ['Meta Performance', 'Performance of WNDRR Meta ads across all campaigns'],
+};
+function mpSyncChrome() {
+  const view = mmState.view;
+  const t = MP_VIEW_TITLES[view] || MP_VIEW_TITLES.performance;
+  const h = document.getElementById('mp-page-title'); if (h) h.textContent = view === 'matching' ? 'Ad Matching' : t[0];
+  const sub = document.getElementById('mp-page-subtitle'); if (sub) sub.textContent = t[1];
+  document.querySelectorAll('.mp-subnav-btn').forEach((b) => b.classList.toggle('active', b.dataset.mpView === view));
+  const open = document.getElementById('tab-meta-performance').classList.contains('active');
+  const subs = document.getElementById('sidebar-mp-subnav'); if (subs) subs.style.display = open && state.currentUser && state.currentUser.role === 'admin' ? '' : 'none';
+  document.querySelectorAll('.sidebar-sub-btn').forEach((b) => b.classList.toggle('active', open && b.dataset.mpNav === view));
+  const main = document.getElementById('sidebar-meta-performance'); if (main) { main.classList.toggle('mp-open', open); main.setAttribute('aria-expanded', open ? 'true' : 'false'); }
+  document.getElementById('mp-view-performance').style.display = view === 'performance' ? '' : 'none';
+  document.getElementById('mp-view-best').style.display = view === 'best' ? '' : 'none';
+  document.getElementById('mp-perf-controls').style.display = view === 'matching' ? 'none' : '';
+  const dpaBox = document.getElementById('mp-dpa'); if (dpaBox) dpaBox.checked = !!mpState.dpa;
+  document.getElementById('mp-view-matching').style.display = view === 'matching' ? '' : 'none';
 }
 
 function mpSetView(view) {
   mmState.view = view;
-  document.querySelectorAll('.mp-subnav-btn').forEach((b) => b.classList.toggle('active', b.dataset.mpView === view));
-  document.getElementById('mp-view-performance').style.display = view === 'performance' ? '' : 'none';
-  document.getElementById('mp-perf-controls').style.display = view === 'performance' ? '' : 'none';
-  document.getElementById('mp-view-matching').style.display = view === 'matching' ? '' : 'none';
   loadMetaPerformanceArea();
 }
 document.querySelectorAll('.mp-subnav-btn').forEach((b) => b.addEventListener('click', () => mpSetView(b.dataset.mpView)));
+// Sidebar sub-menu: open the area (if it is not open yet) on the chosen page. The date range, Previous period and DPA choice live in mpState, so they carry across pages.
+document.querySelectorAll('.sidebar-sub-btn').forEach((b) => b.addEventListener('click', () => {
+  mmState.view = b.dataset.mpNav;
+  if (document.getElementById('tab-meta-performance').classList.contains('active')) loadMetaPerformanceArea();
+  else switchTab('meta-performance');
+}));
 
 // Plain-language confidence (the numeric score stays server-side):
 //   Exact  = deterministic evidence matched a known value
@@ -17709,4 +17739,275 @@ document.addEventListener('click', async (e) => {
   if (!vhData) await vhLoad();
   vhRender();
   openModal('version-modal');
+});
+
+// ═══ Best Ads ═══════════════════════════════════════════════════════════════
+// A gallery of the best individual Meta ads for the selected period, ranked by a chosen metric. It is a presentation layer over the same stored Meta data as the Performance
+// page: the server (GET /meta-performance/best-ads) ranks the WHOLE eligible set, the page only shows 24 more at a time. The date range, Previous period, Refresh and
+// Include DPAs choices are the SAME state as the Performance page (mpState); everything else here is the Best Ads page's own filter. Each card opens the existing Ad Preview modal.
+const BA_KPIS = [
+  { key: 'purchase_value', label: 'Purchase Value', fmt: 'money', better: 'up' },
+  { key: 'purchases', label: 'Purchases', fmt: 'int', better: 'up' },
+  { key: 'cpa', label: 'CPA', fmt: 'money', better: 'down' },
+  { key: 'spend', label: 'Amount Spent', fmt: 'money', better: null },
+  { key: 'roas', label: 'ROAS', fmt: 'roas', better: 'up' },
+];
+const baState = {
+  rank: 'purchase_value', funnel: 'all', campaign: '', status: 'all', minSpend: 500, minPurchases: 5, q: '', layout: 'grid',
+  page: 1, ads: [], adsById: new Map(), data: null, reqId: 0, loading: false, campaignsFor: '', io: null, playing: null,
+};
+const baMedia = new Map(); // adId -> { state, kind, thumb_url, video_url }
+const baMediaAsked = new Set();
+
+function baQuery(page) {
+  const p = [mpRangeQuery()];
+  if (mpState.compare) p.push('compare=1');
+  p.push(`rank=${encodeURIComponent(baState.rank)}`, `min_spend=${encodeURIComponent(baState.minSpend)}`, `min_purchases=${encodeURIComponent(baState.minPurchases)}`,
+    `status=${baState.status}`, `page=${page}`, 'page_size=24');
+  if (baState.q) p.push(`q=${encodeURIComponent(baState.q)}`);
+  if (baState.funnel !== 'all') p.push(`funnel=${encodeURIComponent(baState.funnel)}`);
+  if (baState.campaign) p.push(`campaign_id=${encodeURIComponent(baState.campaign)}`);
+  if (mpState.dpa) p.push('dpa=include');
+  return p.join('&');
+}
+
+function baSyncControls() {
+  const set = (id, v) => { const el = document.getElementById(id); if (el && document.activeElement !== el) el.value = v; };
+  set('ba-rank', baState.rank); set('ba-funnel', baState.funnel); set('ba-status', baState.status); set('ba-search', baState.q);
+  set('ba-min-spend', baState.minSpend); set('ba-min-purchases', baState.minPurchases);
+  const dpa = document.getElementById('ba-dpa'); if (dpa) dpa.checked = !!mpState.dpa;
+  const mdpa = document.getElementById('mp-dpa'); if (mdpa) mdpa.checked = !!mpState.dpa;
+  const needs = baState.rank === 'cpa' || baState.rank === 'roas';
+  document.getElementById('ba-minp-wrap').style.display = needs ? '' : 'none';
+  document.querySelectorAll('.ba-view-btn').forEach((b) => { const on = b.dataset.baLayout === baState.layout; b.classList.toggle('active', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); });
+  document.getElementById('ba-grid').dataset.layout = baState.layout;
+}
+
+async function baLoadCampaigns() {
+  const key = mpRangeKey();
+  if (baState.campaignsFor === key) return;
+  try {
+    const r = await api(`/meta-performance/campaigns?${mpRangeQuery()}`);
+    baState.campaignsFor = key;
+    const sel = document.getElementById('ba-campaign');
+    sel.innerHTML = `<option value="">All campaigns</option>${r.campaigns.map((c) => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name || `Campaign ${c.id}`)}</option>`).join('')}`;
+    sel.value = baState.campaign;
+  } catch (e) { /* the campaign filter is optional */ }
+}
+
+function baKpiHtml(data) {
+  const pop = data.population;
+  const cmp = pop.previous;
+  const ok = !!(cmp && cmp.available && cmp.totals);
+  let vs = 'vs previous period';
+  if (cmp && cmp.range) { const d = mpDaysBetween(cmp.range.since, cmp.range.until); vs = d === 1 ? 'vs previous day' : `vs previous ${d} days`; }
+  return BA_KPIS.map((def) => {
+    const v = pop.totals[def.key];
+    return `<div class="ba-kpi"><div class="ba-kpi-label">${def.label}</div>
+      <div class="ba-kpi-value" title="${escapeHtml(v === null || v === undefined ? 'Not available' : String(v))}">${mpFmt(v, def.fmt)}</div>
+      ${cmp ? mpDelta(def, mpExact(pop.totals, def.key), ok ? mpExact(cmp.totals, def.key) : null, ok, vs) : ''}</div>`;
+  }).join('');
+}
+
+function baFormatMoney0(n) { try { return new Intl.NumberFormat('en-AU', { style: 'currency', currency: mpState.currency || 'AUD', maximumFractionDigits: 0 }).format(n); } catch (e) { return `$${Math.round(n)}`; } }
+
+function baCardHtml(a) {
+  const id = escapeHtml(a.meta_ad_id);
+  const status = a.effective_status === 'ACTIVE' ? 'Active' : (a.effective_status || '').includes('PAUSED') ? 'Paused' : 'Other';
+  const statusCls = status.toLowerCase();
+  const rankLabel = a.rank;
+  const hero = baState.data && baState.data.rank.used === 'purchase_value' ? ' ba-hero-ranked' : '';
+  return `<article class="ba-card" data-ba-card="${id}">
+    <div class="ba-media" data-ba-media="${id}">
+      <button type="button" class="ba-media-btn" data-ba-open="${id}" aria-label="Open the ad preview for ${escapeHtml(a.ad_name || a.meta_ad_id)}"><span class="ba-ph"><span class="ba-ph-text"></span></span></button>
+      <span class="ba-rank" title="Rank ${rankLabel}">#${rankLabel}</span>
+      <span class="ba-kind" hidden></span>
+    </div>
+    <div class="ba-body">
+      <div class="ba-badges">${mpFunnelBadge(a.funnel)}<span class="ba-status ${statusCls}">${status}</span></div>
+      <h4 class="ba-name" title="${escapeHtml(a.ad_name || '')}${a.campaign_name ? ` — ${escapeHtml(a.campaign_name)}` : ''}">${escapeHtml(a.ad_name || '(unnamed ad)')}</h4>
+      <div class="ba-hero${hero}"><span class="ba-hero-label">Purchase Value</span><strong class="ba-hero-value">${mpFmt(a.purchase_value, 'money')}</strong></div>
+      <dl class="ba-metrics">
+        <div><dt>Purchases</dt><dd>${mpFmt(a.purchases, 'int')}</dd></div>
+        <div><dt>CPA</dt><dd>${mpFmt(a.cpa, 'money')}</dd></div>
+        <div><dt>Reach</dt><dd>${a.reach === null || a.reach === undefined ? '<span class="mp-na" title="Per-ad Reach for this period has not been loaded from Meta">—</span>' : Number(a.reach).toLocaleString('en-AU')}</dd></div>
+        <div><dt>Amount Spent</dt><dd>${mpFmt(a.spend, 'money')}</dd></div>
+      </dl>
+      <div class="ba-foot"><div class="ba-roas"><span>ROAS</span><strong>${mpFmt(a.roas, 'roas')}</strong></div>
+        <button type="button" class="ba-details" data-ba-open="${id}">View Full Details <span aria-hidden="true">→</span></button></div>
+    </div>
+  </article>`;
+}
+
+// "6–12 Oct 2026" (same month), "28 Sep–4 Oct 2026", "9 Oct 2026"
+function baRangeText(r) {
+  if (!r) return '';
+  if (r.since === r.until) return mpDate(r.since, true);
+  const [sy, sm, sd] = r.since.split('-').map(Number); const [ey, em, ed] = r.until.split('-').map(Number);
+  if (sy === ey && sm === em) return `${sd}–${ed} ${MP_MONTHS[em - 1]} ${ey}`;
+  return `${mpDate(r.since, sy !== ey)}–${mpDate(r.until, true)}`;
+}
+function baShownLine(d) {
+  const n = baState.ads.length;
+  return `Showing ${n.toLocaleString('en-AU')} of ${d.total.toLocaleString('en-AU')} ads · Ranked by ${d.rank.label} · ${baRangeText(d.range)}`;
+}
+
+function baRender(d, appended) {
+  const grid = document.getElementById('ba-grid');
+  const pop = d.population;
+  document.getElementById('ba-kpis').innerHTML = baKpiHtml(d);
+  document.getElementById('ba-scope').innerHTML = `Totals above cover <strong>all ${pop.ads.toLocaleString('en-AU')} ad${pop.ads === 1 ? '' : 's'}</strong> that match these filters (including the minimum spend), not only the cards shown below.`;
+  const ruleBits = [];
+  if (d.rank.fallback) ruleBits.push(`<span class="ba-rule-warn">${escapeHtml(d.rank.fallback.reason)}</span>`);
+  if (d.rules.text) ruleBits.push(escapeHtml(d.rules.text));
+  if (d.rules.purchases_rule && pop.excluded_by_rule > 0) ruleBits.push(`${pop.excluded_by_rule.toLocaleString('en-AU')} ad${pop.excluded_by_rule === 1 ? '' : 's'} left out by this rule.`);
+  if (d.reach_info && d.reach_info.state === 'ready' && d.reach_info.source === 'meta_range' && d.rank.used === 'reach') ruleBits.push(`Reach loaded from Meta ${mpDateTime(d.reach_info.pulled_at)}.`);
+  document.getElementById('ba-rule').innerHTML = ruleBits.join(' ');
+  document.getElementById('ba-rule').style.display = ruleBits.length ? '' : 'none';
+  document.getElementById('ba-summary').textContent = d.total ? baShownLine(d) : `0 ads · Ranked by ${d.rank.label} · ${baRangeText(d.range)}`;
+  const state = document.getElementById('ba-state');
+  const cov = d.coverage || {};
+  if (!d.total) {
+    let title; let body;
+    if (cov.status === 'none') { title = 'Meta data is not available for this period'; body = 'No Meta stats have been synced for these dates yet. Try a more recent range, or use Refresh now.'; }
+    else if (pop.ads === 0 && pop.below_min_spend > 0) { title = 'No ads meet the minimum spend'; body = `${pop.below_min_spend.toLocaleString('en-AU')} ad${pop.below_min_spend === 1 ? '' : 's'} ran in this period but spent less than ${baFormatMoney0(d.rules.min_spend)}. Lower the minimum spend to see ${pop.below_min_spend === 1 ? 'it' : 'them'}.`; }
+    else if (pop.ads > 0) { title = 'No ads meet this ranking rule'; body = `${d.rules.text || 'The ranking needs data these ads do not have.'} Lower the limits or choose a different ranking.`; }
+    else { title = 'No ads match these filters'; body = 'Try clearing the search, funnel, campaign or status filters.'; }
+    state.className = 'ba-state ba-state-empty'; state.style.display = '';
+    state.innerHTML = `<strong>${escapeHtml(title)}</strong><span>${escapeHtml(body)}</span>`;
+  } else { state.style.display = 'none'; }
+  const html = d.ads.map(baCardHtml).join('');
+  if (appended) grid.insertAdjacentHTML('beforeend', html); else grid.innerHTML = html;
+  const more = document.getElementById('ba-more');
+  const left = d.total - baState.ads.length;
+  more.innerHTML = left > 0 ? `<button type="button" class="btn btn-ghost" id="ba-show-more">Show ${Math.min(24, left)} more ads <span class="ba-more-left">(${left.toLocaleString('en-AU')} remaining)</span></button>` : '';
+  baObserveMedia(grid);
+}
+
+async function loadBestAds(page) {
+  if (!state.currentUser || state.currentUser.role !== 'admin') return;
+  const append = page > 1;
+  const id = ++baState.reqId;
+  baSyncControls();
+  const grid = document.getElementById('ba-grid');
+  const state0 = document.getElementById('ba-state');
+  if (!append) {
+    baState.page = 1; baState.ads = []; baState.adsById = new Map();
+    state0.className = 'ba-state'; state0.style.display = 'none';
+    if (!baState.data) { grid.innerHTML = Array.from({ length: 8 }, () => '<div class="ba-card ba-skel" aria-hidden="true"><div class="ba-media"></div><div class="ba-body"><i></i><i></i><i></i></div></div>').join(''); document.getElementById('ba-summary').textContent = 'Loading best ads…'; }
+    else { grid.classList.add('ba-loading'); }
+  } else { const b = document.getElementById('ba-show-more'); if (b) { b.disabled = true; b.textContent = 'Loading…'; } }
+  baState.loading = true;
+  try {
+    const d = await api(`/meta-performance/best-ads?${baQuery(append ? page : 1)}`);
+    if (id !== baState.reqId) return;
+    baState.loading = false; grid.classList.remove('ba-loading');
+    baState.data = d; baState.page = d.page;
+    mpState.range = d.range; if (d.today) mpState.today = d.today;
+    const rbl = document.getElementById('mp-range-btn-label'); if (rbl) rbl.textContent = d.preset === 'custom' ? mpRangeLabel(d.range.since, d.range.until) : d.label;
+    document.getElementById('mp-range-line').textContent = `${mpRange(d.range, true)} · ${d.timezone}`;
+    d.ads.forEach((a) => { baState.ads.push(a); baState.adsById.set(a.meta_ad_id, a); });
+    document.getElementById('ba-coverage').innerHTML = mpRenderCoverage(d.coverage, 'Best Ads');
+    baRender(d, append);
+    if (!append) { baLoadCampaigns(); mpCheckFreshness(); }
+  } catch (e) {
+    if (id !== baState.reqId) return;
+    baState.loading = false; grid.classList.remove('ba-loading');
+    if (!append) grid.innerHTML = '';
+    document.getElementById('ba-more').innerHTML = '';
+    document.getElementById('ba-summary').textContent = '';
+    state0.className = 'ba-state ba-state-error'; state0.style.display = '';
+    state0.innerHTML = `<strong>Couldn't load Best Ads</strong><span>${escapeHtml(e.message)}</span><button type="button" class="btn btn-ghost btn-sm" id="ba-retry">Try again</button>`;
+  }
+}
+
+// ── Creative media: loaded only for cards that scroll near the screen; never every video at once ──
+function baObserveMedia(root) {
+  const els = [...root.querySelectorAll('[data-ba-media]:not([data-ba-seen])')];
+  if (!els.length) return;
+  const fill = (el) => { el.dataset.baSeen = '1'; baFillCached(el); };
+  if (!('IntersectionObserver' in window)) { els.forEach(fill); baFetchMedia(els.map((e) => e.dataset.baMedia)); return; }
+  if (!baState.io) {
+    baState.io = new IntersectionObserver((entries) => {
+      const vis = entries.filter((en) => en.isIntersecting).map((en) => en.target);
+      vis.forEach((el) => { baState.io.unobserve(el); fill(el); });
+      if (vis.length) baFetchMedia(vis.map((e) => e.dataset.baMedia));
+    }, { rootMargin: '400px 0px' });
+  }
+  els.forEach((el) => baState.io.observe(el));
+}
+function baFillCached(el) { const t = baMedia.get(el.dataset.baMedia); if (t) baFillMedia(el, t); }
+function baFillMedia(el, t) {
+  const btn = el.querySelector('.ba-media-btn');
+  const ph = btn.querySelector('.ba-ph'); const txt = ph && ph.querySelector('.ba-ph-text');
+  const kind = t.kind || '';
+  const kindEl = el.querySelector('.ba-kind');
+  if (kind && CC_KIND_LABEL[kind]) { kindEl.hidden = false; kindEl.dataset.kind = kind; kindEl.title = CC_KIND_LABEL[kind]; kindEl.innerHTML = kind === 'video' ? CC_BADGE_PLAY.replace(/<span[^>]*>|<\/span>/g, '') : '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="M21 16l-5-5-8 8"/></svg>'; }
+  if (t.state === 'ok' && t.thumb_url) {
+    btn.classList.add('has-img'); el.classList.toggle('ba-playable', !!(kind === 'video' && t.video_url));
+    btn.innerHTML = `<img src="${escapeHtml(t.thumb_url)}" loading="lazy" decoding="async" referrerpolicy="no-referrer" alt="" onerror="this.parentNode.classList.remove('has-img');this.parentNode.innerHTML='<span class=&quot;ba-ph&quot;><span class=&quot;ba-ph-text&quot;>Preview unavailable</span></span>';this.remove()">${el.classList.contains('ba-playable') ? `<span class="ba-play" data-ba-play="${escapeHtml(el.dataset.baMedia)}" role="button" tabindex="0" aria-label="Play video"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg></span>` : ''}`;
+  } else if (txt) {
+    txt.textContent = t.state === 'unavailable' ? 'Preview unavailable' : t.state === 'pending' ? 'Preview not loaded yet' : '';
+    ph.classList.toggle('ba-ph-none', t.state !== 'loading');
+  }
+}
+async function baFetchMedia(idList) {
+  const ids = [...new Set(idList)];
+  ids.forEach((i) => { const t = baMedia.get(i); if (t) document.querySelectorAll(`[data-ba-media="${CSS.escape(i)}"]`).forEach((el) => baFillMedia(el, t)); });
+  const ask = ids.filter((i) => !baMedia.has(i) && !baMediaAsked.has(i));
+  for (let i = 0; i < ask.length; i += 24) {
+    const part = ask.slice(i, i + 24);
+    part.forEach((x) => baMediaAsked.add(x));
+    try {
+      const r = await api('/ad-creative/thumbnails', { method: 'POST', body: JSON.stringify({ ad_ids: part, size: 'large' }) });
+      Object.entries(r.thumbs || {}).forEach(([adId, t]) => {
+        if (t.state === 'ok') baMedia.set(adId, t); else baMediaAsked.delete(adId);
+        document.querySelectorAll(`[data-ba-media="${CSS.escape(adId)}"]`).forEach((el) => baFillMedia(el, t.state === 'pending' && !r.paused ? { ...t, state: 'loading' } : t));
+      });
+    } catch (e) { part.forEach((x) => baMediaAsked.delete(x)); }
+  }
+}
+// Inline playback, one video at a time, only when the cached preview already holds a playable file. Otherwise a click opens the Ad Preview modal.
+function baPlay(adId) {
+  const t = baMedia.get(adId); const el = document.querySelector(`[data-ba-media="${CSS.escape(adId)}"]`);
+  if (!t || !t.video_url || !el) return false;
+  if (baState.playing) baStop(baState.playing);
+  const btn = el.querySelector('.ba-media-btn');
+  btn.dataset.restore = btn.innerHTML;
+  btn.innerHTML = `<video src="${escapeHtml(t.video_url)}" poster="${escapeHtml(t.thumb_url || '')}" controls autoplay muted playsinline preload="none"></video>`;
+  btn.classList.add('is-playing'); baState.playing = adId;
+  const v = btn.querySelector('video'); if (v) v.addEventListener('error', () => baStop(adId, true));
+  return true;
+}
+function baStop(adId, failed) {
+  const el = document.querySelector(`[data-ba-media="${CSS.escape(adId)}"]`); if (!el) return;
+  const btn = el.querySelector('.ba-media-btn'); const v = btn.querySelector('video'); if (v) { try { v.pause(); } catch (e) { /* ignore */ } }
+  if (btn.dataset.restore) { btn.innerHTML = btn.dataset.restore; delete btn.dataset.restore; }
+  btn.classList.remove('is-playing'); if (failed) { el.classList.remove('ba-playable'); btn.querySelectorAll('.ba-play').forEach((x) => x.remove()); const t = baMedia.get(adId); if (t) baMedia.set(adId, { ...t, video_url: null }); }
+  if (baState.playing === adId) baState.playing = null;
+}
+function baOpen(adId) {
+  const a = baState.adsById.get(adId); const d = baState.data;
+  ccOpenViewer(adId, a && d ? { metrics: { spend: a.spend, purchases: a.purchases, cpa: a.cpa, roas: a.roas, outbound_ctr: a.outbound_ctr, reach: a.reach, frequency: a.frequency }, range: d.range, funnel: a.funnel } : undefined);
+}
+
+// ── Controls ──
+let baTimer = null;
+const baReload = (delay) => { clearTimeout(baTimer); baTimer = setTimeout(() => loadBestAds(), delay || 0); };
+document.getElementById('ba-rank').addEventListener('change', (e) => { baState.rank = e.target.value; baReload(); });
+document.getElementById('ba-funnel').addEventListener('change', (e) => { baState.funnel = e.target.value; baReload(); });
+document.getElementById('ba-campaign').addEventListener('change', (e) => { baState.campaign = e.target.value; baReload(); });
+document.getElementById('ba-status').addEventListener('change', (e) => { baState.status = e.target.value; baReload(); });
+document.getElementById('ba-min-spend').addEventListener('input', (e) => { const v = e.target.value.trim(); if (v === '' || !Number.isFinite(Number(v)) || Number(v) < 0) return; baState.minSpend = Number(v); baReload(450); });
+document.getElementById('ba-min-purchases').addEventListener('input', (e) => { const v = Math.floor(Number(e.target.value)); if (!Number.isFinite(v) || v < 1) return; baState.minPurchases = v; baReload(450); });
+document.getElementById('ba-search').addEventListener('input', (e) => { baState.q = e.target.value.trim(); baReload(350); });
+document.getElementById('ba-dpa').addEventListener('change', (e) => { mpState.dpa = e.target.checked; baReload(); });
+document.querySelectorAll('.ba-view-btn').forEach((b) => b.addEventListener('click', () => { baState.layout = b.dataset.baLayout; baSyncControls(); }));
+document.addEventListener('click', (e) => {
+  if (e.target.closest('#ba-retry')) { loadBestAds(); return; }
+  if (e.target.closest('#ba-show-more')) { loadBestAds(baState.page + 1); return; }
+  const pl = e.target.closest('[data-ba-play]');
+  if (pl) { e.preventDefault(); e.stopPropagation(); if (!baPlay(pl.dataset.baPlay)) baOpen(pl.dataset.baPlay); return; }
+  const op = e.target.closest('#mp-view-best [data-ba-open]');
+  if (op) { e.preventDefault(); if (!op.closest('.ba-media-btn.is-playing')) baOpen(op.dataset.baOpen); }
 });

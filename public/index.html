@@ -60,7 +60,13 @@
            confirms an admin; /api/meta-performance/* is independently
            admin-gated server-side, so this hiding is a convenience, not the
            enforcement). A real top-level page, not a Settings tab. -->
-      <button class="tab-btn" data-tab="meta-performance" id="sidebar-meta-performance" style="display:none;"><span class="sidebar-nav-icon"><svg class=ic aria-hidden=true focusable=false><use href=#i-chart></use></svg></span>Meta Performance</button>
+      <button class="tab-btn" data-tab="meta-performance" id="sidebar-meta-performance" style="display:none;"><span class="sidebar-nav-icon"><svg class=ic aria-hidden=true focusable=false><use href=#i-chart></use></svg></span>Meta Performance<span class="sidebar-group-chevron sidebar-mp-chevron" aria-hidden="true">▾</span></button>
+      <!-- Meta Performance sub-pages (shown while that area is open): the same one area with three views; no new top-level route. -->
+      <div class="sidebar-subnav" id="sidebar-mp-subnav" style="display:none;" role="group" aria-label="Meta Performance pages">
+        <button type="button" class="sidebar-sub-btn" data-mp-nav="performance">Performance</button>
+        <button type="button" class="sidebar-sub-btn" data-mp-nav="best">Best Ads</button>
+        <button type="button" class="sidebar-sub-btn" data-mp-nav="matching">Ad Matching</button>
+      </div>
       <button class="tab-btn" data-tab="planning"><span class="sidebar-nav-icon"><svg class=ic aria-hidden=true focusable=false><use href=#i-calendar></use></svg></span>Planning</button>
 
       <!-- Production-readiness follow-up (item 1): Create & Review and
@@ -184,11 +190,12 @@
          src/lib/metaPerformance.js for why. -->
     <section id="tab-meta-performance" class="tab-panel">
       <div class="mp-top">
-        <div class="mp-title-block"><h2>Meta Performance</h2><div class="mp-subtitle">Performance of WNDRR Meta ads across all campaigns</div></div>
+        <div class="mp-title-block"><h2 id="mp-page-title">Meta Performance</h2><div class="mp-subtitle" id="mp-page-subtitle">Performance of WNDRR Meta ads across all campaigns</div></div>
         <div class="mp-top-right">
           <!-- Performance | Ad Matching: one area, two views (no extra top-level sidebar item). -->
           <div class="mp-subnav" id="mp-subnav" role="tablist">
             <button type="button" class="mp-subnav-btn active" data-mp-view="performance" role="tab">Performance</button>
+            <button type="button" class="mp-subnav-btn" data-mp-view="best" role="tab">Best Ads</button>
             <button type="button" class="mp-subnav-btn" data-mp-view="matching" role="tab">Ad Matching</button>
           </div>
         </div>
@@ -317,6 +324,52 @@
         <div class="mp-footnote">All Purchases, Purchase Value, ROAS and CPA shown here are Meta-reported (Purchase ROAS = Purchase Value ÷ Amount Spent). Attribution: 7-day click + 1-day view (provisional). Reach &amp; Frequency are unique-people figures: they are loaded from Meta on request for the selected period and are never summed from daily rows. Not shown yet: Thumbstop &amp; Hold Rate (formulas not yet confirmed).</div>
       </div>
       </div><!-- /#mp-view-performance -->
+
+      <!-- Best Ads: a presentation layer over the same Meta data -- the best individual ads, ranked by a chosen metric, as a visual gallery. Shares the date range / Previous period /
+           Refresh controls above and opens the same Ad Preview modal. Built in app.js (loadBestAds). -->
+      <div id="mp-view-best" style="display:none;">
+        <div id="ba-coverage"></div>
+        <div class="ba-kpis" id="ba-kpis" aria-live="polite"></div>
+        <div class="ba-scope" id="ba-scope"></div>
+        <div class="ba-toolbar" id="ba-toolbar">
+          <label class="ba-f"><span>Rank by</span>
+            <select id="ba-rank" aria-label="Rank by">
+              <option value="purchase_value">Purchase Value</option>
+              <option value="purchases">Purchases</option>
+              <option value="cpa">CPA (lowest first)</option>
+              <option value="reach">Reach</option>
+              <option value="spend">Amount Spent</option>
+              <option value="roas">ROAS</option>
+            </select></label>
+          <label class="ba-f"><span>Funnel</span>
+            <select id="ba-funnel" aria-label="Funnel">
+              <option value="all">All</option><option value="TOF">TOF</option><option value="TOM">TOM</option><option value="MOF">MOF</option>
+            </select></label>
+          <label class="ba-f ba-f-campaign"><span>Campaign</span>
+            <select id="ba-campaign" aria-label="Campaign"><option value="">All campaigns</option></select></label>
+          <label class="ba-f"><span>Status</span>
+            <select id="ba-status" aria-label="Status"><option value="all">All</option><option value="active">Active</option><option value="paused">Paused</option></select></label>
+          <label class="ba-f ba-f-min"><span>Minimum spend</span>
+            <span class="ba-money"><i>$</i><input type="number" id="ba-min-spend" min="0" step="50" inputmode="decimal" value="500" aria-label="Minimum spend (AUD)"></span></label>
+          <label class="ba-f ba-f-minp" id="ba-minp-wrap" style="display:none;"><span>Min. purchases</span>
+            <input type="number" id="ba-min-purchases" min="1" step="1" inputmode="numeric" value="5" aria-label="Minimum purchases (CPA and ROAS ranking)"></label>
+          <label class="ba-f ba-f-search"><span>Search</span>
+            <input type="search" id="ba-search" placeholder="Ad name, product or Meta Ad ID" autocomplete="off" aria-label="Search"></label>
+          <label class="mp-inline-check ba-dpa" title="Dynamic Product Ads are excluded by default. They stay stored; this only changes what is shown."><input type="checkbox" id="ba-dpa"> Include DPAs</label>
+        </div>
+        <div class="ba-rule" id="ba-rule"></div>
+        <div class="ba-summary-row">
+          <div class="ba-summary" id="ba-summary" role="status" aria-live="polite"></div>
+          <div class="ba-view-toggle" role="group" aria-label="Layout">
+            <button type="button" class="ba-view-btn active" data-ba-layout="grid" aria-pressed="true">Grid</button>
+            <button type="button" class="ba-view-btn" data-ba-layout="list" aria-pressed="false">List</button>
+          </div>
+        </div>
+        <div class="ba-state" id="ba-state" style="display:none;"></div>
+        <div class="ba-grid" id="ba-grid" data-layout="grid"></div>
+        <div class="ba-more" id="ba-more"></div>
+        <div class="mp-footnote">Ranked from the same Meta-reported figures as the Performance page (Purchase ROAS = Purchase Value ÷ Amount Spent; attribution 7-day click + 1-day view, provisional). Each card is one Meta ad — ads are never grouped or merged, even when they share a creative.</div>
+      </div><!-- /#mp-view-best -->
 
       <!-- Ad Matching: classify Meta ads into Product(s) / Concept / Creative
            Style / Creator / Ad Setup. Local database only -- this view never

@@ -2,6 +2,16 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.0.3",
+      "date": "2026-10-13",
+      "title": "Best Ads page",
+      "changes": [
+        "Meta Performance now has a Best Ads page: a gallery of the best-performing Meta ads ranked by purchase value, with Rank By, Funnel, Campaign, Status, Minimum Spend, Search and Include DPAs filters.",
+        "Meta Performance in the sidebar expands to Performance, Best Ads and Ad Matching; the date range and Previous period carry across pages.",
+        "Each card is one Meta ad with its real creative, Purchase Value, Purchases, CPA, Reach, Amount Spent and ROAS, and opens the existing Ad Preview."
+      ]
+    },
+    {
       "version": "1.0.2",
       "date": "2026-10-13",
       "title": "Meta ad preview: redesigned two-column modal",
