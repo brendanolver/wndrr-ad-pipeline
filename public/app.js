@@ -805,16 +805,16 @@ function mpRenderCoverage(cov, label) {
 // The comparison under a summary figure: the change, then what it is against. Colour = whether the move is FAVOURABLE for that metric (def.better); a metric with no
 // agreed direction (Amount Spent, CPM, Outbound CTR, Reach, Frequency) is shown neutral. Unavailable / missing data is stated, never turned into a percentage.
 function mpDelta(def, cur, prev, ok, vs) {
-  const na = (why) => `<div class="mp-kpi-delta unavailable" title="${escapeHtml(why)}"><span class="mp-kpi-pct">—</span><span class="mp-kpi-vs">${escapeHtml(vs || 'vs previous period')} unavailable</span></div>`;
+  const na = (why) => `<div class="mp-kpi-delta unavailable" title="${escapeHtml(why)}"><span class="mp-kpi-pct">—</span> <span class="mp-kpi-vs">${escapeHtml(vs || 'vs previous period')} unavailable</span></div>`;
   if (!ok) return na('The previous period is not fully synced, so there is nothing reliable to compare against.');
   if (cur === null || cur === undefined || prev === null || prev === undefined || !(prev > 0)) return na('There is no previous-period value to compare against.');
   const pct = ((cur - prev) / prev) * 100;
   if (!Number.isFinite(pct)) return na('There is no previous-period value to compare against.');
-  const r = Math.round(pct);
-  const arrow = pct > 0 ? '▲' : pct < 0 ? '▼' : '•';
+  const shown = Math.round(Math.abs(pct) * 10) / 10; // one decimal, e.g. 8.2%
+  const arrow = shown === 0 ? '→' : pct > 0 ? '↑' : '↓';
   let cls = 'neutral';
-  if (def.better && r !== 0) cls = (pct > 0) === (def.better === 'up') ? 'good' : 'bad';
-  return `<div class="mp-kpi-delta ${cls}" title="Previous period: ${escapeHtml(String(prev))}"><span class="mp-kpi-pct">${arrow} ${Math.abs(r)}%</span><span class="mp-kpi-vs">${escapeHtml(vs || 'vs previous period')}</span></div>`;
+  if (def.better && shown !== 0) cls = (pct > 0) === (def.better === 'up') ? 'good' : 'bad';
+  return `<div class="mp-kpi-delta ${cls}" title="Previous period: ${escapeHtml(String(prev))}"><span class="mp-kpi-pct">${arrow} ${shown.toFixed(1)}%</span> <span class="mp-kpi-vs">${escapeHtml(vs || 'vs previous period')}</span></div>`;
 }
 
 function mpRenderSummary(sum) {
@@ -849,11 +849,23 @@ function mpRenderSummary(sum) {
   // "vs previous 7 days": the length of the period being compared against
   const prevDays = cmp ? mpDaysBetween(cmp.range.since, cmp.range.until) : 0;
   const vsText = prevDays === 1 ? 'vs previous day' : `vs previous ${prevDays} days`;
+  // % changes are computed from the raw sums (not from values already rounded to two decimals), so 2.14 vs 1.50 cannot drift a tenth of a point
+  const exact = (t, key) => {
+    const sp = Number(t.spend), pu = Number(t.purchases), pv = Number(t.purchase_value), at = Number(t.add_to_cart), cl = Number(t.outbound_clicks), im = Number(t.impressions);
+    switch (key) {
+      case 'cpa': return pu > 0 ? sp / pu : null;
+      case 'roas': return sp > 0 ? pv / sp : null;
+      case 'cost_per_atc': return at > 0 ? sp / at : null;
+      case 'outbound_ctr': return im > 0 ? (cl / im) * 100 : null;
+      case 'cpm': return im > 0 ? (sp / im) * 1000 : null;
+      default: return t[key];
+    }
+  };
   const kpiCard = (def) => `
     <div class="mp-kpi">
       <div class="mp-kpi-label">${def.label}</div>
       <div class="mp-kpi-value" title="${escapeHtml(String(sum.totals[def.key] === null || sum.totals[def.key] === undefined ? 'Not available' : sum.totals[def.key]))}">${mpFmt(sum.totals[def.key], def.fmt)}</div>
-      ${cmp ? mpDelta(def, sum.totals[def.key], cmp.totals[def.key], bothComplete, vsText) : ''}
+      ${cmp ? mpDelta(def, exact(sum.totals, def.key), exact(cmp.totals, def.key), bothComplete, vsText) : ''}
     </div>`;
   // two panels, as in the design: money on one side, traffic / delivery on the other. Every card is one of the same real figures as before (nothing added or dropped).
   const FIN = ['spend', 'purchases', 'cpa', 'purchase_value', 'roas'];
@@ -1294,8 +1306,8 @@ function mpReachTilesHtml(rf, vs) {
   const status = !rf ? '' : rf.available ? ''
     : rf.state === 'filtered' ? 'whole account only' : rf.state === 'loading' ? 'loading from Meta…' : rf.state === 'failed' ? 'unavailable' : 'not loaded';
   // Reach / Frequency are unique-people figures Meta computes per period: the previous period's cannot be derived from stored daily rows, so no change is shown for them
-  const sub = status ? `<div class="mp-kpi-delta unavailable"><span class="mp-kpi-pct">—</span><span class="mp-kpi-vs">${escapeHtml(status)}</span></div>`
-    : vs ? `<div class="mp-kpi-delta unavailable" title="Reach and Frequency are unique-people figures Meta calculates for each period; the previous period's are not stored, so no change is shown."><span class="mp-kpi-pct">—</span><span class="mp-kpi-vs">${escapeHtml(vs)} unavailable</span></div>` : '';
+  const sub = vs ? `<div class="mp-kpi-delta unavailable" title="Reach and Frequency are unique-people figures Meta calculates for each period; the previous period's are not stored, so no change is shown."><span class="mp-kpi-pct">—</span> <span class="mp-kpi-vs">${escapeHtml(vs)} unavailable</span></div>`
+    : status ? `<div class="mp-kpi-status">${escapeHtml(status)}</div>` : '';
   const tip = (what) => (asOf ? ` title="${escapeHtml(what + ' ' + asOf)}"` : '');
   return `<div class="mp-kpi"><div class="mp-kpi-label">Reach</div><div class="mp-kpi-value"${tip('Reach')}>${val(rf && rf.reach, 'int')}</div>${sub}</div>
     <div class="mp-kpi"><div class="mp-kpi-label">Frequency</div><div class="mp-kpi-value"${tip('Frequency')}>${val(rf && rf.frequency, 'freq')}</div>${sub}</div>`;

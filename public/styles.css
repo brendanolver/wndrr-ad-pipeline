@@ -3181,7 +3181,7 @@ input[type=checkbox],input[type=radio]{accent-color:var(--accent-strong);}
 /* tables */
 .admin-table{border:1px solid var(--border);box-shadow:none;}
 .admin-table th,.mp-table th{background:var(--surface2);color:var(--text-secondary);}
-.admin-table tbody tr:hover td,.mp-table tbody tr:hover td{background:var(--accent-softer);}
+.admin-table tbody tr:hover td,.mp-table:not(.mp-perf) tbody tr:hover td{background:var(--accent-softer);}
 
 /* badges, chips, empty states */
 .badge,.plan-chip{border-radius:var(--r-pill);}
@@ -3347,14 +3347,13 @@ input[type=checkbox],input[type=radio]{accent-color:var(--accent-strong);}
 .mp-table.mp-perf .mp-name-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;}
 .mp-table.mp-perf .mp-campaign-line{overflow:hidden;}
 .mp-table.mp-perf td.mp-creative-cell .cc-thumb,.mp-table.mp-perf td.mp-name .cc-thumb{width:40px;height:40px;border-radius:6px;}
-.mp-table.mp-perf tbody tr:hover td:not(.mp-cell){background:var(--accent-softer);}
+/* (Batch 14: the Meta Performance row hover is an overlay laid over the column shading, defined at the end of this file) */
 .mp-table.mp-perf td.mp-reach-key{background:var(--accent-softer);}
 /* benchmark bands: the whole cell takes the soft colour, the value stays bold and readable; neutral cells (no approved benchmark, or a reporting window the benchmark does not cover) get none */
 .mp-table.mp-perf td.mp-cell{font-weight:700;}
 .mp-table.mp-perf td.mp-cell-green{background:#e8f5ec;color:#17603c;}
 .mp-table.mp-perf td.mp-cell-orange{background:#fdf1df;color:#855000;}
 .mp-table.mp-perf td.mp-cell-red{background:#fbe6e3;color:#9d261d;}
-.mp-table.mp-perf tbody tr:hover td.mp-cell-green{background:#dcefe3;} .mp-table.mp-perf tbody tr:hover td.mp-cell-orange{background:#fbe8cc;} .mp-table.mp-perf tbody tr:hover td.mp-cell-red{background:#f8d9d5;}
 /* the value inside a coloured cell is plain (no rectangle, no symbol); its meaning is announced by screen readers and shown in the tooltip */
 .mp-metric{display:inline;min-width:0;padding:0;border:0;border-radius:0;background:none;color:inherit;text-align:inherit;font-weight:inherit;}
 .mp-metric[data-health]::before{content:none;margin:0;}
@@ -3708,11 +3707,11 @@ body{background:var(--bg);color:var(--text);}
 .mp-table.mp-perf thead th:nth-child(6),.mp-table.mp-perf thead th:nth-child(8){background:#EEF5FF;}
 .mp-table.mp-perf thead th:nth-child(11),.mp-table.mp-perf thead th:nth-child(13),.mp-table.mp-perf thead th:nth-child(15){background:#F4F1FF;}
 /* body: group tint with extremely subtle alternating columns */
-.mp-table.mp-perf tbody td{background:#fff;border-bottom:1px solid var(--mp-line);padding:8px 10px;vertical-align:middle;}
-.mp-table.mp-perf tbody td.mp-c-fin{background:var(--mp-fin-tint);}
-.mp-table.mp-perf tbody td.mp-c-fin:nth-child(6),.mp-table.mp-perf tbody td.mp-c-fin:nth-child(8){background:#F7FAFF;}
-.mp-table.mp-perf tbody td.mp-c-tr{background:var(--mp-tr-tint);}
-.mp-table.mp-perf tbody td.mp-c-tr:nth-child(11),.mp-table.mp-perf tbody td.mp-c-tr:nth-child(13),.mp-table.mp-perf tbody td.mp-c-tr:nth-child(15){background:#FBFAFF;}
+.mp-table.mp-perf tbody td{background-color:#fff;border-bottom:1px solid var(--mp-line);padding:8px 10px;vertical-align:middle;}
+.mp-table.mp-perf tbody td.mp-c-fin{background-color:var(--mp-fin-tint);}
+.mp-table.mp-perf tbody td.mp-c-fin:nth-child(6),.mp-table.mp-perf tbody td.mp-c-fin:nth-child(8){background-color:#F7FAFF;}
+.mp-table.mp-perf tbody td.mp-c-tr{background-color:var(--mp-tr-tint);}
+.mp-table.mp-perf tbody td.mp-c-tr:nth-child(11),.mp-table.mp-perf tbody td.mp-c-tr:nth-child(13),.mp-table.mp-perf tbody td.mp-c-tr:nth-child(15){background-color:#FBFAFF;}
 /* very light alternating rows (an overlay, so the column tints still read) + a hover that never hides the pills */
 .mp-table.mp-perf tbody tr:nth-child(even) td{background-image:linear-gradient(rgba(16,16,40,.018),rgba(16,16,40,.018));}
 .mp-table.mp-perf tbody tr:hover td{background-image:linear-gradient(rgba(60,70,160,.06),rgba(60,70,160,.06));}
@@ -3739,9 +3738,9 @@ body{background:var(--bg);color:var(--text);}
 .mp-table.mp-perf td.mp-reach-key .mp-val{color:#1B3F8F;}
 /* sticky Ad details columns (Funnel, Creative, Ad name): enough room to read, the metrics scroll beside them */
 @media (min-width:1000px){
-  .mp-table.mp-perf thead tr:not(.mp-group-row) th:nth-child(1),.mp-table.mp-perf tbody td:nth-child(1){position:sticky;left:0;z-index:3;background:#fff;}
-  .mp-table.mp-perf thead tr:not(.mp-group-row) th:nth-child(2),.mp-table.mp-perf tbody td:nth-child(2){position:sticky;left:64px;z-index:3;background:#fff;}
-  .mp-table.mp-perf thead tr:not(.mp-group-row) th:nth-child(3),.mp-table.mp-perf tbody td:nth-child(3){position:sticky;left:152px;z-index:3;background:#fff;box-shadow:1px 0 0 var(--mp-line);}
+  .mp-table.mp-perf thead tr:not(.mp-group-row) th:nth-child(1),.mp-table.mp-perf tbody td:nth-child(1){position:sticky;left:0;z-index:3;background-color:#fff;}
+  .mp-table.mp-perf thead tr:not(.mp-group-row) th:nth-child(2),.mp-table.mp-perf tbody td:nth-child(2){position:sticky;left:64px;z-index:3;background-color:#fff;}
+  .mp-table.mp-perf thead tr:not(.mp-group-row) th:nth-child(3),.mp-table.mp-perf tbody td:nth-child(3){position:sticky;left:152px;z-index:3;background-color:#fff;box-shadow:1px 0 0 var(--mp-line);}
   .mp-table.mp-perf thead tr:not(.mp-group-row) th:nth-child(-n+3){z-index:6;}
   .mp-table.mp-perf thead tr.mp-group-row td.mp-group-details{z-index:7;left:0;}
   .mp-table.mp-perf tbody tr:nth-child(even) td:nth-child(-n+3){background-image:linear-gradient(rgba(16,16,40,.018),rgba(16,16,40,.018));}
@@ -3912,3 +3911,14 @@ body{background:var(--bg);color:var(--text);}
 .vh-title{margin-top:4px;font-weight:600;font-size:13.5px;}
 .vh-changes{margin:6px 0 0 18px;padding:0;font-size:12.5px;color:var(--text-secondary);display:flex;flex-direction:column;gap:3px;}
 .vh-build{margin-top:12px;}
+
+/* ═══ Final refinements: ad-name typography, full-row hover ════════════════════════════════════════════════════════════════════ */
+.mp-table.mp-perf td.mp-name .mp-name-text{font-size:12px;font-weight:600;line-height:1.35;}
+.mp-table.mp-perf td.mp-name .mp-campaign-line{font-size:11px;font-weight:400;color:var(--text-muted);}
+/* One very light highlight across EVERY cell of the hovered row (Ad details, Financial, Traffic & delivery), laid over the existing column shading rather than replacing it.
+   Written with the sticky Ad details columns and the alternating-row overlay in mind: those carry their own overlay, so this has to be at least as specific. */
+.mp-table.mp-perf tbody tr:hover td,
+.mp-table.mp-perf tbody tr:nth-child(even):hover td,
+.mp-table.mp-perf tbody tr:hover td:nth-child(-n+3),
+.mp-table.mp-perf tbody tr:nth-child(even):hover td:nth-child(-n+3){background-image:linear-gradient(rgba(70,80,170,.055),rgba(70,80,170,.055));}
+.mp-kpi-status{margin-top:5px;font-size:11.5px;line-height:1.3;color:var(--text-muted);white-space:nowrap;}

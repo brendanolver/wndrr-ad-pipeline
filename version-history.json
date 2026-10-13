@@ -2,6 +2,16 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.0.1",
+      "date": "2026-10-13",
+      "title": "Meta Performance: clearer KPI comparisons, ad names, row hover",
+      "changes": [
+        "KPI cards compare with the previous period (one decimal, favourable or unfavourable only where it is clear; Reach and Frequency show unavailable).",
+        "Ad names are slightly smaller, semibold, two lines at most.",
+        "Hovering a row now lightly highlights the whole row without losing the column shading."
+      ]
+    },
+    {
       "version": "1.0.0",
       "date": "2026-10-13",
       "title": "Version tracking begins",
