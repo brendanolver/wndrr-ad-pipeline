@@ -591,7 +591,7 @@ const mbenchFmt = (metric, v) => {
   if (metric === 'outbound_ctr') return `${n}%`;
   return n;
 };
-const mbenchWindowText = (r) => (r.highlight_only ? `${mbenchWindowBase(r)} · green only` : mbenchWindowBase(r));
+const mbenchWindowText = (r) => (r.highlight_only ? `${mbenchWindowBase(r)} · green only` : r.highlight_bad_only ? `${mbenchWindowBase(r)} · red only` : mbenchWindowBase(r));
 const mbenchWindowBase = (r) => {
   if (r.min_days == null && r.max_days == null) return 'any period';
   if (r.min_days != null && r.max_days != null) return r.min_days === r.max_days ? `${r.min_days}-day periods` : `${r.min_days}–${r.max_days}-day periods`;
@@ -680,7 +680,7 @@ function mbenchFill(f, metric, b) {
   mbenchEl('mbench-lo').value = b && b.target_min != null ? b.target_min : '';
   mbenchEl('mbench-tol').value = b ? b.tolerance_pct : '20';
   // Reach is a number to notice rather than a target to miss, so a new Reach benchmark starts as "green only"
-  mbenchEl('mbench-style').value = b ? (b.highlight_only ? 'green' : 'bands') : (metric === 'reach' ? 'green' : 'bands');
+  mbenchEl('mbench-style').value = b ? (b.highlight_only ? 'green' : b.highlight_bad_only ? 'red' : 'bands') : (metric === 'reach' ? 'green' : 'bands');
   mbenchEl('mbench-inclusive').checked = b ? b.inclusive : true;
   const custom = !!b && (b.min_days != null || b.max_days != null);
   mbenchEl('mbench-window').value = custom ? 'custom' : 'any'; mbenchEl('mbench-window-fields').style.display = custom ? '' : 'none';
@@ -697,10 +697,11 @@ function mbenchSyncForm() {
   mbenchEl('mbench-lo-wrap').hidden = !range;
   mbenchEl('mbench-target-label').textContent = range ? `Highest acceptable ${label}` : `Target ${label}`;
   mbenchEl('mbench-kind-hint').textContent = range ? 'Flag ads whose frequency is outside this range.' : kind === 'lower' ? `Flag ads where ${label} is higher than this value.` : `Flag ads where ${label} is lower than this value.`;
-  const greenOnly = mbenchEl('mbench-style').value === 'green';
+  const styleV = mbenchEl('mbench-style').value; const greenOnly = styleV === 'green'; const redOnly = styleV === 'red';
   mbenchEl('mbench-tol-wrap').hidden = greenOnly;
-  mbenchEl('mbench-style-hint').textContent = greenOnly ? `Ads are highlighted green when ${label} ${range ? 'is inside the range' : kind === 'lower' ? 'is at or below the target' : 'reaches the target'}; otherwise they have no colour.` : 'Green when it meets the target, orange when close, red when further off.';
-  mbenchEl('mbench-tol-hint').textContent = `Show orange when performance is within ${mbenchEl('mbench-tol').value || 0}% of the target.`;
+  mbenchEl('mbench-tol-label').textContent = redOnly ? 'Red when it misses by more than' : 'Orange tolerance';
+  mbenchEl('mbench-style-hint').textContent = redOnly ? `Only ads that miss the target by more than the tolerance are flagged red; everything else has no colour.` : greenOnly ? `Ads are highlighted green when ${label} ${range ? 'is inside the range' : kind === 'lower' ? 'is at or below the target' : 'reaches the target'}; otherwise they have no colour.` : 'Green when it meets the target, orange when close, red when further off.';
+  mbenchEl('mbench-tol-hint').textContent = redOnly ? `Flag red when it misses the target by more than ${mbenchEl('mbench-tol').value || 0}%. Use 0% to flag anything that misses it.` : `Show orange when performance is within ${mbenchEl('mbench-tol').value || 0}% of the target.`;
   mbenchEl('mbench-inclusive-label').textContent = range ? 'A value exactly at either end counts as green' : kind === 'lower' ? 'A value exactly on the target counts as green' : 'A value exactly on the target counts as green';
   mbenchPreview();
 }
@@ -729,6 +730,11 @@ function mbenchPreview() {
   // reuse the same unit formatting as the cards: swap each number in the band text for its formatted value
   const fmt = (txt) => txt.replace(/-?\d+(?:\.\d+)?/g, (n) => mbenchFmt(metric, Number(n)));
   const names = { green: 'Better than target', orange: `Within ${tol}%`, red: 'Below target' };
+  if (mbenchEl('mbench-style').value === 'red') {
+    el.innerHTML = `<div class="mbp-title">Preview <small>(red only, ${tol}% tolerance)</small></div>
+      <div class="mbp-tiles mbp-tiles-2"><div class="mbp-tile mbp-none" data-band="none"><b>Otherwise</b><span>No colour</span></div><div class="mbp-tile mbp-red" data-band="red"><b>${escapeHtml(fmt(bands.red.text))}</b><span>Flagged red</span></div></div>`;
+    return;
+  }
   if (greenOnly) {
     el.innerHTML = `<div class="mbp-title">Preview <small>(green only)</small></div>
       <div class="mbp-tiles mbp-tiles-2"><div class="mbp-tile mbp-green" data-band="green"><b>${escapeHtml(fmt(bands.green.text))}</b><span>${bands.range ? 'Highlighted green' : 'Highlighted green'}</span></div><div class="mbp-tile mbp-none" data-band="none"><b>Otherwise</b><span>No colour</span></div></div>`;
@@ -762,6 +768,7 @@ mbenchEl('mbench-save').addEventListener('click', async () => {
     inclusive: mbenchEl('mbench-inclusive').checked, tolerance_pct: mbenchEl('mbench-tol').value,
     target_min: range && mbenchEl('mbench-lo').value !== '' ? mbenchEl('mbench-lo').value : null,
     highlight_only: mbenchEl('mbench-style').value === 'green',
+    highlight_bad_only: mbenchEl('mbench-style').value === 'red',
   };
   if (!(Number(body.target) > 0)) { mbenchMsg('Enter a target above 0, or Cancel to leave this measure unset.', 'err'); return; }
   if (range && body.target_min === null) { mbenchMsg('Enter the lowest acceptable value for a range.', 'err'); return; }

@@ -69,3 +69,12 @@ test('Purchase Value, Adds to Cart and Cost / ATC can be benchmarked per funnel'
   assert.equal(cls(rows, 'TOF', 'add_to_cart', 174), 'green'); assert.equal(cls(rows, 'TOF', 'add_to_cart', 100), 'red');
   assert.equal(cls(rows, 'TOF', 'cost_per_atc', 4.74), 'green'); assert.equal(cls(rows, 'TOF', 'cost_per_atc', 6), 'orange'); assert.equal(cls(rows, 'TOM', 'cost_per_atc', 4.74), 'red'); assert.equal(cls(rows, 'MOF', 'cost_per_atc', 4.74), null);
 });
+
+test('"red only": red when the target is missed by more than the tolerance, otherwise no colour (never green or orange)', () => {
+  const rows = [row('TOM', 'cpa', 60, { highlight_bad_only: true }), row('TOF', 'roas', 2, { highlight_bad_only: true, tolerance_pct: 0 })];
+  assert.equal(cls(rows, 'TOM', 'cpa', 40), null); assert.equal(cls(rows, 'TOM', 'cpa', 60), null); assert.equal(cls(rows, 'TOM', 'cpa', 70), null); // within 20%
+  assert.equal(cls(rows, 'TOM', 'cpa', 73), 'red');
+  assert.equal(cls(rows, 'TOF', 'roas', 2.5), null); assert.equal(cls(rows, 'TOF', 'roas', 1.99), 'red', '0% tolerance flags anything that misses');
+  assert.deepEqual(Object.keys(bench.ruleOf(row('TOM', 'cpa', 60, { highlight_bad_only: true }))).filter((k) => ['green', 'orange', 'red'].includes(k)), ['red']);
+  assert.throws(() => bench.cleanInput({ funnel: 'TOF', metric: 'cpa', target: 5, highlight_only: true, highlight_bad_only: true }), /either green only or red only/);
+});

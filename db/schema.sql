@@ -3150,6 +3150,8 @@ ALTER TABLE meta_performance_benchmarks ADD CONSTRAINT meta_performance_benchmar
 ALTER TABLE meta_performance_benchmarks ADD COLUMN IF NOT EXISTS target_min NUMERIC(14,4) CHECK (target_min IS NULL OR target_min >= 0);
 -- Batch 19: "green only" benchmarks (highlight a value green when it meets the target; otherwise leave it uncoloured). Additive; existing rows default to the normal green / orange / red.
 ALTER TABLE meta_performance_benchmarks ADD COLUMN IF NOT EXISTS highlight_only BOOLEAN NOT NULL DEFAULT false;
+-- Batch 21: "red only" benchmarks (flag only the ads that miss the target; everything else uncoloured). Additive; existing rows default to the normal bands.
+ALTER TABLE meta_performance_benchmarks ADD COLUMN IF NOT EXISTS highlight_bad_only BOOLEAN NOT NULL DEFAULT false;
 
 -- =====================================================================
 -- Batch 11: corrections audit. When a person re-saves an ad whose classification they had already confirmed (Previous / edit in the review

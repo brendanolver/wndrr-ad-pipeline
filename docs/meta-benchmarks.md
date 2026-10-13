@@ -18,5 +18,8 @@ This extends the existing benchmark system (table `meta_performance_benchmarks`,
 ## Green only (highlight a threshold)
 For a number you want to notice rather than a target you can miss (typically **Reach**, e.g. "highlight green at 20,000 or more"), choose **Colours: Green only** in the editor (the default for a new Reach benchmark). The value is green when it meets the target and has no colour otherwise: never orange or red. Available for every measure and for Frequency ranges; stored as `highlight_only`.
 
+## Red only (highlight the bad ones)
+Choose **Colours: Red only** to flag just the ads that miss a target: a value is red when it misses the target by more than the tolerance and has no colour otherwise (never green or orange). The tolerance field becomes "Red when it misses by more than"; use 0% to flag anything that misses the target. Stored as `highlight_bad_only` (mutually exclusive with green only).
+
 ## Data model (additive)
-`meta_performance_benchmarks`: the metric column is widened (VARCHAR 12 to 24) and its check lists the nine measures (existing rows untouched) and an optional `target_min` column holds a Frequency range's lower bound, and `highlight_only` (default false) marks a green-only benchmark. No data is deleted or rewritten.
+`meta_performance_benchmarks`: the metric column is widened (VARCHAR 12 to 24) and its check lists the nine measures (existing rows untouched) and an optional `target_min` column holds a Frequency range's lower bound, `highlight_only` (default false) marks a green-only benchmark, and `highlight_bad_only` (default false) a red-only one. No data is deleted or rewritten.

@@ -235,6 +235,10 @@ const targetSymbol = (rule) => {
   if (g.lte !== undefined) return `≤ ${g.lte}`; if (g.lt !== undefined) return `< ${g.lt}`;
   if (g.gte !== undefined) return `≥ ${g.gte}`; if (g.gt !== undefined) return `> ${g.gt}`;
   if (g.max !== undefined) return `≤ ${g.max}`; if (g.min !== undefined) return `≥ ${g.min}`;
+  // a "red only" benchmark has no green side: describe the point where it turns red
+  const rd = Array.isArray(rule.red) ? null : (rule.red || {});
+  if (rd) { if (rd.gt !== undefined) return `red > ${rd.gt}`; if (rd.lt !== undefined) return `red < ${rd.lt}`; }
+  else return 'red outside range';
   return '';
 };
 // The primary rule shown for a colour-coded metric: the one that applies to this range, else the first configured one.
