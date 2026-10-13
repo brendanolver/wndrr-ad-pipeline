@@ -16774,8 +16774,19 @@ async function ensureReferenceLibraryCategoriesLoaded() {
   }
 }
 
-function formatReferenceLibraryDate(iso) {
-  return new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
+const REF_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec'];
+function formatReferenceLibraryDate(iso, withYear) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return `${d.getDate()} ${REF_MONTHS[d.getMonth()]}${withYear ? ` ${d.getFullYear()}` : ''}`;
+}
+
+// A saved link is shown and opened as typed, but only ever as http(s): a link pasted without its scheme gets https://, anything else (javascript:, data:) opens nothing.
+function referenceHref(link) {
+  const t = String(link || '').trim();
+  if (/^https?:\/\//i.test(t)) return t;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(t)) return '#';
+  return /^[^\s/]+\.[^\s/]+/.test(t) ? `https://${t}` : '#';
 }
 
 // Best-effort platform detection from the saved URL -- purely client-side,
@@ -16808,11 +16819,13 @@ function referencePlaceholderHtml(platform) {
   return `<div class="ref-card-placeholder"><span class="ref-card-placeholder-icon">${platform.icon}</span><span class="ref-card-placeholder-label">${escapeHtml(platform.placeholder)}</span></div>`;
 }
 
+// The card's picture: the person's own cover, else the preview fetched from the link, else (YouTube only, while the server copy is still being fetched) YouTube's
+// own thumbnail, else the platform placeholder. A picture that fails to load falls back to the placeholder rather than a broken-image icon.
 function referenceVisualHtml(item, platform) {
-  const thumb = platform.label === 'YouTube' ? youtubeThumbnailUrl(item.link) : null;
+  const thumb = item.thumb_url || (platform.label === 'YouTube' ? youtubeThumbnailUrl(item.link) : null);
   if (!thumb) return referencePlaceholderHtml(platform);
   const safeLabel = escapeHtml(platform.placeholder).replace(/'/g, '&#39;');
-  return `<img class="ref-card-thumb" src="${escapeHtml(thumb)}" alt="" loading="lazy" onerror="handleReferenceThumbError(this, '${platform.icon}', '${safeLabel}')">`;
+  return `<img class="ref-card-thumb" src="${escapeHtml(thumb)}" alt="" loading="lazy" onerror="handleReferenceThumbError(this, '${platform.icon.replace(/'/g, '&#39;')}', '${safeLabel}')">`;
 }
 
 // A YouTube thumbnail URL can still 404 (private/deleted video) -- falls
@@ -16826,9 +16839,9 @@ function handleReferenceThumbError(imgEl, icon, label) {
 }
 
 function updateReferenceLibraryCounts() {
-  document.getElementById('ref-lib-count-all').textContent = state.referenceLibrary.length;
-  document.getElementById('ref-lib-count-bau').textContent = state.referenceLibrary.filter((r) => r.idea_type === 'bau').length;
-  document.getElementById('ref-lib-count-sale').textContent = state.referenceLibrary.filter((r) => r.idea_type === 'sale').length;
+  document.getElementById('ref-lib-count-all').textContent = `(${state.referenceLibrary.length})`;
+  document.getElementById('ref-lib-count-bau').textContent = `(${state.referenceLibrary.filter((r) => r.idea_type === 'bau').length})`;
+  document.getElementById('ref-lib-count-sale').textContent = `(${state.referenceLibrary.filter((r) => r.idea_type === 'sale').length})`;
 }
 
 function referenceLibraryCategoryOptionsHtml() {
@@ -16846,7 +16859,7 @@ function referenceLibraryFilteredList(filterValue, searchValue) {
   return state.referenceLibrary.filter((r) => {
     if (filterValue !== 'all' && r.idea_type !== filterValue) return false;
     if (!search) return true;
-    const haystack = [r.comment, r.category].filter(Boolean).join(' ').toLowerCase();
+    const haystack = [r.comment, r.category, r.added_by, detectReferencePlatform(r.link).label].filter(Boolean).join(' ').toLowerCase();
     return haystack.includes(search);
   });
 }
@@ -16878,10 +16891,9 @@ function referenceCardHtml(item, mode) {
   const isPicker = mode === 'picker';
   const platform = detectReferencePlatform(item.link);
   const typeLabel = item.idea_type === 'sale' ? 'SALE' : 'BAU';
-  const contextParts = [platform.label];
-  if (item.category) contextParts.push(item.category);
-  const added = `${escapeHtml(item.added_by)} · ${formatReferenceLibraryDate(item.created_at)}`;
-  const safeLink = escapeHtml(item.link).replace(/'/g, '&#39;');
+  const initial = escapeHtml(String(item.added_by || '?').trim().charAt(0).toUpperCase() || '?');
+  const added = `<span class="ref-avatar" aria-hidden="true">${initial}</span><span class="ref-card-added-text">${escapeHtml(item.added_by)} · ${formatReferenceLibraryDate(item.created_at)}</span>`;
+  const isVideo = platform.label === 'TikTok' || platform.label === 'YouTube' || /instagram\.com\/reels?\//i.test(item.link || '');
 
   const menuHtml = isPicker ? '' : `
       <div class="ref-card-menu" onclick="event.stopPropagation()">
@@ -16895,23 +16907,22 @@ function referenceCardHtml(item, mode) {
   const footerInner = isPicker
     ? `<button type="button" class="btn btn-primary btn-sm ref-card-pick-btn" onclick="event.stopPropagation();pickReferenceLibraryItem(${item.id})">Use This Reference</button>`
     : `<span class="ref-card-added">${added}</span>
-       <span class="ref-card-footer-actions">
-         <button type="button" class="ref-card-edit-btn" onclick="event.stopPropagation();openReferenceEditModal(${item.id})">Edit</button>
-         <span class="ref-card-open-hint">Open &#8599;</span>
-       </span>`;
+       <a class="ref-card-open-hint" href="${escapeHtml(referenceHref(item.link))}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">Open &#8599;</a>`;
 
-  const clickAttr = isPicker ? '' : ` onclick="window.open('${safeLink}', '_blank', 'noopener')"`;
+  const openAttr = isPicker ? '' : ` role="button" tabindex="0" data-ref-open="${item.id}" aria-label="Open reference details"`;
 
   return `
-    <div class="ref-card"${clickAttr}>
+    <div class="ref-card"${openAttr}>
       <div class="ref-card-visual">
         ${referenceVisualHtml(item, platform)}
+        <span class="ref-card-platform" title="${escapeHtml(platform.label)}">${platform.icon}</span>
+        ${isVideo ? '<span class="ref-card-play" aria-hidden="true">&#9654;</span>' : ''}
         ${menuHtml}
       </div>
       <div class="ref-card-body">
         <div class="ref-card-meta">
           <span class="ref-card-type ref-card-type-${item.idea_type}">${typeLabel}</span>
-          <span class="ref-card-context">${contextParts.map(escapeHtml).join(' · ')}</span>
+          <span class="ref-card-context">${escapeHtml(platform.label)}</span>
         </div>
         <div class="ref-card-comment">${escapeHtml(item.comment)}</div>
         <div class="ref-card-footer">${footerInner}</div>
@@ -16961,7 +16972,7 @@ function referenceLibraryGroupedHtml(sortedList) {
   }
   return groups.map((g) => `
     <div class="ref-lib-month-group">
-      <div class="ref-lib-month-heading">${escapeHtml(g.label)} <span class="ref-lib-month-count">${g.items.length} reference${g.items.length === 1 ? '' : 's'}</span></div>
+      <div class="ref-lib-month-heading"><span class="ref-lib-month-name">${escapeHtml(g.label)}</span><span class="ref-lib-month-count">· ${g.items.length} reference${g.items.length === 1 ? '' : 's'}</span></div>
       <div class="ref-lib-grid">${g.items.map(referenceLibraryCardHtml).join('')}</div>
     </div>`).join('');
 }
@@ -16981,6 +16992,7 @@ function renderReferenceLibraryList() {
     ? 'No references match your filters.'
     : 'No references yet — be the first to add one.';
   updateReferenceLibraryCounts();
+  refSchedulePreviewPoll();
 }
 
 function closeAllReferenceCardMenus() {
@@ -17056,8 +17068,83 @@ function setReferenceAddType(type) {
   document.getElementById('ref-add-type-sale').classList.toggle('active', type === 'sale');
 }
 
+// The cover image on the form: `cover` is a new image chosen this time (sent on save), `removeCover` drops the person's own cover, `item` is the reference being edited.
+const refForm = { cover: null, removeCover: false, item: null };
+
+function refCoverRender() {
+  const item = refForm.item;
+  const preview = document.getElementById('ref-add-cover-preview');
+  const img = document.getElementById('ref-add-cover-img');
+  const note = document.getElementById('ref-add-cover-note');
+  const hint = document.getElementById('ref-add-cover-hint');
+  const upload = document.getElementById('ref-add-cover-btn');
+  const remove = document.getElementById('ref-add-cover-remove');
+  const retry = document.getElementById('ref-add-cover-retry');
+  let src = null; let text = ''; let canRemove = false; let canRetry = false; let help = "Optional. We try to find a preview from the link automatically. If there isn't one, upload a screenshot or cover image.";
+  if (refForm.cover) { src = refForm.cover.data; text = 'New cover image (saved when you press Save)'; canRemove = true; }
+  else if (item && item.thumb_kind === 'cover' && !refForm.removeCover) { src = item.thumb_url; text = 'Your cover image'; canRemove = true; }
+  else if (item && item.thumb_kind === 'auto') { src = item.thumb_url; text = 'Automatic preview from the link'; help = 'Upload your own image to use instead of the automatic preview.'; }
+  else if (item && item.thumb_kind === 'cover' && refForm.removeCover) { help = 'Your cover will be removed when you save; the automatic preview (if there is one) is used instead.'; }
+  else if (item && item.preview_status === 'pending') { help = 'Looking for a preview from the link…'; }
+  else if (item && item.preview_status === 'none') { help = 'No automatic preview was found for this link (common for Instagram and TikTok). Upload a screenshot instead.'; canRetry = true; }
+  preview.hidden = !src; if (src) img.src = src;
+  note.textContent = text; hint.textContent = help;
+  upload.textContent = refForm.cover || (item && item.thumb_kind === 'cover' && !refForm.removeCover) ? 'Replace cover image' : 'Upload cover image';
+  remove.hidden = !canRemove; retry.hidden = !canRetry;
+}
+
+// Large screenshots are scaled down in the browser (longest side 1600px) before upload; anything that cannot be scaled is sent as it is.
+function refPrepareImage(file) {
+  return new Promise((resolve) => {
+    const fr = new FileReader();
+    fr.onerror = () => resolve(null);
+    fr.onload = () => {
+      const raw = fr.result;
+      const img = new Image();
+      img.onerror = () => resolve({ name: file.name, data: raw });
+      img.onload = () => {
+        const max = 1600; const scale = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+        if (scale === 1 && file.size < 1.5 * 1024 * 1024) return resolve({ name: file.name, data: raw });
+        try {
+          const c = document.createElement('canvas'); c.width = Math.round(img.naturalWidth * scale); c.height = Math.round(img.naturalHeight * scale);
+          const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
+          resolve({ name: String(file.name || 'cover').replace(/\.[A-Za-z0-9]+$/, '') + '.jpg', data: c.toDataURL('image/jpeg', 0.86) });
+        } catch (_) { resolve({ name: file.name, data: raw }); }
+      };
+      img.src = raw;
+    };
+    fr.readAsDataURL(file);
+  });
+}
+
+async function refSetCoverFile(file) {
+  if (!file) return;
+  if (!/^image\/(png|jpeg|gif|webp)$/.test(file.type)) return toast('The cover must be a PNG, JPG, GIF or WebP image', true);
+  if (file.size > 12 * 1024 * 1024) return toast('That image is too large (over 12 MB)', true);
+  const prepared = await refPrepareImage(file);
+  if (!prepared) return toast('That image could not be read', true);
+  refForm.cover = prepared; refForm.removeCover = false; refCoverRender();
+}
+
+function refCoverRemove() {
+  if (refForm.cover) refForm.cover = null; else refForm.removeCover = true;
+  document.getElementById('ref-add-cover-file').value = '';
+  refCoverRender();
+}
+
+async function refCoverRetry() {
+  if (!refForm.item) return;
+  try {
+    const row = await api(`/reference-library/${refForm.item.id}/refresh-preview`, { method: 'POST', body: '{}' });
+    state.referenceLibrary = state.referenceLibrary.map((r) => (r.id === row.id ? row : r)); refForm.item = row;
+    refCoverRender(); renderReferenceLibraryList(); toast('Trying again — the card updates when a preview is found');
+  } catch (e) { toast(e.message, true); }
+}
+
 async function openReferenceAddModal() {
   referenceAddEditId = null;
+  refForm.cover = null; refForm.removeCover = false; refForm.item = null;
+  document.getElementById('ref-add-cover-file').value = '';
   document.getElementById('reference-add-modal-title').textContent = 'Add Reference';
   document.getElementById('ref-add-link').value = '';
   document.getElementById('ref-add-comment').value = '';
@@ -17066,6 +17153,7 @@ async function openReferenceAddModal() {
   document.getElementById('ref-add-category').value = '';
   setReferenceAddType('bau');
   document.getElementById('ref-add-delete-btn').style.display = 'none';
+  refCoverRender();
   openModal('reference-add-modal');
 }
 
@@ -17073,6 +17161,8 @@ async function openReferenceEditModal(id) {
   const item = state.referenceLibrary.find((r) => r.id === id);
   if (!item) return;
   referenceAddEditId = id;
+  refForm.cover = null; refForm.removeCover = false; refForm.item = item;
+  document.getElementById('ref-add-cover-file').value = '';
   document.getElementById('reference-add-modal-title').textContent = 'Edit Reference';
   document.getElementById('ref-add-link').value = item.link;
   document.getElementById('ref-add-comment').value = item.comment;
@@ -17081,6 +17171,7 @@ async function openReferenceEditModal(id) {
   document.getElementById('ref-add-category').value = item.category || '';
   setReferenceAddType(item.idea_type);
   document.getElementById('ref-add-delete-btn').style.display = '';
+  refCoverRender();
   openModal('reference-add-modal');
 }
 
@@ -17092,13 +17183,16 @@ async function saveReferenceAdd() {
   if (!comment) return toast('Add a quick note on what you like about it', true);
 
   const payload = { link, comment, idea_type: referenceAddType, category: category || null };
+  if (refForm.cover) payload.cover = refForm.cover;
+  else if (refForm.removeCover) payload.remove_cover = true;
   try {
+    let saved;
     if (referenceAddEditId) {
-      const updated = await api(`/reference-library/${referenceAddEditId}`, { method: 'PUT', body: JSON.stringify(payload) });
-      state.referenceLibrary = state.referenceLibrary.map((r) => (r.id === updated.id ? updated : r));
+      saved = await api(`/reference-library/${referenceAddEditId}`, { method: 'PUT', body: JSON.stringify(payload) });
+      state.referenceLibrary = state.referenceLibrary.map((r) => (r.id === saved.id ? saved : r));
     } else {
-      const created = await api('/reference-library', { method: 'POST', body: JSON.stringify(payload) });
-      state.referenceLibrary = [created, ...state.referenceLibrary];
+      saved = await api('/reference-library', { method: 'POST', body: JSON.stringify(payload) });
+      state.referenceLibrary = [saved, ...state.referenceLibrary];
     }
     closeModal('reference-add-modal');
     renderReferenceLibraryList();
@@ -17113,6 +17207,7 @@ async function confirmDeleteReferenceLibraryItem(id) {
   try {
     await api(`/reference-library/${id}`, { method: 'DELETE' });
     state.referenceLibrary = state.referenceLibrary.filter((r) => r.id !== id);
+    if (state.referenceDetailId === id) closeReferenceDetail();
     renderReferenceLibraryList();
     toast('Reference deleted');
   } catch (e) {
@@ -17132,6 +17227,111 @@ async function deleteReferenceLibraryItem() {
   } catch (e) {
     toast(e.message, true);
   }
+}
+
+// ── Reference detail (an inspiration viewer in a right-hand drawer) ──
+function referenceDetailHtml(item) {
+  const platform = detectReferencePlatform(item.link);
+  const thumb = item.thumb_url || (platform.label === 'YouTube' ? youtubeThumbnailUrl(item.link) : null);
+  const safeLabel = escapeHtml(platform.placeholder).replace(/'/g, '&#39;');
+  const media = thumb
+    ? `<img class="rd-img" src="${escapeHtml(thumb)}" alt="" onerror="handleReferenceThumbError(this, '${platform.icon.replace(/'/g, '&#39;')}', '${safeLabel}')">`
+    : referencePlaceholderHtml(platform);
+  const href = escapeHtml(referenceHref(item.link));
+  const initial = escapeHtml(String(item.added_by || '?').trim().charAt(0).toUpperCase() || '?');
+  const typeLabel = item.idea_type === 'sale' ? 'SALE' : 'BAU';
+  return `
+    <div class="rd-media">${media}<span class="ref-card-platform" title="${escapeHtml(platform.label)}">${platform.icon}</span></div>
+    <div class="rd-scroll">
+      <div class="rd-meta">
+        <span class="ref-card-type ref-card-type-${item.idea_type}">${typeLabel}</span>
+        <span class="ref-card-context">${escapeHtml(platform.label)}</span>
+        <span class="rd-added"><span class="ref-avatar" aria-hidden="true">${initial}</span>Added by ${escapeHtml(item.added_by)} · ${formatReferenceLibraryDate(item.created_at, true)}</span>
+      </div>
+      <div class="rd-label">Why is this creative worth saving?</div>
+      <div class="rd-comment">${escapeHtml(item.comment)}</div>
+      <div class="rd-label">Reference URL</div>
+      <div class="rd-url"><span class="rd-url-text" title="${escapeHtml(item.link)}">${escapeHtml(item.link)}</span><a class="rd-open-sm" href="${href}" target="_blank" rel="noopener noreferrer">Open &#8599;</a></div>
+      ${item.category ? `<div class="rd-label">Product / Category</div><div class="rd-value">${escapeHtml(item.category)}</div>` : ''}
+    </div>
+    <div class="rd-footer">
+      <div class="ref-card-menu rd-menu">
+        <button type="button" class="rd-more" onclick="toggleReferenceCardMenu('detail', event)" aria-label="More actions">&bull;&bull;&bull;</button>
+        <div class="ref-card-menu-dropdown rd-menu-dropdown" id="ref-card-menu-detail">
+          <button type="button" class="ref-card-menu-item ref-card-menu-item-danger" onclick="closeAllReferenceCardMenus();confirmDeleteReferenceLibraryItem(${item.id})">Delete</button>
+        </div>
+      </div>
+      <div class="rd-footer-actions">
+        <button type="button" class="btn btn-ghost" onclick="referenceDetailEdit(${item.id})">Edit Reference</button>
+        <a class="btn btn-primary rd-open" href="${href}" target="_blank" rel="noopener noreferrer">Open Original Reference &#8599;</a>
+      </div>
+    </div>`;
+}
+
+function openReferenceDetail(id) {
+  const item = state.referenceLibrary.find((r) => r.id === id);
+  if (!item) return;
+  state.referenceDetailId = id;
+  document.getElementById('ref-detail-body').innerHTML = referenceDetailHtml(item);
+  const host = document.getElementById('ref-detail');
+  host.hidden = false;
+  requestAnimationFrame(() => host.classList.add('open'));
+  document.getElementById('ref-detail-close').focus();
+}
+
+function closeReferenceDetail() {
+  state.referenceDetailId = null;
+  const host = document.getElementById('ref-detail');
+  if (!host) return;
+  host.classList.remove('open');
+  host.hidden = true;
+}
+
+function referenceDetailEdit(id) { closeReferenceDetail(); openReferenceEditModal(id); }
+
+document.addEventListener('click', (e) => {
+  if (e.target.closest('#ref-detail-close') || e.target.id === 'ref-detail') { closeReferenceDetail(); return; }
+  const card = e.target.closest('.ref-card[data-ref-open]');
+  if (card && !e.target.closest('.ref-card-menu, a, button')) openReferenceDetail(Number(card.dataset.refOpen));
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && state.referenceDetailId && !document.querySelector('.modal-backdrop.show')) { closeReferenceDetail(); return; }
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.classList && e.target.classList.contains('ref-card') && e.target.dataset.refOpen) { e.preventDefault(); openReferenceDetail(Number(e.target.dataset.refOpen)); }
+});
+
+// ── cover image controls on the form ──
+document.getElementById('ref-add-cover-btn').addEventListener('click', () => document.getElementById('ref-add-cover-file').click());
+document.getElementById('ref-add-cover-file').addEventListener('change', (e) => { refSetCoverFile(e.target.files[0]); });
+document.getElementById('ref-add-cover-remove').addEventListener('click', refCoverRemove);
+document.getElementById('ref-add-cover-retry').addEventListener('click', refCoverRetry);
+// a screenshot pasted while the form is open becomes the cover
+document.addEventListener('paste', (e) => {
+  if (!document.getElementById('reference-add-modal').classList.contains('show')) return;
+  const f = Array.from((e.clipboardData && e.clipboardData.files) || []).find((x) => /^image\//.test(x.type));
+  if (!f) return;
+  e.preventDefault(); refSetCoverFile(f);
+});
+
+// ── automatic previews arrive in the background: while any card is still "pending", look again a few times (never blocks anything) ──
+let refPollTimer = null; let refPollRound = 0;
+const REF_POLL_DELAYS = [4000, 8000, 15000, 25000, 40000, 60000];
+function refSchedulePreviewPoll() {
+  if (refPollTimer || !state.referenceLibrary.some((r) => r.preview_status === 'pending')) { if (!state.referenceLibrary.some((r) => r.preview_status === 'pending')) refPollRound = 0; return; }
+  if (refPollRound >= REF_POLL_DELAYS.length) return;
+  refPollTimer = setTimeout(async () => {
+    refPollTimer = null;
+    if (!document.getElementById('tab-reference-library').classList.contains('active')) return;
+    // never redraw the grid under an open ••• menu or the detail viewer: look again shortly instead
+    if (document.querySelector('.ref-card-menu-dropdown.show') || state.referenceDetailId) { refSchedulePreviewPoll(); return; }
+    refPollRound += 1;
+    try {
+      const fresh = await api('/reference-library');
+      const sig = (list) => list.map((r) => `${r.id}:${r.preview_status}:${r.thumb_version}`).join('|');
+      const changed = sig(fresh) !== sig(state.referenceLibrary);
+      state.referenceLibrary = fresh;
+      if (changed) renderReferenceLibraryList(); else refSchedulePreviewPoll();
+    } catch (_) { refSchedulePreviewPoll(); }
+  }, REF_POLL_DELAYS[Math.min(refPollRound, REF_POLL_DELAYS.length - 1)]);
 }
 
 

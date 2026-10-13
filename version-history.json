@@ -2,6 +2,16 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.1.5",
+      "date": "2026-10-13",
+      "title": "Reference Library redesign",
+      "changes": [
+        "Visual-first Reference Library: large previews on every card, with a cleaner four-column grid, compact header, and month headings with a divider",
+        "Previews come from an uploaded cover image first, then an automatic preview fetched from the link (YouTube, TikTok, page image); a failed preview never blocks saving",
+        "Cards open a viewer with the larger preview, full comment and original link; Edit and Delete moved into the three-dot menu"
+      ]
+    },
+    {
       "version": "1.1.4",
       "date": "2026-10-13",
       "title": "Update Requests page",

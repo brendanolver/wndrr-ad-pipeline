@@ -1431,21 +1431,25 @@
          (index.html above), never a second copy of the data. -->
     <section id="tab-reference-library" class="tab-panel">
       <button type="button" class="link-btn ref-lib-back" onclick="switchTab('concept-dev')">&larr; Back</button>
-      <h1 class="tr-page-title"><svg class=ic aria-hidden=true focusable=false><use href=#i-book></use></svg> Reference Library</h1>
-      <div class="hint ref-lib-helper">A shared bank of creative inspiration saved by the team.</div>
-      <div class="ref-lib-toolbar">
+      <div class="rl-head">
+        <div class="rl-head-text">
+          <h1 class="tr-page-title"><svg class=ic aria-hidden=true focusable=false><use href=#i-book></use></svg> Reference Library</h1>
+          <div class="rl-sub">Creative inspiration saved by the team.</div>
+        </div>
+        <button type="button" class="btn btn-primary rl-add" onclick="openReferenceAddModal()">+ Add Reference</button>
+      </div>
+      <div class="rl-bar">
         <div class="filter-tabs ref-lib-tabs">
           <button type="button" class="filter-tab active" id="ref-lib-tab-all" onclick="setReferenceLibraryFilter('all')">All <span class="filter-tab-count" id="ref-lib-count-all">0</span></button>
           <button type="button" class="filter-tab" id="ref-lib-tab-bau" onclick="setReferenceLibraryFilter('bau')">BAU <span class="filter-tab-count" id="ref-lib-count-bau">0</span></button>
           <button type="button" class="filter-tab" id="ref-lib-tab-sale" onclick="setReferenceLibraryFilter('sale')">SALE <span class="filter-tab-count" id="ref-lib-count-sale">0</span></button>
         </div>
-        <div class="ref-lib-toolbar-actions">
-          <input type="search" id="ref-lib-search" class="ref-lib-search" placeholder="Search references…" oninput="renderReferenceLibraryList()">
-          <select id="ref-lib-sort" class="ref-lib-sort" onchange="setReferenceLibrarySort(this.value)">
+        <div class="rl-bar-tools">
+          <input type="search" id="ref-lib-search" class="ref-lib-search" placeholder="Search references…" aria-label="Search references" oninput="renderReferenceLibraryList()">
+          <select id="ref-lib-sort" class="ref-lib-sort" aria-label="Sort references" onchange="setReferenceLibrarySort(this.value)">
             <option value="newest">Newest</option>
             <option value="oldest">Oldest</option>
           </select>
-          <button type="button" class="btn btn-primary btn-sm" onclick="openReferenceAddModal()">+ Add Reference</button>
         </div>
       </div>
       <div id="ref-lib-list" class="ref-lib-list"></div>
@@ -3409,11 +3413,11 @@
       <button class="modal-close" onclick="closeModal('reference-add-modal')">&times;</button>
     </div>
     <div class="modal-body">
-      <label>Reference Link *
+      <label>Reference URL *
         <input type="url" id="ref-add-link" placeholder="Paste a link — ad, video, post…">
       </label>
-      <label>What do you like about it? *
-        <textarea id="ref-add-comment" rows="3" placeholder="A quick note on why this caught your eye"></textarea>
+      <label>Why is this creative worth saving? *
+        <textarea id="ref-add-comment" rows="3" placeholder="Strong first 2-second hook showing the product immediately. Could adapt this for our box fit tees."></textarea>
       </label>
       <label>Idea Type *
         <div class="ref-add-type-toggle">
@@ -3421,9 +3425,23 @@
           <button type="button" class="ref-type-btn" id="ref-add-type-sale" onclick="setReferenceAddType('sale')">Sale</button>
         </div>
       </label>
-      <label>Category <span class="hint">(optional)</span>
+      <label>Product / Category <span class="hint">(optional)</span>
         <select id="ref-add-category"><option value="">— none —</option></select>
       </label>
+      <div class="ref-cover" id="ref-add-cover">
+        <div class="ref-cover-title">Cover Image <span class="hint">(optional)</span></div>
+        <div class="ref-cover-preview" id="ref-add-cover-preview" hidden>
+          <img id="ref-add-cover-img" alt="">
+          <span class="ref-cover-note" id="ref-add-cover-note"></span>
+        </div>
+        <div class="ref-cover-actions">
+          <button type="button" class="btn btn-ghost btn-sm" id="ref-add-cover-btn">Upload cover image</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="ref-add-cover-remove" hidden>Remove</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="ref-add-cover-retry" hidden>Try automatic preview again</button>
+        </div>
+        <input type="file" id="ref-add-cover-file" accept="image/png,image/jpeg,image/gif,image/webp" hidden>
+        <div class="hint" id="ref-add-cover-hint"></div>
+      </div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-danger" id="ref-add-delete-btn" style="display:none;" onclick="deleteReferenceLibraryItem()">Delete</button>
@@ -3431,6 +3449,14 @@
       <button class="btn btn-primary" onclick="saveReferenceAdd()">Save Reference</button>
     </div>
   </div>
+</div>
+
+<!-- Reference detail: an inspiration viewer (larger preview, full comment, original URL, who / when) in a right-hand drawer over the page. Filled by openReferenceDetail(). -->
+<div id="ref-detail" class="ref-detail-backdrop" hidden>
+  <aside class="ref-detail" role="dialog" aria-modal="true" aria-label="Reference details">
+    <button type="button" class="ref-detail-close" id="ref-detail-close" aria-label="Close">&times;</button>
+    <div class="ref-detail-body" id="ref-detail-body"></div>
+  </aside>
 </div>
 
 <!-- Dashboard -> Brief Builder: the entry point for starting a normal

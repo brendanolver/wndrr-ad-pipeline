@@ -62,7 +62,9 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Update Requests carry screenshots / PDFs as base64, so it gets its own larger JSON limit (mounted before the default parser).
-app.use('/api/update-requests', cookieParser(), express.json({ limit: '40mb' }), requireAuth, updateRequestRoutes);
+// Reference Library covers arrive as base64 (5 MB images), so it also gets a larger JSON limit.
+app.use('/api/reference-library', cookieParser(), requireAuth, express.json({ limit: '12mb' }));
+app.use('/api/update-requests', cookieParser(), requireAuth, express.json({ limit: '40mb' }), updateRequestRoutes);
 app.use(express.json());
 app.use(cookieParser());
 

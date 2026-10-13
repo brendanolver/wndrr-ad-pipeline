@@ -1167,6 +1167,24 @@ CREATE TABLE IF NOT EXISTS reference_library (
 CREATE INDEX IF NOT EXISTS idx_reference_library_created_at ON reference_library(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_reference_library_idea_type ON reference_library(idea_type);
 
+-- Reference Library previews (additive; existing references are untouched and keep working with no preview). preview_status: NULL = never tried,
+-- pending / ok / none (no preview available -- normal for Instagram and TikTok) . A person's own cover image ('cover') always wins over the automatic
+-- one ('auto'); both live in their own table so the list query never carries image bytes. thumb_version changes whenever either image changes (cache busting).
+ALTER TABLE reference_library ADD COLUMN IF NOT EXISTS preview_status VARCHAR(10);
+ALTER TABLE reference_library ADD COLUMN IF NOT EXISTS preview_source VARCHAR(20);
+ALTER TABLE reference_library ADD COLUMN IF NOT EXISTS preview_checked_at TIMESTAMPTZ;
+ALTER TABLE reference_library ADD COLUMN IF NOT EXISTS thumb_version INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE IF NOT EXISTS reference_library_images (
+  reference_id INTEGER NOT NULL REFERENCES reference_library(id) ON DELETE CASCADE,
+  kind VARCHAR(5) NOT NULL CHECK (kind IN ('cover', 'auto')),
+  mime_type VARCHAR(40) NOT NULL,
+  file_name VARCHAR(160),
+  size_bytes INTEGER NOT NULL,
+  data BYTEA NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (reference_id, kind)
+);
+
 -- ---------------------------------------------------------------------------
 -- Users & Auth foundation: real per-user accounts, replacing the single
 -- shared APP_PASSWORD gate (see src/auth.js), plus role-based permissions --
