@@ -4371,3 +4371,25 @@ body{background:var(--bg);color:var(--text);}
 .mp-top3 .mp-fresh-line{flex-wrap:nowrap;white-space:nowrap;}
 #mp-fresh-note{flex-basis:auto;padding-left:15px;font-size:11px;line-height:1.2;white-space:normal;}
 #mp-fresh-note:empty{display:none;}
+
+/* ═══ Batch 23: date range popover clean-up ═══ */
+.mp-range-pop{grid-template-columns:188px minmax(0,1fr);width:min(760px,calc(100vw - 48px));}
+.mp-range-presets{padding:8px;gap:1px;max-height:none;overflow:visible;}
+.mp-range-presets .mp-preset{padding:7px 12px;font-size:13px;border-radius:8px;}
+.mp-preset-note{font-size:10.5px;}
+.mp-range-cal{padding:14px 18px 16px;display:flex;flex-direction:column;}
+.mp-cal-nav{display:grid;grid-template-columns:34px minmax(0,1fr) minmax(0,1fr) 34px;gap:8px;align-items:center;margin-bottom:6px;}
+.mp-cal-nav select{width:100%;min-width:0;height:34px;}
+.mp-cal-arrow{padding:0;display:flex;align-items:center;justify-content:center;}
+.mp-cal-months{gap:26px;}
+.mp-cal-title{margin:8px 0 4px;font-size:14px;}
+.mp-cal-day{height:32px;}
+.mp-cal-day.in{background:var(--accent-softer);}
+.mp-cal-summary{margin-top:10px;font-size:14px;}
+.mp-cal-note{margin-top:1px;}
+.mp-cal-fields{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;margin-top:10px;}
+.mp-cal-fields label{display:flex;flex-direction:column;gap:4px;font-size:11.5px;font-weight:600;color:var(--text-secondary);min-width:0;}
+.mp-cal-fields input{width:100%;min-width:0;box-sizing:border-box;height:34px;padding:0 10px;font-size:13px;}
+.mp-cal-actions{margin-top:14px;padding-top:12px;border-top:1px solid var(--border);}
+.mp-cal-actions .btn{height:36px;}
+@media (max-width:760px){.mp-range-pop{width:auto;}.mp-range-presets{overflow-x:auto;}}

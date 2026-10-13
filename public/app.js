@@ -1325,7 +1325,17 @@ function mpCalOpen() {
   const pop = document.getElementById('mp-range-pop'); pop.hidden = false;
   document.getElementById('mp-range-btn').setAttribute('aria-expanded', 'true');
   mpCalRender();
+  mpCalFit();
 }
+// Keep the popover inside the window: it opens under the date button, so on a narrower screen shift it left (never off the right edge or over the sidebar's edge).
+function mpCalFit() {
+  const pop = document.getElementById('mp-range-pop'); if (!pop || pop.hidden) return;
+  pop.style.left = ''; pop.style.right = '';
+  const r = pop.getBoundingClientRect(); const margin = 16;
+  const over = r.right - (window.innerWidth - margin);
+  if (over > 0) { const cs = parseFloat(getComputedStyle(pop).left) || 0; pop.style.left = `${Math.max(cs - over, -(r.left - margin))}px`; pop.style.right = 'auto'; }
+}
+window.addEventListener('resize', () => { if (mpCal.open) mpCalFit(); });
 function mpCalClose() {
   mpCal.open = false;
   document.getElementById('mp-range-pop').hidden = true;

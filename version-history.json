@@ -2,6 +2,14 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.1.2",
+      "date": "2026-10-13",
+      "title": "Date range popover clean-up",
+      "changes": [
+        "The date range calendar is tidier: compact preset list, evenly sized month and year selectors, matching From / to date fields that no longer spill out, and the popover now always stays inside the window."
+      ]
+    },
+    {
       "version": "1.1.1",
       "date": "2026-10-13",
       "title": "Meta Performance header, KPI row and filters redesign",
