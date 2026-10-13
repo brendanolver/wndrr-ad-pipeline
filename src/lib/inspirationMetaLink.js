@@ -12,6 +12,7 @@
 // explicit lookup action below (read-only Meta GET, 50 ads per call, rate-limit aware).
 const { pool } = require('../db');
 const metaAds = require('./metaAds');
+const guard = require('./metaRequestGuard');
 
 const norm = (u) => String(u || '').trim();
 function urlsOf(row) {
@@ -80,29 +81,45 @@ async function report(db = pool) {
 }
 
 // EXPLICIT admin action: read each candidate ad's preview_shareable_link from Meta (read-only), one read per ad (Meta removes the multi-id request on 27 Oct 2026), and store it.
-// Highest-spend ads first; `limit` caps one press (default 500 ads = 500 reads). Resumable: ads already looked up are skipped.
-async function lookupShareLinks({ limit = 500 } = {}, deps = {}) {
+// Highest-spend ads first; `limit` caps one press (default 200 ads = 200 reads, at most 2000). Resumable: ads already looked up are skipped. It is a LOWER-priority read: it does not
+// run while a Meta sync is running or Meta has asked us to wait, it shares the per-minute lookup budget with cover lookups, and an ad whose read failed or was refused is not asked
+// for again for a few minutes (in memory only; a failure is never stored as "this ad has no link").
+async function lookupShareLinks({ limit = 200 } = {}, deps = {}) {
   const db = deps.db || pool;
   const configured = deps.configured ? deps.configured() : metaAds.configured();
   if (!configured) { const e = new Error('Meta is not configured in this environment.'); e.status = 409; throw e; }
   const getByIds = deps.metaGetByIds || metaAds.metaGetByIds;
-  const cap = Math.min(2000, Math.max(1, parseInt(limit, 10) || 500));
-  const cands = (await db.query(
+  const cap = Math.min(2000, Math.max(1, parseInt(limit, 10) || 200));
+  const out = { asked: 0, stored: 0, without_link: 0, calls: 0, rate_limited: false, failed: 0, deferred: 0, paused: null };
+  const block = deps.guardBlock !== undefined ? deps.guardBlock : guard.lowPriorityBlock();
+  if (block) { out.paused = block.text; return out; }
+  const all = (await db.query(
     `SELECT a.meta_ad_id FROM meta_ads a
       WHERE NOT EXISTS (SELECT 1 FROM meta_ad_share_links s WHERE s.meta_ad_id = a.meta_ad_id)
         AND EXISTS (SELECT 1 FROM meta_ad_insights_daily d WHERE d.meta_ad_id = a.meta_ad_id AND d.spend > 0)
       ORDER BY (SELECT COALESCE(sum(d.spend), 0) FROM meta_ad_insights_daily d WHERE d.meta_ad_id = a.meta_ad_id) DESC, a.meta_ad_id
       LIMIT $1`, [cap])).rows.map((r) => r.meta_ad_id);
-  const out = { asked: 0, stored: 0, without_link: 0, calls: 0, rate_limited: false, failed: 0 };
+  const fresh = all.filter((id) => !guard.negativeGet('share', id));
+  const cands = fresh.slice(0, guard.takeBudget(fresh.length));
+  out.deferred = fresh.length - cands.length;
+  if (out.deferred) out.paused = 'lookups are limited to a fixed number a minute to protect the Meta API; press again shortly for the rest';
   for (let i = 0; i < cands.length; i += 50) {
     const batch = cands.slice(i, i + 50);
     let data;
-    try { out.calls += batch.length; data = await getByIds(batch, 'preview_shareable_link'); } catch (err) { if (err && err.rateLimited) { out.rate_limited = true; break; } continue; }
+    try { out.calls += batch.length; data = await getByIds(batch, 'preview_shareable_link'); } catch (err) {
+      if (err && err.rateLimited) { out.rate_limited = true; guard.noteRateLimit(err); break; }
+      if (err && [102, 190].includes(err.metaCode)) break; // authentication: nothing else would work
+      batch.forEach((id) => guard.negativeSet('share', id, 'error'));
+      out.failed += batch.length;
+      continue;
+    }
     const failures = (data && data[metaAds.metaGetByIds.FAILURES]) || {};
     for (const id of batch) {
-      // an ad whose read FAILED is unknown, not "without a link": it is left to be looked up again
-      if (failures[id] && failures[id].kind === 'error') { out.failed += 1; continue; }
+      // an ad whose read FAILED or was REFUSED (cause unknown) is unresolved, not "without a link": it is left to be looked up again later
+      if (failures[id] && failures[id].kind !== 'skipped') { guard.negativeSet('share', id, failures[id].kind); out.failed += 1; continue; }
+      if (failures[id]) { out.deferred += 1; continue; }
       out.asked += 1;
+      guard.negativeClear('share', id);
       const link = data && data[id] && data[id].preview_shareable_link;
       if (link) {
         await db.query('INSERT INTO meta_ad_share_links (meta_ad_id, share_link, fetched_at) VALUES ($1,$2, now()) ON CONFLICT (meta_ad_id) DO UPDATE SET share_link = EXCLUDED.share_link, fetched_at = now()', [id, link]);

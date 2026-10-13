@@ -325,30 +325,36 @@ async function metaGetAllPages(path, params, onPage, maxPages = 200) {
 // Request volume: this is now one call per id (it was one call per 50). Calls run with a small fixed concurrency, and stop at the first rate-limit or
 // authentication response (nothing else would work either). There is NO retry of any kind (unchanged).
 //
-// Outcome per id (see metaGetByIdsDetailed):
-//   ok          object returned
-//   not_found   deleted / does not exist / not visible to this token (permanent: never worth repeating every page view)
-//   error       anything else (network, 5xx, transient): the object's state is UNKNOWN, not absent
+// Outcome per id (see metaGetByIdsDetailed). Meta's "cannot be loaded" error (code 100, subcode 33) is documented to mean ANY of: the object does not exist, the token
+// lacks permission for it, it belongs to another account, or the operation is unsupported. It therefore proves nothing about deletion, and nothing here treats an
+// object as permanently gone on the strength of an error: an object is only ever "resolved" (returned) or "unresolved" (and an unresolved one is never counted as absent).
+//   ok            object returned
+//   inaccessible  Meta refused to load it (100/33, 404, permission codes): cause UNKNOWN (missing / permission / wrong account / invalid id). Unresolved. Retried, with limits
+//   error         anything else (network, 5xx, unparseable): unknown, probably transient. Unresolved. Retried, with limits
+//   (rate_limited / auth stop the whole call; see below)
 const IDS_CONCURRENCY = 4;
+const MAX_CONSECUTIVE_FAILURES = 10; // with not one success yet, a systemic problem (permissions, token scope): stop asking instead of sending the rest
 const FAILURES = Symbol('metaGetByIds.failures');
 const AUTH_CODES = new Set([102, 190]);
+// Meta's documented permission-style codes; for a single object these are ambiguous too (that object, or the whole token)
+const PERMISSION_CODES = new Set([3, 10, 200, 278, 299]);
 
 function classifyObjectFailure(result) {
   const error = (result.data && typeof result.data === 'object' && result.data.error) || {};
-  const code = numOrNull(error.code); const sub = numOrNull(error.error_subcode);
+  const code = numOrNull(error.code);
   if (isRateLimitResponse(result.status, error)) return 'rate_limited';
   if (result.status === 401 || AUTH_CODES.has(code)) return 'auth';
-  // 100/33 = "object does not exist, cannot be loaded due to missing permissions, or does not support this operation"; 803 = alias/ID does not exist
-  if (result.status === 404 || (code === 100 && sub === 33) || code === 803) return 'not_found';
+  if (result.status === 404 || code === 100 || code === 803 || PERMISSION_CODES.has(code) || (code !== null && code >= 200 && code < 300)) return 'inaccessible';
   return 'error';
 }
 
 async function metaGetByIdsDetailed(ids, fields, params = {}, { concurrency = IDS_CONCURRENCY, get = metaGet } = {}) {
   const list = [...new Set((ids || []).map((x) => String(x)).filter(Boolean))];
-  const out = { requested: list.length, calls: 0, data: {}, failures: {}, skipped: [], aborted: null };
-  let next = 0;
+  const out = { requested: list.length, calls: 0, data: {}, failures: {}, skipped: [], aborted: null, stopped_systemic: false };
+  let next = 0; let consecutiveFailures = 0;
+  const failed = () => { consecutiveFailures += 1; if (!Object.keys(out.data).length && consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) out.stopped_systemic = true; };
   const worker = async () => {
-    while (!out.aborted) {
+    while (!out.aborted && !out.stopped_systemic) {
       const i = next; next += 1;
       if (i >= list.length) return;
       const id = list[i];
@@ -358,17 +364,19 @@ async function metaGetByIdsDetailed(ids, fields, params = {}, { concurrency = ID
         result = await get(`/${encodeURIComponent(id)}`, { ...params, fields });
       } catch (err) {
         out.failures[id] = { kind: 'error', status: null, code: null, subcode: null, message: safeText(err && err.message) };
+        failed();
         continue;
       }
       if (result.status === 200 && result.data && typeof result.data === 'object' && !result.data.error) {
-        if (Object.keys(result.data).length) out.data[id] = result.data;
-        else out.failures[id] = { kind: 'not_found', status: 200, code: null, subcode: null, message: 'Meta returned no object for this id' };
+        if (Object.keys(result.data).length) { out.data[id] = result.data; consecutiveFailures = 0; }
+        else { out.failures[id] = { kind: 'inaccessible', status: 200, code: null, subcode: null, message: 'Meta returned no object for this id' }; failed(); }
         continue;
       }
       const kind = classifyObjectFailure(result);
       const e = buildMetaApiError(result, 'Meta object lookup');
-      if (kind === 'rate_limited' || kind === 'auth') { out.aborted = e; out.failures[id] = { kind, status: e.status, code: e.metaCode, subcode: e.metaSubcode, message: e.message }; return; }
+      if (kind === 'rate_limited' || kind === 'auth') { out.aborted = e; out.failures[id] = { kind, status: e.status, code: e.metaCode, subcode: e.metaSubcode, message: e.message }; if (kind === 'rate_limited') require('./metaRequestGuard').noteRateLimit(e); return; }
       out.failures[id] = { kind, status: e.status, code: e.metaCode, subcode: e.metaSubcode, message: e.message };
+      failed();
     }
   };
   await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, list.length || 1)) }, worker));
@@ -379,12 +387,13 @@ async function metaGetByIdsDetailed(ids, fields, params = {}, { concurrency = ID
 
 // Contract kept: resolves to the { id: object } map of what Meta returned, and throws a MetaApiError when the lookup could not be done.
 //   * rate limit / auth response  -> throws it (callers already stop on err.rateLimited); everything fetched before it is on err.partial
-//   * every id failed for a non-"not found" reason (the old whole-request failure) -> throws the first such error
-//   * otherwise -> the map of successes (partial success preserved). Per-id failures ride along under metaGetByIds.FAILURES so a caller can tell
-//     "deleted / inaccessible" from "could not be read": { [id]: { kind: 'not_found' | 'error', message, code, subcode } }
+//   * nothing could be read and a read FAILED (kind 'error': network / 5xx) -> throws the first such error (the old whole-request failure)
+//   * otherwise -> the map of successes (partial success preserved), possibly empty. Per-id failures ride along under metaGetByIds.FAILURES:
+//     { [id]: { kind: 'inaccessible' | 'error', message, code, subcode } }. Ids never asked for because the call stopped early are listed as kind 'skipped'.
 async function metaGetByIds(ids, fields, params = {}, deps = {}) {
   const r = await metaGetByIdsDetailed(ids, fields, params, deps);
   if (r.aborted) { r.aborted.partial = r.data; r.aborted.failures = r.failures; throw r.aborted; }
+  r.skipped.forEach((id) => { r.failures[id] = { kind: 'skipped', status: null, code: null, subcode: null, message: 'Not requested: the call stopped after repeated failures with no success' }; });
   const failed = Object.entries(r.failures);
   if (r.requested > 0 && !Object.keys(r.data).length) {
     const firstHard = failed.find(([, f]) => f.kind === 'error');

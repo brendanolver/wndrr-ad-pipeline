@@ -50,28 +50,23 @@ const AD_FIELDS = 'id,name,effective_status,campaign_id,adset_id,creative{id},cr
 const BACKFILL_CHUNK_DAYS = 30;
 // Graph API multi-id reads accept up to 50 ids per request.
 const AD_LOOKUP_BATCH = 50;
-// Used only when Meta gave no retry hint with a rate-limit response.
-const DEFAULT_RATE_LIMIT_COOLDOWN_SECONDS = 300;
 
-// In-process cooldown after a rate-limit response. While it is active every
-// Meta-touching action here fails fast WITHOUT calling Meta, so a second
-// click (or a future scheduler) can't pile more calls onto an account that
-// just told us to wait. Memory only: a restart clears it, which is fine --
-// the real limit lives on Meta's side and is re-detected on the next call.
-let rateLimitedUntil = 0;
-
-function noteRateLimit(err) {
-  if (err && err.rateLimited) {
-    const seconds = err.retryAfterSeconds || DEFAULT_RATE_LIMIT_COOLDOWN_SECONDS;
-    rateLimitedUntil = Math.max(rateLimitedUntil, Date.now() + seconds * 1000);
-  }
-}
+// In-process cooldown after a rate-limit response, SHARED with every other Meta caller (see metaRequestGuard.js): while it is active every Meta-touching action fails
+// fast WITHOUT calling Meta, so a second click (or the scheduler) can't pile more calls onto an account that just told us to wait. Memory only.
+const guard = require('./metaRequestGuard');
+const noteRateLimit = (err) => guard.noteRateLimit(err);
 
 function assertNotRateLimited() {
-  const remaining = Math.ceil((rateLimitedUntil - Date.now()) / 1000);
+  const remaining = guard.cooldownSecondsLeft();
   if (remaining > 0) {
     throw new MetaApiError(RATE_LIMIT_MESSAGE, { rateLimited: true, retryAfterSeconds: remaining });
   }
+}
+
+// The reporting sync and the other explicit sync jobs outrank every lower-priority read (thumbnails, share links) for as long as they run.
+async function withPriority(fn) {
+  guard.beginPriority();
+  try { return await fn(); } finally { guard.endPriority(); }
 }
 
 function fmtDate(d) {
@@ -299,32 +294,61 @@ async function ensureIdentitiesForPage(adIds, needLookup, counters) {
   }
 }
 
+// Identity lookup limits. Provisional operating limits (not performance benchmarks), overridable by environment variable:
+//   META_IDENTITY_MAX_PER_SYNC        most ads looked up in ONE sync (the rest stay unresolved, are reported, and are picked up by the next sync): a burst of new ads
+//                                     (or an old backlog) can never become an unbounded number of requests
+//   META_IDENTITY_MAX_AUTO_ATTEMPTS   after this many failed attempts an ad is no longer retried on every sync ...
+//   META_IDENTITY_RETRY_HOURS         ... but at most once per this many hours (it stays unresolved and visible meanwhile; it is NEVER written off as deleted)
+const envInt = (name, dflt) => { const n = parseInt(process.env[name], 10); return Number.isFinite(n) && n > 0 ? n : dflt; };
+const identityLimits = () => ({ maxPerSync: envInt('META_IDENTITY_MAX_PER_SYNC', 300), maxAutoAttempts: envInt('META_IDENTITY_MAX_AUTO_ATTEMPTS', 3), retryHours: envInt('META_IDENTITY_RETRY_HOURS', 24) });
+
 // Fetches metadata for ONLY the given ad ids (one read per ad: Meta removes the root `/?ids=` request on 27 Oct 2026, see metaAds.metaGetByIds) --
 // never a full-account listing. A rate limit / auth response aborts (thrown, after the ads already read are stored); any other failure leaves
-// those ads as id-only shells (their daily rows are already safely stored). Since Batch 27 a failure is no longer silent: every ad that could
-// not be resolved is recorded in meta_ad_identity_lookups and counted by cause, so the run can say it is PARTIAL:
-//   not_found  Meta says the ad does not exist / is not visible to this token: permanent, does not make the run partial
-//   failed     the read itself failed (network, 5xx, ...): the ad's identity is UNKNOWN, the run is partial, a later sync retries it (it is still a shell)
+// those ads as id-only shells (their daily rows are already safely stored). A failure is never silent: every ad that could not be resolved is recorded in
+// meta_ad_identity_lookups and counted, so the run can say it is PARTIAL:
+//   inaccessible  Meta refused to load it (error 100/33 and the like): the cause is UNKNOWN (deleted, no permission, another account, invalid id), so it is UNRESOLVED, not "gone"
+//   error         the read itself failed (network, 5xx, ...): unknown
+//   deferred      not asked this time (the per-sync cap, or its retry back-off): still unresolved
+// Nothing is ever treated as permanently absent. An ad that has really been deleted stops delivering, which takes it out of Planning's recent-delivery window by itself.
 async function lookupMissingAds(ids, deps = {}) {
   const db = deps.db || pool;
   const getByIds = deps.metaGetByIds || metaGetByIds;
   const upsert = deps.upsertAd || upsertAd;
-  const out = { requested: ids.length, resolved: 0, unresolved: 0, not_found: 0, failed: 0, calls: 0, failed_ids: [] };
+  const lim = { ...identityLimits(), ...(deps.limits || {}) };
+  const out = { requested: ids.length, resolved: 0, unresolved: 0, inaccessible: 0, failed: 0, deferred: 0, calls: 0, failed_ids: [] };
   const recordFailure = async (id, f) => {
     await db.query(
       `INSERT INTO meta_ad_identity_lookups (meta_ad_id, state, last_error_code, last_error_message)
        VALUES ($1,$2,$3,$4)
        ON CONFLICT (meta_ad_id) DO UPDATE SET state = EXCLUDED.state, attempts = meta_ad_identity_lookups.attempts + 1, last_attempt_at = now(),
               last_error_code = EXCLUDED.last_error_code, last_error_message = EXCLUDED.last_error_message`,
-      [id, f.kind === 'not_found' ? 'not_found' : 'error', f.code === undefined ? null : f.code, f.message ? String(f.message).slice(0, 300) : null]);
+      [id, f.kind === 'inaccessible' ? 'inaccessible' : 'error', f.code === undefined ? null : f.code, f.message ? String(f.message).slice(0, 300) : null]);
   };
   const resolveOne = async (id, row) => {
     await upsert(adFromMeta(row));
     await db.query('DELETE FROM meta_ad_identity_lookups WHERE meta_ad_id = $1', [id]);
     out.resolved += 1;
   };
-  for (let i = 0; i < ids.length; i += AD_LOOKUP_BATCH) {
-    const batch = ids.slice(i, i + AD_LOOKUP_BATCH);
+  const noteFailure = (id, f) => {
+    out.unresolved += 1;
+    if (f.kind === 'inaccessible') out.inaccessible += 1;
+    out.failed += 1;
+    if (out.failed_ids.length < 20) out.failed_ids.push(id);
+  };
+
+  // 1. back-off: ads that keep failing are not asked again on every sync
+  let todo = ids.slice();
+  if (todo.length) {
+    const held = new Set((await db.query(
+      `SELECT meta_ad_id FROM meta_ad_identity_lookups WHERE meta_ad_id = ANY($1::text[]) AND attempts >= $2 AND last_attempt_at > now() - ($3::int * interval '1 hour')`,
+      [todo, lim.maxAutoAttempts, lim.retryHours])).rows.map((r) => r.meta_ad_id));
+    if (held.size) { todo = todo.filter((id) => !held.has(id)); out.deferred += held.size; out.unresolved += held.size; }
+  }
+  // 2. cap per sync
+  if (todo.length > lim.maxPerSync) { const over = todo.length - lim.maxPerSync; todo = todo.slice(0, lim.maxPerSync); out.deferred += over; out.unresolved += over; }
+
+  for (let i = 0; i < todo.length; i += AD_LOOKUP_BATCH) {
+    const batch = todo.slice(i, i + AD_LOOKUP_BATCH);
     let map; let failures = {};
     try {
       out.calls += batch.length;
@@ -337,16 +361,16 @@ async function lookupMissingAds(ids, deps = {}) {
         throw err;
       }
       const f = { kind: 'error', code: err.metaCode === undefined ? null : err.metaCode, message: err.message };
-      for (const id of batch) { await recordFailure(id, f); out.failed += 1; out.unresolved += 1; if (out.failed_ids.length < 20) out.failed_ids.push(id); }
+      for (const id of batch) { await recordFailure(id, f); noteFailure(id, f); }
       continue;
     }
     for (const id of batch) {
       const row = map[id];
       if (row && row.id) { await resolveOne(id, row); continue; }
-      const f = failures[id] || { kind: 'not_found', message: 'Meta returned no object for this id' };
+      const f = failures[id] || { kind: 'inaccessible', message: 'Meta returned no object for this id' };
+      if (f.kind === 'skipped') { out.deferred += 1; out.unresolved += 1; continue; } // the call stopped early after repeated failures: not asked, not recorded as a failure of this ad
       await recordFailure(id, f);
-      out.unresolved += 1;
-      if (f.kind === 'not_found') out.not_found += 1; else { out.failed += 1; if (out.failed_ids.length < 20) out.failed_ids.push(id); }
+      noteFailure(id, f);
     }
   }
   return out;
@@ -426,13 +450,19 @@ async function startRunExclusive({ runType, since, until, userId }) {
   }
 }
 
-// 'partial' when ad identity lookups FAILED (their ads are missing name / campaign / creative until a later sync resolves them). Ads Meta says no longer exist
-// (not_found) are reported but do not make a run partial. status is left untouched (see the schema comment).
+// 'partial' when any ad identity is still UNRESOLVED after the lookups (failed, refused, or not asked this time): those ads have no name, campaign or creative yet and cannot
+// be matched to a product. status is left untouched (see the schema comment).
 function describeCompleteness(lookup) {
-  if (lookup.failed > 0) {
-    return { completeness: 'partial', note: `${lookup.failed} of ${lookup.requested} ad identity lookups failed, so those ads have no name, campaign or creative yet and cannot be matched to a product; the next sync retries them.${lookup.not_found ? ` ${lookup.not_found} more no longer exist on Meta.` : ''}` };
+  const open = (lookup.failed || 0) + (lookup.deferred || 0);
+  if (open > 0) {
+    const parts = [];
+    if (lookup.inaccessible) parts.push(`${lookup.inaccessible} refused by Meta (cause unknown: deleted, no permission or another account)`);
+    const other = (lookup.failed || 0) - (lookup.inaccessible || 0);
+    if (other > 0) parts.push(`${other} failed to read`);
+    if (lookup.deferred) parts.push(`${lookup.deferred} not asked this time (per-sync cap or retry back-off)`);
+    return { completeness: 'partial', note: `${open} of ${lookup.requested} ad identities are unresolved (${parts.join(', ')}), so those ads have no name, campaign or creative yet and cannot be matched to a product. None is treated as deleted; the next sync retries them within the retry limits.` };
   }
-  return { completeness: 'complete', note: lookup.not_found ? `${lookup.not_found} ads seen in Insights no longer exist on Meta (not retried).` : null };
+  return { completeness: 'complete', note: null };
 }
 
 // Job A: routine performance sync for [since, until], logged start-to-
@@ -443,7 +473,7 @@ function describeCompleteness(lookup) {
 // It does NOT list or upsert the account's ad inventory, so the
 // ~29.7k existing meta_ads rows are never touched here (names/statuses of
 // ads that have no new Insights only refresh via refreshInventory).
-async function runSync({ since, until, runType = 'default', userId = null }) {
+async function runSyncUnguarded({ since, until, runType = 'default', userId = null }) {
   if (!configured()) {
     throw new Error('Meta Ads is not configured (META_AD_ACCOUNT_ID / META_ACCESS_TOKEN missing)');
   }
@@ -471,16 +501,16 @@ async function runSync({ since, until, runType = 'default', userId = null }) {
          ads_discovered = $1, ads_inserted = $2, ads_updated = $3,
          daily_rows_inserted = $4, daily_rows_updated = $5,
          status = 'success', finished_at = now(),
-         completeness = $7, ads_unresolved = $8, lookup_failed = $9, lookup_not_found = $10, completeness_note = $11
+         completeness = $7, ads_unresolved = $8, lookup_failed = $9, lookup_inaccessible = $10, completeness_note = $11, lookup_deferred = $12
        WHERE id = $6`,
       [adsDiscovered, adsInserted, adsUpdated, insights.inserted, insights.updated, runId,
-        completeness.completeness, lookup.unresolved, lookup.failed, lookup.not_found, completeness.note]
+        completeness.completeness, lookup.unresolved, lookup.failed, lookup.inaccessible, completeness.note, lookup.deferred]
     );
     return {
       run_id: runId, range: { since, until },
       daily_rows_seen: insights.rowsSeen, daily_rows_inserted: insights.inserted, daily_rows_updated: insights.updated,
       new_ads_identified: insights.newIdentities,
-      ad_metadata_lookups: { requested: lookup.requested, resolved: lookup.resolved, unresolved: lookup.unresolved, not_found: lookup.not_found, failed: lookup.failed, calls: lookup.calls },
+      ad_metadata_lookups: { requested: lookup.requested, resolved: lookup.resolved, unresolved: lookup.unresolved, inaccessible: lookup.inaccessible, failed: lookup.failed, deferred: lookup.deferred, calls: lookup.calls },
       completeness: completeness.completeness, completeness_note: completeness.note,
       campaigns,
     };
@@ -510,7 +540,7 @@ async function failRun(runId, err) {
 // excluded from every "which days are synced" calculation because it pulls
 // no Insights (see metaPerformance.getCoverage). Progress is upserted as it
 // goes, so a rate limit midway leaves everything fetched so far stored.
-async function refreshInventory({ userId = null } = {}) {
+async function refreshInventoryUnguarded({ userId = null } = {}) {
   if (!configured()) {
     throw new Error('Meta Ads is not configured (META_AD_ACCOUNT_ID / META_ACCESS_TOKEN missing)');
   }
@@ -552,6 +582,10 @@ function defaultWindow(now = new Date()) {
   const until = ymdInZone(now, REPORTING_TIMEZONE);
   return { since: addDays(until, -2), until };
 }
+
+// Both are explicit sync jobs, so they hold priority over thumbnail / share-link reads while they run.
+const runSync = (args) => withPriority(() => runSyncUnguarded(args));
+const refreshInventory = (args) => withPriority(() => refreshInventoryUnguarded(args));
 
 async function runDefaultSync(userId) {
   const { since, until } = defaultWindow();
@@ -618,7 +652,7 @@ async function getSyncStatus() {
     last_successful_run: lastSuccessResult.rows[0] || null,
     last_inventory_refresh: lastInventoryResult.rows[0] || null,
     // Seconds left on the in-process rate-limit cooldown (0 = none).
-    rate_limit_cooldown_seconds: Math.max(0, Math.ceil((rateLimitedUntil - Date.now()) / 1000)),
+    rate_limit_cooldown_seconds: guard.cooldownSecondsLeft(),
     total_meta_ads: Object.values(matchCounts).reduce((a, b) => a + b, 0),
     match_counts: matchCounts,
     daily_insights: dailyRangeResult.rows[0] || null,
@@ -773,4 +807,5 @@ module.exports = {
   adInventoryDiagnostics,
   lookupMissingAds,
   describeCompleteness,
+  __withPriority: withPriority, // exported for tests
 };

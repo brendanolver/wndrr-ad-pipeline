@@ -13,6 +13,7 @@
 // cached covers are served as they are.
 const { pool } = require('../db');
 const metaAds = require('./metaAds');
+const guard = require('./metaRequestGuard');
 const autoSync = require('./metaAutoSync');
 const { safeUrl, expiresAtFor } = require('./metaAdCreative');
 
@@ -41,6 +42,20 @@ function summarise(c) {
   const thumb = safeUrl(c.thumbnail_url) || safeUrl((spec.video_data || {}).image_url) || safeUrl(((spec.link_data || {}).child_attachments || [])[0] && spec.link_data.child_attachments[0].picture) || null;
   return { kind, thumb_url: thumb, object_type: c.object_type || null };
 }
+
+// Lower-priority reads never starve the reporting sync and never outrun Meta (see metaRequestGuard.js): skipped creatives are reported "pending", exactly like a cover not loaded yet,
+// and the page asks again on its next render. A creative whose read failed a moment ago is not asked for again straight away (in-memory only, never stored as "unavailable").
+function lookupPlan(need, ns, stats, deps) {
+  const now = Date.now();
+  const block = deps.guardBlock !== undefined ? deps.guardBlock : guard.lowPriorityBlock(now);
+  if (block) { if (!stats.paused) stats.paused = block.text; return []; }
+  const fresh = need.filter((cid) => !guard.negativeGet(ns, cid, now));
+  const granted = guard.takeBudget(fresh.length, now);
+  if (granted < fresh.length && !stats.paused) stats.paused = 'cover lookups are limited to a fixed number a minute to protect the Meta API; the rest load on the next view';
+  return fresh.slice(0, granted);
+}
+// what to show for a creative with no stored cover: a refused read (cause unknown) shows the neutral placeholder for a few minutes; a failed read stays "pending"
+function tempState(ns, cid) { const e = cid ? guard.negativeGet(ns, cid) : null; return e ? (e.kind === 'inaccessible' ? 'unavailable' : 'pending') : null; }
 
 async function getThumbs(adIds, { now = Date.now() } = {}, deps = {}) {
   const db = deps.db || pool;
@@ -75,21 +90,26 @@ async function getThumbs(adIds, { now = Date.now() } = {}, deps = {}) {
   if (need.length && configured && (!enabled() || !autoOn)) stats.paused = !autoOn ? 'automatic Meta refresh is off (META_AUTO_SYNC)' : 'thumbnail lookups are off (META_THUMBNAILS)';
   if (need.length && configured && enabled() && autoOn) {
     const getByIds = deps.metaGetByIds || metaAds.metaGetByIds;
-    for (let i = 0; i < need.length; i += BATCH) {
-      const batch = need.slice(i, i + BATCH);
+    const ask = lookupPlan(need, 'thumb', stats, deps);
+    for (let i = 0; i < ask.length; i += BATCH) {
+      const batch = ask.slice(i, i + BATCH);
       let data;
       try {
         stats.meta_calls += batch.length; stats.creatives_asked += batch.length;
         data = await getByIds(batch, FIELDS, THUMB_PARAMS);
       } catch (err) {
-        if (err && err.rateLimited) { stats.rate_limited = true; break; }
-        data = null; // this batch failed: remember nothing, serve what we have
+        if (err && err.rateLimited) { stats.rate_limited = true; guard.noteRateLimit(err); break; }
+        if (err && [102, 190].includes(err.metaCode)) break; // authentication: nothing else would work either
+        batch.forEach((cid) => guard.negativeSet('thumb', cid, 'error')); // this batch failed: not stored anywhere, but not asked again for a minute
+        continue;
       }
       if (!data) continue;
       const failures = data[metaAds.metaGetByIds.FAILURES] || {};
       for (const cid of batch) {
-        // a creative whose read FAILED (not "does not exist") is unknown: remember nothing, so it is asked for again rather than cached as unavailable
-        if (failures[cid] && failures[cid].kind === 'error') continue;
+        // a creative whose read FAILED or was REFUSED is unknown, not "gone": never written as unavailable, remembered briefly in memory only
+        if (failures[cid] && failures[cid].kind !== 'skipped') { guard.negativeSet('thumb', cid, failures[cid].kind); continue; }
+        if (failures[cid]) continue;
+        guard.negativeClear('thumb', cid);
         const s = summarise(data[cid]);
         const ok = !!s.thumb_url;
         const exp = ok ? expiresAtFor([s.thumb_url], now) : null;
@@ -113,7 +133,7 @@ async function getThumbs(adIds, { now = Date.now() } = {}, deps = {}) {
     const c = cid ? cacheOf.get(cid) : null;
     if (c && c.state === 'ok' && c.thumb_url && c.expires_at && new Date(c.expires_at).getTime() > now) { out[id] = { state: 'ok', kind: c.kind, thumb_url: c.thumb_url }; stats.from_thumb_cache += 1; continue; }
     // no cover to show, but the format is still reported when Meta told us (the table shows it on the placeholder)
-    out[id] = { state: c && c.state === 'unavailable' ? 'unavailable' : 'pending', kind: (c && c.kind) || (pv && pv.payload && pv.payload.kind && pv.payload.kind !== 'unknown' ? pv.payload.kind : null), thumb_url: null };
+    out[id] = { state: c && c.state === 'unavailable' ? 'unavailable' : (tempState('thumb', cid) || 'pending'), kind: (c && c.kind) || (pv && pv.payload && pv.payload.kind && pv.payload.kind !== 'unknown' ? pv.payload.kind : null), thumb_url: null };
   }
   return { thumbs: out, stats };
 }
@@ -152,14 +172,22 @@ async function getLargeThumbs(adIds, { now = Date.now() } = {}, deps = {}) {
   if (need.length && configured && (!enabled() || !autoOn)) stats.paused = !autoOn ? 'automatic Meta refresh is off (META_AUTO_SYNC)' : 'thumbnail lookups are off (META_THUMBNAILS)';
   if (need.length && configured && enabled() && autoOn) {
     const getByIds = deps.metaGetByIds || metaAds.metaGetByIds;
-    for (let i = 0; i < need.length; i += BATCH) {
-      const batch = need.slice(i, i + BATCH);
+    const ask = lookupPlan(need, 'thumb_large', stats, deps);
+    for (let i = 0; i < ask.length; i += BATCH) {
+      const batch = ask.slice(i, i + BATCH);
       let data;
-      try { stats.meta_calls += batch.length; stats.creatives_asked += batch.length; data = await getByIds(batch, FIELDS, LARGE_PARAMS); } catch (err) { if (err && err.rateLimited) { stats.rate_limited = true; break; } data = null; }
+      try { stats.meta_calls += batch.length; stats.creatives_asked += batch.length; data = await getByIds(batch, FIELDS, LARGE_PARAMS); } catch (err) {
+        if (err && err.rateLimited) { stats.rate_limited = true; guard.noteRateLimit(err); break; }
+        if (err && [102, 190].includes(err.metaCode)) break;
+        batch.forEach((cid) => guard.negativeSet('thumb_large', cid, 'error'));
+        continue;
+      }
       if (!data) continue;
       const failures = data[metaAds.metaGetByIds.FAILURES] || {};
       for (const cid of batch) {
-        if (failures[cid] && failures[cid].kind === 'error') continue; // read failed: unknown, not "unavailable"
+        if (failures[cid] && failures[cid].kind !== 'skipped') { guard.negativeSet('thumb_large', cid, failures[cid].kind); continue; } // read failed or refused: unknown, never stored as "unavailable"
+        if (failures[cid]) continue;
+        guard.negativeClear('thumb_large', cid);
         const s = summarise(data[cid]);
         const exp = s.thumb_url ? expiresAtFor([s.thumb_url], now) : null;
         await db.query(
@@ -181,7 +209,7 @@ async function getLargeThumbs(adIds, { now = Date.now() } = {}, deps = {}) {
     if (pv) { out[id] = { state: 'ok', kind: pl.kind, thumb_url: pv, video_url: (pl.main && pl.main.video_url) || null }; stats.from_preview_cache += 1; continue; }
     const c = cid ? cacheOf.get(cid) : null;
     if (c && largeFresh(c)) { out[id] = { state: 'ok', kind: c.kind, thumb_url: c.large_url, video_url: null }; stats.from_thumb_cache += 1; continue; }
-    out[id] = { state: c && c.state === 'unavailable' ? 'unavailable' : 'pending', kind: (c && c.kind) || null, thumb_url: null, video_url: null };
+    out[id] = { state: c && c.state === 'unavailable' ? 'unavailable' : (tempState('thumb_large', cid) || 'pending'), kind: (c && c.kind) || null, thumb_url: null, video_url: null };
   }
   return { thumbs: out, stats };
 }
