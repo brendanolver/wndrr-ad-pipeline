@@ -3139,6 +3139,13 @@ BEGIN
   END IF;
 END $$;
 
+-- Batch 16: independent benchmarks per funnel for more measures. ADDITIVE and safe to repeat: the metric check is widened (every existing row stays valid) and an optional
+-- lowest acceptable value (target_min) lets Frequency carry an acceptable RANGE. No existing row is changed.
+ALTER TABLE meta_performance_benchmarks DROP CONSTRAINT IF EXISTS meta_performance_benchmarks_metric_check;
+ALTER TABLE meta_performance_benchmarks ADD CONSTRAINT meta_performance_benchmarks_metric_check
+  CHECK (metric IN ('cpa', 'frequency', 'reach', 'roas', 'outbound_ctr', 'cpm'));
+ALTER TABLE meta_performance_benchmarks ADD COLUMN IF NOT EXISTS target_min NUMERIC(14,4) CHECK (target_min IS NULL OR target_min >= 0);
+
 -- =====================================================================
 -- Batch 11: corrections audit. When a person re-saves an ad whose classification they had already confirmed (Previous / edit in the review
 -- modal, or the full editor) and the values CHANGE, the before/after snapshot is kept here. Additive and append-only; nothing reads it for

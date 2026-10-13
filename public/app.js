@@ -574,50 +574,67 @@ document.getElementById('mcls-add-name').addEventListener('keydown', (e) => { if
 // ── Settings -> Meta Performance: editable benchmarks ───────────────────
 // One target per funnel + metric (+ optional reporting window). The server derives the bands (20% rule), validates every field, audits each
 // change and answers with the whole grid again, so what is shown here is always what the dashboard uses.
-const MBENCH = { data: null, editing: null };
-const mbenchFmt = (metric, v) => (metric === 'cpa' ? `$${Number(v).toLocaleString('en-AU')}` : Number(v).toLocaleString('en-AU'));
+const MBENCH = { data: null, editing: null, funnel: 'TOF' };
+const MBENCH_LABEL = { cpa: 'CPA', roas: 'ROAS', outbound_ctr: 'Outbound CTR', cpm: 'CPM', reach: 'Reach', frequency: 'Frequency' };
+const mbenchFmt = (metric, v) => {
+  const n = Number(v).toLocaleString('en-AU', { maximumFractionDigits: 4 });
+  if (metric === 'cpa' || metric === 'cpm') return `$${n}`;
+  if (metric === 'roas' || metric === 'frequency') return `${n}×`;
+  if (metric === 'outbound_ctr') return `${n}%`;
+  return n;
+};
 const mbenchWindowText = (r) => {
   if (r.min_days == null && r.max_days == null) return 'any period';
   if (r.min_days != null && r.max_days != null) return r.min_days === r.max_days ? `${r.min_days}-day periods` : `${r.min_days}–${r.max_days}-day periods`;
   return r.min_days != null ? `${r.min_days}+ day periods` : `periods up to ${r.max_days} days`;
 };
 function mbenchTargetText(r) {
+  if (r.metric === 'frequency' && r.target_min != null) return `${mbenchFmt('frequency', r.target_min)} to ${mbenchFmt('frequency', r.target)}`;
   const lower = r.direction === 'lower';
   const sym = lower ? (r.inclusive ? '≤' : '<') : (r.inclusive ? '≥' : '>');
   return `${sym} ${mbenchFmt(r.metric, r.target)}`;
 }
 function mbenchMsg(text, kind) { const el = document.getElementById('mbench-msg'); if (el) { el.textContent = text || ''; el.className = `mbench-msg${kind ? ` ${kind}` : ''}`; } }
+// One funnel at a time (tabs): a row per measure showing that funnel's benchmark, or "Not set". Each ad on Meta Performance is judged only by ITS funnel's rows.
 function mbenchRender() {
   const d = MBENCH.data; const grid = document.getElementById('mbench-grid');
   if (!d || !grid) return;
   const LAB = Object.fromEntries(d.metrics.map((m) => [m.key, m.label]));
-  grid.innerHTML = `<table class="mbench-table"><thead><tr><th>Funnel</th>${d.metrics.map((m) => `<th>${escapeHtml(m.label)} <small>${m.direction === 'lower' ? 'lower is better' : 'higher is better'}</small></th>`).join('')}</tr></thead><tbody>
-    ${d.funnels.map((f) => `<tr><th>${f}</th>${d.metrics.map((m) => {
-      const rows = d.benchmarks.filter((b) => b.funnel === f && b.metric === m.key);
-      const items = rows.map((b) => `<div class="mbench-item${b.active ? '' : ' off'}">
-          <span class="mbench-target"><b>${escapeHtml(mbenchTargetText(b))}</b> <small>${escapeHtml(mbenchWindowText(b))}${b.active ? '' : ' · off'}</small></span>
-          <span class="mbench-bands" title="Orange up to ${b.tolerance_pct}% beyond the target; red beyond that"><i class="mp-health mp-health-green"></i><i class="mp-health mp-health-orange"></i><i class="mp-health mp-health-red"></i> ${b.tolerance_pct}%</span>
-          <span class="mbench-acts"><button type="button" class="link-btn" data-mb-edit="${b.id}">Edit</button><button type="button" class="link-btn" data-mb-toggle="${b.id}">${b.active ? 'Turn off' : 'Turn on'}</button><button type="button" class="link-btn danger" data-mb-del="${b.id}">Remove</button></span>
-        </div>`).join('');
-      return `<td>${items || '<span class="mbench-none">Not set — shows a neutral value</span>'}<button type="button" class="link-btn mbench-add" data-mb-add="${f}|${m.key}">+ Add</button></td>`;
-    }).join('')}</tr>`).join('')}</tbody></table>`;
+  const f = MBENCH.funnel;
+  const nSet = (fn) => d.benchmarks.filter((b) => b.funnel === fn && b.active).length;
+  const tabs = `<div class="mbench-tabs" role="tablist" aria-label="Funnel">${d.funnels.map((fn) => `<button type="button" role="tab" class="mbench-tab${fn === f ? ' active' : ''}" aria-selected="${fn === f}" data-mb-funnel="${fn}">${fn}<small>${nSet(fn)} set</small></button>`).join('')}</div>`;
+  const rowsHtml = d.metrics.map((m) => {
+    const rows = d.benchmarks.filter((b) => b.funnel === f && b.metric === m.key);
+    const dirText = m.key === 'frequency' ? 'lower is better, or a range' : (m.direction === 'lower' ? 'lower is better' : 'higher is better');
+    const items = rows.map((b) => `<div class="mbench-item${b.active ? '' : ' off'}">
+        <span class="mbench-target"><b>${escapeHtml(mbenchTargetText(b))}</b> <small>${escapeHtml(mbenchWindowText(b))}${b.active ? '' : ' · off'}</small></span>
+        <span class="mbench-bands" title="Orange up to ${b.tolerance_pct}% beyond the target; red beyond that"><i class="mp-health mp-health-green"></i><i class="mp-health mp-health-orange"></i><i class="mp-health mp-health-red"></i> ${b.tolerance_pct}%</span>
+        <span class="mbench-acts"><button type="button" class="link-btn" data-mb-edit="${b.id}">Edit</button><button type="button" class="link-btn" data-mb-toggle="${b.id}">${b.active ? 'Turn off' : 'Turn on'}</button><button type="button" class="link-btn danger" data-mb-del="${b.id}">Remove</button></span>
+      </div>`).join('');
+    return `<tr><th scope="row">${escapeHtml(m.label)}<small>${dirText}</small></th><td>${items || '<span class="mbench-none">Not set — shows a neutral value</span>'}<button type="button" class="link-btn mbench-add" data-mb-add="${f}|${m.key}">${rows.length ? '+ Add another window' : '+ Set benchmark'}</button></td></tr>`;
+  }).join('');
+  grid.innerHTML = `${tabs}<table class="mbench-table mbench-table-funnel" aria-label="${f} benchmarks"><thead><tr><th>${f} measure</th><th>Benchmark</th></tr></thead><tbody>${rowsHtml}</tbody></table>`;
   const hist = document.getElementById('mbench-history');
   if (hist) {
-    const nm = (v) => (v ? `${v.funnel} ${LAB[v.metric] || v.metric} ${v.target}${v.min_days != null || v.max_days != null ? ` (${v.min_days || '…'}–${v.max_days || '…'} d)` : ''}${v.active === false ? ' [off]' : ''}` : '');
-    hist.innerHTML = d.history.length ? `<ul>${d.history.map((h) => `<li><b>${escapeHtml(h.action)}</b> ${escapeHtml(nm(h.after) || nm(h.before))}${h.action === 'update' && h.before ? ` <small>(was ${escapeHtml(nm(h.before))})</small>` : ''} <small>· ${escapeHtml(h.user || 'system')} · ${escapeHtml(new Date(h.at).toLocaleString('en-AU'))}</small></li>`).join('')}</ul>` : '<small>No changes yet.</small>';
+    const nm = (v) => (v ? `${v.funnel} ${LAB[v.metric] || v.metric} ${v.target_min != null ? `${v.target_min}–` : ''}${v.target}${v.min_days != null || v.max_days != null ? ` (${v.min_days || '…'}–${v.max_days || '…'} d)` : ''}${v.active === false ? ' [off]' : ''}` : '');
+    hist.innerHTML = d.history.length ? `<ul>${d.history.map((h) => `<li><b>${escapeHtml(h.action)}</b> ${escapeHtml(nm(h.after) || nm(h.before))}${h.action === 'update' && h.before ? ` <small>(was ${escapeHtml(nm(h.before))})</small>` : ''} <small>· ${escapeHtml(h.user || 'system')} · ${escapeHtml(new Date(h.at).toLocaleString('en-AU', { timeZone: MP_TZ, day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }))}</small></li>`).join('')}</ul>` : '<div class="mbench-none">No changes yet.</div>';
   }
 }
 function mbenchResetForm() {
   MBENCH.editing = null;
   document.getElementById('mbench-form-title').textContent = 'Add a benchmark';
-  document.getElementById('mbench-target').value = ''; document.getElementById('mbench-window').value = 'any'; document.getElementById('mbench-window-fields').style.display = 'none';
+  document.getElementById('mbench-target').value = ''; document.getElementById('mbench-lo').value = ''; document.getElementById('mbench-window').value = 'any'; document.getElementById('mbench-window-fields').style.display = 'none';
   document.getElementById('mbench-min').value = ''; document.getElementById('mbench-max').value = ''; document.getElementById('mbench-inclusive').checked = true; document.getElementById('mbench-tol').value = '20';
   document.getElementById('mbench-funnel').disabled = false; document.getElementById('mbench-metric').disabled = false;
   document.getElementById('mbench-cancel').style.display = 'none'; mbenchInclusiveLabel();
 }
 function mbenchInclusiveLabel() {
-  const lower = document.getElementById('mbench-metric').value !== 'reach';
-  document.getElementById('mbench-inclusive-label').textContent = lower ? 'A value exactly on the target is green (≤ target)' : 'A value exactly on the target is green (≥ target)';
+  const m = document.getElementById('mbench-metric').value;
+  const lower = ['cpa', 'cpm', 'frequency'].includes(m);
+  const range = m === 'frequency' && document.getElementById('mbench-lo').value !== '';
+  document.getElementById('mbench-lo-wrap').style.display = m === 'frequency' ? '' : 'none';
+  document.getElementById('mbench-target-label').textContent = m === 'frequency' ? 'Highest acceptable' : 'Target';
+  document.getElementById('mbench-inclusive-label').textContent = range ? 'A value exactly at the highest acceptable is green' : lower ? 'A value exactly on the target is green (≤ target)' : 'A value exactly on the target is green (≥ target)';
 }
 async function loadMetaBenchmarksPanel() {
   try { MBENCH.data = await api('/meta-performance/benchmarks'); mbenchRender(); mbenchMsg(''); }
@@ -628,6 +645,7 @@ async function mbenchSend(method, path, body) {
   MBENCH.data = res; mbenchRender(); return res;
 }
 document.getElementById('mbench-metric').addEventListener('change', mbenchInclusiveLabel);
+document.getElementById('mbench-lo').addEventListener('input', mbenchInclusiveLabel);
 document.getElementById('mbench-window').addEventListener('change', (e) => { document.getElementById('mbench-window-fields').style.display = e.target.value === 'custom' ? '' : 'none'; });
 document.getElementById('mbench-cancel').addEventListener('click', () => { mbenchResetForm(); mbenchMsg(''); });
 document.getElementById('mbench-save').addEventListener('click', async () => {
@@ -636,17 +654,20 @@ document.getElementById('mbench-save').addEventListener('click', async () => {
     funnel: document.getElementById('mbench-funnel').value, metric: document.getElementById('mbench-metric').value, target: document.getElementById('mbench-target').value,
     min_days: win ? document.getElementById('mbench-min').value : null, max_days: win ? document.getElementById('mbench-max').value : null,
     inclusive: document.getElementById('mbench-inclusive').checked, tolerance_pct: document.getElementById('mbench-tol').value,
+    target_min: document.getElementById('mbench-metric').value === 'frequency' && document.getElementById('mbench-lo').value !== '' ? document.getElementById('mbench-lo').value : null,
   };
   if (win && !body.min_days && !body.max_days) { mbenchMsg('Enter at least one day count for the window, or choose “Any period”.', 'err'); return; }
   mbenchMsg('Saving…');
   try {
     if (MBENCH.editing) await mbenchSend('PUT', `/${MBENCH.editing}`, body); else await mbenchSend('POST', '', body);
+    MBENCH.funnel = body.funnel; mbenchRender();
     mbenchMsg(MBENCH.editing ? 'Saved.' : 'Benchmark added.', 'ok'); mbenchResetForm();
   } catch (e) { mbenchMsg(e.message, 'err'); }
 });
 document.getElementById('mbench-grid').addEventListener('click', async (e) => {
   const t = e.target.closest('button'); if (!t) return;
   const d = MBENCH.data; if (!d) return;
+  if (t.dataset.mbFunnel) { MBENCH.funnel = t.dataset.mbFunnel; mbenchRender(); return; }
   try {
     if (t.dataset.mbAdd) {
       const [f, m] = t.dataset.mbAdd.split('|'); mbenchResetForm();
@@ -654,7 +675,8 @@ document.getElementById('mbench-grid').addEventListener('click', async (e) => {
       document.getElementById('mbench-target').focus(); document.getElementById('mbench-form').scrollIntoView({ block: 'nearest' });
     } else if (t.dataset.mbEdit) {
       const b = d.benchmarks.find((x) => String(x.id) === t.dataset.mbEdit); if (!b) return;
-      MBENCH.editing = b.id; document.getElementById('mbench-form-title').textContent = `Edit ${b.funnel} ${b.metric === 'cpa' ? 'CPA' : b.metric === 'reach' ? 'Reach' : 'Frequency'} benchmark`;
+      MBENCH.editing = b.id; document.getElementById('mbench-form-title').textContent = `Edit ${b.funnel} ${MBENCH_LABEL[b.metric] || b.metric} benchmark`;
+      document.getElementById('mbench-lo').value = b.target_min != null ? b.target_min : '';
       document.getElementById('mbench-funnel').value = b.funnel; document.getElementById('mbench-metric').value = b.metric;
       document.getElementById('mbench-funnel').disabled = true; document.getElementById('mbench-metric').disabled = true;
       document.getElementById('mbench-target').value = b.target; document.getElementById('mbench-inclusive').checked = b.inclusive; document.getElementById('mbench-tol').value = b.tolerance_pct;
@@ -689,6 +711,14 @@ document.getElementById('mbench-grid').addEventListener('click', async (e) => {
 // See src/lib/metaPerformance.js.
 const MP_TZ = 'Australia/Sydney';
 const MP_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const MP_FUNNEL_KEYS = ['TOF', 'TOM', 'MOF'];
+function mpLoadFunnels() {
+  try {
+    const raw = JSON.parse(localStorage.getItem('wndrr.mp.funnels') || 'null');
+    if (Array.isArray(raw)) { const f = raw.filter((x) => MP_FUNNEL_KEYS.includes(x)); return MP_FUNNEL_KEYS.filter((x) => f.includes(x)); }
+  } catch (e) { /* storage may be unavailable: default to all three */ }
+  return [...MP_FUNNEL_KEYS];
+}
 const mpState = {
   preset: 'last_7',
   customSince: '',
@@ -708,7 +738,8 @@ const mpState = {
   adsReach: null, // ads response reach_info
   adsById: new Map(),
   reachTimer: null,
-  funnel: 'all', // all | TOF | TOM | MOF | multiple | unknown
+  funnel: 'all', // legacy single-funnel filter that also narrowed the summary; the page now uses `funnels` below for the table only, so this stays 'all'
+  funnels: mpLoadFunnels(), // the Ad Performance table's funnel checkboxes (subset of TOF / TOM / MOF); remembered in this browser
   campaign: '', // exact Meta campaign id or ''
   dpa: false, // include Dynamic Product Ads (default: excluded)
   fresh: null, // last /freshness answer
@@ -718,6 +749,8 @@ const mpState = {
   campaignsFor: '', // range key the campaign dropdown was loaded for
 };
 const mpFilterQuery = () => `${mpState.dpa ? '&dpa=include' : ''}${mpState.funnel && mpState.funnel !== 'all' ? `&funnel=${encodeURIComponent(mpState.funnel)}` : ''}${mpState.campaign ? `&campaign_id=${encodeURIComponent(mpState.campaign)}` : ''}`;
+// the table's funnel checkboxes: nothing is sent when all three are ticked (= the complete table, including ads with no TOF / TOM / MOF in the campaign name)
+const mpFunnelsQuery = () => (mpState.funnels.length === MP_FUNNEL_KEYS.length ? '' : `&funnels=${mpState.funnels.length ? mpState.funnels.join(',') : 'none'}`);
 const mpFiltered = () => (mpState.funnel && mpState.funnel !== 'all') || !!mpState.campaign;
 const MP_FUNNEL_LABEL = { TOF: 'TOF', TOM: 'TOM', MOF: 'MOF', multiple: 'Mixed', unknown: 'Unknown' };
 function mpFunnelBadge(f) {
@@ -921,9 +954,14 @@ function mpRenderBenchStrip(res) {
   const h = res.health;
   if (!h || !h.matrix) { hn.style.display = 'none'; return; }
   const per = h.period || {};
-  const LAB = { cpa: 'CPA', frequency: 'Frequency', reach: 'Reach' };
-  const money = (m, t) => (m === 'cpa' ? String(t).replace(/(\d+(?:\.\d+)?)/, '$$$1') : String(t).replace(/(\d{4,})/, (x) => Number(x).toLocaleString('en-AU')));
-  const groups = ['cpa', 'frequency', 'reach'].map((m) => {
+  const LAB = { cpa: 'CPA', roas: 'ROAS', outbound_ctr: 'Outbound CTR', cpm: 'CPM', reach: 'Reach', frequency: 'Frequency' };
+  const MET = Object.keys(LAB);
+  const isMoney = (m) => m === 'cpa' || m === 'cpm';
+  const money = (m, t) => (isMoney(m) ? String(t).replace(/(\d+(?:\.\d+)?)/g, '$$$1') : String(t).replace(/(\d{4,})/, (x) => Number(x).toLocaleString('en-AU')) + (m === 'roas' ? '×' : m === 'outbound_ctr' ? '%' : ''));
+  // measures nobody has set a benchmark for (in any funnel) are summarised on one line instead of three empty groups
+  const anySet = (m) => ['TOF', 'TOM', 'MOF'].some((f) => h.matrix[f][m].state !== 'no_benchmark');
+  const unsetMetrics = MET.filter((m) => !anySet(m));
+  const groups = MET.filter(anySet).map((m) => {
     const on = []; const win = []; const none = [];
     ['TOF', 'TOM', 'MOF'].forEach((f) => {
       const c = h.matrix[f][m];
@@ -933,16 +971,16 @@ function mpRenderBenchStrip(res) {
     });
     const waitNote = win.length ? `<span class="mp-bench-note">not judged for ${per.days ? `this ${per.days}-day period` : 'this period'}</span>` : '';
     return `<div class="mp-bench-group"><b>${LAB[m]}</b> ${on.join('')}${win.join('')}${waitNote}${none.length ? `<span class="mp-bench-none" title="No benchmark has been set for these, so their ${LAB[m]} shows without colour">no benchmark: ${none.join(', ')}</span>` : ''}</div>`;
-  }).join('');
+  }).join('') + (unsetMetrics.length ? `<div class="mp-bench-group"><b>No benchmark set yet</b><span class="mp-bench-none" title="Set one per funnel in Settings → Meta Performance. Until then these show without colour.">${unsetMetrics.map((m) => LAB[m]).join(', ')}</span></div>` : '');
   const needsReach = ['frequency', 'reach'].some((m) => ['TOF', 'TOM', 'MOF'].some((f) => h.matrix[f][m].state === 'active'));
   const reachMissing = needsReach && res.reach_info && !res.reach_info.source;
   const fc = h.funnel_counts || {};
   const unjudged = (fc.unknown || 0) + (fc.multiple || 0);
   const lines = [];
-  ['TOF', 'TOM', 'MOF'].forEach((f) => ['cpa', 'frequency', 'reach'].forEach((m) => {
+  ['TOF', 'TOM', 'MOF'].forEach((f) => MET.forEach((m) => {
     const bands = h.bands && h.bands[f] && h.bands[f][m];
     if (!bands) return;
-    const fmtBand = (metric, text) => (metric === 'cpa' ? text.replace(/(\d+(?:\.\d+)?)/g, '$$$1') : text);
+    const fmtBand = (metric, text) => (isMoney(metric) ? text.replace(/(\d+(?:\.\d+)?)/g, '$$$1') : metric === 'roas' ? text.replace(/(\d+(?:\.\d+)?)/g, '$1×') : metric === 'outbound_ctr' ? text.replace(/(\d+(?:\.\d+)?)/g, '$1%') : text);
     lines.push(`<li><b>${f} ${LAB[m]}</b> ${bands.map((b) => `<span class="mp-health mp-health-${escapeHtml(b.state)}"></span>${escapeHtml(fmtBand(m, b.text))}`).join(' · ')} <small>(${escapeHtml(((h.matrix[f][m].windows || []).map((w) => w.text).join('; ')) || 'any period')})</small></li>`);
   }));
   hn.style.display = '';
@@ -969,8 +1007,10 @@ function mpRenderAds(res) {
   mpRenderReachBar();
   mpRenderBenchStrip(res);
   if (!res.ads.length) {
+    const noFunnel = Array.isArray(res.funnels) && res.funnels.length === 0;
     body.innerHTML = `<tr><td colspan="15" class="mp-table-empty">${
-      res.q || res.status !== 'all' || mpFiltered() ? 'No ads match this search or filter.' : 'No ads had spend or impressions in this period.'}</td></tr>`;
+      noFunnel ? '<b>No funnels selected.</b> Tick TOF, TOM or MOF (or choose Select all) to see ads.'
+        : res.q || res.status !== 'all' || mpFiltered() || res.funnels ? `No ads match this search or filter${res.funnels ? ` (funnels: ${res.funnels.join(', ')})` : ''}.` : 'No ads had spend or impressions in this period.'}</td></tr>`;
   } else {
     const healthOn = !!(res.health && res.health.active);
     // The whole metric cell takes a soft background (green / orange / red) -- never colour alone: the band is spoken to screen readers (CSS ::after from data-band) and shown in the tooltip.
@@ -987,14 +1027,14 @@ function mpRenderAds(res) {
       if (!healthOn) return '';
       const hh = res.health;
       const fn = a.funnel;
-      const label = { cpa: 'CPA', frequency: 'Frequency', reach: 'Reach' }[metric];
+      const label = { cpa: 'CPA', roas: 'ROAS', outbound_ctr: 'Outbound CTR', cpm: 'CPM', frequency: 'Frequency', reach: 'Reach' }[metric];
       if (h) return h === 'green' ? `${fn} ${label}: meeting the benchmark` : h === 'orange' ? `${fn} ${label}: missing the benchmark by up to ${hh.tolerance_pct || 20}%` : `${fn} ${label}: missing the benchmark by more than ${hh.tolerance_pct || 20}%`;
       if (fn !== 'TOF' && fn !== 'TOM' && fn !== 'MOF') return 'Funnel is unknown or mixed (the campaign name has no single TOF / TOM / MOF), so this ad is never coloured';
       const cell = hh.matrix && hh.matrix[fn] && hh.matrix[fn][metric];
       if (cell && cell.state !== 'active') return cell.reason;
-      const v = metric === 'cpa' ? a.cpa : metric === 'reach' ? a.reach : a.frequency;
+      const v = a[metric];
       if (metric === 'cpa' && (v === null || v === undefined)) return 'No purchases in this period, so no CPA to judge';
-      if (v === null || v === undefined) return `${label} for this period has not been loaded${metric !== 'cpa' ? ' (Refresh loads exact Reach & Frequency)' : ''}`;
+      if (v === null || v === undefined) return `${label} for this period is not available${metric === 'reach' || metric === 'frequency' ? ' (Refresh loads exact Reach & Frequency)' : ''}`;
       return `Not within any benchmark band (${cell ? cell.rule : ''})`;
     };
     // Per-cell previous-period change (only when Compare is on AND both periods are fully synced; real stored data, never invented). The colour says whether the move is
@@ -1029,11 +1069,11 @@ function mpRenderAds(res) {
         ${cell('mp-c-fin', '', mpFmt(a.purchases, 'int'), 'purchases', 'up', a, bar(a.purchases, sc.purchases_max))}
         ${cell('mp-c-fin', why(a, 'cpa', a.cpa_health), metric(a.cpa_health, mpFmt(a.cpa, 'money')), 'cpa', 'down', a)}
         ${cell('mp-c-fin', 'Meta purchase conversion value (omni_purchase) for this period', mpFmt(a.purchase_value, 'money'), 'purchase_value', 'up', a)}
-        ${cell('mp-c-fin', 'Meta purchase ROAS = purchase value ÷ amount spent (null when nothing was spent). No ROAS benchmark is approved, so it is never rated.', mpFmt(a.roas, 'roas'), 'roas', 'up', a)}
+        ${cell('mp-c-fin', why(a, 'roas', a.roas_health) || 'Meta purchase ROAS = purchase value ÷ amount spent. It is only coloured where a benchmark has been set for this ad\'s funnel.', metric(a.roas_health, mpFmt(a.roas, 'roas')), 'roas', 'up', a)}
         ${cell('mp-c-tr', '', mpFmt(a.add_to_cart, 'int'), 'add_to_cart', 'up', a)}
         ${cell('mp-c-tr', '', mpFmt(a.cost_per_atc, 'money'), 'cost_per_atc', 'down', a)}
-        ${cell('mp-c-tr', '', mpFmt(a.outbound_ctr, 'pct'), 'outbound_ctr', 'up', a)}
-        ${cell('mp-c-tr mp-cpm', 'CPM = Amount Spent ÷ Impressions × 1,000 (no benchmark approved, so it is never rated)', a.impressions > 0 ? mpFmt(a.cpm, 'money') : '<span class="mp-na" title="No impressions in this period">—</span>', 'cpm', null, a)}
+        ${cell('mp-c-tr', why(a, 'outbound_ctr', a.outbound_ctr_health), metric(a.outbound_ctr_health, mpFmt(a.outbound_ctr, 'pct')), 'outbound_ctr', 'up', a)}
+        ${cell('mp-c-tr mp-cpm', why(a, 'cpm', a.cpm_health) || 'CPM = Amount Spent ÷ Impressions × 1,000. It is only coloured where a benchmark has been set for this ad\'s funnel.', a.impressions > 0 ? metric(a.cpm_health, mpFmt(a.cpm, 'money')) : '<span class="mp-na" title="No impressions in this period">—</span>', 'cpm', null, a)}
         ${cell(`mp-c-tr${a.funnel === 'TOF' ? ' mp-reach-key' : ''}`, why(a, 'reach', a.reach_health) || (a.funnel === 'TOF' ? 'Reach is the key measure for TOF' : ''), metric(a.reach_health, mpReachCell(a.reach, 'int')), null, null, a)}
         ${cell('mp-c-tr', why(a, 'frequency', a.frequency_health), metric(a.frequency_health, mpReachCell(a.frequency, 'freq')), null, null, a)}
       </tr>`).join('');
@@ -1060,7 +1100,7 @@ function mpRenderPager(res) {
 async function loadMetaPerformanceAds() {
   const id = ++mpState.adsReqId;
   const qs = `${mpRangeQuery()}&q=${encodeURIComponent(mpState.q)}&status=${mpState.status}` +
-    `&sort=${mpState.sort}&dir=${mpState.dir}&page=${mpState.page}&page_size=${mpState.pageSize}${mpState.compare ? '&compare=1' : ''}${mpFilterQuery()}`;
+    `&sort=${mpState.sort}&dir=${mpState.dir}&page=${mpState.page}&page_size=${mpState.pageSize}${mpState.compare ? '&compare=1' : ''}${mpFilterQuery()}${mpFunnelsQuery()}`;
   try {
     const res = await api(`/meta-performance/ads?${qs}`);
     if (id !== mpState.adsReqId) return; // a newer request superseded this one
@@ -1434,7 +1474,7 @@ document.addEventListener('click', (e) => {
   const cfb = e.target.closest('#mm-modal-body [data-conflict-creative]');
   if (cfb && cfb.dataset.conflictCreative) { closeModal('meta-match-modal'); openConflictModal(cfb.dataset.conflictCreative); return; }
   if (e.target.id === 'mp-refresh-now') mpRefreshNow();
-  if (e.target.id === 'mp-filter-clear') { mpState.funnel = 'all'; mpState.campaign = ''; mpState.page = 1; document.getElementById('mp-funnel').value = 'all'; document.getElementById('mp-campaign').value = ''; loadMetaPerformance(); }
+  if (e.target.id === 'mp-filter-clear') { mpState.funnel = 'all'; mpState.campaign = ''; mpState.page = 1; document.getElementById('mp-campaign').value = ''; loadMetaPerformance(); }
 });
 
 // Campaign / funnel filter. Funnel comes only from literal TOF / TOM / MOF tokens in the campaign name; anything else is
@@ -1445,11 +1485,7 @@ async function mpLoadCampaignFilter() {
   try {
     const r = await api(`/meta-performance/campaigns?${mpRangeQuery()}`);
     mpState.campaignsFor = key;
-    const fsel = document.getElementById('mp-funnel');
     const csel = document.getElementById('mp-campaign');
-    const fCount = (k) => (r.funnels[k] ? ` (${r.funnels[k].campaigns})` : '');
-    fsel.innerHTML = `<option value="all">All funnels</option>${['TOF', 'TOM', 'MOF', 'multiple', 'unknown'].map((k) => `<option value="${k}">${MP_FUNNEL_LABEL[k]}${fCount(k)}</option>`).join('')}`;
-    fsel.value = mpState.funnel;
     csel.innerHTML = `<option value="">All campaigns</option>${r.campaigns.map((c) => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name || `Campaign ${c.id}`)} · ${escapeHtml(MP_FUNNEL_LABEL[c.funnel] || c.funnel)}</option>`).join('')}`;
     csel.value = mpState.campaign;
     const hint = document.getElementById('mp-campaign-hint');
@@ -1460,7 +1496,22 @@ async function mpLoadCampaignFilter() {
   } catch (e) { /* the filter is optional */ }
 }
 document.getElementById('mp-dpa').addEventListener('change', (e) => { mpState.dpa = e.target.checked; mpState.page = 1; loadMetaPerformance(); });
-document.getElementById('mp-funnel').addEventListener('change', (e) => { mpState.funnel = e.target.value; mpState.page = 1; loadMetaPerformance(); });
+// ── Funnel checkboxes: filter the Ad Performance TABLE only (the summary cards keep their page-level scope) ──
+function mpSyncFunnelUi() {
+  const sel = mpState.funnels;
+  document.querySelectorAll('#mp-funnel-group input[type=checkbox]').forEach((c) => { c.checked = sel.includes(c.value); });
+  const n = document.getElementById('mp-funnel-count'); if (n) n.textContent = `${sel.length} of ${MP_FUNNEL_KEYS.length} selected`;
+  const all = document.getElementById('mp-funnel-all'); if (all) all.disabled = sel.length === MP_FUNNEL_KEYS.length;
+  const g = document.getElementById('mp-funnel-group'); if (g) g.classList.toggle('mp-fgroup-narrowed', sel.length !== MP_FUNNEL_KEYS.length);
+}
+function mpSetFunnels(list) {
+  mpState.funnels = MP_FUNNEL_KEYS.filter((f) => list.includes(f));
+  try { localStorage.setItem('wndrr.mp.funnels', JSON.stringify(mpState.funnels)); } catch (e) { /* remembering is a convenience */ }
+  mpState.page = 1; mpSyncFunnelUi(); loadMetaPerformanceAds();
+}
+document.querySelectorAll('#mp-funnel-group input[type=checkbox]').forEach((c) => c.addEventListener('change', () => mpSetFunnels([...document.querySelectorAll('#mp-funnel-group input:checked')].map((x) => x.value))));
+document.getElementById('mp-funnel-all').addEventListener('click', () => mpSetFunnels(MP_FUNNEL_KEYS));
+mpSyncFunnelUi();
 document.getElementById('mp-campaign').addEventListener('change', (e) => { mpState.campaign = e.target.value; mpState.page = 1; loadMetaPerformance(); });
 
 // ── Ad preview (creative behind a Meta ad) ─────────────────────────────

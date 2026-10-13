@@ -62,6 +62,19 @@ function percentRule({ direction, target, inclusive = true, pct = TOLERANCE_PCT,
   return { period, green: inclusive ? { gte: target } : { gt: target }, orange: { ...(inclusive ? { lt: target } : { lte: target }), gte: limit }, red: { lt: limit } };
 }
 
+// An acceptable RANGE (used for Frequency, where both too much and, if the person wants it, too little repetition matter): green between min and max,
+// orange within pct % beyond either end, red further out. min <= max; the max end is inclusive unless `inclusive` is false.
+function rangeRule({ min, max, inclusive = true, pct = TOLERANCE_PCT, period = null }) {
+  if (![min, max, pct].every(Number.isFinite) || min < 0 || min > max || pct < 0) throw new Error('rangeRule: bad arguments');
+  const lo = r6(min * (1 - pct / 100)); const hi = r6(max * (1 + pct / 100));
+  return {
+    period,
+    green: { gte: min, ...(inclusive ? { lte: max } : { lt: max }) },
+    orange: [{ gte: lo, lt: min }, { ...(inclusive ? { gt: max } : { gte: max }), lte: hi }],
+    red: [{ lt: lo }, { gt: hi }],
+  };
+}
+
 // benchmarks for the colour-coded metrics (null = WNDRR has not approved one yet: the value shows, uncoloured)
 const RULES = {
   TOF: {
@@ -78,7 +91,8 @@ const RULES = {
   },
 };
 const JUDGED_FUNNELS = ['TOF', 'TOM', 'MOF'];
-const METRICS = ['cpa', 'frequency', 'reach'];
+// every measure a benchmark can be set for (Settings > Meta Performance); a measure is only ever coloured where a benchmark has actually been configured
+const METRICS = ['cpa', 'roas', 'outbound_ctr', 'cpm', 'reach', 'frequency'];
 const STATES = ['red', 'orange', 'green'];
 
 // The two benchmarks WNDRR has APPROVED. A configured override can never change them (it may only supply the still-pending metrics).
@@ -162,11 +176,14 @@ function pickRule(entry, days) {
   return fits.sort((x, y) => spanOf(windowOf(x)) - spanOf(windowOf(y)))[0] || null;
 }
 
-const match = (v, c) => !!c
+const match1 = (v, c) => !!c
   && (c.gt === undefined || v > c.gt) && (c.gte === undefined || v >= c.gte)
   && (c.lt === undefined || v < c.lt) && (c.lte === undefined || v <= c.lte)
   && (c.min === undefined || v >= c.min) && (c.max === undefined || v <= c.max);
-const validCond = (c) => !!c && typeof c === 'object' && Object.keys(c).length > 0 && Object.entries(c).every(([k, x]) => ['gt', 'gte', 'lt', 'lte', 'min', 'max'].includes(k) && typeof x === 'number' && Number.isFinite(x));
+// a band is one condition, or a list of conditions where ANY may match (a range has two outer bands: too low and too high)
+const match = (v, c) => (Array.isArray(c) ? c.some((x) => match1(v, x)) : match1(v, c));
+const validCond1 = (c) => !!c && typeof c === 'object' && !Array.isArray(c) && Object.keys(c).length > 0 && Object.entries(c).every(([k, x]) => ['gt', 'gte', 'lt', 'lte', 'min', 'max'].includes(k) && typeof x === 'number' && Number.isFinite(x));
+const validCond = (c) => (Array.isArray(c) ? c.length > 0 && c.every(validCond1) : validCond1(c));
 function validRule(r) {
   if (!r || typeof r !== 'object') return false;
   if (r.period !== null && r.period !== undefined && r.period !== 'approx_4_days') return false;
@@ -196,6 +213,7 @@ function classify(funnel, metric, value, ctx = {}, { rules = effectiveRules(), e
 
 // "over 60 and up to 72", "2 to 2.4", "under 2" ... (plain words; the UI adds the unit)
 function condText(c) {
+  if (Array.isArray(c)) return c.map(condText).join(' or ');
   const lo = c.gt !== undefined ? ['over', c.gt] : c.gte !== undefined ? ['from', c.gte] : c.min !== undefined ? ['from', c.min] : null;
   const hi = c.lt !== undefined ? ['under', c.lt] : c.lte !== undefined ? ['up to', c.lte] : c.max !== undefined ? ['up to', c.max] : null;
   if (lo && hi) return lo[0] === 'from' && hi[0] === 'up to' ? `${lo[1]} to ${hi[1]}` : `${lo[0]} ${lo[1]} and ${hi[0]} ${hi[1]}`;
@@ -209,10 +227,11 @@ function describe(rule) {
 // [{ state, text, cond }] green -> orange -> red, for the compact colour guide in the UI
 const bandsOf = (rule) => ['green', 'orange', 'red'].filter((s) => rule[s] !== undefined).map((s) => ({ state: s, text: condText(rule[s]), cond: rule[s] }));
 
-const METRIC_LABEL = { cpa: 'CPA', frequency: 'Frequency', reach: 'Reach' };
+const METRIC_LABEL = { cpa: 'CPA', roas: 'ROAS', outbound_ctr: 'Outbound CTR', cpm: 'CPM', reach: 'Reach', frequency: 'Frequency' };
 // the green side of a rule as a short symbol: '≤ 60', '< 2', '≥ 50000' (the UI adds units)
 const targetSymbol = (rule) => {
   const g = rule.green || {};
+  if (g.gte !== undefined && (g.lte !== undefined || g.lt !== undefined)) return `${g.gte}–${g.lte !== undefined ? g.lte : g.lt}`; // a range
   if (g.lte !== undefined) return `≤ ${g.lte}`; if (g.lt !== undefined) return `< ${g.lt}`;
   if (g.gte !== undefined) return `≥ ${g.gte}`; if (g.gt !== undefined) return `> ${g.gt}`;
   if (g.max !== undefined) return `≤ ${g.max}`; if (g.min !== undefined) return `≥ ${g.min}`;
@@ -275,4 +294,4 @@ function status({ rules = effectiveRules(), enabled = ENABLED, coded = COLOUR_CO
   };
 }
 
-module.exports = { windowOf, inWindow, windowText, rulesOf, pickRule, describe, METRIC_LABEL, percentRule, parseOverrides, effectiveRules, APPROVED, TOLERANCE_PCT, ENABLED, RULES_VERSION, APPROX_4_DAYS, COLOUR_CODED, RULES, JUDGED_FUNNELS, METRICS, rangeDays, isApprox4Days, validRule, classify, status };
+module.exports = { rangeRule, windowOf, inWindow, windowText, rulesOf, pickRule, describe, METRIC_LABEL, percentRule, parseOverrides, effectiveRules, APPROVED, TOLERANCE_PCT, ENABLED, RULES_VERSION, APPROX_4_DAYS, COLOUR_CODED, RULES, JUDGED_FUNNELS, METRICS, rangeDays, isApprox4Days, validRule, classify, status };

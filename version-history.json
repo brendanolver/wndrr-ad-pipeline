@@ -2,6 +2,15 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.0.5",
+      "date": "2026-10-13",
+      "title": "Funnel checkboxes and per-funnel benchmarks",
+      "changes": [
+        "Performance: the Funnel dropdown is replaced by TOF / TOM / MOF checkboxes (all selected by default, Select all, n of 3 selected) that filter the ad table only; the summary cards keep their scope.",
+        "Benchmarks are now set separately for each funnel and measure (CPA, ROAS, Outbound CTR, CPM, Reach, Frequency, with an optional Frequency range); each ad is coloured only against its own funnel's benchmark, and unset measures stay uncoloured."
+      ]
+    },
+    {
       "version": "1.0.4",
       "date": "2026-10-13",
       "title": "Performance & Best Ads refinement",

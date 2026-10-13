@@ -12,8 +12,9 @@ const { HttpError } = require('./metaPerformance');
 
 const FUNNELS = health.JUDGED_FUNNELS;
 const METRICS = health.METRICS;
-const DIRECTION = { cpa: 'lower', frequency: 'lower', reach: 'higher' };
-const UNIT = { cpa: '$ AUD', frequency: '×', reach: 'people' };
+// which side of the target is better (frequency may also be given an acceptable range, see target_min)
+const DIRECTION = { cpa: 'lower', roas: 'higher', outbound_ctr: 'higher', cpm: 'lower', reach: 'higher', frequency: 'lower' };
+const UNIT = { cpa: '$ AUD', roas: '×', outbound_ctr: '%', cpm: '$ AUD', reach: 'people', frequency: '×' };
 const CACHE_MS = 5000;
 let cache = null;
 
@@ -26,7 +27,7 @@ const intOrNull = (v) => {
 
 function publicRow(r) {
   return {
-    id: r.id, funnel: r.funnel, metric: r.metric, min_days: r.min_days, max_days: r.max_days, target: num(r.target), inclusive: !!r.inclusive,
+    id: r.id, funnel: r.funnel, metric: r.metric, min_days: r.min_days, max_days: r.max_days, target: num(r.target), target_min: num(r.target_min), inclusive: !!r.inclusive,
     tolerance_pct: num(r.tolerance_pct), active: !!r.active, note: r.note || null, direction: DIRECTION[r.metric], unit: UNIT[r.metric],
     updated_at: r.updated_at ? new Date(r.updated_at).toISOString() : null, updated_by_user_id: r.updated_by_user_id || null,
   };
@@ -34,7 +35,11 @@ function publicRow(r) {
 
 // one stored row -> the rule object metaFunnelHealth.classify understands
 function ruleOf(row) {
-  const rule = health.percentRule({ direction: DIRECTION[row.metric], target: Number(row.target), inclusive: !!row.inclusive, pct: Number(row.tolerance_pct) });
+  const min = num(row.target_min);
+  // Frequency with a lower bound is an acceptable RANGE [target_min, target]; every other benchmark is one target with a good side
+  const rule = row.metric === 'frequency' && min !== null
+    ? health.rangeRule({ min, max: Number(row.target), inclusive: !!row.inclusive, pct: Number(row.tolerance_pct) })
+    : health.percentRule({ direction: DIRECTION[row.metric], target: Number(row.target), inclusive: !!row.inclusive, pct: Number(row.tolerance_pct) });
   rule.window = (row.min_days || row.max_days) ? { min_days: row.min_days || null, max_days: row.max_days || null } : null;
   return rule;
 }
@@ -83,13 +88,22 @@ function cleanInput(body, { partial = false } = {}) {
   }
   if (!partial || b.metric !== undefined) {
     const m = String(b.metric || '').toLowerCase();
-    if (!METRICS.includes(m)) throw new HttpError(400, 'Metric must be CPA, Frequency or Reach');
+    if (!METRICS.includes(m)) throw new HttpError(400, 'Metric must be CPA, ROAS, Outbound CTR, CPM, Reach or Frequency');
     out.metric = m;
   }
   if (!partial || b.target !== undefined) {
     const t = num(b.target);
     if (t === null || !Number.isFinite(t) || t < 0 || t > 1e9) throw new HttpError(400, 'Enter a target number (0 or more)');
     out.target = t;
+  }
+  if (b.target_min !== undefined) {
+    const lo = num(b.target_min);
+    if (lo !== null) {
+      if (!Number.isFinite(lo) || lo < 0 || lo > 1e9) throw new HttpError(400, 'The lowest acceptable value must be 0 or more');
+      if ((out.metric || String(b.metric || '').toLowerCase()) !== 'frequency' && b.metric !== undefined) throw new HttpError(400, 'An acceptable range is only available for Frequency');
+      if (out.target !== undefined && lo > out.target) throw new HttpError(400, 'The lowest acceptable value cannot be above the highest');
+    }
+    out.target_min = lo;
   }
   if (!partial || b.min_days !== undefined || b.max_days !== undefined) {
     const lo = intOrNull(b.min_days); const hi = intOrNull(b.max_days);
@@ -119,9 +133,9 @@ async function create(body, userId) {
   try {
     await client.query('BEGIN');
     const r = await client.query(
-      `INSERT INTO meta_performance_benchmarks (funnel, metric, min_days, max_days, target, inclusive, tolerance_pct, active, note, created_by_user_id, updated_by_user_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10) RETURNING *`,
-      [v.funnel, v.metric, v.min_days, v.max_days, v.target, v.inclusive, v.tolerance_pct, v.active === undefined ? true : v.active, v.note || null, userId || null]
+      `INSERT INTO meta_performance_benchmarks (funnel, metric, min_days, max_days, target, target_min, inclusive, tolerance_pct, active, note, created_by_user_id, updated_by_user_id)
+       VALUES ($1,$2,$3,$4,$5,$11,$6,$7,$8,$9,$10,$10) RETURNING *`,
+      [v.funnel, v.metric, v.min_days, v.max_days, v.target, v.inclusive, v.tolerance_pct, v.active === undefined ? true : v.active, v.note || null, userId || null, v.target_min === undefined ? null : v.target_min]
     );
     await record(client, r.rows[0].id, 'create', null, r.rows[0], userId);
     await client.query('COMMIT');
@@ -142,11 +156,12 @@ async function update(id, body, userId) {
     const cur = (await client.query('SELECT * FROM meta_performance_benchmarks WHERE id = $1 FOR UPDATE', [id])).rows[0];
     if (!cur) throw new HttpError(404, 'Benchmark not found');
     const next = { ...cur, ...v };
+    if (num(next.target_min) !== null && (next.metric !== 'frequency' || num(next.target_min) > Number(next.target))) throw new HttpError(400, next.metric !== 'frequency' ? 'An acceptable range is only available for Frequency' : 'The lowest acceptable value cannot be above the highest');
     if (next.min_days !== null && next.max_days !== null && next.min_days > next.max_days) throw new HttpError(400, 'The window’s first day count cannot be larger than its last');
     const r = await client.query(
-      `UPDATE meta_performance_benchmarks SET funnel=$2, metric=$3, min_days=$4, max_days=$5, target=$6, inclusive=$7, tolerance_pct=$8, active=$9, note=$10, updated_by_user_id=$11, updated_at=now()
+      `UPDATE meta_performance_benchmarks SET funnel=$2, metric=$3, min_days=$4, max_days=$5, target=$6, inclusive=$7, tolerance_pct=$8, active=$9, note=$10, updated_by_user_id=$11, target_min=$12, updated_at=now()
         WHERE id=$1 RETURNING *`,
-      [id, next.funnel, next.metric, next.min_days, next.max_days, next.target, next.inclusive, next.tolerance_pct, next.active, next.note, userId || null]
+      [id, next.funnel, next.metric, next.min_days, next.max_days, next.target, next.inclusive, next.tolerance_pct, next.active, next.note, userId || null, num(next.target_min)]
     );
     await record(client, id, 'update', cur, r.rows[0], userId);
     await client.query('COMMIT');

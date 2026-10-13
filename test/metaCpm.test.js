@@ -29,14 +29,15 @@ test('existing metrics are unchanged by adding CPM', () => {
   const m = perf.deriveMetrics({ spend: 400, purchases: 8, purchase_value: 960, add_to_cart: 40, outbound_clicks: 200, impressions: 20000 });
   assert.equal(m.cpa, 50); assert.equal(m.roas, 2.4); assert.equal(m.cost_per_atc, 10); assert.equal(m.outbound_ctr, 1); assert.equal(m.cpm, 20);
 });
-test('CPM is sortable (whitelisted SQL), a KPI card, a table column, never coloured, and not a benchmark metric', () => {
+test('CPM is sortable (whitelisted SQL), a KPI card, a table column, and coloured ONLY where a per-funnel benchmark has been configured', () => {
   const lib = read('src/lib/metaPerformance.js');
   assert.match(lib, /cpm: 'agg\.spend \/ NULLIF\(agg\.impressions, 0\)'/);
   const app = read('public/app.js');
   assert.match(app, /\{ key: 'cpm', label: 'CPM', fmt: 'money', better: null \}/, 'a summary card; better is null so a comparison is never shown as good or bad');
   const row = app.slice(app.indexOf("body.innerHTML = res.ads.map((a) => `"), app.indexOf('ccHydrateThumbs(body);'));
-  assert.match(row, /'mp-c-tr mp-cpm'/, 'the CPM cell'); assert.doesNotMatch(row, /cellCls\(a\.cpm/);
+  assert.match(row, /'mp-c-tr mp-cpm'/, 'the CPM cell'); assert.match(row, /metric\(a\.cpm_health/, 'coloured through the funnel benchmark result, which is null (neutral) unless one is configured');
   assert.match(read('public/index.html'), /data-sort="cpm"/);
   const health = read('src/lib/metaFunnelHealth.js');
-  assert.doesNotMatch(health.slice(health.indexOf('const METRICS')), /'cpm'/, 'no CPM benchmark exists to colour against');
+  assert.match(health.slice(health.indexOf('const METRICS')), /'cpm'/, 'CPM can have a benchmark, but none is built in: it is neutral until one is set');
+  assert.doesNotMatch(health.slice(health.indexOf('const RULES = {'), health.indexOf('const JUDGED_FUNNELS')), /cpm/, 'no CPM target is invented or pre-set');
 });

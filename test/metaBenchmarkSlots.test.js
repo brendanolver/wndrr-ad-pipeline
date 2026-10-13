@@ -44,8 +44,8 @@ test('Unknown and Mixed funnels are never judged, whatever is configured; a disa
   const rows = [row('MOF', 'cpa', 60), row('TOF', 'cpa', 60, { active: false })];
   assert.equal(cls(rows, 'unknown', 'cpa', 10, 7), null); assert.equal(cls(rows, 'multiple', 'cpa', 10, 7), null); assert.equal(cls(rows, 'TOF', 'cpa', 10, 7), null);
 });
-test('Settings explains it: slots per funnel, only approved targets set, neutral when empty, windows, and no CPM benchmark', () => {
+test('Settings explains it: benchmarks per funnel, unset = neutral, which side is good, and windows', () => {
   const html = require('fs').readFileSync(require('path').join(__dirname, '..', 'public/index.html'), 'utf8');
   const rules = html.slice(html.indexOf('id="mbench-rules"'), html.indexOf('id="mbench-grid"'));
-  for (const t of [/Each funnel has its own slots/, /Only approved targets are set/, /An empty slot shows a neutral value/, /reporting window is judged only inside that window/, /CPM has no benchmark/]) assert.match(rules, t);
+  for (const t of [/Each funnel has its own benchmarks/, /Leave a benchmark unset and that measure stays neutral/, /Which side is good depends on the measure/, /reporting window is judged only inside that window/]) assert.match(rules, t);
 });

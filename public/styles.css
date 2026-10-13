@@ -4135,3 +4135,29 @@ body{background:var(--bg);color:var(--text);}
 .apg-ad-nums i{font-style:normal;font-size:10.5px;font-weight:500;color:var(--text-muted);}
 .apg-open{margin-left:auto;}
 .apg-combined .apm-metric-v{font-size:16px;}
+
+/* ═══ Batch 16: funnel checkboxes in the Ad Performance toolbar + per-funnel benchmark settings ═══ */
+.mp-fgroup{margin:0;border:1px solid var(--accent-border);border-radius:10px;padding:4px 10px 6px;background:#fff;min-width:0;}
+.mp-fgroup.mp-fgroup-narrowed{background:var(--accent-softer);}
+.mp-fgroup legend{display:flex;align-items:center;gap:5px;padding:0 4px;font-size:11.5px;font-weight:600;color:var(--text-secondary);}
+.mp-fgroup-info{width:13px;height:13px;color:var(--text-muted);}
+.mp-fgroup-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+.mp-fchk{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;cursor:pointer;color:var(--text);user-select:none;}
+.mp-fchk input{width:16px;height:16px;margin:0;cursor:pointer;}
+.mp-fchk-TOF input{accent-color:#2f6fdc;}
+.mp-fchk-TOM input{accent-color:#7a4fd0;}
+.mp-fchk-MOF input{accent-color:#1b9a5c;}
+.mp-fchk:has(input:not(:checked)){color:var(--text-muted);font-weight:500;}
+.mp-fall{background:none;border:1px solid var(--accent-border);border-radius:8px;padding:3px 10px;font-family:inherit;font-size:12px;font-weight:600;color:var(--accent-text);cursor:pointer;}
+.mp-fall:hover:not(:disabled){background:var(--accent-soft);}
+.mp-fall:disabled{opacity:.45;cursor:default;}
+.mp-fcount{font-size:11.5px;color:var(--text-muted);padding-left:10px;border-left:1px solid var(--border);white-space:nowrap;}
+
+.mbench-tabs{display:flex;gap:6px;margin:10px 0 0;}
+.mbench-tab{border:1px solid var(--border);border-bottom:0;border-radius:8px 8px 0 0;background:var(--surface2);padding:8px 18px;font-family:inherit;font-size:13px;font-weight:700;color:var(--text-secondary);cursor:pointer;display:flex;flex-direction:column;align-items:flex-start;line-height:1.2;}
+.mbench-tab small{font-weight:500;font-size:11px;color:var(--text-muted);}
+.mbench-tab.active{background:#fff;color:var(--accent-text);box-shadow:inset 0 2px 0 var(--accent);}
+.mbench-table-funnel{margin-top:0;}
+.mbench-table-funnel tbody th{width:200px;font-weight:600;}
+.mbench-table-funnel tbody th small{display:block;font-weight:400;font-size:11px;color:var(--text-muted);}
+.mbench-opt{font-weight:400;color:var(--text-muted);}

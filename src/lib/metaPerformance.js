@@ -505,7 +505,18 @@ function parseAdsQuery(query) {
   const q = String(query.q || '').trim().slice(0, 200);
   const pageSize = Math.min(100, Math.max(1, parseInt(query.page_size, 10) || 20));
   const page = Math.max(1, parseInt(query.page, 10) || 1);
-  return { sort, dir, status, q, pageSize, page };
+  return { sort, dir, status, q, pageSize, page, funnels: parseFunnelList(query.funnels) };
+}
+
+// The Ad Performance table's funnel checkboxes: ?funnels=TOF,TOM (any subset) or ?funnels=none. null = no restriction (nothing sent, all three, or unreadable), so a table with
+// all three ticked is the complete table, including ads whose funnel is Unknown / Mixed. This filters ONLY the table rows (and the counts that describe them), never the page summary.
+const TABLE_FUNNELS = ['TOF', 'TOM', 'MOF'];
+function parseFunnelList(raw) {
+  if (raw === undefined || raw === null) return null;
+  const s = String(raw).trim().toLowerCase();
+  if (s === 'none') return [];
+  const list = [...new Set(s.split(',').map((x) => x.trim().toUpperCase()).filter((x) => TABLE_FUNNELS.includes(x)))];
+  return list.length === 0 || list.length === TABLE_FUNNELS.length ? null : list;
 }
 
 // One row per ad that had activity in the range (spend or impressions),
@@ -530,6 +541,7 @@ async function getAds(parsed, query) {
   const where = [];
   if (STATUS_FILTERS[opts.status]) where.push(STATUS_FILTERS[opts.status]);
   if (filter.funnel) { params.push(filter.funnel); where.push(`COALESCE(mc.funnel, 'unknown') = $${params.length}`); }
+  if (opts.funnels) { params.push(opts.funnels); where.push(`COALESCE(mc.funnel, 'unknown') = ANY($${params.length}::text[])`); }
   if (filter.campaignId) { params.push(filter.campaignId); where.push(`a.meta_campaign_id = $${params.length}`); }
   if (filter.excludeDpa) where.push(dpaLib.notDpaPredicate('a', 'mc'));
   if (opts.q) {
@@ -612,6 +624,7 @@ async function getAds(parsed, query) {
     dir: opts.dir,
     status: opts.status,
     q: opts.q,
+    funnels: opts.funnels,
     filter: filter.active ? { funnel: filter.funnel, campaign_id: filter.campaignId } : null,
     dpa: await getDpaInfo(parsed.range, filter),
     scale,
@@ -634,6 +647,10 @@ async function getAds(parsed, query) {
       cpa_health: funnelHealth.classify(a.funnel, 'cpa', a.cpa, { days: healthDays }, healthCtx),
       frequency_health: funnelHealth.classify(a.funnel, 'frequency', a.frequency, { days: healthDays }, healthCtx),
       reach_health: funnelHealth.classify(a.funnel, 'reach', a.reach, { days: healthDays }, healthCtx), // coloured only where a Reach benchmark has been set
+      // each ad is judged against ITS OWN funnel's benchmark for the measure, and only where one has been configured (otherwise null = neutral)
+      roas_health: funnelHealth.classify(a.funnel, 'roas', a.roas, { days: healthDays }, healthCtx),
+      outbound_ctr_health: funnelHealth.classify(a.funnel, 'outbound_ctr', a.outbound_ctr, { days: healthDays }, healthCtx),
+      cpm_health: funnelHealth.classify(a.funnel, 'cpm', a.cpm, { days: healthDays }, healthCtx),
     })),
     health: { ...funnelHealth.status({ range: parsed.range, rules: bench.rules, coded: bench.coded, source: bench.source === 'settings' ? 'settings' : null }), funnel_counts: funnelCounts },
     reach_info: {
