@@ -39,6 +39,8 @@ function ageDays(created, today) {
 // WHEN did this creative start? A creation date is not a start date (an ad can be created long before it delivers, or copied), so the first day of STORED delivery is preferred. If that day is
 // only where our stored history begins (first_delivery_truncated) it proves nothing about being new, so the Meta creation date is used (and disclosed). With neither, the start is unknown.
 function startOf(c) {
+  // Batch 31: another instance of this creative (an original that is paused or not yet reviewed) was created earlier and has no stored delivery, so the creative cannot be proven new
+  if (c.first_delivery && c.origin_created_undated && ymd(c.origin_created_undated) < ymd(c.first_delivery)) return { date: ymd(c.origin_created_undated), basis: 'created' };
   if (c.first_delivery && !c.first_delivery_truncated) return { date: ymd(c.first_delivery), basis: 'first_delivery' };
   if (c.created) return { date: ymd(c.created), basis: 'created' };
   if (c.first_delivery) return { date: ymd(c.first_delivery), basis: 'first_stored_delivery' };

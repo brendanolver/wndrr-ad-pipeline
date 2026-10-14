@@ -26,8 +26,8 @@ const ad = (id, o = {}) => ({
   t_spend: o.spend === undefined ? 400 : o.spend, t_imp: 40000, t_clk: 800, t_pur: o.purchases === undefined ? 8 : o.purchases, t_val: 1600,
   f_spend: 0, f_imp: 0, f_clk: 0, f_pur: 0, f_val: 0, g_spend: 0, g_imp: 0, g_clk: 0, g_pur: 0, g_val: 0, r_spend: 0, r_imp: 0, r_clk: 0, r_pur: 0, r_val: 0, p_spend: 0, p_imp: 0, p_clk: 0, p_pur: 0, p_val: 0,
 });
-const stubDb = (rows, newest = day(1)) => ({
-  query: async (sql) => (/MIN\(insight_date\)/.test(sql) ? { rows: [{ d: day(200), n: newest }] } : { rows }),
+const stubDb = (rows, newest = day(1), origins = []) => ({
+  query: async (sql) => (/creative-origins/.test(sql) ? { rows: origins } : /MIN\(insight_date\)/.test(sql) ? { rows: [{ d: day(200), n: newest }] } : { rows }),
 });
 const load = async (rows, newest) => (await perf.loadProductAdPerformance([fam], { db: stubDb(rows, newest), rules: RULES, coded: CODED, today: TODAY, nameCopies })).get(fam.key);
 const evalWith = async (rows, o = {}, cfg = CFG) => {

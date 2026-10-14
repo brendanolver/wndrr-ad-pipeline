@@ -230,6 +230,14 @@ async function loadProductAdPerformance(families, { db, rules, coded, config = D
     });
   });
   per.forEach((g, fk) => { if (nameCopies) mergeNameCopies(g, nameCopies); });
+  const allGroups = []; per.forEach((g) => g.forEach((x) => allGroups.push(x)));
+  const origins = await loadCreativeOrigins(db, allGroups, nameCopies);
+  origins.forEach((o, x) => {
+    x.instances_total = o.instances;
+    if (o.first_day && (!x.first_day || o.first_day < x.first_day)) { x.first_day = o.first_day; x.first_delivery_from_other_instance = true; }
+    if (o.created && (!x.created || new Date(o.created) < new Date(x.created))) x.created = o.created;
+    if (o.undated_created) x.origin_created_undated = o.undated_created;
+  });
   per.forEach((g, fk) => {
     const entry = out.get(fk);
     g.forEach((x) => {
@@ -237,7 +245,7 @@ async function loadProductAdPerformance(families, { db, rules, coded, config = D
       // dates: created = the ad's creation date in Meta; first_delivery / last_delivery = the first and last day with STORED delivery (spend or impressions); lifetime_spend = all stored days.
       // A creation date is not a start date, and a first stored delivery on the first day we hold data may only be where our history begins (first_delivery_truncated).
       entry.creatives.push({ ...verdict, key: x.key, name: (x.ads[0] && x.ads[0].name) || null, ads: x.ads, ad_count: x.ads.length, concept: x.concept, creator: x.creator, style_id: x.style, media: x.media, created: x.created, shared: x.shared, mixed_funnels: x.pools.size > 1,
-        first_delivery: x.first_day || null, last_delivery: x.last_day || null, lifetime_spend: Math.round(num(x.life_spend) * 100) / 100, first_delivery_truncated: !!(x.first_day && horizon && x.first_day <= horizon), funnel_label: [...x.funnels].join(' / ') || null });
+        first_delivery: x.first_day || null, last_delivery: x.last_day || null, instances_total: x.instances_total || x.ads.length, first_delivery_from_other_instance: !!x.first_delivery_from_other_instance, origin_created_undated: x.origin_created_undated || null, lifetime_spend: Math.round(num(x.life_spend) * 100) / 100, first_delivery_truncated: !!(x.first_day && horizon && x.first_day <= horizon), funnel_label: [...x.funnels].join(' / ') || null });
     });
     entry.insights_last_day = newestDay; // the newest day with ANY stored delivery: whether delivery can be judged at all (Live Ads)
     entry.ads = [...g.values()].reduce((s, x) => s + x.ads.length, 0);
@@ -281,7 +289,7 @@ function newGroup(key) {
 }
 // r: one ad row as the loaders' queries return it (meta_ad_id, ad_name, funnel, first_day, last_day, life_spend, concept_label, creator_name, creative_style_id, media_type, delivery_rows, t_* r_* p_* f_* g_* metrics)
 function addRowToGroup(x, r, shared = false) {
-  x.ads.push({ id: r.meta_ad_id, name: r.ad_name, shared, status: r.effective_status || null });
+  x.ads.push({ id: r.meta_ad_id, name: r.ad_name, shared, status: r.effective_status || null, creative_id: r.meta_creative_id || null });
   if (shared) x.shared = true;
   x.delivery_rows += r.delivery_rows;
   // Batch 30: the SAME creative running in several funnels stays ONE creative, but each funnel keeps its own pooled metrics so it is judged against that funnel's benchmark
@@ -296,6 +304,44 @@ function addRowToGroup(x, r, shared = false) {
   x.life_spend = (x.life_spend || 0) + num(r.life_spend);
   x.concept = x.concept || r.concept_label || null; x.creator = x.creator || r.creator_name || null; x.style = x.style || r.creative_style_id || null; x.media = x.media || r.media_type || null;
   if (r.created_time && (!x.created || new Date(r.created_time) < new Date(x.created))) x.created = r.created_time;
+}
+
+// WHEN did a unique creative really start? (Batch 31) Planning only loads the ads that are ACTIVE and matched, but a duplicate of an old creative (into another campaign or ad set)
+// is a new Meta AD, not a new CREATIVE. If the original instance is paused, archived or not yet reviewed it is not in the group, and the group's first delivery would be the duplicate's:
+// a creative that has run for weeks would be called "early testing". This looks up EVERY instance of the same creative identity (an identical Meta creative id, or the "- Copy" name rule, whatever
+// the status or match state) and returns the earliest stored delivery day and creation date. It never adds an ad to a group, so unique-creative counts and the performance judged are unchanged.
+const likeEscape = (s) => String(s).replace(/[\\%_]/g, (m) => `\\${m}`);
+async function loadCreativeOrigins(db, groups, nameCopies) {
+  const ids = new Set(); const pats = new Set();
+  groups.forEach((g) => g.ads.forEach((a) => {
+    if (a.creative_id) ids.add(String(a.creative_id));
+    if (nameCopies && nameCopies.hasCopySuffix && nameCopies.hasCopySuffix(a.name) && a.name) pats.add(`${likeEscape(nameCopies.baseOf(a.name))}%`);
+  }));
+  const out = new Map();
+  if (!ids.size && !pats.size) return out;
+  let rows = [];
+  try {
+    rows = (await db.query(
+      `/* creative-origins */ SELECT m.meta_ad_id, m.meta_creative_id, m.ad_name, m.created_time,
+              (SELECT to_char(MIN(x.insight_date), 'YYYY-MM-DD') FROM meta_ad_insights_daily x WHERE x.meta_ad_id = m.meta_ad_id AND (x.spend > 0 OR x.impressions > 0)) AS first_day
+         FROM meta_ads m WHERE m.meta_creative_id = ANY($1::text[]) OR m.ad_name ILIKE ANY($2::text[])`, [[...ids], [...pats]])).rows;
+  } catch (e) { return out; } // never blocks Planning: without it the creative is dated from the instances that are loaded (as before)
+  groups.forEach((g) => {
+    const gids = new Set(g.ads.map((a) => a.creative_id).filter(Boolean).map(String));
+    const hasCopy = !!(nameCopies && nameCopies.hasCopySuffix && g.ads.some((a) => nameCopies.hasCopySuffix(a.name)));
+    const bases = new Set(hasCopy ? g.ads.map((a) => nameCopies.baseOf(a.name)) : []);
+    const mine = rows.filter((c) => (c.meta_creative_id && gids.has(String(c.meta_creative_id))) || (hasCopy && bases.has(nameCopies.baseOf(c.ad_name))));
+    if (!mine.length) return;
+    let first = null; let created = null;
+    mine.forEach((c) => {
+      if (c.first_day && (!first || c.first_day < first)) first = c.first_day;
+      if (c.created_time && (!created || new Date(c.created_time) < new Date(created))) created = c.created_time;
+    });
+    // an earlier-created instance that has NO stored delivery cannot be dated: it is disclosed, and the creative is not called new
+    const undated = mine.filter((c) => !c.first_day && c.created_time && (!first || new Date(c.created_time).toISOString().slice(0, 10) < first)).map((c) => new Date(c.created_time));
+    out.set(g, { instances: mine.length, first_day: first, created, undated_created: undated.length ? new Date(Math.min(...undated.map((d) => d.getTime()))) : null });
+  });
+  return out;
 }
 
 // A "- Copy" of an ad is the same creative even when Meta gave it its own creative id (Batch 10's name-copy rule): fold such a group into the group of the
