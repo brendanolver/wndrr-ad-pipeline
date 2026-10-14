@@ -126,12 +126,11 @@ test('live ads: Live Ads, coverage, concentration and the explanation agree on t
   assert.equal(Math.round(it.facts.top_creative_spend_share), 91, '(900+100)/(1100) of the spend sits on the one duplicated creative');
 });
 
-test('live ads: page wiring (column between Why and Stock on both pages, expanded creative table, settings)', () => {
+test('live ads: page wiring (a Live ads box in the key metrics on both pages, expanded creative table, settings)', () => {
   const pl = fs.readFileSync(path.join(__dirname, '..', 'public', 'planning.js'), 'utf8');
-  const cols = pl.slice(pl.indexOf('const PL_COLS = ['));
-  const order = ['key: \'product\'', 'key: \'why\'', 'key: \'live\'', 'key: \'stock\'', 'key: \'u30\'', 'key: \'priority\''].map((k) => cols.indexOf(k));
-  assert.ok(order.every((i, n) => i > -1 && (n === 0 || i > order[n - 1])), 'Live ads sits between Why it needs creative and Stock');
-  assert.match(pl, /label: \(\) => 'Live ads'/);
+  const cell = pl.slice(pl.indexOf('function plMetricsCell'), pl.indexOf('function plStatusCell'));
+  const order = ['Sales 30D', 'Stock on hand', 'Live ads'].map((k) => cell.indexOf(`<small>${k}`));
+  assert.ok(order.every((i, n) => i > -1 && (n === 0 || i > order[n - 1])), 'Key metrics: Sales 30D, Stock on hand, Live ads');
   assert.match(pl, /plLiveAdsHtml\(it\)/, 'the expanded details list each distinct creative');
   assert.ok(!pl.includes('<th class="num">Meta ads</th>'), 'no Meta-instance column in the expanded details');
   for (const h of ['Creative', 'Format', 'Funnel', 'Delivery', 'Performance']) assert.ok(pl.includes(`<th>${h}</th>`) || pl.includes(`<th class="num">${h}</th>`), `column ${h}`);

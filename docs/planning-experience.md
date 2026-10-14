@@ -37,6 +37,17 @@ Planning is one sidebar item with an expandable sub-menu, the same pattern as Me
 * **Table**: Product (small thumbnail, name, category), Why it needs creative, Stock (units; a quiet amber "3.1w cover" only on a short runway), Sales 30d, Priority (High / Medium with a small dot; scoring unchanged). Sorting (Product, Stock, Sales 30d, Priority) and search are kept; the Opportunity and Priority filters sit in the same card. No table cell is filled red / green / orange.
 * Removed from the default table (all still in the expanded details or evidence): Sales 7d, Sales trend, Active / Effective creatives, Last new creative, opportunity classification, action buttons, tier / pace / season columns.
 
+## Batch 32: workspace redesign (UI only)
+
+Presentation only. The engine, Meta matching, classifications, benchmarks, scoring and Shoot Plan writes are unchanged; every label below is worded from engine output by `PlanningExplain.creativeStatus()` (pure, tested in `test/planningCreativeStatus.test.js`).
+
+* **Table** (Core and High Stocks share it): PRODUCT (thumbnail, name, category, chevron) | KEY METRICS (Sales 30D, Stock on hand, Live ads; Live ads is still only the number) | CREATIVE STATUS (short coloured label + one sentence) | PRIORITY (Needs creative only) | ACTION.
+* **Status tones**: red = creative attention (No Active Ads Identified, Underperforming Creative, Creative Fatigue); amber = monitoring / testing / thin (Concentrated Delivery, Low Concept Variety, Old Creative, Low Creative Coverage, Early Testing, In Production); green = Performing Well / Adequately Covered; grey = Needs review (Matching Uncertain, Ads Not Identified, Benchmark Missing, Insufficient Delivery, Not Delivering, Meta Data Unavailable, Insufficient Data). Missing benchmarks or delivery are never worded as poor performance.
+* **Action**: Needs creative shows the purple `+ Add to Shoot Plan`, which becomes `In Shoot Plan` once the product is in this week's plan (click again to add another concept). Covered and Needs review show a subtle `View` / `Review`. Every row keeps a `...` menu with the manual Add (restricted-stock decisions are unchanged) and View details.
+* **Sorting**: header buttons plus a Sort menu (Product, Priority [Needs only], Sales 30D, Stock on hand, Live ads).
+* **Weekly strip**: concepts planned / target, remaining, products selected, carried over, `View Shoot Plan`, and a thin "Weekly creative goal" progress bar.
+* **Expanded panel**: A) large thumbnail, name, priority, recommendation headline + one explanation, Add action; B) three metric cards; C) compact colourway grid (available vs unavailable, stock, sizes, shootable; selection rules unchanged); D) three collapsibles: Why was this product recommended? / Recent live ads / Additional details. All previous evidence is kept inside them.
+
 ## Plain-English reasons
 
 Built by `PlanningExplain.reasonFor()` from fields the engine returned (`facts`, `gap.type`, `status`, `revival`, `launch_age_days`); never from a product list.

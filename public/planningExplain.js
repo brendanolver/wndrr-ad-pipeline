@@ -231,7 +231,6 @@
         const nw = (x.creative_conditions && x.creative_conditions.new) || num(x.testing) || 0;
         return nw > 0 ? mk('Early Testing', 'amber', `${nw === 1 ? 'A new creative was' : `${nw} new creatives were`} recently launched. Awaiting sufficient delivery.`) : mk('Early Testing', 'amber', 'A recently uploaded concept has no Meta delivery yet.');
       }
-      if (item.status === 'momentum_ok') return mk('Sales Holding Up', 'green', 'Sales have held up since launch.');
       if (perf >= min) return mk('Performing Well', 'green', `${plural(perf, 'effective creative')} currently running.`);
       return mk('Adequately Covered', 'green', perf ? `${perf === 1 ? 'One creative is' : `${perf} creatives are`} performing; others are still being assessed.` : 'Nothing is clearly failing; newer creative is still being assessed.');
     }

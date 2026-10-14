@@ -16,21 +16,22 @@ const run = (p) => opp.evaluate(p, CFG, TODAY, 'core');
 const cov = (n) => ({ known: true, active_ads: n, possible: 0, unresolved: 0, unresolved_share_pct: 0, uncertain: false, min: 5 });
 const v = (k, s, o = {}) => ({ ...cr(k, s, { age: o.age === undefined ? 120 : o.age }), first_delivery: day(o.age === undefined ? 120 : o.age), first_delivery_truncated: false, last_delivery: day(1), ...o });
 
-test('add: the Actions column (+ Add) is in every category; Priority only in Needs creative', () => {
-  const cols = pl.slice(pl.indexOf('const PL_COLS = ['), pl.indexOf('const plColsFor'));
-  assert.match(cols, /key: 'add', label: \(\) => 'Actions', w: 'pt-w-add', cell: plAddCell \}/, 'no `only` restriction: all three categories');
-  assert.match(cols, /key: 'priority'[^}]*only: 'needs'/);
-  const keys = (cat) => [...cols.matchAll(/key: '(\w+)'(?:[^}]*only: '(\w+)')?/g)].filter((m) => !m[2] || m[2] === cat).map((m) => m[1]);
-  assert.deepEqual(keys('needs'), ['product', 'why', 'live', 'stock', 'u30', 'priority', 'add']);
-  assert.deepEqual(keys('covered'), ['product', 'why', 'live', 'stock', 'u30', 'add']);
-  assert.deepEqual(keys('review'), ['product', 'why', 'live', 'stock', 'u30', 'add']);
+test('add: the Action column (+ Add) is in every category; Priority only in Needs creative', () => {
+  const table = pl.slice(pl.indexOf('function plTableHtml'), pl.indexOf('const PL_EMPTY'));
+  assert.match(table, /const showPrio = cat === 'needs'/);
+  assert.match(table, /th\('Product'[\s\S]*th\('Key metrics'[\s\S]*th\('Creative status'[\s\S]*showPrio \? th\('Priority'[\s\S]*th\('Action'/, 'Product | Key metrics | Creative status | Priority (Needs only) | Action');
+  assert.match(pl, /priority: \{[^}]*only: 'needs'/, 'the Priority sort is offered only in Needs creative');
+  const act = pl.slice(pl.indexOf('function plActionCell'), pl.indexOf('// sorting'));
+  assert.match(act, /cat === 'needs'[\s\S]*pl-act-add[\s\S]*data-opp-add/, 'Needs: the primary + Add to Shoot Plan button');
+  assert.match(act, /cat !== 'needs' \? `<button type="button" role="menuitem" data-opp-add/, 'Covered / Needs Review: the same add is one tap away in the row menu');
+  assert.match(act, /pl-act-view[\s\S]*data-opp-toggle/, 'Covered / Needs Review show a subtle View / Review action');
 });
-test('add: one button, the existing black primary style, never disabled because something is in production', () => {
-  const cell = pl.slice(pl.indexOf('function plAddCell'), pl.indexOf('const PL_COLS = ['));
-  assert.match(cell, /class="btn btn-primary btn-sm pl-add-btn"/); assert.doesNotMatch(cell, /btn-ghost|blue|purple|accent/);
+test('add: one primary button in the purple accent, never disabled because something is in production', () => {
+  const cell = pl.slice(pl.indexOf('function plActionCell'), pl.indexOf('// sorting'));
+  assert.match(cell, /class="btn btn-sm pl-act pl-act-add"/);
   assert.doesNotMatch(cell.replace(/\/\/.*$/gm, ''), /disabled/, 'the button is never disabled');
   assert.doesNotMatch(cell.replace(/\/\/.*$/gm, ''), /production|prod\./, 'in-production status plays no part in showing the button (it has its own indicator)');
-  assert.match(css, /\.btn-primary\{background:var\(--primary\)/); assert.match(css, /--ds-navy-800: #1c1c22/, 'the primary colour is the near-black of the WNDRR design');
+  assert.match(css, /\.pl-act-add\s*\{[^}]*var\(--accent-strong\)/, 'Batch 32: the Add action uses the purple accent');
   const plan = pl.slice(pl.indexOf('async function plPlan'), pl.indexOf('\n}\n', pl.indexOf('async function plPlan')));
   assert.doesNotMatch(plan, /confirmDialog/, 'no confirmation gate in front of a manual add; the modal explains instead');
   assert.match(plan, /additional/); assert.match(plan, /notes:/);

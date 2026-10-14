@@ -2,6 +2,17 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.2.1",
+      "date": "2026-10-14",
+      "title": "Core planning redesign",
+      "changes": [
+        "Core and High Stocks table redesigned: Key metrics, short coloured Creative status, Priority (Needs only) and Action columns",
+        "Weekly strip gains a thin weekly creative goal bar and View Shoot Plan link",
+        "Expanded product is now a decision panel: recommendation, three metric cards, compact colourway grid, three collapsible evidence sections",
+        "Presentation only: engine, matching, benchmarks, scoring and Shoot Plan writes are unchanged"
+      ]
+    },
+    {
       "version": "1.2.0",
       "date": "2026-10-14",
       "title": "Planning refinements",
