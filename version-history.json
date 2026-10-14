@@ -2,6 +2,15 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.2.5",
+      "date": "2026-10-14",
+      "title": "Colourway thumbnails",
+      "changes": [
+        "Core colourway thumbnails are larger and show the whole catalogue picture (front and back) uncropped; unavailable colourways stay recognisable",
+        "Presentation only: no data, selection or Shoot Plan changes"
+      ]
+    },
+    {
       "version": "1.2.4",
       "date": "2026-10-14",
       "title": "Core planning simplified",
