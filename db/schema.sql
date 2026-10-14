@@ -3359,6 +3359,16 @@ CREATE TABLE IF NOT EXISTS update_request_attachments (
 CREATE INDEX IF NOT EXISTS idx_update_request_attachments_request ON update_request_attachments(request_id);
 
 -- =====================================================================
+
+-- =====================================================================
+-- Batch 30: colourways belong to a CONCEPT, not to a separate record per colourway.
+-- ADDITIVE and idempotent (a nullable column; no existing row is read, rewritten or deleted). shoot_plan_item_styles still holds the colourways chosen for the
+-- product that week (what the pull list and shoot use, the union across the product's concepts); planned_style_ids records which of them THIS concept
+-- covers, so one concept (e.g. "Styling Video") can cover Black, Grey, Air Blue and Dark Green without becoming four concepts. NULL = not recorded (every
+-- concept that existed before this column, which then covers the product's colourways as before).
+-- =====================================================================
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS planned_style_ids INTEGER[];
+
 -- Approved Ad Matching concepts + historical-spelling aliases
 -- =====================================================================
 -- The concept list Ad Matching offers is the people-approved vocabulary: meta_matching_vocab rows of kind 'concept'. The 40 approved
@@ -3456,12 +3466,3 @@ INSERT INTO meta_matching_concept_aliases (alias, alias_key, approved_name, remo
   ('TALKTHROUGH', 'talkthrough', 'TALK THROUGH', false),
   ('FLATLAY PHOTO', 'flatlay photo', 'FLAT LAY', false)
 ON CONFLICT (alias_key) DO NOTHING;
-
--- =====================================================================
--- Batch 30: colourways belong to a CONCEPT, not to a separate record per colourway.
--- ADDITIVE and idempotent (a nullable column; no existing row is read, rewritten or deleted). shoot_plan_item_styles still holds the colourways chosen for the
--- product that week (what the pull list and shoot use, the union across the product's concepts); planned_style_ids records which of them THIS concept
--- covers, so one concept (e.g. "Styling Video") can cover Black, Grey, Air Blue and Dark Green without becoming four concepts. NULL = not recorded (every
--- concept that existed before this column, which then covers the product's colourways as before).
--- =====================================================================
-ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS planned_style_ids INTEGER[];

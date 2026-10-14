@@ -73,6 +73,7 @@ function stockOf(stock, pace, cfg, sizes = null) {
   const units = Math.max(0, Math.round(num(stock.units))); const onOrder = Math.max(0, Math.round(num(stock.on_order)));
   const cover = pace > 0 ? r1(units / pace) : null;
   const coverWithOrder = pace > 0 ? r1((units + onOrder) / pace) : null;
+  const at = pace > 0 ? ` (${r1(pace)} units a week)` : ''; // the one coverage calculation: available units / weekly pace, always stated with the pace it used
   const notes = [];
   let band; let points;
   if (units < cfg.opp_min_stock_units) { band = 'low'; points = 0; notes.push(`${units} sellable units is below the ${cfg.opp_min_stock_units} needed before creative is worth making.`); }
@@ -81,10 +82,10 @@ function stockOf(stock, pace, cfg, sizes = null) {
     // Batch 29: only stock that is physically available counts. A confirmed restock, a reorder or an open purchase order does NOT close the gap: new creative is for what can be sold now.
     const need = minCoverWeeks(cfg);
     band = 'short'; points = Math.round(10 * (cover / Math.max(need, 0.1)));
-    notes.push(`${cover} weeks of available stock at the current pace: less than the ${need} weeks needed for creative to pay off${(Number(cfg.creative_lead_time_days) || 0) > 0 && need > cfg.stock_min_cover_weeks ? ` (about ${cfg.creative_lead_time_days} days to get new creative live plus a ${cfg.test_period_days} day test period: the stock would run out before it could contribute)` : ''}.${onOrder > 0 ? ` ${onOrder} units on order are not counted: they are not available to sell yet.` : ''}`);
-  } else if (cover <= cfg.stock_overstock_weeks) { band = 'healthy'; points = 10; notes.push(`${cover} weeks of stock at the current pace: enough to justify creative.`); }
-  else if (cover <= cfg.stock_excess_weeks) { band = 'slow'; points = 5; notes.push(`${cover} weeks of stock: more than ${cfg.stock_overstock_weeks}, so it is a slow mover. Plenty of stock is not a reason for more creative.`); }
-  else { band = 'excess'; points = 0; notes.push(`${cover} weeks of stock: more than ${cfg.stock_excess_weeks}. Stock this large earns no points: the constraint is demand, not creative.`); }
+    notes.push(`${cover} weeks of available stock at the current pace${at}: less than the ${need} weeks needed for creative to pay off${(Number(cfg.creative_lead_time_days) || 0) > 0 && need > cfg.stock_min_cover_weeks ? ` (about ${cfg.creative_lead_time_days} days to get new creative live plus a ${cfg.test_period_days} day test period: the stock would run out before it could contribute)` : ''}.${onOrder > 0 ? ` ${onOrder} units on order are not counted: they are not available to sell yet.` : ''}`);
+  } else if (cover <= cfg.stock_overstock_weeks) { band = 'healthy'; points = 10; notes.push(`${cover} weeks of stock at the current pace${at}: enough to justify creative.`); }
+  else if (cover <= cfg.stock_excess_weeks) { band = 'slow'; points = 5; notes.push(`${cover} weeks of stock${at}: more than ${cfg.stock_overstock_weeks}, so it is a slow mover. Plenty of stock is not a reason for more creative.`); }
+  else { band = 'excess'; points = 0; notes.push(`${cover} weeks of stock${at}: more than ${cfg.stock_excess_weeks}. Stock this large earns no points: the constraint is demand, not creative.`); }
   let sizeNote = null;
   if (sizes && sizes.available && sizes.level && sizes.level !== 'ok') {
     const cut = sizes.level === 'broken' ? 4 : 2; points = Math.max(0, points - cut);

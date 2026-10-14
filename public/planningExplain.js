@@ -59,11 +59,10 @@
     if (!known) return { known: false, count: null, instances: null, stalled: 0, starting: 0, pending, window: win, title: x.live_unknown ? `Delivery cannot be judged: the newest stored Meta delivery day is too old.` : 'Meta ad data is unavailable.' };
     const count = num(x.live_creatives) || 0; const instances = num(x.live_instances) || 0; const stalled = num(x.live_stalled) || 0; const starting = num(x.live_starting) || 0;
     const lines = [];
-    if (instances > count) lines.push(`${plural(instances, 'Meta ad')}`);
     if (stalled) lines.push(`+${stalled} not delivering`);
     if (starting) lines.push(`+${starting} just launched`);
     if (pending) lines.push(`+${pending} unreviewed`);
-    const title = `${plural(count, 'unique creative')} delivered in the last ${plural(win, 'day')}${instances > count ? `, running as ${plural(instances, 'Meta ad')} (duplicates are one creative)` : ''}.${stalled ? ` ${plural(stalled, 'more active creative')} ${stalled === 1 ? 'has' : 'have'} not delivered in that time.` : ''}${starting ? ` ${plural(starting, 'creative')} launched in the last 3 days and ${starting === 1 ? 'has' : 'have'} no data yet.` : ''}${pending ? ` ${plural(pending, 'active ad')} awaiting review in Ad Matching may belong to this product, so the count may be incomplete.` : ''}`;
+    const title = `${plural(count, 'unique creative')} delivered in the last ${plural(win, 'day')}.${stalled ? ` ${plural(stalled, 'more active creative')} ${stalled === 1 ? 'has' : 'have'} not delivered in that time.` : ''}${starting ? ` ${plural(starting, 'creative')} launched in the last 3 days and ${starting === 1 ? 'has' : 'have'} no data yet.` : ''}${pending ? ` ${plural(pending, 'active ad')} awaiting review in Ad Matching may belong to this product, so the count may be incomplete.` : ''}`;
     return { known: true, count, instances, stalled, starting, pending, window: win, lines, title };
   }
 
@@ -79,7 +78,7 @@
     if (c.insufficient_delivery) parts.push(`${c.insufficient_delivery} with insufficient delivery`);
     if (c.not_delivering) parts.push(`${c.not_delivering} active but not delivering`);
     const lv = liveAds(item);
-    const liveBit = lv.known ? ` (${lv.count} delivering now${lv.instances > lv.count ? `, running as ${plural(lv.instances, 'Meta ad')}` : ''})` : '';
+    const liveBit = lv.known ? ` (${lv.count} delivering now)` : '';
     return parts.length ? `${plural(num(x.unique_creatives), 'unique creative')}${liveBit}: ${parts.join(', ')}.` : null;
   }
 
@@ -266,8 +265,8 @@
       ['Available stock', v(x.stock_units, ' units')],
       ['Sales, last 7 days', v(x.units7)],
       ['Sales, last 30 days', v(x.units30)],
-      ['Stock coverage', num(x.cover_weeks) === null ? na : `${num(x.cover_weeks)} weeks`],
-      ['Live ads', (() => { const lv = liveAds(item); return lv.known ? `${lv.count} unique${lv.instances > lv.count ? ` (${plural(lv.instances, 'Meta ad')})` : ''}${lv.stalled ? `, ${lv.stalled} active not delivering` : ''}${lv.pending ? ` (+${lv.pending} awaiting review)` : ''}` : na; })()],
+      ['Stock coverage', num(x.cover_weeks) === null ? na : `${num(x.cover_weeks)} weeks${num(x.weekly_pace) !== null ? ` at ${num(x.weekly_pace)} units a week` : ''}`],
+      ['Live ads', (() => { const lv = liveAds(item); return lv.known ? `${lv.count} unique${lv.stalled ? `, ${lv.stalled} active but not delivering` : ''}${lv.pending ? ` (+${lv.pending} awaiting review)` : ''}` : na; })()],
       ['Active creative', creat(x.unique_creatives)],
       ['Effective creative', num(x.active_ads) === null ? na : fmt(num(x.performing) || 0)],
       ['New creative', num(x.active_ads) === null ? na : fmt(num(c.new !== undefined ? c.new : x.testing) || 0)],

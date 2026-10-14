@@ -275,9 +275,8 @@ function recommend({ concepts, items, inProduction = new Map(), cfg, rules }) {
 }
 
 // ── orchestration ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-// items: the Planning payload's product results; nothing is written; no Meta call is made.
-async function compute({ db, items = [], today, weekStart, cfg, benchmarks, nameCopies = null, categoryIndex = null }) {
-  const data = await loadAds({ db, today, cfg });
+// pure: loaded data + Planning items -> the page payload (nothing is read or written here)
+function assemble({ data, items = [], inProduction = new Map(), today, cfg, benchmarks, nameCopies = null, categoryIndex = null }) {
   const rules = benchmarks.rules; const coded = benchmarks.coded;
   const creatives = buildCreatives({ rows: data.rows, products: data.products, conceptNames: data.conceptNames, rules, coded, cfg, today, nameCopies, horizon: data.horizon, newest: data.newest });
   const catByCode = new Map(categoryIndex || []);
@@ -287,7 +286,6 @@ async function compute({ db, items = [], today, weekStart, cfg, benchmarks, name
   items.forEach((i) => (i.codes || []).forEach((c) => nameByCode.set(c, i.name)));
   const analysed = analyseConcepts({ creatives, rules, coded, cfg, today, categoryOf: (code) => catByCode.get(code) || null });
   analysed.concepts.forEach((c) => c.products.forEach((p) => { p.name = nameByCode.get(p.code) || p.code; }));
-  const inProduction = await loadInProduction({ db, weekStart, lookbackWeeks: cfg.pipeline_lookback_weeks });
   const sugg = recommend({ concepts: analysed.concepts, items, inProduction, cfg, rules });
   const concepts = analysed.concepts.map((c) => ({ ...c, suggestions: sugg.get(c.key) || [], suggestions_total: (sugg.get(c.key) || {}).total_eligible || (sugg.get(c.key) || []).length }));
   const C = opCfg.CONCEPT;
@@ -299,5 +297,11 @@ async function compute({ db, items = [], today, weekStart, cfg, benchmarks, name
     counts: { concepts: concepts.length, established: concepts.filter((c) => c.status === 'established').length, promising: concepts.filter((c) => c.status === 'promising').length, creatives: creatives.length },
   };
 }
+// items: the Planning payload's product results; nothing is written; no Meta call is made.
+async function compute({ db, items = [], today, weekStart, cfg, benchmarks, nameCopies = null, categoryIndex = null }) {
+  const data = await loadAds({ db, today, cfg });
+  const inProduction = await loadInProduction({ db, weekStart, lookbackWeeks: cfg.pipeline_lookback_weeks });
+  return assemble({ data, items, inProduction, today, cfg, benchmarks, nameCopies, categoryIndex });
+}
 
-module.exports = { STATUS_LABEL, loadAds, loadInProduction, buildCreatives, analyseConcepts, eligibility, testedBy, recommend, compute, hasBenchmark, funnelStatus };
+module.exports = { STATUS_LABEL, assemble, loadAds, loadInProduction, buildCreatives, analyseConcepts, eligibility, testedBy, recommend, compute, hasBenchmark, funnelStatus };

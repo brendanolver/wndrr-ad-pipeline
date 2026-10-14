@@ -75,6 +75,7 @@
       <div class="sidebar-subnav" id="sidebar-planning-subnav" style="display:none;" role="group" aria-label="Planning sections">
         <button type="button" class="sidebar-sub-pl" data-pl-nav="core">Core</button>
         <button type="button" class="sidebar-sub-pl" data-pl-nav="high-stocks">High Stocks</button>
+        <button type="button" class="sidebar-sub-pl" data-pl-nav="creative-insights">Creative Insights</button>
         <button type="button" class="sidebar-sub-pl" data-pl-nav="shoot-plan">Shoot Plan</button>
       </div>
 
@@ -467,10 +468,11 @@
           </div>
         </div>
 
-        <!-- Section navigation: the same three sections as the sidebar sub-menu, kept in step with it (plSyncChrome). -->
+        <!-- Section navigation: the same four sections as the sidebar sub-menu, kept in step with it (plSyncChrome). -->
         <div class="pl-topnav" id="planning-topnav" role="tablist" aria-label="Planning sections">
           <button type="button" class="pl-topnav-btn" data-pl-nav="core" role="tab">Core</button>
           <button type="button" class="pl-topnav-btn" data-pl-nav="high-stocks" role="tab">High Stocks</button>
+          <button type="button" class="pl-topnav-btn" data-pl-nav="creative-insights" role="tab">Creative Insights</button>
           <button type="button" class="pl-topnav-btn" data-pl-nav="shoot-plan" role="tab">Shoot Plan</button>
         </div>
 
@@ -509,6 +511,10 @@
 
         <div class="planning-step-panel" data-step="high-stocks" id="planning-step-high-stocks">
           <div id="high-stock-list" class="core-shoot-planning-list"></div>
+        </div>
+
+        <div class="planning-step-panel" data-step="creative-insights" id="planning-step-creative-insights">
+          <div id="creative-insights" class="creative-insights"></div>
         </div>
 
         <div class="planning-step-panel" data-step="shoot-plan" id="planning-step-shoot-plan">
@@ -2366,6 +2372,10 @@
         </select>
       </label>
       <div id="shoot-plan-recommendation" class="wp-modal-reco" style="display:none;"></div>
+      <label>Creative concept <span class="hint">(optional)</span>
+        <select id="shoot-plan-concept-type"></select>
+        <span class="hint">One concept covers every colourway ticked below; it is not a separate concept per colourway.</span>
+      </label>
       <label>Concepts to start for this product
         <input type="number" id="shoot-plan-videos" min="1" max="10" step="1" value="1" inputmode="numeric" aria-describedby="shoot-plan-videos-hint">
         <span class="hint" id="shoot-plan-videos-hint">Distinct creative ideas, not videos or products. A concept can later be adapted for other products and still counts once.</span>

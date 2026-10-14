@@ -4717,3 +4717,26 @@ body{background:var(--bg);color:var(--text);}
 .pl-how b{color:var(--text);}
 .pl-detail .pl-live{grid-column:1/-1;}
 .pl-live-table{width:100%;}
+
+/* ── Batch 30: quick Add column, Creative Insights ── */
+.pl-table .pt-w-add{width:7%;}
+.pl-table td.pt-add{text-align:right;white-space:nowrap;vertical-align:middle;}
+.pl-add-btn{white-space:nowrap;font-weight:600;}
+.pl-ins-note{margin:6px 0 10px;}
+.pl-ins-table .pt-w-ins-c{width:30%;}.pl-ins-table .pt-w-num{width:13%;}.pl-ins-table .pt-w-ins-p{width:22%;}.pl-ins-table .pt-w-ins-o{width:22%;}
+.pl-ins-st{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border-strong);color:var(--text);font-size:11px;font-weight:600;padding:1px 8px;border-radius:999px;}
+.pl-ins-st::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--border-strong);}
+.pl-ins-st[data-status="established"]::before{background:var(--green);}
+.pl-ins-st[data-status="promising"]::before{background:var(--amber);}
+.pl-ins-st[data-status="weak"]::before{background:var(--red);}
+.pl-ins-sub{display:block;margin-top:3px;font-size:11px;color:var(--text-muted);}
+.pl-ins-opp{font-size:13px;color:var(--text-secondary);}
+.pl-ins-opp b{color:var(--text);}
+.pl-ins-detail .pl-ins-suggest{grid-column:1 / -1;}
+.pl-ins-sugg{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;}
+.pl-ins-s{display:flex;align-items:flex-start;gap:12px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--surface);}
+.pl-ins-s-body{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:2px;font-size:13px;}
+.pl-ins-s-body small{font-size:11px;color:var(--text-muted);}
+.pl-ins-s-why{color:var(--text-secondary);line-height:1.4;}
+.pl-ins-caveat{color:#92400e;}
+.pl-ins-detail .pt-mini{width:100%;}

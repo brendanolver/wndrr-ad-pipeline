@@ -4872,7 +4872,7 @@ function renderPlanning() {
 // loaded by loadAll(). Upcoming Drops and Promotions used to be steps 3
 // and 4 here -- they're now their own sidebar tabs (#tab-drops /
 // #tab-promotions), so this workflow is Core/High Stocks/Shoot Plan only.
-const PLANNING_STEPS = ['core', 'high-stocks', 'shoot-plan'];
+const PLANNING_STEPS = ['core', 'high-stocks', 'creative-insights', 'shoot-plan'];
 // The three sections are chosen from the sidebar (Planning sub-menu, same pattern as Meta Performance); the URL hash mirrors the section (#planning/core,
 // #planning/high-stocks, #planning/shoot-plan) so Back/Forward and links work. A full page refresh still lands on the Dashboard (app-wide rule, see showApp).
 function setPlanningStep(key, { fromHash = false } = {}) {
@@ -4883,6 +4883,7 @@ function setPlanningStep(key, { fromHash = false } = {}) {
   const strip = document.getElementById('planning-production-header');
   if (strip) strip.style.display = key === 'shoot-plan' ? 'none' : '';
   if (!fromHash && document.getElementById('tab-planning').classList.contains('active') && window.location.hash !== `#planning/${key}`) window.location.hash = `#planning/${key}`;
+  if (key === 'creative-insights' && typeof plLoadInsights === 'function') plLoadInsights();
   if (typeof plSyncChrome === 'function') plSyncChrome();
 }
 
@@ -5239,7 +5240,7 @@ async function toggleWeeklyProgress(field) {
 // that still exist) -- their Mark as Reviewed buttons are still real,
 // relocated to #tab-drops/#tab-promotions, and still painted from here.
 const PLANNING_STEP_REVIEW_FIELD = { core: 'core_reviewed', 'high-stocks': 'high_stock_reviewed', drops: 'drops_reviewed', promotions: 'promotions_reviewed' };
-const PLANNING_STEP_LABELS = { weekly: 'Weekly Plan', core: '1 Core', 'high-stocks': '2 High Stocks', 'shoot-plan': '3 Shoot Plan' };
+const PLANNING_STEP_LABELS = { weekly: 'Weekly Plan', core: '1 Core', 'high-stocks': '2 High Stocks', 'creative-insights': 'Creative Insights', 'shoot-plan': '3 Shoot Plan' };
 const PLANNING_REVIEW_BTN_IDS = { core: 'core-review-btn', 'high-stocks': 'high-stocks-review-btn', drops: 'drops-review-btn', promotions: 'promotions-review-btn' };
 
 function renderPlanningStepNav() {
@@ -7363,6 +7364,15 @@ function openShootPlanModal(preset) {
     </div>`;
   }).join('');
 
+  // Batch 30: the creative concept (the reusable vocabulary); chosen from Creative Insights it arrives preselected. One concept covers every colourway ticked.
+  const ctSel = document.getElementById('shoot-plan-concept-type');
+  if (ctSel) {
+    const names = conceptTypesForFormat('video');
+    const wanted = preset.concept || '';
+    const list = wanted && !names.some((n) => n.toLowerCase() === wanted.toLowerCase()) ? [wanted, ...names] : names;
+    ctSel.innerHTML = `<option value="">Decide in Concept Development</option>${list.map((n) => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('')}`;
+    ctSel.value = wanted ? (list.find((n) => n.toLowerCase() === wanted.toLowerCase()) || '') : '';
+  }
   // Bring from Warehouse is the default -- most shoots need something
   // pulled, and defaulting here means the size fields the warehouse pull
   // list depends on are visible unless someone actively says otherwise.
@@ -7512,6 +7522,9 @@ async function saveShootPlanItem() {
     image_url: headerImage?.image_url || null,
     week_start: planningWeekStart(),
   };
+  const conceptSel = document.getElementById('shoot-plan-concept-type');
+  if (conceptSel && conceptSel.value) payload.concept_type = conceptSel.value;
+  if (shootPlanModalContext.additional) payload.additional = true; // another concept for a product already in this week's plan: added to it, never a duplicate
   if (typeof wpShootPayloadExtras === 'function') {
     const extras = wpShootPayloadExtras(shootPlanModalContext);
     if (extras.error) return toast(extras.error, true);
@@ -7521,7 +7534,8 @@ async function saveShootPlanItem() {
     const created = await api('/shoot-plan', { method: 'POST', body: JSON.stringify(payload) });
     const fromOpportunity = shootPlanModalContext.opportunity;
     closeModal('shoot-plan-modal');
-    toast(created && created.merged ? 'Merged into the existing Shoot Plan entry for this product' : 'Added to Shoot Plan');
+    toast(created && created.merged ? (shootPlanModalContext.additional ? 'Added another concept to this product in the Shoot Plan' : 'Merged into the existing Shoot Plan entry for this product') : 'Added to Shoot Plan');
+    if (state.insights) { state.insights.data = null; if (state.planningStep === 'creative-insights' && typeof plLoadInsights === 'function') plLoadInsights(); } // suggestions change once something is planned
     if (fromOpportunity) {
       // The person just confirmed the shoot from a recommendation -> record it as done (traceable via the note).
       try { await cpSetState(fromOpportunity.key, 'acted_on', 'Added to Shoot Plan', { priority: fromOpportunity.priority, severity: 0, headline: fromOpportunity.title, why: fromOpportunity.explanation }); } catch (err) { /* best effort */ }

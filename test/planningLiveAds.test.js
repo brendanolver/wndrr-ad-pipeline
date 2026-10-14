@@ -43,15 +43,16 @@ test('live ads: one creative duplicated across five campaigns is ONE live ad (fi
   assert.equal(it.facts.unique_creatives, 1, 'creative coverage uses the same identity');
   assert.equal(it.creatives.length, 1); assert.equal(it.creatives[0].ads, 5); assert.equal(it.creatives[0].name, 'Try-on video');
   const lv = E.liveAds(it);
-  assert.equal(lv.count, 1); assert.equal(lv.instances, 5); assert.ok(lv.lines.includes('5 Meta ads'));
-  assert.match(E.conditionsSummary(it) || '', /1 unique creative \(1 delivering now, running as 5 Meta ads\)/, 'the explanation quotes the same deduplicated identity');
+  assert.equal(lv.count, 1); assert.equal(lv.instances, 5, 'the instance count stays available for audit');
+  assert.ok(!/Meta ad/i.test(lv.lines.join(' ') + lv.title), 'Batch 30: the display never mentions Meta ad instances');
+  assert.match(E.conditionsSummary(it) || '', /1 unique creative \(1 delivering now\):/, 'the explanation quotes the same deduplicated identity, without instance counts');
   assert.equal(it.facts.top_creative_spend_share, 100, 'concentration sees one creative holding all the spend, not five');
 });
 
 test('live ads: three completely different creatives for one product are three live ads', async () => {
   const it = await evalWith([ad('a1'), ad('a2'), ad('a3')]);
   assert.equal(it.facts.live_creatives, 3); assert.equal(it.facts.live_instances, 3); assert.equal(it.facts.unique_creatives, 3);
-  assert.equal(E.liveAds(it).lines.length, 0, 'no duplicate note when every ad is its own creative');
+  assert.equal(E.liveAds(it).lines.length, 0, 'nothing but the number when every ad is its own creative');
 });
 
 test('live ads: the same concept with different executions is NOT merged (different creative ids stay separate)', async () => {
@@ -132,7 +133,8 @@ test('live ads: page wiring (column between Why and Stock on both pages, expande
   assert.ok(order.every((i, n) => i > -1 && (n === 0 || i > order[n - 1])), 'Live ads sits between Why it needs creative and Stock');
   assert.match(pl, /label: \(\) => 'Live ads'/);
   assert.match(pl, /plLiveAdsHtml\(it\)/, 'the expanded details list each distinct creative');
-  for (const h of ['Creative', 'Format', 'Funnel', 'Delivery', 'Performance', 'Meta ads']) assert.ok(pl.includes(`<th>${h}</th>`) || pl.includes(`<th class="num">${h}</th>`), `column ${h}`);
+  assert.ok(!pl.includes('<th class="num">Meta ads</th>'), 'no Meta-instance column in the expanded details');
+  for (const h of ['Creative', 'Format', 'Funnel', 'Delivery', 'Performance']) assert.ok(pl.includes(`<th>${h}</th>`) || pl.includes(`<th class="num">${h}</th>`), `column ${h}`);
   assert.ok(pl.includes('plPageHtml(\'core\')') && pl.includes("plPageHtml('high', tierNote)"), 'Core and High Stocks share one table');
   assert.ok(Object.keys(cfgLib.LABEL).includes('live_delivery_days'));
 });
