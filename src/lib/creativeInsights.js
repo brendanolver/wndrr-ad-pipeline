@@ -52,7 +52,8 @@ async function loadAds({ db, today, cfg }) {
   // every matched, product-specific, non-DPA ad in the window, whatever its status today (a paused ad that ran last month is evidence a concept worked)
   const cond = `m.match_status IN ('confirmed', 'auto_matched') AND NOT COALESCE(cl.excluded_from_intelligence, false) AND NOT COALESCE(cl.not_product_specific, false)
         AND NOT COALESCE((${dpaLib.dpaPredicate('m', 'c')}), false)
-        AND EXISTS (SELECT 1 FROM meta_ad_products p WHERE p.meta_ad_id = m.meta_ad_id AND p.product_code <> ALL($1::text[]))`;
+        AND EXISTS (SELECT 1 FROM meta_ad_products p WHERE p.meta_ad_id = m.meta_ad_id AND p.product_code <> ALL($1::text[]))
+        AND EXISTS (SELECT 1 FROM meta_ad_insights_daily x WHERE x.meta_ad_id = m.meta_ad_id AND x.insight_date BETWEEN $2::date AND $3::date AND (x.spend > 0 OR x.impressions > 0))`;
   const rows = (await db.query(perf.adRowsSql(cond), [[], from, end, recentFrom, priorFrom, priorTo, fatFrom, fatPriorFrom, fatPriorTo, joinFrom])).rows;
   const prod = await db.query('SELECT meta_ad_id, product_code, product_name FROM meta_ad_products WHERE meta_ad_id = ANY($1::text[])', [rows.map((r) => r.meta_ad_id)]);
   const concepts = await db.query('SELECT id, name FROM concept_types');
