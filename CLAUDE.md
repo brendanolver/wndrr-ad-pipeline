@@ -1,0 +1,6 @@
+# WNDRR Ad Pipeline: instructions for Claude Code
+
+* **Release workflow:** follow `docs/release-process.md` for every explicitly requested development task. In short: branch from `main`, implement, test (unit, browser, database), fix regressions, bump the version (`docs/versioning.md`), commit, fast-forward merge into `main`, push `main` (Railway deploys from `main` only), verify the deployment and health checks, report. Do not stop for a separate merge or deploy approval when every check passes; do stop and ask in the situations listed under "Stop and request approval" in that document. This is not permission for unrequested product changes or unrelated releases.
+* **Safety:** never force-push or rewrite history; never put secrets in the repository; use a local or isolated database for write tests; do not trigger Meta syncs or matching backlog jobs; do not modify production data.
+* **Versioning:** every merged change gets its own version through `npm run bump`; `version-history.json` is the source of truth.
+* **Planning intelligence:** see `docs/planning-intelligence.md` (engine) and `docs/planning-experience.md` (page). Recommendation calculations change only when a task explicitly asks for it.
