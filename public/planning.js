@@ -95,7 +95,7 @@ const plNone = '<span class="pt-na">&ndash;</span>';
 const plCfg = () => (state.opportunities && state.opportunities.config) || {};
 const plMin = () => plCfg().min_performing_creatives || 3;
 const plData = (mode) => (mode === 'core' ? state.opportunities.core : state.opportunities.high_stocks);
-const plMomentum = (mode) => PE.momentumItemsFor(mode, state.opportunities.momentum);
+const plMomentum = (mode) => PE.momentumItemsFor(mode, plData(mode), state.opportunities.momentum);
 
 // ── cells ──
 function plProductCell(it) {
@@ -253,7 +253,7 @@ function plFilterPanelHtml(mode, base) {
     <div class="pl-cats" role="tablist" aria-label="${PL_MODE_NAME[mode]} status">${tabs}</div>
     <div class="pl-fields">
       <label class="pl-f"><span>Opportunity</span><select data-opp-filter="${mode}:type"><option value="">All</option>${typeList.map((t) => `<option value="${plEsc(t)}"${fl.type === t ? ' selected' : ''}>${plEsc(t)}</option>`).join('')}</select></label>
-      <label class="pl-f"><span>Priority</span><select data-opp-filter="${mode}:priority"><option value="">All</option>${['High', 'Medium'].map((p) => `<option value="${p}"${fl.priority === p ? ' selected' : ''}>${p}</option>`).join('')}</select></label>
+      <label class="pl-f"><span>Priority</span><select data-opp-filter="${mode}:priority"><option value="">All</option>${['High', 'Medium', 'Low'].filter((p) => p !== 'Low' || plData(mode).items.some((i) => i.actionable && i.priority === 'Low')).map((p) => `<option value="${p}"${fl.priority === p ? ' selected' : ''}>${p}</option>`).join('')}</select></label>
       <input type="search" class="opp-search mp-search-box" data-opp-search="${mode}" placeholder="Search products" value="${plEsc(state.oppQuery[mode])}" aria-label="Search products">
       ${fl.priority || fl.type || state.oppSort[mode] || state.oppQuery[mode] ? `<button type="button" class="link-btn" data-opp-reset="${mode}">Clear</button>` : ''}
     </div></div>`;

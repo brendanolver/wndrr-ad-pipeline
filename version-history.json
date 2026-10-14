@@ -2,6 +2,18 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.1.7",
+      "date": "2026-10-14",
+      "title": "Planning experience redesign",
+      "changes": [
+        "Planning has its own sidebar sub-menu: Core, High Stocks and Shoot Plan",
+        "Core and High Stocks share one simpler page: four status groups, a five-column table and plain-English reasons",
+        "Expanded products show the recommendation, key facts, suggested direction and production activity, with detailed evidence kept behind one click",
+        "Production progress now lives on the Shoot Plan page",
+        "WNDRR favicon is served at /favicon.ico and the browser tab is titled WNDRR Creative"
+      ]
+    },
+    {
       "version": "1.1.6",
       "date": "2026-10-14",
       "title": "Planning intelligence and Meta lookup safety",

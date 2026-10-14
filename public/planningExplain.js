@@ -68,7 +68,7 @@
         const d = num(x.newest_creative_days);
         return `the active creative is old${d !== null ? ` (the newest launched ${plural(d, 'day')} ago)` : ''} with little delivery`;
       }
-      case 'thin': return `only ${num(x.performing) || 0} of the ${min} performing creatives we want are in place`;
+      case 'thin': return `only ${plural(num(x.performing) || 0, 'performing creative')} ${(num(x.performing) || 0) === 1 ? 'is' : 'are'} in place (${min} wanted)`;
       default: return null;
     }
   }
@@ -106,6 +106,8 @@
       case 'insufficient_data':
       case 'unavailable': {
         if (x.matching === 'uncertain') return `Creative coverage could not be confirmed: ${plural(num(x.matching_pending) || 0, 'active ad')} awaiting review in Ad Matching may belong to this product.`;
+        // most of its creatives have data but no approved benchmark applies to their funnel: the engine says so, so the sentence can too
+        if (num(x.unique_creatives) && (num(x.unrated) || 0) >= Math.ceil(num(x.unique_creatives) / 2)) return "We can't confidently assess this product's creative coverage yet: most of its creatives run in funnels with no approved benchmark, so they can't be called good or bad.";
         return "We can't confidently assess this product's creative coverage yet.";
       }
       case 'launch_unknown': return "We can't confirm this product's launch date yet, so no recommendation is made.";
@@ -202,11 +204,20 @@
     const list = (data && data.items) || [];
     const needs = list.filter((i) => categoryOf(i) === 'needs').length;
     const review = list.filter((i) => categoryOf(i) === 'insufficient').length;
-    const mom = momentumItemsFor(mode, momentum);
+    const mom = momentumItemsFor(mode, data, momentum);
     return { needs, protect: mom.filter((i) => i.actionable).length, review };
   }
-  // Protect Momentum is an opportunity type inside Core and High Stocks: official Core products on Core, everything else (labelled "Not Core") on High Stocks.
-  const momentumItemsFor = (mode, momentum) => ((momentum && momentum.items) || []).filter((i) => (mode === 'core' ? !!i.is_core : !i.is_core));
+  // Protect Momentum is an opportunity type inside Core and High Stocks, not a status or a page. The engine places an official Core product's Protect Momentum result in the
+  // Core list (it keeps its Core identity); a non-Core recent launch is placed in the separate momentum list. So: Core = Core-list items whose primary type is Protect Momentum;
+  // High Stocks = the non-Core recent launches (shown labelled "Not Core: recent launch").
+  const isMomentum = (i) => !!i && (i.mode === 'momentum' || i.opportunity_type === 'protect_momentum');
+  function momentumItemsFor(mode, data, momentum) {
+    const own = ((data && data.items) || []).filter(isMomentum);
+    const placed = ((momentum && momentum.items) || []).filter((i) => (mode === 'core' ? !!i.is_core : !i.is_core));
+    const seen = new Set(); const out = [];
+    own.concat(placed).forEach((i) => { if (!seen.has(i.key)) { seen.add(i.key); out.push(i); } });
+    return out;
+  }
 
   // Weekly strip: concepts planned against the target, kept distinct from products selected and from concepts carried over from earlier weeks
   function weeklySummary(progress, productsSelected, fallbackTarget) {

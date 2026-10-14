@@ -67,6 +67,16 @@ test('uncertain matching is never described as "no active creative": it says cov
   assert.equal(E.keyFacts(it).find(([k]) => k === 'Active creative')[1], '0 (+3 awaiting review)');
 });
 
+test('creatives with no approved benchmark are never called good or bad: coverage is "can\'t assess", and one performing creative among them is only "thin"', () => {
+  const un = ['a', 'b', 'c'].map((k, i) => cr(k, 'unrated', { age: 60 - i * 10, spend: 600, purchases: 8, concept: `C${i}` }));
+  const allUnrated = run(base({ sales: strong, coverage: cov({ active_ads: 3 }), creatives: un }));
+  assert.equal(allUnrated.status, 'insufficient_data');
+  assert.match(reason(allUnrated), /^We can't confidently assess this product's creative coverage yet: most of its creatives run in funnels with no approved benchmark/);
+  assert.doesNotMatch(reason(allUnrated), /underperform|over the approved/i);
+  const thin = run(base({ sales: strong, coverage: cov({ active_ads: 3 }), creatives: [...un.slice(0, 2), cr('p', 'performing', { age: 30, spend: 600, purchases: 12, concept: 'P' })] }));
+  assert.match(reason(thin), /only 1 performing creative is in place \(3 wanted\)/);
+});
+
 test('not-recommended reasons are real: out of season, weak demand, low stock', () => {
   const oos = run(base({ name: 'Heavy Hood Sweat', category: 'SWEATS', sales: strong, coverage: cov(), season: seasonOf('Heavy Hood Sweat', 'SWEATS') }));
   if (oos.status === 'out_of_season') assert.match(reason(oos), /^Out of season in Australia right now/);
@@ -81,11 +91,16 @@ test('protect momentum is an opportunity type inside Core / High Stocks, never a
     assert.equal(E.typeLabelOf(mom), 'Protect Momentum');
     assert.match(reason(mom), /^New launch \(14 days ago\), selling/);
   }
-  const data = { items: [] };
-  const momentum = { items: [{ is_core: true, actionable: true, status: 'act', mode: 'momentum' }, { is_core: false, actionable: true, status: 'act', mode: 'momentum' }, { is_core: false, actionable: false, status: 'weak_demand', mode: 'momentum' }] };
-  assert.equal(E.summaryCounts('core', data, momentum).protect, 1, 'Core shows only official Core launches');
-  assert.equal(E.summaryCounts('high', data, momentum).protect, 1, 'High Stocks shows the non-Core ones (labelled Not Core)');
-  assert.equal(E.momentumItemsFor('core', momentum).length, 1); assert.equal(E.momentumItemsFor('high', momentum).length, 2);
+  // placement as the engine does it (planningPrimary): an official Core product keeps its Core identity, so its Protect Momentum result lives in the CORE list; only non-Core recent launches go to the momentum list
+  const coreMom = run(base({ is_core: true, launch_age_days: 20, sales: salesOf(60, { units7: 20, units14: 36 }), coverage: cov() }), 'momentum');
+  assert.equal(E.typeLabelOf(coreMom), 'Protect Momentum');
+  const data = { items: [coreMom, { key: 'x', status: 'act', mode: 'core', opportunity_type: 'confirmed_gap', actionable: true }] };
+  const momentum = { items: [{ key: 'n1', is_core: false, actionable: true, status: 'act', mode: 'momentum' }, { key: 'n2', is_core: false, actionable: false, status: 'weak_demand', mode: 'momentum' }] };
+  assert.deepEqual(E.momentumItemsFor('core', data, momentum).map((i) => i.key), [coreMom.key], 'Core shows its official Core launches (from the Core list)');
+  assert.equal(E.summaryCounts('core', data, momentum).protect, 1);
+  assert.deepEqual(E.momentumItemsFor('high', { items: [] }, momentum).map((i) => i.key), ['n1', 'n2'], 'High Stocks shows the non-Core recent launches');
+  assert.equal(E.summaryCounts('high', { items: [] }, momentum).protect, 1, 'only actionable ones are counted as opportunities');
+  assert.equal(E.momentumItemsFor('core', { items: [] }, { items: [{ key: 'n1', is_core: false, mode: 'momentum' }] }).length, 0, 'a non-Core launch never appears on Core');
 });
 
 test('the top summary uses real counts and the weekly strip keeps products, concepts and carry-over apart', () => {
