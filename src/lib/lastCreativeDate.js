@@ -100,6 +100,9 @@ function summarizeProduct(creatives) {
   };
 }
 
+// whole days from the creative date to today (null when there is no date or no today)
+const withDaysSince = (sum, today) => ({ ...sum, days_since: sum.last_creative_uploaded_date && today ? Math.max(0, dayNo(today) - dayNo(sum.last_creative_uploaded_date)) : null });
+
 const likeEscape = (s) => String(s).replace(/[\\%_]/g, (m) => `\\${m}`);
 
 // → { byFamily: Map(familyKey -> summary), byAd: Map(meta_ad_id -> { date, reason, conflicts }) }
@@ -165,7 +168,7 @@ async function loadLastCreativeDates(families, { db, today = null } = {}) {
       list.push({ key: x.key, name: res.original_name || (x.ads[0] && x.ads[0].name) || null, date: res.date, reason: res.reason, conflicts: res.conflicts, created: earliest });
       x.ads.forEach((a) => { if (!byAd.has(a.id)) byAd.set(a.id, { date: res.date, reason: res.reason, conflicts: res.conflicts }); });
     });
-    byFamily.set(fk, summarizeProduct(list));
+    byFamily.set(fk, withDaysSince(summarizeProduct(list), today));
   });
   return { byFamily, byAd };
 }

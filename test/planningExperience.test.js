@@ -145,7 +145,7 @@ test('page wiring: sidebar sub-menu replaces the in-page step buttons; six defau
   assert.match(app, /window\.location\.hash = `#planning\/\$\{key\}`/, 'sections have deep links');
   assert.match(app, /hash === '#planning' \|\| hash\.startsWith\('#planning\/'\)/);
   assert.match(app, /#planning\/drop/, 'the pre-restructure #planning/drop links still redirect');
-  const head = pl.slice(pl.indexOf('function plTableHtml'), pl.indexOf('const limit = state.oppLimit'));
+  const head = pl.slice(pl.indexOf('function plTableHtml'), pl.indexOf('const PL_EMPTY'));
   const cols = [...head.matchAll(/th\('([^']+)'/g)].map((m) => m[1]);
   assert.deepEqual(cols, ['Product', 'Key metrics', 'Creative status', 'Priority', 'Action']);
   for (const gone of ['Sales 7d', 'Sales trend', 'Active creatives', 'Effective creatives', 'Last new creative', 'Opportunity type']) assert.ok(!head.includes(gone), `${gone} is not a default column`);

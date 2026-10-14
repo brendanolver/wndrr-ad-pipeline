@@ -176,7 +176,7 @@ test('wiring: Key metrics gain Last creative; the panel shows Last Creative Uplo
   const order = ['Sales 30D', 'Stock on hand', 'Live ads', 'Last creative'].map((k) => cell.indexOf(`<small>${k}`));
   assert.ok(order.every((i, n) => i > -1 && (n === 0 || i > order[n - 1])), 'Sales 30D, Stock on hand, Live ads, Last creative');
   assert.match(pl, /Last Creative Uploaded/); assert.match(pl, /<th>Creative date<\/th>/); assert.match(pl, /first delivery \$\{plEsc\(PE\.longDate\(c\.first_delivery\)\)\}/);
-  const head = pl.slice(pl.indexOf('function plTableHtml'), pl.indexOf('const limit = state.oppLimit'));
+  const head = pl.slice(pl.indexOf('function plTableHtml'), pl.indexOf('const PL_EMPTY'));
   assert.deepEqual([...head.matchAll(/th\('([^']+)'/g)].map((m) => m[1]), ['Product', 'Key metrics', 'Creative status', 'Priority', 'Action'], 'the table columns are unchanged');
   for (const f of ['planningOpportunities.js', 'planningPrimary.js', 'creativeRecency.js', 'planningDemand.js']) assert.doesNotMatch(fs.readFileSync(path.join(root, 'src', 'lib', f), 'utf8'), /last_creative|lastCreative/, `${f} does not read the date`);
   const ld = fs.readFileSync(path.join(root, 'src', 'lib', 'planningOpportunitiesLoader.js'), 'utf8');

@@ -2,6 +2,17 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.2.4",
+      "date": "2026-10-14",
+      "title": "Core planning simplified",
+      "changes": [
+        "Planning Core is now a prioritised task list: a card header with priority summary, filters and tabs, and a table of Sales (30D) with 7D trend, Stock with weeks of cover, Creative gap, Priority and Action",
+        "Expanded product is short: Upcoming Drops picture, one sentence on why, three figures, selectable colourways, one Add to Shoot Plan action and a View Meta Ads link where relevant",
+        "The recommendation accordions and technical evidence are no longer shown in Core (still calculated, still in High Stocks)",
+        "Presentation only: engine, benchmarks, matching and Shoot Plan writes are unchanged"
+      ]
+    },
+    {
       "version": "1.2.3",
       "date": "2026-10-14",
       "title": "Planning table refinement",

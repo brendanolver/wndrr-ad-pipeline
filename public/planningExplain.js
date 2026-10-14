@@ -237,13 +237,13 @@
     const note = 'The creative date written in the ad name (not a verified Meta upload date). Duplicates of the same creative count once, dated from the original ad.';
     if (!d) {
       const why = !lc ? 'Creative dates could not be loaded.' : lc.unavailable_reason === 'no_creative' ? 'No matched creative found for this product.' : 'None of the matched creatives has a valid date in its ad name.';
-      return { known: false, day: null, year: null, long: null, title: `Last creative: not available. ${why}`, caveat: why };
+      return { known: false, day: null, year: null, long: null, days: null, title: `Last creative: not available. ${why}`, caveat: why };
     }
     const bits = [];
     if (lc.possibly_newer_undated) bits.push(`${lc.creatives_undated === 1 ? 'A creative' : `${lc.creatives_undated} creatives`} without a valid name date may be newer.`);
     else if (lc.creatives_undated) bits.push(`${lc.creatives_undated} of ${lc.creatives_total} creatives have no usable name date.`);
     if (lc.has_conflicts) bits.push('Some copies carry a different date; the original ad\u2019s date is used.');
-    return { known: true, day: d.day, year: d.year, long: d.long, name: lc.creative_name || null, uncertain: !!lc.possibly_newer_undated, title: `Last creative: ${d.long}. ${note}${bits.length ? ` ${bits.join(' ')}` : ''}`, caveat: bits.join(' ') || null };
+    return { known: true, day: d.day, year: d.year, long: d.long, days: num(lc.days_since) === null ? null : Math.max(0, num(lc.days_since)), name: lc.creative_name || null, uncertain: !!lc.possibly_newer_undated, title: `Last creative: ${d.long}. ${note}${bits.length ? ` ${bits.join(' ')}` : ''}`, caveat: bits.join(' ') || null };
   }
   // one creative in the live-ads table: its original creative date, or why there is none
   function creativeDate(c) {
@@ -291,6 +291,49 @@
       }
     }
     return mk('Not Recommended', 'grey', reasonFor(item, cfg));
+  }
+
+  // Planning -> Core wording (Creative Gap column). The SAME engine result as creativeStatus; only the labels and the one sentence are phrased for the Core table.
+  function coreStatus(item, cfg = {}) {
+    const st = creativeStatus(item, cfg); const x = f(item);
+    const total = num(x.unique_creatives); const perf = num(x.performing) || 0;
+    if (st.label === 'No Active Ads Identified') {
+      const lead = item.mode === 'momentum' ? 'New launch' : x.demand_level === 'strong' ? 'Strong sales' : x.demand_level === 'steady' ? 'Steady sales' : 'Slow sales';
+      return { ...st, label: 'No Active Creative', text: `${lead}, but no ads currently running.` };
+    }
+    if (st.label === 'Underperforming Creative' && total !== null && total > 0) return { ...st, text: perf ? `Only ${perf} of ${total} creatives performing.` : `None of ${total} ${total === 1 ? 'creative is' : 'creatives are'} performing.` };
+    if (st.label === 'Early Testing') return { ...st, label: 'Creative in Testing' };
+    return st;
+  }
+  // "Why shoot this product?": ONE sentence, from the engine's own facts (nothing is recalculated). Needs: why it is worth shooting; Covered / Review: why not yet.
+  function whyShoot(item, cfg = {}) {
+    const x = f(item); const cat = categoryOf(item); const min = num(cfg.min_performing_creatives) || 3;
+    const total = num(x.unique_creatives); const perf = num(x.performing) || 0;
+    if (cat === 'needs') {
+      const type = (item.gap && item.gap.type) || item.opportunity_type;
+      const sales = item.mode === 'momentum' ? (x.demand_level === 'strong' ? 'Strong early sales since launch' : 'A recent launch') : x.demand_level === 'strong' ? 'Strong recent sales' : x.demand_level === 'steady' ? 'Steady sales' : 'Modest sales';
+      const stock = x.stock_band === 'healthy' ? 'healthy stock levels' : (x.stock_band === 'slow' || x.stock_band === 'excess') ? 'plenty of stock' : x.stock_band === 'short' ? 'limited stock cover' : null;
+      const head = `${sales}${stock ? ` and ${stock}` : ''}`;
+      let gap;
+      switch (type) {
+        case 'confirmed_gap': case 'creative_gap': gap = 'but no ads are currently running'; break;
+        case 'underperforming': gap = total !== null && total > 1 ? (perf ? `but only ${perf} of ${total} active creatives are performing against the approved CPA limit` : `but none of the ${total} active creatives is performing against the approved CPA limit`) : 'but the active creative is not performing against the approved CPA limit'; break;
+        case 'fatigue': gap = 'but the active creative is showing signs of fatigue'; break;
+        case 'concentration': { const sh = num(x.top_creative_spend_share); gap = sh !== null ? `but ${Math.round(sh)}% of ad spend sits on one creative` : 'but almost all ad spend sits on one creative'; break; }
+        case 'diversity': gap = `but live creatives share only ${plural(num(x.distinct_concepts) || 1, 'concept')}`; break;
+        case 'stale': gap = 'but the existing creative is old with little delivery'; break;
+        case 'thin': { const inPlay = num(x.creatives_in_play); gap = (item.gap && item.gap.single) || (inPlay !== null && inPlay <= 1) ? 'but it depends on a single creative' : `but only ${inPlay === null ? 'a few' : inPlay} creatives are in play (${min} wanted)`; break; }
+        default: gap = 'but it needs more effective creative';
+      }
+      return `${head}, ${gap}.`;
+    }
+    const st = creativeStatus(item, cfg);
+    if (cat === 'covered') {
+      if (item.status === 'in_production') return 'A concept is already progressing through the Shoot Plan, so no new creative is needed yet.';
+      if (item.status === 'testing') return st.text;
+      return perf >= min ? `${plural(perf, 'effective creative')} currently running, so no new creative is needed.` : st.text;
+    }
+    return st.text;
   }
 
   // Why a product cannot be shot now (stock): for already-planned work this is a WARNING, never a removal.
@@ -423,5 +466,5 @@
   };
   const typeLabelOf = (item) => (item.mode === 'momentum' || item.opportunity_type === 'protect_momentum' ? 'Protect Momentum' : TYPE_LABEL[(item.gap && item.gap.type) || item.opportunity_type] || null);
 
-  return { creativeStatus, salesTrend, lastCreative, creativeDate, liveAds, CATEGORY, CATEGORY_ORDER, STATUS_CATEGORY, categoryOf, isVisible, longDate, startedPhrase, conditionsSummary, stockRestriction, sellingClause, creativeClause, reasonFor, whyWithNumbers, recommendationFor, directionFor, keyFacts, stockWarning, productionActivity, summaryCounts, momentumItemsFor, weeklySummary, TYPE_LABEL, typeLabelOf };
+  return { creativeStatus, coreStatus, whyShoot, salesTrend, lastCreative, creativeDate, liveAds, CATEGORY, CATEGORY_ORDER, STATUS_CATEGORY, categoryOf, isVisible, longDate, startedPhrase, conditionsSummary, stockRestriction, sellingClause, creativeClause, reasonFor, whyWithNumbers, recommendationFor, directionFor, keyFacts, stockWarning, productionActivity, summaryCounts, momentumItemsFor, weeklySummary, TYPE_LABEL, typeLabelOf };
 }));
