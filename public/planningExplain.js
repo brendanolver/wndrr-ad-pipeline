@@ -200,6 +200,55 @@
     }
   }
 
+  // CREATIVE STATUS (Batch 32): a short label, a tone and ONE supporting sentence for the main table. Everything comes from the engine's own result (status, gap type, review reason, facts):
+  // nothing is classified here. red = creative attention needed, amber = monitoring / early testing / thin coverage, green = performing or adequately covered, grey = not enough information.
+  function sellWord(item) {
+    const x = f(item); const lead = item.mode === 'momentum' ? 'New launch, ' : '';
+    const w = x.demand_level === 'strong' ? 'selling strongly' : x.demand_level === 'steady' ? 'consistent sales' : 'selling slowly';
+    const s = `${lead}${w}`; return s.charAt(0).toUpperCase() + s.slice(1);
+  }
+  function creativeStatus(item, cfg = {}) {
+    const x = f(item); const cat = categoryOf(item);
+    const min = num(cfg.min_performing_creatives) || 3;
+    const n = num(x.unique_creatives) || 0; const perf = num(x.performing) || 0; const weak = num(x.weak) || 0;
+    const mk = (label, tone, text) => ({ label, tone, text });
+    if (cat === 'needs') {
+      const gap = item.gap || {}; const type = gap.type || item.opportunity_type;
+      switch (type) {
+        case 'confirmed_gap': case 'creative_gap': return mk('No Active Ads Identified', 'red', `${sellWord(item)}, but no active ads found.`);
+        case 'underperforming': return mk('Underperforming Creative', 'red', `${plural(weak, 'creative')} above the approved CPA limit.${perf ? ` Only ${perf} performing.` : ' None performing.'}`);
+        case 'fatigue': return mk('Creative Fatigue', 'red', `${plural(num(x.declining) || 1, 'creative')} showing fatigue.${perf ? ` Only ${perf} performing.` : ''}`);
+        case 'concentration': { const sh = num(x.top_creative_spend_share); return mk('Concentrated Delivery', 'amber', sh !== null ? `${Math.round(sh)}% of ad spend is on one creative.` : 'Almost all ad spend is on one creative.'); }
+        case 'diversity': return mk('Low Concept Variety', 'amber', `Live creatives share only ${plural(num(x.distinct_concepts) || 1, 'concept')}.`);
+        case 'stale': return mk('Old Creative', 'amber', 'Existing creative is old with little delivery.');
+        case 'thin': { const inPlay = num(x.creatives_in_play); return (gap.single || (inPlay !== null && inPlay <= 1)) ? mk('Low Creative Coverage', 'amber', 'Depends on a single creative. Opportunity to test more.') : mk('Low Creative Coverage', 'amber', `Only ${inPlay === null ? perf : inPlay} creatives in play (${min} wanted).`); }
+        default: return mk('Creative Needed', 'amber', reasonFor(item, cfg));
+      }
+    }
+    if (cat === 'covered') {
+      if (item.status === 'in_production') return mk('In Production', 'amber', 'A concept is already progressing through the Shoot Plan.');
+      if (item.status === 'testing') {
+        const nw = (x.creative_conditions && x.creative_conditions.new) || num(x.testing) || 0;
+        return nw > 0 ? mk('Early Testing', 'amber', `${nw === 1 ? 'A new creative was' : `${nw} new creatives were`} recently launched. Awaiting sufficient delivery.`) : mk('Early Testing', 'amber', 'A recently uploaded concept has no Meta delivery yet.');
+      }
+      if (item.status === 'momentum_ok') return mk('Sales Holding Up', 'green', 'Sales have held up since launch.');
+      if (perf >= min) return mk('Performing Well', 'green', `${plural(perf, 'effective creative')} currently running.`);
+      return mk('Adequately Covered', 'green', perf ? `${perf === 1 ? 'One creative is' : `${perf} creatives are`} performing; others are still being assessed.` : 'Nothing is clearly failing; newer creative is still being assessed.');
+    }
+    if (cat === 'review') {
+      switch (item.review_reason) {
+        case 'uncertain_matching': return mk('Matching Uncertain', 'grey', `${plural(num(x.matching_pending) || 0, 'active ad')} awaiting review may belong to this product.`);
+        case 'unidentified_ads': return mk('Ads Not Identified', 'grey', "Some Meta ads couldn't be identified, so coverage can't be confirmed.");
+        case 'missing_benchmark': return mk('Benchmark Missing', 'grey', `No approved ${(x.unrated_funnels || []).join(' / ') || 'funnel'} benchmark is available.`);
+        case 'insufficient_delivery': return mk('Insufficient Delivery', 'grey', 'The current ads have not spent enough to assess.');
+        case 'not_delivering': return mk('Not Delivering', 'grey', 'Active ads are not delivering, so there is nothing to assess.');
+        case 'no_meta_data': return mk('Meta Data Unavailable', 'grey', 'Creative coverage could not be checked.');
+        default: return mk('Insufficient Data', 'grey', 'Not enough delivery to confidently assess performance.');
+      }
+    }
+    return mk('Not Recommended', 'grey', reasonFor(item, cfg));
+  }
+
   // Why a product cannot be shot now (stock): for already-planned work this is a WARNING, never a removal.
   function stockRestriction(item) {
     const x = f(item);
@@ -330,5 +379,5 @@
   };
   const typeLabelOf = (item) => (item.mode === 'momentum' || item.opportunity_type === 'protect_momentum' ? 'Protect Momentum' : TYPE_LABEL[(item.gap && item.gap.type) || item.opportunity_type] || null);
 
-  return { liveAds, CATEGORY, CATEGORY_ORDER, STATUS_CATEGORY, categoryOf, isVisible, longDate, startedPhrase, conditionsSummary, stockRestriction, sellingClause, creativeClause, reasonFor, whyWithNumbers, recommendationFor, directionFor, keyFacts, stockWarning, productionActivity, summaryCounts, momentumItemsFor, weeklySummary, TYPE_LABEL, typeLabelOf };
+  return { creativeStatus, liveAds, CATEGORY, CATEGORY_ORDER, STATUS_CATEGORY, categoryOf, isVisible, longDate, startedPhrase, conditionsSummary, stockRestriction, sellingClause, creativeClause, reasonFor, whyWithNumbers, recommendationFor, directionFor, keyFacts, stockWarning, productionActivity, summaryCounts, momentumItemsFor, weeklySummary, TYPE_LABEL, typeLabelOf };
 }));
