@@ -48,6 +48,15 @@ Presentation only. The engine, Meta matching, classifications, benchmarks, scori
 * **Weekly strip**: concepts planned / target, remaining, products selected, carried over, `View Shoot Plan`, and a thin "Weekly creative goal" progress bar.
 * **Expanded panel**: A) large thumbnail, name, priority, recommendation headline + one explanation, Add action; B) three metric cards; C) compact colourway grid (available vs unavailable, stock, sizes, shootable; selection rules unchanged); D) three collapsibles: Why was this product recommended? / Recent live ads / Additional details. All previous evidence is kept inside them.
 
+## Table refinement: 7-day sales trend and calmer rows
+
+Visual only (`public/planning.js` `plMetricsCell`, `PlanningExplain.salesTrend`, CSS). The engine, priority and status are untouched, and the trend never feeds them.
+
+* **Rows** are white (open or closed), with grey dividers and a very light grey hover. No coloured left borders and no ranking backgrounds.
+* **Key metrics** are flat (no boxes) and read across the row: Sales 30D with its 7D trend underneath, Stock on hand, Live ads, Last creative.
+* **7D trend** = (last 7 days - previous 7 days) / previous 7 days x 100, with previous 7 days = last 14 days - last 7 days, from `facts.units7` and `facts.units14` (the sales already loaded; nothing is estimated). Green `up 12%`, red `down 24%`, grey `0%` when unchanged (rounded), `New` when the product has been on sale under 14 days or sold nothing in the previous 7 days, `No comparison` when the 14-day figure is missing or the windows do not reconcile. Both windows include today's part-day; the tooltip shows the two unit counts. This is a display figure and is separate from the engine's own demand trend.
+* **Colour** is used only for the trend, the Creative status badge, the priority dot and the purple primary action. The "In Shoot Plan" state is a plain white button.
+
 ## Last Creative Uploaded (Core and High Stocks)
 
 Read-only display data (`src/lib/lastCreativeDate.js`, attached to the finished items in `planningOpportunitiesLoader.js`). It never feeds the engine, so no recommendation, status, priority or count depends on it.

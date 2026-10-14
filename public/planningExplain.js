@@ -207,6 +207,23 @@
     const w = x.demand_level === 'strong' ? 'selling strongly' : x.demand_level === 'steady' ? 'consistent sales' : 'selling slowly';
     const s = `${lead}${w}`; return s.charAt(0).toUpperCase() + s.slice(1);
   }
+  // The 7-day sales trend shown under Sales 30D: the last 7 days against the 7 days before them, from the sales the page already has (facts.units7 = last 7 days, facts.units14 = last 14 days).
+  // Display only: the engine has its own, separate demand trend. Nothing is invented: too little history, or no sales to compare with, is said plainly.
+  //   kind: up | down | flat | new | none     pct: the rounded % change (null for new / none)
+  function salesTrend(item) {
+    const x = f(item); const l7 = num(x.units7); const l14 = num(x.units14); const live = num(x.days_on_sale);
+    const none = (why) => ({ kind: 'none', pct: null, arrow: '', text: 'No comparison', title: `No 7-day comparison: ${why}` });
+    if (l7 === null || l14 === null) return none('the last 14 days of sales are not available.');
+    const p7 = l14 - l7;
+    if (p7 < 0) return none('the sales windows do not reconcile.');
+    const window = `Last 7 days: ${plural(l7, 'unit')}. Previous 7 days: ${plural(p7, 'unit')}. Both windows include today\u2019s part-day.`;
+    if (live !== null && live < 14) return { kind: 'new', pct: null, arrow: '', text: 'New', title: `New: on sale for ${plural(live, 'day')}, so there are not two full weeks to compare. ${window}` };
+    if (p7 === 0) return l7 === 0 ? { kind: 'flat', pct: 0, arrow: '\u2192', text: '0%', title: `No sales in either week. ${window}` } : { kind: 'new', pct: null, arrow: '', text: 'New', title: `No sales in the previous 7 days, so a percentage cannot be calculated. ${window}` };
+    const pct = Math.round(((l7 - p7) / p7) * 100);
+    const kind = pct > 0 ? 'up' : pct < 0 ? 'down' : 'flat';
+    return { kind, pct, arrow: kind === 'up' ? '\u2191' : kind === 'down' ? '\u2193' : '\u2192', text: `${Math.abs(pct)}%`, title: `${pct > 0 ? '+' : ''}${pct}% (last 7 days vs the 7 days before). ${window}` };
+  }
+
   // "Last Creative Uploaded": the creative date written in the ad names of the product's unique creatives (NOT a verified Meta upload event). Display only.
   const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const DATE_REASON = {
@@ -406,5 +423,5 @@
   };
   const typeLabelOf = (item) => (item.mode === 'momentum' || item.opportunity_type === 'protect_momentum' ? 'Protect Momentum' : TYPE_LABEL[(item.gap && item.gap.type) || item.opportunity_type] || null);
 
-  return { creativeStatus, lastCreative, creativeDate, liveAds, CATEGORY, CATEGORY_ORDER, STATUS_CATEGORY, categoryOf, isVisible, longDate, startedPhrase, conditionsSummary, stockRestriction, sellingClause, creativeClause, reasonFor, whyWithNumbers, recommendationFor, directionFor, keyFacts, stockWarning, productionActivity, summaryCounts, momentumItemsFor, weeklySummary, TYPE_LABEL, typeLabelOf };
+  return { creativeStatus, salesTrend, lastCreative, creativeDate, liveAds, CATEGORY, CATEGORY_ORDER, STATUS_CATEGORY, categoryOf, isVisible, longDate, startedPhrase, conditionsSummary, stockRestriction, sellingClause, creativeClause, reasonFor, whyWithNumbers, recommendationFor, directionFor, keyFacts, stockWarning, productionActivity, summaryCounts, momentumItemsFor, weeklySummary, TYPE_LABEL, typeLabelOf };
 }));

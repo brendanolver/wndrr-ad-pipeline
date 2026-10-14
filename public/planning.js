@@ -113,14 +113,16 @@ function plProductCell(it, mode) {
   return `<td class="pt-product"><div class="pt-pwrap"><span class="pt-chev" aria-hidden="true"></span><span class="pt-thumb">${plThumb(it.image_url)}</span><span class="pt-name"><b>${plEsc(it.name)}</b><small>${plEsc(it.category || '')}</small>${notCore}${inProd}</span></div></td>`;
 }
 function plMetricsCell(it) {
-  const f = it.facts || {}; const lv = PE.liveAds(it); const lc = PE.lastCreative(it);
+  const f = it.facts || {}; const lv = PE.liveAds(it); const lc = PE.lastCreative(it); const tr = PE.salesTrend(it);
   const sales = f.units30 === null || f.units30 === undefined ? plNone : `<b>${plNum(f.units30)}</b>`;
   const partial = f.demand_basis === 'since_launch' && f.days_on_sale ? `<em>${f.days_on_sale}d on sale</em>` : '';
   const stock = f.stock_units === null || f.stock_units === undefined ? plNone : `<b>${plNum(f.stock_units)}</b>`;
   const warn = PE.stockWarning(it);
   const live = lv.known ? `<b>${plNum(lv.count)}</b>` : plNone;
+  // colour is only for the trend: green rising, red falling, grey otherwise
+  const trend = `<span class="pl-trend" data-trend="${tr.kind}" title="${plEsc(tr.title)}">${tr.arrow ? `<i aria-hidden="true">${tr.arrow}</i> ` : ''}${plEsc(tr.text)}${tr.kind === 'up' || tr.kind === 'down' || tr.pct === 0 ? ' <span class="pl-trend-k">7D trend</span>' : ''}</span>`;
   return `<td class="pt-metrics"><div class="pl-metrics">
-    <span class="pl-m" title="${plEsc(((it.demand && it.demand.evidence) || []).join(' '))}">${sales}<small>Sales 30D${partial ? ` ${partial}` : ''}</small></span>
+    <span class="pl-m pt-sales" title="${plEsc(((it.demand && it.demand.evidence) || []).join(' '))}">${sales}<small>Sales 30D${partial ? ` ${partial}` : ''}</small>${trend}</span>
     <span class="pl-m" title="${plEsc(it.stock && it.stock.notes ? it.stock.notes.join(' ') : 'Available sellable stock')}">${stock}<small>Stock on hand${warn ? ` <em class="pt-warn">${plEsc(warn)}</em>` : ''}</small></span>
     <span class="pl-m pt-live" title="${plEsc(lv.title)}">${live}<small>Live ads</small></span>
     <span class="pl-m pt-last" title="${plEsc(lc.title)}">${lc.known ? `<b>${plEsc(lc.day)}</b><em class="pl-m-year">${plEsc(lc.year)}</em>` : plNone}<small>Last creative${lc.uncertain ? ' <em class="pt-warn" aria-label="A creative without a valid date may be newer">?</em>' : ''}</small></span></div></td>`;

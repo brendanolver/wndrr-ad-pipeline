@@ -2,6 +2,17 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.2.3",
+      "date": "2026-10-14",
+      "title": "Planning table refinement",
+      "changes": [
+        "Sales 30D now shows a 7-day sales trend underneath (last 7 days vs the previous 7 days, from existing sales data)",
+        "Key metrics are flat and read across the row; rows are white with grey dividers and a light grey hover",
+        "Colour is limited to the trend, Creative status, priority dot and the primary action",
+        "Display only: recommendations, priority, creative status, filters, sorting and Shoot Plan are unchanged"
+      ]
+    },
+    {
       "version": "1.2.2",
       "date": "2026-10-14",
       "title": "Last Creative Uploaded",
