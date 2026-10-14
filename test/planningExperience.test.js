@@ -136,7 +136,7 @@ test('no product name or hardcoded recommendation text lives in the wording modu
   assert.doesNotMatch(src, /fetch\(|XMLHttpRequest|api\(/, 'pure: it never reads or writes anything');
 });
 
-test('page wiring: sidebar sub-menu replaces the in-page step buttons; five default columns; shared Core / High Stocks interface', () => {
+test('page wiring: sidebar sub-menu replaces the in-page step buttons; six default columns; shared Core / High Stocks interface', () => {
   const html = pub('index.html'); const app = pub('app.js'); const pl = pub('planning.js');
   for (const sec of ['core', 'high-stocks', 'shoot-plan']) assert.match(html, new RegExp(`data-pl-nav="${sec}"`));
   assert.doesNotMatch(html, /planning-step-btn|planning-steps"|id="planning-shoot-summary"|id="planning-shoot-plan-summary-block"/);
@@ -144,7 +144,7 @@ test('page wiring: sidebar sub-menu replaces the in-page step buttons; five defa
   assert.match(app, /hash === '#planning' \|\| hash\.startsWith\('#planning\/'\)/);
   assert.match(app, /#planning\/drop/, 'the pre-restructure #planning/drop links still redirect');
   const cols = [...pl.slice(pl.indexOf('const PL_COLS = [')).split('];')[0].matchAll(/label: \([a-z]*\) => (?:\(cat === 'needs' \? '([^']+)' : '[^']+'\)|'([^']+)')/g)].map((m) => m[1] || m[2]);
-  assert.deepEqual(cols, ['Product', 'Why it needs creative', 'Stock', 'Sales 30d', 'Priority']);
+  assert.deepEqual(cols, ['Product', 'Why it needs creative', 'Live ads', 'Stock', 'Sales 30d', 'Priority']);
   for (const gone of ['Sales 7d', 'Sales trend', 'Active creatives', 'Effective creatives', 'Last new creative', 'Opportunity type']) assert.ok(!pl.slice(pl.indexOf('const PL_COLS = [')).split('];')[0].includes(gone), `${gone} is not a default column`);
   assert.match(pl, /plPageHtml\('core'\)/); assert.match(pl, /plPageHtml\('high', tierNote\)/, 'Core and High Stocks render through the same function');
   assert.match(pl, /View detailed evidence/); assert.match(pl, /Add to Shoot Plan/); assert.match(pl, /Existing production activity/); assert.match(pl, /Suggested creative direction/);

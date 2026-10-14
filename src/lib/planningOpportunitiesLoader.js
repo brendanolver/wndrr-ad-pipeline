@@ -189,7 +189,7 @@ async function computeOpportunities({ now = new Date(), deps = {} } = {}) {
       key: f.key, name: f.name, category: f.category, codes: f.codes, style_codes: f.style_codes, is_core: f.is_core, image_url: pickImage(r.colourways),
       launch: r.launch, launch_age_days: r.launch_age_days, launch_date: r.launch_date, stock: r.stock, sales: r.sales, data_quality: r.quality, tier: r.tier, tierState,
       coverage: cov ? { known: true, active_ads: active, possible, unresolved: cov.unresolved_identities || 0, unresolved_share_pct: cov.unresolved_share_pct === undefined ? null : cov.unresolved_share_pct, uncertain: !!(cls && cls.state === 'uncertain'), min: settings.min_active_ads } : { known: false, min: settings.min_active_ads },
-      creatives: ev.creatives || [], history: h, pipeline: pipeFor(f), seasonData: g ? g.status : (ctx.seasonality && ctx.seasonality.available ? 'insufficient_data' : null), seasonEvidence: g && g.evidence ? g.evidence : null,
+      creatives: ev.creatives || [], insights_last_day: ev.insights_last_day || null, history: h, pipeline: pipeFor(f), seasonData: g ? g.status : (ctx.seasonality && ctx.seasonality.available ? 'insufficient_data' : null), seasonEvidence: g && g.evidence ? g.evidence : null,
     };
   };
 
@@ -239,12 +239,12 @@ async function computeOpportunities({ now = new Date(), deps = {} } = {}) {
   const unknown = rows.filter((r) => r.launch.status === 'unknown');
   const relevantUnknown = unknown.filter((r) => (r.stock.known && r.stock.units > 0) || num(r.sales.units30) > 0 || (r.stock.on_order || 0) > 0);
   const byBasis = {}; unknown.forEach((r) => { byBasis[r.launch.basis] = (byBasis[r.launch.basis] || 0) + 1; });
-  const unlaunched = rows.filter((r) => r.launch.status === 'unlaunched' && r.stock.known && r.stock.units > 0);
+  const unlaunched = rows.filter((r) => r.launch.status === 'unlaunched' && r.stock.known && (r.stock.total_units || 0) > 0);
   const launchReview = {
     total_unknown: unknown.length, relevant_count: relevantUnknown.length, historical_count: unknown.length - relevantUnknown.length, by_basis: byBasis,
     relevant: relevantUnknown.sort((a, b) => b.stock.units - a.stock.units).slice(0, 50).map((r) => ({ key: r.f.key, name: r.f.name, product_code: r.f.codes[0], image_url: pickImage(r.colourways), soh_total: r.stock.units, units_30d: Math.round(num(r.sales.units30)), basis: r.launch.basis, detail: r.launch.detail, evidence: (r.launch.by_style[0] && r.launch.by_style[0].evidence) || [] })),
     excluded_unlaunched_count: unlaunched.length,
-    excluded_unlaunched: unlaunched.sort((a, b) => b.stock.units - a.stock.units).slice(0, 40).map((r) => ({ key: r.f.key, name: r.f.name, detail: r.launch.detail, in_upcoming_drop: r.launch.in_upcoming_drop, soh_total: r.stock.units })),
+    excluded_unlaunched: unlaunched.sort((a, b) => b.stock.total_units - a.stock.total_units).slice(0, 40).map((r) => ({ key: r.f.key, name: r.f.name, detail: r.launch.detail, in_upcoming_drop: r.launch.in_upcoming_drop, soh_total: r.stock.total_units })),
     note: unknown.length > relevantUnknown.length ? `${unknown.length - relevantUnknown.length} products with no readable launch date have no stock, no open order and no sales in the last 30 days: they are historical catalogue entries and are not asked of the team.` : null,
   };
 

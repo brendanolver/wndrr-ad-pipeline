@@ -57,3 +57,15 @@ The expanded product lists each colourway with thumbnail, available units, size 
 1. Is 20 units in 30 days the right "steady" line for a Core product that is not Platinum / Rocket?
 2. Should the runway minimum (4 weeks) be longer than the existing default for immediate shoots? (Left unchanged: not invented.) `creative_lead_time_days` (off) can add the measured production lead time.
 3. Should a colourway need more than the product-level 40 units to be shot? (Today the same 40 applies.)
+
+## Live Ads column (restored, Core and High Stocks)
+
+The Batch 28 table dropped the "Active creatives" column; Batch 29 restores it as **Live ads**, between *Why it needs creative* and *Stock* on both pages.
+
+* **What is counted: unique creatives, never Meta ad ids.** Identity is the existing one (`productAdPerformance.creativeGroupKey`): an identical Meta creative id, or a "- Copy" of an ad by name (Batch 10 rule). One video running in five campaigns is **1** live ad (shown as `1` with a quiet `5 Meta ads` note). Three different videos, or a video and a static image, are separate creatives. A shared concept, creator or product never merges executions (diversity still counts concepts separately).
+* **Live = ACTIVE in Meta AND delivered (spend or impressions) on a stored day within `live_delivery_days`** (Settings > Planning > Performance evidence, default 7, range 1-30). Only active, confirmed or auto-matched ads are read (DPAs excluded), so "previously active" means *active in Meta but no longer delivering*.
+* **Other states, told apart in the detail table:** *Active, not delivering* (delivered before, not within the window), *Active, no delivery recorded*, *Just launched, no data yet* (created in the last 3 days; listed, not counted), *Delivery unknown*.
+* **No invented counts.** If the newest stored Meta delivery day is more than 3 days old, delivery cannot be judged: the column shows a dash with the reason. Ads awaiting review in Ad Matching that may belong to the product are shown as `+N unreviewed` and never added to the count.
+* **One identity everywhere.** The Live Ads count, creative coverage, concentration, diversity, the "Creative picture" sentence and Key facts all read the same de-duplicated list (`creativeRecency.summarize`).
+* **Expanded details:** a "Live ads" table, one row per distinct creative: name, format, funnel, delivery status (with last delivery date), performance (condition, spend, CPA where available) and the number of Meta ad instances. Column sorting by Live ads is available.
+* Tests: `test/planningLiveAds.test.js` (duplicate across campaigns, different creatives, same concept different executions, name copies, video + static, active without recent delivery, stale insights, uncertain matches, window setting, page wiring), run through the real grouping code over a stubbed database.

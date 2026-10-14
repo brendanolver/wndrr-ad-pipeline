@@ -210,8 +210,8 @@ async function loadProductAdPerformance(families, { db, rules, coded, config = D
     [codes, from, end, recentFrom, priorFrom, priorTo, fatFrom, fatPriorFrom, fatPriorTo, joinFrom])).rows;
 
   // The earliest day with any stored delivery for ANY ad. A first-delivery date on that day may only be where the stored history begins, so it is never trusted to mean "just started".
-  let horizon = null;
-  try { horizon = ((await db.query("SELECT to_char(MIN(insight_date), 'YYYY-MM-DD') AS d FROM meta_ad_insights_daily")).rows[0] || {}).d || null; } catch (e) { horizon = null; }
+  let horizon = null; let newestDay = null;
+  try { const h = (await db.query("SELECT to_char(MIN(insight_date), 'YYYY-MM-DD') AS d, to_char(MAX(insight_date), 'YYYY-MM-DD') AS n FROM meta_ad_insights_daily")).rows[0] || {}; horizon = h.d || null; newestDay = h.n || null; } catch (e) { horizon = null; newestDay = null; }
   const per = new Map(); // familyKey -> Map(groupKey -> pooled)
   rows.forEach((r) => {
     const fams = [...new Set((r.product_codes || []).map((c) => codeToFamily.get(c)).filter(Boolean))];
@@ -241,9 +241,10 @@ async function loadProductAdPerformance(families, { db, rules, coded, config = D
       const verdict = judgeCreative({ total: x.total, recent: x.recent, prior: x.prior, fatigue_recent: x.fatigue_recent, fatigue_prior: x.fatigue_prior, delivery_rows: x.delivery_rows, funnel: JUDGED(funnel) }, { rules, coded, config: cfg });
       // dates: created = the ad's creation date in Meta; first_delivery / last_delivery = the first and last day with STORED delivery (spend or impressions); lifetime_spend = all stored days.
       // A creation date is not a start date, and a first stored delivery on the first day we hold data may only be where our history begins (first_delivery_truncated).
-      entry.creatives.push({ ...verdict, key: x.key, ads: x.ads, ad_count: x.ads.length, concept: x.concept, creator: x.creator, style_id: x.style, media: x.media, created: x.created, shared: x.shared, mixed_funnels: x.funnels.size > 1,
+      entry.creatives.push({ ...verdict, key: x.key, name: (x.ads[0] && x.ads[0].name) || null, ads: x.ads, ad_count: x.ads.length, concept: x.concept, creator: x.creator, style_id: x.style, media: x.media, created: x.created, shared: x.shared, mixed_funnels: x.funnels.size > 1,
         first_delivery: x.first_day || null, last_delivery: x.last_day || null, lifetime_spend: Math.round(num(x.life_spend) * 100) / 100, first_delivery_truncated: !!(x.first_day && horizon && x.first_day <= horizon), funnel_label: [...x.funnels].join(' / ') || null });
     });
+    entry.insights_last_day = newestDay; // the newest day with ANY stored delivery: whether delivery can be judged at all (Live Ads)
     entry.ads = [...g.values()].reduce((s, x) => s + x.ads.length, 0);
     entry.shared_ads = [...g.values()].reduce((s, x) => s + x.ads.filter((a) => a.shared).length, 0);
   });

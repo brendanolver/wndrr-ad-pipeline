@@ -176,7 +176,7 @@ test('conditions: a product can hold creatives in several conditions at once and
   assert.deepEqual(sum.conditions, { new: 1, insufficient_delivery: 1, missing_benchmark: 1, performing: 1, underperforming: 1, fatigued: 0, not_delivering: 1 });
   assert.deepEqual(sum.unrated_funnels, ['TOM']);
   const item = { facts: { unique_creatives: 6, creative_conditions: sum.conditions, unrated_funnels: sum.unrated_funnels } };
-  assert.equal(E.conditionsSummary(item), '6 creatives: 1 performing against the approved benchmark, 1 over the approved limit, 1 new (first days of delivery), 1 with no approved TOM benchmark, 1 with too little delivery to judge, 1 active but not delivering.');
+  assert.equal(E.conditionsSummary(item), '6 unique creatives: 1 performing against the approved benchmark, 1 over the approved limit, 1 new (first days of delivery), 1 with no approved TOM benchmark, 1 with too little delivery to judge, 1 active but not delivering.');
 });
 test('conditions: an ad that is active but not delivering is not "gathering data"', () => {
   const p = recency.phaseOf(verdict('a', 'unavailable', { created: day(3) }), TODAY, CFG);

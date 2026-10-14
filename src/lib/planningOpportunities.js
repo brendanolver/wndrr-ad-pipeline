@@ -26,6 +26,8 @@
 // sources, an out-of-season exception): High needs strong or steady demand AND complete data. Every component is returned in score_parts.
 // Pure: no database, no network, no clock (today is passed in).
 const recency = require('./creativeRecency');
+const { LIVE_LABEL } = recency;
+const { MEDIA_LABEL } = require('./metaNameParsing');
 const demandLib = require('./planningDemand');
 const evidenceLib = require('./creativeEvidence');
 
@@ -155,7 +157,7 @@ function priorityOf(score, cfg) {
 
 // MAIN. mode: 'core' | 'revival' | 'momentum'.  → opportunity (always returned; check .status / .actionable)
 function evaluate(p, cfg, today, mode = 'core') {
-  const sum = recency.summarize(p.creatives || [], today, cfg, { uploads: (p.pipeline && p.pipeline.uploaded) || [] });
+  const sum = recency.summarize(p.creatives || [], today, cfg, { uploads: (p.pipeline && p.pipeline.uploaded) || [], insightsLastDay: p.insights_last_day || null });
   const ev = evidenceLib.distribution(sum.list, cfg);
   // a recent launch is measured from its OFFICIAL launch date: units since launch (not the 30-day window, which can include pre-launch orders) over the days on sale
   const recentLaunch = mode === 'momentum' && Number.isFinite(Number(p.launch_age_days)) && p.sales && p.sales.available;
@@ -196,7 +198,8 @@ function evaluate(p, cfg, today, mode = 'core') {
       initial28: p.sales && p.sales.initial28 !== undefined ? p.sales.initial28 : null, recent28: p.sales && p.sales.recent28 !== undefined ? p.sales.recent28 : null,
       sales_band: p.salesBand || 'unknown', tier: p.tier ? p.tier.tier : null, tier_index: p.tier ? p.tier.index : null,
       season: p.season ? p.season.label : null, season_source: p.season ? p.season.source : null, season_state: p.season ? p.season.state : null,
-      active_ads: p.coverage && p.coverage.known ? p.coverage.active_ads : null, unique_creatives: sum.total, performing: sum.performing, weak: sum.weak, declining: sum.declining, softening: sum.softening, testing: sum.testing,
+      active_ads: p.coverage && p.coverage.known ? p.coverage.active_ads : null, unique_creatives: sum.total,
+      live_creatives: sum.live, live_instances: sum.live_instances, live_starting: sum.live_starting, live_stalled: sum.live_stalled, live_unknown: sum.live_unknown, live_window_days: sum.live_window_days, performing: sum.performing, weak: sum.weak, declining: sum.declining, softening: sum.softening, testing: sum.testing,
       unrated: sum.unrated, unjudged: sum.unjudged, newest_creative_days: sum.newest_age_days, newest_creative_source: sum.newest_source, testing_until: sum.testing_until,
       top_creative_spend_share: ev.top_spend_share, top_creative_purchase_share: ev.top_purchase_share, meaningful_creatives: ev.meaningful, distinct_concepts: ev.distinct_concepts,
       matching: p.coverage && p.coverage.known ? (num(p.coverage.possible) > 0 || ['medium', 'high'].includes(unr.level) ? 'uncertain' : 'confirmed') : 'unknown', unresolved_level: unr.level, unresolved_share_pct: unr.share === undefined ? null : unr.share, matching_pending: p.coverage ? num(p.coverage.possible) : null, unresolved_identities: p.coverage ? num(p.coverage.unresolved) : null,
@@ -208,7 +211,7 @@ function evaluate(p, cfg, today, mode = 'core') {
       ...extra,
     };
   };
-  const creativesOut = sum.list.map((c) => ({ key: c.key, phase: c.phase, label: c.label, age_days: c.age_days, concept: c.concept || null, cpa: c.cpa || null, spend: c.spend, purchases: c.purchases, ads: c.ad_count, state: c.state, softening: !!(c.trend && c.trend.softening), reasons: c.reasons || [],
+  const creativesOut = sum.list.map((c) => ({ key: c.key, name: c.name || null, format: c.media ? (MEDIA_LABEL[c.media] || String(c.media)) : null, live_status: c.live_status || null, live_label: LIVE_LABEL[c.live_status] || null, phase: c.phase, label: c.label, age_days: c.age_days, concept: c.concept || null, cpa: c.cpa || null, spend: c.spend, purchases: c.purchases, ads: c.ad_count, state: c.state, softening: !!(c.trend && c.trend.softening), reasons: c.reasons || [],
       condition: c.condition || null, funnel: c.funnel || null, mixed_funnels: !!c.mixed_funnels, started: c.started || null, started_basis: c.started_basis || null, created: c.created ? String(c.created instanceof Date ? c.created.toISOString() : c.created).slice(0, 10) : null,
       first_delivery: c.first_delivery || null, last_delivery: c.last_delivery || null, lifetime_spend: c.lifetime_spend === undefined ? null : c.lifetime_spend, ad_ids: (c.ads_list || []).slice(0, 3) }));
   const done = (status, reason, extra = {}) => ({

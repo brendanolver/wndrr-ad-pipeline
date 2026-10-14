@@ -113,6 +113,11 @@ function plWhyCell(it) {
   const tag = type === 'Protect Momentum' || type === 'Revive momentum' ? `<small class="pt-why-tag">${plEsc(type)}</small>` : '';
   return `<td class="pt-why"><span class="pt-why-text">${plEsc(text)}</span>${tag}</td>`;
 }
+function plLiveCell(it) {
+  const lv = PE.liveAds(it);
+  if (!lv.known) return `<td class="pt-num pt-live" title="${plEsc(lv.title)}">${plNone}${lv.pending ? `<small>+${lv.pending} unreviewed</small>` : ''}</td>`;
+  return `<td class="pt-num pt-live" title="${plEsc(lv.title)}"><b>${plNum(lv.count)}</b>${lv.lines.slice(0, 2).map((l) => `<small>${plEsc(l)}</small>`).join('')}</td>`;
+}
 function plStockCell(it) {
   const f = it.facts || {};
   if (f.stock_units === null || f.stock_units === undefined) return `<td class="pt-num" title="Stock has not loaded">${plNone}</td>`;
@@ -132,6 +137,7 @@ function plPrioCell(it) {
 const PL_COLS = [
   { key: 'product', label: () => 'Product', w: 'pt-w-product', cell: plProductCell, sort: (i) => String(i.name).toLowerCase() },
   { key: 'why', label: (cat) => (cat === 'needs' ? 'Why it needs creative' : 'Assessment'), w: 'pt-w-why', cell: plWhyCell },
+  { key: 'live', label: () => 'Live ads', w: 'pt-w-num', cell: plLiveCell, sort: (i) => { const n = (i.facts || {}).live_creatives; return n === null || n === undefined ? -1 : n; } },
   { key: 'stock', label: () => 'Stock', w: 'pt-w-num', cell: plStockCell, sort: (i) => (i.facts || {}).stock_units },
   { key: 'u30', label: () => 'Sales 30d', w: 'pt-w-num', cell: plSalesCell, sort: (i) => (i.facts || {}).units30 },
   { key: 'priority', label: () => 'Priority', w: 'pt-w-prio', cell: plPrioCell, sort: (i) => (i.actionable ? PL_PRIO_ORDER[i.priority] * 1000 + i.score : -1) },
@@ -177,6 +183,15 @@ function plEvidenceHtml(it) {
   </div>`;
 }
 // which colourways can be shot now (active, enough AVAILABLE stock, a usable size run), with what stops the others. Nothing is guessed: where size data is not available it says so.
+// every distinct live creative of the product (one row per creative, however many campaigns run it)
+function plLiveAdsHtml(it) {
+  const lv = PE.liveAds(it);
+  const rows = (it.creatives || []).slice().sort((a, b) => (a.live_status === 'delivering' ? 0 : 1) - (b.live_status === 'delivering' ? 0 : 1) || (b.spend || 0) - (a.spend || 0));
+  const head = lv.known ? `<p class="pl-d-text"><b>${plNum(lv.count)}</b> unique ${lv.count === 1 ? 'creative' : 'creatives'} delivering in the last ${plPlural(lv.window, 'day')}${lv.instances > lv.count ? `, running as ${plPlural(lv.instances, 'Meta ad')}` : ''}. Duplicates of the same creative across campaigns are counted once.${lv.pending ? ` ${plPlural(lv.pending, 'active ad')} awaiting review may belong to this product, so this may be incomplete.` : ''}</p>` : `<p class="pl-d-text">${plEsc(lv.title)}${lv.pending ? ` ${plPlural(lv.pending, 'active ad')} awaiting review may belong to this product.` : ''}</p>`;
+  if (!rows.length) return `<section class="pl-d-sec pl-live"><h5>Live ads</h5>${head}<p class="hint">No active, matched ads for this product (DPAs are not counted).</p></section>`;
+  const perf = (c) => `${plEsc(c.label || '')}${c.spend ? `<small>$${plNum(Math.round(c.spend))} spend${c.cpa ? `, CPA $${plNum(Math.round(c.cpa))}` : ''} (${plCfg().window_days || 14}d)</small>` : ''}`;
+  return `<section class="pl-d-sec pl-live"><h5>Live ads</h5>${head}<table class="pt-mini pl-live-table"><thead><tr><th>Creative</th><th>Format</th><th>Funnel</th><th>Delivery</th><th>Performance</th><th class="num">Meta ads</th></tr></thead><tbody>${rows.slice(0, 15).map((c) => `<tr class="${c.live_status === 'delivering' ? 'pl-live-on' : 'pl-live-off'}"><td>${plEsc(c.name || c.concept || 'Unnamed creative')}${c.concept && c.name ? `<small>${plEsc(c.concept)}</small>` : ''}</td><td>${plEsc(c.format || 'Unknown')}</td><td>${plEsc(c.funnel || (c.mixed_funnels ? 'Several' : 'Unknown'))}</td><td>${plEsc(c.live_label || '')}${c.last_delivery ? `<small>last delivery ${plEsc(PE.longDate(c.last_delivery))}</small>` : ''}</td><td>${perf(c)}</td><td class="num">${plNum(c.ads || 1)}</td></tr>`).join('')}</tbody></table>${rows.length > 15 ? `<p class="hint">${rows.length - 15} more not shown.</p>` : ''}</section>`;
+}
 function plColourwaysHtml(it) {
   const cws = it.colourways || [];
   if (!cws.length) return '';
@@ -217,6 +232,7 @@ function plDetailHtml(it, mode, ncols) {
   return `<tr class="pt-detail-row"><td colspan="${ncols}"><div class="pl-detail">
     <section class="pl-d-sec pl-d-reco"><h5>Recommendation</h5><p class="pl-d-main">${plEsc(PE.recommendationFor(it))}</p><p class="pl-d-why"><b>Why:</b> ${plEsc(reason)}${nums ? ` ${plEsc(nums)}` : ''}</p>${pic ? `<p class="pl-d-why"><b>Creative picture:</b> ${plEsc(pic)}</p>` : ''}</section>
     <section class="pl-d-sec"><h5>Key facts</h5><dl class="pl-facts">${facts}</dl></section>
+    ${plLiveAdsHtml(it)}
     ${plColourwaysHtml(it)}
     ${dir.length ? `<section class="pl-d-sec"><h5>Suggested creative direction</h5>${plList(dir)}</section>` : ''}
     <section class="pl-d-sec"><h5>Existing production activity</h5><p class="pl-d-text">${plEsc(prod.text)}</p></section>

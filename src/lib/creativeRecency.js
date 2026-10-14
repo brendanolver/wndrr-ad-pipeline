@@ -65,10 +65,32 @@ function phaseOf(c, today, cfg) {
   }
 }
 
+// LIVE (Batch 29). One unique creative (an identical Meta creative id or a "- Copy" by name, however many campaigns / ad sets run it) is
+//   delivering  ACTIVE in Meta AND delivered (spend or impressions) on a stored day within the last `live_delivery_days`: counted as a live ad
+//   starting    ACTIVE, created in the last NEW_AD_DAYS and no delivery stored yet: too new to have data, listed but not counted as delivering
+//   stalled     ACTIVE in Meta but its last stored delivery is older than the window (it was delivering, it no longer is)
+//   no_delivery ACTIVE in Meta with no stored delivery at all and not new
+//   unknown     the newest stored Insights day is too old to say whether anything is delivering: nothing is counted (never an invented number)
+// A paused / archived ad is not read at all (only ACTIVE matched ads are loaded), so "previously active" here means active in Meta that has stopped delivering.
+const NEW_AD_DAYS = 3;
+const INSIGHTS_STALE_DAYS = 3;
+const LIVE_LABEL = { delivering: 'Delivering', starting: 'Just launched, no data yet', stalled: 'Active, not delivering', no_delivery: 'Active, no delivery recorded', unknown: 'Delivery unknown' };
+function liveStatusOf(c, today, cfg, insightsLastDay) {
+  const fresh = !!insightsLastDay && ymd(insightsLastDay) >= addDaysYmd(today, -INSIGHTS_STALE_DAYS);
+  if (!fresh) return 'unknown';
+  const cutoff = addDaysYmd(today, -(Number(cfg.live_delivery_days) || 7));
+  if (c.last_delivery && ymd(c.last_delivery) >= cutoff) return 'delivering';
+  const created = ageDays(c.created, today);
+  if (!c.last_delivery && created !== null && created <= NEW_AD_DAYS) return 'starting';
+  return c.last_delivery ? 'stalled' : 'no_delivery';
+}
+
 // pure: a product's creatives → counts + the facts the explanations quote.
 //   uploads  concepts that WNDRR's own production records show as uploaded: [{ date, concept }] (a Meta ad may not be matched to the product yet)
-function summarize(creatives, today, cfg, { uploads = [] } = {}) {
-  const list = (creatives || []).map((c) => ({ ...c, ads_list: Array.isArray(c.ads) ? c.ads.map((a) => a.id) : [], ...phaseOf(c, today, cfg) }));
+function summarize(creatives, today, cfg, { uploads = [], insightsLastDay = null } = {}) {
+  const list = (creatives || []).map((c) => ({ ...c, ads_list: Array.isArray(c.ads) ? c.ads.map((a) => a.id) : [], ...phaseOf(c, today, cfg), live_status: liveStatusOf(c, today, cfg, insightsLastDay) }));
+  const liveCount = (st) => list.filter((c) => c.live_status === st).length;
+  const liveUnknown = list.length > 0 && list.every((c) => c.live_status === 'unknown');
   const by = { testing: 0, recent_performing: 0, recent_weak: 0, performing: 0, declining: 0, weak: 0, stale: 0, unrated: 0, unjudged: 0, not_delivering: 0 };
   list.forEach((c) => { by[c.phase] += 1; });
   const ages = list.map((c) => c.age_days).filter((a) => a !== null);
@@ -89,6 +111,9 @@ function summarize(creatives, today, cfg, { uploads = [] } = {}) {
   const funnelsOf = (arr) => [...new Set(arr.map((c) => c.funnel).filter(Boolean))].sort();
   return {
     list, by, total: list.length, conditions,
+    // Live Ads: unique creatives delivering now (null when delivery cannot be judged), the Meta ad instances behind them, and the active ones that are not delivering
+    live: liveUnknown ? null : liveCount('delivering'), live_instances: liveUnknown ? null : list.filter((c) => c.live_status === 'delivering').reduce((n, c) => n + (c.ad_count || (c.ads_list || []).length || 1), 0),
+    live_starting: liveCount('starting'), live_stalled: liveCount('stalled') + liveCount('no_delivery'), live_unknown: liveUnknown, live_window_days: Number(cfg.live_delivery_days) || 7,
     // "weak" = judged over the approved benchmark with enough data, whatever its age (an old over-limit creative is both weak and stale); "stale" here is the rest
     // of the old ones: too little delivery to judge, so they are not called weak
     performing: by.performing + by.recent_performing,
@@ -105,4 +130,4 @@ function summarize(creatives, today, cfg, { uploads = [] } = {}) {
   };
 }
 
-module.exports = { LABEL, CONDITION, ageDays, startOf, phaseOf, summarize, addDaysYmd };
+module.exports = { LIVE_LABEL, liveStatusOf, NEW_AD_DAYS, INSIGHTS_STALE_DAYS, LABEL, CONDITION, ageDays, startOf, phaseOf, summarize, addDaysYmd };
