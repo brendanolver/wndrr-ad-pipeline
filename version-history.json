@@ -2,6 +2,17 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.1.6",
+      "date": "2026-10-14",
+      "title": "Planning intelligence and Meta lookup safety",
+      "changes": [
+        "Planning: Core, High Stocks and a new Protect Momentum view are compact sortable tables; recommendations judge real current demand, stock cover, season and creative evidence, and explain themselves",
+        "Recent launches are judged on sales per day on sale; High priority for a launch needs strong demand",
+        "Unidentified Meta ads are weighed by their share of spend instead of suppressing recommendations",
+        "Meta lookups no longer use the multi-id request Meta removes on 27 Oct 2026; failures are recorded, bounded and never treated as deleted"
+      ]
+    },
+    {
       "version": "1.1.5",
       "date": "2026-10-13",
       "title": "Reference Library redesign",
