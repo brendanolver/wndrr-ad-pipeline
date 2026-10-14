@@ -48,6 +48,22 @@ Presentation only. The engine, Meta matching, classifications, benchmarks, scori
 * **Weekly strip**: concepts planned / target, remaining, products selected, carried over, `View Shoot Plan`, and a thin "Weekly creative goal" progress bar.
 * **Expanded panel**: A) large thumbnail, name, priority, recommendation headline + one explanation, Add action; B) three metric cards; C) compact colourway grid (available vs unavailable, stock, sizes, shootable; selection rules unchanged); D) three collapsibles: Why was this product recommended? / Recent live ads / Additional details. All previous evidence is kept inside them.
 
+## Last Creative Uploaded (Core and High Stocks)
+
+Read-only display data (`src/lib/lastCreativeDate.js`, attached to the finished items in `planningOpportunitiesLoader.js`). It never feeds the engine, so no recommendation, status, priority or count depends on it.
+
+**What it is.** The creative date written in the ad name, not a verified Meta upload event. The interface says "Last Creative Uploaded" / "Last creative"; the tooltip states the source.
+
+**Extraction.** `#CREATIVEID_YY-WKXX_DD-MM_...` e.g. `#306_26-WK38_18-09_...` is 18/09/2026 (year from YY, day and month from DD-MM). Validated, never guessed: the structure must match; the date must exist (no 31 September, no 29 February in a non-leap year); `WKXX` must agree with the date (one week either way, New Year weeks wrap); the date may not be in the future, before 2018, or more than 14 days after the ad itself was created in Meta. Anything else is "unavailable" with a reason (`no_pattern`, `invalid_date`, `week_mismatch`, `future`, `implausible_year`, `after_ad_created`).
+
+**Unique creatives.** Same identity as the rest of Planning (`creativeGroupKey`: an identical Meta creative id, or a "- Copy" by name). Every instance of the creative (any status, matched or not) is gathered, and the date is the **original** ad's: the instance Meta created first. A newer duplicate's name date, creation date or first delivery is never used and the newest date is never silently picked. Copies that carry a different date are reported (`has_conflicts`, shown in the panel); copies that disagree with no way to tell the original are unavailable (`conflicting_dates`); if the original has no usable date but a duplicate does, the creative is unavailable (`original_undated`).
+
+**Product.** All reliably matched creatives (confirmed or auto matched; excluded-from-intelligence and Dynamic Product Ads left out) in ANY delivery status, so paused and archived creative counts. `last_creative_uploaded_date` is the newest valid date. If an undated creative was created after it, the table shows a `?` ("may be newer"). No matched creative, or none with a valid date: a dash.
+
+**Where.** Table, Key metrics: Sales 30D, Stock on hand, Live ads, Last creative (`18 Sep` / `2026`). Expanded panel: "Last Creative Uploaded 18 September 2026". Recent live ads: a Creative date column (original date, or the reason it is unavailable), with first and last delivery kept separate in the Delivery column. One row per unique creative.
+
+**Limitations.** Historical ads that do not follow the naming convention have no date. A duplicate that was renamed AND given a new creative id (no "- Copy") is a different creative to the system and keeps its own name date. Shared ads matched to several products date each of them, as for creative coverage.
+
 ## Plain-English reasons
 
 Built by `PlanningExplain.reasonFor()` from fields the engine returned (`facts`, `gap.type`, `status`, `revival`, `launch_age_days`); never from a product list.

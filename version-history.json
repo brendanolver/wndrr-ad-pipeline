@@ -2,6 +2,17 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.2.2",
+      "date": "2026-10-14",
+      "title": "Last Creative Uploaded",
+      "changes": [
+        "Core and High Stocks gain a Last creative metric: the newest creative date written in the ad names of each product's unique creatives",
+        "Original creative date is used for duplicated creatives; invalid, missing or conflicting dates show as unavailable, never guessed",
+        "Expanded product shows Last Creative Uploaded and Recent live ads shows each creative's original date beside its first delivery",
+        "Read-only display data: recommendation logic, classifications, creative effectiveness, matching, counts and Shoot Plan are unchanged"
+      ]
+    },
+    {
       "version": "1.2.1",
       "date": "2026-10-14",
       "title": "Core planning redesign",

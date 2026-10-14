@@ -207,6 +207,34 @@
     const w = x.demand_level === 'strong' ? 'selling strongly' : x.demand_level === 'steady' ? 'consistent sales' : 'selling slowly';
     const s = `${lead}${w}`; return s.charAt(0).toUpperCase() + s.slice(1);
   }
+  // "Last Creative Uploaded": the creative date written in the ad names of the product's unique creatives (NOT a verified Meta upload event). Display only.
+  const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const DATE_REASON = {
+    no_pattern: 'The ad names do not carry a creative date.', invalid_date: 'The creative date in the ad name is not a real date.', week_mismatch: 'The week and the date in the ad name disagree.',
+    future: 'The creative date in the ad name is in the future.', implausible_year: 'The year in the ad name is not plausible.', after_ad_created: 'The creative date is later than the ad itself was created.',
+    conflicting_dates: 'Copies of this creative carry different dates and the original cannot be told apart.', original_undated: 'The original ad has no usable date, so a duplicate\u2019s date is not used.', no_instances: 'No ad found for this creative.',
+  };
+  function shortDate(ymd) { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(ymd || '')); return m ? { day: `${Number(m[3])} ${SHORT_MONTHS[Number(m[2]) - 1]}`, year: m[1], long: longDate(ymd) } : null; }
+  function lastCreative(item) {
+    const lc = item && item.last_creative; const d = lc ? shortDate(lc.last_creative_uploaded_date) : null;
+    const note = 'The creative date written in the ad name (not a verified Meta upload date). Duplicates of the same creative count once, dated from the original ad.';
+    if (!d) {
+      const why = !lc ? 'Creative dates could not be loaded.' : lc.unavailable_reason === 'no_creative' ? 'No matched creative found for this product.' : 'None of the matched creatives has a valid date in its ad name.';
+      return { known: false, day: null, year: null, long: null, title: `Last creative: not available. ${why}`, caveat: why };
+    }
+    const bits = [];
+    if (lc.possibly_newer_undated) bits.push(`${lc.creatives_undated === 1 ? 'A creative' : `${lc.creatives_undated} creatives`} without a valid name date may be newer.`);
+    else if (lc.creatives_undated) bits.push(`${lc.creatives_undated} of ${lc.creatives_total} creatives have no usable name date.`);
+    if (lc.has_conflicts) bits.push('Some copies carry a different date; the original ad\u2019s date is used.');
+    return { known: true, day: d.day, year: d.year, long: d.long, name: lc.creative_name || null, uncertain: !!lc.possibly_newer_undated, title: `Last creative: ${d.long}. ${note}${bits.length ? ` ${bits.join(' ')}` : ''}`, caveat: bits.join(' ') || null };
+  }
+  // one creative in the live-ads table: its original creative date, or why there is none
+  function creativeDate(c) {
+    const d = c ? shortDate(c.original_date) : null;
+    if (d) return { known: true, long: d.long, note: c.original_date_conflicts ? 'Copies carry a different date; the original ad\u2019s date is used.' : null };
+    return { known: false, long: null, note: c && c.original_date_reason ? (DATE_REASON[c.original_date_reason] || null) : null };
+  }
+
   function creativeStatus(item, cfg = {}) {
     const x = f(item); const cat = categoryOf(item);
     const min = num(cfg.min_performing_creatives) || 3;
@@ -378,5 +406,5 @@
   };
   const typeLabelOf = (item) => (item.mode === 'momentum' || item.opportunity_type === 'protect_momentum' ? 'Protect Momentum' : TYPE_LABEL[(item.gap && item.gap.type) || item.opportunity_type] || null);
 
-  return { creativeStatus, liveAds, CATEGORY, CATEGORY_ORDER, STATUS_CATEGORY, categoryOf, isVisible, longDate, startedPhrase, conditionsSummary, stockRestriction, sellingClause, creativeClause, reasonFor, whyWithNumbers, recommendationFor, directionFor, keyFacts, stockWarning, productionActivity, summaryCounts, momentumItemsFor, weeklySummary, TYPE_LABEL, typeLabelOf };
+  return { creativeStatus, lastCreative, creativeDate, liveAds, CATEGORY, CATEGORY_ORDER, STATUS_CATEGORY, categoryOf, isVisible, longDate, startedPhrase, conditionsSummary, stockRestriction, sellingClause, creativeClause, reasonFor, whyWithNumbers, recommendationFor, directionFor, keyFacts, stockWarning, productionActivity, summaryCounts, momentumItemsFor, weeklySummary, TYPE_LABEL, typeLabelOf };
 }));

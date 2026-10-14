@@ -24,6 +24,7 @@ const season = require('./seasonRelevance');
 const progress = require('./shootPlanProgress');
 const coverageLib = require('./activeAdCoverage');
 const nameCopies = require('./metaNameCopies');
+const lastCreativeLib = require('./lastCreativeDate');
 const planningSales = require('./planningSales');
 const primaryLib = require('./planningPrimary');
 const { ymdInZone, REPORTING_TIMEZONE } = require('./metaPerformance');
@@ -161,6 +162,10 @@ async function computeOpportunities({ now = new Date(), deps = {} } = {}) {
   const benchmarks = deps.benchmarks || await require('./metaBenchmarks').getEffective();
   const evidence = deps.performance || (ctx.coverage && ctx.coverage.available ? await perf.loadProductAdPerformance(evFamilies, { db, rules: benchmarks.rules, coded: benchmarks.coded, config: cfg, today, nameCopies }) : new Map());
   const hist = deps.history || (ctx.coverage && ctx.coverage.available ? await history.loadCreativeHistory(evFamilies, { db, rules: benchmarks.rules, coded: benchmarks.coded, today, config: cfg, nameCopies }) : new Map());
+  // "Last Creative Uploaded" (read-only display data): the creative date written in the ad names of each product's unique creatives. It is attached to the finished items below and never
+  // feeds the engine, so no recommendation, status, priority or count can change because of it. A failed lookup only means the column shows a dash.
+  let lastCreative = deps.lastCreative || null;
+  if (!lastCreative && ctx.coverage && ctx.coverage.available) { try { lastCreative = await lastCreativeLib.loadLastCreativeDates(evFamilies, { db, today }); } catch (e) { lastCreative = null; } }
   const pipeline = deps.pipeline || await progress.loadProductPipeline(db, weekStart, { lookbackWeeks: cfg.pipeline_lookback_weeks });
   const pipeFor = (f) => {
     const seen = new Set(); const out = { in_flight: 0, by_stage: {}, uploaded: [], this_week: 0 };
@@ -207,6 +212,15 @@ async function computeOpportunities({ now = new Date(), deps = {} } = {}) {
   const revivalEvals = runMode(revivalRows, 'revival');
   const momentumEvals = runMode(momentumRows, 'momentum');
 
+  // each unique creative listed under "Recent live ads" carries the original creative date of its name (looked up through any of its ads; null when unavailable)
+  const withOriginalDates = (list, evCreatives, lc) => {
+    if (!lc || !Array.isArray(list)) return list;
+    const adsOf = new Map((evCreatives || []).map((c) => [c.key, c.ads || []]));
+    return list.map((c) => {
+      const hit = (adsOf.get(c.key) || []).map((a) => lc.byAd.get(a.id)).find(Boolean);
+      return { ...c, original_date: hit ? hit.date : null, original_date_reason: hit ? hit.reason : 'no_instances', original_date_conflicts: hit ? (hit.conflicts || []).length : 0 };
+    });
+  };
   const colourFor = (key) => (rows.find((r) => r.f.key === key) || {}).colourways || [];
   const rowFor = (key) => rows.find((r) => r.f.key === key);
   const tierTag = (e) => (e.facts && e.facts.tier === 'platinum' ? 'Platinum' : e.facts && e.facts.tier === 'rocket' ? 'Rocket' : null);
@@ -227,6 +241,8 @@ async function computeOpportunities({ now = new Date(), deps = {} } = {}) {
       ...e, product_code: (e.codes && e.codes[0]) || e.key, colourways: colourFor(key), kinds, tags, placement: pick.placement, also_qualifies: pick.also, evaluated_as: pick.evaluated,
       classification: r.f.is_core ? 'Official Core (ApparelMagic group AA CORE STYLES)' : (e.mode === 'momentum' ? 'Not Core: recent launch' : 'Not Core: Platinum / Rocket'),
       launch_date: r.launch_date, launch_age_days: r.launch_age_days,
+      last_creative: lastCreative && lastCreative.byFamily.get(key) ? lastCreative.byFamily.get(key) : null,
+      creatives: withOriginalDates(e.creatives, (evidence.get(key) || {}).creatives, lastCreative),
     };
     (pick.placement === 'core' ? coreItems : pick.placement === 'high_stocks' ? hsItems : momentumItems).push(item);
   });

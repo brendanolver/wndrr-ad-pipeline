@@ -4761,7 +4761,7 @@ body{background:var(--bg);color:var(--text);}
 .pl-table-v2{min-width:880px;table-layout:fixed;}
 .pl-table-v2 th{padding:10px 12px;font-size:10px;letter-spacing:.07em;}
 .pl-table-v2 td{padding:10px 12px;vertical-align:middle;overflow:visible;}
-.pl-table-v2 .pt-w-product{width:23%;}.pl-table-v2 .pt-w-metrics{width:27%;}.pl-table-v2 .pt-w-status{width:25%;}.pl-table-v2 .pt-w-prio{width:9%;}.pl-table-v2 .pt-w-act{width:16%;}
+.pl-table-v2 .pt-w-product{width:21%;}.pl-table-v2 .pt-w-metrics{width:33%;}.pl-table-v2 .pt-w-status{width:21%;}.pl-table-v2 .pt-w-prio{width:9%;}.pl-table-v2 .pt-w-act{width:16%;}
 .pl-table-v2 .pt-thumb{width:44px;height:44px;border-radius:9px;flex:0 0 44px;}
 .pl-table-v2 .pt-name b{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;white-space:normal;}
 .pl-metrics{display:flex;gap:6px;}
@@ -4839,3 +4839,12 @@ body{background:var(--bg);color:var(--text);}
 .pl-x-more{display:flex;flex-direction:column;}
 .pl-x .pl-d-note{margin:0;}
 @media (max-width:900px){.pl-x-head{flex-wrap:wrap;}.pl-x-act{align-items:flex-start;}.pl-x-metrics{grid-template-columns:1fr;}}
+
+/* Last Creative Uploaded (the creative date written in the ad name) */
+.pl-m .pl-m-year{font-size:10.5px;line-height:1.1;margin-top:-1px;}
+.pl-m.pt-last b{white-space:nowrap;}
+.pl-x-last{margin:6px 0 0;font-size:12.5px;color:var(--text-muted);}
+.pl-x-last b{color:var(--text);font-weight:600;}
+.pl-x-last small{display:block;font-size:11px;color:#9a5b00;}
+.pl-live-cdate b{font-weight:600;white-space:nowrap;}
+.pl-live-cdate small{display:block;font-size:10.5px;color:var(--text-muted);}
