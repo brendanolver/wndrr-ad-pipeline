@@ -2,6 +2,16 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.2.0",
+      "date": "2026-10-14",
+      "title": "Planning refinements",
+      "changes": [
+        "Creative age now follows the original unique creative: a duplicated Meta ad no longer restarts early testing (earliest delivery across every instance of the creative)",
+        "+ Add on every product row in Needs creative, Covered / monitoring and Needs review (black primary button, Actions column); stock-restricted colourways are never selected silently and need an explicit decision",
+        "Concise main-table assessments; counts, funnels, dates and evidence stay in the expanded row"
+      ]
+    },
+    {
       "version": "1.1.9",
       "date": "2026-10-14",
       "title": "Creative Insights and shoot planning",
