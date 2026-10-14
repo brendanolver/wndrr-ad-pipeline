@@ -167,25 +167,9 @@ function creativeGroupKey(ad, nameCopies) {
   return ad.meta_creative_id ? `c:${ad.meta_creative_id}` : base ? `n:${base}` : `a:${ad.meta_ad_id}`;
 }
 
-// → Map(familyKey -> { creatives: [verdict + {key, ads[], names, concept, creator, style, media, first_spend, created}], ads: n, shared_ads: n, summary })
-async function loadProductAdPerformance(families, { db, rules, coded, config = DEFAULTS, today, nameCopies = null } = {}) {
-  const cfg = { ...DEFAULTS, ...config };
-  const end = addDays(today, -1);
-  const recentFrom = addDays(end, -(cfg.trend_days - 1));
-  const priorTo = addDays(recentFrom, -1);
-  const priorFrom = addDays(priorTo, -(cfg.trend_days - 1));
-  const from = addDays(end, -(cfg.window_days - 1));
-  const fatFrom = addDays(end, -(cfg.fatigue_days - 1));      // the last fatigue_days ...
-  const fatPriorTo = addDays(fatFrom, -1);
-  const fatPriorFrom = addDays(fatPriorTo, -(cfg.fatigue_days - 1)); // ... and the same number of days before them
-  const joinFrom = fatPriorFrom < from ? fatPriorFrom : from;
-  const codeToFamily = new Map();
-  families.forEach((f) => (f.codes || [f.key]).forEach((c) => codeToFamily.set(c, f.key)));
-  const codes = [...codeToFamily.keys()];
-  const out = new Map(); families.forEach((f) => out.set(f.key, { creatives: [], ads: 0, shared_ads: 0 }));
-  if (!codes.length) return out;
-  const rows = (await db.query(
-    `SELECT m.meta_ad_id, m.ad_name, m.meta_creative_id, m.created_time, c.funnel,
+// The ONE query that turns Meta ads into per-ad evidence rows (windows end yesterday). `cond` is the WHERE condition and may use $1 (a text[] of product codes). Parameters $2..$10 are the windows.
+function adRowsSql(cond) {
+  return `SELECT m.meta_ad_id, m.ad_name, m.meta_creative_id, m.effective_status, m.created_time, c.funnel, cl.concept_type_id,
             (SELECT to_char(MIN(x.insight_date), 'YYYY-MM-DD') FROM meta_ad_insights_daily x WHERE x.meta_ad_id = m.meta_ad_id AND (x.spend > 0 OR x.impressions > 0)) AS first_day,
             (SELECT to_char(MAX(x.insight_date), 'YYYY-MM-DD') FROM meta_ad_insights_daily x WHERE x.meta_ad_id = m.meta_ad_id AND (x.spend > 0 OR x.impressions > 0)) AS last_day,
             (SELECT COALESCE(SUM(x.spend), 0) FROM meta_ad_insights_daily x WHERE x.meta_ad_id = m.meta_ad_id) AS life_spend,
@@ -205,11 +189,31 @@ async function loadProductAdPerformance(families, { db, rules, coded, config = D
        LEFT JOIN meta_ad_classifications cl ON cl.meta_ad_id = m.meta_ad_id
        LEFT JOIN meta_campaigns c ON c.meta_campaign_id = m.meta_campaign_id
        LEFT JOIN meta_ad_insights_daily d ON d.meta_ad_id = m.meta_ad_id AND d.insight_date BETWEEN $10 AND $3
-      WHERE m.effective_status = 'ACTIVE' AND m.match_status IN ('confirmed', 'auto_matched') AND NOT COALESCE(cl.excluded_from_intelligence, false)
+      WHERE ${cond}
+      GROUP BY m.meta_ad_id, m.ad_name, m.meta_creative_id, m.effective_status, m.created_time, c.funnel, cl.concept_type_id, cl.concept_label, cl.creator_name, cl.creative_style_id, cl.media_type`;
+}
+const ACTIVE_PRODUCT_COND = `m.effective_status = 'ACTIVE' AND m.match_status IN ('confirmed', 'auto_matched') AND NOT COALESCE(cl.excluded_from_intelligence, false)
         AND NOT COALESCE((${dpaLib.dpaPredicate('m', 'c')}), false)
-        AND EXISTS (SELECT 1 FROM meta_ad_products p WHERE p.meta_ad_id = m.meta_ad_id AND p.product_code = ANY($1::text[]))
-      GROUP BY m.meta_ad_id, m.ad_name, m.meta_creative_id, m.created_time, c.funnel, cl.concept_label, cl.creator_name, cl.creative_style_id, cl.media_type`,
-    [codes, from, end, recentFrom, priorFrom, priorTo, fatFrom, fatPriorFrom, fatPriorTo, joinFrom])).rows;
+        AND EXISTS (SELECT 1 FROM meta_ad_products p WHERE p.meta_ad_id = m.meta_ad_id AND p.product_code = ANY($1::text[]))`;
+
+// → Map(familyKey -> { creatives: [verdict + {key, ads[], names, concept, creator, style, media, first_spend, created}], ads: n, shared_ads: n, summary })
+async function loadProductAdPerformance(families, { db, rules, coded, config = DEFAULTS, today, nameCopies = null } = {}) {
+  const cfg = { ...DEFAULTS, ...config };
+  const end = addDays(today, -1);
+  const recentFrom = addDays(end, -(cfg.trend_days - 1));
+  const priorTo = addDays(recentFrom, -1);
+  const priorFrom = addDays(priorTo, -(cfg.trend_days - 1));
+  const from = addDays(end, -(cfg.window_days - 1));
+  const fatFrom = addDays(end, -(cfg.fatigue_days - 1));      // the last fatigue_days ...
+  const fatPriorTo = addDays(fatFrom, -1);
+  const fatPriorFrom = addDays(fatPriorTo, -(cfg.fatigue_days - 1)); // ... and the same number of days before them
+  const joinFrom = fatPriorFrom < from ? fatPriorFrom : from;
+  const codeToFamily = new Map();
+  families.forEach((f) => (f.codes || [f.key]).forEach((c) => codeToFamily.set(c, f.key)));
+  const codes = [...codeToFamily.keys()];
+  const out = new Map(); families.forEach((f) => out.set(f.key, { creatives: [], ads: 0, shared_ads: 0 }));
+  if (!codes.length) return out;
+  const rows = (await db.query(adRowsSql(ACTIVE_PRODUCT_COND), [codes, from, end, recentFrom, priorFrom, priorTo, fatFrom, fatPriorFrom, fatPriorTo, joinFrom])).rows;
 
   // The earliest day with any stored delivery for ANY ad. A first-delivery date on that day may only be where the stored history begins, so it is never trusted to mean "just started".
   let horizon = null; let newestDay = null;
@@ -221,23 +225,8 @@ async function loadProductAdPerformance(families, { db, rules, coded, config = D
     fams.forEach((fk) => {
       if (!per.has(fk)) per.set(fk, new Map());
       const g = per.get(fk); const key = creativeGroupKey(r, nameCopies);
-      if (!g.has(key)) g.set(key, { key, ads: [], total: zeroBundle(), recent: zeroBundle(), prior: zeroBundle(), fatigue_recent: zeroBundle(), fatigue_prior: zeroBundle(), delivery_rows: 0, funnels: new Set(), pools: new Map(), concept: null, creator: null, style: null, media: null, created: null, shared: false });
-      const x = g.get(key);
-      x.ads.push({ id: r.meta_ad_id, name: r.ad_name, shared });
-      if (shared) x.shared = true;
-      x.delivery_rows += r.delivery_rows;
-      // Batch 30: the SAME creative running in several funnels stays ONE creative, but each funnel keeps its own pooled metrics so it is judged against that funnel's benchmark
-      const fnl = r.funnel || 'unknown';
-      if (!x.pools.has(fnl)) x.pools.set(fnl, newPool());
-      const pool = x.pools.get(fnl);
-      pool.delivery_rows += r.delivery_rows;
-      [['total', 't'], ['recent', 'r'], ['prior', 'p'], ['fatigue_recent', 'f'], ['fatigue_prior', 'g']].forEach(([w, p]) => { [x, pool].forEach((tgt) => { tgt[w].spend += num(r[`${p}_spend`]); tgt[w].impressions += num(r[`${p}_imp`]); tgt[w].clicks += num(r[`${p}_clk`]); tgt[w].purchases += num(r[`${p}_pur`]); tgt[w].value += num(r[`${p}_val`]); }); });
-      if (r.funnel) x.funnels.add(r.funnel);
-      if (r.first_day && (!x.first_day || r.first_day < x.first_day)) x.first_day = r.first_day;
-      if (r.last_day && (!x.last_day || r.last_day > x.last_day)) x.last_day = r.last_day;
-      x.life_spend = (x.life_spend || 0) + num(r.life_spend);
-      x.concept = x.concept || r.concept_label || null; x.creator = x.creator || r.creator_name || null; x.style = x.style || r.creative_style_id || null; x.media = x.media || r.media_type || null;
-      if (r.created_time && (!x.created || new Date(r.created_time) < new Date(x.created))) x.created = r.created_time;
+      if (!g.has(key)) g.set(key, newGroup(key));
+      addRowToGroup(g.get(key), r, shared);
     });
   });
   per.forEach((g, fk) => { if (nameCopies) mergeNameCopies(g, nameCopies); });
@@ -283,7 +272,30 @@ function judgeAcrossFunnels(x, { rules, coded, cfg }) {
 }
 function funnelResult(r) {
   const v = r.verdict;
-  return { funnel: r.funnel_key, benchmarked: !!(r.funnel && v.state !== 'unrated' && v.state !== 'insufficient' && v.state !== 'unavailable'), state: v.state, benchmark: v.benchmark || null, spend: v.spend, purchases: v.purchases, impressions: v.impressions, cpa: v.cpa, roas: v.roas, ctr: v.ctr, reason: (v.reasons || [])[0] || null };
+  return { funnel: r.funnel_key, benchmarked: !!(r.funnel && v.state !== 'unrated' && v.state !== 'insufficient' && v.state !== 'unavailable'), state: v.state, benchmark: v.benchmark || null, spend: v.spend, purchases: v.purchases, impressions: v.impressions, cpa: v.cpa, roas: v.roas, ctr: v.ctr, value: Math.round(num(v.roas) * num(v.spend) * 100) / 100, reason: (v.reasons || [])[0] || null };
+}
+
+// ONE creative as a pool of Meta ads (any number of campaigns / ad sets): the account's single definition of "a unique creative". Shared by Planning (per product) and Creative Insights (account-wide).
+function newGroup(key) {
+  return { key, ads: [], total: zeroBundle(), recent: zeroBundle(), prior: zeroBundle(), fatigue_recent: zeroBundle(), fatigue_prior: zeroBundle(), delivery_rows: 0, funnels: new Set(), pools: new Map(), concept: null, creator: null, style: null, media: null, created: null, shared: false };
+}
+// r: one ad row as the loaders' queries return it (meta_ad_id, ad_name, funnel, first_day, last_day, life_spend, concept_label, creator_name, creative_style_id, media_type, delivery_rows, t_* r_* p_* f_* g_* metrics)
+function addRowToGroup(x, r, shared = false) {
+  x.ads.push({ id: r.meta_ad_id, name: r.ad_name, shared, status: r.effective_status || null });
+  if (shared) x.shared = true;
+  x.delivery_rows += r.delivery_rows;
+  // Batch 30: the SAME creative running in several funnels stays ONE creative, but each funnel keeps its own pooled metrics so it is judged against that funnel's benchmark
+  const fnl = r.funnel || 'unknown';
+  if (!x.pools.has(fnl)) x.pools.set(fnl, newPool());
+  const pool = x.pools.get(fnl);
+  pool.delivery_rows += r.delivery_rows;
+  [['total', 't'], ['recent', 'r'], ['prior', 'p'], ['fatigue_recent', 'f'], ['fatigue_prior', 'g']].forEach(([w, p]) => { [x, pool].forEach((tgt) => { tgt[w].spend += num(r[`${p}_spend`]); tgt[w].impressions += num(r[`${p}_imp`]); tgt[w].clicks += num(r[`${p}_clk`]); tgt[w].purchases += num(r[`${p}_pur`]); tgt[w].value += num(r[`${p}_val`]); }); });
+  if (r.funnel) x.funnels.add(r.funnel);
+  if (r.first_day && (!x.first_day || r.first_day < x.first_day)) x.first_day = r.first_day;
+  if (r.last_day && (!x.last_day || r.last_day > x.last_day)) x.last_day = r.last_day;
+  x.life_spend = (x.life_spend || 0) + num(r.life_spend);
+  x.concept = x.concept || r.concept_label || null; x.creator = x.creator || r.creator_name || null; x.style = x.style || r.creative_style_id || null; x.media = x.media || r.media_type || null;
+  if (r.created_time && (!x.created || new Date(r.created_time) < new Date(x.created))) x.created = r.created_time;
 }
 
 // A "- Copy" of an ad is the same creative even when Meta gave it its own creative id (Batch 10's name-copy rule): fold such a group into the group of the
@@ -311,4 +323,4 @@ function mergeNameCopies(groups, nameCopies) {
 }
 const JUDGED = (f) => (['TOF', 'TOM', 'MOF'].includes(f) ? f : null);
 
-module.exports = { judgeAcrossFunnels, mergeNameCopies, DEFAULTS, LIMITS, LABEL, resolveConfig, judgeCreative, summarizeProduct, loadProductAdPerformance, creativeGroupKey, cpaOf, roasOf, ctrOf };
+module.exports = { adRowsSql, newGroup, addRowToGroup, judgeAcrossFunnels, mergeNameCopies, DEFAULTS, LIMITS, LABEL, resolveConfig, judgeCreative, summarizeProduct, loadProductAdPerformance, creativeGroupKey, cpaOf, roasOf, ctrOf };

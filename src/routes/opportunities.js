@@ -33,6 +33,29 @@ router.get('/', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// GET /api/opportunities/insights: which creative CONCEPTS work across products, and which products could test them (Batch 30). Reads this application's own database and the Planning
+// result (same memo as GET /); never calls Meta and writes nothing. The result is memoised per Planning result and invalidated with it.
+let insightsMemo = null;
+router.get('/insights', async (req, res, next) => {
+  try {
+    const deps = req.app && req.app.locals && req.app.locals.opportunityDeps ? req.app.locals.opportunityDeps : undefined;
+    const data = await loader.getOpportunities({ fresh: !!req.query.fresh, deps });
+    if (!data.available) return res.json({ available: false, reason: data.reason || 'Planning data has not loaded.' });
+    if (insightsMemo && insightsMemo.stamp === data.generated_at) return res.json(insightsMemo.value);
+    const insights = require('../lib/creativeInsights');
+    const planningContext = require('../lib/planningContext');
+    const cfgLib = require('../lib/creativePlanningConfig');
+    const settings = await planningContext.loadSettings(pool);
+    const cfg = cfgLib.resolve(settings.creative_planning_config || {}).config;
+    const benchmarks = await require('../lib/metaBenchmarks').getEffective();
+    const seen = new Set(); const items = [];
+    [data.core, data.high_stocks, data.momentum].forEach((l) => ((l && l.items) || []).forEach((i) => { if (!seen.has(i.key)) { seen.add(i.key); items.push(i); } }));
+    const value = await insights.compute({ db: pool, items, today: data.today, weekStart: data.week_start, cfg, benchmarks, nameCopies: require('../lib/metaNameCopies'), categoryIndex: data._categoryIndex || null });
+    insightsMemo = { stamp: data.generated_at, value };
+    res.json(value);
+  } catch (err) { next(err); }
+});
+
 // GET /api/opportunities/launch-cohort?date=YYYY-MM-DD -> every product officially launched (ApparelMagic mid_code) on that date, or in the whole recent-launch window when no date is
 // given, with its stock, recent sales and what Planning currently says about it.
 // It writes nothing, but it is NOT free of external reads: it uses the same loader as GET /api/opportunities (getOpportunities, 5-minute memo). With a warm memo it answers from memory;

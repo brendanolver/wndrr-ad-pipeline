@@ -296,7 +296,8 @@ async function computeOpportunities({ now = new Date(), deps = {} } = {}) {
   notes.push('Dynamic Product Ads are not counted as creative coverage or concepts.');
   if (!sizeField) notes.push('Stock by size is not exposed by ApparelMagic here, so size availability does not affect recommendations.');
 
-  return {
+  const categoryIndex = new Map(); families.forEach((f) => (f.codes || []).forEach((c) => { if (f.category) categoryIndex.set(c, f.category); }));
+  const result = {
     available: true, generated_at: now.toISOString(), today, week_start: weekStart,
     config: { window_days: cfg.window_days, min_performing_creatives: cfg.min_performing_creatives, test_period_days: cfg.test_period_days, recent_creative_days: cfg.recent_creative_days, stale_creative_days: cfg.stale_creative_days, opp_min_recent_units: cfg.opp_min_recent_units, opp_min_stock_units: cfg.opp_min_stock_units, revival_decline_pct: cfg.revival_decline_pct, revival_min_cover_weeks: cfg.revival_min_cover_weeks, revival_min_age_days: cfg.revival_min_age_days, revival_min_recent_units: cfg.revival_min_recent_units, revival_min_pace_pct: cfg.revival_min_pace_pct, demand_steady_units: cfg.demand_steady_units, demand_strong_units: cfg.demand_strong_units, momentum_window_days: cfg.momentum_window_days, stock_min_cover_weeks: cfg.stock_min_cover_weeks, high_stock_min_soh: hsMin, priority_high_min: cfg.priority_high_min, priority_medium_min: cfg.priority_medium_min },
     core: { items: coreItems, counts: countBy(coreItems), total: coreItems.length, actionable: coreItems.filter((i) => i.actionable).length },
@@ -305,6 +306,9 @@ async function computeOpportunities({ now = new Date(), deps = {} } = {}) {
     launch_review: launchReview, recent_launches: recentLaunches,
     data: { notes, config_issues: configIssues, coverage_reliability: mem, season_source: ctx.salesSource ? ctx.salesSource.label : null, benchmarks_source: benchmarks.source || null, quality: dataQuality },
   };
+  // product code -> category for EVERY product (not just the ones listed): server-side only, never serialised
+  Object.defineProperty(result, '_categoryIndex', { value: categoryIndex, enumerable: false });
+  return result;
 }
 
 async function getOpportunities({ fresh = false, deps } = {}) {
