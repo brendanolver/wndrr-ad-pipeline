@@ -57,13 +57,40 @@ test('page shape: Core uses its own short table and expanded view; High Stocks k
   const fn = (name, next) => pl.slice(pl.indexOf(`function ${name}`), pl.indexOf(next, pl.indexOf(`function ${name}`)));
   const core = fn('plCoreDetailHtml', 'function plCoreTableHtml');
   assert.doesNotMatch(core, /<details|plLiveAdsHtml|plEvidenceParts|keyFacts|whyWithNumbers|conditionsSummary|score_parts|Eligibility|Additional details|Recent live ads/, 'the Core expanded view has no accordions and none of the technical evidence');
-  assert.match(core, /plMainImg\(it\.image_url\)/); assert.match(core, /plCoreMetrics\(it\)/); assert.match(core, /plCoreColourCards\(it\)/); assert.match(core, /plCoreAddBtn\(it\)/); assert.match(core, /data-opp-meta/);
+  assert.match(core, /plMainImg\(it\.image_url\)/); assert.match(core, /plCoreMetrics\(it\)/); assert.match(core, /plCoreColourCards\(it\)/); assert.match(core, /plCoreAddBtn\(it\)/); assert.match(core, /plCoreAdsHtml\(it, mode\)/);
   assert.equal((core.match(/plCoreAddBtn\(it\)/g) || []).length, 1, 'exactly one primary action in the expanded view');
+  const ads = fn('plCoreAdsHtml', 'function plCoreThumbs');
+  assert.equal((ads.match(/<details/g) || []).length, 1, 'ONE collapsed View Meta Ads section'); assert.match(ads, /View Meta Ads/); assert.match(ads, /data-opp-meta/);
+  assert.match(ads, /Creative date[\s\S]*Funnel[\s\S]*Status[\s\S]*Spend \(14D\)[\s\S]*CPA \(14D\)/, 'creatives with date, funnel, status and the Meta numbers');
+  assert.doesNotMatch(ads, /score_parts|Eligibility|keyFacts|whyWithNumbers/);
   assert.match(pl, /coverage-card-imgrow pl-cx-img/, 'the main picture is the Upcoming Drops picture panel'); assert.match(pl, /drop-card-product-tile pl-cc-tile/, 'colourway thumbnails are the Upcoming Drops tile');
   assert.match(pl, /#i-image/, 'the same image icon fallback');
   const metrics = fn('plCoreMetrics', 'function plHasMetaAds');
-  assert.equal((metrics.match(/\bm\(/g) || []).length, 3, 'three metrics'); assert.match(metrics, /Sales &middot; 30D/); assert.match(metrics, /Stock on hand/); assert.match(metrics, /Active creatives/);
+  assert.equal((metrics.match(/\bcard\(/g) || []).length, 3, 'three metric cards'); assert.match(metrics, /Sales \(30D\)/); assert.match(metrics, /Stock on hand/); assert.match(metrics, /Active \/ effective creatives/);
   assert.match(pl, /return mode === 'core' \? plCoreTableHtml\(mode, items, cat\) : plTableHtml\(mode, items, cat\)/);
   assert.match(pl, /function plDetailHtml/); assert.match(fn('plDetailHtml', 'function plBase') || pl, /Additional details/, 'High Stocks keeps its detailed panel');
-  assert.match(css, /\.coverage-card-imgrow\{[^}]*height:170px/); assert.match(css, /\.pl-cx-img\{height:170px/);
+  assert.match(css, /\.coverage-card-imgrow\{[^}]*height:170px/); assert.match(css, /\.pl-cx-img\{height:200px/);
+});
+
+test('creative coverage: unique creatives (duplicates once) and the latest NAME date; Unknown / None are told apart; never a delivery date', () => {
+  const lc = (o) => ({ last_creative: { creatives_total: 5, last_creative_uploaded_date: '2026-09-18', possibly_newer_undated: false, ...o } });
+  let c = E.coverage(lc({}), '2026');
+  assert.deepEqual([c.known, c.count, c.latest, c.latestKnown], [true, 5, '18 Sep', true]);
+  assert.equal(E.coverage(lc({ last_creative_uploaded_date: '2025-12-30' }), '2026').latest, '30 Dec 2025', 'a date from another year carries its year');
+  c = E.coverage(lc({ last_creative_uploaded_date: null }), '2026'); assert.deepEqual([c.count, c.latest, c.latestKnown], [5, 'Unknown', false]);
+  c = E.coverage(lc({ creatives_total: 0, last_creative_uploaded_date: null }), '2026'); assert.deepEqual([c.count, c.latest], [0, 'None']);
+  assert.equal(E.coverage({}, '2026').known, false); assert.equal(E.coverage({ last_creative: {} }, '2026').known, false);
+  assert.equal(E.coverage(lc({ possibly_newer_undated: true }), '2026').uncertain, true);
+  assert.match(E.coverage(lc({}), '2026').title, /Copy.*count once[\s\S]*not a delivery date/);
+});
+
+test('creative coverage: the loader counts each unique creative once across campaigns, funnels and Copy suffixes', async () => {
+  const nm = (n) => `#${n}_26-WK38_18-09_X_Video`;
+  const r = (id, name, cr) => ({ meta_ad_id: id, ad_name: name, meta_creative_id: cr, effective_status: 'ACTIVE', created_time: '2026-09-19T00:00:00Z', product_codes: ['W26AA001'] });
+  const rows = [r('a1', nm(1), 'c1'), r('a2', nm(1), 'c1'), r('a3', nm(1), 'c1'),       // one creative in three campaigns
+    r('b1', nm(2), 'c2'), r('b2', `${nm(2)} - Copy`, 'c3'), r('b3', `${nm(2)} - Copy 2`, 'c4'), // a creative and its copies (own creative ids)
+    r('d1', nm(3), 'c5'), r('d2', nm(4), 'c6')];                                          // two different executions
+  const stub = { query: async (sql) => (/last-creative-origins/.test(sql) ? { rows: [] } : { rows }) };
+  const out = await lc.loadLastCreativeDates([{ key: 'W26AA001', codes: ['W26AA001', 'W26AA001BLK'] }], { db: stub, today: '2026-10-14' });
+  assert.equal(out.byFamily.get('W26AA001').creatives_total, 4, '1 + 1 (with its copies) + 2 different executions');
 });

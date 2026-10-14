@@ -339,6 +339,11 @@ function plCoreStockCell(it) {
   const cover = f.cover_weeks !== null && f.cover_weeks !== undefined ? `<small>${plEsc(f.cover_weeks)} weeks</small>` : '';
   return `<td class="pt-num pt-stock" title="${plEsc(it.stock && it.stock.notes ? it.stock.notes.join(' ') : 'Available sellable stock')}"><b>${f.stock_units === null || f.stock_units === undefined ? plNone : plNum(f.stock_units)}</b><small>In stock</small>${cover}${warn ? `<small class="pt-warn">${plEsc(warn)}</small>` : ''}</td>`;
 }
+function plCoreCoverageCell(it) {
+  const c = PE.coverage(it, ((state.opportunities || {}).today || '').slice(0, 4));
+  if (!c.known) return `<td class="pt-num pt-cov" title="${plEsc(c.title)}"><b>${plNone}</b></td>`;
+  return `<td class="pt-num pt-cov" title="${plEsc(c.title)}"><b>${plNum(c.count)} <span class="pt-cov-u">unique</span></b><small>Latest: <span class="pt-cov-d${c.latestKnown ? '' : ' none'}">${plEsc(c.latest)}</span>${c.uncertain ? ' <em class="pt-warn" aria-label="A creative without a valid date may be newer">?</em>' : ''}</small></td>`;
+}
 function plCoreStatusCell(it) {
   const st = PE.coreStatus(it, plCfg());
   const type = PE.categoryOf(it) === 'needs' ? PE.typeLabelOf(it) : null;
@@ -362,33 +367,36 @@ function plCoreActionCell(it, mode) {
 const PL_NOIMG = '<svg class=ic aria-hidden=true focusable=false><use href=#i-image></use></svg>';
 const plMainImg = (url) => `<div class="coverage-card-imgrow pl-cx-img">${url ? `<img src="${plEsc(url)}" alt="">` : `<span class="coverage-card-noimg">${PL_NOIMG}</span>`}</div>`;
 const plTileImg = (url) => `<span class="drop-card-product-tile pl-cc-tile">${url ? `<img src="${plEsc(url)}" alt="">` : `<span class="drop-card-product-noimg">${PL_NOIMG}</span>`}</span>`;
-// colourway cards: thumbnail, name, stock, readiness and a tick. A colourway that can be shot is ticked by default; one that cannot says why and cannot be ticked here (the Shoot Plan modal asks before a restricted one is included).
+// colourway cards: a tick, the Drops-style thumbnail, name (else SKU), units, size availability and whether it can be shot. A colourway that can be shot is ticked by default; one that cannot says why and
+// cannot be ticked here (the Shoot Plan modal asks before a restricted one is included).
 function plCoreColourCards(it) {
   const cws = it.colourways || [];
   if (!cws.length) return '';
   const picked = new Set(plPickedCodes(it)); const viableN = cws.filter((c) => c.viable).length;
   const card = (c) => {
-    const status = c.viable ? `<span class="pl-cc-ready">${PL_ICON.check} Ready</span>` : `<span class="pl-cc-off" title="${plEsc(c.restriction || '')}">Unavailable</span>`;
-    const stock = c.viable ? `${plNum(c.soh)} units` : (c.soh > 0 ? `${plNum(c.soh)} units` : 'Out of stock');
-    const why = !c.viable && c.restriction && c.soh > 0 ? `<small>${plEsc(c.restriction)}</small>` : '';
+    const sizes = c.sizes ? `${c.sizes.available_sizes} of ${c.sizes.total_sizes} sizes` : 'Sizes not available';
+    const low = c.sizes && c.sizes.low && c.sizes.low.length ? ` title="Low or sold out: ${plEsc(c.sizes.low.join(', '))}"` : '';
+    const stock = c.soh > 0 ? `${plNum(c.soh)} units` : 'Out of stock';
+    const status = c.viable ? `<span class="pl-cc-ready">${PL_ICON.check} Ready to shoot</span>` : `<span class="pl-cc-off" title="${plEsc(c.restriction || '')}">Can't shoot now</span>${c.restriction ? `<small>${plEsc(c.restriction)}</small>` : ''}`;
     const box = `<input type="checkbox" class="pl-cc-box" data-opp-pick="${plEsc(it.key)}" data-style="${plEsc(c.style_code)}"${picked.has(c.style_code) ? ' checked' : ''}${c.viable && !plReadOnly() ? '' : ' disabled'} aria-label="Include ${plEsc(c.colour_label || c.style_code)} in the Shoot Plan">`;
-    return `<li class="pl-cc${c.viable ? ' ok' : ' off'}">${plTileImg(c.image_url)}<span class="pl-cc-body"><b>${plEsc(c.colour_label || c.style_code)}</b><span class="pl-cc-stock">${stock}</span>${status}${why}</span>${box}</li>`;
+    return `<li class="pl-cc${c.viable ? ' ok' : ' off'}" title="${plEsc(c.style_code)}">${box}${plTileImg(c.image_url)}<span class="pl-cc-body"><b>${plEsc(c.colour_label || c.style_code)}</b><span class="pl-cc-stock">${stock}</span><span class="pl-cc-sizes"${low}>${plEsc(sizes)}</span>${status}</span></li>`;
   };
-  return `<section class="pl-cx-cws"><div class="pl-cx-cws-h"><h5>Select colourways</h5><span class="pl-cx-count" data-opp-count="${plEsc(it.key)}">${picked.size} of ${viableN} ready to shoot selected</span></div><ul class="pl-cc-grid">${cws.map(card).join('')}</ul></section>`;
+  return `<section class="pl-cx-cws"><div class="pl-cx-cws-h"><h5>Available colourways</h5><span class="pl-cx-count">${viableN} of ${cws.length} can be shot now &middot; <span data-opp-count="${plEsc(it.key)}">${picked.size} selected</span></span></div><ul class="pl-cc-grid">${cws.map(card).join('')}</ul></section>`;
 }
-// three flat figures: Sales 30D with its 7-day trend, Stock on hand with weeks of cover, Active creatives with how many are effective
+// three metric cards: Sales 30D with its 7-day trend, Stock on hand with weeks of cover, Active / effective creatives
 function plCoreMetrics(it) {
   const f = it.facts || {};
   const total = f.active_ads === null || f.active_ads === undefined || f.unique_creatives === null || f.unique_creatives === undefined ? null : f.unique_creatives;
-  const cover = f.cover_weeks !== null && f.cover_weeks !== undefined ? `${f.cover_weeks} weeks cover` : '';
-  const m = (value, label, sub) => `<div class="pl-cm"><b>${value}</b><span class="pl-cm-l">${label}</span><small>${sub}</small></div>`;
+  const perf = f.performing || 0; const others = total === null ? 0 : Math.max(0, total - perf);
+  const cover = f.cover_weeks !== null && f.cover_weeks !== undefined ? `${f.cover_weeks} weeks of cover` : '';
+  const eff = total === null ? ['&ndash;', 'Creative data unavailable'] : [`${plNum(total)} / ${plNum(perf)}`, total === 0 ? 'No creative running' : others === 0 ? 'All performing' : `${plNum(others)} not performing${(f.testing || f.unrated) ? ' yet' : ''}`];
+  const card = (icon, tone, value, label, sub) => `<div class="pl-cm"><span class="pl-cm-ic" data-tone="${tone}">${icon}</span><b>${value}</b><span class="pl-cm-l">${label}</span><small>${sub}</small></div>`;
   return `<div class="pl-cx-metrics">
-    ${m(f.units30 === null || f.units30 === undefined ? '&ndash;' : plNum(f.units30), 'Sales &middot; 30D', plTrendHtml(it, true))}
-    ${m(f.stock_units === null || f.stock_units === undefined ? '&ndash;' : plNum(f.stock_units), 'Stock on hand', plEsc(cover))}
-    ${m(total === null ? '&ndash;' : plNum(total), 'Active creatives', total === null ? 'Creative data unavailable' : `${plNum(f.performing || 0)} effective`)}
+    ${card(PL_ICON.chart, 'green', f.units30 === null || f.units30 === undefined ? '&ndash;' : plNum(f.units30), 'Sales (30D)', plTrendHtml(it, true))}
+    ${card(PL_ICON.cube, 'purple', f.stock_units === null || f.stock_units === undefined ? '&ndash;' : plNum(f.stock_units), 'Stock on hand', plEsc(cover))}
+    ${card(PL_ICON.video, 'purple', eff[0], 'Active / effective creatives', plEsc(eff[1]))}
   </div>`;
 }
-// View Meta Ads (secondary): opens Meta Performance searched for this product's code, only when the product has matched ads
 function plHasMetaAds(it) { const f = it.facts || {}; return (f.live_creatives || 0) > 0 || (f.active_ads || 0) > 0 || !!(it.last_creative && it.last_creative.creatives_total > 0); }
 function plViewMetaAds(key) {
   const it = plFindItem(key); if (!it || typeof mpState === 'undefined') return;
@@ -396,31 +404,56 @@ function plViewMetaAds(key) {
   const box = document.getElementById('mp-search'); if (box) box.value = mpState.q;
   if (document.getElementById('tab-meta-performance').classList.contains('active')) loadMetaPerformanceArea(); else switchTab('meta-performance');
 }
-// The expanded product: what it is, why it needs creative (one sentence), three figures, the colourways, one primary action. The engine's evidence, scoring and rules stay in the backend.
+// View Meta Ads: ONE collapsed section. Opened, it lists the unique creatives delivering for the product (duplicates across campaigns and funnels are one row) with the creative date from the ad name,
+// funnel, performance status and the headline Meta numbers; the full Meta data is one click further (Meta Performance, searched for the product).
+function plCoreAdsHtml(it, mode) {
+  if (!plHasMetaAds(it)) return '';
+  const key = `${mode}:${it.key}:ads`;
+  const rows = (it.creatives || []).slice().sort((a, b) => (a.live_status === 'delivering' ? 0 : 1) - (b.live_status === 'delivering' ? 0 : 1) || (b.spend || 0) - (a.spend || 0));
+  const money = (v) => (v === null || v === undefined ? plNone : `$${plNum(Math.round(v))}`);
+  const word = (c) => { const w = plStateWord(c.state); return w ? w.charAt(0).toUpperCase() + w.slice(1) : '&ndash;'; };
+  const body = rows.length ? `<table class="pt-mini pl-ads-table"><thead><tr><th>Creative</th><th>Creative date</th><th>Funnel</th><th>Status</th><th class="num">Spend (14D)</th><th class="num">CPA (14D)</th></tr></thead><tbody>${rows.slice(0, 12).map((c) => {
+    const cd = PE.creativeDate(c);
+    return `<tr class="${c.live_status === 'delivering' ? '' : 'pl-live-off'}"><td>${plEsc(c.name || c.concept || 'Unnamed creative')}${c.format ? `<small>${plEsc(c.format)}</small>` : ''}</td><td>${cd.known ? plEsc(cd.long) : plNone}</td><td>${plEsc(c.funnel || (c.mixed_funnels ? 'Several' : 'Unknown'))}</td><td>${word(c)}${c.live_status && c.live_status !== 'delivering' ? `<small>${plEsc(c.live_label || '')}</small>` : ''}</td><td class="num">${money(c.spend)}</td><td class="num">${money(c.cpa)}</td></tr>`;
+  }).join('')}</tbody></table>${rows.length > 12 ? `<p class="hint">${rows.length - 12} more in Meta Performance.</p>` : ''}` : '<p class="hint">No ads are delivering for this product right now.</p>';
+  return `<details class="pl-cx-ads" data-opp-evidence="${plEsc(key)}"${state.oppEvidence[key] ? ' open' : ''}><summary><span class="pl-cx-ads-ic">${PL_ICON.chart}</span><span><b>View Meta Ads</b><small>See all unique creatives and recent ad performance for this product.</small></span><i aria-hidden="true">${PL_ICON.chev}</i></summary><div class="pl-cx-ads-body">${body}<div class="pl-cx-foot"><button type="button" class="btn btn-sm pl-metalink" data-opp-meta="${plEsc(it.key)}">Open in Meta Performance &rarr;</button></div></div></details>`;
+}
+// colourway pictures under the main one (click to look at one)
+function plCoreThumbs(it) {
+  const seen = new Set([it.image_url]);
+  const list = (it.colourways || []).filter((c) => c.image_url && !seen.has(c.image_url) && seen.add(c.image_url)).slice(0, 6);
+  const all = it.image_url ? [{ image_url: it.image_url, colour_label: 'Main' }, ...list] : list;
+  if (all.length < 2) return '';
+  return `<span class="pl-cx-thumbs">${all.map((c) => `<button type="button" class="pl-cx-th" data-opp-swap="${plEsc(c.image_url)}" title="${plEsc(c.colour_label || c.style_code || '')}"><img src="${plEsc(c.image_url)}" alt=""></button>`).join('')}</span>`;
+}
+// The expanded product, following the mockup: picture, name / priority / action, one-sentence reason, three metric cards, colourways, then one collapsed View Meta Ads. The engine's evidence,
+// scoring and rules stay in the backend (and in High Stocks).
 function plCoreDetailHtml(it, mode, ncols) {
-  const cfg = plCfg(); const st = PE.coreStatus(it, cfg);
+  const cfg = plCfg(); const st = PE.coreStatus(it, cfg); const cat = PE.categoryOf(it);
+  const prio = it.actionable && it.priority ? `<span class="opp-priority" data-priority="${plEsc(it.priority)}" title="${plEsc(plPrioTitle(it))}">${plEsc(it.priority)} priority</span>` : '';
+  const heading = cat === 'needs' ? 'Why shoot this product?' : cat === 'review' ? 'Why this needs review' : 'Why no new creative is needed';
   return `<tr class="pt-detail-row"><td colspan="${ncols}"><div class="pl-cx">
     <div class="pl-cx-top">
-      ${plMainImg(it.image_url)}
+      <div class="pl-cx-pic">${plMainImg(it.image_url)}${plCoreThumbs(it)}</div>
       <div class="pl-cx-main">
-        <div class="pl-cx-head"><div class="pl-cx-id"><h4>${plEsc(it.name)}</h4><span class="pl-x-cat">${plEsc(it.category || '')}</span></div><span class="pl-cx-add">${plCoreAddBtn(it)}${PL_BLOCKED.includes(it.status) ? '<span class="hint">This product cannot be planned yet.</span>' : ''}${plReadOnly() ? '<span class="hint">Past weeks are read-only.</span>' : ''}</span></div>
-        <div class="pl-cx-gap"><span class="pl-status" data-tone="${plEsc(st.tone)}"><i aria-hidden="true"></i>${plEsc(st.label)}</span><p class="pl-cx-why">${plEsc(PE.whyShoot(it, cfg))}</p></div>
+        <div class="pl-cx-head"><div class="pl-cx-id"><h4>${plEsc(it.name)}</h4>${prio}<span class="pl-x-cat">${plEsc(it.category || '')}</span></div><span class="pl-cx-add">${plCoreAddBtn(it)}${PL_BLOCKED.includes(it.status) ? '<span class="hint">This product cannot be planned yet.</span>' : ''}${plReadOnly() ? '<span class="hint">Past weeks are read-only.</span>' : ''}</span></div>
+        <div class="pl-cx-why" data-tone="${plEsc(st.tone)}"><span class="pl-cx-why-ic">${PL_ICON.target}</span><div><b>${heading}</b><p>${plEsc(PE.whyShoot(it, cfg))}</p></div></div>
         ${plCoreMetrics(it)}
+        ${plCoreColourCards(it)}
       </div>
     </div>
-    ${plCoreColourCards(it)}
-    ${plHasMetaAds(it) ? `<div class="pl-cx-foot"><button type="button" class="btn btn-sm pl-metalink" data-opp-meta="${plEsc(it.key)}">${PL_ICON.chart} View Meta Ads</button></div>` : ''}
+    ${plCoreAdsHtml(it, mode)}
   </div></td></tr>`;
 }
 function plCoreTableHtml(mode, items, cat) {
   const sort = state.oppSort[mode];
   const th = (label, cls, key) => { const def = key && PL_SORTS[key] && (!PL_SORTS[key].only || PL_SORTS[key].only === cat) ? key : null; const on = def && sort && sort.key === def; return `<th class="${cls}${def ? ' pt-sortable' : ''}${on ? ' sorted' : ''}"${def ? ` data-opp-sort="${mode}:${def}" role="button" tabindex="0" aria-sort="${on ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}"` : ''}>${plEsc(label)}${on ? (sort.dir === 'asc' ? ' &uarr;' : ' &darr;') : ''}</th>`; };
-  const needs = cat === 'needs'; const ncols = needs ? 7 : 5;
-  const head = `${needs ? '<th class="pt-w-rank">#</th>' : ''}${th('Product', 'pt-w-product', 'product')}${th('Sales (30D)', 'pt-w-sales', 'u30')}${th('Stock', 'pt-w-stockc', 'stock')}${th(needs ? 'Creative gap' : 'Creative status', 'pt-w-gap', null)}${needs ? th('Priority', 'pt-w-prio', 'priority') : ''}${th('Action', 'pt-w-act', null)}`;
+  const needs = cat === 'needs'; const ncols = needs ? 8 : 6;
+  const head = `${needs ? '<th class="pt-w-rank">#</th>' : ''}${th('Product', 'pt-w-product', 'product')}${th('Sales (30D)', 'pt-w-sales', 'u30')}${th('Stock', 'pt-w-stockc', 'stock')}${th('Creative coverage', 'pt-w-cov', null)}${th(needs ? 'Creative gap' : 'Creative status', 'pt-w-gap', null)}${needs ? th('Priority', 'pt-w-prio', 'priority') : ''}${th('Action', 'pt-w-act', null)}`;
   const limit = state.oppLimit[mode] || PL_PAGE;
   const body = items.slice(0, limit).map((it, n) => {
     const open = !!state.oppOpen[`${mode}:${it.key}`];
-    return `<tr class="pt-row${open ? ' open' : ''}${needs ? '' : ' pt-quiet'}" data-opp-row="${mode}:${plEsc(it.key)}" data-status="${plEsc(it.status)}" data-category="${plEsc(cat)}" tabindex="0" aria-expanded="${open}">${needs ? `<td class="pt-rank">${n + 1}</td>` : ''}${plCoreProductCell(it)}${plCoreSalesCell(it)}${plCoreStockCell(it)}${plCoreStatusCell(it)}${needs ? plPrioCell(it) : ''}${plCoreActionCell(it, mode)}</tr>${open ? plCoreDetailHtml(it, mode, ncols) : ''}`;
+    return `<tr class="pt-row${open ? ' open' : ''}${needs ? '' : ' pt-quiet'}" data-opp-row="${mode}:${plEsc(it.key)}" data-status="${plEsc(it.status)}" data-category="${plEsc(cat)}" tabindex="0" aria-expanded="${open}">${needs ? `<td class="pt-rank">${n + 1}</td>` : ''}${plCoreProductCell(it)}${plCoreSalesCell(it)}${plCoreStockCell(it)}${plCoreCoverageCell(it)}${plCoreStatusCell(it)}${needs ? plPrioCell(it) : ''}${plCoreActionCell(it, mode)}</tr>${open ? plCoreDetailHtml(it, mode, ncols) : ''}`;
   }).join('');
   return `<div class="pt-wrap"><table class="pt-table pl-table pl-table-core pt-${plEsc(mode)}"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>${items.length > limit ? `<div class="pt-more"><button type="button" class="btn btn-ghost btn-sm" data-opp-more="${mode}">Show ${Math.min(PL_PAGE, items.length - limit)} more</button></div>` : ''}`;
 }
@@ -617,6 +650,8 @@ document.addEventListener('click', (ev) => {
   if (ev.target.closest('[data-opp-refresh]')) { plLoadOpportunities(true); return; }
   const plan = ev.target.closest('[data-opp-plan]');
   if (plan) { plPlan(plan.dataset.oppPlan, plan.dataset.oppColour || null); return; }
+  const swap = ev.target.closest('[data-opp-swap]');
+  if (swap) { const box = swap.closest('.pl-cx') && swap.closest('.pl-cx').querySelector('.pl-cx-img'); if (box) box.innerHTML = `<img src="${plEsc(swap.dataset.oppSwap)}" alt="">`; return; }
   const meta = ev.target.closest('[data-opp-meta]');
   if (meta) { plViewMetaAds(meta.dataset.oppMeta); return; }
   const quick = ev.target.closest('[data-opp-add]');
@@ -652,7 +687,7 @@ document.addEventListener('change', (ev) => {
     const key = pick.dataset.oppPick; const it = plFindItem(key); if (!it) return;
     const set = new Set(plPickedCodes(it)); if (pick.checked) set.add(pick.dataset.style); else set.delete(pick.dataset.style);
     state.oppPick[key] = [...set];
-    const n = document.querySelector(`[data-opp-count="${CSS.escape(key)}"]`); if (n) n.textContent = `${set.size} of ${(it.colourways || []).filter((c) => c.viable).length} ready to shoot selected`;
+    const n = document.querySelector(`[data-opp-count="${CSS.escape(key)}"]`); if (n) n.textContent = `${set.size} selected`;
     return;
   }
   const ss = ev.target.closest && ev.target.closest('[data-opp-sort-select]');

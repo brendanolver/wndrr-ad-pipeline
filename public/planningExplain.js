@@ -245,6 +245,17 @@
     if (lc.has_conflicts) bits.push('Some copies carry a different date; the original ad\u2019s date is used.');
     return { known: true, day: d.day, year: d.year, long: d.long, days: num(lc.days_since) === null ? null : Math.max(0, num(lc.days_since)), name: lc.creative_name || null, uncertain: !!lc.possibly_newer_undated, title: `Last creative: ${d.long}. ${note}${bits.length ? ` ${bits.join(' ')}` : ''}`, caveat: bits.join(' ') || null };
   }
+  // CREATIVE COVERAGE (Core table): how many genuinely different creatives the product has had (every matched creative in any status; duplicates across campaigns, ad sets, funnels and "- Copy"
+  // suffixes count once) and the newest creative date written in the ad names. Never a delivery or modified date. "Unknown" = creatives exist but none has a reliable name date.
+  function coverage(item, refYear) {
+    const lc = item && item.last_creative; const count = lc ? num(lc.creatives_total) : null;
+    if (!lc || count === null) return { known: false, count: null, latest: null, latestKnown: false, uncertain: false, title: 'Creative coverage could not be loaded.' };
+    const d = shortDate(lc.last_creative_uploaded_date);
+    const latest = d ? `${d.day}${refYear && String(refYear) !== d.year ? ` ${d.year}` : ''}` : (count > 0 ? 'Unknown' : 'None');
+    const note = lc.possibly_newer_undated ? ' A creative without a valid date in its name may be newer.' : '';
+    return { known: true, count, latest, latestKnown: !!d, uncertain: !!lc.possibly_newer_undated,
+      title: `${count} unique ${count === 1 ? 'creative' : 'creatives'} matched to this product, in any status. Duplicates across campaigns, ad sets, funnels and "Copy" suffixes count once. Latest is the newest creative date written in the ad names${d ? ` (${d.long})` : ''}, not a delivery date.${note}` };
+  }
   // one creative in the live-ads table: its original creative date, or why there is none
   function creativeDate(c) {
     const d = c ? shortDate(c.original_date) : null;
@@ -466,5 +477,5 @@
   };
   const typeLabelOf = (item) => (item.mode === 'momentum' || item.opportunity_type === 'protect_momentum' ? 'Protect Momentum' : TYPE_LABEL[(item.gap && item.gap.type) || item.opportunity_type] || null);
 
-  return { creativeStatus, coreStatus, whyShoot, salesTrend, lastCreative, creativeDate, liveAds, CATEGORY, CATEGORY_ORDER, STATUS_CATEGORY, categoryOf, isVisible, longDate, startedPhrase, conditionsSummary, stockRestriction, sellingClause, creativeClause, reasonFor, whyWithNumbers, recommendationFor, directionFor, keyFacts, stockWarning, productionActivity, summaryCounts, momentumItemsFor, weeklySummary, TYPE_LABEL, typeLabelOf };
+  return { creativeStatus, coverage, coreStatus, whyShoot, salesTrend, lastCreative, creativeDate, liveAds, CATEGORY, CATEGORY_ORDER, STATUS_CATEGORY, categoryOf, isVisible, longDate, startedPhrase, conditionsSummary, stockRestriction, sellingClause, creativeClause, reasonFor, whyWithNumbers, recommendationFor, directionFor, keyFacts, stockWarning, productionActivity, summaryCounts, momentumItemsFor, weeklySummary, TYPE_LABEL, typeLabelOf };
 }));

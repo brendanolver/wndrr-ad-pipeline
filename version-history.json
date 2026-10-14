@@ -2,6 +2,16 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.2.6",
+      "date": "2026-10-14",
+      "title": "Core creative coverage",
+      "changes": [
+        "Core table gains a Creative coverage column: unique creatives (duplicates and copies counted once) and the latest creative date from the ad names, Unknown when none is reliable",
+        "Row thumbnails are 62px and uncropped; the expanded product follows the new mockup with colourway cards (size availability) and one collapsed View Meta Ads section",
+        "Presentation only: engine, matching, benchmarks and Shoot Plan writes are unchanged"
+      ]
+    },
+    {
       "version": "1.2.5",
       "date": "2026-10-14",
       "title": "Colourway thumbnails",
