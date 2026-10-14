@@ -508,7 +508,17 @@ function parseAdsQuery(query) {
   const q = String(query.q || '').trim().slice(0, 200);
   const pageSize = Math.min(100, Math.max(1, parseInt(query.page_size, 10) || 20));
   const page = Math.max(1, parseInt(query.page, 10) || 1);
-  return { sort, dir, status, q, pageSize, page, funnels: parseFunnelList(query.funnels) };
+  return { sort, dir, status, q, pageSize, page, funnels: parseFunnelList(query.funnels), product: parseProductScope(query.product) };
+}
+
+// Batch 33: "View Meta Ads" from Planning. ?product=CODE1,CODE2 (a product family's style codes) narrows the Ad Performance TABLE to ads whose confirmed / auto-matched product association
+// includes one of those codes (the same product-to-ad matching Planning uses), whatever the funnel or delivery status. Rows stay individual Meta ads (copies are NOT merged here). Table only:
+// the summary cards, benchmarks and every calculation are untouched. null = no product scope.
+const PRODUCT_CODE_RE = /^[A-Za-z0-9._\-\/ ]{1,60}$/;
+function parseProductScope(raw) {
+  if (raw === undefined || raw === null || String(raw).trim() === '') return null;
+  const list = [...new Set(String(raw).split(',').map((x) => x.trim()).filter((x) => PRODUCT_CODE_RE.test(x)))].slice(0, 80);
+  return list.length ? list : null;
 }
 
 // The Ad Performance table's funnel checkboxes: ?funnels=TOF,TOM (any subset) or ?funnels=none. null = no restriction (nothing sent, all three, or unreadable), so a table with
@@ -547,6 +557,7 @@ async function getAds(parsed, query) {
   if (opts.funnels) { params.push(opts.funnels); where.push(`COALESCE(mc.funnel, 'unknown') = ANY($${params.length}::text[])`); }
   if (filter.campaignId) { params.push(filter.campaignId); where.push(`a.meta_campaign_id = $${params.length}`); }
   if (filter.excludeDpa) where.push(dpaLib.notDpaPredicate('a', 'mc'));
+  if (opts.product) { params.push(opts.product); where.push(`a.match_status IN ('confirmed', 'auto_matched') AND EXISTS (SELECT 1 FROM meta_ad_products sp WHERE sp.meta_ad_id = a.meta_ad_id AND sp.product_code = ANY($${params.length}::text[]))`); }
   if (opts.q) {
     // ad name, exact Meta Ad ID, product name / code, creative / concept name (adSearchSql)
     where.push(adSearchSql(params, opts.q));
@@ -628,6 +639,7 @@ async function getAds(parsed, query) {
     status: opts.status,
     q: opts.q,
     funnels: opts.funnels,
+    product: opts.product,
     filter: filter.active ? { funnel: filter.funnel, campaign_id: filter.campaignId } : null,
     dpa: await getDpaInfo(parsed.range, filter),
     scale,
@@ -957,6 +969,7 @@ module.exports = {
   previousPeriod,
   parseRangeParams,
   parseAdsQuery,
+  parseProductScope,
   deriveMetrics,
   getCoverage,
   getSummary,

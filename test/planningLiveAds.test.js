@@ -126,14 +126,10 @@ test('live ads: Live Ads, coverage, concentration and the explanation agree on t
   assert.equal(Math.round(it.facts.top_creative_spend_share), 91, '(900+100)/(1100) of the spend sits on the one duplicated creative');
 });
 
-test('live ads: page wiring (a Live ads box in the key metrics on both pages, expanded creative table, settings)', () => {
+test('live ads: page wiring (Active Ads in the Creative coverage column on both pages, settings)', () => {
   const pl = fs.readFileSync(path.join(__dirname, '..', 'public', 'planning.js'), 'utf8');
-  const cell = pl.slice(pl.indexOf('function plMetricsCell'), pl.indexOf('function plStatusCell'));
-  const order = ['Sales 30D', 'Stock on hand', 'Live ads'].map((k) => cell.indexOf(`<small>${k}`));
-  assert.ok(order.every((i, n) => i > -1 && (n === 0 || i > order[n - 1])), 'Key metrics: Sales 30D, Stock on hand, Live ads');
-  assert.match(pl, /plLiveAdsHtml\(it\)/, 'the expanded details list each distinct creative');
-  assert.ok(!pl.includes('<th class="num">Meta ads</th>'), 'no Meta-instance column in the expanded details');
-  for (const h of ['Creative', 'Format', 'Funnel', 'Delivery', 'Performance']) assert.ok(pl.includes(`<th>${h}</th>`) || pl.includes(`<th class="num">${h}</th>`), `column ${h}`);
-  assert.ok(pl.includes('plPageHtml(\'core\')') && pl.includes("plPageHtml('high', tierNote)"), 'Core and High Stocks share one table');
+  const cell = pl.slice(pl.indexOf('function plCoreCoverageCell'), pl.indexOf('function plCoreStatusCell'));
+  assert.ok(cell.indexOf('Active ') > -1 && cell.indexOf('Active ') < cell.indexOf('Latest: '), 'Creative coverage: Active Ads first, then the latest creative date');
+  assert.ok(pl.includes("plPageHtml(mode") || (pl.includes("plPageHtml('core')") && pl.includes("plPageHtml('high', tierNote)")), 'Core and High Stocks share one table');
   assert.ok(Object.keys(cfgLib.LABEL).includes('live_delivery_days'));
 });

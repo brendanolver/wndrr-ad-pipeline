@@ -137,14 +137,11 @@ test('weak demand: a product with 16 units in about 21 days on sale is not recom
 // ── UI wiring ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 test('ui: Priority exists only in Needs creative and + Add in all three; Priority is sortable; Live ads shows only the number; the page has four sections', () => {
   const pl = fs.readFileSync(path.join(__dirname, '..', 'public', 'planning.js'), 'utf8');
-  assert.match(pl, /priority: \{[^}]*only: 'needs'/); assert.match(pl, /const showPrio = cat === 'needs'/, 'Batch 32: Priority is a column only in Needs creative');
-  assert.match(pl.slice(pl.indexOf('function plActionCell'), pl.indexOf('// sorting')), /data-opp-add/, 'the Add action exists in every category');
+  assert.match(pl, /priority: \{[^}]*only: 'needs'/); assert.match(pl, /const needs = cat === 'needs'/, 'Priority is a column only in Needs creative');
+  assert.match(pl.slice(pl.indexOf('function plCoreAddBtn'), pl.indexOf('// colourway cards')), /data-opp-add/, 'the Add action exists in every category');
   assert.match(pl, /\$\{cur === 'needs' \? `<label class="pl-f"><span>Priority/, 'the Priority filter is also only offered in Needs creative');
-  const cell = pl.slice(pl.indexOf('function plMetricsCell'), pl.indexOf('function plStatusCell')).replace(/\/\/.*$/gm, '');
-  const live = cell.slice(cell.indexOf('pt-live'));
-  assert.doesNotMatch(live, /Meta ad|running as/, 'Live ads in the key metrics is the number and nothing else');
-  assert.match(live, /\$\{live\}<small>Live ads<\/small>/, 'the box holds the number and its label only');
-  assert.doesNotMatch(pl.slice(pl.indexOf('function plLiveAdsHtml'), pl.indexOf('function plColourwaysHtml')), /Meta ads?<\/th>|running as/);
+  const cov = pl.slice(pl.indexOf('function plCoreCoverageCell'), pl.indexOf('function plCoreStatusCell'));
+  assert.doesNotMatch(cov, /Meta ad|running as/, 'Active Ads is the number and its label, nothing else');
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
   for (const sec of ['core', 'high-stocks', 'creative-insights', 'shoot-plan']) assert.equal((html.match(new RegExp(`data-pl-nav="${sec}"`, 'g')) || []).length, 2, `${sec} is in both the top navigation and the sidebar`);
   const app = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');

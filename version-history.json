@@ -2,6 +2,17 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.2.7",
+      "date": "2026-10-15",
+      "title": "Active Ads, creative deduplication and Meta navigation",
+      "changes": [
+        "Creative coverage now shows Active Ads (genuinely different creatives delivering now) with the latest creative date; Core and High Stocks share one table",
+        "Copies of one creative (Copy, Copy 2, Copy - Copy, with different Meta creative ids and no original in the set) now count once; each funnel keeps its own spend, purchases and CPA",
+        "View Meta Ads is one button that opens Meta Performance scoped to the product (all funnels and statuses, individual Meta ads, clearable, Back to Planning)",
+        "Recommendation thresholds, ranking, stock rules, benchmarks and Creative Insights are unchanged"
+      ]
+    },
+    {
       "version": "1.2.6",
       "date": "2026-10-14",
       "title": "Core creative coverage",

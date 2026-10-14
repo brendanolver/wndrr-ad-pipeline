@@ -229,7 +229,7 @@ async function loadProductAdPerformance(families, { db, rules, coded, config = D
       addRowToGroup(g.get(key), r, shared);
     });
   });
-  per.forEach((g, fk) => { if (nameCopies) mergeNameCopies(g, nameCopies); });
+  per.forEach((g, fk) => { if (nameCopies) { mergeNameCopies(g, nameCopies); mergeCopySiblings(g, nameCopies); } });
   const allGroups = []; per.forEach((g) => g.forEach((x) => allGroups.push(x)));
   const origins = await loadCreativeOrigins(db, allGroups, nameCopies);
   origins.forEach((o, x) => {
@@ -346,6 +346,20 @@ async function loadCreativeOrigins(db, groups, nameCopies) {
 
 // A "- Copy" of an ad is the same creative even when Meta gave it its own creative id (Batch 10's name-copy rule): fold such a group into the group of the
 // original ad (the one whose name equals the copy's base name). Pooled metrics are summed (they are different ads' spend, so nothing is counted twice).
+// Folds group g into group t: pooled metrics are summed per funnel (different ads' spend, so nothing is counted twice), ads and dates are combined.
+function foldGroup(t, g) {
+  ['total', 'recent', 'prior', 'fatigue_recent', 'fatigue_prior'].forEach((w) => { Object.keys(t[w]).forEach((m) => { t[w][m] += g[w][m]; }); });
+  t.ads.push(...g.ads); t.delivery_rows += g.delivery_rows; g.funnels.forEach((f) => t.funnels.add(f)); t.shared = t.shared || g.shared;
+  g.pools.forEach((gp, fk) => { if (!t.pools.has(fk)) t.pools.set(fk, newPool()); const tp = t.pools.get(fk); tp.delivery_rows += gp.delivery_rows; ['total', 'recent', 'prior', 'fatigue_recent', 'fatigue_prior'].forEach((w) => { Object.keys(tp[w]).forEach((m) => { tp[w][m] += gp[w][m]; }); }); });
+  t.concept = t.concept || g.concept; t.creator = t.creator || g.creator; t.style = t.style || g.style; t.media = t.media || g.media;
+  if (g.created && (!t.created || new Date(g.created) < new Date(t.created))) t.created = g.created;
+  if (g.first_day && (!t.first_day || g.first_day < t.first_day)) t.first_day = g.first_day;
+  if (g.last_day && (!t.last_day || g.last_day > t.last_day)) t.last_day = g.last_day;
+  t.life_spend = (t.life_spend || 0) + (g.life_spend || 0);
+}
+
+// A "- Copy" of an ad is the same creative even when Meta gave it its own creative id (Batch 10's name-copy rule): fold such a group into the group of the
+// original ad (the one whose name equals the copy's base name).
 function mergeNameCopies(groups, nameCopies) {
   const byName = new Map(); // normalised ad name -> group key
   groups.forEach((g, k) => g.ads.forEach((a) => { const nm = String(a.name || '').trim().toLowerCase(); if (nm && !byName.has(nm)) byName.set(nm, k); }));
@@ -355,18 +369,32 @@ function mergeNameCopies(groups, nameCopies) {
     if (!copyAd) return;
     const baseKey = byName.get(String(nameCopies.baseOf(copyAd.name)).trim().toLowerCase());
     if (!baseKey || baseKey === k || !groups.has(baseKey)) return;
-    const t = groups.get(baseKey);
-    ['total', 'recent', 'prior', 'fatigue_recent', 'fatigue_prior'].forEach((w) => { Object.keys(t[w]).forEach((m) => { t[w][m] += g[w][m]; }); });
-    t.ads.push(...g.ads); t.delivery_rows += g.delivery_rows; g.funnels.forEach((f) => t.funnels.add(f)); t.shared = t.shared || g.shared;
-    g.pools.forEach((gp, fk) => { if (!t.pools.has(fk)) t.pools.set(fk, newPool()); const tp = t.pools.get(fk); tp.delivery_rows += gp.delivery_rows; ['total', 'recent', 'prior', 'fatigue_recent', 'fatigue_prior'].forEach((w) => { Object.keys(tp[w]).forEach((m) => { tp[w][m] += gp[w][m]; }); }); });
-    t.concept = t.concept || g.concept; t.creator = t.creator || g.creator; t.style = t.style || g.style; t.media = t.media || g.media;
-    if (g.created && (!t.created || new Date(g.created) < new Date(t.created))) t.created = g.created;
-    if (g.first_day && (!t.first_day || g.first_day < t.first_day)) t.first_day = g.first_day;
-    if (g.last_day && (!t.last_day || g.last_day > t.last_day)) t.last_day = g.last_day;
-    t.life_spend = (t.life_spend || 0) + (g.life_spend || 0);
+    foldGroup(groups.get(baseKey), g);
     groups.delete(k);
+  });
+}
+
+// Batch 33. mergeNameCopies only folds a copy into an ORIGINAL that is itself in the set. When the original is not (paused, archived, or never matched to the product) the copies
+// ("X - Copy", "X - Copy 2", "X - Copy - Copy", ...), each with its own Meta creative id, stayed separate creatives: one execution counted four times. This also folds the copies
+// that share the same canonical name with each other (and with a plain-named original when present). Only a recognised TRAILING duplicate suffix counts (metaNameCopies), the
+// remainder must match exactly (case aside), and two ads with identical names but no suffix are never merged. Planning only: Creative Insights keeps calling mergeNameCopies.
+function mergeCopySiblings(groups, nameCopies) {
+  if (!nameCopies || !nameCopies.hasCopySuffix) return;
+  const norm = (n) => String(n || '').trim().toLowerCase();
+  const bases = new Set();
+  groups.forEach((g) => g.ads.forEach((a) => { if (a.name && nameCopies.hasCopySuffix(a.name)) bases.add(norm(nameCopies.baseOf(a.name))); }));
+  if (!bases.size) return;
+  const buckets = new Map(); // canonical name -> first group key
+  [...groups.keys()].forEach((k) => {
+    const g = groups.get(k); if (!g) return;
+    const suffixed = g.ads.find((a) => a.name && nameCopies.hasCopySuffix(a.name));
+    const key = suffixed ? norm(nameCopies.baseOf(suffixed.name)) : (g.ads.map((a) => norm(a.name)).find((n) => n && bases.has(n)) || null);
+    if (!key) return;
+    if (!buckets.has(key)) { buckets.set(key, k); return; }
+    const t = groups.get(buckets.get(key)); if (!t || t === g) return;
+    foldGroup(t, g); groups.delete(k);
   });
 }
 const JUDGED = (f) => (['TOF', 'TOM', 'MOF'].includes(f) ? f : null);
 
-module.exports = { adRowsSql, newGroup, addRowToGroup, judgeAcrossFunnels, mergeNameCopies, DEFAULTS, LIMITS, LABEL, resolveConfig, judgeCreative, summarizeProduct, loadProductAdPerformance, creativeGroupKey, cpaOf, roasOf, ctrOf };
+module.exports = { adRowsSql, newGroup, addRowToGroup, judgeAcrossFunnels, mergeNameCopies, mergeCopySiblings, DEFAULTS, LIMITS, LABEL, resolveConfig, judgeCreative, summarizeProduct, loadProductAdPerformance, creativeGroupKey, cpaOf, roasOf, ctrOf };

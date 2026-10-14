@@ -135,7 +135,7 @@ async function loadLastCreativeDates(families, { db, today = null } = {}) {
       perf.addRowToGroup(g.get(key), { ...r, delivery_rows: 0 });
     });
   });
-  per.forEach((g) => perf.mergeNameCopies(g, nameCopies));
+  per.forEach((g) => { perf.mergeNameCopies(g, nameCopies); perf.mergeCopySiblings(g, nameCopies); });
 
   // every other instance of the same creative (any status, matched or not) so the ORIGINAL ad is found even when it is paused or not yet reviewed
   const ids = new Set(); const pats = new Set(); const groups = [];

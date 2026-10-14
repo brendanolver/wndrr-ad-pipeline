@@ -17,18 +17,17 @@ const cov = (n) => ({ known: true, active_ads: n, possible: 0, unresolved: 0, un
 const v = (k, s, o = {}) => ({ ...cr(k, s, { age: o.age === undefined ? 120 : o.age }), first_delivery: day(o.age === undefined ? 120 : o.age), first_delivery_truncated: false, last_delivery: day(1), ...o });
 
 test('add: the Action column (+ Add) is in every category; Priority only in Needs creative', () => {
-  const table = pl.slice(pl.indexOf('function plTableHtml'), pl.indexOf('const PL_EMPTY'));
-  assert.match(table, /const showPrio = cat === 'needs'/);
-  assert.match(table, /th\('Product'[\s\S]*th\('Key metrics'[\s\S]*th\('Creative status'[\s\S]*showPrio \? th\('Priority'[\s\S]*th\('Action'/, 'Product | Key metrics | Creative status | Priority (Needs only) | Action');
+  const table = pl.slice(pl.indexOf('function plCoreTableHtml'), pl.indexOf('const PL_CORE_TITLE'));
+  assert.match(table, /const needs = cat === 'needs'/);
+  assert.match(table, /needs \? '<th class="pt-w-rank">#<\/th>' : ''[\s\S]*th\('Product'[\s\S]*th\('Sales \(30D\)'[\s\S]*th\('Stock'[\s\S]*th\('Creative coverage'[\s\S]*'Creative gap'[\s\S]*needs \? th\('Priority'[\s\S]*th\('Action'/, '# | Product | Sales (30D) | Stock | Creative coverage | Creative gap | Priority (Needs only) | Action');
   assert.match(pl, /priority: \{[^}]*only: 'needs'/, 'the Priority sort is offered only in Needs creative');
-  const act = pl.slice(pl.indexOf('function plActionCell'), pl.indexOf('// sorting'));
-  assert.match(act, /cat === 'needs'[\s\S]*pl-act-add[\s\S]*data-opp-add/, 'Needs: the primary + Add to Shoot Plan button');
-  assert.match(act, /cat !== 'needs' \? `<button type="button" role="menuitem" data-opp-add/, 'Covered / Needs Review: the same add is one tap away in the row menu');
-  assert.match(act, /pl-act-view[\s\S]*data-opp-toggle/, 'Covered / Needs Review show a subtle View / Review action');
+  const act = pl.slice(pl.indexOf('function plCoreAddBtn'), pl.indexOf('// colourway cards'));
+  assert.match(act, /needs \? 'pl-act-add' : 'pl-act-soft'[\s\S]*data-opp-add/, 'Needs: the purple + Add; Covered / Needs review: the same add as a quiet outline button');
+  assert.match(act, /pl-expand[\s\S]*data-opp-toggle/, 'every row has the expand control');
 });
 test('add: one primary button in the purple accent, never disabled because something is in production', () => {
-  const cell = pl.slice(pl.indexOf('function plActionCell'), pl.indexOf('// sorting'));
-  assert.match(cell, /class="btn btn-sm pl-act pl-act-add"/);
+  const cell = pl.slice(pl.indexOf('function plCoreAddBtn'), pl.indexOf('// colourway cards'));
+  assert.match(cell, /pl-act \$\{needs \? 'pl-act-add' : 'pl-act-soft'\}/);
   assert.doesNotMatch(cell.replace(/\/\/.*$/gm, ''), /disabled/, 'the button is never disabled');
   assert.doesNotMatch(cell.replace(/\/\/.*$/gm, ''), /production|prod\./, 'in-production status plays no part in showing the button (it has its own indicator)');
   assert.match(css, /\.pl-act-add\s*\{[^}]*var\(--accent-strong\)/, 'Batch 32: the Add action uses the purple accent');
@@ -65,7 +64,6 @@ test('assessment: covered product, one or two short sentences, no counts, funnel
   // the detail is kept for the expanded row
   const detail = E.conditionsSummary(reaper);
   assert.match(detail, /9 unique creatives/); assert.match(detail, /3 performing against the approved benchmark/); assert.match(detail, /1 over the approved limit/); assert.match(detail, /with no approved TOF benchmark/); assert.match(detail, /insufficient delivery/); assert.match(detail, /in early testing/);
-  assert.ok(pl.includes('plLiveAdsHtml(it)') && pl.includes('Creative picture:'), 'the expanded row shows the creative picture and the live ads table (funnels, delivery dates, performance)');
 });
 test('assessment: early testing, uploads and review reasons stay short; missing benchmarks are never read as underperformance', () => {
   const enough = run(base({ sales: salesOf(150, { units7: 40, units14: 75 }), coverage: cov(4), creatives: [v('a', 'performing', { age: 90 }), v('b', 'performing', { age: 80 }), v('c', 'insufficient', { age: 2, spend: 10 }), v('d', 'underperforming', { age: 100, severity: 'clear' })] }));

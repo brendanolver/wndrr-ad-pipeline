@@ -48,13 +48,11 @@ test('creative status: it only re-words the engine output (no recalculation of s
   st(it); assert.deepEqual(it, copy, 'the engine item is not mutated');
 });
 
-test('redesign wiring: row cells, planned state, weekly goal strip and the three-section expanded panel', () => {
+test('redesign wiring: row cells, planned state and the weekly goal strip', () => {
   const pl = fs.readFileSync(path.join(__dirname, '..', 'public', 'planning.js'), 'utf8');
   const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
-  assert.match(pl, /plStatusCell\(it\)/); assert.match(pl, /plMetricsCell\(it\)/); assert.match(pl, /plActionCell\(it, mode\)/);
+  assert.match(pl, /plCoreStatusCell\(it\)/); assert.match(pl, /plCoreSalesCell\(it\)/); assert.match(pl, /plCoreCoverageCell\(it\)/); assert.match(pl, /plCoreActionCell\(it, mode\)/);
   assert.match(pl, /pl-act-planned/, 'a selected product shows a planned state');
   assert.match(pl, /pl-week-goal/); assert.match(pl, /Weekly creative goal/); assert.match(pl, /View Shoot Plan/);
-  for (const t of ['Why was this product recommended\\?', 'Recent live ads', 'Additional details']) assert.match(pl, new RegExp(t));
-  assert.equal((pl.match(/<details class="pl-x-d"/g) || []).length >= 3, true, 'three collapsible evidence sections');
   for (const tone of ['red', 'amber', 'green', 'grey']) assert.match(css, new RegExp(`\\.pl-status\\[data-tone="${tone}"\\]`), `${tone} tone styled`);
 });

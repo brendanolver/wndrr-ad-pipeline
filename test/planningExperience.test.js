@@ -145,12 +145,11 @@ test('page wiring: sidebar sub-menu replaces the in-page step buttons; six defau
   assert.match(app, /window\.location\.hash = `#planning\/\$\{key\}`/, 'sections have deep links');
   assert.match(app, /hash === '#planning' \|\| hash\.startsWith\('#planning\/'\)/);
   assert.match(app, /#planning\/drop/, 'the pre-restructure #planning/drop links still redirect');
-  const head = pl.slice(pl.indexOf('function plTableHtml'), pl.indexOf('const PL_EMPTY'));
-  const cols = [...head.matchAll(/th\('([^']+)'/g)].map((m) => m[1]);
-  assert.deepEqual(cols, ['Product', 'Key metrics', 'Creative status', 'Priority', 'Action']);
+  const head = pl.slice(pl.indexOf('function plCoreTableHtml'), pl.indexOf('const PL_CORE_TITLE'));
+  for (const h of ["th('Product'", "th('Sales (30D)'", "th('Stock'", "th('Creative coverage'", "'Creative gap'", "th('Priority'", "th('Action'"]) assert.ok(head.includes(h), `column ${h}`);
   for (const gone of ['Sales 7d', 'Sales trend', 'Active creatives', 'Effective creatives', 'Last new creative', 'Opportunity type']) assert.ok(!head.includes(gone), `${gone} is not a default column`);
   assert.match(pl, /plPageHtml\('core'\)/); assert.match(pl, /plPageHtml\('high', tierNote\)/, 'Core and High Stocks render through the same function');
-  assert.match(pl, /View detailed evidence/); assert.match(pl, /Add to Shoot Plan/); assert.match(pl, /Existing production activity/); assert.match(pl, /Suggested creative direction/);
+  assert.match(pl, /Add to Shoot Plan/);
   assert.doesNotMatch(pl, /pt-green|pt-orange|pt-red/, 'no table cell is filled red / green / orange');
 });
 

@@ -372,7 +372,7 @@ function switchTab(name) {
   if (name === 'reference-library') loadReferenceLibraryPage();
   if (name === 'update-requests') loadUpdateRequests();
   // Meta Performance reads stored data only (never Meta) -- refetched on every visit so a sync just run from Settings shows up.
-  if (name === 'meta-performance') loadMetaPerformanceArea();
+  if (name === 'meta-performance') { if (mpState.productNav) mpState.productNav = false; else mpState.product = null; loadMetaPerformanceArea(); }
   // Same reasoning as Shooting above -- Editing is the direct downstream
   // consumer of Shooting's Mark as Shot action, so it needs a fresh fetch
   // on every visit too.
@@ -863,6 +863,8 @@ const mpState = {
   freshPoll: null,
   freshTimer: null,
   campaignsFor: '', // range key the campaign dropdown was loaded for
+  product: null, // Batch 33: { codes, label, key, from } while the Ad Performance table is scoped to one product (View Meta Ads in Planning); null = all ads
+  productNav: false, // set while arriving from Planning so entering the page does not clear the scope
 };
 const mpFilterQuery = () => `${mpState.dpa ? '&dpa=include' : ''}${mpState.funnel && mpState.funnel !== 'all' ? `&funnel=${encodeURIComponent(mpState.funnel)}` : ''}${mpState.campaign ? `&campaign_id=${encodeURIComponent(mpState.campaign)}` : ''}`;
 // the table's funnel checkboxes: nothing is sent when all three are ticked (= the complete table, including ads with no TOF / TOM / MOF in the campaign name)
@@ -1230,7 +1232,7 @@ function mpRenderPager(res) {
 async function loadMetaPerformanceAds() {
   const id = ++mpState.adsReqId;
   const qs = `${mpRangeQuery()}&q=${encodeURIComponent(mpState.q)}&status=${mpState.status}` +
-    `&sort=${mpState.sort}&dir=${mpState.dir}&page=${mpState.page}&page_size=${mpState.pageSize}${mpState.compare ? '&compare=1' : ''}${mpFilterQuery()}${mpFunnelsQuery()}`;
+    `&sort=${mpState.sort}&dir=${mpState.dir}&page=${mpState.page}&page_size=${mpState.pageSize}${mpState.compare ? '&compare=1' : ''}${mpFilterQuery()}${mpFunnelsQuery()}${mpState.product ? `&product=${encodeURIComponent(mpState.product.codes.join(','))}` : ''}`;
   try {
     const res = await api(`/meta-performance/ads?${qs}`);
     if (id !== mpState.adsReqId) return; // a newer request superseded this one
@@ -2076,8 +2078,37 @@ function mpSyncChrome() {
   document.getElementById('mp-perf-controls').style.display = view === 'matching' ? 'none' : '';
   mpPlaceDateControls(view);
   const dpaBox = document.getElementById('mp-dpa'); if (dpaBox) dpaBox.checked = !!mpState.dpa;
+  mpRenderProductScope();
   document.getElementById('mp-view-matching').style.display = view === 'matching' ? '' : 'none';
 }
+
+// ── Product scope (Batch 33): Planning's "View Meta Ads" opens this page with the Ad Performance table limited to one product ──
+// The scope uses the product-to-ad matching (the family's style codes), never a name search, and shows every funnel and status for the range with each Meta ad as its own row. It narrows the table
+// only; the summary cards and all calculations are unchanged. The product filter can be cleared, and Back returns to the Planning section it came from.
+function mpRenderProductScope() {
+  const el = document.getElementById('mp-product-scope'); if (!el) return;
+  const p = mpState.product; el.hidden = !p || mmState.view !== 'performance';
+  if (!p) { el.innerHTML = ''; return; }
+  el.innerHTML = `<span class="mp-ps-k">Product</span><b>${escapeHtml(p.label)}</b><span class="mp-ps-note">All funnels and statuses. Every Meta ad is listed, copies included. The summary above covers all ads.</span><span class="mp-ps-actions">${p.from ? '<button type="button" class="link-btn" id="mp-product-back">&larr; Back to Planning</button>' : ''}<button type="button" class="link-btn" id="mp-product-clear">Clear product filter</button></span>`;
+}
+function mpOpenProduct({ codes, label, key, from }) {
+  mpState.product = { codes: (codes || []).slice(0, 80), label: label || 'Product', key: key || '', from: from || '' };
+  mpState.productNav = true; mmState.view = 'performance';
+  mpState.q = ''; mpState.status = 'all'; mpState.funnel = 'all'; mpState.funnels = [...MP_FUNNEL_KEYS]; mpState.campaign = ''; mpState.page = 1;
+  const set = (id, v) => { const e = document.getElementById(id); if (e) e.value = v; };
+  set('mp-search', ''); set('mp-status', 'all'); set('mp-campaign', ''); mpSyncFunnelUi();
+  const h = `#meta-performance/product/${encodeURIComponent(mpState.product.key || 'product')}`;
+  if (window.location.hash !== h) window.location.hash = h; else handleHashRoute();
+}
+document.addEventListener('click', (e) => {
+  if (e.target.closest('#mp-product-clear')) {
+    mpState.product = null; mpState.page = 1; mpRenderProductScope();
+    try { window.history.replaceState(null, '', '#meta-performance'); } catch (_) { /* non-fatal */ }
+    loadMetaPerformanceAds();
+  } else if (e.target.closest('#mp-product-back')) {
+    const from = mpState.product && mpState.product.from; window.location.hash = `#planning/${from || 'core'}`;
+  }
+});
 
 function mpSetView(view) {
   mmState.view = view;
@@ -5008,6 +5039,11 @@ function handleHashRoute() {
     const section = hash.replace(/^#planning\/?/, '').split('/')[0] || 'core';
     if (!document.getElementById('tab-planning').classList.contains('active')) switchTab('planning');
     setPlanningStep(PLANNING_STEPS.includes(section) ? section : 'core', { fromHash: true });
+    return;
+  }
+  if (hash.startsWith('#meta-performance')) {
+    if (mpState.product) mpState.productNav = true; // arriving (or returning with Forward) via a product link keeps its scope
+    if (!document.getElementById('tab-meta-performance').classList.contains('active')) switchTab('meta-performance'); else { mpState.productNav = false; loadMetaPerformanceArea(); }
     return;
   }
   if (hash.startsWith('#drops')) {

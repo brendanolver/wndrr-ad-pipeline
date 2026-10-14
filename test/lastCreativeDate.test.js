@@ -169,15 +169,13 @@ test('display: 18 Sep / 2026 in the table, 18 September 2026 in the panel, a das
   assert.equal(E.creativeDate({ original_date: null, original_date_reason: 'original_undated' }).known, false);
 });
 
-test('wiring: Key metrics gain Last creative; the panel shows Last Creative Uploaded; Recent live ads shows the original date next to first delivery; the engine never reads it', () => {
+test('wiring: the Creative coverage column shows the latest creative date; the engine never reads it', () => {
   const root = path.join(__dirname, '..');
   const pl = fs.readFileSync(path.join(root, 'public', 'planning.js'), 'utf8');
-  const cell = pl.slice(pl.indexOf('function plMetricsCell'), pl.indexOf('function plStatusCell'));
-  const order = ['Sales 30D', 'Stock on hand', 'Live ads', 'Last creative'].map((k) => cell.indexOf(`<small>${k}`));
-  assert.ok(order.every((i, n) => i > -1 && (n === 0 || i > order[n - 1])), 'Sales 30D, Stock on hand, Live ads, Last creative');
-  assert.match(pl, /Last Creative Uploaded/); assert.match(pl, /<th>Creative date<\/th>/); assert.match(pl, /first delivery \$\{plEsc\(PE\.longDate\(c\.first_delivery\)\)\}/);
-  const head = pl.slice(pl.indexOf('function plTableHtml'), pl.indexOf('const PL_EMPTY'));
-  assert.deepEqual([...head.matchAll(/th\('([^']+)'/g)].map((m) => m[1]), ['Product', 'Key metrics', 'Creative status', 'Priority', 'Action'], 'the table columns are unchanged');
+  const cov = pl.slice(pl.indexOf('function plCoreCoverageCell'), pl.indexOf('function plCoreStatusCell'));
+  assert.match(cov, /Latest: /); assert.match(cov, /Active \$\{c\.active === 1 \? 'Ad' : 'Ads'\}/, 'Creative coverage: N Active Ads, then Latest: date');
+  const table = pl.slice(pl.indexOf('function plCoreTableHtml'), pl.indexOf('const PL_CORE_TITLE'));
+  for (const h of ["th('Product'", "th('Sales (30D)'", "th('Stock'", "th('Creative coverage'", "'Creative gap'", "th('Priority'", "th('Action'"]) assert.ok(table.includes(h), `column ${h}`);
   for (const f of ['planningOpportunities.js', 'planningPrimary.js', 'creativeRecency.js', 'planningDemand.js']) assert.doesNotMatch(fs.readFileSync(path.join(root, 'src', 'lib', f), 'utf8'), /last_creative|lastCreative/, `${f} does not read the date`);
   const ld = fs.readFileSync(path.join(root, 'src', 'lib', 'planningOpportunitiesLoader.js'), 'utf8');
   const run = ld.slice(ld.indexOf('const runMode'), ld.indexOf('const coreEvals'));
