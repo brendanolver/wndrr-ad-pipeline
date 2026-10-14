@@ -28,7 +28,7 @@ function dateStr(d) {
 
 // Makes sure an item has at least `want` live concepts (creative_assets that were not killed): the planning step asked for that many distinct concepts, so each
 // is its own Concept Development record (counted once, whatever products it is later adapted for). Never removes or renames an existing concept.
-async function ensureConcepts(client, item, want, { baseName, creator, createdByUserId, conceptType, assignee, editingOwner, format }) {
+async function ensureConcepts(client, item, want, { baseName, creator, createdByUserId, conceptType, assignee, editingOwner, format, plannedStyleIds = null }) {
   const have = (await client.query("SELECT count(*)::int AS n FROM creative_assets WHERE shoot_plan_item_id = $1 AND concept_dev_status <> 'killed'", [item.id])).rows[0].n;
   if (have >= want) return 0;
   const firstStyle = (await client.query('SELECT style_id FROM shoot_plan_item_styles WHERE shoot_plan_item_id = $1 ORDER BY style_id LIMIT 1', [item.id])).rows[0];
@@ -38,7 +38,7 @@ async function ensureConcepts(client, item, want, { baseName, creator, createdBy
       style_id: firstStyle ? firstStyle.style_id : null, concept_name: `${baseName} (${n})`, concept_classification: 'new_experimental', format: FORMATS.includes(format) ? format : 'video',
       strategy_owner: creator, status: 'awaiting_concept_development', created_by_user_id: createdByUserId, concept_type: conceptType || null, concept_assignee: assignee || null, editing_owner: editingOwner || null,
     });
-    await client.query('UPDATE creative_assets SET shoot_plan_item_id = $1 WHERE id = $2', [item.id, a.id]);
+    await client.query('UPDATE creative_assets SET shoot_plan_item_id = $1, planned_style_ids = $3::int[] WHERE id = $2', [item.id, a.id, plannedStyleIds && plannedStyleIds.length ? plannedStyleIds : null]);
     made += 1;
   }
   return made;
@@ -138,6 +138,8 @@ router.post('/', async (req, res, next) => {
   // its own Concept Development record); `videos` is the older name for the same number and is still accepted.
   const rawConcepts = req.body && req.body.concepts !== undefined && req.body.concepts !== null ? req.body.concepts : videos;
   const requestedVideos = rawConcepts === undefined || rawConcepts === null ? 1 : Number(rawConcepts);
+  // Batch 30: `additional: true` means "this many MORE concepts for a product that is already planned this week" (the count is added to the live concepts, never a duplicate of one that exists)
+  const additional = !!(req.body && req.body.additional === true);
   if (!Number.isInteger(requestedVideos) || requestedVideos < 1 || requestedVideos > MAX_CONCEPTS) {
     return res.status(400).json({ error: `concepts must be a whole number from 1 to ${MAX_CONCEPTS}` });
   }
@@ -198,7 +200,9 @@ router.post('/', async (req, res, next) => {
             AND (source IS NULL OR source IN ('core', 'high_stock', 'manual', 'momentum')) ORDER BY id LIMIT 1 FOR UPDATE`, [product_code, week_start || null]);
       if (existing.rows.length) {
         const ex = existing.rows[0];
-        const raised = Math.max(ex.planned_videos || 1, requestedVideos);
+        const haveNow = additional ? (await client.query("SELECT count(*)::int AS n FROM creative_assets WHERE shoot_plan_item_id = $1 AND concept_dev_status <> 'killed'", [ex.id])).rows[0].n : 0;
+        const wantTotal = additional ? haveNow + requestedVideos : requestedVideos;
+        const raised = Math.max(ex.planned_videos || 1, wantTotal);
         await client.query('UPDATE shoot_plan_items SET planned_videos = $1, recommended_videos = COALESCE($2, recommended_videos), video_mix = COALESCE($3::jsonb, video_mix), recommendation_snapshot = COALESCE($4::jsonb, recommendation_snapshot) WHERE id = $5',
           [raised, recommended_videos === undefined ? null : recommended_videos, video_mix ? JSON.stringify(video_mix) : null, recommendation_snapshot ? JSON.stringify(recommendation_snapshot) : null, ex.id]);
         for (const c of trimmedColourways) {
@@ -208,7 +212,7 @@ router.post('/', async (req, res, next) => {
         {
           const baseName = (concept_name && concept_name.trim()) || (quick_note && quick_note.trim()) || (product_name ? `New Concept — ${product_name}` : 'New Concept');
           const cu = await client.query('SELECT user_id FROM content_creators WHERE LOWER(name) = LOWER($1) AND user_id IS NOT NULL', [creator.trim()]);
-          await ensureConcepts(client, ex, requestedVideos, { baseName, creator: creator.trim(), createdByUserId: cu.rows[0] ? cu.rows[0].user_id : null, conceptType: concept_type, assignee: concept_assignee, editingOwner: editing_owner, format });
+          await ensureConcepts(client, ex, wantTotal, { plannedStyleIds: trimmedColourways.map((c) => Number(c.style_id)), baseName, creator: creator.trim(), createdByUserId: cu.rows[0] ? cu.rows[0].user_id : null, conceptType: concept_type, assignee: concept_assignee, editingOwner: editing_owner, format });
         }
         await client.query('COMMIT'); bust();
         const refreshed = (await pool.query('SELECT * FROM shoot_plan_items WHERE id = $1', [ex.id])).rows[0];
@@ -276,7 +280,7 @@ router.post('/', async (req, res, next) => {
     // Development scopes a Core/High Stock/Promotion product's concepts to
     // exactly this shoot_plan_item, not every historical asset ever made
     // for the style.
-    await client.query('UPDATE creative_assets SET shoot_plan_item_id = $1 WHERE id = $2', [item.id, asset.id]);
+    await client.query('UPDATE creative_assets SET shoot_plan_item_id = $1, planned_style_ids = $3::int[] WHERE id = $2', [item.id, asset.id, trimmedColourways.length ? trimmedColourways.map((c) => Number(c.style_id)) : null]);
 
     for (const c of trimmedColourways) {
       await client.query(
@@ -285,7 +289,7 @@ router.post('/', async (req, res, next) => {
       );
     }
 
-    await ensureConcepts(client, item, requestedVideos, { baseName: resolvedConceptName, creator: trimmedCreator, createdByUserId, conceptType: trimmedConceptType, assignee: concept_assignee, editingOwner: editing_owner, format });
+    await ensureConcepts(client, item, requestedVideos, { plannedStyleIds: trimmedColourways.map((c) => Number(c.style_id)), baseName: resolvedConceptName, creator: trimmedCreator, createdByUserId, conceptType: trimmedConceptType, assignee: concept_assignee, editingOwner: editing_owner, format });
     await client.query('COMMIT'); bust();
     res.status(201).json({
       ...item,
