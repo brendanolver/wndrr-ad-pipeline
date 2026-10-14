@@ -55,14 +55,15 @@ test('multi-creative: one new creative never overrides the established creatives
   const o = run(base({ sales: salesOf(709, { units7: 165, units14: 330 }), stock: { known: true, units: 2678, on_order: 0 }, coverage: cov(10), creatives: [...established, ...fresh] }));
   assert.equal(o.status, 'covered', 'six performing creatives are assessed on their own evidence; four new ones do not make it "too early"');
   assert.equal(o.facts.performing, 6); assert.equal(o.facts.creative_conditions.new, 4);
-  assert.doesNotMatch(E.reasonFor(o, CFG), /too early/i); assert.match(E.reasonFor(o, CFG), /10 unique creatives/);
+  assert.doesNotMatch(E.reasonFor(o, CFG), /too early/i); assert.equal(E.reasonFor(o, CFG), 'Existing creative coverage is sufficient for now. 6 creatives are performing, with others still being assessed.'); assert.match(E.conditionsSummary(o), /10 unique creatives/, 'the counts live in the expanded row');
 });
 test('multi-creative: a missing TOF benchmark never overrides rated MOF creatives; unrated creatives count as creatives in play', () => {
   const mof = ['a', 'b'].map((k, i) => ({ ...v(k, 'performing', { age: 60 - i, concept: `M${i}` }), funnel: 'MOF' }));
   const tof = ['t1', 't2', 't3', 't4'].map((k, i) => ({ ...v(k, 'unrated', { age: 70 - i, concept: `T${i}` }), funnel: 'TOF' }));
   const o = run(base({ sales: strong, coverage: cov(6), creatives: [...mof, ...tof] }));
   assert.equal(o.status, 'covered'); assert.equal(o.facts.performing, 2); assert.equal(o.facts.unrated, 4); assert.equal(o.facts.creatives_in_play, 6);
-  assert.match(E.reasonFor(o, CFG), /2 performing against the approved benchmark, 4 with no approved TOF benchmark/);
+  assert.equal(E.reasonFor(o, CFG), 'Existing creative coverage is sufficient for now. 2 creatives are performing, with others still being assessed.');
+  assert.match(E.conditionsSummary(o), /2 performing against the approved benchmark, 4 with no approved TOF benchmark/);
 });
 test('multi-creative: performing and underperforming creatives together are both reported; one weak creative does not make every creative weak', () => {
   const o = run(base({ sales: strong, coverage: cov(4), creatives: [v('a', 'performing', { age: 90 }), v('b', 'performing', { age: 80 }), v('c', 'underperforming', { age: 70, severity: 'clear' }), v('d', 'underperforming', { age: 60, severity: 'clear' })] }));
@@ -134,9 +135,9 @@ test('weak demand: a product with 16 units in about 21 days on sale is not recom
 });
 
 // ── UI wiring ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-test('ui: Priority and + Add exist only in Needs creative; Priority is sortable; Live ads shows only the number; the page has four sections', () => {
+test('ui: Priority exists only in Needs creative and + Add in all three; Priority is sortable; Live ads shows only the number; the page has four sections', () => {
   const pl = fs.readFileSync(path.join(__dirname, '..', 'public', 'planning.js'), 'utf8');
-  assert.match(pl, /key: 'priority'[^}]*only: 'needs'[^}]*sort:/); assert.match(pl, /key: 'add'[^}]*only: 'needs'/);
+  assert.match(pl, /key: 'priority'[^}]*only: 'needs'[^}]*sort:/); assert.doesNotMatch(pl.slice(pl.indexOf("key: 'add'"), pl.indexOf('const plColsFor')), /only:/, 'Batch 31: the Actions column (+ Add) is in every category');
   assert.match(pl, /const plColsFor = \(cat\) => PL_COLS\.filter/);
   assert.match(pl, /\$\{cur === 'needs' \? `<label class="pl-f"><span>Priority/, 'the Priority filter is also only offered in Needs creative');
   const cell = pl.slice(pl.indexOf('function plLiveCell'), pl.indexOf('function plStockCell')).replace(/\/\/.*$/gm, '');

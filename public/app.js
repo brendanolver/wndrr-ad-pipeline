@@ -7353,7 +7353,7 @@ function openShootPlanModal(preset) {
     <div class="shoot-plan-colour-row">
       ${c.image_url ? `<img class="shoot-plan-colour-thumb" src="${c.image_url}" alt="">` : '<span class="shoot-plan-colour-thumb shoot-plan-noimg"><svg class=ic aria-hidden=true focusable=false><use href=#i-image></use></svg></span>'}
       <label class="checkbox-label shoot-plan-colour-check">
-        <input type="checkbox" class="shoot-plan-colour-required" value="${c.style_id}" ${shootPlanColourPreselected(preset, c) ? 'checked' : ''}>
+        <input type="checkbox" class="shoot-plan-colour-required" value="${c.style_id}" ${shootPlanColourPreselected(preset, c) ? 'checked' : ''}${c.viable === false ? ` data-restricted="${escapeHtml(c.restriction || 'Not shootable')}" data-colour-name="${escapeHtml(c.colour_label || c.style_code)}"` : ''} onchange="onShootPlanColourToggle(this)">
         <span class="shoot-plan-colour-names">
           <span class="shoot-plan-colour-name">${escapeHtml(c.colour_label || c.style_code)}</span>
           ${c.colour_label ? `<span class="shoot-plan-colour-code">${escapeHtml(c.style_code)}</span>` : ''}
@@ -7465,7 +7465,14 @@ function updateShootPlanSampleStatusVisibility() {
 // Select All / Clear All -- a many-colourway product otherwise means
 // clicking every single checkbox just to shoot the whole family.
 function selectAllShootPlanColours(checked) {
-  document.querySelectorAll('#shoot-plan-colours .shoot-plan-colour-required').forEach((el) => { el.checked = checked; });
+  // Select All never ticks a stock-restricted colourway: that needs its own explicit decision (onShootPlanColourToggle)
+  document.querySelectorAll('#shoot-plan-colours .shoot-plan-colour-required').forEach((el) => { if (checked && el.dataset.restricted) return; el.checked = checked; if (!checked) delete el.dataset.override; });
+}
+// Manual planning may override a recommendation but never silently bypasses a stock restriction: ticking a restricted colourway shows the reason and needs an explicit yes.
+async function onShootPlanColourToggle(el) {
+  if (!el.checked || !el.dataset.restricted) { delete el.dataset.override; return; }
+  const yes = await confirmDialog(`${el.dataset.colourName} cannot be shot as planned: ${el.dataset.restricted}. Include it in this shoot anyway?`, { okLabel: 'Include anyway' });
+  if (yes) el.dataset.override = '1'; else { el.checked = false; delete el.dataset.override; }
 }
 
 // Pre-fills every still-required colourway's size from Settings -> Default
@@ -7495,6 +7502,7 @@ async function saveShootPlanItem() {
   for (const row of document.querySelectorAll('#shoot-plan-colours .shoot-plan-colour-row')) {
     const checkbox = row.querySelector('.shoot-plan-colour-required');
     if (!checkbox.checked) continue;
+    if (checkbox.dataset.restricted && !checkbox.dataset.override) return toast(`${checkbox.dataset.colourName} is stock-restricted (${checkbox.dataset.restricted}). Untick it, or tick it again and confirm to include it.`, true);
     const size = row.querySelector('.shoot-plan-colour-size').value.trim();
     if (bringingFromWarehouse && !size) return toast('Select a size for every required colourway', true);
     const styleId = Number(checkbox.value);

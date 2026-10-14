@@ -140,8 +140,10 @@ function plPrioCell(it) {
   return `<td class="pt-prio">${it.actionable && it.priority ? `<span class="opp-priority" data-priority="${plEsc(it.priority)}" title="${plEsc(plPrioTitle(it))}">${plEsc(it.priority)}</span>` : plNone}</td>`;
 }
 function plAddCell(it) {
+  // the same compact black action in Needs creative, Covered / monitoring and Needs review: a person can always plan a product manually. It is never disabled because something is
+  // already in production (that has its own "In production" indicator); stock restrictions are handled inside the Shoot Plan modal, never bypassed silently.
   if (plReadOnly() || PL_BLOCKED.includes(it.status)) return '<td class="pt-add"></td>';
-  return `<td class="pt-add"><button type="button" class="btn btn-ghost btn-sm pl-add-btn" data-opp-add="${plEsc(it.key)}" title="Add this product to this week's Shoot Plan" aria-label="Add ${plEsc(it.name)} to the Shoot Plan">+ Add</button></td>`;
+  return `<td class="pt-add"><button type="button" class="btn btn-primary btn-sm pl-add-btn" data-opp-add="${plEsc(it.key)}" title="Add this product to this week's Shoot Plan" aria-label="Add ${plEsc(it.name)} to the Shoot Plan">+ Add</button></td>`;
 }
 
 const PL_COLS = [
@@ -151,9 +153,9 @@ const PL_COLS = [
   { key: 'stock', label: () => 'Stock', w: 'pt-w-num', cell: plStockCell, sort: (i) => (i.facts || {}).stock_units },
   { key: 'u30', label: () => 'Sales 30d', w: 'pt-w-num', cell: plSalesCell, sort: (i) => (i.facts || {}).units30 },
   { key: 'priority', label: () => 'Priority', w: 'pt-w-prio', cell: plPrioCell, only: 'needs', sort: (i) => (i.actionable ? PL_PRIO_ORDER[i.priority] * 1000 + i.score : -1) },
-  { key: 'add', label: () => '', w: 'pt-w-add', cell: plAddCell, only: 'needs' },
+  { key: 'add', label: () => 'Actions', w: 'pt-w-add', cell: plAddCell },
 ];
-// Priority and the quick Add action exist only where there is something to decide: the Needs creative list
+// Priority exists only where there is something to rank (Needs creative); the Actions column (+ Add) is in every category
 const plColsFor = (cat) => PL_COLS.filter((c) => !c.only || c.only === cat);
 
 // ── expandable details: A recommendation, B key facts, C suggested direction, D production, E detailed evidence (collapsed), F action ──
@@ -481,7 +483,6 @@ async function plPlan(key, colourCode = null, extra = {}) {
   if (plReadOnly()) return;
   const it = plFindItem(key);
   const prod = it ? PE.productionActivity(it, PL_STAGE_LABEL) : { active: false };
-  if (prod.active && !extra.noConfirm && !(await confirmDialog(`${it.name} already has production activity. ${prod.text} Plan another concept anyway?`, { okLabel: 'Plan another concept' }))) return;
   try {
     const prep = await api('/opportunities/prepare-shoot', { method: 'POST', body: JSON.stringify({ key }) });
     if (!prep.product_code) return toast('This product has no product code, so it cannot be planned here', true);
@@ -493,6 +494,7 @@ async function plPlan(key, colourCode = null, extra = {}) {
       opp: { headline: extra.reason || prep.headline, snapshot, kinds: prep.kinds, tags: prep.tags, status: prep.status, pipeline: prep.pipeline },
       preselectStyleCodes: colourCode ? [colourCode] : null, // otherwise every colourway that can be shot is ticked; restricted ones are listed, unticked, with the reason
       concept: extra.concept || null, additional,
+      notes: [additional ? "This product is already in this week's Shoot Plan: the concept you add goes on that record (no duplicate product or concept)." : null, prod.active ? prod.text : null].filter(Boolean),
     });
   } catch (e) { toast(e.message, true); }
 }
@@ -508,12 +510,13 @@ function wpPrepareShootModal(preset) {
   if (!input) return;
   input.value = '1';
   const o = preset.opp || null;
-  if (!o) { reco.style.display = 'none'; reco.innerHTML = ''; return; }
+  const notes = (preset.notes || []).map((n) => `<div class="hint">${plEsc(n)}</div>`).join('');
+  if (!o) { reco.style.display = notes ? '' : 'none'; reco.innerHTML = notes; return; }
   reco.style.display = '';
   const why = (o.snapshot && o.snapshot.why) || [];
   reco.innerHTML = `<div class="pl-reco-head"><b>${plEsc(o.status === 'act' ? 'Recommended' : 'Planning anyway')}</b> ${(o.tags || []).map((t) => plChip(t)).join('')}</div><div>${plEsc(o.headline || '')}</div>
     ${why.length ? `<details class="opp-more"><summary>Why</summary><ul class="opp-why">${why.map((w) => `<li>${plEsc(w)}</li>`).join('')}</ul></details>` : ''}
-    <div class="hint">This reason is saved with the production record. Choose how many distinct concepts to start; each is its own Concept Development record.</div>`;
+    ${notes}<div class="hint">This reason is saved with the production record. Choose how many distinct concepts to start; each is its own Concept Development record.</div>`;
 }
 
 function wpShootPayloadExtras(ctx) {

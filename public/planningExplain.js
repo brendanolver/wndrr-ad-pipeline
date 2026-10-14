@@ -154,20 +154,20 @@
     }
     switch (item.status) {
       case 'covered': {
-        const pic = conditionsSummary(item);
-        const min = num(cfg.min_performing_creatives) || 3;
-        if (pic && num(x.performing) !== null && num(x.performing) >= min) return `Enough effective creative is running. ${pic}`;
-        if (pic) return `${pic} Enough creatives are in play and none is clearly failing, so no new creative is needed this week.`;
-        return item.reason || 'Enough creative is in play.';
+        // concise: the position, whether more is needed, the main reason. The counts, funnels, dates and evidence are in the expanded row.
+        const perf = num(x.performing); const others = (num(x.testing) || 0) + (num(x.unrated) || 0) + (num(x.unjudged) || 0);
+        const lead = 'Existing creative coverage is sufficient for now.';
+        if (perf !== null && perf > 0) return `${lead} ${perf === 1 ? 'One creative is' : `${perf} creatives are`} performing${others ? ', with others still being assessed' : ''}.`;
+        return `${lead} Nothing is clearly failing${others ? ' and newer or unbenchmarked creative is still being assessed' : ''}.`;
       }
       // Overall sales are product demand: they say nothing about whether Meta creative is working.
       case 'momentum_ok': return 'Sales have held up since launch. That is product demand, not evidence about Meta creative.';
       case 'testing': {
         const st = x.newest_started; const n = (x.creative_conditions && x.creative_conditions.new) || num(x.testing) || 0;
-        if (n > 0 && st) { const pic = conditionsSummary(item); return `${n === 1 ? 'A creative is' : `${n} creatives are`} in early testing: ${n === 1 ? 'it' : 'the newest'} ${startedPhrase({ date: st.date, basis: st.basis, age_days: st.age_days })}.${pic ? ` ${pic}` : ''} Enough creative is in play for now.`; }
+        if (n > 0 && st) return `Existing creative is enough for now while ${n === 1 ? 'a new creative is' : 'new creative is'} in early testing.`;
         const pu = (x.pending_uploads || []).map(longDate).filter(Boolean);
-        if (pu.length) return `${pu.length === 1 ? 'A concept was' : `${pu.length} concepts were`} marked uploaded on ${pu.join(', ')} (production record); no matching Meta delivery found yet.`;
-        return 'New creative is in early testing and enough creative is in play for now.';
+        if (pu.length) return `${pu.length === 1 ? 'A recently uploaded concept has' : 'Recently uploaded concepts have'} no Meta delivery yet (see the production record).`;
+        return 'Enough creative is in play while new creative is in early testing.';
       }
       case 'in_production': return 'A concept for this product is already in the Shoot Plan pipeline.';
       case 'insufficient_data':
@@ -181,7 +181,7 @@
             const n = num(x.unrated) || c.missing_benchmark || 0;
             return `${n === 1 ? 'This ad has' : `These ${n} ads have`} performance data, but there is no approved ${fs || 'funnel'} benchmark to assess ${n === 1 ? 'it' : 'them'} against.`;
           }
-          case 'insufficient_delivery': return `Insufficient delivery: ${(c.insufficient_delivery || 0) === 1 ? 'the live creative has' : `${c.insufficient_delivery || 'the live'} creatives have`} not spent enough (or had enough impressions) to assess.`;
+          case 'insufficient_delivery': return 'Insufficient delivery: the live creatives have not spent enough to assess.';
           case 'not_delivering': return `${plural(c.not_delivering || num(x.not_delivering) || 0, 'ad')} ${(c.not_delivering || 0) === 1 ? 'is' : 'are'} active in Meta but not delivering, so there is no performance to assess.`;
           case 'no_meta_data': return 'Meta ad data is unavailable, so creative coverage could not be checked.';
           case 'no_evidence': return 'There is no Meta creative evidence for this product either way.';

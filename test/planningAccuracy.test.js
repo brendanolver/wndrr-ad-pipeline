@@ -190,13 +190,14 @@ test('conditions: a recent upload that a Meta creative already shows is counted 
   const pending = recency.summarize([], TODAY, CFG, { uploads: [{ date: day(4), concept: 'X' }] });
   assert.equal(pending.recent_uploads, 1);
   const o = run(gapProduct({ sales: salesOf(30, { units7: 7, units14: 15 }), pipeline: { in_flight: 0, by_stage: {}, uploaded: [{ date: day(4), concept: 'X' }], this_week: 0 }, creatives: [verdict('b', 'underperforming', { age: 120, severity: 'clear' })], coverage: cov({ active_ads: 1 }) }));
-  assert.equal(o.status, 'testing'); assert.match(E.reasonFor(o, CFG), /marked uploaded on \d+ \w+ 2026 \(production record\); no matching Meta delivery found yet/);
+  assert.equal(o.status, 'testing'); assert.match(E.reasonFor(o, CFG), /A recently uploaded concept has no Meta delivery yet/);
 });
 test('benchmarks: a missing benchmark is named, with the funnel, and is never "still gathering data"; TOF / TOM are never judged against the MOF target', () => {
   // Batch 30: a missing benchmark is named, and it never stops the rest of the picture being assessed
   const three = run(gapProduct({ coverage: cov({ active_ads: 3 }), creatives: ['a', 'b', 'c'].map((k, i) => verdict(k, 'unrated', { funnel: 'TOM', age: 90 - i })) }));
   assert.equal(three.status, 'covered'); assert.match(three.reason, /3 that cannot be benchmarked \(no approved TOM benchmark\)/);
-  assert.match(E.reasonFor(three, CFG), /3 with no approved TOM benchmark/);
+  assert.equal(E.reasonFor(three, CFG), 'Existing creative coverage is sufficient for now. Nothing is clearly failing and newer or unbenchmarked creative is still being assessed.', 'the main table stays short');
+  assert.match(E.conditionsSummary(three), /3 with no approved TOM benchmark/, 'the detail is in the expanded creative picture');
   const two = run(gapProduct({ coverage: cov({ active_ads: 2 }), creatives: [verdict('a', 'unrated', { funnel: 'TOM', age: 90 }), verdict('b', 'unrated', { funnel: 'TOM', age: 80 })] }));
   assert.equal(two.status, 'act'); assert.equal(two.gap.type, 'thin');
   assert.doesNotMatch(three.reason + E.reasonFor(three, CFG) + two.reason, /gathering data|too early/i);

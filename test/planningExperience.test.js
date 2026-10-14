@@ -77,7 +77,7 @@ test('creatives with no approved benchmark are never called good or bad: coverag
   // Batch 30: unrated creatives still exist and deliver. Enough of them in play = monitor, saying plainly that they cannot be benchmarked; never good or bad
   const allUnrated = run(base({ sales: strong, coverage: cov({ active_ads: 3 }), creatives: un }));
   assert.equal(allUnrated.status, 'covered'); assert.equal(E.categoryOf(allUnrated), 'covered');
-  assert.match(reason(allUnrated), /^3 unique creatives: 3 with no approved funnel benchmark\./);
+  assert.match(reason(allUnrated), /^Existing creative coverage is sufficient for now\./); assert.match(E.conditionsSummary(allUnrated), /^3 unique creatives: 3 with no approved funnel benchmark\./);
   assert.doesNotMatch(reason(allUnrated), /underperform|over the approved/i);
   // too few in play is thin whatever the mix: one performing + one unrated is two creatives in play (3 wanted)
   const thin = run(base({ sales: strong, coverage: cov({ active_ads: 2 }), creatives: [un[0], cr('p', 'performing', { age: 30, spend: 600, purchases: 12, concept: 'P' })] }));
@@ -146,7 +146,7 @@ test('page wiring: sidebar sub-menu replaces the in-page step buttons; six defau
   assert.match(app, /hash === '#planning' \|\| hash\.startsWith\('#planning\/'\)/);
   assert.match(app, /#planning\/drop/, 'the pre-restructure #planning/drop links still redirect');
   const cols = [...pl.slice(pl.indexOf('const PL_COLS = [')).split('];')[0].matchAll(/label: \([a-z]*\) => (?:\(cat === 'needs' \? '([^']+)' : '[^']+'\)|'([^']+)')/g)].map((m) => m[1] || m[2]);
-  assert.deepEqual(cols, ['Product', 'Why it needs creative', 'Live ads', 'Stock', 'Sales 30d', 'Priority']);
+  assert.deepEqual(cols, ['Product', 'Why it needs creative', 'Live ads', 'Stock', 'Sales 30d', 'Priority', 'Actions']);
   for (const gone of ['Sales 7d', 'Sales trend', 'Active creatives', 'Effective creatives', 'Last new creative', 'Opportunity type']) assert.ok(!pl.slice(pl.indexOf('const PL_COLS = [')).split('];')[0].includes(gone), `${gone} is not a default column`);
   assert.match(pl, /plPageHtml\('core'\)/); assert.match(pl, /plPageHtml\('high', tierNote\)/, 'Core and High Stocks render through the same function');
   assert.match(pl, /View detailed evidence/); assert.match(pl, /Add to Shoot Plan/); assert.match(pl, /Existing production activity/); assert.match(pl, /Suggested creative direction/);
