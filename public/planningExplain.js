@@ -74,9 +74,9 @@
     if (c.performing) parts.push(`${c.performing} performing against the approved benchmark`);
     if (c.underperforming) parts.push(`${c.underperforming} over the approved limit`);
     if (c.fatigued) parts.push(`${c.fatigued} showing signs of fatigue`);
-    if (c.new) parts.push(`${c.new} new (first days of delivery)`);
+    if (c.new) parts.push(`${c.new} in early testing`);
     if (c.missing_benchmark) parts.push(`${c.missing_benchmark} with no approved ${(x.unrated_funnels || []).join(' / ') || 'funnel'} benchmark`);
-    if (c.insufficient_delivery) parts.push(`${c.insufficient_delivery} with too little delivery to judge`);
+    if (c.insufficient_delivery) parts.push(`${c.insufficient_delivery} with insufficient delivery`);
     if (c.not_delivering) parts.push(`${c.not_delivering} active but not delivering`);
     const lv = liveAds(item);
     const liveBit = lv.known ? ` (${lv.count} delivering now${lv.instances > lv.count ? `, running as ${plural(lv.instances, 'Meta ad')}` : ''})` : '';
@@ -119,7 +119,11 @@
         const d = num(x.newest_creative_days);
         return `the active creative is old${d !== null ? ` (the newest launched ${plural(d, 'day')} ago)` : ''} with little delivery`;
       }
-      case 'thin': return `only ${plural(num(x.performing) || 0, 'performing creative')} ${(num(x.performing) || 0) === 1 ? 'is' : 'are'} in place (${min} wanted)`;
+      case 'thin': {
+        const n = num(x.creatives_in_play); const single = (gap && gap.single) || (n !== null && n <= 1);
+        if (n === null) return `only ${plural(num(x.performing) || 0, 'performing creative')} ${(num(x.performing) || 0) === 1 ? 'is' : 'are'} in place (${min} wanted)`;
+        return single ? 'it depends on a single creative' : `it has only ${plural(n, 'creative')} in play (${min} wanted)`;
+      }
       default: return null;
     }
   }
@@ -151,17 +155,20 @@
     }
     switch (item.status) {
       case 'covered': {
-        const n = num(x.unique_creatives);
-        return `Enough effective creative is running${num(x.performing) !== null && n !== null ? ` (${num(x.performing)} of ${plural(n, 'creative')} performing against the approved benchmark)` : ''}.`;
+        const pic = conditionsSummary(item);
+        const min = num(cfg.min_performing_creatives) || 3;
+        if (pic && num(x.performing) !== null && num(x.performing) >= min) return `Enough effective creative is running. ${pic}`;
+        if (pic) return `${pic} Enough creatives are in play and none is clearly failing, so no new creative is needed this week.`;
+        return item.reason || 'Enough creative is in play.';
       }
       // Overall sales are product demand: they say nothing about whether Meta creative is working.
       case 'momentum_ok': return 'Sales have held up since launch. That is product demand, not evidence about Meta creative.';
       case 'testing': {
         const st = x.newest_started; const n = (x.creative_conditions && x.creative_conditions.new) || num(x.testing) || 0;
-        if (n > 0 && st) return `${n === 1 ? 'A creative is' : `${n} creatives are`} new: ${n === 1 ? 'it' : 'the newest'} ${startedPhrase({ date: st.date, basis: st.basis, age_days: st.age_days })}. Too early to judge.`;
+        if (n > 0 && st) { const pic = conditionsSummary(item); return `${n === 1 ? 'A creative is' : `${n} creatives are`} in early testing: ${n === 1 ? 'it' : 'the newest'} ${startedPhrase({ date: st.date, basis: st.basis, age_days: st.age_days })}.${pic ? ` ${pic}` : ''} Enough creative is in play for now.`; }
         const pu = (x.pending_uploads || []).map(longDate).filter(Boolean);
         if (pu.length) return `${pu.length === 1 ? 'A concept was' : `${pu.length} concepts were`} marked uploaded on ${pu.join(', ')} (production record); no matching Meta delivery found yet.`;
-        return 'New creative is still in its first days of delivery. Too early to judge.';
+        return 'New creative is in early testing and enough creative is in play for now.';
       }
       case 'in_production': return 'A concept for this product is already in the Shoot Plan pipeline.';
       case 'insufficient_data':
@@ -175,7 +182,7 @@
             const n = num(x.unrated) || c.missing_benchmark || 0;
             return `${n === 1 ? 'This ad has' : `These ${n} ads have`} performance data, but there is no approved ${fs || 'funnel'} benchmark to assess ${n === 1 ? 'it' : 'them'} against.`;
           }
-          case 'insufficient_delivery': return `${(c.insufficient_delivery || 0) === 1 ? 'An established ad has' : 'Established ads have'} too little delivery (spend or impressions) to judge.`;
+          case 'insufficient_delivery': return `Insufficient delivery: ${(c.insufficient_delivery || 0) === 1 ? 'the live creative has' : `${c.insufficient_delivery || 'the live'} creatives have`} not spent enough (or had enough impressions) to assess.`;
           case 'not_delivering': return `${plural(c.not_delivering || num(x.not_delivering) || 0, 'ad')} ${(c.not_delivering || 0) === 1 ? 'is' : 'are'} active in Meta but not delivering, so there is no performance to assess.`;
           case 'no_meta_data': return 'Meta ad data is unavailable, so creative coverage could not be checked.';
           case 'no_evidence': return 'There is no Meta creative evidence for this product either way.';
@@ -188,7 +195,7 @@
       case 'out_of_season': return 'Out of season in Australia right now, so new creative is not a priority.';
       case 'weak_demand': return num(x.units30) !== null ? `Only ${plural(num(x.units30), 'unit')} sold in 30 days, which is not enough demand to justify new creative.` : (item.reason || 'Sales are too low to justify new creative.');
       case 'low_stock': return stockRestriction(item).text || (item.reason || 'Stock is too low to justify new creative.');
-      case 'too_new': return item.reason || 'Too early to judge: it has only just started selling.';
+      case 'too_new': return item.reason || 'It has only just started selling: too few days of sales to judge demand.';
       case 'not_launched': return 'Not launched yet, so there is nothing to promote.';
       default: return item.reason || '';
     }

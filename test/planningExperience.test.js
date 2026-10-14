@@ -45,9 +45,10 @@ test('underperforming creative: counts the creatives over the approved limit; a 
   const testing = run(base({ sales: salesOf(40, { units7: 9, units14: 19 }), coverage: cov({ active_ads: 1 }), creatives: [cr('a', 'testing', { age: 4, spend: 40, purchases: 0 })] }));
   const unrated = run(base({ sales: strong, coverage: cov({ active_ads: 1 }), creatives: [cr('a', 'unrated', { age: 100, spend: 500, purchases: 6, concept: 'A' })] }));
   for (const it of [testing, unrated]) assert.doesNotMatch(reason(it), /underperform|over the approved/i, it.status);
-  assert.equal(E.categoryOf(testing), 'covered');
-  assert.match(reason(testing), /A creative is new: it was created on 8 October 2026 \(4 days ago\); its first delivery date is not available\. Too early to judge\./);
-  assert.doesNotMatch(reason(testing), /still gathering data/);
+  // Batch 30: a product whose only creative is new is NOT silenced by it: with a single creative (4 days old) the product still depends on one ad
+  assert.equal(E.categoryOf(testing), 'needs'); assert.equal(testing.gap.type, 'thin'); assert.equal(testing.gap.single, true);
+  assert.match(reason(testing), /it depends on a single creative/);
+  assert.doesNotMatch(reason(testing), /still gathering data|too early to judge/i);
 });
 
 test('creative concentration and fatigue are described only when the engine found them', () => {
@@ -73,13 +74,14 @@ test('uncertain matching is never described as "no active creative": it says cov
 
 test('creatives with no approved benchmark are never called good or bad: coverage is "can\'t assess", and one performing creative among them is only "thin"', () => {
   const un = ['a', 'b', 'c'].map((k, i) => cr(k, 'unrated', { age: 60 - i * 10, spend: 600, purchases: 8, concept: `C${i}` }));
+  // Batch 30: unrated creatives still exist and deliver. Enough of them in play = monitor, saying plainly that they cannot be benchmarked; never good or bad
   const allUnrated = run(base({ sales: strong, coverage: cov({ active_ads: 3 }), creatives: un }));
-  assert.equal(allUnrated.status, 'insufficient_data');
-  assert.equal(allUnrated.review_reason, 'missing_benchmark');
-  assert.match(reason(allUnrated), /^These 3 ads have performance data, but there is no approved funnel benchmark to assess them against\.$/);
+  assert.equal(allUnrated.status, 'covered'); assert.equal(E.categoryOf(allUnrated), 'covered');
+  assert.match(reason(allUnrated), /^3 unique creatives: 3 with no approved funnel benchmark\./);
   assert.doesNotMatch(reason(allUnrated), /underperform|over the approved/i);
-  const thin = run(base({ sales: strong, coverage: cov({ active_ads: 3 }), creatives: [...un.slice(0, 2), cr('p', 'performing', { age: 30, spend: 600, purchases: 12, concept: 'P' })] }));
-  assert.match(reason(thin), /only 1 performing creative is in place \(3 wanted\)/);
+  // too few in play is thin whatever the mix: one performing + one unrated is two creatives in play (3 wanted)
+  const thin = run(base({ sales: strong, coverage: cov({ active_ads: 2 }), creatives: [un[0], cr('p', 'performing', { age: 30, spend: 600, purchases: 12, concept: 'P' })] }));
+  assert.equal(thin.status, 'act'); assert.match(reason(thin), /it has only 2 creatives in play \(3 wanted\)/);
 });
 
 test('not-recommended reasons are real: out of season, weak demand, low stock', () => {

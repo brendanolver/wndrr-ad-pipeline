@@ -152,11 +152,11 @@ test('demand: strong new launch qualifies; weak and steady launches do not (Acce
 // ── CREATIVE CONDITIONS and DATES ──────────────────────────────────────────────────────────────────────
 const verdict = (key, state, o = {}) => ({ ...cr(key, state, { age: o.age === undefined ? 120 : o.age }), ...o });
 test('dates: "new" is measured from the first delivery, never from a creation date; a creation date alone is disclosed as such', () => {
-  const fd = recency.phaseOf(verdict('a', 'insufficient', { created: day(300), first_delivery: day(5), first_delivery_truncated: false }), TODAY, CFG);
-  assert.equal(fd.phase, 'testing'); assert.equal(fd.started_basis, 'first_delivery'); assert.equal(fd.age_days, 5, 'created long ago but only began delivering 5 days ago: genuinely new');
+  const fd = recency.phaseOf(verdict('a', 'insufficient', { created: day(300), first_delivery: day(3), first_delivery_truncated: false }), TODAY, CFG);
+  assert.equal(fd.phase, 'testing'); assert.equal(fd.started_basis, 'first_delivery'); assert.equal(fd.age_days, 3, 'created long ago but only began delivering 3 days ago: genuinely new');
   const old = recency.phaseOf(verdict('b', 'insufficient', { created: day(6), first_delivery: day(80), first_delivery_truncated: false }), TODAY, CFG);
   assert.notEqual(old.phase, 'testing', 'recently CREATED is not recently RUNNING: it has been delivering for 80 days'); assert.equal(old.age_days, 80);
-  const created = recency.phaseOf(verdict('c', 'insufficient', { created: day(6) }), TODAY, CFG);
+  const created = recency.phaseOf(verdict('c', 'insufficient', { created: day(3) }), TODAY, CFG);
   assert.equal(created.phase, 'testing'); assert.equal(created.started_basis, 'created');
 });
 test('dates: a first delivery on the day our stored history begins is never taken to mean "just started"', () => {
@@ -176,7 +176,7 @@ test('conditions: a product can hold creatives in several conditions at once and
   assert.deepEqual(sum.conditions, { new: 1, insufficient_delivery: 1, missing_benchmark: 1, performing: 1, underperforming: 1, fatigued: 0, not_delivering: 1 });
   assert.deepEqual(sum.unrated_funnels, ['TOM']);
   const item = { facts: { unique_creatives: 6, creative_conditions: sum.conditions, unrated_funnels: sum.unrated_funnels } };
-  assert.equal(E.conditionsSummary(item), '6 unique creatives: 1 performing against the approved benchmark, 1 over the approved limit, 1 new (first days of delivery), 1 with no approved TOM benchmark, 1 with too little delivery to judge, 1 active but not delivering.');
+  assert.equal(E.conditionsSummary(item), '6 unique creatives: 1 performing against the approved benchmark, 1 over the approved limit, 1 in early testing, 1 with no approved TOM benchmark, 1 with insufficient delivery, 1 active but not delivering.');
 });
 test('conditions: an ad that is active but not delivering is not "gathering data"', () => {
   const p = recency.phaseOf(verdict('a', 'unavailable', { created: day(3) }), TODAY, CFG);
@@ -193,10 +193,13 @@ test('conditions: a recent upload that a Meta creative already shows is counted 
   assert.equal(o.status, 'testing'); assert.match(E.reasonFor(o, CFG), /marked uploaded on \d+ \w+ 2026 \(production record\); no matching Meta delivery found yet/);
 });
 test('benchmarks: a missing benchmark is named, with the funnel, and is never "still gathering data"; TOF / TOM are never judged against the MOF target', () => {
-  const o = run(gapProduct({ coverage: cov({ active_ads: 2 }), creatives: [verdict('a', 'unrated', { funnel: 'TOM', age: 90 }), verdict('b', 'unrated', { funnel: 'TOM', age: 80 })] }));
-  assert.equal(o.status, 'insufficient_data'); assert.equal(E.categoryOf(o), 'review');
-  assert.equal(E.reasonFor(o, CFG), 'These 2 ads have performance data, but there is no approved TOM benchmark to assess them against.');
-  assert.doesNotMatch(o.reason + E.reasonFor(o, CFG), /gathering data/);
+  // Batch 30: a missing benchmark is named, and it never stops the rest of the picture being assessed
+  const three = run(gapProduct({ coverage: cov({ active_ads: 3 }), creatives: ['a', 'b', 'c'].map((k, i) => verdict(k, 'unrated', { funnel: 'TOM', age: 90 - i })) }));
+  assert.equal(three.status, 'covered'); assert.match(three.reason, /3 that cannot be benchmarked \(no approved TOM benchmark\)/);
+  assert.match(E.reasonFor(three, CFG), /3 with no approved TOM benchmark/);
+  const two = run(gapProduct({ coverage: cov({ active_ads: 2 }), creatives: [verdict('a', 'unrated', { funnel: 'TOM', age: 90 }), verdict('b', 'unrated', { funnel: 'TOM', age: 80 })] }));
+  assert.equal(two.status, 'act'); assert.equal(two.gap.type, 'thin');
+  assert.doesNotMatch(three.reason + E.reasonFor(three, CFG) + two.reason, /gathering data|too early/i);
   const perf = require('../src/lib/productAdPerformance'); const health = require('../src/lib/metaFunnelHealth');
   const ctx = { rules: health.effectiveRules(), coded: health.COLOUR_CODED };
   const m = (spend, purchases) => ({ total: { spend, impressions: 50000, clicks: 900, purchases, value: 0 }, recent: { spend: spend / 2, impressions: 25000, clicks: 450, purchases: purchases / 2, value: 0 }, prior: { spend: spend / 2, impressions: 25000, clicks: 450, purchases: purchases / 2, value: 0 }, delivery_rows: 14 });

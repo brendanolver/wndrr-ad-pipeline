@@ -4,7 +4,8 @@
 // Input: the per-creative verdicts from lib/productAdPerformance.js (state: performing | underperforming | declining | insufficient | unrated | unavailable,
 // judged ONLY from the approved Meta Performance benchmarks) plus each creative's creation date (the earliest Meta created_time among its ads).
 // PHASES (one per creative):
-//   testing            created within the test period and not yet judged: it is still gathering data
+//   testing            in its first `new_creative_days` (default 4) of delivery and not yet supported by enough evidence for a verdict: early testing. From the next day it is ASSESSED:
+//                      if delivery is still too small it is 'unjudged' ("Insufficient delivery"), never "too early"
 //   recent_performing  created within the "recent" window and within the approved benchmark
 //   recent_weak        created within the "recent" window and judged over the approved benchmark WITH enough data (a real result, not a guess)
 //   performing         older, within the approved benchmark
@@ -20,8 +21,8 @@ const toMs = (s) => Date.parse(`${ymd(s)}T00:00:00Z`);
 const addDaysYmd = (s, n) => new Date(toMs(s) + n * DAY).toISOString().slice(0, 10);
 
 const LABEL = {
-  testing: 'New: in its first days of delivery', recent_performing: 'Recent, performing', recent_weak: 'Recent, underperforming', performing: 'Established, performing', declining: 'Previously performing, declining',
-  weak: 'Underperforming', stale: 'Old / stale', unrated: 'No approved benchmark', unjudged: 'Too little delivery to judge', not_delivering: 'Not currently delivering',
+  testing: 'Early testing', recent_performing: 'Recent, performing', recent_weak: 'Recent, underperforming', performing: 'Established, performing', declining: 'Previously performing, declining',
+  weak: 'Underperforming', stale: 'Old / stale', unrated: 'No approved benchmark', unjudged: 'Insufficient delivery', not_delivering: 'Not currently delivering',
 };
 // The six conditions staff care about. A product can have creatives in several of them at once, so they are counted apart and never collapsed into one generic statement.
 const CONDITION = {
@@ -46,7 +47,7 @@ function startOf(c) {
 
 // pure: ONE creative → { phase, label, age_days, started, started_basis, condition }
 function phaseOf(c, today, cfg) {
-  const test = cfg.test_period_days; const recent = cfg.recent_creative_days; const stale = cfg.stale_creative_days;
+  const test = cfg.new_creative_days === undefined ? cfg.test_period_days : cfg.new_creative_days; const recent = cfg.recent_creative_days; const stale = cfg.stale_creative_days;
   const st = startOf(c);
   const age = ageDays(st.date, today);
   const canBeNew = st.basis !== 'first_stored_delivery';
@@ -100,7 +101,8 @@ function summarize(creatives, today, cfg, { uploads = [], insightsLastDay = null
   const pendingUploads = upAll.filter((u) => ageDays(u.date, today) <= cfg.test_period_days && !visibleInMeta(u));
   const upAges = upAll.map((u) => ageDays(u.date, today));
   const testing = list.filter((c) => c.phase === 'testing');
-  const testingUntil = testing.map((c) => addDaysYmd(c.started, cfg.test_period_days)).sort().pop() || null;
+  const newDays = cfg.new_creative_days === undefined ? cfg.test_period_days : cfg.new_creative_days;
+  const testingUntil = testing.map((c) => addDaysYmd(c.started, newDays + 1)).sort().pop() || null; // assessed from the day after its first `newDays` days
   const uploadTestingUntil = pendingUploads.map((u) => addDaysYmd(u.date, cfg.test_period_days)).sort().pop() || null;
   const newestMeta = ages.length ? Math.min(...ages) : null;
   const newestUpload = upAges.length ? Math.min(...upAges) : null;

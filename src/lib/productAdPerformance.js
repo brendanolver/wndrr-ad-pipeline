@@ -157,6 +157,8 @@ function summarizeProduct(creatives, { pendingAds = 0, minPerforming = DEFAULTS.
 
 // ── loader ──────────────────────────────────────────────────────────────────────────────────────
 const ymdOf = (d) => d.toISOString().slice(0, 10);
+const zeroBundle = () => ({ spend: 0, impressions: 0, clicks: 0, purchases: 0, value: 0 });
+const newPool = () => ({ total: zeroBundle(), recent: zeroBundle(), prior: zeroBundle(), fatigue_recent: zeroBundle(), fatigue_prior: zeroBundle(), delivery_rows: 0 });
 const addDays = (ymd, n) => { const [y, m, d] = ymd.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10); };
 
 // Collapse ads that are the SAME creative: an identical Meta creative id, or an ad that is just a "- Copy" of another by name (Batch 10's name-copy rule).
@@ -219,12 +221,17 @@ async function loadProductAdPerformance(families, { db, rules, coded, config = D
     fams.forEach((fk) => {
       if (!per.has(fk)) per.set(fk, new Map());
       const g = per.get(fk); const key = creativeGroupKey(r, nameCopies);
-      if (!g.has(key)) g.set(key, { key, ads: [], total: { spend: 0, impressions: 0, clicks: 0, purchases: 0, value: 0 }, recent: { spend: 0, impressions: 0, clicks: 0, purchases: 0, value: 0 }, prior: { spend: 0, impressions: 0, clicks: 0, purchases: 0, value: 0 }, fatigue_recent: { spend: 0, impressions: 0, clicks: 0, purchases: 0, value: 0 }, fatigue_prior: { spend: 0, impressions: 0, clicks: 0, purchases: 0, value: 0 }, delivery_rows: 0, funnels: new Set(), concept: null, creator: null, style: null, media: null, created: null, shared: false });
+      if (!g.has(key)) g.set(key, { key, ads: [], total: zeroBundle(), recent: zeroBundle(), prior: zeroBundle(), fatigue_recent: zeroBundle(), fatigue_prior: zeroBundle(), delivery_rows: 0, funnels: new Set(), pools: new Map(), concept: null, creator: null, style: null, media: null, created: null, shared: false });
       const x = g.get(key);
       x.ads.push({ id: r.meta_ad_id, name: r.ad_name, shared });
       if (shared) x.shared = true;
       x.delivery_rows += r.delivery_rows;
-      [['total', 't'], ['recent', 'r'], ['prior', 'p'], ['fatigue_recent', 'f'], ['fatigue_prior', 'g']].forEach(([w, p]) => { x[w].spend += num(r[`${p}_spend`]); x[w].impressions += num(r[`${p}_imp`]); x[w].clicks += num(r[`${p}_clk`]); x[w].purchases += num(r[`${p}_pur`]); x[w].value += num(r[`${p}_val`]); });
+      // Batch 30: the SAME creative running in several funnels stays ONE creative, but each funnel keeps its own pooled metrics so it is judged against that funnel's benchmark
+      const fnl = r.funnel || 'unknown';
+      if (!x.pools.has(fnl)) x.pools.set(fnl, newPool());
+      const pool = x.pools.get(fnl);
+      pool.delivery_rows += r.delivery_rows;
+      [['total', 't'], ['recent', 'r'], ['prior', 'p'], ['fatigue_recent', 'f'], ['fatigue_prior', 'g']].forEach(([w, p]) => { [x, pool].forEach((tgt) => { tgt[w].spend += num(r[`${p}_spend`]); tgt[w].impressions += num(r[`${p}_imp`]); tgt[w].clicks += num(r[`${p}_clk`]); tgt[w].purchases += num(r[`${p}_pur`]); tgt[w].value += num(r[`${p}_val`]); }); });
       if (r.funnel) x.funnels.add(r.funnel);
       if (r.first_day && (!x.first_day || r.first_day < x.first_day)) x.first_day = r.first_day;
       if (r.last_day && (!x.last_day || r.last_day > x.last_day)) x.last_day = r.last_day;
@@ -237,11 +244,10 @@ async function loadProductAdPerformance(families, { db, rules, coded, config = D
   per.forEach((g, fk) => {
     const entry = out.get(fk);
     g.forEach((x) => {
-      const funnel = x.funnels.size === 1 ? [...x.funnels][0] : null; // a creative running in several funnels is not judged against one funnel's benchmark
-      const verdict = judgeCreative({ total: x.total, recent: x.recent, prior: x.prior, fatigue_recent: x.fatigue_recent, fatigue_prior: x.fatigue_prior, delivery_rows: x.delivery_rows, funnel: JUDGED(funnel) }, { rules, coded, config: cfg });
+      const verdict = judgeAcrossFunnels(x, { rules, coded, cfg });
       // dates: created = the ad's creation date in Meta; first_delivery / last_delivery = the first and last day with STORED delivery (spend or impressions); lifetime_spend = all stored days.
       // A creation date is not a start date, and a first stored delivery on the first day we hold data may only be where our history begins (first_delivery_truncated).
-      entry.creatives.push({ ...verdict, key: x.key, name: (x.ads[0] && x.ads[0].name) || null, ads: x.ads, ad_count: x.ads.length, concept: x.concept, creator: x.creator, style_id: x.style, media: x.media, created: x.created, shared: x.shared, mixed_funnels: x.funnels.size > 1,
+      entry.creatives.push({ ...verdict, key: x.key, name: (x.ads[0] && x.ads[0].name) || null, ads: x.ads, ad_count: x.ads.length, concept: x.concept, creator: x.creator, style_id: x.style, media: x.media, created: x.created, shared: x.shared, mixed_funnels: x.pools.size > 1,
         first_delivery: x.first_day || null, last_delivery: x.last_day || null, lifetime_spend: Math.round(num(x.life_spend) * 100) / 100, first_delivery_truncated: !!(x.first_day && horizon && x.first_day <= horizon), funnel_label: [...x.funnels].join(' / ') || null });
     });
     entry.insights_last_day = newestDay; // the newest day with ANY stored delivery: whether delivery can be judged at all (Live Ads)
@@ -249,6 +255,35 @@ async function loadProductAdPerformance(families, { db, rules, coded, config = D
     entry.shared_ads = [...g.values()].reduce((s, x) => s + x.ads.filter((a) => a.shared).length, 0);
   });
   return out;
+}
+
+// ONE creative, judged within each funnel it ran in (Batch 30). With a single funnel this is exactly judgeCreative. With several, each funnel's pooled metrics are judged
+// against THAT funnel's approved benchmark and the creative's verdict is taken from its most informative funnel: rated (performing / underperforming / declining) before
+// unrated before insufficient before no-delivery, the funnel with the most spend winning a tie. Every funnel's own result stays in `funnel_results`. The creative is never
+// "unrated" merely because it also ran in a funnel with no benchmark, and one funnel's result never overrides another funnel's evidence in the totals.
+const VERDICT_RANK = { performing: 0, underperforming: 0, declining: 0, unrated: 1, insufficient: 2, unavailable: 3 };
+function judgeAcrossFunnels(x, { rules, coded, cfg }) {
+  const results = [...x.pools.entries()].map(([fk, pool]) => {
+    const funnel = JUDGED(fk);
+    const v = judgeCreative({ total: pool.total, recent: pool.recent, prior: pool.prior, fatigue_recent: pool.fatigue_recent, fatigue_prior: pool.fatigue_prior, delivery_rows: pool.delivery_rows, funnel }, { rules, coded, config: cfg });
+    return { funnel_key: fk, funnel, verdict: v };
+  });
+  if (results.length <= 1) {
+    const only = results[0] || { verdict: judgeCreative({ total: x.total, recent: x.recent, prior: x.prior, delivery_rows: x.delivery_rows, funnel: null }, { rules, coded, config: cfg }) };
+    return { ...only.verdict, funnel_results: results.map((r) => funnelResult(r)) };
+  }
+  const ranked = results.slice().sort((a, b) => (VERDICT_RANK[a.verdict.state] - VERDICT_RANK[b.verdict.state]) || (num(b.verdict.spend) - num(a.verdict.spend)));
+  const primary = ranked[0].verdict;
+  return {
+    ...primary,
+    spend: Math.round(num(x.total.spend) * 100) / 100, purchases: num(x.total.purchases), impressions: num(x.total.impressions),
+    funnel_results: ranked.map((r) => funnelResult(r)),
+    reasons: [`Judged in its ${ranked[0].funnel_key} funnel (${num(primary.spend) > 0 ? money(primary.spend) : 'no'} spend there); it also ran in ${ranked.slice(1).map((r) => r.funnel_key).join(' and ')}, each judged against its own funnel benchmark.`, ...(primary.reasons || [])],
+  };
+}
+function funnelResult(r) {
+  const v = r.verdict;
+  return { funnel: r.funnel_key, benchmarked: !!(r.funnel && v.state !== 'unrated' && v.state !== 'insufficient' && v.state !== 'unavailable'), state: v.state, benchmark: v.benchmark || null, spend: v.spend, purchases: v.purchases, impressions: v.impressions, cpa: v.cpa, roas: v.roas, ctr: v.ctr, reason: (v.reasons || [])[0] || null };
 }
 
 // A "- Copy" of an ad is the same creative even when Meta gave it its own creative id (Batch 10's name-copy rule): fold such a group into the group of the
@@ -265,6 +300,7 @@ function mergeNameCopies(groups, nameCopies) {
     const t = groups.get(baseKey);
     ['total', 'recent', 'prior', 'fatigue_recent', 'fatigue_prior'].forEach((w) => { Object.keys(t[w]).forEach((m) => { t[w][m] += g[w][m]; }); });
     t.ads.push(...g.ads); t.delivery_rows += g.delivery_rows; g.funnels.forEach((f) => t.funnels.add(f)); t.shared = t.shared || g.shared;
+    g.pools.forEach((gp, fk) => { if (!t.pools.has(fk)) t.pools.set(fk, newPool()); const tp = t.pools.get(fk); tp.delivery_rows += gp.delivery_rows; ['total', 'recent', 'prior', 'fatigue_recent', 'fatigue_prior'].forEach((w) => { Object.keys(tp[w]).forEach((m) => { tp[w][m] += gp[w][m]; }); }); });
     t.concept = t.concept || g.concept; t.creator = t.creator || g.creator; t.style = t.style || g.style; t.media = t.media || g.media;
     if (g.created && (!t.created || new Date(g.created) < new Date(t.created))) t.created = g.created;
     if (g.first_day && (!t.first_day || g.first_day < t.first_day)) t.first_day = g.first_day;
@@ -275,4 +311,4 @@ function mergeNameCopies(groups, nameCopies) {
 }
 const JUDGED = (f) => (['TOF', 'TOM', 'MOF'].includes(f) ? f : null);
 
-module.exports = { mergeNameCopies, DEFAULTS, LIMITS, LABEL, resolveConfig, judgeCreative, summarizeProduct, loadProductAdPerformance, creativeGroupKey, cpaOf, roasOf, ctrOf };
+module.exports = { judgeAcrossFunnels, mergeNameCopies, DEFAULTS, LIMITS, LABEL, resolveConfig, judgeCreative, summarizeProduct, loadProductAdPerformance, creativeGroupKey, cpaOf, roasOf, ctrOf };

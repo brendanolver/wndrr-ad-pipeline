@@ -114,16 +114,16 @@ test('9. a product with MANY ads but poor performance is a gap: ad count is not 
 });
 
 // ── 10-12. Testing, production, matching ───────────────────────────────────────────────────────────
-test('10. recently uploaded ads still TESTING get their test period; but they do not silence a strong seller that still lacks creative', () => {
-  const quiet = run(base({ sales: salesOf(30), creatives: [cr('a', 'insufficient', { age: 6, spend: 20 }), cr('b', 'underperforming', { age: 120, severity: 'clear' })], coverage: { known: true, active_ads: 2, possible: 0, uncertain: false, min: 5 } }));
-  assert.equal(quiet.status, 'testing'); assert.match(quiet.reason, /new and in the first 14 days of delivery/); assert.match(quiet.reason, /20 October 2026/);
-  assert.match(quiet.reason, /was created on 6 October 2026 \(6 days ago\); its first delivery date is not available/, 'a creation date is never presented as a delivery date');
-  assert.doesNotMatch(quiet.reason, /still gathering data/);
-  const strongTesting = run(base({ sales: strong, creatives: [cr('a', 'insufficient', { age: 6, spend: 20 }), cr('b', 'underperforming', { age: 120, severity: 'clear' })], coverage: { known: true, active_ads: 2, possible: 0, uncertain: false, min: 5 } }));
-  assert.equal(strongTesting.status, 'act', 'strong demand with only 0 performing + 1 testing is still short of the 3 wanted');
-  assert.ok(strongTesting.score_parts.some((p) => /already testing or in production/.test(p.label) && p.points < 0), 'but it is scored lower for what is already in play');
+test('10. a creative in its first days is early testing; it does not silence a product that still lacks creative, but enough creative in play does', () => {
+  const quiet = run(base({ sales: salesOf(30), creatives: [cr('a', 'insufficient', { age: 3, spend: 20 }), cr('b', 'underperforming', { age: 120, severity: 'clear' })], coverage: { known: true, active_ads: 2, possible: 0, uncertain: false, min: 5 } }));
+  assert.equal(quiet.status, 'act', 'Batch 30: a newly launched ad never places the whole product in monitoring while the product is short of creative');
+  assert.equal(quiet.gap.type, 'underperforming');
+  assert.ok(quiet.score_parts.some((p) => /already testing or in production/.test(p.label) && p.points < 0), 'it is scored lower for what is already in play');
+  const day5 = run(base({ sales: strong, creatives: [cr('a', 'insufficient', { age: 5, spend: 20 }), cr('b', 'underperforming', { age: 120, severity: 'clear' })], coverage: { known: true, active_ads: 2, possible: 0, uncertain: false, min: 5 } }));
+  assert.equal(day5.facts.creative_conditions.insufficient_delivery, 1, 'from day 5 it is assessed: insufficient delivery, not "early"'); assert.equal(day5.facts.creative_conditions.new, 0);
   const enough = run(base({ sales: strong, creatives: [cr('a', 'performing', { age: 90 }), cr('b', 'performing', { age: 80 }), cr('c', 'insufficient', { age: 4, spend: 10 }), cr('d', 'underperforming', { age: 100, severity: 'clear' })] }));
-  assert.equal(enough.status, 'testing', 'performing + testing reaches the wanted number: wait for the data');
+  assert.equal(enough.status, 'testing', 'performing + early testing reaches the wanted number: wait for the data'); assert.match(enough.reason, /in early testing, in the first 4 days of delivery/);
+  assert.doesNotMatch(enough.reason, /too early to judge|gathering data/i);
 });
 test('10b. an upload recorded only in WNDRR production (not yet matched to a Meta ad) also counts as testing', () => {
   const o = run(base({ sales: salesOf(30), creatives: [], pipeline: { in_flight: 0, by_stage: {}, uploaded: [{ date: day(3), concept: 'UGC' }], this_week: 0 } }));
@@ -157,10 +157,11 @@ test('13. INCOMPLETE sales data: missing sales are insufficient data; a partial 
   assert.equal(disagree.priority, 'Medium'); assert.match(disagree.caps.join(' '), /two sales sources disagree/);
 });
 test('14. MISSING funnel benchmarks: unrated creatives are neither good nor bad, no benchmark is invented, and concentration is still found', () => {
+  // Batch 30: unrated creatives are still creatives in play. Two of them are thin coverage; enough of them is monitoring. Neither is good nor bad.
   const o = run(base({ sales: strong, creatives: [cr('a', 'unrated', { age: 90 }), cr('b', 'unrated', { age: 80 })] }));
-  assert.equal(o.status, 'insufficient_data'); assert.equal(o.needs_review, true); assert.equal(o.review_reason, 'missing_benchmark'); assert.match(o.reason, /performance data, but there is no approved funnel benchmark/);
-  const tom = run(base({ sales: strong, creatives: [{ ...cr('a', 'unrated', { age: 90 }), funnel: 'TOM' }, { ...cr('b', 'unrated', { age: 80 }), funnel: 'TOM' }] }));
-  assert.match(tom.reason, /2 creatives have performance data, but there is no approved TOM benchmark to assess them against/); assert.doesNotMatch(tom.reason, /gathering data/);
+  assert.equal(o.status, 'act'); assert.equal(o.gap.type, 'thin'); assert.match(o.reason, /2 creatives in play \(3 wanted\)/); assert.doesNotMatch(o.reason, /underperform|over the approved/i);
+  const tom = run(base({ sales: strong, creatives: ['a', 'b', 'c'].map((k, i) => ({ ...cr(k, 'unrated', { age: 90 - i }), funnel: 'TOM' })) }));
+  assert.equal(tom.status, 'covered'); assert.match(tom.reason, /3 that cannot be benchmarked \(no approved TOM benchmark\)/); assert.doesNotMatch(tom.reason, /gathering data/);
   const conc = run(base({ sales: strong, creatives: [cr('a', 'unrated', { spend: 1500, purchases: 30, concept: 'X' }), cr('b', 'unrated', { spend: 100, purchases: 2, concept: 'Y' })], coverage: { known: true, active_ads: 2, possible: 0, uncertain: false, min: 5 } }));
   assert.equal(conc.status, 'act'); assert.equal(conc.gap.type, 'concentration', 'concentration does not depend on a CPA benchmark');
 });
@@ -373,7 +374,7 @@ test('season: the measured sales pattern still wins when it says OUT, with the d
 // ── creative recency ───────────────────────────────────────────────────────────────────────────────
 test('recency phases: testing / recent / established / declining / stale, and no data is never "weak"', () => {
   const ph = (c) => recency.phaseOf(c, TODAY, CFG).phase;
-  assert.equal(ph(cr('a', 'insufficient', { age: 5 })), 'testing'); assert.equal(ph(cr('a', 'insufficient', { age: 40 })), 'unjudged'); assert.equal(ph(cr('a', 'insufficient', { age: 200 })), 'stale');
+  assert.equal(ph(cr('a', 'insufficient', { age: 4 })), 'testing'); assert.equal(ph(cr('a', 'insufficient', { age: 5 })), 'unjudged', 'from day 5 it is assessed: insufficient delivery, never too early'); assert.equal(ph(cr('a', 'insufficient', { age: 40 })), 'unjudged'); assert.equal(ph(cr('a', 'insufficient', { age: 200 })), 'stale');
   assert.equal(ph(cr('a', 'underperforming', { age: 10 })), 'recent_weak'); assert.equal(ph(cr('a', 'underperforming', { age: 60 })), 'weak'); assert.equal(ph(cr('a', 'underperforming', { age: 150 })), 'stale');
   assert.equal(ph(cr('a', 'performing', { age: 10 })), 'recent_performing'); assert.equal(ph(cr('a', 'performing', { age: 200 })), 'performing');
   assert.equal(ph(cr('a', 'declining', { age: 200 })), 'declining'); assert.equal(ph(cr('a', 'unrated', { age: 200 })), 'unrated');

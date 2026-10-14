@@ -141,9 +141,10 @@ test('strong recent launch -> High; moderate (steady) recent launch -> not recom
 });
 test('the rule is a setting, uses the existing strong-demand line, and does not touch established products', () => {
   const off = cfgLib.resolve({ momentum_high_requires_strong: 0, launch_requires_strong_demand: 0 }).config;
-  assert.equal(run(launchP(11, 13), 'momentum', off).priority, 'High', 'switched off: the previous behaviour');
+  const lean = { stock: { known: true, units: 100, on_order: 0 } }; // under the slow-mover line, so stock does not cap the priority
+  assert.equal(run(launchP(11, 13, lean), 'momentum', off).priority, 'High', 'switched off: the previous behaviour');
   const higher = cfgLib.resolve({ demand_strong_units: 20, demand_steady_units: 10 }).config;
-  assert.equal(run(launchP(11, 13), 'momentum', higher).priority, 'High', 'it follows the strong-demand line: no new number');
+  assert.equal(run(launchP(11, 13, lean), 'momentum', higher).priority, 'High', 'it follows the strong-demand line: no new number');
   // an established product (no short window) with steady demand is unchanged by this rule
   const established = run(base({ sales: salesOf(29, { units7: 7, units14: 14 }) }));
   assert.equal(established.demand.partial, false); assert.ok(!/short window/.test(established.caps.join(' ')));
