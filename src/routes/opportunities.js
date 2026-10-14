@@ -79,7 +79,7 @@ router.post('/prepare-shoot', async (req, res, next) => {
     const idBy = new Map(rows.rows.map((r) => [r.style_code, r.id]));
     const colours = usable.filter((c) => idBy.has(c.style_code)).map((c) => {
       const sizing = apparelmagic.resolveStyleSizing(am.amDetails, am.amSizeRanges, c.style_code);
-      return { style_id: idBy.get(c.style_code), style_code: c.style_code, colour_label: c.colour_label, image_url: c.image_url, soh: c.soh, sizes: sizing.sizes, sizing_system: sizing.system };
+      return { style_id: idBy.get(c.style_code), style_code: c.style_code, colour_label: c.colour_label, image_url: c.image_url, soh: c.soh, viable: c.viable !== false, restriction: c.restriction || null, sizes: sizing.sizes, sizing_system: sizing.system };
     });
     // what already exists for this product this week, so the modal can say so instead of creating a duplicate
     res.json({

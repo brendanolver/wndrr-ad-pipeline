@@ -97,24 +97,51 @@ async function computeOpportunities({ now = new Date(), deps = {} } = {}) {
     if (deps.sizesByStyle !== undefined) { sizesByStyle = deps.sizesByStyle; sizeField = sizesByStyle ? 'injected' : null; }
     else if (apparelmagic.configured() && apparelmagic.getAmCacheStatus().stock && apparelmagic.getAmCacheStatus().stock.hasData) { const ss = await apparelmagic.getStockSizes(); sizesByStyle = ss.sizes && ss.sizes.size ? ss.sizes : null; sizeField = ss.sizeField || null; }
   } catch (e) { sizesByStyle = null; }
-  const sizesOf = (f) => {
+  const sizesOf = (codes) => {
     if (!sizesByStyle) return null;
     const { orderSizes, sizeHealth } = require('./coreCreativePlan');
     const m = new Map();
-    f.style_codes.forEach((c) => { const sm = sizesByStyle.get(c); if (sm) sm.forEach((q, sz) => m.set(sz, (m.get(sz) || 0) + Math.max(0, num(q)))); });
+    codes.forEach((c) => { const sm = sizesByStyle.get(c); if (sm) sm.forEach((q, sz) => m.set(sz, (m.get(sz) || 0) + Math.max(0, num(q)))); });
     return m.size ? sizeHealth(orderSizes(m.entries(), [])) : null;
   };
+  // Batch 29: a COLOURWAY (one style code) is shootable now when it is active (not discontinued or marked not launched), has the minimum AVAILABLE stock (never incoming stock) and its own
+  // size run is not broken. Discontinued is only ever what the launch assessment says (a person's override, Shopify ARCHIVED): it is never inferred from zero stock.
+  const colourwayViewOf = (code, status, amDetails) => {
+    const soh = Math.max(0, Number(am.amStock.get(code)) || 0);
+    const active = !['discontinued', 'unlaunched'].includes(status);
+    const sizes = sizesOf([code]);
+    const brokenSizes = !!(cfg.stock_block_broken_sizes && sizes && sizes.available && sizes.level === 'broken');
+    const low = (sizes && sizes.run ? sizes.run : []).filter((x) => x.qty < require('./coreCreativePlanConfig').SIZE.min_units_per_size).map((x) => x.size);
+    let reason = null;
+    if (!active) reason = status === 'discontinued' ? 'Discontinued' : 'Not launched';
+    else if (soh < cfg.opp_min_stock_units) reason = `Only ${soh} available (${cfg.opp_min_stock_units} needed)`;
+    else if (brokenSizes) reason = `Broken sizes: ${low.join(', ')} low or sold out`;
+    return {
+      style_code: code, colour_label: apparelmagic.resolveColourLabel(amDetails, code), image_url: (amDetails.get(code) || {}).imageUrl || null, launch_status: status || null, soh, active, viable: !reason, restriction: reason,
+      sizes: sizes && sizes.available ? { level: sizes.level, warning: sizes.warning, available_sizes: sizes.available_sizes, total_sizes: sizes.total_sizes, run: sizes.run, low } : null,
+    };
+  };
+  // thumbnail: an active colourway with the stock to shoot (the best stocked first), else any active colourway with stock, else none (the page shows a neutral placeholder). Never a discontinued colourway.
+  const pickImage = (cws) => {
+    const withImg = cws.filter((c) => c.image_url);
+    const best = (arr) => arr.slice().sort((a, b) => b.soh - a.soh)[0];
+    const a = best(withImg.filter((c) => c.viable)); if (a) return a.image_url;
+    const b = best(withImg.filter((c) => c.active && c.soh > 0)); return b ? b.image_url : null;
+  };
   const rows = families.map((f) => {
-    const stock = stockOf(f);
+    const allStock = stockOf(f);
     const lstyles = f.style_codes.map((c) => launchInputs.forStyle(c, { amDetails: am.amDetails, salesByStyle, drops: lc.drops, overrides: lc.overrides, shopify: lc.shopify || deps.shopifyEvidence || null }));
-    const l = launch.assessFamily({ styles: lstyles, familyOverride: lc.overrides.get(f.key) || null, stock: { known: stock.known, units: stock.units }, onOrder: stock.on_order }, today, launchCfg);
+    const l = launch.assessFamily({ styles: lstyles, familyOverride: lc.overrides.get(f.key) || null, stock: { known: allStock.known, units: allStock.units }, onOrder: allStock.on_order }, today, launchCfg);
     const ft = familyTier(f, tiers);
     const launchDate = planningSales.familyLaunchDate(l, am.amDetails);
     const fs = planningSales.familySales({ style_codes: f.style_codes, salesByStyle, window, launchDate, today, tierSales: ft.sales, cfg });
     const launchAge = launchDate ? planningSales.daysBetween(launchDate, today) : null;
     const lsByStyle = new Map(l.by_style.map((x) => [x.style_code, x.status]));
-    const colourways = f.style_codes.map((c) => ({ style_code: c, colour_label: apparelmagic.resolveColourLabel(am.amDetails, c), image_url: (am.amDetails.get(c) || {}).imageUrl || null, launch_status: lsByStyle.get(c) || null, soh: Math.max(0, Number(am.amStock.get(c)) || 0) }));
-    return { f, stock: { ...stock, sizes: sizesOf(f) }, sales: fs.sales, quality: fs.quality, launch: l, launch_date: launchDate, launch_age_days: launchAge, tier: ft.tier, colourways };
+    const colourways = f.style_codes.map((c) => colourwayViewOf(c, lsByStyle.get(c) || null, am.amDetails)).sort((a, b) => Number(b.viable) - Number(a.viable) || b.soh - a.soh || String(a.style_code).localeCompare(String(b.style_code)));
+    const activeCws = colourways.filter((c) => c.active);
+    // the stock the engine judges is what can be sold AND advertised now: sellable units in the active colourways (incoming stock is never added)
+    const stock = { ...allStock, total_units: allStock.units, units: activeCws.reduce((sum, c) => sum + c.soh, 0), sizes: sizesOf(activeCws.map((c) => c.style_code)), colourways: { total: colourways.length, active: activeCws.length, viable: colourways.filter((c) => c.viable).length } };
+    return { f, stock, sales: fs.sales, quality: fs.quality, launch: l, launch_date: launchDate, launch_age_days: launchAge, tier: ft.tier, colourways };
   });
 
   // who is evaluated for what:
@@ -159,7 +186,7 @@ async function computeOpportunities({ now = new Date(), deps = {} } = {}) {
     const g = ctx.seasonality && ctx.seasonality.available ? ctx.seasonality.groups.get(f.key) : null;
     const h = hist.get(f.key) || { winners: [] };
     return {
-      key: f.key, name: f.name, category: f.category, codes: f.codes, style_codes: f.style_codes, is_core: f.is_core, image_url: (r.colourways.find((c) => c.image_url) || {}).image_url || null,
+      key: f.key, name: f.name, category: f.category, codes: f.codes, style_codes: f.style_codes, is_core: f.is_core, image_url: pickImage(r.colourways),
       launch: r.launch, launch_age_days: r.launch_age_days, launch_date: r.launch_date, stock: r.stock, sales: r.sales, data_quality: r.quality, tier: r.tier, tierState,
       coverage: cov ? { known: true, active_ads: active, possible, unresolved: cov.unresolved_identities || 0, unresolved_share_pct: cov.unresolved_share_pct === undefined ? null : cov.unresolved_share_pct, uncertain: !!(cls && cls.state === 'uncertain'), min: settings.min_active_ads } : { known: false, min: settings.min_active_ads },
       creatives: ev.creatives || [], history: h, pipeline: pipeFor(f), seasonData: g ? g.status : (ctx.seasonality && ctx.seasonality.available ? 'insufficient_data' : null), seasonEvidence: g && g.evidence ? g.evidence : null,
@@ -215,7 +242,7 @@ async function computeOpportunities({ now = new Date(), deps = {} } = {}) {
   const unlaunched = rows.filter((r) => r.launch.status === 'unlaunched' && r.stock.known && r.stock.units > 0);
   const launchReview = {
     total_unknown: unknown.length, relevant_count: relevantUnknown.length, historical_count: unknown.length - relevantUnknown.length, by_basis: byBasis,
-    relevant: relevantUnknown.sort((a, b) => b.stock.units - a.stock.units).slice(0, 50).map((r) => ({ key: r.f.key, name: r.f.name, product_code: r.f.codes[0], image_url: (r.colourways.find((c) => c.image_url) || {}).image_url || null, soh_total: r.stock.units, units_30d: Math.round(num(r.sales.units30)), basis: r.launch.basis, detail: r.launch.detail, evidence: (r.launch.by_style[0] && r.launch.by_style[0].evidence) || [] })),
+    relevant: relevantUnknown.sort((a, b) => b.stock.units - a.stock.units).slice(0, 50).map((r) => ({ key: r.f.key, name: r.f.name, product_code: r.f.codes[0], image_url: pickImage(r.colourways), soh_total: r.stock.units, units_30d: Math.round(num(r.sales.units30)), basis: r.launch.basis, detail: r.launch.detail, evidence: (r.launch.by_style[0] && r.launch.by_style[0].evidence) || [] })),
     excluded_unlaunched_count: unlaunched.length,
     excluded_unlaunched: unlaunched.sort((a, b) => b.stock.units - a.stock.units).slice(0, 40).map((r) => ({ key: r.f.key, name: r.f.name, detail: r.launch.detail, in_upcoming_drop: r.launch.in_upcoming_drop, soh_total: r.stock.units })),
     note: unknown.length > relevantUnknown.length ? `${unknown.length - relevantUnknown.length} products with no readable launch date have no stock, no open order and no sales in the last 30 days: they are historical catalogue entries and are not asked of the team.` : null,
@@ -271,7 +298,7 @@ async function computeOpportunities({ now = new Date(), deps = {} } = {}) {
 
   return {
     available: true, generated_at: now.toISOString(), today, week_start: weekStart,
-    config: { min_performing_creatives: cfg.min_performing_creatives, test_period_days: cfg.test_period_days, recent_creative_days: cfg.recent_creative_days, stale_creative_days: cfg.stale_creative_days, opp_min_recent_units: cfg.opp_min_recent_units, opp_min_stock_units: cfg.opp_min_stock_units, revival_decline_pct: cfg.revival_decline_pct, revival_min_cover_weeks: cfg.revival_min_cover_weeks, revival_min_age_days: cfg.revival_min_age_days, revival_min_recent_units: cfg.revival_min_recent_units, revival_min_pace_pct: cfg.revival_min_pace_pct, demand_steady_units: cfg.demand_steady_units, demand_strong_units: cfg.demand_strong_units, momentum_window_days: cfg.momentum_window_days, stock_min_cover_weeks: cfg.stock_min_cover_weeks, high_stock_min_soh: hsMin, priority_high_min: cfg.priority_high_min, priority_medium_min: cfg.priority_medium_min },
+    config: { window_days: cfg.window_days, min_performing_creatives: cfg.min_performing_creatives, test_period_days: cfg.test_period_days, recent_creative_days: cfg.recent_creative_days, stale_creative_days: cfg.stale_creative_days, opp_min_recent_units: cfg.opp_min_recent_units, opp_min_stock_units: cfg.opp_min_stock_units, revival_decline_pct: cfg.revival_decline_pct, revival_min_cover_weeks: cfg.revival_min_cover_weeks, revival_min_age_days: cfg.revival_min_age_days, revival_min_recent_units: cfg.revival_min_recent_units, revival_min_pace_pct: cfg.revival_min_pace_pct, demand_steady_units: cfg.demand_steady_units, demand_strong_units: cfg.demand_strong_units, momentum_window_days: cfg.momentum_window_days, stock_min_cover_weeks: cfg.stock_min_cover_weeks, high_stock_min_soh: hsMin, priority_high_min: cfg.priority_high_min, priority_medium_min: cfg.priority_medium_min },
     core: { items: coreItems, counts: countBy(coreItems), total: coreItems.length, actionable: coreItems.filter((i) => i.actionable).length },
     high_stocks: { items: hsItems, counts: countBy(hsItems), total: hsItems.length, actionable: hsItems.filter((i) => i.actionable).length, tier_state: tierState, tier_note: tierReason },
     momentum: { items: momentumItems, counts: countBy(momentumItems), total: momentumItems.length, actionable: momentumItems.filter((i) => i.actionable).length },

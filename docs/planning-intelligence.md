@@ -1,5 +1,7 @@
 # Planning intelligence (Batch 27)
 
+> **Batch 29 changed several rules below** (minimum stock 40 available units, incoming stock never counts, shootable colourways and size runs, demand qualification, creative testing measured from first delivery). The current rules are in `docs/planning-accuracy.md`; where the two differ, that document wins.
+
 How Core, High Stocks and Protect momentum recommendations are produced. Every threshold named here is a **provisional starting point**, editable in
 Settings (`creativePlanningConfig.js`), and none is a Meta performance benchmark (those stay in Meta Performance settings). The engine is pure
 (`planningOpportunities.js`, `planningDemand.js`, `creativeEvidence.js`, `planningSales.js`, `planningPrimary.js`, `seasonRelevance.js`); the loader

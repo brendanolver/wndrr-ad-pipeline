@@ -13,7 +13,7 @@
 state.opportunities = null;
 state.opportunitiesError = null;
 state.conceptProgress = null;
-// which status tab each page shows (needs | covered | not_recommended | insufficient): the engine's eight statuses are grouped into four, see planningExplain.js
+// which category tab each page shows (needs | covered | review): the engine's statuses are grouped into three visible categories, the rest are hidden, see planningExplain.js
 state.oppView = { core: 'needs', high: 'needs' };
 state.oppOpen = {};
 state.oppEvidence = {};
@@ -39,6 +39,8 @@ async function plLoadOpportunities(fresh) {
     state.opportunitiesError = e.message;
   }
   try { plRenderCore(); plRenderHighStocks(); } catch (e) { console.error('opportunity render failed', e); }
+  try { plRenderSettingsInfo(); } catch (e) { console.error('planning settings info failed', e); }
+  try { if (typeof renderShootPlanStep === 'function' && Array.isArray(state.shootPlan)) renderShootPlanStep(); } catch (e) { console.error('shoot plan stock warnings failed', e); } // the stock warnings on planned work follow the latest assessment
   try { renderProductionHeader(); } catch (e) { /* header is optional */ }
 }
 
@@ -160,7 +162,7 @@ function plEvidenceHtml(it) {
   const stock = plList(it.stock && it.stock.notes ? it.stock.notes : []);
   const seas = it.season ? plList([...(it.season.reasons || []), `Source: ${it.season.source === 'sales_pattern' ? 'its own monthly sales pattern' : it.season.source === 'category_prior' ? "WNDRR's Australian category rule (not measured sales)" : 'no seasonal rule applies'}.`]) : '';
   const cre = (it.creatives || []).length
-    ? `<table class="pt-mini"><thead><tr><th>Creative</th><th>Phase</th><th>Age</th><th class="num">Spend</th><th class="num">CPA</th><th>Detail</th></tr></thead><tbody>${it.creatives.slice(0, 10).map((c) => `<tr><td>${plEsc(c.concept || 'unclassified')}${c.ads > 1 ? ` <small>${c.ads} ads</small>` : ''}</td><td>${plEsc(c.label)}</td><td>${plEsc(plAgeText(c.age_days))}</td><td class="num">${c.spend ? `$${plNum(Math.round(c.spend))}` : plNone}</td><td class="num">${c.cpa ? `$${plNum(Math.round(c.cpa))}` : plNone}</td><td>${plEsc((c.reasons || [])[0] || '')}</td></tr>`).join('')}</tbody></table>`
+    ? `<table class="pt-mini"><thead><tr><th>Creative / ad</th><th>Condition</th><th>Funnel</th><th>Started</th><th>Last delivery</th><th class="num">Spend (${plCfg().window_days || 14}d)</th><th class="num">Lifetime</th><th class="num">CPA</th><th>Why</th></tr></thead><tbody>${it.creatives.slice(0, 12).map((c) => `<tr><td>${plEsc(c.concept || 'unclassified')}${c.ad_ids && c.ad_ids[0] ? ` <small title="Meta ad id">${plEsc(String(c.ad_ids[0]))}${c.ads > 1 ? ` +${c.ads - 1}` : ''}</small>` : ''}</td><td>${plEsc(c.label)}</td><td>${plEsc(c.funnel || (c.mixed_funnels ? 'several' : 'unknown'))}</td><td>${c.started ? `${plEsc(PE.longDate(c.started))}<small>${c.started_basis === 'first_delivery' ? 'first delivery' : c.started_basis === 'created' ? 'ad created' : 'history starts here'}</small>` : plNone}</td><td>${c.last_delivery ? plEsc(PE.longDate(c.last_delivery)) : plNone}</td><td class="num">${c.spend ? `$${plNum(Math.round(c.spend))}` : plNone}</td><td class="num">${c.lifetime_spend ? `$${plNum(Math.round(c.lifetime_spend))}` : plNone}</td><td class="num">${c.cpa ? `$${plNum(Math.round(c.cpa))}` : plNone}</td><td>${plEsc((c.reasons || [])[0] || '')}</td></tr>`).join('')}</tbody></table>`
     : '<p class="hint">No active creative with delivery for this product (confirmed ads only).</p>';
   const creative = `${cre}${it.evidence && it.evidence.notes && it.evidence.notes.length ? plList(it.evidence.notes) : ''}<p class="hint">Judged against the approved Meta Performance benchmarks only (Meta-reported CPA; Triple Whale is not connected and is never substituted). DPAs are not counted. A relative worsening within the benchmark is "softening", not fatigue. Creatives with no approved benchmark for their funnel are shown as unrated, never as good or bad.</p>`;
   const matching = plList([byKey('matching'), f.matching === 'uncertain' ? `${f.matching_pending} suggested ad(s) are awaiting review in Ad Matching, so a creative gap cannot be confirmed yet.` : '']);
@@ -173,6 +175,19 @@ function plEvidenceHtml(it) {
     ${plSection('How the engine reached this', engine)}${plSection('Sales evidence', sales)}${plSection('Stock evidence', stock)}${plSection('Seasonal assessment', seas)}
     ${plSection('Creative performance', creative)}${plSection('Matching confidence', matching)}${plSection('Score breakdown', score)}${plSection('Eligibility rules', elig)}${plSection('Other classifications', other)}${plSection('Data freshness', fresh)}
   </div>`;
+}
+// which colourways can be shot now (active, enough AVAILABLE stock, a usable size run), with what stops the others. Nothing is guessed: where size data is not available it says so.
+function plColourwaysHtml(it) {
+  const cws = it.colourways || [];
+  if (!cws.length) return '';
+  const ro = plReadOnly();
+  const row = (c) => {
+    const sizes = c.sizes ? `${c.sizes.available_sizes} of ${c.sizes.total_sizes} sizes in stock${c.sizes.low && c.sizes.low.length ? ` (low or sold out: ${c.sizes.low.join(', ')})` : ''}` : 'Size data not available';
+    const thumb = c.image_url ? `<img src="${plEsc(c.image_url)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.remove()">` : '';
+    return `<li class="pl-cw${c.viable ? '' : ' pl-cw-off'}"><span class="pt-thumb pl-cw-thumb">${thumb}</span><span class="pl-cw-name"><b>${plEsc(c.colour_label || c.style_code)}</b><small>${plEsc(c.style_code)}</small></span><span class="pl-cw-stock"><b>${plNum(c.soh)}</b> available<small>${plEsc(sizes)}</small></span><span class="pl-cw-state">${c.viable ? '<span class="pl-cw-ok">Can be shot now</span>' : `<span class="pl-cw-no">${plEsc(c.restriction || 'Not shootable')}</span>`}</span>${c.viable && !ro && !PL_BLOCKED.includes(it.status) ? `<button type="button" class="link-btn" data-opp-plan="${plEsc(it.key)}" data-opp-colour="${plEsc(c.style_code)}">Plan this colourway</button>` : '<span></span>'}</li>`;
+  };
+  const viable = cws.filter((c) => c.viable).length;
+  return `<section class="pl-d-sec pl-d-cw"><h5>Colourways <span class="pl-cw-count">${viable} of ${cws.length} can be shot now</span></h5><ul class="pl-cw-list">${cws.map(row).join('')}</ul></section>`;
 }
 const PL_BLOCKED = ['not_launched', 'launch_unknown', 'unavailable'];
 function plInThisWeeksPlan(it) {
@@ -194,13 +209,15 @@ function plDetailHtml(it, mode, ncols) {
   const cfg = plCfg();
   const reason = PE.reasonFor(it, cfg);
   const nums = PE.whyWithNumbers(it);
+  const pic = PE.conditionsSummary(it);
   const facts = PE.keyFacts(it).map(([k, v]) => `<div><dt>${plEsc(k)}</dt><dd>${plEsc(v)}</dd></div>`).join('');
   const dir = PE.directionFor(it);
   const prod = PE.productionActivity(it, PL_STAGE_LABEL);
   const open = !!state.oppEvidence[`${mode}:${it.key}`];
   return `<tr class="pt-detail-row"><td colspan="${ncols}"><div class="pl-detail">
-    <section class="pl-d-sec pl-d-reco"><h5>Recommendation</h5><p class="pl-d-main">${plEsc(PE.recommendationFor(it))}</p><p class="pl-d-why"><b>Why:</b> ${plEsc(reason)}${nums ? ` ${plEsc(nums)}` : ''}</p></section>
+    <section class="pl-d-sec pl-d-reco"><h5>Recommendation</h5><p class="pl-d-main">${plEsc(PE.recommendationFor(it))}</p><p class="pl-d-why"><b>Why:</b> ${plEsc(reason)}${nums ? ` ${plEsc(nums)}` : ''}</p>${pic ? `<p class="pl-d-why"><b>Creative picture:</b> ${plEsc(pic)}</p>` : ''}</section>
     <section class="pl-d-sec"><h5>Key facts</h5><dl class="pl-facts">${facts}</dl></section>
+    ${plColourwaysHtml(it)}
     ${dir.length ? `<section class="pl-d-sec"><h5>Suggested creative direction</h5>${plList(dir)}</section>` : ''}
     <section class="pl-d-sec"><h5>Existing production activity</h5><p class="pl-d-text">${plEsc(prod.text)}</p></section>
     <details class="pl-d-evidence" data-opp-evidence="${mode}:${plEsc(it.key)}"${open ? ' open' : ''}><summary>View detailed evidence</summary>${plEvidenceHtml(it)}</details>
@@ -214,7 +231,7 @@ function plBase(mode) {
   const fl = state.oppFilter[mode];
   const src = fl.type === 'Protect Momentum' ? plMomentum(mode) : plData(mode).items;
   const q = state.oppQuery[mode].trim().toLowerCase();
-  return src.filter((i) => (!q || String(i.name).toLowerCase().includes(q) || String(i.category || '').toLowerCase().includes(q))
+  return src.filter((i) => PE.isVisible(i) && (!q || String(i.name).toLowerCase().includes(q) || String(i.category || '').toLowerCase().includes(q))
     && (!fl.priority || i.priority === fl.priority)
     && (!fl.type || fl.type === 'Protect Momentum' || PE.typeLabelOf(i) === fl.type));
 }
@@ -269,10 +286,9 @@ function plTableHtml(mode, items, cat) {
   return `<div class="pt-wrap"><table class="pt-table pl-table pt-${plEsc(mode)}"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>${items.length > limit ? `<div class="pt-more"><button type="button" class="btn btn-ghost btn-sm" data-opp-more="${mode}">Show ${Math.min(PL_PAGE, items.length - limit)} more (${items.length - limit} not shown)</button></div>` : ''}`;
 }
 const PL_EMPTY = {
-  needs: (mode, sf) => `No ${PL_MODE_NAME[mode]} product currently needs new creative.${sf ? ` ${sf.text}` : ''}`,
-  covered: () => 'No products here: nothing is covered or being monitored with these filters.',
-  not_recommended: () => 'No products here: nothing is excluded with these filters.',
-  insufficient: () => 'No products here: every product has enough data to be assessed.',
+  needs: (mode, sf) => `No ${PL_MODE_NAME[mode]} product currently needs new creative that can be shot now.${sf ? ` ${sf.text}` : ''}`,
+  covered: () => 'Nothing here: no product with these filters is covered or being monitored.',
+  review: () => 'Nothing needs review: every product that could be shot has an assessable creative picture.',
 };
 function plListHtml(mode) {
   const { base, items, cat } = plItemsFor(mode);
@@ -301,7 +317,7 @@ function plRenderCore() {
   if (!host) return;
   const o = state.opportunities;
   if (!o || !o.available) { host.innerHTML = plUnavailableHtml(); return; }
-  host.innerHTML = `${plPageHtml('core')}${plNotesHtml()}`;
+  host.innerHTML = plPageHtml('core');
   if (typeof renderPlanningStepNav === 'function') renderPlanningStepNav();
 }
 
@@ -313,7 +329,7 @@ function plRenderHighStocks() {
   if (!o || !o.available) { host.innerHTML = plUnavailableHtml(); return; }
   const hs = o.high_stocks;
   const tierNote = hs.tier_state !== 'ok' ? `<div class="opp-tier-note" role="note">${plEsc(hs.tier_note || 'The Platinum / Rocket classification is unavailable.')} High Stocks cannot recommend a product without it.</div>` : '';
-  host.innerHTML = `${plPageHtml('high', tierNote)}${plLaunchReviewHtml(o.launch_review)}${plNotesHtml()}`;
+  host.innerHTML = plPageHtml('high', tierNote);
   if (typeof renderPlanningStepNav === 'function') renderPlanningStepNav();
 }
 
@@ -358,7 +374,7 @@ document.addEventListener('click', (ev) => {
   if (view) { const [mode, key] = view.dataset.oppView.split(':'); state.oppView[mode] = key; state.oppLimit[mode] = PL_PAGE; plRerender(mode); return; }
   if (ev.target.closest('[data-opp-refresh]')) { plLoadOpportunities(true); return; }
   const plan = ev.target.closest('[data-opp-plan]');
-  if (plan) { plPlan(plan.dataset.oppPlan); return; }
+  if (plan) { plPlan(plan.dataset.oppPlan, plan.dataset.oppColour || null); return; }
   const sort = ev.target.closest('[data-opp-sort]');
   if (sort) { const [mode, key] = sort.dataset.oppSort.split(':'); const cur = state.oppSort[mode]; state.oppSort[mode] = !cur || cur.key !== key ? { key, dir: 'desc' } : cur.dir === 'desc' ? { key, dir: 'asc' } : null; plRerender(mode); return; }
   const reset = ev.target.closest('[data-opp-reset]');
@@ -405,6 +421,7 @@ function plSyncChrome() {
     const step = b.dataset.plNav;
     const active = open && state.planningStep === step;
     b.classList.toggle('active', active);
+    if (b.getAttribute('role') === 'tab') b.setAttribute('aria-selected', active ? 'true' : 'false');
     if (active) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
     const disabled = past && step !== 'shoot-plan';
     b.disabled = disabled; b.title = disabled ? 'Past weeks only show the Shoot Plan (a historical record).' : '';
@@ -418,7 +435,7 @@ function plSyncChrome() {
 }
 
 // ── choosing a product: the explicit step into the Shoot Plan (via the existing modal) ──
-async function plPlan(key) {
+async function plPlan(key, colourCode = null) {
   if (plReadOnly()) return;
   const it = plFindItem(key);
   const prod = it ? PE.productionActivity(it, PL_STAGE_LABEL) : { active: false };
@@ -429,6 +446,7 @@ async function plPlan(key) {
     openShootPlanModal({
       productCode: prep.product_code, productName: prep.product_name, category: prep.category, colours: prep.colours, source: prep.source,
       opp: { headline: prep.headline, snapshot: prep.snapshot, kinds: prep.kinds, tags: prep.tags, status: prep.status, pipeline: prep.pipeline },
+      preselectStyleCodes: colourCode ? [colourCode] : null,
     });
   } catch (e) { toast(e.message, true); }
 }
@@ -583,7 +601,7 @@ async function loadWeeklyPlanConfig() {
     WPS.config = res;
     const wasOpen = !!(document.getElementById('wpc-advanced') && document.getElementById('wpc-advanced').open);
     const field = (f) => {
-      const yesNo = { launch_sales_confirms: ['No: a person confirms', 'Yes: sustained sales count'], launch_date_verified: ['No: treat as unverified', 'Yes: confirmed by WNDRR'] }[f.key];
+      const yesNo = { launch_sales_confirms: ['No: a person confirms', 'Yes: sustained sales count'], launch_date_verified: ['No: treat as unverified', 'Yes: confirmed by WNDRR'], stock_require_viable_colourway: ['No: family stock is enough', 'Yes: a shootable colourway is needed'], stock_block_broken_sizes: ['No: broken sizes only lower the score', 'Yes: broken sizes mean not recommended'], demand_tier_qualifies: ['No: Platinum / Rocket needs steady sales too', 'Yes: Platinum / Rocket qualifies'], launch_requires_strong_demand: ['No: steady demand is enough', 'Yes: a launch needs strong demand or Platinum / Rocket'], momentum_high_requires_strong: ['No', 'Yes'] }[f.key];
       const input = yesNo
         ? `<select id="wpc-${wpEsc(f.key)}" data-wpc-key="${wpEsc(f.key)}" aria-describedby="wpc-${wpEsc(f.key)}-hint"><option value="0" ${Number(f.value) === 0 ? 'selected' : ''}>${yesNo[0]}</option><option value="1" ${Number(f.value) === 1 ? 'selected' : ''}>${yesNo[1]}</option></select>`
         : `<input type="number" id="wpc-${wpEsc(f.key)}" data-wpc-key="${wpEsc(f.key)}" min="${f.min}" max="${f.max}" step="any" value="${f.value}" aria-describedby="wpc-${wpEsc(f.key)}-hint">`;
@@ -705,3 +723,72 @@ async function leLookup() {
   const i = document.getElementById('le-q'); if (i) i.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') leLookup(); });
 })();
 
+
+// Shoot Plan: a stock WARNING on work that is already planned. A product that becomes stock-restricted after it was planned is never removed or changed: the team sees why and decides.
+function plShootPlanWarning(item) {
+  const o = state.opportunities;
+  if (!o || !o.available || !item || !item.product_code) return '';
+  const all = [...o.core.items, ...o.high_stocks.items, ...((o.momentum && o.momentum.items) || [])];
+  const opp = all.find((i) => (i.codes || []).includes(item.product_code) || i.product_code === item.product_code);
+  if (!opp) return '';
+  const bits = [];
+  const r = PE.stockRestriction(opp);
+  if (r.restricted) bits.push(r.text);
+  (item.styles || []).forEach((s) => {
+    const cw = (opp.colourways || []).find((c) => c.style_code === s.style_code);
+    if (cw && !cw.viable && cw.restriction && !r.restricted) bits.push(`${cw.colour_label || cw.style_code}: ${cw.restriction.toLowerCase()}`);
+  });
+  return bits.length ? `<div class="pl-stockwarn" role="note">Stock warning: ${plEsc(bits.map((b) => String(b).replace(/\.\s*$/, '')).join('. '))}. This plan has not been changed.</div>` : '';
+}
+
+// ── Settings > Planning: data sources, how recommendations work, launch and data quality (moved here from the Planning pages) ─────────────────────────────────────────────────────────
+function plRenderSettingsInfo() {
+  const src = document.getElementById('pl-set-sources'); const how = document.getElementById('pl-set-how'); const qual = document.getElementById('pl-set-quality');
+  if (!src || !how || !qual) return;
+  const o = state.opportunities;
+  if (!o || !o.available) { const m = `<div class="co-empty">${plEsc(state.opportunitiesError || (o && o.reason) || 'Planning data is loading…')}</div>`; src.innerHTML = m; qual.innerHTML = m; how.innerHTML = plHowHtml(null); return; }
+  const q = (o.data && o.data.quality) || {}; const rel = o.data && o.data.coverage_reliability;
+  const all = [...o.core.items, ...o.high_stocks.items, ...((o.momentum && o.momentum.items) || [])];
+  const uncertain = all.filter((i) => (i.facts || {}).matching === 'uncertain').length;
+  const stamp = (iso) => (iso ? plAgeStamp(iso) : 'not read yet');
+  const row = (name, what, when, note) => `<tr><th scope="row">${plEsc(name)}</th><td>${plEsc(what)}</td><td>${plEsc(when)}</td><td>${note ? plEsc(note) : ''}</td></tr>`;
+  src.innerHTML = `<table class="pl-set-table"><thead><tr><th>Source</th><th>What Planning uses it for</th><th>Last read</th><th>Notes</th></tr></thead><tbody>
+    ${row('ApparelMagic: sales', 'Units sold in 7, 14 and 30 days and since launch (online sales)', stamp(q.recent_sales && q.recent_sales.fetched_at), q.recent_sales && q.recent_sales.complete === false ? 'Some daily requests failed: recent sales may be under-counted' : '')}
+    ${row('ApparelMagic: stock', 'Available sellable units by colourway and size (incoming stock is never counted)', stamp(q.stock && q.stock.fetched_at), q.stock ? q.stock.size_data : '')}
+    ${row('ApparelMagic: launch dates', 'The official launch date (mid_code), Core group and colourway status', 'with the catalogue', '')}
+    ${row('Shopify', 'Read through Stock Demand Planning (launch pace); not queried separately', stamp(q.launch_pace && q.launch_pace.fetched_at), '')}
+    ${row('Stock Demand Planning', 'The Platinum / Rocket classification, by colourway (style code); read, never recreated', stamp(q.launch_pace && q.launch_pace.fetched_at), q.launch_pace && q.launch_pace.available === false ? 'Unavailable: High Stocks cannot recommend without it' : 'Refreshed about every 3 hours')}
+    ${row('Meta', 'Delivery, spend and results of confirmed ads against the approved benchmarks (DPAs excluded)', stamp(q.meta && q.meta.last_successful_sync), q.meta && q.meta.unresolved_ad_identities ? `${q.meta.unresolved_ad_identities} recent ads could not be identified` : '')}
+    ${row('Ad Matching', 'Which Meta ads belong to which product', 'live', rel ? `${rel.awaiting_review} of ${rel.active_ads} active ads are awaiting review` : '')}
+    ${row('Uncertain product mappings', 'Products whose creative count could change once suggested ad matches are reviewed', 'live', `${uncertain} product${uncertain === 1 ? '' : 's'}`)}
+    ${row('Recommendations', 'Rebuilt from all of the above', stamp(o.generated_at), 'Refresh on the Planning page recalculates now')}
+  </tbody></table>`;
+  how.innerHTML = plHowHtml(plCfg());
+  qual.innerHTML = `${plLaunchReviewHtml(o.launch_review) || '<div class="hint">No launch checks are waiting.</div>'}${plNotesHtml()}`;
+}
+
+function plHowHtml(c) {
+  const n = (k, d) => (c && c[k] !== undefined && c[k] !== null ? c[k] : d);
+  const li = (t, b) => `<li><b>${plEsc(t)}</b> ${plEsc(b)}</li>`;
+  return `<ul class="pl-how">
+    ${li('Core.', 'Official ApparelMagic Core styles (group AA CORE STYLES). The classification is never inferred from sales, stock or age.')}
+    ${li('High Stocks.', "Non-Core products that Stock Demand Planning classes as Platinum or Rocket and that have lost momentum against their own launch pace but still sell.")}
+    ${li('Protect Momentum.', `A recent launch (within ${n('momentum_window_days', 60)} days of its official launch date) with strong demand or a Platinum / Rocket classification and too little effective creative. It is a type of opportunity inside Core and High Stocks, not a page.`)}
+    ${li('Needs creative.', 'Passes every check below AND has a genuine creative need. A creative gap alone never qualifies a product.')}
+    ${li('Covered / monitoring.', 'Passes the checks and has enough effective creative, brand-new creative still in its first days of delivery, or concepts already in the Shoot Plan.')}
+    ${li('Needs review.', 'Passes the checks but something specific stops the creative picture being assessed: ad matches awaiting review, ads with no approved benchmark for their funnel, too little delivery, or no Meta data. The sentence says which.')}
+    ${li('Stock restrictions.', `Only available sellable stock counts (never incoming stock). A product needs ${n('opp_min_stock_units', 40)}+ available units, at least one active colourway with ${n('opp_min_stock_units', 40)}+ available units and a usable size run, and enough cover at its current sales pace (${n('stock_min_cover_weeks', 4)}+ weeks). Products that fail are not shown, are re-checked on every refresh, and return by themselves when stock recovers. Work already planned is never removed: it gets a stock warning.`)}
+    ${li('Demand qualification.', `A Platinum or Rocket product (Stock Demand Planning) qualifies while it is still selling. Any other product needs steady selling (${n('demand_steady_units', 20)}+ units in 30 days); a recent launch needs strong demand (${n('demand_strong_units', 50)}+ per 30 days, normalised for the days on sale) or Platinum / Rocket.`)}
+    ${li('Creative effectiveness.', 'Judged only against the approved Meta benchmarks (Settings > Meta Performance). A creative with no approved benchmark for its funnel is unrated: it is never called good or bad. Overall product sales are product demand, not evidence that Meta creative works.')}
+    ${li('Fixed rules.', 'Season follows the Australian calendar; launch dates come from ApparelMagic (mid_code); Meta results are Meta-reported (Triple Whale is not substituted). These are not editable here.')}
+  </ul>`;
+}
+
+document.addEventListener('click', (ev) => {
+  const t = ev.target.closest && ev.target.closest('[data-plset]');
+  if (!t) return;
+  const key = t.dataset.plset;
+  document.querySelectorAll('.pl-set-tab').forEach((b) => b.classList.toggle('active', b.dataset.plset === key));
+  document.querySelectorAll('[data-plset-group]').forEach((g) => { g.style.display = g.dataset.plsetGroup === key ? '' : 'none'; });
+  if (key !== 'rules') plRenderSettingsInfo();
+});

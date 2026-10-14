@@ -34,7 +34,7 @@ const ALLOCATION = {
   recent_creative_days: 30,      // a creative newer than this is "recently launched" (so a clear weak result is "recently launched and underperforming")
   stale_creative_days: 90,       // a creative older than this that is not performing is "old / stale"
   opp_min_recent_units: 8,       // units sold in the last 30 days before a product counts as having demand today
-  opp_min_stock_units: 30,       // sellable units below this: never a creative recommendation (nothing to sell)
+  opp_min_stock_units: 40,       // sellable units below this: never a creative recommendation (Batch 29: WNDRR's rule is 40 AVAILABLE units; incoming stock never counts). Applied to the product and to the colourway that would be shot
   revival_decline_pct: 50,       // High Stocks: the last 28 days sell below this % of the product's first 28 days = momentum lost
   revival_min_age_days: 56,      // High Stocks: a product must have sold for at least this many days so its first and latest 28 days do not overlap
   revival_min_cover_weeks: 6,    // High Stocks: weeks of stock at the current pace needed to justify more creative investment
@@ -76,6 +76,14 @@ const ALLOCATION = {
   // Days from "concept planned" to "creative live and gathering data" that stock must outlast, in ADDITION to the test period. 0 = off (only stock_min_cover_weeks applies). Not defaulted
   // to a guess: WNDRR's measured median is shown on the Planning page (from production timestamps) so a figure can be chosen from evidence.
   creative_lead_time_days: 0,
+  // Batch 29: stock must be physically available and the colourway must be shootable now. These are on/off rules, not new numbers: the minimum is opp_min_stock_units, and "broken" sizing is the
+  // existing size-run judgement (coreCreativePlanConfig SIZE). 1 = on, 0 = off.
+  stock_require_viable_colourway: 1, // at least one active colourway with the minimum stock (and a size run that is not broken) is needed: a healthy family total is not enough
+  stock_block_broken_sizes: 1,       // a product (or colourway) whose size run is broken is not recommended for new creative
+  // Batch 29: demand qualification. Demand Planning's Platinum / Rocket classification is the authoritative signal of strong demand; other products need steady selling (demand_steady_units).
+  // A creative gap alone never qualifies a product. 1 = on, 0 = off.
+  demand_tier_qualifies: 1,          // Platinum / Rocket qualifies on its own (it must still be selling: above opp_min_recent_units)
+  launch_requires_strong_demand: 1,  // a recent launch needs strong demand (demand_strong_units, normalised per day on sale) or a Platinum / Rocket classification: steady is not enough for a new shoot
 };
 const ALLOC_LIMITS = {
   videos_high_need_strong: [0, 20], videos_high_need_ok: [0, 20], videos_high_need_low: [0, 20], videos_medium_need_strong: [0, 20], videos_medium_need_ok: [0, 20], videos_medium_need_low: [0, 20],
@@ -88,6 +96,7 @@ const ALLOC_LIMITS = {
   stock_min_cover_weeks: [0, 26], stock_overstock_weeks: [4, 104], stock_excess_weeks: [8, 260], season_override_units: [5, 1000], season_pattern_index: [110, 300],
   momentum_window_days: [14, 180], momentum_min_days_live: [1, 28], concentration_share_pct: [50, 99], concentration_min_spend: [0, 5000], meaningful_share_pct: [1, 50], min_distinct_concepts: [1, 10],
   concept_known_pct: [10, 100], sales_discrepancy_pct: [10, 200], sales_discrepancy_min_units: [1, 500], priority_high_min: [30, 100], priority_medium_min: [10, 99], unresolved_spend_note_pct: [0.1, 50], unresolved_spend_block_pct: [0.5, 100], momentum_high_requires_strong: [0, 1], creative_lead_time_days: [0, 120],
+  stock_require_viable_colourway: [0, 1], stock_block_broken_sizes: [0, 1], demand_tier_qualifies: [0, 1], launch_requires_strong_demand: [0, 1],
   launch_date_verified: [0, 1], launch_sales_confirms: [0, 1], launch_sales_min_units: [1, 1000], launch_settle_days: [0, 90], new_drop_days: [14, 180],
 };
 const ALLOC_LABEL = {
@@ -100,7 +109,7 @@ const ALLOC_LABEL = {
   creative_saturation_count: 'Well supplied once this many unique creatives are running', videos_when_saturated: 'Most videos for a well-supplied product (unless its creative is fatigued)',
   slow_mover_weeks_cover: 'Slow mover when stock would last longer than (weeks)', videos_slow_mover: 'Most videos for a slow mover',
   test_period_days: 'A new creative is "still testing" for (days after it was created)', recent_creative_days: 'A creative is "recently launched" for (days)', stale_creative_days: 'A non-performing creative older than this is "old" (days)',
-  opp_min_recent_units: 'Units sold in the last 30 days for a product to count as having demand', opp_min_stock_units: 'Sellable units needed before creative is recommended',
+  opp_min_recent_units: 'Units sold in the last 30 days for a product to count as having demand', opp_min_stock_units: 'Available sellable units needed before creative is recommended (incoming stock never counts)',
   revival_decline_pct: 'High Stocks: momentum lost when the last 28 days sell below this % of the first 28 days', revival_min_age_days: 'High Stocks: product must have been selling for at least (days)', revival_min_cover_weeks: 'High Stocks: weeks of stock needed to justify a refresh',
   demand_steady_units: 'Demand is steady from this many units in 30 days', demand_strong_units: 'Demand is strong from this many units in 30 days', trend_pct: 'Sales trend: change in the last 7 days against the pace before it (%)', trend_min_weekly_units: 'Sales trend: and by at least this many units a week',
   revival_min_recent_units: 'High Stocks: units in the last 30 days still needed to be a realistic revival', revival_min_pace_pct: 'High Stocks: lowest % of launch pace worth reviving',
@@ -112,6 +121,8 @@ const ALLOC_LABEL = {
   sales_discrepancy_pct: 'Sales sources disagree when they differ by (%)', sales_discrepancy_min_units: 'Sales sources disagree when they differ by at least (units)', priority_high_min: 'Score for High priority', priority_medium_min: 'Score for Medium priority',
   unresolved_spend_note_pct: 'Unidentified Meta ads: share of recent spend (%) from which a no-creative recommendation is held at Medium', unresolved_spend_block_pct: 'Unidentified Meta ads: share of recent spend (%) from which a no-creative recommendation becomes not enough data',
   momentum_high_requires_strong: 'Recent launches (under 30 days of selling): High priority needs strong demand (1 = yes, 0 = no)', creative_lead_time_days: 'Days for new creative to go from planned to live, which stock must outlast with the test period (0 = off)',
+  stock_require_viable_colourway: 'Stock: at least one shootable colourway is needed, not just a healthy family total (1 = yes, 0 = no)', stock_block_broken_sizes: 'Stock: a broken size run means not recommended (1 = yes, 0 = no)',
+  demand_tier_qualifies: 'Demand: a Demand Planning Platinum / Rocket product qualifies on its own (1 = yes, 0 = needs steady sales like any other)', launch_requires_strong_demand: 'Demand: a recent launch needs strong demand or Platinum / Rocket (1 = yes, 0 = steady is enough)',
   launch_date_verified: 'ApparelMagic mid_code is the OFFICIAL launch date (1 = confirmed by WNDRR, 0 = treat as unverified: a passed date is not proof)', launch_sales_confirms: 'Sales alone confirm a launch (1 = yes, 0 = a person confirms)', launch_sales_min_units: 'Units sold before sales count as launch evidence',
   launch_settle_days: 'Optional: check a launch date that passed less than this many days ago with no sales (days, 0 = off)', new_drop_days: 'A product is a New drop for this many days after launch',
 };
@@ -144,7 +155,7 @@ function resolve(stored = {}) {
 // the settings the UI shows, grouped the way staff think about them, with the default and the allowed range of each. `advanced` groups are collapsed in Settings.
 const GROUPS = [
   { key: 'opportunities', title: 'Opportunities (Core and High Stocks)', help: 'When a product counts as needing new creative this week. A new creative is given time to gather data before another is recommended; products that are out of stock, out of season or not selling are not recommended. These are starting points to tune, not performance targets.', keys: ['min_performing_creatives', 'test_period_days', 'recent_creative_days', 'stale_creative_days', 'opp_min_recent_units', 'opp_min_stock_units', 'strong_sales_percentile', 'weak_sales_percentile'] },
-  { key: 'demand', title: 'Demand, stock and season', help: 'How much current selling is needed before creative is worth making, how stock cover is judged (enough stock is needed; a lot of stock is not a reason), and when an out-of-season product can still qualify. Absolute units matter as well as percentage change.', keys: ['creative_lead_time_days', 'demand_steady_units', 'demand_strong_units', 'trend_pct', 'trend_min_weekly_units', 'stock_min_cover_weeks', 'stock_overstock_weeks', 'stock_excess_weeks', 'season_override_units', 'season_pattern_index', 'priority_high_min', 'priority_medium_min'] },
+  { key: 'demand', title: 'Demand, stock and season', help: 'How much current selling is needed before creative is worth making, how stock cover is judged (enough stock is needed; a lot of stock is not a reason), and when an out-of-season product can still qualify. Absolute units matter as well as percentage change.', keys: ['creative_lead_time_days', 'demand_steady_units', 'demand_strong_units', 'trend_pct', 'trend_min_weekly_units', 'stock_min_cover_weeks', 'stock_overstock_weeks', 'stock_excess_weeks', 'season_override_units', 'season_pattern_index', 'priority_high_min', 'priority_medium_min', 'stock_require_viable_colourway', 'stock_block_broken_sizes', 'demand_tier_qualifies', 'launch_requires_strong_demand'] },
   { key: 'momentum', title: 'Protect Momentum (recent launches)', help: 'Recent launches that are selling well but have too little effective creative. Age comes from the official ApparelMagic launch date; sales are normalised per day so a half-complete period is never compared with a full one.', keys: ['momentum_high_requires_strong', 'momentum_window_days', 'momentum_min_days_live'] },
   { key: 'concentration', title: 'Creative concentration, diversity and data quality', help: 'When one creative carries most of a product\'s delivery, when the creative is too similar, and when two sales sources disagree.', keys: ['unresolved_spend_note_pct', 'unresolved_spend_block_pct', 'concentration_share_pct', 'concentration_min_spend', 'meaningful_share_pct', 'min_distinct_concepts', 'concept_known_pct', 'sales_discrepancy_pct', 'sales_discrepancy_min_units'] },
   { key: 'revival', title: 'High Stocks revival', help: 'How a proven (Platinum or Rocket) product is judged to have lost momentum and be worth a creative refresh.', keys: ['revival_decline_pct', 'revival_min_age_days', 'revival_min_cover_weeks', 'revival_min_recent_units', 'revival_min_pace_pct'] },

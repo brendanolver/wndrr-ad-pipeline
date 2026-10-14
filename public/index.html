@@ -467,6 +467,13 @@
           </div>
         </div>
 
+        <!-- Section navigation: the same three sections as the sidebar sub-menu, kept in step with it (plSyncChrome). -->
+        <div class="pl-topnav" id="planning-topnav" role="tablist" aria-label="Planning sections">
+          <button type="button" class="pl-topnav-btn" data-pl-nav="core" role="tab">Core</button>
+          <button type="button" class="pl-topnav-btn" data-pl-nav="high-stocks" role="tab">High Stocks</button>
+          <button type="button" class="pl-topnav-btn" data-pl-nav="shoot-plan" role="tab">Shoot Plan</button>
+        </div>
+
         <!-- Compact weekly strip (Core / High Stocks): concepts planned against the target. The full production progress lives on the Shoot Plan page. -->
         <div id="planning-production-header" class="pl-week-strip" aria-live="polite"></div>
 
@@ -1476,6 +1483,14 @@
       </div>
 
       <div class="settings-panel active" id="settings-panel-planning">
+        <!-- Planning settings in four parts (Batch 29). Only genuine business thresholds are editable; fixed calculations and sources of truth are explained under "How recommendations work". The Meta benchmarks themselves stay in Settings > Meta Performance. -->
+        <div class="pl-set-tabs" role="tablist" aria-label="Planning settings">
+          <button type="button" class="pl-set-tab active" role="tab" data-plset="rules">Recommendation rules</button>
+          <button type="button" class="pl-set-tab" role="tab" data-plset="sources">Data sources</button>
+          <button type="button" class="pl-set-tab" role="tab" data-plset="how">How recommendations work</button>
+          <button type="button" class="pl-set-tab" role="tab" data-plset="quality">Launch and data quality</button>
+        </div>
+        <div class="pl-set-group" data-plset-group="rules">
         <div class="planning-section-header">
           <h2>Weekly concept target</h2>
           <span class="admin-note">How many distinct new creative concepts the team plans each week (default 15). Counts concepts, not products or video exports.</span>
@@ -1530,6 +1545,32 @@
         </div>
 
         <div class="planning-section-header">
+          <h2>Priority Overrides</h2>
+          <span class="admin-note">Business reasons that lift (or hold) a product's creative priority whatever its stock, season or coverage: an upcoming drop, a confirmed restock, a promotion, a strategic launch or a manual priority. They only change ranking and its explanation; they never create or change creative.</span>
+        </div>
+        <div class="po-add-row">
+          <input type="text" id="po-product-q" placeholder="Search product name or code" autocomplete="off">
+          <select id="po-kind"></select>
+          <input type="text" id="po-note" placeholder="Note (optional)" maxlength="300">
+          <input type="date" id="po-until" title="Optional end date">
+          <input type="number" id="po-videos" min="0" max="50" step="1" placeholder="Videos (optional)" title="Fix the number of videos recommended for this product (0 to 50)">
+          <button class="btn btn-primary btn-sm" id="po-add-btn">+ Add override</button>
+        </div>
+        <div id="po-matches" class="po-matches"></div>
+        <div id="po-list" class="po-list"></div>
+              </div>
+        <div class="pl-set-group" data-plset-group="sources" style="display:none;">
+          <div class="planning-section-header"><h2>Data sources</h2><span class="admin-note">Where each recommendation's evidence comes from, and when it was last read. Read-only.</span></div>
+          <div id="pl-set-sources" class="pl-set-card"></div>
+        </div>
+        <div class="pl-set-group" data-plset-group="how" style="display:none;">
+          <div class="planning-section-header"><h2>How recommendations work</h2><span class="admin-note">Plain-English explanations. The numbers quoted are the current settings.</span></div>
+          <div id="pl-set-how" class="pl-set-card"></div>
+        </div>
+        <div class="pl-set-group" data-plset-group="quality" style="display:none;">
+          <div class="planning-section-header"><h2>Launch checks and data notes</h2><span class="admin-note">Technical information moved here from the Planning pages. Read-only.</span></div>
+          <div id="pl-set-quality" class="pl-set-card"></div>
+        <div class="planning-section-header">
           <h2>Launch status</h2>
           <span class="admin-note">Products are treated as launched when they have sold, are in stock with no future launch date, or have been marked here. Use this when the system cannot tell (it flags those products). This is a note in this pipeline only: nothing changes in Shopify or ApparelMagic.</span>
         </div>
@@ -1553,20 +1594,7 @@
         </div>
         <div id="le-result" class="le-result"></div>
 
-        <div class="planning-section-header">
-          <h2>Priority Overrides</h2>
-          <span class="admin-note">Business reasons that lift (or hold) a product's creative priority whatever its stock, season or coverage: an upcoming drop, a confirmed restock, a promotion, a strategic launch or a manual priority. They only change ranking and its explanation; they never create or change creative.</span>
         </div>
-        <div class="po-add-row">
-          <input type="text" id="po-product-q" placeholder="Search product name or code" autocomplete="off">
-          <select id="po-kind"></select>
-          <input type="text" id="po-note" placeholder="Note (optional)" maxlength="300">
-          <input type="date" id="po-until" title="Optional end date">
-          <input type="number" id="po-videos" min="0" max="50" step="1" placeholder="Videos (optional)" title="Fix the number of videos recommended for this product (0 to 50)">
-          <button class="btn btn-primary btn-sm" id="po-add-btn">+ Add override</button>
-        </div>
-        <div id="po-matches" class="po-matches"></div>
-        <div id="po-list" class="po-list"></div>
       </div>
 
       <div class="settings-panel" id="settings-panel-shoot-prep">

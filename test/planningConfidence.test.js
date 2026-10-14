@@ -120,24 +120,27 @@ test('coverage loader: with nothing unresolved there is no extra query and the s
 // ── High priority and short selling windows ────────────────────────────────────────────────────────
 const launchP = (u30, days, o = {}) => base({ key: 'W26NEW', name: 'Drop Tee', is_core: false, launch_age_days: days - 1, stock: { known: true, units: 300, on_order: 0 }, sales: salesOf(u30, { units7: Math.round(u30 / days * 7), units14: Math.round(u30 / days * 14), since_launch: u30, days_live: days }), ...o });
 
-test('Reaper-style launch: 11 units in 13 days scales to about 25 per 30 days (steady): it is held at Medium, with the reason, not High', () => {
+test('Reaper-style launch: 11 units in 13 days scales to about 25 per 30 days (steady): Batch 29 needs STRONG demand for a launch, so it is not recommended; with that rule off the old behaviour (held at Medium, with the reason) applies', () => {
   const o = run(launchP(11, 13), 'momentum');
-  assert.equal(o.status, 'act'); assert.equal(Math.round(o.demand.eq30), 25); assert.equal(o.demand.level, 'steady'); assert.equal(o.demand.partial, true);
-  assert.equal(o.priority, 'Medium');
-  assert.match(o.caps.join(' '), /only 13 days of sales, scaled to about 25 units in 30 days. That is steady, not strong \(50\+\), and a short window is an estimate rather than an observation/);
-  assert.ok(o.score >= CFG.priority_high_min, `the score (${o.score}) alone would have been High: it is the demand rule that holds it`);
+  assert.equal(o.status, 'weak_demand'); assert.equal(Math.round(o.demand.eq30), 25); assert.equal(o.demand.level, 'steady'); assert.equal(o.demand.partial, true);
+  assert.match(o.reason, /not the strong demand \(50\+\) or Platinum \/ Rocket classification that justifies a new shoot/);
+  const off = cfgLib.resolve({ launch_requires_strong_demand: 0 }).config;
+  const o2 = run(launchP(11, 13), 'momentum', off);
+  assert.equal(o2.status, 'act'); assert.equal(o2.priority, 'Medium');
+  assert.match(o2.caps.join(' '), /only 13 days of sales, scaled to about 25 units in 30 days. That is steady, not strong \(50\+\), and a short window is an estimate rather than an observation/);
+  assert.ok(o2.score >= CFG.priority_high_min, `the score (${o2.score}) alone would have been High: it is the demand rule that holds it`);
 });
-
-test('strong recent launch -> High; moderate recent launch -> Medium; weak recent launch -> not recommended; very short history -> too early', () => {
+test('strong recent launch -> High; moderate (steady) recent launch -> not recommended (Medium only with the Batch 29 rule off); weak recent launch -> not recommended; very short history -> too early', () => {
   assert.equal(run(launchP(60, 13), 'momentum').priority, 'High');
   const moderate = run(launchP(14, 13), 'momentum'); // about 32 units in 30 days
-  assert.equal(moderate.demand.level, 'steady'); assert.equal(moderate.priority, 'Medium');
+  assert.equal(moderate.demand.level, 'steady'); assert.equal(moderate.status, 'weak_demand');
+  const off = cfgLib.resolve({ launch_requires_strong_demand: 0 }).config;
+  assert.equal(run(launchP(14, 13), 'momentum', off).priority, 'Medium');
   assert.equal(run(launchP(6, 13), 'momentum').status, 'weak_demand');
   const early = run(launchP(9, 3), 'momentum'); assert.equal(early.status, 'too_new');
 });
-
 test('the rule is a setting, uses the existing strong-demand line, and does not touch established products', () => {
-  const off = cfgLib.resolve({ momentum_high_requires_strong: 0 }).config;
+  const off = cfgLib.resolve({ momentum_high_requires_strong: 0, launch_requires_strong_demand: 0 }).config;
   assert.equal(run(launchP(11, 13), 'momentum', off).priority, 'High', 'switched off: the previous behaviour');
   const higher = cfgLib.resolve({ demand_strong_units: 20, demand_steady_units: 10 }).config;
   assert.equal(run(launchP(11, 13), 'momentum', higher).priority, 'High', 'it follows the strong-demand line: no new number');
@@ -174,8 +177,10 @@ test('with a production lead time configured, stock must outlast lead time + tes
   assert.equal(o.status, 'low_stock'); assert.match(o.reason, /only 4\.6 weeks of stock/); assert.match(o.reason, /5 needed for creative to pay off: 21 days to get new creative live plus a 14 day test period/);
   const c14 = cfgLib.resolve({ creative_lead_time_days: 14 }).config; // 28 days = 4 weeks: equal to the existing minimum
   assert.equal(run(maison(), 'core', c14).status, 'act');
+  // Batch 29: incoming stock never counts. A restock on order does not close the gap.
   const restock = run(maison({ stock: { known: true, units: 169, on_order: 200 } }), 'core', c21);
-  assert.equal(restock.status, 'act'); assert.equal(restock.stock.band, 'short_restock', 'a confirmed restock closes the gap');
+  assert.equal(restock.status, 'low_stock'); assert.equal(restock.stock_issue, 'short_runway'); assert.equal(restock.stock.band, 'short');
+  assert.match(restock.reason, /200 on order do not count: not available to sell yet/);
 });
 
 test('production lead time is MEASURED from production timestamps for the Planning page (information only, with the number of concepts behind it)', async () => {

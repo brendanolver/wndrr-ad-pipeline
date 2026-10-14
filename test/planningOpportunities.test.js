@@ -75,7 +75,7 @@ test('5b. a recent launch is normalised per day on sale: 13 days of selling is n
 });
 test('6. a WEAK recent launch is not recommended just for being new; one on sale only a few days is "too early", not weak', () => {
   const weak = run(launchP({ sales: salesOf(6, { units7: 3, units14: 6, since_launch: 6, days_live: 13 }) }), 'momentum');
-  assert.equal(weak.status, 'weak_demand'); assert.match(weak.reason, /not recommended just for being new/);
+  assert.equal(weak.status, 'weak_demand'); assert.match(weak.reason, /Being new, or having no creative yet, is not enough on its own/);
   const early = run(launchP({ launch_age_days: 2, sales: salesOf(9, { units7: 9, units14: 9, since_launch: 9, days_live: 3 }) }), 'momentum');
   assert.equal(early.status, 'too_new'); assert.match(early.reason, /not judged until 5 days of selling/);
 });
@@ -116,7 +116,9 @@ test('9. a product with MANY ads but poor performance is a gap: ad count is not 
 // ── 10-12. Testing, production, matching ───────────────────────────────────────────────────────────
 test('10. recently uploaded ads still TESTING get their test period; but they do not silence a strong seller that still lacks creative', () => {
   const quiet = run(base({ sales: salesOf(30), creatives: [cr('a', 'insufficient', { age: 6, spend: 20 }), cr('b', 'underperforming', { age: 120, severity: 'clear' })], coverage: { known: true, active_ads: 2, possible: 0, uncertain: false, min: 5 } }));
-  assert.equal(quiet.status, 'testing'); assert.match(quiet.reason, /still gathering data/); assert.match(quiet.reason, /2026-10-20/);
+  assert.equal(quiet.status, 'testing'); assert.match(quiet.reason, /new and in the first 14 days of delivery/); assert.match(quiet.reason, /20 October 2026/);
+  assert.match(quiet.reason, /was created on 6 October 2026 \(6 days ago\); its first delivery date is not available/, 'a creation date is never presented as a delivery date');
+  assert.doesNotMatch(quiet.reason, /still gathering data/);
   const strongTesting = run(base({ sales: strong, creatives: [cr('a', 'insufficient', { age: 6, spend: 20 }), cr('b', 'underperforming', { age: 120, severity: 'clear' })], coverage: { known: true, active_ads: 2, possible: 0, uncertain: false, min: 5 } }));
   assert.equal(strongTesting.status, 'act', 'strong demand with only 0 performing + 1 testing is still short of the 3 wanted');
   assert.ok(strongTesting.score_parts.some((p) => /already testing or in production/.test(p.label) && p.points < 0), 'but it is scored lower for what is already in play');
@@ -156,7 +158,9 @@ test('13. INCOMPLETE sales data: missing sales are insufficient data; a partial 
 });
 test('14. MISSING funnel benchmarks: unrated creatives are neither good nor bad, no benchmark is invented, and concentration is still found', () => {
   const o = run(base({ sales: strong, creatives: [cr('a', 'unrated', { age: 90 }), cr('b', 'unrated', { age: 80 })] }));
-  assert.equal(o.status, 'insufficient_data'); assert.match(o.reason, /no approved benchmark applies/);
+  assert.equal(o.status, 'insufficient_data'); assert.equal(o.needs_review, true); assert.equal(o.review_reason, 'missing_benchmark'); assert.match(o.reason, /performance data, but there is no approved funnel benchmark/);
+  const tom = run(base({ sales: strong, creatives: [{ ...cr('a', 'unrated', { age: 90 }), funnel: 'TOM' }, { ...cr('b', 'unrated', { age: 80 }), funnel: 'TOM' }] }));
+  assert.match(tom.reason, /2 creatives have performance data, but there is no approved TOM benchmark to assess them against/); assert.doesNotMatch(tom.reason, /gathering data/);
   const conc = run(base({ sales: strong, creatives: [cr('a', 'unrated', { spend: 1500, purchases: 30, concept: 'X' }), cr('b', 'unrated', { spend: 100, purchases: 2, concept: 'Y' })], coverage: { known: true, active_ads: 2, possible: 0, uncertain: false, min: 5 } }));
   assert.equal(conc.status, 'act'); assert.equal(conc.gap.type, 'concentration', 'concentration does not depend on a CPA benchmark');
 });
@@ -201,16 +205,17 @@ test('17. a product qualifying for several opportunity types shows ONE primary r
 });
 
 // ── 18-19. Stock ───────────────────────────────────────────────────────────────────────────────────
-test('18. INSUFFICIENT stock: too few units, or too little cover for creative to pay off, is not a recommendation (a confirmed restock changes that)', () => {
+test('18. INSUFFICIENT stock: too few units, or too little cover for creative to pay off, is not a recommendation (and incoming stock does not change that)', () => {
   assert.equal(run(base({ stock: { known: true, units: 12, on_order: 200 }, sales: strong })).status, 'low_stock');
   const short = run(base({ stock: { known: true, units: 60, on_order: 0 }, sales: salesOf(100, { units7: 25, units14: 50 }) }));
   assert.equal(short.status, 'low_stock'); assert.match(short.reason, /only 2.4 weeks of stock/);
+  // Batch 29: incoming stock never counts as available, so an open order does not rescue a short runway
   const restocked = run(base({ stock: { known: true, units: 60, on_order: 300 }, sales: salesOf(100, { units7: 25, units14: 50 }) }));
-  assert.equal(restocked.status, 'act'); assert.equal(restocked.stock.band, 'short_restock');
+  assert.equal(restocked.status, 'low_stock'); assert.equal(restocked.stock_issue, 'short_runway'); assert.match(restocked.reason, /300 on order do not count/);
 });
 test('19. VERY HIGH stock cover earns no extra priority, and with weak demand it is not a reason to recommend at all', () => {
   const low = run(base({ stock: { known: true, units: 600, on_order: 0 }, sales: salesOf(12) }));
-  assert.equal(low.status, 'weak_demand'); assert.match(low.reason, /Large unsold stock with weak demand is not a reason/);
+  assert.equal(low.status, 'weak_demand'); assert.match(low.reason, /not steady selling/); // weak sellers are excluded before stock cover is even considered
   const healthy = run(base({ stock: { known: true, units: 150, on_order: 0 }, sales: strong }));
   const excess = run(base({ stock: { known: true, units: 4000, on_order: 0 }, sales: strong }));
   assert.equal(healthy.stock.band, 'healthy'); assert.equal(excess.stock.band, 'excess');
@@ -281,8 +286,10 @@ test('demand bands are absolute: steady and strong need real units; weak demand 
   assert.equal(dm.demandOf({ available: true, units7: 3, units14: 6, units30: 15 }, CFG).level, 'weak');
   assert.equal(dm.demandOf({ available: true, units7: 6, units14: 11, units30: 30 }, CFG).level, 'steady');
   assert.equal(dm.demandOf({ available: true, units7: 14, units14: 27, units30: 60 }, CFG).level, 'strong');
-  const weakHigh = run(base({ sales: salesOf(15), stock: { known: true, units: 120, on_order: 0 } }));
-  assert.notEqual(weakHigh.priority, 'High'); assert.match(weakHigh.caps.join(' '), /demand is only modest/);
+  // weak demand alone no longer qualifies (Batch 29); a Platinum product that still sells qualifies on Demand Planning's signal, and is held at Medium
+  assert.equal(run(base({ sales: salesOf(15), stock: { known: true, units: 120, on_order: 0 } })).status, 'weak_demand');
+  const weakHigh = run(base({ tier: { tier: 'platinum', index: 180 }, sales: salesOf(15), stock: { known: true, units: 120, on_order: 0 } }));
+  assert.equal(weakHigh.status, 'act'); assert.notEqual(weakHigh.priority, 'High'); assert.match(weakHigh.caps.join(' '), /demand is only modest/);
 });
 test('a thin shortfall (some performing creative, fewer than wanted, nothing weak) only acts for an established product when demand is strong', () => {
   const thin = [cr('a', 'performing', { age: 100, concept: 'A' }), cr('b', 'performing', { age: 90, concept: 'B' })];

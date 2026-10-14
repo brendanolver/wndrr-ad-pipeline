@@ -184,6 +184,9 @@ async function loadProductAdPerformance(families, { db, rules, coded, config = D
   if (!codes.length) return out;
   const rows = (await db.query(
     `SELECT m.meta_ad_id, m.ad_name, m.meta_creative_id, m.created_time, c.funnel,
+            (SELECT to_char(MIN(x.insight_date), 'YYYY-MM-DD') FROM meta_ad_insights_daily x WHERE x.meta_ad_id = m.meta_ad_id AND (x.spend > 0 OR x.impressions > 0)) AS first_day,
+            (SELECT to_char(MAX(x.insight_date), 'YYYY-MM-DD') FROM meta_ad_insights_daily x WHERE x.meta_ad_id = m.meta_ad_id AND (x.spend > 0 OR x.impressions > 0)) AS last_day,
+            (SELECT COALESCE(SUM(x.spend), 0) FROM meta_ad_insights_daily x WHERE x.meta_ad_id = m.meta_ad_id) AS life_spend,
             cl.concept_label, cl.creator_name, cl.creative_style_id, cl.media_type,
             (SELECT array_agg(DISTINCT p.product_code) FROM meta_ad_products p WHERE p.meta_ad_id = m.meta_ad_id) AS product_codes,
             COUNT(d.meta_ad_id) FILTER (WHERE d.insight_date >= $2)::int AS delivery_rows,
@@ -206,6 +209,9 @@ async function loadProductAdPerformance(families, { db, rules, coded, config = D
       GROUP BY m.meta_ad_id, m.ad_name, m.meta_creative_id, m.created_time, c.funnel, cl.concept_label, cl.creator_name, cl.creative_style_id, cl.media_type`,
     [codes, from, end, recentFrom, priorFrom, priorTo, fatFrom, fatPriorFrom, fatPriorTo, joinFrom])).rows;
 
+  // The earliest day with any stored delivery for ANY ad. A first-delivery date on that day may only be where the stored history begins, so it is never trusted to mean "just started".
+  let horizon = null;
+  try { horizon = ((await db.query("SELECT to_char(MIN(insight_date), 'YYYY-MM-DD') AS d FROM meta_ad_insights_daily")).rows[0] || {}).d || null; } catch (e) { horizon = null; }
   const per = new Map(); // familyKey -> Map(groupKey -> pooled)
   rows.forEach((r) => {
     const fams = [...new Set((r.product_codes || []).map((c) => codeToFamily.get(c)).filter(Boolean))];
@@ -220,6 +226,9 @@ async function loadProductAdPerformance(families, { db, rules, coded, config = D
       x.delivery_rows += r.delivery_rows;
       [['total', 't'], ['recent', 'r'], ['prior', 'p'], ['fatigue_recent', 'f'], ['fatigue_prior', 'g']].forEach(([w, p]) => { x[w].spend += num(r[`${p}_spend`]); x[w].impressions += num(r[`${p}_imp`]); x[w].clicks += num(r[`${p}_clk`]); x[w].purchases += num(r[`${p}_pur`]); x[w].value += num(r[`${p}_val`]); });
       if (r.funnel) x.funnels.add(r.funnel);
+      if (r.first_day && (!x.first_day || r.first_day < x.first_day)) x.first_day = r.first_day;
+      if (r.last_day && (!x.last_day || r.last_day > x.last_day)) x.last_day = r.last_day;
+      x.life_spend = (x.life_spend || 0) + num(r.life_spend);
       x.concept = x.concept || r.concept_label || null; x.creator = x.creator || r.creator_name || null; x.style = x.style || r.creative_style_id || null; x.media = x.media || r.media_type || null;
       if (r.created_time && (!x.created || new Date(r.created_time) < new Date(x.created))) x.created = r.created_time;
     });
@@ -230,7 +239,10 @@ async function loadProductAdPerformance(families, { db, rules, coded, config = D
     g.forEach((x) => {
       const funnel = x.funnels.size === 1 ? [...x.funnels][0] : null; // a creative running in several funnels is not judged against one funnel's benchmark
       const verdict = judgeCreative({ total: x.total, recent: x.recent, prior: x.prior, fatigue_recent: x.fatigue_recent, fatigue_prior: x.fatigue_prior, delivery_rows: x.delivery_rows, funnel: JUDGED(funnel) }, { rules, coded, config: cfg });
-      entry.creatives.push({ ...verdict, key: x.key, ads: x.ads, ad_count: x.ads.length, concept: x.concept, creator: x.creator, style_id: x.style, media: x.media, created: x.created, shared: x.shared, mixed_funnels: x.funnels.size > 1 });
+      // dates: created = the ad's creation date in Meta; first_delivery / last_delivery = the first and last day with STORED delivery (spend or impressions); lifetime_spend = all stored days.
+      // A creation date is not a start date, and a first stored delivery on the first day we hold data may only be where our history begins (first_delivery_truncated).
+      entry.creatives.push({ ...verdict, key: x.key, ads: x.ads, ad_count: x.ads.length, concept: x.concept, creator: x.creator, style_id: x.style, media: x.media, created: x.created, shared: x.shared, mixed_funnels: x.funnels.size > 1,
+        first_delivery: x.first_day || null, last_delivery: x.last_day || null, lifetime_spend: Math.round(num(x.life_spend) * 100) / 100, first_delivery_truncated: !!(x.first_day && horizon && x.first_day <= horizon), funnel_label: [...x.funnels].join(' / ') || null });
     });
     entry.ads = [...g.values()].reduce((s, x) => s + x.ads.length, 0);
     entry.shared_ads = [...g.values()].reduce((s, x) => s + x.ads.filter((a) => a.shared).length, 0);
@@ -254,6 +266,9 @@ function mergeNameCopies(groups, nameCopies) {
     t.ads.push(...g.ads); t.delivery_rows += g.delivery_rows; g.funnels.forEach((f) => t.funnels.add(f)); t.shared = t.shared || g.shared;
     t.concept = t.concept || g.concept; t.creator = t.creator || g.creator; t.style = t.style || g.style; t.media = t.media || g.media;
     if (g.created && (!t.created || new Date(g.created) < new Date(t.created))) t.created = g.created;
+    if (g.first_day && (!t.first_day || g.first_day < t.first_day)) t.first_day = g.first_day;
+    if (g.last_day && (!t.last_day || g.last_day > t.last_day)) t.last_day = g.last_day;
+    t.life_spend = (t.life_spend || 0) + (g.life_spend || 0);
     groups.delete(k);
   });
 }

@@ -22,6 +22,7 @@ Planning is one sidebar item with an expandable sub-menu, the same pattern as Me
 
 * **Summary**: `7 PRODUCTS NEED CREATIVE · 4 Protect Momentum opportunities · 2 need review`, from the real lists (zero segments are omitted).
 * **Weekly strip** (header): `THIS WEEK'S SHOOT PLAN  2 concepts planned / 15 target — 13 concepts remaining`, then products selected and concepts carried over from earlier weeks, each from its own source: concepts are counted by the unchanged `shootPlanProgress` (a concept adapted for several products counts once, carried-over concepts are not new). Nothing is invented to reach the target.
+* **Batch 29 note:** the page now shows three categories (Needs creative, Covered / monitoring, Needs review); products that are not selling enough, lack stock or sizing, or are out of season are not shown (their assessment is kept). See `docs/planning-accuracy.md`. The paragraph below describes the Batch 28 grouping.
 * **Four categories** replace the eight status pills. Every engine status maps to exactly one (`public/planningExplain.js`, tested), and every product stays reachable:
 
   | Category | Engine statuses |

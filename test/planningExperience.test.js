@@ -16,14 +16,17 @@ const cov = (o = {}) => ({ known: true, active_ads: 0, possible: 0, unresolved: 
 const perf = (n, spends = []) => ['a', 'b', 'c'].slice(0, n).map((k, i) => cr(k, 'performing', { age: 60 - i * 15, spend: spends[i] || 600, purchases: 12, concept: `C${i}` }));
 const reason = (it) => E.reasonFor(it, CFG);
 
-test('every engine status belongs to exactly one of the four categories (nothing is hidden or unmapped)', () => {
-  assert.deepEqual(E.CATEGORY_ORDER, ['needs', 'covered', 'not_recommended', 'insufficient']);
-  for (const status of Object.keys(opp.STATUS_LABEL)) assert.ok(E.STATUS_CATEGORY[status], `status ${status} has a category`);
+test('every engine status maps to a visible category or is deliberately hidden (Batch 29: three visible categories)', () => {
+  assert.deepEqual(E.CATEGORY_ORDER, ['needs', 'covered', 'review']);
+  for (const status of Object.keys(opp.STATUS_LABEL)) assert.ok(E.STATUS_CATEGORY[status], `status ${status} is mapped`);
   assert.equal(E.categoryOf({ status: 'act' }), 'needs');
-  for (const s of ['covered', 'momentum_ok', 'testing', 'in_production']) assert.equal(E.categoryOf({ status: s }), 'covered', s);
-  for (const s of ['insufficient_data', 'unavailable', 'launch_unknown']) assert.equal(E.categoryOf({ status: s }), 'insufficient', s);
-  for (const s of ['out_of_season', 'weak_demand', 'low_stock', 'too_new', 'no_proven_demand', 'not_recent', 'not_launched']) assert.equal(E.categoryOf({ status: s }), 'not_recommended', s);
-  assert.deepEqual(Object.keys(E.CATEGORY).map((k) => E.CATEGORY[k].label), ['Needs creative', 'Covered / monitoring', 'Not recommended', 'Insufficient data']);
+  for (const s of ['covered', 'testing', 'in_production']) assert.equal(E.categoryOf({ status: s }), 'covered', s);
+  // Needs review is only an unresolved EVIDENCE problem on a product that already passed stock, demand and season
+  assert.equal(E.categoryOf({ status: 'insufficient_data', needs_review: true }), 'review');
+  assert.equal(E.categoryOf({ status: 'insufficient_data', needs_review: false }), 'hidden', 'missing sales or baseline data is a data-quality matter, not a review item');
+  for (const s of ['out_of_season', 'weak_demand', 'low_stock', 'too_new', 'no_proven_demand', 'not_recent', 'not_launched', 'momentum_ok', 'launch_unknown', 'unavailable']) assert.equal(E.categoryOf({ status: s }), 'hidden', s);
+  assert.deepEqual(Object.keys(E.CATEGORY).map((k) => E.CATEGORY[k].label), ['Needs creative', 'Covered / monitoring', 'Needs review']);
+  assert.ok(!Object.keys(E.CATEGORY).includes('not_recommended'));
 });
 
 test('confirmed creative gap: plain English from the engine\'s own finding, with the real units', () => {
@@ -43,7 +46,8 @@ test('underperforming creative: counts the creatives over the approved limit; a 
   const unrated = run(base({ sales: strong, coverage: cov({ active_ads: 1 }), creatives: [cr('a', 'unrated', { age: 100, spend: 500, purchases: 6, concept: 'A' })] }));
   for (const it of [testing, unrated]) assert.doesNotMatch(reason(it), /underperform|over the approved/i, it.status);
   assert.equal(E.categoryOf(testing), 'covered');
-  assert.match(reason(testing), /still gathering data/);
+  assert.match(reason(testing), /A creative is new: it was created on 8 October 2026 \(4 days ago\); its first delivery date is not available\. Too early to judge\./);
+  assert.doesNotMatch(reason(testing), /still gathering data/);
 });
 
 test('creative concentration and fatigue are described only when the engine found them', () => {
@@ -58,7 +62,7 @@ test('creative concentration and fatigue are described only when the engine foun
 
 test('uncertain matching is never described as "no active creative": it says coverage could not be confirmed', () => {
   const it = run(base({ sales: strong, coverage: cov({ active_ads: 0, possible: 3, uncertain: true }) }));
-  assert.equal(it.status, 'insufficient_data'); assert.equal(E.categoryOf(it), 'insufficient');
+  assert.equal(it.status, 'insufficient_data'); assert.equal(E.categoryOf(it), 'review'); assert.equal(it.review_reason, 'uncertain_matching');
   const r = reason(it);
   assert.match(r, /^Creative coverage could not be confirmed: 3 active ads awaiting review in Ad Matching/);
   assert.doesNotMatch(r, /No active creative|haven't identified any active ads/i);
@@ -71,7 +75,8 @@ test('creatives with no approved benchmark are never called good or bad: coverag
   const un = ['a', 'b', 'c'].map((k, i) => cr(k, 'unrated', { age: 60 - i * 10, spend: 600, purchases: 8, concept: `C${i}` }));
   const allUnrated = run(base({ sales: strong, coverage: cov({ active_ads: 3 }), creatives: un }));
   assert.equal(allUnrated.status, 'insufficient_data');
-  assert.match(reason(allUnrated), /^We can't confidently assess this product's creative coverage yet: most of its creatives run in funnels with no approved benchmark/);
+  assert.equal(allUnrated.review_reason, 'missing_benchmark');
+  assert.match(reason(allUnrated), /^These 3 ads have performance data, but there is no approved funnel benchmark to assess them against\.$/);
   assert.doesNotMatch(reason(allUnrated), /underperform|over the approved/i);
   const thin = run(base({ sales: strong, coverage: cov({ active_ads: 3 }), creatives: [...un.slice(0, 2), cr('p', 'performing', { age: 30, spend: 600, purchases: 12, concept: 'P' })] }));
   assert.match(reason(thin), /only 1 performing creative is in place \(3 wanted\)/);
@@ -81,7 +86,7 @@ test('not-recommended reasons are real: out of season, weak demand, low stock', 
   const oos = run(base({ name: 'Heavy Hood Sweat', category: 'SWEATS', sales: strong, coverage: cov(), season: seasonOf('Heavy Hood Sweat', 'SWEATS') }));
   if (oos.status === 'out_of_season') assert.match(reason(oos), /^Out of season in Australia right now/);
   const weakDemand = run(base({ sales: salesOf(3, { units7: 1, units14: 2 }), coverage: cov() }));
-  assert.equal(weakDemand.status, 'weak_demand'); assert.equal(E.categoryOf(weakDemand), 'not_recommended');
+  assert.equal(weakDemand.status, 'weak_demand'); assert.equal(E.categoryOf(weakDemand), 'hidden');
   assert.match(reason(weakDemand), /^Only 3 units sold in 30 days/);
 });
 
@@ -104,7 +109,7 @@ test('protect momentum is an opportunity type inside Core / High Stocks, never a
 });
 
 test('the top summary uses real counts and the weekly strip keeps products, concepts and carry-over apart', () => {
-  const items = [{ status: 'act' }, { status: 'act' }, { status: 'insufficient_data' }, { status: 'covered' }, { status: 'out_of_season' }];
+  const items = [{ status: 'act' }, { status: 'act' }, { status: 'insufficient_data', needs_review: true }, { status: 'insufficient_data' }, { status: 'covered' }, { status: 'out_of_season' }];
   assert.deepEqual(E.summaryCounts('core', { items }, { items: [] }), { needs: 2, protect: 0, review: 1 });
   const w = E.weeklySummary({ target: 15, planned: 2, remaining: 13, carryover: { count: 4 } }, 7);
   assert.deepEqual(w, { loaded: true, planned: 2, target: 15, remaining: 13, carried: 4, products: 7 });
@@ -119,7 +124,8 @@ test('direction and production text come from evidence, and key facts say "Not a
   assert.equal(pipe.active, true); assert.match(pipe.text, /2 concepts already in the Shoot Plan pipeline \(1 filmed, 1 edited\)/);
   assert.equal(E.productionActivity({ pipeline: { planned: 0 } }).active, false);
   const blank = E.keyFacts({ facts: {} });
-  assert.ok(blank.filter(([k]) => /stock|Active|Effective|Testing|Unrated|7 days|30 days|coverage/i.test(k)).every(([, v]) => v === 'Not available'));
+  assert.ok(blank.filter(([k]) => /stock|Active|Effective|New creative|Unrated|7 days|30 days|coverage|launched/i.test(k)).every(([, v]) => v === 'Not available'));
+  assert.equal(blank.find(([k]) => k === 'Latest creative started')[1], 'None found');
   assert.equal(E.stockWarning({ facts: { stock_band: 'short', cover_weeks: 3.1 } }), '3.1w cover');
   assert.equal(E.stockWarning({ facts: { stock_band: 'healthy', cover_weeks: 12 } }), null);
 });

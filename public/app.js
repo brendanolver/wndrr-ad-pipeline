@@ -7325,6 +7325,12 @@ function shootThisWeekForCoverage(productCode) {
   });
 }
 
+// Which colourways start ticked in the Shoot Plan modal. A colourway chosen from the Planning page (Plan this colourway) is the only one ticked; otherwise the colourways that can be shot now
+// (a recommendation says which); every other caller passes no such data and keeps the old behaviour (all ticked). Nothing is removed from the list: anything can still be ticked by hand.
+function shootPlanColourPreselected(preset, c) {
+  if (preset.preselectStyleCodes && preset.preselectStyleCodes.length) return preset.preselectStyleCodes.includes(c.style_code);
+  return c.viable !== false;
+}
 function openShootPlanModal(preset) {
   shootPlanModalContext = preset;
   document.getElementById('shoot-plan-product-name').textContent = preset.productName;
@@ -7346,10 +7352,11 @@ function openShootPlanModal(preset) {
     <div class="shoot-plan-colour-row">
       ${c.image_url ? `<img class="shoot-plan-colour-thumb" src="${c.image_url}" alt="">` : '<span class="shoot-plan-colour-thumb shoot-plan-noimg"><svg class=ic aria-hidden=true focusable=false><use href=#i-image></use></svg></span>'}
       <label class="checkbox-label shoot-plan-colour-check">
-        <input type="checkbox" class="shoot-plan-colour-required" value="${c.style_id}" checked>
+        <input type="checkbox" class="shoot-plan-colour-required" value="${c.style_id}" ${shootPlanColourPreselected(preset, c) ? 'checked' : ''}>
         <span class="shoot-plan-colour-names">
           <span class="shoot-plan-colour-name">${escapeHtml(c.colour_label || c.style_code)}</span>
           ${c.colour_label ? `<span class="shoot-plan-colour-code">${escapeHtml(c.style_code)}</span>` : ''}
+          ${c.soh !== undefined && c.soh !== null ? `<span class="shoot-plan-colour-code">${escapeHtml(String(c.soh))} available${c.restriction ? ` · ${escapeHtml(c.restriction)}` : ''}</span>` : ''}
         </span>
       </label>
       ${sizeControl}
@@ -8971,6 +8978,7 @@ function shootPlanProductRowHtml(item) {
           <span class="shoot-plan-pathway-chip">${escapeHtml(shootPlanRequirementLabel(item))}</span>
         </div>
         <div class="shoot-plan-style-chips">${chips}</div>
+        ${!readOnly && typeof plShootPlanWarning === 'function' ? plShootPlanWarning(item) : ''}
         ${typeof wpShootPlanVideosHtml === 'function' ? wpShootPlanVideosHtml(item, readOnly) : ''}
         ${item.quick_note ? `<div class="shoot-plan-idea"><svg class=ic aria-hidden=true focusable=false><use href=#i-bulb></use></svg> ${escapeHtml(item.quick_note)}</div>` : ''}
       </div>

@@ -10,7 +10,7 @@
 // STOCK establishes whether there is enough inventory to justify creative. It never makes a product MORE urgent for being large:
 //   cover = sellable units / the current weekly pace (the higher of the 30-day and 14-day pace, so a product that is speeding up is not flattered)
 //   short   cover < the weeks needed (stock_min_cover_weeks, or when creative_lead_time_days is set the time to get new creative live plus its test period, whichever is longer):
-//           the stock would not outlast production and a test, unless a restock on order closes the gap
+//           the stock would not outlast production and a test. Incoming stock (on order) never closes the gap (Batch 29)
 //   healthy stock_min_cover_weeks .. stock_overstock_weeks          full points
 //   slow    stock_overstock_weeks .. stock_excess_weeks             half points: it is a slow mover, stock is not a reason to shoot
 //   excess  beyond stock_excess_weeks                               no points; with only weak demand the product is not recommended at all
@@ -78,10 +78,10 @@ function stockOf(stock, pace, cfg, sizes = null) {
   if (units < cfg.opp_min_stock_units) { band = 'low'; points = 0; notes.push(`${units} sellable units is below the ${cfg.opp_min_stock_units} needed before creative is worth making.`); }
   else if (cover === null) { band = 'no_sales'; points = 4; notes.push('Nothing is selling, so there is no pace to measure cover against.'); }
   else if (cover < minCoverWeeks(cfg)) {
+    // Batch 29: only stock that is physically available counts. A confirmed restock, a reorder or an open purchase order does NOT close the gap: new creative is for what can be sold now.
     const need = minCoverWeeks(cfg);
-    const restocked = onOrder > 0 && coverWithOrder >= need;
-    band = restocked ? 'short_restock' : 'short'; points = restocked ? 6 : Math.round(10 * (cover / Math.max(need, 0.1)));
-    notes.push(`${cover} weeks of stock at the current pace${restocked ? `, ${onOrder} more on order (${coverWithOrder} weeks with it)` : ''}: ${restocked ? 'a restock is confirmed' : `less than the ${need} weeks needed for creative to pay off${(Number(cfg.creative_lead_time_days) || 0) > 0 && need > cfg.stock_min_cover_weeks ? ` (about ${cfg.creative_lead_time_days} days to get new creative live plus a ${cfg.test_period_days} day test period: the stock would run out before it could contribute)` : ''}`}.`);
+    band = 'short'; points = Math.round(10 * (cover / Math.max(need, 0.1)));
+    notes.push(`${cover} weeks of available stock at the current pace: less than the ${need} weeks needed for creative to pay off${(Number(cfg.creative_lead_time_days) || 0) > 0 && need > cfg.stock_min_cover_weeks ? ` (about ${cfg.creative_lead_time_days} days to get new creative live plus a ${cfg.test_period_days} day test period: the stock would run out before it could contribute)` : ''}.${onOrder > 0 ? ` ${onOrder} units on order are not counted: they are not available to sell yet.` : ''}`);
   } else if (cover <= cfg.stock_overstock_weeks) { band = 'healthy'; points = 10; notes.push(`${cover} weeks of stock at the current pace: enough to justify creative.`); }
   else if (cover <= cfg.stock_excess_weeks) { band = 'slow'; points = 5; notes.push(`${cover} weeks of stock: more than ${cfg.stock_overstock_weeks}, so it is a slow mover. Plenty of stock is not a reason for more creative.`); }
   else { band = 'excess'; points = 0; notes.push(`${cover} weeks of stock: more than ${cfg.stock_excess_weeks}. Stock this large earns no points: the constraint is demand, not creative.`); }
