@@ -363,6 +363,7 @@ function switchTab(name) {
   document.querySelectorAll('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === `tab-${name}`));
   autoExpandSidebarGroupForTab(name);
   if (typeof mpSyncChrome === 'function' && typeof mmState !== 'undefined') mpSyncChrome();
+  if (typeof plSyncChrome === 'function') plSyncChrome();
   // Shooting is the direct downstream consumer of an action just taken on
   // Tuesday Review (Approve for Shooting) -- unlike every other tab, it
   // needs a fresh fetch on every visit so a concept approved a moment ago
@@ -413,6 +414,13 @@ function switchTab(name) {
 document.querySelectorAll('.tab-btn[data-tab]').forEach((btn) => {
   btn.addEventListener('click', () => switchTab(btn.dataset.tab));
 });
+// Clicking Planning in the sidebar opens its first section (Core), like Meta Performance opening on Performance.
+document.getElementById('sidebar-planning').addEventListener('click', () => setPlanningStep('core'));
+// Planning sub-menu (Core / High Stocks / Shoot Plan): opens Planning (if it is not open yet) on the chosen section.
+document.querySelectorAll('[data-pl-nav]').forEach((b) => b.addEventListener('click', () => {
+  if (!document.getElementById('tab-planning').classList.contains('active')) switchTab('planning');
+  setPlanningStep(b.dataset.plNav);
+}));
 
 // Settings sub-nav: the same switch-a-panel pattern as the top-level tabs
 // above, just nested one level -- Settings had grown to 8 sections on one
@@ -4865,25 +4873,26 @@ function renderPlanning() {
 // and 4 here -- they're now their own sidebar tabs (#tab-drops /
 // #tab-promotions), so this workflow is Core/High Stocks/Shoot Plan only.
 const PLANNING_STEPS = ['core', 'high-stocks', 'shoot-plan'];
-function setPlanningStep(key) {
+// The three sections are chosen from the sidebar (Planning sub-menu, same pattern as Meta Performance); the URL hash mirrors the section (#planning/core,
+// #planning/high-stocks, #planning/shoot-plan) so Back/Forward and links work. A full page refresh still lands on the Dashboard (app-wide rule, see showApp).
+function setPlanningStep(key, { fromHash = false } = {}) {
+  if (!PLANNING_STEPS.includes(key)) key = 'core';
   state.planningStep = key;
-  document.querySelectorAll('.planning-step-btn').forEach((btn) => btn.classList.toggle('active', btn.dataset.step === key));
   document.querySelectorAll('.planning-step-panel').forEach((panel) => panel.classList.toggle('active', panel.dataset.step === key));
-  // The persistent "This Week's Shoot Plan" summary is redundant on the
-  // Shoot Plan step itself -- that step already is this summary, in full.
-  document.getElementById('planning-shoot-plan-summary-block').style.display = key === 'shoot-plan' ? 'none' : '';
+  // The weekly strip is the Core / High Stocks summary; the Shoot Plan section carries the full production progress itself.
+  const strip = document.getElementById('planning-production-header');
+  if (strip) strip.style.display = key === 'shoot-plan' ? 'none' : '';
+  if (!fromHash && document.getElementById('tab-planning').classList.contains('active') && window.location.hash !== `#planning/${key}`) window.location.hash = `#planning/${key}`;
+  if (typeof plSyncChrome === 'function') plSyncChrome();
 }
-document.querySelectorAll('.planning-step-btn').forEach((btn) => {
-  btn.addEventListener('click', () => setPlanningStep(btn.dataset.step));
-});
 
 // Same "samples required" definition as the Shoot Plan step's own stat --
 // only "Bring from Warehouse" colourway+size rows count, so this header
 // line never disagrees with the number the step itself shows.
 function renderPlanningShootSummary() {
   const samplesRequired = shootPlanWarehouseRows().length;
-  document.getElementById('planning-shoot-summary').textContent =
-    `${state.shootPlan.length} product${state.shootPlan.length === 1 ? '' : 's'} selected · ${samplesRequired} sample${samplesRequired === 1 ? '' : 's'} required`;
+  const el = document.getElementById('planning-shoot-summary'); // (the old header line: the figures now live on the Shoot Plan section)
+  if (el) el.textContent = `${state.shootPlan.length} product${state.shootPlan.length === 1 ? '' : 's'} selected · ${samplesRequired} sample${samplesRequired === 1 ? '' : 's'} required`;
 }
 
 // ── Upcoming Drops sub-navigation (list / drop / product) ────────────
@@ -4992,6 +5001,12 @@ function handleHashRoute() {
   }
   if (hash.startsWith('#planning/promotion')) {
     window.location.hash = hash.replace('#planning/promotion', '#promotions');
+    return;
+  }
+  if (hash === '#planning' || hash.startsWith('#planning/')) {
+    const section = hash.replace(/^#planning\/?/, '').split('/')[0] || 'core';
+    if (!document.getElementById('tab-planning').classList.contains('active')) switchTab('planning');
+    setPlanningStep(PLANNING_STEPS.includes(section) ? section : 'core', { fromHash: true });
     return;
   }
   if (hash.startsWith('#drops')) {
@@ -5250,6 +5265,7 @@ function renderPlanningStepNav() {
     btn.classList.toggle('planning-review-btn-done', reviewed);
     btn.disabled = readOnlyPast;
   });
+  if (typeof plSyncChrome === 'function') plSyncChrome(); // sidebar ticks + past-week state
 }
 
 // What's launching, not just "are we on track" -- the landing page's job is
@@ -6908,7 +6924,8 @@ function coreShootCategoryRowHtml(cat, selectedCodes) {
 function renderCoreStepFooter() {
   const coreCodes = new Set(state.coreProducts.map((p) => p.product_code));
   const count = state.shootPlan.filter((i) => coreCodes.has(i.product_code)).length;
-  document.getElementById('core-step-footer-count').textContent = `${count} Core product${count === 1 ? '' : 's'} selected`;
+  const fc = document.getElementById('core-step-footer-count');
+  if (fc) fc.textContent = `${count} Core product${count === 1 ? '' : 's'} selected`;
 }
 
 function renderCoreShootPlanning() {
@@ -7193,7 +7210,8 @@ function highStockProductRowHtml(p, selectedCodes) {
 function renderHighStockStepFooter() {
   const hsCodes = new Set(state.highStockProducts.map((p) => p.product_code));
   const count = state.shootPlan.filter((i) => hsCodes.has(i.product_code)).length;
-  document.getElementById('high-stock-step-footer-count').textContent = `${count} High Stock product${count === 1 ? '' : 's'} selected`;
+  const fh = document.getElementById('high-stock-step-footer-count');
+  if (fh) fh.textContent = `${count} High Stock product${count === 1 ? '' : 's'} selected`;
 }
 
 function renderHighStockProducts() {
@@ -8985,11 +9003,14 @@ function shootPlanGroupedHtml(emptyMessage) {
 // been selected so far without switching tabs. "Go to Shoot Plan" still
 // jumps to the full step for the stat bar, Confirm & Send, and CSV export.
 function renderPlanningShootPlanSummary() {
+  // The persistent "This Week's Shoot Plan" list under Core / High Stocks was removed (Batch 28): the weekly strip and the Shoot Plan section replace it.
+  const list = document.getElementById('planning-shoot-plan-summary-list');
+  if (!list) return;
   const count = state.shootPlan.length;
   document.getElementById('planning-shoot-plan-summary-count').textContent =
     count ? `${count} product${count === 1 ? '' : 's'} selected this week` : 'Nothing selected yet this week';
   document.getElementById('planning-shoot-plan-summary-link').style.display = count ? '' : 'none';
-  document.getElementById('planning-shoot-plan-summary-list').innerHTML =
+  list.innerHTML =
     shootPlanGroupedHtml('Nothing selected yet this week — use + Shoot This Week on a Core, High Stock, Upcoming Drop, or Promotion product to add one.');
 }
 
@@ -9024,6 +9045,7 @@ function renderShootPlanStep() {
 
   renderWeeklyShootPlanConfirmation();
   if (typeof renderProductionHeader === 'function') renderProductionHeader(); // planned / sent totals come from this same list
+  if (typeof plRenderShootPlanProgress === 'function') plRenderShootPlanProgress(); // the section's own production progress (needs the current list)
 }
 
 // Formats a confirmation timestamp with both date and time, since "sent

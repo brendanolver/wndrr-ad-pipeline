@@ -3,10 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>WNDRR — Ad Creative Pipeline</title>
+<title>WNDRR Creative</title>
+<!-- Tab icon: the official WNDRR wordmark (white on black). /favicon.ico serves the same artwork so a browser that asks for it by default never falls back to its own generic icon. -->
+<link rel="icon" href="favicon.ico" sizes="any">
 <link rel="icon" type="image/png" sizes="32x32" href="brand/favicon-32.png">
 <link rel="icon" type="image/png" sizes="64x64" href="brand/favicon-64.png">
 <link rel="apple-touch-icon" href="brand/apple-touch-icon.png">
+<meta name="theme-color" content="#000000">
 <!-- Preconnect so the Inter webfont request starts immediately alongside
      the page itself, rather than only after styles.css's @import is parsed.
      This is the fix for the "first click on a Filming/Assigned To dropdown
@@ -67,7 +70,13 @@
         <button type="button" class="sidebar-sub-btn" data-mp-nav="best">Best Ads</button>
         <button type="button" class="sidebar-sub-btn" data-mp-nav="matching">Ad Matching</button>
       </div>
-      <button class="tab-btn" data-tab="planning"><span class="sidebar-nav-icon"><svg class=ic aria-hidden=true focusable=false><use href=#i-calendar></use></svg></span>Planning</button>
+      <button class="tab-btn" data-tab="planning" id="sidebar-planning"><span class="sidebar-nav-icon"><svg class=ic aria-hidden=true focusable=false><use href=#i-calendar></use></svg></span>Planning<span class="sidebar-group-chevron sidebar-mp-chevron" aria-hidden="true">▾</span></button>
+      <!-- Planning sections (shown while Planning is open): the same expandable sub-menu pattern as Meta Performance. Protect Momentum is an opportunity type inside Core / High Stocks, not a page. -->
+      <div class="sidebar-subnav" id="sidebar-planning-subnav" style="display:none;" role="group" aria-label="Planning sections">
+        <button type="button" class="sidebar-sub-pl" data-pl-nav="core">Core</button>
+        <button type="button" class="sidebar-sub-pl" data-pl-nav="high-stocks">High Stocks</button>
+        <button type="button" class="sidebar-sub-pl" data-pl-nav="shoot-plan">Shoot Plan</button>
+      </div>
 
       <!-- Production-readiness follow-up (item 1): Create & Review and
            Production start EXPANDED on a fresh session (the `expanded` class
@@ -445,7 +454,9 @@
     <section id="tab-planning" class="tab-panel">
 
       <div id="planning-list-view">
-        <div class="planning-header">
+        <!-- Planning: one page, three sections (Core / High Stocks / Shoot Plan). The sections are chosen from the sidebar (Planning sub-menu), exactly like Meta Performance's pages -- there are no in-page step buttons. -->
+        <div class="mp-top pl-top">
+          <div class="mp-title-block"><h2 id="planning-page-title">Planning</h2><div class="mp-subtitle" id="planning-page-subtitle">Identify the best opportunities for new Meta creative.</div></div>
           <div class="planning-week-nav">
             <button type="button" class="week-nav-btn" id="planning-week-prev" onclick="changePlanningWeek(-1)" aria-label="Previous week">&lsaquo;</button>
             <button type="button" class="planning-week-label-btn" id="planning-week-label" onclick="togglePlanningWeekPicker()"></button>
@@ -456,21 +467,10 @@
           </div>
         </div>
 
-        <!-- Monday's guided workflow: one step visible at a time, freely
-             clickable forward/backward. Upcoming Drops and Promotions used
-             to be steps 3 and 4 here -- they're now their own sidebar
-             sections (see #tab-drops / #tab-promotions below), reusing this
-             exact same list/detail markup unchanged, just relocated. -->
-        <div id="planning-production-header" class="prod-header" aria-live="polite"></div>
-        <div class="planning-steps">
-          <button type="button" class="planning-step-btn active" data-step="core">1 Core</button>
-          <button type="button" class="planning-step-btn" data-step="high-stocks">2 High Stocks</button>
-          <button type="button" class="planning-step-btn" data-step="shoot-plan">3 Shoot Plan</button>
-        </div>
-        <div class="planning-shoot-summary" id="planning-shoot-summary">0 products selected · 0 samples required</div>
+        <!-- Compact weekly strip (Core / High Stocks): concepts planned against the target. The full production progress lives on the Shoot Plan page. -->
+        <div id="planning-production-header" class="pl-week-strip" aria-live="polite"></div>
 
         <div class="planning-step-panel active" data-step="core" id="planning-step-core">
-          <!-- Core creative plan: what to make next for CORE products, and why (see loadCorePlan). -->
           <div id="core-plan" class="core-plan"></div>
           <details class="co-how core-browse"><summary>Browse the full Core catalogue (not recommendations)</summary>
           <div class="core-shoot-planning-title">Core Shoot Planning</div>
@@ -498,33 +498,16 @@
           </div>
 
           </details>
-
-          <div class="planning-step-footer">
-            <span id="core-step-footer-count">0 Core products selected</span>
-            <div class="planning-step-footer-actions">
-              <button type="button" class="planning-review-btn" id="core-review-btn" onclick="toggleWeeklyProgress('core_reviewed')">&#10003; Mark as Reviewed</button>
-              <button type="button" class="btn btn-primary planning-step-continue-btn" onclick="setPlanningStep('high-stocks')">Continue to High Stocks &rarr;</button>
-            </div>
-          </div>
         </div>
 
         <div class="planning-step-panel" data-step="high-stocks" id="planning-step-high-stocks">
-          <div class="core-shoot-planning-title">High Stock Recommendations</div>
           <div id="high-stock-list" class="core-shoot-planning-list"></div>
-
-          <div class="planning-step-footer">
-            <span id="high-stock-step-footer-count">0 High Stock products selected</span>
-            <div class="planning-step-footer-actions">
-              <button type="button" class="planning-review-btn" id="high-stocks-review-btn" onclick="toggleWeeklyProgress('high_stock_reviewed')">&#10003; Mark as Reviewed</button>
-              <button type="button" class="btn btn-primary planning-step-continue-btn" onclick="setPlanningStep('shoot-plan')">Continue to Shoot Plan &rarr;</button>
-            </div>
-          </div>
         </div>
 
         <div class="planning-step-panel" data-step="shoot-plan" id="planning-step-shoot-plan">
-          <div class="shoot-plan-step-header">
-            <h2>This week's Shoot Plan</h2>
-            <span class="admin-note">Monday: choose from Core and High Stocks and plan the week's concepts. Tuesday to Thursday: film, edit and approve. Friday: upload.</span>
+          <div class="pl-section-head">
+            <h3 class="pl-section-title">Shoot Plan</h3>
+            <span class="pl-section-sub">What we are shooting this week, the concepts behind it, and what is already in production.</span>
           </div>
 
           <div id="shoot-plan-progress"></div>
@@ -551,22 +534,6 @@
               <button type="button" class="btn btn-ghost btn-sm" id="shoot-plan-edit-plan-btn" onclick="editShootPlan()">Edit Plan</button>
             </div>
           </div>
-        </div>
-
-        <!-- Persistent across Core/High Stock only -- a product added at
-             either stage shows up here immediately, so you don't have to
-             switch tabs to see what's selected. Hidden on the Shoot Plan
-             step itself (see setPlanningStep), since that step already IS
-             this, in full (stat bar, Confirm & Send CTA, CSV export). -->
-        <div id="planning-shoot-plan-summary-block">
-          <div class="planning-section-header">
-            <h2>This Week's Shoot Plan</h2>
-            <div class="planning-shoot-plan-summary-right">
-              <span class="admin-note" id="planning-shoot-plan-summary-count"></span>
-              <button type="button" class="link-btn" id="planning-shoot-plan-summary-link" onclick="setPlanningStep('shoot-plan')" style="display:none;">Go to Shoot Plan &rarr;</button>
-            </div>
-          </div>
-          <div id="planning-shoot-plan-summary-list"></div>
         </div>
       </div>
 
@@ -4068,6 +4035,7 @@
 </div>
 
 <script src="app.js"></script>
+<script src="planningExplain.js"></script>
 <script src="planning.js"></script>
 </body>
 </html>

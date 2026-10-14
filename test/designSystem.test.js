@@ -58,7 +58,11 @@ test('Meta Performance: coloured RECTANGLES replace the dots in the table, with 
 test('Planning wiring (Batch 14): Core -> High Stocks -> Shoot Plan, no Weekly Plan, script loaded after app.js, modal + progress hooks', () => {
   assert.ok(html.indexOf('<script src="app.js"></script>') < html.indexOf('<script src="planning.js"></script>'));
   assert.doesNotMatch(html, /data-step="weekly"/); assert.doesNotMatch(html, /id="weekly-plan"/); assert.doesNotMatch(html, /weekly-plan\.js/);
-  assert.match(html, /<button type="button" class="planning-step-btn active" data-step="core">1 Core<\/button>/);
+  // Batch 28: the sections are chosen from the sidebar (Planning sub-menu), not from numbered in-page buttons
+  assert.doesNotMatch(html, /planning-step-btn/); assert.doesNotMatch(html, /data-step="core">1 Core/);
+  for (const sec of ['core', 'high-stocks', 'shoot-plan']) assert.ok(html.includes(`data-pl-nav="${sec}"`), `sidebar sub-menu entry for ${sec}`);
+  assert.ok(html.includes('id="sidebar-planning-subnav"'));
+  assert.doesNotMatch(html, /data-pl-nav="(momentum|protect|revival)/, 'Protect Momentum is not a sidebar page');
   for (const id of ['planning-production-header', 'core-plan', 'high-stock-list', 'shoot-plan-progress', 'shoot-plan-videos', 'shoot-plan-recommendation', 'pl-adapt-modal', 'season-immediate-days-input', 'season-secondary-days-input', 'wpc-groups', 'lo-list', 'weekly-target-input']) {
     assert.ok(html.includes(`id="${id}"`), `#${id} exists`);
   }
