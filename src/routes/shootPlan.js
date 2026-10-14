@@ -511,4 +511,5 @@ router.delete('/concepts/:id/products/:productCode', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+router.ensureConcepts = ensureConcepts; // exported for tests (a fake client proves the concept / colourway rules without a database)
 module.exports = router;

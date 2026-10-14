@@ -69,3 +69,7 @@ The Batch 28 table dropped the "Active creatives" column; Batch 29 restores it a
 * **One identity everywhere.** The Live Ads count, creative coverage, concentration, diversity, the "Creative picture" sentence and Key facts all read the same de-duplicated list (`creativeRecency.summarize`).
 * **Expanded details:** a "Live ads" table, one row per distinct creative: name, format, funnel, delivery status (with last delivery date), performance (condition, spend, CPA where available) and the number of Meta ad instances. Column sorting by Live ads is available.
 * Tests: `test/planningLiveAds.test.js` (duplicate across campaigns, different creatives, same concept different executions, name copies, video + static, active without recent delivery, stale insights, uncertain matches, window setting, page wiring), run through the real grouping code over a stubbed database.
+
+## Batch 30 (creative intelligence)
+
+See `docs/creative-insights.md`. Summary of changes to the Batch 29 rules: creative age (0 to 4 days early testing, from day 5 assessed, "Insufficient delivery"), all of a product's creatives assessed per funnel, coverage from creatives in play (unrated and new creatives still count), a single creative is a real gap, the Live ads column shows only the unique-creative number, Priority exists only in Needs creative, slow stock caps priority at Medium, one stock-coverage calculation, and a part-period of sales no longer passes as steady selling. Stock, colourway, size, runway, Platinum / Rocket and production protections are unchanged.
