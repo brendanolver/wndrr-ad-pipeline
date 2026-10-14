@@ -2,6 +2,18 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.1.8",
+      "date": "2026-10-14",
+      "title": "Planning recommendation accuracy and Live ads",
+      "changes": [
+        "Needs Creative now requires 40 available sellable units in a shootable colourway, real sales velocity runway and worthwhile demand; incoming stock never counts",
+        "Platinum/Rocket tiers and steady or strong launch sales qualify demand; weak-demand and stock-restricted products are hidden but their assessment is kept",
+        "Creative conditions measured from first delivery with named missing benchmarks; unsupported performance claims removed",
+        "Live ads column restored on Core and High Stocks: unique creatives, delivery window setting, per-creative detail table",
+        "Colourway section and choice when adding to the Shoot Plan; accurate thumbnails; three visible categories; top navigation synced with the sidebar; Planning settings section"
+      ]
+    },
+    {
       "version": "1.1.7",
       "date": "2026-10-14",
       "title": "Planning experience redesign",
