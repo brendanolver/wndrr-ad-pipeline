@@ -77,8 +77,9 @@ function plToggleTray() { try { localStorage.setItem(PL_TRAY_KEY, plTrayCollapse
 const PL_TRAY_MAX = 5;
 const PL_CAMERA = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.5"/></svg>';
 function plTrayThumb(i) {
+  // the same single-view picture logic as the Shoot Plan tiles (UX.garmentImgHtml): a labelled front picture, else the front half of the catalogue composite
   const img = i.image_url || ((i.styles || []).find((s) => s.image_url) || {}).image_url || '';
-  return `<span class="pl-tray-th" title="${plEsc(i.product_name || 'Product')}">${img ? `<img src="${plEsc(img)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}<span class="pl-tray-th-none" aria-hidden="true">${PL_NOIMG}</span></span>`;
+  return `<span class="pl-tray-th" title="${plEsc(i.product_name || 'Product')}">${UX.garmentImgHtml({ url: img, front: i.front_image_url, category: i.category || i.product_name })}<span class="pl-tray-th-none" aria-hidden="true">${PL_NOIMG}</span></span>`;
 }
 function renderProductionHeader() {
   const el = document.getElementById('planning-production-header');

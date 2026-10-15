@@ -107,8 +107,8 @@ test('active ads: the coverage wording is "N Active Ads" with the latest creativ
   const it = (live, lastCreative) => ({ facts: { live_creatives: live, active_ads: 3, live_unknown: false, live_window_days: 7 }, last_creative: lastCreative });
   const lastC = { creatives_total: 13, last_creative_uploaded_date: '2026-08-28', possibly_newer_undated: false };
   let c = E.coverage(it(5, lastC), '2026');
-  assert.deepEqual([c.active, c.activeKnown, c.latest, c.latestKnown], [5, true, '28 Aug', true], '13 creatives on record, 5 active: the table says 5');
-  c = E.coverage(it(0, lastC), '2026'); assert.deepEqual([c.active, c.latest], [0, '28 Aug'], '0 Active Ads with a latest creative date is correct');
+  assert.deepEqual([c.active, c.activeKnown, c.latest, c.latestKnown], [5, true, '28 Aug 2026', true], '13 creatives on record, 5 active: the table says 5');
+  c = E.coverage(it(0, lastC), '2026'); assert.deepEqual([c.active, c.latest], [0, '28 Aug 2026'], '0 Active Ads with a latest creative date is correct');
   c = E.coverage(it(2, { creatives_total: 4, last_creative_uploaded_date: null }), '2026'); assert.equal(c.latest, 'Unknown');
   c = E.coverage(it(2, { creatives_total: 0, last_creative_uploaded_date: null }), '2026'); assert.equal(c.latest, 'None');
   c = E.coverage({ facts: { live_creatives: 2 } }, '2026'); assert.equal(c.latestKnown, false, 'no creative dates loaded: the date is not invented');

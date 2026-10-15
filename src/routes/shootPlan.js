@@ -83,9 +83,17 @@ router.get('/', async (req, res, next) => {
     // configured or a style isn't resolvable, same as everywhere else.
     const am = await fetchAmData();
     const stylesByItem = new Map();
+    // A separate FRONT picture, only when ApparelMagic holds one that is labelled as the front (and a different one as the back). WNDRR's normal catalogue picture is a single
+    // front-and-back composite, which the screens crop to one view (UX.garmentFit); an individual front picture needs no cropping.
+    const frontByItem = new Map();
     for (const row of stylesResult.rows) {
       if (!stylesByItem.has(row.shoot_plan_item_id)) stylesByItem.set(row.shoot_plan_item_id, []);
       const sizing = apparelmagic.resolveStyleSizing(am.amDetails, am.amSizeRanges, row.style_code);
+      if (!frontByItem.has(row.shoot_plan_item_id)) {
+        const d = am.amDetails && am.amDetails.get(row.style_code);
+        const pick = d && d.images ? apparelmagic.pickFrontBack(d.images) : null;
+        if (pick && pick.layout === 'front_back' && pick.front) frontByItem.set(row.shoot_plan_item_id, pick.front.url);
+      }
       stylesByItem.get(row.shoot_plan_item_id).push({
         style_id: row.style_id,
         style_code: row.style_code,
@@ -123,6 +131,7 @@ router.get('/', async (req, res, next) => {
       promotion_id: i.promotion_id,
       promotion_name: i.promotion_name,
       promotion_stage_name: i.promotion_stage_name,
+      front_image_url: frontByItem.get(i.id) || null,
       styles: stylesByItem.get(i.id) || [],
     })));
   } catch (err) {

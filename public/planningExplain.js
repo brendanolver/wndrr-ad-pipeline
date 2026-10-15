@@ -38,7 +38,9 @@
 
   // Real dates, always labelled with WHICH date they are (a creation date is not a start date; overall sales are not Meta performance).
   const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-  const longDate = (ymd) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(ymd || '')); return m ? `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]} ${m[1]}` : null; };
+  // a real calendar date or nothing: an impossible month / day is shown as unavailable, never as "undefined" or a guessed date
+  const realYmd = (ymd) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(ymd || '')); if (!m) return null; const y = Number(m[1]); const mo = Number(m[2]); const d = Number(m[3]); const dt = new Date(Date.UTC(y, mo - 1, d)); return dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d ? m : null; };
+  const longDate = (ymd) => { const m = realYmd(ymd); return m ? `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]} ${m[1]}` : null; };
   const agoText = (d) => (d === null || d === undefined ? '' : d === 0 ? ' (today)' : ` (${plural(d, 'day')} ago)`);
   // "began delivering on 18 September 2026 (30 days ago)" / "was created on ... ; its first delivery date is not available"
   function startedPhrase(st) {
@@ -231,7 +233,7 @@
     future: 'The creative date in the ad name is in the future.', implausible_year: 'The year in the ad name is not plausible.', after_ad_created: 'The creative date is later than the ad itself was created.',
     conflicting_dates: 'Copies of this creative carry different dates and the original cannot be told apart.', original_undated: 'The original ad has no usable date, so a duplicate\u2019s date is not used.', no_instances: 'No ad found for this creative.',
   };
-  function shortDate(ymd) { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(ymd || '')); return m ? { day: `${Number(m[3])} ${SHORT_MONTHS[Number(m[2]) - 1]}`, year: m[1], long: longDate(ymd) } : null; }
+  function shortDate(ymd) { const m = realYmd(ymd); return m ? { day: `${Number(m[3])} ${SHORT_MONTHS[Number(m[2]) - 1]}`, year: m[1], long: longDate(ymd) } : null; }
   function lastCreative(item) {
     const lc = item && item.last_creative; const d = lc ? shortDate(lc.last_creative_uploaded_date) : null;
     const note = 'The creative date written in the ad name (not a verified Meta upload date). Duplicates of the same creative count once, dated from the original ad.';
@@ -248,12 +250,12 @@
   // CREATIVE COVERAGE (the table column): line 1 = ACTIVE ADS, the number of genuinely different creatives delivering on Meta right now (one creative running in several campaigns, ad sets or
   // funnels, or as "- Copy" duplicates, counts once; a creative counts when at least one matched, active, non-DPA instance delivered inside the delivery window). Line 2 = the newest creative
   // date written in the ad names, from ANY matched creative (paused and historical included), never a delivery or modified date. The two populations differ on purpose:
-  // "0 Active Ads, Latest: 18 Sep" is correct. "Unknown" = creatives exist but none has a reliable name date; "None" = no creative on record.
+  // "0 Active Ads, Latest: 18 Sep 2026" is correct. The year is always shown (creative history spans several years); it is the year written in the ad name, never assumed. "Unknown" = creatives exist but none has a reliable name date; "None" = no creative on record.
   function coverage(item, refYear) {
     const lv = liveAds(item); const lc = item && item.last_creative; const total = lc ? num(lc.creatives_total) : null;
     const d = lc ? shortDate(lc.last_creative_uploaded_date) : null;
     const latestKnown = !!d;
-    const latest = !lc || total === null ? null : d ? `${d.day}${refYear && String(refYear) !== d.year ? ` ${d.year}` : ''}` : (total > 0 ? 'Unknown' : 'None');
+    const latest = !lc || total === null ? null : d ? `${d.day} ${d.year}` : (total > 0 ? 'Unknown' : 'None');
     const note = lc && lc.possibly_newer_undated ? ' A creative without a valid date in its name may be newer.' : '';
     const activeTxt = lv.known ? `${plural(lv.count, 'active ad')} (unique creatives delivering in the last ${plural(lv.window, 'day')}; duplicates across campaigns, ad sets, funnels and Copy suffixes count once).` : `Active ads cannot be counted: ${lv.title}`;
     const latestTxt = latest === null ? 'Creative dates could not be loaded.' : `Latest is the newest creative date written in the ad names${d ? ` (${d.long})` : ''}, from any matched creative including paused and historical ones. It is not a delivery date.`;

@@ -5626,7 +5626,7 @@ body{background:var(--bg);color:var(--text);}
 .pl-tray-txt small{font-size:12px;color:var(--text-muted);}
 .pl-tray-thumbs{display:flex;align-items:center;gap:8px;flex:1 1 auto;min-width:0;padding-left:14px;border-left:1px solid var(--border);overflow:hidden;}
 .pl-tray-th,.pl-tray-more{width:40px;height:40px;border-radius:9px;border:1px solid var(--border);background:var(--surface2);flex:0 0 auto;overflow:hidden;position:relative;display:inline-flex;align-items:center;justify-content:center;}
-.pl-tray-th img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:1;background:var(--surface2);}
+.pl-tray-th img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;z-index:1;background:var(--surface2);}
 .pl-tray-th-none{color:var(--text-muted);display:inline-flex;}
 .pl-tray-th-none .ic{width:16px;height:16px;}
 .pl-tray-more{font-size:12.5px;font-weight:700;color:var(--accent-text,#4c3fc0);}
@@ -5652,7 +5652,9 @@ body{background:var(--bg);color:var(--text);}
 .sp2-tile{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:10px;min-width:0;box-shadow:var(--shadow-xs);}
 .sp2-top{display:flex;gap:12px;align-items:flex-start;min-width:0;}
 .sp2-thumb{position:relative;flex:0 0 auto;width:64px;height:64px;border-radius:10px;overflow:hidden;background:var(--surface2);border:1px solid var(--border);display:inline-flex;align-items:center;justify-content:center;}
-.sp2-thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:1;background:var(--surface2);}
+.sp2-thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;z-index:1;background:var(--surface2);}
+/* one garment view: UX.garmentFit sets left/top/width/height inline when the picture is a front+back composite (the thumbnail box clips the rest) */
+.pl-tray-th img.gt-img[data-gt-view="front-crop"],.sp2-thumb img.gt-img[data-gt-view="front-crop"]{max-width:none;}
 .sp2-thumb-none{color:var(--text-muted);display:inline-flex;}
 .sp2-main{min-width:0;flex:1;display:flex;flex-direction:column;gap:3px;}
 .sp2-name{margin:0;font-size:13.5px;font-weight:700;letter-spacing:.01em;text-transform:uppercase;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
@@ -5692,3 +5694,5 @@ body{background:var(--bg);color:var(--text);}
 .sp2-more summary{font-weight:500;}
 .pl-more-opts{font-size:12px;color:var(--text-secondary);margin-left:10px;}
 .pl-more-opts:hover{color:var(--accent-text);}
+/* Batch 38: the creative date now carries its year ("18 Sep 2026"); keep it on one line */
+.pl-table-core .pt-cov small{white-space:nowrap;}

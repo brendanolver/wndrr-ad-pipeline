@@ -175,6 +175,45 @@
     return `<span class="ux-media ux-media-${sz} ux-media-product">${inner}<span class="ux-media-ph ux-media-ph-icon">${ICON.image}</span></span>`;
   }
 
+  // Garment thumbnails (Planning tray + Shoot Plan tiles): ONE clear view of the garment.
+  // WNDRR's normal ApparelMagic catalogue picture is a single composite with the front and back views side by side, so a small thumbnail of it shows two squeezed garments
+  // (and object-fit: cover just crops through the middle of both). Rules, in order:
+  //   1. a separate picture that ApparelMagic labels as the FRONT is used whole (`front`), nothing is cropped;
+  //   2. otherwise, if the loaded picture is wide enough to be two views side by side, only the FRONT half is shown (the left half: the catalogue puts the front first),
+  //      scaled to fit the thumbnail and centred, not stretched;
+  //   3. a picture that is already one view (portrait / square) is shown whole, centred.
+  // "Wide enough" depends on the garment: two tall bottoms (jeans, pants) side by side are only about square, two tops or shorts are clearly landscape.
+  // The decision uses the picture's own size once it has loaded, so it needs no image data from the server and works for every product.
+  const GT_PAIR_MIN = 1.45; const GT_PAIR_MIN_LONG_BOTTOM = 1.0;
+  const GT_LONG_BOTTOM = /JEAN|PANT|TROUSER|JOGGER/i; const GT_SHORT = /SHORT/i;
+  function garmentPairMin(category) { const c = String(category || ''); return GT_LONG_BOTTOM.test(c) && !GT_SHORT.test(c) ? GT_PAIR_MIN_LONG_BOTTOM : GT_PAIR_MIN; }
+  // pure: where the picture goes inside a thumbnail box. Returns { view: 'front-crop' | 'whole', left, top, width, height } as percentages of the box.
+  function garmentFitGeometry(nw, nh, bw, bh, category, single) {
+    const A = nh ? nw / nh : 0;
+    if (!nw || !nh || !bw || !bh || single || A < garmentPairMin(category)) return { view: 'whole' };
+    const regionAspect = A / 2; const boxAspect = bw / bh; // the front half: nw/2 by nh
+    const rw = regionAspect >= boxAspect ? bw : bh * regionAspect;
+    const rh = regionAspect >= boxAspect ? bw / regionAspect : bh;
+    const round = (n) => Math.round(n * 100) / 100;
+    return { view: 'front-crop', left: round((bw - rw) / 2 / bw * 100), top: round((bh - rh) / 2 / bh * 100), width: round(rw * 2 / bw * 100), height: round(rh / bh * 100) };
+  }
+  function garmentFit(img) {
+    if (!img || !img.naturalWidth) return;
+    const box = img.parentElement; // percentages are of the box's inner (padding) area, which is what an absolutely positioned picture is placed in
+    const g = garmentFitGeometry(img.naturalWidth, img.naturalHeight, (box && box.clientWidth) || 1, (box && box.clientHeight) || 1, img.getAttribute('data-gt-cat'), img.getAttribute('data-gt-single') === '1');
+    img.setAttribute('data-gt-view', g.view);
+    if (g.view === 'front-crop') { img.style.cssText = `left:${g.left}%;top:${g.top}%;width:${g.width}%;height:${g.height}%;object-fit:fill;clip-path:inset(0 50% 0 0);`; } else { img.style.cssText = ''; }
+  }
+  function garmentFitAll(root) { (root || document).querySelectorAll('img.gt-img').forEach((i) => { if (i.complete) garmentFit(i); }); }
+  // (a box that is not laid out yet, e.g. a tile on a page that is not showing, is treated as square, which every thumbnail box is; the placement is in percentages so it stays right)
+  // the clip hides the BACK half of the picture itself, so nothing of it can show in the margin beside the centred front view
+  // the <img> only: the caller keeps its own box (position: relative; overflow: hidden) so spacing, size and styling are unchanged
+  function garmentImgHtml(o) {
+    const opt = o || {}; const url = opt.front || opt.url;
+    if (!url) return '';
+    return `<img class="gt-img" src="${esc(url)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" data-gt-cat="${esc(opt.category || '')}"${opt.front ? ' data-gt-single="1"' : ''} onload="UX.garmentFit(this)" onerror="this.remove()">`;
+  }
+
   // Page header: title, one-line description, optional right-aligned actions.
   function pageHeaderHtml(title, description, actionsHtml) {
     return `<div class="ux-page-header"><div class="ux-page-header-text"><h1 class="ux-page-title">${esc(title)}</h1>${description ? `<p class="ux-page-desc">${esc(description)}</p>` : ''}</div>${actionsHtml ? `<div class="ux-page-header-actions">${actionsHtml}</div>` : ''}</div>`;
@@ -199,5 +238,5 @@
     return `<div class="ux-progress${tone ? ` ux-progress-${tone}` : ''}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${p}"><div class="ux-progress-fill" style="width:${p}%"></div></div>`;
   }
 
-  return { classifyMedia, mediaThumbHtml, creativeThumbHtml, productFallbackHtml, productThumbHtml, mediaFailed, placeholderHtml, pageHeaderHtml, statTilesHtml, badgeHtml, emptyStateHtml, progressBarHtml, esc };
+  return { garmentImgHtml, garmentFit, garmentFitAll, garmentFitGeometry, garmentPairMin, classifyMedia, mediaThumbHtml, creativeThumbHtml, productFallbackHtml, productThumbHtml, mediaFailed, placeholderHtml, pageHeaderHtml, statTilesHtml, badgeHtml, emptyStateHtml, progressBarHtml, esc };
 }));

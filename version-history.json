@@ -2,6 +2,15 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.3.3",
+      "date": "2026-10-15",
+      "title": "Planning: one garment view in thumbnails, full creative dates",
+      "changes": [
+        "Planning tray and Shoot Plan tiles show ONE garment view: a labelled front picture is used whole, otherwise the front half of the front-and-back catalogue picture is shown, centred and scaled; both use one shared helper.",
+        "Creative coverage dates in Core and High Stocks now include the year (DD MMM YYYY), taken from the creative's own date; missing or impossible dates keep their placeholder."
+      ]
+    },
+    {
       "version": "1.3.2",
       "date": "2026-10-15",
       "title": "Shoot Plan: hide Drops-created entries recorded before v1.3.1",

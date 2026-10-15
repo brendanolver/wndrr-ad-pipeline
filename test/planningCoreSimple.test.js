@@ -74,7 +74,7 @@ test('page shape: Core and High Stocks share the short table and expanded view; 
 test('creative coverage: Active Ads and the latest NAME date; Unknown / None are told apart; never a delivery date', () => {
   const lc2 = (o, live = 5) => ({ facts: { live_creatives: live, active_ads: 6 }, last_creative: { creatives_total: 13, last_creative_uploaded_date: '2026-09-18', possibly_newer_undated: false, ...o } });
   let c = E.coverage(lc2({}), '2026');
-  assert.deepEqual([c.known, c.active, c.latest, c.latestKnown], [true, 5, '18 Sep', true]);
+  assert.deepEqual([c.known, c.active, c.latest, c.latestKnown], [true, 5, '18 Sep 2026', true]);
   assert.equal(E.coverage(lc2({ last_creative_uploaded_date: '2025-12-30' }), '2026').latest, '30 Dec 2025', 'a date from another year carries its year');
   c = E.coverage(lc2({ last_creative_uploaded_date: null }), '2026'); assert.deepEqual([c.active, c.latest, c.latestKnown], [5, 'Unknown', false]);
   c = E.coverage(lc2({ creatives_total: 0, last_creative_uploaded_date: null }, 0), '2026'); assert.deepEqual([c.active, c.latest], [0, 'None']);

@@ -9563,7 +9563,7 @@ function shootPlanTileHtml(item) {
   const openLabel = concepts && concepts.length > 1 ? 'Open concepts' : 'Open concept';
   return `<article class="sp2-tile" data-sp-item="${item.id}">
     <div class="sp2-top">
-      <span class="sp2-thumb">${img ? `<img src="${escapeHtml(img)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}<span class="sp2-thumb-none" aria-hidden="true"><svg class=ic focusable=false><use href=#i-image></use></svg></span></span>
+      <span class="sp2-thumb">${UX.garmentImgHtml({ url: img, front: item.front_image_url, category: item.category || item.product_name })}<span class="sp2-thumb-none" aria-hidden="true"><svg class=ic focusable=false><use href=#i-image></use></svg></span></span>
       <div class="sp2-main">
         <h4 class="sp2-name" title="${escapeHtml(item.product_name || '')}">${escapeHtml(item.product_name || 'No product')}</h4>
         <div class="sp2-facts"><span>${cw} colourway${cw === 1 ? '' : 's'}</span><span>${concepts ? `${concepts.length} concept${concepts.length === 1 ? '' : 's'}` : ''}</span></div>
