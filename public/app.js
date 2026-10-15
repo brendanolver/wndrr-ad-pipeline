@@ -5600,7 +5600,7 @@ function dropCardProductsHtml(products) {
   // colourway-collapsed upstream by GET /drops), never per colourway.
   const tiles = shown.map((p) => `
     <div class="drop-card-product-tile">
-      ${p.image_url ? `<img src="${p.image_url}" alt="">` : '<span class="drop-card-product-noimg"><svg class=ic aria-hidden=true focusable=false><use href=#i-image></use></svg></span>'}
+      <span class="gt-box gt-box-wide">${UX.garmentImgHtml({ url: p.image_url, category: p.product_name })}<span class="gt-ph" aria-hidden="true"><svg class=ic focusable=false><use href=#i-image></use></svg></span></span>
       <span class="drop-card-product-name">${escapeHtml(p.product_name)}</span>
       <span class="drop-card-product-code">${escapeHtml(p.product_code)}</span>
     </div>`).join('');
@@ -5967,6 +5967,23 @@ const ASSET_STATUS_COLORS = {
   uploaded_live: ['var(--green-light)', 'var(--green)'],
 };
 
+// Upcoming Drops product page (Batch 39): the big preview shows each colourway's WHOLE picture (front and back where the picture holds both), never cropped; a missing
+// picture keeps a neutral placeholder. Each colourway card shows ONE complete, centred front view (the shared garment helper).
+function renderProductViewImages(group) {
+  document.getElementById('product-view-images').innerHTML = group.images.length
+    ? group.images.slice(0, 4).map((url) => `<span class="gt-big">${UX.productImgFullHtml({ url, alt: group.product_name })}<span class="gt-ph" aria-hidden="true"><svg class=ic focusable=false><use href=#i-image></use></svg></span></span>`).join('')
+    : '<span class="gt-big gt-big-none"><span class="gt-ph" aria-hidden="true"><svg class=ic focusable=false><use href=#i-image></use></svg></span></span>';
+
+  document.getElementById('product-view-colours').innerHTML = group.styles.map((s) => `
+      <div class="product-view-colour-card">
+        <span class="gt-box gt-box-48">${UX.garmentImgHtml({ url: s.image_url, category: group.product_name })}<span class="gt-ph" aria-hidden="true"><svg class=ic focusable=false><use href=#i-image></use></svg></span></span>
+        <div>
+          <div class="product-view-colour-code">${s.style_code}</div>
+          <div class="product-view-colour-stats">${colourStatsLine(s)}</div>
+        </div>
+      </div>`).join('');
+}
+
 async function loadProductView(dropId, productCode) {
   try {
     state.currentDropId = dropId;
@@ -5988,18 +6005,7 @@ async function loadProductView(dropId, productCode) {
 
     document.getElementById('product-view-name').textContent = group.product_name;
     document.getElementById('product-view-code').textContent = `${group.product_code} · ${group.styles.length} colour${group.styles.length === 1 ? '' : 's'}`;
-    document.getElementById('product-view-images').innerHTML = group.images.length
-      ? group.images.slice(0, 4).map((url) => `<img src="${url}" alt="">`).join('')
-      : '<span class="no-img"><svg class=ic aria-hidden=true focusable=false><use href=#i-image></use></svg></span>';
-
-    document.getElementById('product-view-colours').innerHTML = group.styles.map((s) => `
-      <div class="product-view-colour-card">
-        ${s.image_url ? `<img src="${s.image_url}" alt="">` : '<span class="no-img"><svg class=ic aria-hidden=true focusable=false><use href=#i-image></use></svg></span>'}
-        <div>
-          <div class="product-view-colour-code">${s.style_code}</div>
-          <div class="product-view-colour-stats">${colourStatsLine(s)}</div>
-        </div>
-      </div>`).join('');
+    renderProductViewImages(group);
 
     const pct = group.creative_target ? Math.min(100, Math.round((group.current_coverage / group.creative_target) * 100)) : 0;
     const liveMetaLine = group.live_meta_ads !== null ? `<div class="coverage-card-live-meta"><svg class=ic aria-hidden=true focusable=false><use href=#i-signal></use></svg> ${group.live_meta_ads} live on Meta</div>` : '';
@@ -9370,9 +9376,29 @@ function cdModalRefresh() {
   if (nameInput && titleEl && nameInput.style.display !== 'none') {
     titleEl.textContent = (nameInput.value || '').trim() || 'New Concept';
   }
+  cdModalFitNav();
+}
+
+// Too narrow for the pills AND the indicator on one row -> the compact layout (see #cdm-nav.cdm-compact). Measured, not guessed, so it holds at any modal width.
+let cdmNavObserver = null;
+function cdModalFitNav() {
+  const nav = document.getElementById('cdm-nav'); if (!nav) return;
+  const pills = nav.querySelector('.cdm-pills'); const meta = nav.querySelector('.cdm-meta'); if (!pills || !meta || !nav.clientWidth) return;
+  nav.classList.remove('cdm-compact');
+  const cs = getComputedStyle(nav); const room = nav.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  const need = [...pills.children].reduce((n, b) => n + b.offsetWidth, 0) + Math.max(0, pills.children.length - 1) * 8 + meta.offsetWidth + 16 + 4;
+  nav.classList.toggle('cdm-compact', need > room);
+}
+
+function cdModalWatchNavWidth() {
+  const nav = document.getElementById('cdm-nav'); if (!nav) return;
+  const apply = cdModalFitNav;
+  if (typeof ResizeObserver === 'function') { if (cdmNavObserver) cdmNavObserver.disconnect(); cdmNavObserver = new ResizeObserver(apply); cdmNavObserver.observe(nav); }
+  setTimeout(apply, 0); setTimeout(apply, 300);
 }
 
 function cdModalInit() {
+  cdModalWatchNavWidth();
   cdModalActive = CDM_SECTIONS[0];
   if (!cdModalListenersBound) {
     const modal = document.getElementById('concept-dev-modal');
@@ -9390,7 +9416,20 @@ function cdModalInit() {
   if (body) body.scrollTop = 0;
 }
 
+// Owner choices come from the application's own team list (the Planning settings roster that Assigned To already uses everywhere), never a second hard-coded list.
+// Mark is the default when he is on that list; otherwise the default content creator, otherwise nobody is preselected.
+function populateOwnerSelect(selectId, selected) {
+  const sel = document.getElementById(selectId); if (!sel) return;
+  const roster = conceptAssignees();
+  const names = selected && !roster.includes(selected) ? [selected, ...roster] : roster; // a saved owner who has since left the list is kept, never silently dropped
+  const dc = (state.contentCreators || []).find((c) => c.is_default);
+  const pick = selected !== undefined && selected !== null ? selected : (roster.includes('Mark') ? 'Mark' : (dc && roster.includes(dc.name) ? dc.name : ''));
+  sel.innerHTML = `<option value="">Unassigned</option>${names.map((n) => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('')}`;
+  sel.value = pick || '';
+}
+
 function openAdHocConceptModal() {
+  populateOwnerSelect('adhoc-concept-owner');
   adHocConceptStyles = [];
   document.getElementById('adhoc-concept-name').value = '';
   document.getElementById('adhoc-concept-format').value = 'video';
@@ -9432,6 +9471,7 @@ async function saveAdHocConcept() {
   if (!conceptName) return toast('Concept Name is required', true);
   const format = document.getElementById('adhoc-concept-format').value;
   const defaultCreator = state.contentCreators.find((c) => c.is_default) || state.contentCreators[0];
+  const owner = document.getElementById('adhoc-concept-owner').value || null;
   const weekStart = isoDateStr(mondayOfWeek(0));
 
   try {
@@ -9440,7 +9480,9 @@ async function saveAdHocConcept() {
       body: JSON.stringify({
         concept_name: conceptName,
         colourways: adHocConceptStyles.map((s) => ({ style_id: s.style_id, size: null, colour_label: null })),
-        creator: defaultCreator ? defaultCreator.name : DEFAULT_CREATOR,
+        // the chosen owner is both the plan entry's owner (what the cards show) and the concept's Assigned To (what the editor shows)
+        creator: owner || (defaultCreator ? defaultCreator.name : DEFAULT_CREATOR),
+        concept_assignee: owner,
         format,
         source: 'manual',
         week_start: weekStart,
@@ -10808,7 +10850,7 @@ function fillConceptDevModalFields(concept) {
   // select+other pattern as Talent/Location. Kept separate from Concept
   // Name/Idea above (see schema.sql's concept_types comment).
   fillConceptDevSelectWithOther('cd-modal-concept-type-select', 'cd-modal-concept-type-custom', state.conceptTypes.map((t) => t.name), concept ? concept.concept_type : '');
-  document.getElementById('cd-modal-assignee-select').value = concept ? (concept.concept_assignee || '') : '';
+  populateOwnerSelect('cd-modal-assignee-select', concept ? (concept.concept_assignee || '') : '');
 
   // Execution / Shot Plan is legacy -- superseded by structured What to
   // Shoot. Never shown for a new concept and never required; only surfaced
@@ -13421,19 +13463,53 @@ function shootingProductionLabel(format) {
 // (revert), is ever clickable -- matches exactly the two small transitions
 // each backend endpoint supports (start/unstart, mark-shot/unmark-shot), no
 // arbitrary jumping between states.
+// Shared by Shooting and Editing (Batch 39): ONE horizontal status control. Every stage can be chosen, forwards or backwards, so an accidental click is a one-click
+// correction. stages: [{ label, short?, state: 'done' | 'current' | 'todo', action?: onclick JS, title? }]. A stage with no action is shown but not clickable (the title says why).
+// `short` is the label used when the card is narrow (a container query in styles.css), so the three or four stages always stay on one line.
+function stageStepperHtml(stages) {
+  return `<div class="shoot-status-wrap" onclick="event.stopPropagation()"><div class="shoot-status-control stage-stepper" role="group" aria-label="Production status">${stages.map((st) => {
+    const cls = `shoot-status-segment${st.state === 'current' ? ' shoot-status-segment-active' : (st.state === 'done' ? ' shoot-status-segment-done' : '')}`;
+    const label = st.short ? `<span class="seg-full">${escapeHtml(st.label)}</span><span class="seg-short">${escapeHtml(st.short)}</span>` : escapeHtml(st.label);
+    return `<button type="button" class="${cls}" ${st.state === 'current' ? 'aria-current="step"' : ''} ${st.action ? `onclick="${st.action}"` : 'disabled'} title="${escapeHtml(st.title || '')}">${label}</button>`;
+  }).join('')}</div></div>`;
+}
+
+const SHOOT_STAGES = ['scheduled', 'in_progress', 'shot'];
+function shootingStageLabel(stage, format) { return stage === 'scheduled' ? 'Scheduled' : stage === 'in_progress' ? 'In production' : shootingProductionLabel(format); }
+
+// Move a concept to ANY production stage by chaining the existing one-step endpoints (start / unstart / mark-shot / unmark-shot): nothing is deleted or reset beyond what each of
+// those already does. Moving off Filmed asks first because it takes the concept out of Editing's queue (anything saved there is kept); if Editing has already sent it to Final
+// Approval the server refuses and says to use Request Changes there, and that message is shown as it is.
+async function shootingMoveStage(scheduleId, from, to, format) {
+  const steps = { 'scheduled>in_progress': ['start'], 'scheduled>shot': ['mark-shot'], 'in_progress>scheduled': ['unstart'], 'in_progress>shot': ['mark-shot'], 'shot>in_progress': ['unmark-shot', 'start'], 'shot>scheduled': ['unmark-shot'] }[`${from}>${to}`];
+  if (!steps) return;
+  if (from === 'shot') {
+    const ok = await confirmDialog(`Move this back to ${shootingStageLabel(to, format)}? It leaves Editing's queue until it is marked ${shootingProductionLabel(format)} again. Nothing already saved is deleted.`, { okLabel: 'Move back' });
+    if (!ok) return;
+  }
+  try {
+    for (const step of steps) await api(`/shooting/${scheduleId}/${step}`, { method: 'POST' });
+    toast(`Moved to ${shootingStageLabel(to, format)}`);
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    refreshCurrentShootingView(); // always: a chained move that stopped half way must show where the concept really is
+  }
+}
+
 function shootingStatusControlHtml(item) {
-  const stages = ['scheduled', 'in_progress', 'shot'];
   const labels = { scheduled: 'Scheduled', in_progress: 'In production', shot: shootingProductionLabel(item.format) };
-  const currentIndex = stages.indexOf(item.status);
-  return `<div class="shoot-status-control" onclick="event.stopPropagation()">${stages.map((stage, i) => {
-    const isCurrent = i === currentIndex;
-    const isNext = i === currentIndex + 1;
-    let onclick = null;
-    if (isNext) onclick = stage === 'in_progress' ? `startShooting(${item.id})` : `markShootingShot(${item.id})`;
-    else if (isCurrent && i > 0) onclick = stage === 'in_progress' ? `unstartShooting(${item.id})` : `unmarkShootingShot(${item.id})`;
-    const title = isNext ? `Mark as ${labels[stage]}` : (onclick ? `Undo -- revert to ${labels[stages[i - 1]]}` : '');
-    return `<button type="button" class="shoot-status-segment${isCurrent ? ' shoot-status-segment-active' : (i < currentIndex ? ' shoot-status-segment-done' : '')}" ${isCurrent ? 'aria-current="step"' : ''} ${onclick ? `onclick="${onclick}"` : 'disabled'} title="${title}">${labels[stage]}</button>`;
-  }).join('')}</div>`;
+  const currentIndex = SHOOT_STAGES.indexOf(item.status);
+  const short = { in_progress: 'Production' }; // the label used when the card is narrow
+  return stageStepperHtml(SHOOT_STAGES.map((stage, i) => {
+    if (i === currentIndex) return { label: labels[stage], short: short[stage], state: 'current' };
+    if (currentIndex < 0) return { label: labels[stage], short: short[stage], state: 'todo', title: 'Schedule it onto a day first (drag it onto the calendar)' };
+    return {
+      label: labels[stage], short: short[stage], state: i < currentIndex ? 'done' : 'todo',
+      action: `shootingMoveStage(${item.id}, '${item.status}', '${stage}', '${item.format || ''}')`,
+      title: i < currentIndex ? `Move back to ${labels[stage]}` : `Mark as ${labels[stage]}`,
+    };
+  }));
 }
 
 // Week grid card -- compact by design (per the brief: "Do NOT display the
@@ -14540,33 +14616,51 @@ const EDITING_STATUS_CLASS = { to_edit: 'editing-status-to-edit', scheduled: 'ed
 // renderEditingConceptModal's submitted-lock). Both new backward actions
 // are themselves guarded server-side against a submitted Concept, so this
 // never needs to special-case "ready_for_approval" here.
+const EDITING_STAGE_SHORT = { to_edit: 'Filmed', scheduled: 'Booked', editing: 'Editing', ready_for_approval: 'Approval' }; // the card is narrow: the full names stay in each segment's tooltip
 function editingStatusControlHtml(concept) {
   const stages = ['to_edit', 'scheduled', 'editing', 'ready_for_approval'];
   const status = editingConceptStatus(concept);
   const hasDay = !!concept.editing_day;
-  return `<div class="shoot-status-control" onclick="event.stopPropagation()">${stages.map((stage) => {
-    const isCurrent = stage === status;
-    let onclick = null;
-    let title = '';
-    if (stage === 'editing' && (status === 'to_edit' || status === 'scheduled')) {
-      onclick = `advanceEditingToInProgress(${concept.creative_asset_id})`;
-      title = 'Mark as In editing';
-    } else if (stage === 'ready_for_approval' && status === 'editing') {
-      onclick = `advanceEditingToEdited(${concept.creative_asset_id})`;
-      title = 'Mark as Awaiting approval';
-    } else if (stage === 'scheduled' && status === 'editing' && hasDay) {
-      onclick = `revertEditingToScheduled(${concept.creative_asset_id})`;
-      title = 'Undo -- revert to Scheduled';
-    } else if (stage === 'to_edit' && status === 'editing' && !hasDay) {
-      onclick = `revertEditingToToEdit(${concept.creative_asset_id})`;
-      title = 'Undo -- revert to Filmed';
-    } else if (stage === 'to_edit' && status === 'scheduled') {
-      onclick = `revertEditingToToEdit(${concept.creative_asset_id})`;
-      title = 'Undo -- unschedule back to Filmed';
+  const cur = stages.indexOf(status);
+  const id = concept.creative_asset_id;
+  return stageStepperHtml(stages.map((stage, i) => {
+    const base = { label: EDITING_STATUS_LABELS[stage], short: EDITING_STAGE_SHORT[stage], state: i === cur ? 'current' : (i < cur ? 'done' : 'todo') };
+    if (i === cur) return base;
+    if (i > cur) { // forward
+      if (stage === 'scheduled') return { ...base, title: 'Drag it onto an editing day to schedule it' };
+      if (stage === 'editing') return { ...base, action: `advanceEditingToInProgress(${id})`, title: 'Mark as In editing' };
+      return status === 'editing' ? { ...base, action: `advanceEditingToEdited(${id})`, title: 'Mark as Awaiting approval' } : { ...base, title: 'Start editing first' };
     }
-    const done = stages.indexOf(stage) < stages.indexOf(status);
-    return `<button type="button" class="shoot-status-segment${isCurrent ? ' shoot-status-segment-active' : (done ? ' shoot-status-segment-done' : '')}" ${isCurrent ? 'aria-current="step"' : ''} ${onclick ? `onclick="${onclick}"` : 'disabled'} title="${title}">${EDITING_STATUS_LABELS[stage]}</button>`;
-  }).join('')}</div>`;
+    // backward: corrections. Once it has been sent to Final Approval, only Request Changes there can bring it back, so the stage explains that instead of silently doing nothing.
+    if (status === 'ready_for_approval') return { ...base, action: `editingExplainSubmitted(${id})`, title: 'Already sent to Final Approval: Request Changes there to bring it back' };
+    if (status === 'editing') {
+      if (stage === 'scheduled') return hasDay ? { ...base, action: `revertEditingToScheduled(${id})`, title: 'Move back to Scheduled' } : { ...base, title: 'It has no editing day: drag it onto one to schedule it' };
+      return hasDay ? { ...base, action: `editingMoveBackToFilmed(${id})`, title: 'Move back to Filmed (also removes its editing day)' } : { ...base, action: `revertEditingToToEdit(${id})`, title: 'Move back to Filmed' };
+    }
+    return { ...base, action: `revertEditingToToEdit(${id})`, title: 'Move back to Filmed (unschedules it)' };
+  }));
+}
+
+// A concept already sent to Final Approval cannot be pulled back by a card click (that would strand it in the approval queue). Say so, and offer the right place.
+async function editingExplainSubmitted(conceptAssetId) {
+  const ok = await confirmDialog('This concept has already been sent to Final Approval, so its editing status cannot be changed from here. To bring it back, use Request Changes in Final Approval: the edit and its link are kept and it returns to Editing.', { okLabel: 'Open Final Approval' });
+  if (ok) switchTab('final-approval');
+}
+
+// Editing (with a day) -> Filmed in one step: stops editing, then removes the editing day. Both are the existing reversible actions; the final edit rows, links, owner and notes are not touched.
+async function editingMoveBackToFilmed(conceptAssetId) {
+  const concept = editingFindConcept(conceptAssetId);
+  if (!concept) return;
+  if (!(await confirmDialog('Move this back to Filmed? It stops editing and also removes its editing day. Its edits, links and notes are kept.', { okLabel: 'Move back' }))) return;
+  try {
+    await api(`/editing/concepts/${conceptAssetId}/unstart`, { method: 'POST' });
+    await api(`/editing/schedule/${concept.shoot_schedule_id}`, { method: 'PATCH', body: JSON.stringify({ editing_day: null }) });
+    toast('Moved back to Filmed');
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    await refreshCurrentEditingView();
+  }
 }
 
 // Round 11 backward action 1: In Progress + still has an editing_day ->

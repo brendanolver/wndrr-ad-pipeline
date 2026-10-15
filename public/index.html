@@ -2474,15 +2474,18 @@
     </div>
     <div class="modal-body">
       <nav class="cd-modal-nav" aria-label="Concept sections" id="cdm-nav">
-        <button type="button" data-cdm-target="cdm-sec-idea" onclick="cdModalShow('cdm-sec-idea')"><span class="cdm-mark"></span>The Idea</button>
-        <button type="button" data-cdm-target="cd-modal-audience-section" onclick="cdModalShow('cd-modal-audience-section')"><span class="cdm-mark"></span>Audience</button>
-        <button type="button" data-cdm-target="cdm-sec-hook" onclick="cdModalShow('cdm-sec-hook')"><span class="cdm-mark"></span>The Hook</button>
-        <button type="button" data-cdm-target="cdm-sec-production" onclick="cdModalShow('cdm-sec-production')"><span class="cdm-mark"></span>Production</button>
-        <button type="button" data-cdm-target="cdm-sec-references" onclick="cdModalShow('cdm-sec-references')"><span class="cdm-mark"></span>References</button>
-        <button type="button" data-cdm-target="cdm-sec-setup" onclick="cdModalShow('cdm-sec-setup')"><span class="cdm-mark"></span>Shoot Setup</button>
-        <span class="cdm-nav-spacer"></span>
-        <span class="cdm-progress" id="cdm-progress"></span>
-        <button type="button" class="cdm-all" id="cdm-all-btn" onclick="cdModalToggleAll()">Show all</button>
+        <div class="cdm-pills" role="group" aria-label="Sections">
+          <button type="button" data-cdm-target="cdm-sec-idea" onclick="cdModalShow('cdm-sec-idea')"><span class="cdm-mark"></span>The Idea</button>
+          <button type="button" data-cdm-target="cd-modal-audience-section" onclick="cdModalShow('cd-modal-audience-section')"><span class="cdm-mark"></span>Audience</button>
+          <button type="button" data-cdm-target="cdm-sec-hook" onclick="cdModalShow('cdm-sec-hook')"><span class="cdm-mark"></span>The Hook</button>
+          <button type="button" data-cdm-target="cdm-sec-production" onclick="cdModalShow('cdm-sec-production')"><span class="cdm-mark"></span>Production</button>
+          <button type="button" data-cdm-target="cdm-sec-references" onclick="cdModalShow('cdm-sec-references')"><span class="cdm-mark"></span>References</button>
+          <button type="button" data-cdm-target="cdm-sec-setup" onclick="cdModalShow('cdm-sec-setup')"><span class="cdm-mark"></span>Shoot Setup</button>
+        </div>
+        <div class="cdm-meta">
+          <span class="cdm-progress" id="cdm-progress"></span>
+          <button type="button" class="cdm-all" id="cdm-all-btn" onclick="cdModalToggleAll()">Show all</button>
+        </div>
       </nav>
       <div class="cd-modal-context-row">
         <div class="cd-modal-context-compact" id="cd-modal-context"></div>
@@ -3590,6 +3593,11 @@
       <div class="ux-field">
         <label for="adhoc-concept-name">Concept name<span class="cd-req-mark">*</span></label>
         <input type="text" id="adhoc-concept-name" placeholder="e.g. UGC unboxing hook">
+      </div>
+      <div class="ux-field">
+        <label for="adhoc-concept-owner">Assigned to</label>
+        <select id="adhoc-concept-owner"></select>
+        <div class="ux-field-help">Who owns this concept. Defaults to Mark; it can be changed later in the concept editor.</div>
       </div>
       <div class="ux-field">
         <label for="adhoc-concept-style-search">Product / style <span class="ux-field-opt">Optional</span></label>

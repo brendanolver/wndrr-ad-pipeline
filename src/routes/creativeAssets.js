@@ -316,6 +316,15 @@ router.patch('/:id/assignee', async (req, res, next) => {
     );
 
     let responseRow = result.rows[0];
+    // A manually started ("ad-hoc") concept has one owner: changing its Assigned To in the editor also changes the owner its plan entry shows, but only while the entry holds just
+    // this one live concept (several concepts may have different assignees). Nothing else on the concept or the entry is touched.
+    if (hasAssignee && nextAssignee && row.shoot_plan_item_id) {
+      await client.query(
+        `UPDATE shoot_plan_items spi SET creator = $1
+          WHERE spi.id = $2 AND spi.source = 'manual' AND spi.creator IS DISTINCT FROM $1
+            AND (SELECT count(*) FROM creative_assets c WHERE c.shoot_plan_item_id = spi.id AND c.archived_at IS NULL AND c.concept_dev_status <> 'killed') = 1`,
+        [nextAssignee, row.shoot_plan_item_id]);
+    }
     if (hasAssignee && nextAssignee && row.drop_id) {
       await ensureDropProductionLinkage(client, {
         assetId: Number(req.params.id),

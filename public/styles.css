@@ -5626,7 +5626,7 @@ body{background:var(--bg);color:var(--text);}
 .pl-tray-txt small{font-size:12px;color:var(--text-muted);}
 .pl-tray-thumbs{display:flex;align-items:center;gap:8px;flex:1 1 auto;min-width:0;padding-left:14px;border-left:1px solid var(--border);overflow:hidden;}
 .pl-tray-th,.pl-tray-more{width:40px;height:40px;border-radius:9px;border:1px solid var(--border);background:var(--surface2);flex:0 0 auto;overflow:hidden;position:relative;display:inline-flex;align-items:center;justify-content:center;}
-.pl-tray-th img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;z-index:1;background:var(--surface2);}
+.pl-tray-th img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;z-index:1;background:var(--surface2);max-width:none;}
 .pl-tray-th-none{color:var(--text-muted);display:inline-flex;}
 .pl-tray-th-none .ic{width:16px;height:16px;}
 .pl-tray-more{font-size:12.5px;font-weight:700;color:var(--accent-text,#4c3fc0);}
@@ -5652,7 +5652,7 @@ body{background:var(--bg);color:var(--text);}
 .sp2-tile{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:10px;min-width:0;box-shadow:var(--shadow-xs);}
 .sp2-top{display:flex;gap:12px;align-items:flex-start;min-width:0;}
 .sp2-thumb{position:relative;flex:0 0 auto;width:64px;height:64px;border-radius:10px;overflow:hidden;background:var(--surface2);border:1px solid var(--border);display:inline-flex;align-items:center;justify-content:center;}
-.sp2-thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;z-index:1;background:var(--surface2);}
+.sp2-thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;z-index:1;background:var(--surface2);max-width:none;}
 /* one garment view: UX.garmentFit sets left/top/width/height inline when the picture is a front+back composite (the thumbnail box clips the rest) */
 .pl-tray-th img.gt-img[data-gt-view="front-crop"],.sp2-thumb img.gt-img[data-gt-view="front-crop"]{max-width:none;}
 .sp2-thumb-none{color:var(--text-muted);display:inline-flex;}
@@ -5696,3 +5696,55 @@ body{background:var(--bg);color:var(--text);}
 .pl-more-opts:hover{color:var(--accent-text);}
 /* Batch 38: the creative date now carries its year ("18 Sep 2026"); keep it on one line */
 .pl-table-core .pt-cov small{white-space:nowrap;}
+
+/* Batch 39: garment images. The picture sits in a clipped, relatively positioned box; UX.garmentFit places it (centred, in proportion, never stretched). */
+.gt-box{position:relative;display:inline-flex;align-items:center;justify-content:center;overflow:hidden;background:var(--surface2);flex:0 0 auto;}
+.gt-box img.gt-img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;z-index:1;background:var(--surface2);max-width:none;}
+.gt-ph{color:var(--text-muted);display:inline-flex;}
+.gt-ph .ic{width:16px;height:16px;}
+.gt-box-48{width:48px;height:48px;border-radius:6px;}
+.gt-box-wide{width:100%;height:56px;border-radius:6px;}
+.drop-card-product-tile .gt-box-wide img.gt-img{border-radius:0;height:100%;}
+/* a large preview: the whole picture, centred, in proportion */
+.gt-big{position:relative;display:inline-flex;align-items:center;justify-content:center;min-width:72px;height:104px;max-width:260px;padding:4px;border-radius:var(--r);background:var(--surface2);}
+.gt-big img.gt-full{display:block;height:100%;width:auto;max-width:100%;object-fit:contain;position:relative;z-index:1;}
+.gt-big .gt-ph{position:absolute;inset:0;align-items:center;justify-content:center;}
+.gt-big img.gt-full + .gt-ph{display:none;}
+.product-view-images .gt-big{background:transparent;}
+/* tray: remove control on each thumbnail */
+.pl-tray-x{position:absolute;top:2px;right:2px;z-index:3;width:16px;height:16px;border-radius:50%;border:1px solid var(--border);background:var(--surface);color:var(--text-secondary);box-shadow:0 1px 3px rgba(16,16,22,.18);display:inline-flex;align-items:center;justify-content:center;padding:0;cursor:pointer;opacity:0;transition:opacity .12s;}
+.pl-tray-th:hover .pl-tray-x,.pl-tray-th:focus-within .pl-tray-x,.pl-tray-x:focus-visible{opacity:1;}
+.pl-tray-x:hover{background:#fdecec;color:#b42318;border-color:#f3c4c0;}
+.pl-tray-x:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}
+@media (hover:none){.pl-tray-x{opacity:1;}}
+
+/* Batch 39: Concept editor section navigation. The six section pills are centred as one group with even spacing; the required-sections indicator and Show all sit together
+   on the right. When the modal is too narrow for both (class set by cdModalInit), the pills take the full width, centred, and the indicator row sits beneath. */
+#cdm-nav{display:flex;flex-wrap:nowrap;align-items:center;justify-content:space-between;gap:10px 16px;overflow:visible;}
+#cdm-nav .cdm-pills{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;flex:1 1 auto;min-width:0;}
+#cdm-nav .cdm-meta{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex:0 0 auto;}
+#cdm-nav .cdm-mark:empty{display:none;}
+#cdm-nav .cdm-mark{min-width:0;}
+#cdm-nav button{padding:5px 14px;}
+#cdm-nav button.cdm-all{padding:5px 8px;}
+#cdm-nav.cdm-compact{flex-wrap:wrap;}
+#cdm-nav.cdm-compact .cdm-pills{flex:1 1 100%;}
+#cdm-nav.cdm-compact .cdm-meta{flex:1 1 100%;justify-content:space-between;}
+
+/* Batch 39: ONE shared status control for Shooting and Editing: every stage on a single line, current stage clear, narrow cards use the short labels (never wrap). */
+.shoot-status-wrap{container-type:inline-size;width:100%;}
+.shoot-status-control{display:flex;flex-wrap:nowrap;width:100%;max-width:100%;gap:2px;padding:2px;border-radius:999px;background:var(--surface2);border:1px solid var(--border);align-items:stretch;}
+.shoot-status-segment{flex:1 1 auto;min-width:0;white-space:nowrap;text-align:center;font-size:11px;line-height:1.2;padding:4px 8px;overflow:hidden;text-overflow:ellipsis;border-radius:999px;}
+.shoot-status-segment:disabled{cursor:default;}
+.shoot-status-segment-active,.shoot-status-segment-active:disabled{cursor:default;}
+.shoot-status-segment .seg-short{display:none;}
+@container (max-width: 270px){
+  .shoot-status-segment{font-size:10.5px;padding:4px 5px;}
+  .shoot-status-segment .seg-full{display:none;}
+  .shoot-status-segment .seg-short{display:inline;}
+  .shoot-status-segment-done::before{content:none;}
+}
+@container (max-width: 230px){
+  .shoot-status-segment{font-size:10px;padding:4px 2px;}
+  .shoot-status-control{padding:2px;}
+}

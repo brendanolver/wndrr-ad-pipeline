@@ -2,6 +2,18 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.3.4",
+      "date": "2026-10-16",
+      "title": "Planning thumbnails centred, tray remove, owner on New Concept, one-line status control",
+      "changes": [
+        "Planning tray, Shoot Plan tiles and Upcoming Drops show one complete garment view centred by the garment itself (a same-origin, allow-listed picture route lets the browser measure it); the Upcoming Drops product page shows the whole picture, contained.",
+        "Every Planning tray thumbnail has a remove control (hover, keyboard focus, always visible on touch) that uses the guarded Shoot Plan removal: confirmation, protected concepts explained, history kept.",
+        "New Concept has an Assigned to field from the team list (default Mark), saved with the concept, shown on the card and editor, and changeable in the editor without resetting anything.",
+        "Concept editor section pills are centred and evenly spaced with the required-sections indicator and Show all kept readable; the layout switches to a compact arrangement by measured width.",
+        "Shooting (Scheduled, In production, Filmed) and Editing (Filmed, Scheduled, In editing, Awaiting approval) share one single-line status control that moves forwards and backwards through the existing endpoints, asks before leaving Filmed, and points to Final Approval for concepts already sent there."
+      ]
+    },
+    {
       "version": "1.3.3",
       "date": "2026-10-15",
       "title": "Planning: one garment view in thumbnails, full creative dates",

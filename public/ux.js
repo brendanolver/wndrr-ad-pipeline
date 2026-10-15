@@ -175,43 +175,129 @@
     return `<span class="ux-media ux-media-${sz} ux-media-product">${inner}<span class="ux-media-ph ux-media-ph-icon">${ICON.image}</span></span>`;
   }
 
-  // Garment thumbnails (Planning tray + Shoot Plan tiles): ONE clear view of the garment.
+  // Garment images (Planning tray, Shoot Plan tiles, Upcoming Drops): ONE complete, centred garment in a small box; the whole picture in a large one.
   // WNDRR's normal ApparelMagic catalogue picture is a single composite with the front and back views side by side, so a small thumbnail of it shows two squeezed garments
-  // (and object-fit: cover just crops through the middle of both). Rules, in order:
-  //   1. a separate picture that ApparelMagic labels as the FRONT is used whole (`front`), nothing is cropped;
-  //   2. otherwise, if the loaded picture is wide enough to be two views side by side, only the FRONT half is shown (the left half: the catalogue puts the front first),
-  //      scaled to fit the thumbnail and centred, not stretched;
-  //   3. a picture that is already one view (portrait / square) is shown whole, centred.
+  // (and object-fit: cover just crops through the middle of both). Rules for a SMALL thumbnail, in order:
+  //   1. a separate picture that ApparelMagic labels as the FRONT is used (`front`), never split;
+  //   2. otherwise, if the loaded picture is wide enough to be two views side by side, only the FRONT half is used (the left half: the catalogue puts the front first);
+  //   3. a picture that is already one view is used whole.
+  // Then the garment itself is CENTRED: the picture is measured (bounding box of the non-background pixels inside the chosen view, see garmentBBox) and the thumbnail shows exactly
+  // that box plus even padding, scaled to fit (never stretched, never clipped). The measuring reads the picture through the app's own same-origin /api/product-image, because
+  // the browser will not let a page read the pixels of a picture from another site. Until (or unless) it can be measured, the whole chosen view is shown, centred in the box.
   // "Wide enough" depends on the garment: two tall bottoms (jeans, pants) side by side are only about square, two tops or shorts are clearly landscape.
-  // The decision uses the picture's own size once it has loaded, so it needs no image data from the server and works for every product.
+  // A LARGE preview does not use any of this: it shows the whole picture, front and back included (productImgFullHtml).
   const GT_PAIR_MIN = 1.45; const GT_PAIR_MIN_LONG_BOTTOM = 1.0;
   const GT_LONG_BOTTOM = /JEAN|PANT|TROUSER|JOGGER/i; const GT_SHORT = /SHORT/i;
+  const GT_PAD = 0.08; // even padding around the measured garment, as a share of its longer side
+  const GT_PROXY = '/api/product-image?u=';
   function garmentPairMin(category) { const c = String(category || ''); return GT_LONG_BOTTOM.test(c) && !GT_SHORT.test(c) ? GT_PAIR_MIN_LONG_BOTTOM : GT_PAIR_MIN; }
-  // pure: where the picture goes inside a thumbnail box. Returns { view: 'front-crop' | 'whole', left, top, width, height } as percentages of the box.
-  function garmentFitGeometry(nw, nh, bw, bh, category, single) {
+  const round2 = (n) => Math.round(n * 100) / 100;
+  // pure: bounding box of the garment inside `region` ({x0,y0,x1,y1} in pixels of an RGBA array w x h). Background = transparent, or the colour of the region's corners.
+  // A row / column only counts when it holds at least two garment pixels, so a speck or a compression artefact cannot stretch the box. null when nothing garment-like is found.
+  function garmentBBox(data, w, h, region) {
+    const r = region || { x0: 0, y0: 0, x1: w, y1: h };
+    const x0 = Math.max(0, Math.floor(r.x0)); const y0 = Math.max(0, Math.floor(r.y0)); const x1 = Math.min(w, Math.ceil(r.x1)); const y1 = Math.min(h, Math.ceil(r.y1));
+    const rw = x1 - x0; const rh = y1 - y0;
+    if (rw < 4 || rh < 4 || !data || data.length < w * h * 4) return null;
+    const px = (x, y) => { const k = (y * w + x) * 4; return [data[k], data[k + 1], data[k + 2], data[k + 3]]; };
+    const corners = []; const cs = Math.max(1, Math.min(3, Math.floor(Math.min(rw, rh) / 8)));
+    for (const [cx, cy] of [[x0, y0], [x1 - cs, y0], [x0, y1 - cs], [x1 - cs, y1 - cs]]) for (let j = 0; j < cs; j++) for (let i = 0; i < cs; i++) corners.push(px(cx + i, cy + j));
+    const med = (k) => { const v = corners.map((c) => c[k]).sort((a, b) => a - b); return v[Math.floor(v.length / 2)]; };
+    const bg = [med(0), med(1), med(2), med(3)]; const transparentBg = bg[3] < 20;
+    const cols = new Array(rw).fill(0); const rows = new Array(rh).fill(0); let fg = 0;
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+      const [R, G, B, A] = px(x, y);
+      const isFg = transparentBg ? A >= 40 : (A >= 40 && Math.max(Math.abs(R - bg[0]), Math.abs(G - bg[1]), Math.abs(B - bg[2])) > 30);
+      if (isFg) { cols[x - x0] += 1; rows[y - y0] += 1; fg += 1; }
+    }
+    if (fg < rw * rh * 0.005) return null;
+    const first = (a) => a.findIndex((n) => n >= 2); const last = (a) => { for (let i = a.length - 1; i >= 0; i--) if (a[i] >= 2) return i; return -1; };
+    const bx0 = first(cols); const bx1 = last(cols); const by0 = first(rows); const by1 = last(rows);
+    if (bx0 < 0 || by0 < 0 || bx1 <= bx0 || by1 <= by0) return null;
+    return { x0: x0 + bx0, y0: y0 + by0, x1: x0 + bx1 + 1, y1: y0 + by1 + 1 };
+  }
+  // pure: show the rectangle `rect` ({x0,y0,x1,y1} in the picture's own pixels) centred in a bw x bh box, scaled to fit (never stretched). Returns percentages of the BOX for
+  // the picture element (left / top / width / height) and of the PICTURE for the clip that hides everything outside the rectangle (so the other view cannot show beside it).
+  function garmentRectGeometry(nw, nh, rect, bw, bh) {
+    const rw = rect.x1 - rect.x0; const rh = rect.y1 - rect.y0;
+    const s = Math.min(bw / rw, bh / rh);
+    const W = nw * s; const H = nh * s;
+    const left = (bw - rw * s) / 2 - rect.x0 * s; const top = (bh - rh * s) / 2 - rect.y0 * s;
+    return { left: round2(left / bw * 100), top: round2(top / bh * 100), width: round2(W / bw * 100), height: round2(H / bh * 100),
+      clip: { t: round2(rect.y0 / nh * 100), r: round2((nw - rect.x1) / nw * 100), b: round2((nh - rect.y1) / nh * 100), l: round2(rect.x0 / nw * 100) } };
+  }
+  // pure: the view for one picture. `measured` = the garment's box inside the chosen view when it has been measured (picture pixels), else null.
+  // view: 'front-crop' (the front half of a composite) | 'centred' (one view, measured and centred) | 'whole' (nothing known yet: shown whole, centred by the box)
+  function garmentFitGeometry(nw, nh, bw, bh, category, single, measured) {
     const A = nh ? nw / nh : 0;
-    if (!nw || !nh || !bw || !bh || single || A < garmentPairMin(category)) return { view: 'whole' };
-    const regionAspect = A / 2; const boxAspect = bw / bh; // the front half: nw/2 by nh
-    const rw = regionAspect >= boxAspect ? bw : bh * regionAspect;
-    const rh = regionAspect >= boxAspect ? bw / regionAspect : bh;
-    const round = (n) => Math.round(n * 100) / 100;
-    return { view: 'front-crop', left: round((bw - rw) / 2 / bw * 100), top: round((bh - rh) / 2 / bh * 100), width: round(rw * 2 / bw * 100), height: round(rh / bh * 100) };
+    if (!nw || !nh || !bw || !bh) return { view: 'whole' };
+    const pair = !single && A >= garmentPairMin(category);
+    const region = pair ? { x0: 0, y0: 0, x1: nw / 2, y1: nh } : { x0: 0, y0: 0, x1: nw, y1: nh };
+    let rect = null;
+    if (measured && measured.x1 > measured.x0 && measured.y1 > measured.y0) {
+      const side = Math.max(measured.x1 - measured.x0, measured.y1 - measured.y0); const pad = side * GT_PAD;
+      rect = { x0: Math.max(region.x0, measured.x0 - pad), y0: Math.max(region.y0, measured.y0 - pad), x1: Math.min(region.x1, measured.x1 + pad), y1: Math.min(region.y1, measured.y1 + pad) };
+    } else if (pair) rect = region;
+    if (!rect) return { view: 'whole' };
+    return { view: pair ? 'front-crop' : 'centred', pair, region, ...garmentRectGeometry(nw, nh, rect, bw, bh) };
+  }
+  const gtCache = new Map(); // `${url}|${pair}` -> measured box in picture pixels | false (could not be measured)
+  const gtPending = new Set();
+  function gtKey(url, pair) { return `${url}|${pair ? 1 : 0}`; }
+  function gtStored(key) { try { const v = sessionStorage.getItem('gt:' + key); return v ? JSON.parse(v) : undefined; } catch (e) { return undefined; } }
+  function gtStore(key, v) { try { sessionStorage.setItem('gt:' + key, JSON.stringify(v)); } catch (e) { /* storage unavailable: just measured again next time */ } }
+  // measure the picture once (through the same-origin proxy so its pixels are readable), then place every thumbnail of it again
+  function gtMeasure(img, url, pair, nw, nh) {
+    const key = gtKey(url, pair);
+    if (gtCache.has(key) || gtPending.has(key)) return;
+    const stored = gtStored(key); if (stored !== undefined) { gtCache.set(key, stored); return; }
+    gtPending.add(key);
+    const probe = new Image();
+    probe.onload = () => {
+      let result = false;
+      try {
+        const scale = Math.min(1, 360 / Math.max(probe.naturalWidth, probe.naturalHeight));
+        const cw = Math.max(8, Math.round(probe.naturalWidth * scale)); const ch = Math.max(8, Math.round(probe.naturalHeight * scale));
+        const c = document.createElement('canvas'); c.width = cw; c.height = ch; const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(probe, 0, 0, cw, ch);
+        const data = g.getImageData(0, 0, cw, ch).data;
+        const bb = garmentBBox(data, cw, ch, pair ? { x0: 0, y0: 0, x1: cw / 2, y1: ch } : null);
+        const regW = pair ? cw / 2 : cw;
+        // a box that is tiny compared with its view is a white garment on a white page (or noise): do not trust it
+        if (bb && (bb.x1 - bb.x0) >= regW * 0.2 && (bb.y1 - bb.y0) >= ch * 0.2) { const sx = nw / cw; const sy = nh / ch; result = { x0: bb.x0 * sx, y0: bb.y0 * sy, x1: bb.x1 * sx, y1: bb.y1 * sy }; } // canvas pixels -> the picture's own pixels
+      } catch (e) { result = false; }
+      gtCache.set(key, result); gtPending.delete(key); if (result) gtStore(key, result);
+      document.querySelectorAll('img.gt-img').forEach((i) => { if (i.getAttribute('data-gt-key') === key) garmentFit(i); });
+    };
+    probe.onerror = () => { gtCache.set(key, false); gtPending.delete(key); };
+    probe.src = GT_PROXY + encodeURIComponent(url);
   }
   function garmentFit(img) {
     if (!img || !img.naturalWidth) return;
     const box = img.parentElement; // percentages are of the box's inner (padding) area, which is what an absolutely positioned picture is placed in
-    const g = garmentFitGeometry(img.naturalWidth, img.naturalHeight, (box && box.clientWidth) || 1, (box && box.clientHeight) || 1, img.getAttribute('data-gt-cat'), img.getAttribute('data-gt-single') === '1');
+    const bw = (box && box.clientWidth) || 1; const bh = (box && box.clientHeight) || 1; // (a box that is not laid out yet is treated as square; the placement is in percentages so it stays right)
+    const url = img.getAttribute('data-gt-url') || img.currentSrc || img.src; const single = img.getAttribute('data-gt-single') === '1'; const cat = img.getAttribute('data-gt-cat');
+    const first = garmentFitGeometry(img.naturalWidth, img.naturalHeight, bw, bh, cat, single, null);
+    const pair = !!first.pair || (!single && img.naturalHeight && img.naturalWidth / img.naturalHeight >= garmentPairMin(cat));
+    const key = gtKey(url, pair); img.setAttribute('data-gt-key', key);
+    const measured = gtCache.get(key) || null;
+    const g = measured ? garmentFitGeometry(img.naturalWidth, img.naturalHeight, bw, bh, cat, single, measured) : first;
     img.setAttribute('data-gt-view', g.view);
-    if (g.view === 'front-crop') { img.style.cssText = `left:${g.left}%;top:${g.top}%;width:${g.width}%;height:${g.height}%;object-fit:fill;clip-path:inset(0 50% 0 0);`; } else { img.style.cssText = ''; }
+    img.setAttribute('data-gt-measured', measured ? '1' : '0');
+    if (g.view === 'whole') img.style.cssText = ''; else img.style.cssText = `left:${g.left}%;top:${g.top}%;width:${g.width}%;height:${g.height}%;object-fit:fill;clip-path:inset(${g.clip.t}% ${g.clip.r}% ${g.clip.b}% ${g.clip.l}%);`;
+    if (!measured && !gtCache.has(key) && typeof document !== 'undefined' && document.createElement) gtMeasure(img, url, pair, img.naturalWidth, img.naturalHeight);
   }
   function garmentFitAll(root) { (root || document).querySelectorAll('img.gt-img').forEach((i) => { if (i.complete) garmentFit(i); }); }
-  // (a box that is not laid out yet, e.g. a tile on a page that is not showing, is treated as square, which every thumbnail box is; the placement is in percentages so it stays right)
-  // the clip hides the BACK half of the picture itself, so nothing of it can show in the margin beside the centred front view
   // the <img> only: the caller keeps its own box (position: relative; overflow: hidden) so spacing, size and styling are unchanged
   function garmentImgHtml(o) {
     const opt = o || {}; const url = opt.front || opt.url;
     if (!url) return '';
-    return `<img class="gt-img" src="${esc(url)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" data-gt-cat="${esc(opt.category || '')}"${opt.front ? ' data-gt-single="1"' : ''} onload="UX.garmentFit(this)" onerror="this.remove()">`;
+    return `<img class="gt-img" src="${esc(url)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" data-gt-url="${esc(url)}" data-gt-cat="${esc(opt.category || '')}"${opt.front ? ' data-gt-single="1"' : ''} onload="UX.garmentFit(this)" onerror="this.remove()">`;
+  }
+  // a LARGE preview: the whole picture (front and back where the picture holds both), never cropped, centred, in proportion. A missing or broken picture leaves the box's placeholder.
+  function productImgFullHtml(o) {
+    const opt = o || {}; const url = opt.url;
+    if (!url) return '';
+    return `<img class="gt-full" src="${esc(url)}" alt="${esc(opt.alt || '')}" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.remove()">`;
   }
 
   // Page header: title, one-line description, optional right-aligned actions.
@@ -238,5 +324,5 @@
     return `<div class="ux-progress${tone ? ` ux-progress-${tone}` : ''}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${p}"><div class="ux-progress-fill" style="width:${p}%"></div></div>`;
   }
 
-  return { garmentImgHtml, garmentFit, garmentFitAll, garmentFitGeometry, garmentPairMin, classifyMedia, mediaThumbHtml, creativeThumbHtml, productFallbackHtml, productThumbHtml, mediaFailed, placeholderHtml, pageHeaderHtml, statTilesHtml, badgeHtml, emptyStateHtml, progressBarHtml, esc };
+  return { garmentImgHtml, productImgFullHtml, garmentFit, garmentFitAll, garmentFitGeometry, garmentRectGeometry, garmentBBox, garmentPairMin, classifyMedia, mediaThumbHtml, creativeThumbHtml, productFallbackHtml, productThumbHtml, mediaFailed, placeholderHtml, pageHeaderHtml, statTilesHtml, badgeHtml, emptyStateHtml, progressBarHtml, esc };
 }));

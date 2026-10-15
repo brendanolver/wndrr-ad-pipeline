@@ -75,11 +75,20 @@ const PL_TRAY_KEY = 'wndrr.planning.trayCollapsed';
 const plTrayCollapsed = () => { try { return localStorage.getItem(PL_TRAY_KEY) === '1'; } catch (e) { return false; } };
 function plToggleTray() { try { localStorage.setItem(PL_TRAY_KEY, plTrayCollapsed() ? '0' : '1'); } catch (e) { /* storage unavailable: the choice just is not remembered */ } renderProductionHeader(); }
 const PL_TRAY_MAX = 5;
+document.addEventListener('click', (ev) => {
+  const x = ev.target.closest && ev.target.closest('[data-pl-tray-remove]');
+  if (!x) return;
+  ev.preventDefault(); ev.stopPropagation();
+  removeShootPlanItem(Number(x.dataset.plTrayRemove));
+});
 const PL_CAMERA = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.5"/></svg>';
 function plTrayThumb(i) {
   // the same single-view picture logic as the Shoot Plan tiles (UX.garmentImgHtml): a labelled front picture, else the front half of the catalogue composite
   const img = i.image_url || ((i.styles || []).find((s) => s.image_url) || {}).image_url || '';
-  return `<span class="pl-tray-th" title="${plEsc(i.product_name || 'Product')}">${UX.garmentImgHtml({ url: img, front: i.front_image_url, category: i.category || i.product_name })}<span class="pl-tray-th-none" aria-hidden="true">${PL_NOIMG}</span></span>`;
+  // each thumbnail carries its own remove control (visible on hover / keyboard focus, always visible on touch screens); it uses the Shoot Plan's normal removal, so a product
+  // whose concepts have work on them stays in the plan and the dialog says why (removeShootPlanItem)
+  const nm = plEsc(i.product_name || 'this product');
+  return `<span class="pl-tray-th" title="${nm}" data-pl-tray-item="${i.id}">${UX.garmentImgHtml({ url: img, front: i.front_image_url, category: i.category || i.product_name })}<span class="pl-tray-th-none" aria-hidden="true">${PL_NOIMG}</span><button type="button" class="pl-tray-x" data-pl-tray-remove="${i.id}" aria-label="Remove ${nm} from this week's Shoot Plan" title="Remove from plan"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></span>`;
 }
 function renderProductionHeader() {
   const el = document.getElementById('planning-production-header');

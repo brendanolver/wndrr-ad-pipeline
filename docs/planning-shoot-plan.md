@@ -51,6 +51,15 @@ WNDRR's normal ApparelMagic catalogue picture is ONE image with the front and ba
 
 Limitations: the left half is assumed to be the front (the catalogue convention; the browser journey cannot see real ApparelMagic pictures); a very wide single product photo, or a pair of tall bottoms whose pair is narrower than the threshold, would be shown whole. The Core table row thumbnails are unchanged.
 
+## Centred thumbnails, tray remove, Upcoming Drops (v1.3.4)
+
+- **Centring.** The shared helper (`UX.garmentImgHtml`) still shows ONE complete garment, but now also centres it by the garment's own bounding box (white margin equal on every side, proportions kept, never cropped or stretched). Browsers cannot read the pixels of a picture served from another site, so the measurement goes through `GET /api/product-image?u=` (`src/routes/productImage.js`): same-origin, behind sign-in, and only for pictures the application already holds (an ApparelMagic image URL or a Shoot Plan item's `image_url`); anything else is refused without being fetched. The picture itself is still displayed from its own URL. If it cannot be measured the front half is shown, as before. Results are cached in memory and `sessionStorage`.
+- **Where it applies.** Planning tray, Shoot Plan tiles, Upcoming Drops colour cards and Drop-card product tiles. The large preview on an Upcoming Drops product page shows the WHOLE picture (front and back), `object-fit: contain`, via `UX.productImgFullHtml`. Missing or broken pictures show the neutral placeholder.
+- **Tray remove.** Each tray thumbnail has a remove control (visible on hover or keyboard focus, always visible on touch devices). It uses the same guarded removal as the Shoot Plan tile (`removeShootPlanItem`): confirmation first, work-in-progress concepts block it and the message says what to do, untouched drafts are archived (history kept). The tray, tiles and Add to Shoot buttons update immediately.
+- **Owner.** New Concept has an Assigned To field from the application's team list (default Mark). It is saved as the concept's `concept_assignee` and the manual plan entry's `creator`, shown on the card and in the editor, and changing it in the editor does not reset the concept.
+- **Status control.** Shooting (Scheduled / In production / Filmed) and Editing (Filmed / Scheduled / In editing / Awaiting approval) share one single-line stepper. Any stage can be chosen, forwards or backwards, through the existing endpoints; leaving Filmed asks first, and a concept already in Final Approval is directed to Request Changes there. Nothing is deleted.
+- No database change.
+
 ## Creative coverage dates (v1.3.3)
 
 The "Latest:" date in Core and High Stocks (one shared cell, `plCoreCoverageCell` -> `PlanningExplain.coverage`) is always `D Mon YYYY`, using the year in the creative's own source date (never the current year, never invented). Missing creative dates stay `Unknown` / `None`; an impossible date is treated as unavailable. Display only: counting and recommendations are unchanged.
