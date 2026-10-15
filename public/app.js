@@ -10311,22 +10311,19 @@ function conceptDevConceptCardHtml(concept, productSource) {
 // GET /concept-development) -- their existing Proven creative coverage
 // stays exactly where it's tracked (the drop's own Required Concepts
 // plan/Planning product page), it's just not duplicated into this list.
-// "+ New Concept" is the same primary action for every source now. The
-// toolbar row leads with a plain "New Concepts" heading so this workspace
-// reads unambiguously as the new-concepts view -- Creative Tools is
-// supporting/reference functionality, so it stays a quiet secondary link
-// even though it now sits alongside the primary button instead of on its
-// own line above it (where it was reading as if it were the section title).
+// The page header owns the actions (Creative Toolkit, + New Concept); this row is just the "New Concepts" heading so the workspace reads as the new-concepts view.
+// The header's + New Concept is context-aware: inside a product's workspace it adds a concept to THAT product (openAddConceptModal), elsewhere it starts an ad-hoc one.
+function conceptDevHeaderNewConcept() {
+  const cd = state.conceptDev;
+  if (cd.view === 'product' && cd.currentItemId) return openAddConceptModal(cd.currentItemId);
+  return openAdHocConceptModal();
+}
 function renderConceptDevProductWorkspace(product) {
   return `
     <button type="button" class="link-btn cd-back-link" onclick="closeConceptDevProduct()">&larr; Back to Products</button>
     ${conceptDevWorkspaceHeaderHtml(product)}
     <div class="cd-workspace-toolbar">
       <div class="cd-workspace-toolbar-heading">New Concepts</div>
-      <div class="cd-workspace-toolbar-actions">
-        <button type="button" class="link-btn cd-need-inspiration" onclick="openCreativeTools(${product.shoot_plan_item_id})">Creative Tools &#9662;</button>
-        <button type="button" class="btn btn-primary btn-sm cd-new-concept-btn" onclick="openAddConceptModal(${product.shoot_plan_item_id})">+ New Concept</button>
-      </div>
     </div>
     <div class="cd-concept-grid">
       ${product.concepts.length ? product.concepts.map((c) => conceptDevConceptCardHtml(c, product.source)).join('') : '<div class="attention-empty">No new concepts yet</div>'}
@@ -14616,28 +14613,24 @@ const EDITING_STATUS_CLASS = { to_edit: 'editing-status-to-edit', scheduled: 'ed
 // renderEditingConceptModal's submitted-lock). Both new backward actions
 // are themselves guarded server-side against a submitted Concept, so this
 // never needs to special-case "ready_for_approval" here.
-const EDITING_STAGE_SHORT = { to_edit: 'Filmed', scheduled: 'Booked', editing: 'Editing', ready_for_approval: 'Approval' }; // the card is narrow: the full names stay in each segment's tooltip
+// Editing shows three stages: Filmed -> Editing -> Approval. "Booked" (a concept that has been given an editing day but not started) is a planning detail, not a stage: it still
+// exists underneath (editing_day, the week grid, "Scheduled" in the summary and the card's date), and such a concept simply shows as Filmed until editing starts.
+const EDITING_STAGES = [['to_edit', 'Filmed'], ['editing', 'Editing'], ['ready_for_approval', 'Approval']];
+function editingStageIndex(status) { return status === 'scheduled' ? 0 : EDITING_STAGES.findIndex((x) => x[0] === status); }
 function editingStatusControlHtml(concept) {
-  const stages = ['to_edit', 'scheduled', 'editing', 'ready_for_approval'];
   const status = editingConceptStatus(concept);
-  const hasDay = !!concept.editing_day;
-  const cur = stages.indexOf(status);
+  const cur = editingStageIndex(status);
   const id = concept.creative_asset_id;
-  return stageStepperHtml(stages.map((stage, i) => {
-    const base = { label: EDITING_STATUS_LABELS[stage], short: EDITING_STAGE_SHORT[stage], state: i === cur ? 'current' : (i < cur ? 'done' : 'todo') };
+  return stageStepperHtml(EDITING_STAGES.map(([stage, label], i) => {
+    const base = { label, state: i === cur ? 'current' : (i < cur ? 'done' : 'todo') };
     if (i === cur) return base;
     if (i > cur) { // forward
-      if (stage === 'scheduled') return { ...base, title: 'Drag it onto an editing day to schedule it' };
       if (stage === 'editing') return { ...base, action: `advanceEditingToInProgress(${id})`, title: 'Mark as In editing' };
-      return status === 'editing' ? { ...base, action: `advanceEditingToEdited(${id})`, title: 'Mark as Awaiting approval' } : { ...base, title: 'Start editing first' };
+      return status === 'editing' ? { ...base, action: `advanceEditingToEdited(${id})`, title: 'Mark as Awaiting approval (opens the final edit)' } : { ...base, title: 'Start editing first' };
     }
     // backward: corrections. Once it has been sent to Final Approval, only Request Changes there can bring it back, so the stage explains that instead of silently doing nothing.
     if (status === 'ready_for_approval') return { ...base, action: `editingExplainSubmitted(${id})`, title: 'Already sent to Final Approval: Request Changes there to bring it back' };
-    if (status === 'editing') {
-      if (stage === 'scheduled') return hasDay ? { ...base, action: `revertEditingToScheduled(${id})`, title: 'Move back to Scheduled' } : { ...base, title: 'It has no editing day: drag it onto one to schedule it' };
-      return hasDay ? { ...base, action: `editingMoveBackToFilmed(${id})`, title: 'Move back to Filmed (also removes its editing day)' } : { ...base, action: `revertEditingToToEdit(${id})`, title: 'Move back to Filmed' };
-    }
-    return { ...base, action: `revertEditingToToEdit(${id})`, title: 'Move back to Filmed (unschedules it)' };
+    return { ...base, action: `editingMoveBackToFilmed(${id})`, title: 'Move back to Filmed' };
   }));
 }
 
@@ -14647,14 +14640,10 @@ async function editingExplainSubmitted(conceptAssetId) {
   if (ok) switchTab('final-approval');
 }
 
-// Editing (with a day) -> Filmed in one step: stops editing, then removes the editing day. Both are the existing reversible actions; the final edit rows, links, owner and notes are not touched.
+// Editing -> Filmed: stops editing (the existing reversible "unstart"). Its editing day (if it has one), owner, edits, links and notes are all kept, so it can be started again straight away.
 async function editingMoveBackToFilmed(conceptAssetId) {
-  const concept = editingFindConcept(conceptAssetId);
-  if (!concept) return;
-  if (!(await confirmDialog('Move this back to Filmed? It stops editing and also removes its editing day. Its edits, links and notes are kept.', { okLabel: 'Move back' }))) return;
   try {
     await api(`/editing/concepts/${conceptAssetId}/unstart`, { method: 'POST' });
-    await api(`/editing/schedule/${concept.shoot_schedule_id}`, { method: 'PATCH', body: JSON.stringify({ editing_day: null }) });
     toast('Moved back to Filmed');
   } catch (e) {
     toast(e.message, true);
@@ -15568,10 +15557,10 @@ function finalApprovalVersions(c) {
   return edits.map((e) => ({ ...e, format: e.format || c.format || 'video' }));
 }
 
-function finalApprovalMediaStripHtml(versions, size, productImage) {
+function finalApprovalMediaStripHtml(versions, size) {
   const shown = versions.slice(0, 3);
   const extra = versions.length - shown.length;
-  return `<div class="fa-media-strip">${shown.map((v) => UX.creativeThumbHtml(v.final_edit_link, v.format, productImage, { size, label: v.asset_name || 'Creative preview' })).join('')}${extra > 0 ? `<span class="fa-media-more">+${extra}</span>` : ''}</div>`;
+  return `<div class="fa-media-strip">${shown.map((v) => UX.finalCreativeHtml(v.final_edit_link, v.format, { size, label: v.asset_name || 'Creative preview' })).join('')}${extra > 0 ? `<span class="fa-media-more">+${extra}</span>` : ''}</div>`;
 }
 
 function finalApprovalCardHtml(c) {
@@ -15734,6 +15723,18 @@ function adSetupSetCategory(choice) {
   renderAdSetupNamePreview();
 }
 const URL_LINK_PAGE_LABELS = { product: 'Product', category: 'Category', new_arrivals: 'New Arrivals', home: 'Home Page', sale_bundle: 'Sale/Bundle Page', sign_up: 'Sign Up Page', other: 'Other' };
+// What the choice is called in the form. The Meta ad name keeps the established short word ("Product"), so naming and matching are unchanged.
+const URL_LINK_PAGE_OPTION_LABELS = { ...URL_LINK_PAGE_LABELS, product: 'Product Page' };
+const adSetupHttpUrl = (u) => { try { const x = new URL(String(u || '').trim()); return x.protocol === 'https:' || x.protocol === 'http:'; } catch (e) { return false; } };
+// the Meta ad name never says the category twice: a Product Name that already ends with its Product Category drops it here (stored values are not edited)
+function adSetupNameWithoutCategory(name, category) {
+  const n = String(name || '').trim(); const c = String(category || '').trim();
+  if (!n || !c) return n;
+  const sing = (w) => { const x = String(w).toLowerCase().replace(/[^a-z0-9/-]/g, ''); return x.length > 3 && x.endsWith('s') && !x.endsWith('ss') ? x.slice(0, -1) : x; };
+  const words = n.split(/\s+/); const cw = c.split(/\s+/);
+  if (words.length <= cw.length) return n;
+  return words.slice(-cw.length).map(sing).every((x, i) => x === sing(cw[i])) ? words.slice(0, -cw.length).join(' ') : n;
+}
 const CTA_LABELS = { shop_now: 'Shop Now', sign_up: 'Sign Up', learn_more: 'Learn More', shop_the_sale: 'Shop the Sale' };
 const STAGE_TAGS = { hype: 'HYPE', sale_live: 'LIVE', mid_sale: 'MID SALE', last_chance: 'LAST CHANCE' };
 
@@ -15771,7 +15772,7 @@ function renderAdSetupSubtabCounts() {
 
 // One Ad Setup row = one Final Edit (version), so each card shows that version's own creative.
 function adSetupMediaHtml(item) {
-  return UX.creativeThumbHtml(item.final_edit_link, item.final_edit_format || item.media_type || 'video', item.product_image_url, { size: 'md', label: item.final_edit_asset_name || item.concept_name });
+  return UX.finalCreativeHtml(item.final_edit_link, item.final_edit_format || item.media_type || 'video', { size: 'md', label: item.final_edit_asset_name || item.concept_name });
 }
 
 function adSetupCardHtml(item) {
@@ -15849,7 +15850,7 @@ function buildMetaAdNamePreviewClient(d) {
   segs.push(d.batch_number ? `#${d.batch_number}` : '#—');
   if (d.week_no) segs.push(d.week_no);
   if (d.ad_date) segs.push(formatDateDDMMClient(d.ad_date));
-  segs.push(d.product_label ? d.product_label.toUpperCase() : '*');
+  segs.push(d.product_label ? adSetupNameWithoutCategory(d.product_label, d.product_type).toUpperCase() : '*');
   segs.push(d.product_type ? d.product_type.toUpperCase() : '*');
   segs.push(d.hook_short || '*');
   segs.push(d.media_type === 'video' ? 'Video' : d.media_type === 'image' ? 'Image' : '*');
@@ -15865,6 +15866,7 @@ async function openAdSetupModal(id) {
     const detail = await api(`/ad-setup/${id}`);
     state.adSetup.editingId = id;
     state.adSetup.draft = { ...detail };
+    state.adSetup.productUrlMessage = null;
     document.getElementById('ad-setup-modal-title').textContent = detail.concept_name;
     document.getElementById('ad-setup-move-back-btn').style.display = state.currentUser && state.currentUser.role === 'admin' ? '' : 'none';
     renderAdSetupModal();
@@ -15901,7 +15903,37 @@ function detectStageTypeClient(stageName) {
   return null;
 }
 
+// A note under Destination when it needs attention: a product page that could not be found, or an address that is not a web address.
+function renderAdSetupDestinationNote() {
+  const el = document.getElementById('as-destination-note'); if (!el) return;
+  const d = state.adSetup.draft; const url = String(d.destination_url || '').trim();
+  const info = (d.destination_info && d.destination_info.product_page) || {};
+  let msg = '';
+  if (!url && d.url_link_page === 'product') msg = (state.adSetup.productUrlMessage || info.message || 'The product page address has not been found yet. Paste the product page address.');
+  else if (url && !adSetupHttpUrl(url)) msg = 'This is not a web address. It should start with https://';
+  else if (!url && d.url_link_page) msg = 'Add the address this ad should send people to.';
+  el.innerHTML = msg ? `<div class="as-flag">${escapeHtml(msg)}</div>` : '';
+}
+
+// Choosing "Product Page" with no address yet asks the server for the product's page (real data only); the person can always overwrite it.
+async function adSetupChooseLinkPage(value) {
+  adSetupSet('url_link_page', value);
+  state.adSetup.productUrlMessage = null;
+  const d = state.adSetup.draft;
+  if (value === 'product' && !String(d.destination_url || '').trim() && state.adSetup.editingId) {
+    const id = state.adSetup.editingId;
+    try {
+      const r = await api(`/ad-setup/${id}/product-url`);
+      if (state.adSetup.editingId !== id || state.adSetup.draft.url_link_page !== 'product' || String(state.adSetup.draft.destination_url || '').trim()) return;
+      if (r.url) { adSetupSet('destination_url', r.url); const inp = document.getElementById('as-destination-url'); if (inp) inp.value = r.url; }
+      else state.adSetup.productUrlMessage = `${r.message || 'The product page address could not be found.'} Paste the product page address below.`;
+    } catch (e) { state.adSetup.productUrlMessage = 'The product page address could not be looked up. Paste it below.'; }
+  }
+  renderAdSetupReadiness();
+}
+
 function renderAdSetupReadiness() {
+  renderAdSetupDestinationNote();
   const d = state.adSetup.draft;
   const ps = adSetupPrimaryState(d);
   const hasCopy = !!d.copy_set_id || !!((d.selected_headline || '').trim() && (d.selected_description || '').trim());
@@ -15911,7 +15943,7 @@ function renderAdSetupReadiness() {
     { label: 'Primary Text approved', ready: ps.approved && (!!d.copy_set_id || !!(d.selected_primary_text || '').trim()) },
     { label: 'Headline and Description', ready: hasCopy },
     { label: 'CTA', ready: !!d.cta },
-    { label: 'Destination', ready: !!(d.url_link_page && d.destination_url) },
+    { label: 'Destination', ready: !!(d.url_link_page && adSetupHttpUrl(d.destination_url)) },
   ];
   const el = document.getElementById('as-readiness-list');
   if (!el) return;
@@ -15950,7 +15982,8 @@ function renderAdSetupModal() {
     hook_short: d.hook_short, creator_name: d.creator_name, concept_label: d.concept_label,
     media_type: d.media_type, ad_type: d.ad_type, url_link_page: d.url_link_page,
   });
-  const productNames = (d.products || []).map((p) => p.name).filter(Boolean);
+  const productNames = [...new Set((d.products || []).map((p) => p.name).filter(Boolean))];
+  const finalLink = /^https?:\/\//i.test(String(d.final_edit_link || '').trim()) ? String(d.final_edit_link).trim() : '';
 
   document.getElementById('ad-setup-modal-body').innerHTML = `
     <div class="as-layout">
@@ -16006,9 +16039,9 @@ function renderAdSetupModal() {
               <input type="text" value="${escapeHtml(d.concept_label || '')}" oninput="adSetupSet('concept_label', this.value)">
             </label>
             <label>URL link page
-              <select onchange="adSetupSet('url_link_page', this.value || null)">
+              <select onchange="adSetupChooseLinkPage(this.value || null)">
                 <option value="" ${d.url_link_page ? '' : 'selected'}>-- Choose page --</option>
-                ${optionSelect('url_link_page', URL_LINK_PAGE_LABELS, d.url_link_page)}
+                ${optionSelect('url_link_page', URL_LINK_PAGE_OPTION_LABELS, d.url_link_page)}
               </select>
             </label>
           </div>
@@ -16019,8 +16052,9 @@ function renderAdSetupModal() {
         <section class="as-section as-card">
           <div class="as-section-title">Destination</div>
           <label>Destination URL
-            <input type="text" value="${escapeHtml(d.destination_url || '')}" placeholder="https://" oninput="adSetupSet('destination_url', this.value)">
+            <input type="text" id="as-destination-url" value="${escapeHtml(d.destination_url || '')}" placeholder="https://" oninput="adSetupSet('destination_url', this.value)">
           </label>
+          <div id="as-destination-note"></div>
         </section>
       </div>
 
@@ -16028,13 +16062,13 @@ function renderAdSetupModal() {
         <section class="as-section as-card">
           <div class="as-section-title">Creative</div>
           <div class="as-creative">
-            ${UX.creativeThumbHtml(d.final_edit_link, d.final_edit_format || d.media_type || 'video', d.product_image_url, { size: 'lg', label: d.final_edit_asset_name || d.concept_name })}
+            ${(() => { const thumb = UX.finalCreativeHtml(d.final_edit_link, d.final_edit_format || d.media_type || 'video', { size: 'lg', label: d.final_edit_asset_name || d.concept_name }); return finalLink ? `<a href="${escapeHtml(finalLink)}" target="_blank" rel="noopener" class="as-creative-thumb-link" title="Open the finished creative">${thumb}</a>` : thumb; })()}
             <div class="as-creative-body">
               <div class="as-creative-name">${escapeHtml(d.final_edit_asset_name || d.concept_name || '')}</div>
               ${productNames.length ? `<div class="as-section-note" style="margin:0;">${escapeHtml(productNames.join(', '))}</div>` : ''}
-              ${d.final_edit_link
-                ? `<a href="${escapeHtml(d.final_edit_link)}" target="_blank" rel="noopener" class="ux-link-btn">View creative &rarr;</a>`
-                : '<div class="editing-final-edit-empty">No final creative link on record.</div>'}
+              ${finalLink
+                ? `<a href="${escapeHtml(finalLink)}" target="_blank" rel="noopener" class="ux-link-btn">View creative &rarr;</a>`
+                : '<div class="editing-final-edit-empty">Final creative missing: no link has been attached to this final edit.</div>'}
             </div>
           </div>
         </section>
@@ -16340,7 +16374,7 @@ async function saveAdSetupDraft() {
     delete state.adSetup.draft.batch;
     try {
       const fresh = await api(`/ad-setup/${state.adSetup.editingId}`);
-      Object.assign(state.adSetup.draft, { copy_rule: fresh.copy_rule, batch_number: fresh.batch_number, batch_name: fresh.batch_name, sale_sequence_number: fresh.sale_sequence_number, generated_meta_ad_name: fresh.generated_meta_ad_name });
+      Object.assign(state.adSetup.draft, { copy_rule: fresh.copy_rule, batch_number: fresh.batch_number, batch_name: fresh.batch_name, sale_sequence_number: fresh.sale_sequence_number, generated_meta_ad_name: fresh.generated_meta_ad_name, destination_info: fresh.destination_info });
     } catch (e) { /* the rule note refreshes next time it opens */ }
     toast('Draft saved');
     renderAdSetupModal();
@@ -16400,7 +16434,7 @@ async function openAdSetupApprovedModal(id) {
       </div>
       <div class="as-section">
         <div class="as-section-title">Destination</div>
-        <div>${escapeHtml(URL_LINK_PAGE_LABELS[d.url_link_page] || d.url_link_page)} &mdash; ${escapeHtml(d.destination_url || '')}</div>
+        <div>${escapeHtml(URL_LINK_PAGE_OPTION_LABELS[d.url_link_page] || d.url_link_page)} &mdash; ${escapeHtml(d.destination_url || '')}</div>
       </div>
     `;
     openModal('ad-setup-approved-modal');

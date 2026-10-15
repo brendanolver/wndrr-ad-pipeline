@@ -47,11 +47,36 @@ The thumbnail is derived from that link only (`UX.classifyMedia`):
 * YouTube link: YouTube's own still of that video, with a small play icon.
 * Direct video file (`.mp4`, `.mov`, `.m4v`, `.webm`, `.ogv`): the browser's first frame of the file itself (`preload="metadata"`, `#t=0.1`, muted, never autoplays), with a play icon.
 * Direct image file: the image itself, no play icon.
-* Anything else (Drive, Frame.io, Dropbox, Vimeo, unknown hosts) or no link: a neutral placeholder that names the format and platform ("Video · Google Drive", "Static · no link yet").
+* Google Drive: Drive's own thumbnail when the file is shared as "anyone with the link"; otherwise the placeholder.
+* Anything else (Frame.io, Dropbox, Vimeo, unknown hosts): a neutral placeholder that says "<platform> · preview unavailable"; "View creative" still opens the original.
+* No link at all: a neutral placeholder that says "Final creative missing" (v1.3.5; `UX.finalCreativeHtml`).
 * A preview that fails to load falls back to the same placeholder, never a broken image.
 
-A product catalogue image is never used. A concept with several versions (hooks) shows one thumbnail per version: the Ready for Approval queue now returns every
+A product catalogue image is never used on Final Approval or Ad Setup (v1.3.5: the earlier "labelled product image" fallback is gone there; Shooting and Editing cards, which are
+about work in progress, still use `UX.creativeThumbHtml`). A concept with several versions (hooks) shows one thumbnail per version: the Ready for Approval queue now returns every
 active Final Edit (`final_edits` array, additive), and each Ad Setup row already corresponds to one Final Edit.
+
+## Editing status control (v1.3.5)
+
+Editing shows three stages: **Filmed -> Editing -> Approval**. "Booked" is not a stage: a concept that has been given an editing day but not started simply shows as Filmed
+(its day, the week grid and the Scheduled summary are unchanged). Filmed -> Editing is the existing start action; Editing -> Filmed is the existing reversible `unstart`
+(the editing day, owner, edits and links are kept); Editing -> Approval opens the final edit step and nothing is sent until it is submitted. A concept already in Final
+Approval can only come back through Request Changes there: its Filmed / Editing segments explain that and offer Final Approval. Shooting keeps its own stages
+(Scheduled, In production, Filmed).
+
+## Ad Setup naming and destination (v1.3.5)
+
+* **Product Name / Product Category.** The category is taken out of the Product Name as one whole contiguous run (a structured category such as "Box Fit Tee" first, then a
+  garment vocabulary), never word by word, so meaningful style words stay ("ASSET RAGLAN" + "BOX FIT TEE"; "ROTHMAN" + "SPORT SHORT"). The stored product, Shopify and
+  ApparelMagic names are never touched. A draft made earlier whose Product Name is still exactly a linked product's full catalogue name has the repeated category taken off once
+  when it is opened; any other value (including one a person typed) is left exactly as saved. The generated Meta ad name keeps its structure and never says the category twice.
+* **URL link page.** An ad about one specific product (one ApparelMagic product code, however many colourways) defaults to **Product Page**; the Meta ad name segment keeps its
+  established word "Product". The default is applied once per Ad Setup (`ad_setups.destination_defaulted_at`) and only when the destination is untouched (no URL, link page empty
+  or the old automatic New Arrivals). Sale ads and multi-product ads keep their existing rules (Sign Up page for hype, chosen by the team for the other sale stages, New Arrivals otherwise).
+* **Destination URL.** Filled only from real data, in this order: Shopify's own `onlineStoreUrl` for the product (read-only Admin lookup by SKU prefix; needs the `read_products`
+  scope on the existing token; exactly one published product must match), then the address a person already saved on an earlier Ad Setup of the same product. Never built from
+  a name or guessed. A URL already in the field is never replaced. When none can be found the destination is flagged ("Paste the product page address") and the Final Check keeps
+  Destination open. Destination counts as ready only with a link page and a valid web address, in the form and on the server (Approve).
 
 ## What was deliberately not changed
 

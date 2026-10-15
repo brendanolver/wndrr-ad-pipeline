@@ -107,22 +107,36 @@ const GARMENT_NOUNS = new Set([
   'crew', 'short', 'shorts', 'pant', 'pants', 'jean', 'jeans', 'jogger', 'joggers',
   'jacket', 'vest', 'cap', 'hat', 'beanie', 'sock', 'socks', 'set', 'dress', 'skirt',
   'polo', 'tank', 'singlet', 'coat', 'parka', 'jumpsuit', 'romper', 'rugby', 'bomber',
-  'zip', 'quarterzip', 'halfzip', 'boardshort', 'boardshorts',
+  'zip', 'quarterzip', 'halfzip', 'boardshort', 'boardshorts', 'trackshort', 'trackpant',
+  'tracksuit', 'bag', 'tote', 'belt', 'scarf', 'glove', 'gloves', 'bottle', 'towel',
 ]);
 const FIT_MODIFIERS = new Set([
   'box', 'fit', 'relaxed', 'oversized', 'cropped', 'slim', 'regular', 'straight',
   'wide', 'skinny', 'loose', 'carpenter', 'cargo', 'utility', 'heavyweight',
   'lightweight', 'long', 'short', 'sleeve', 'full', 'half', 'quarter', 'classic',
-  'essential', 'core',
+  'essential', 'core', 'sport', 'beach', 'swim', 'gym', 'training', 'tech', 'track',
+  'lounge', 'sweat', 'board', 'running', 'baggy', 'tapered', 'pleated', '1/4', '1/2', '3/4',
 ]);
 
 function normWord(w) {
-  return String(w || '').toLowerCase().replace(/[^a-z0-9-]/g, '');
+  return String(w || '').toLowerCase().replace(/[^a-z0-9/-]/g, '');
 }
+// "tees" -> "tee", "pants" -> "pant", "hoodies" -> "hoodie"; "dress" keeps its s
+const KEEP_S = new Set(['dress', 'cross']);
+function singular(w) {
+  const x = normWord(w);
+  if (x.length > 3 && x.endsWith('ies')) return x.slice(0, -3) + 'y';
+  if (x.length > 3 && x.endsWith('s') && !x.endsWith('ss') && !KEEP_S.has(x)) return x.slice(0, -1);
+  return x;
+}
+const isGarmentNoun = (w) => GARMENT_NOUNS.has(normWord(w)) || GARMENT_NOUNS.has(singular(w));
 
 // Splits a full product name into { name, category }. Anchors on the LAST
 // garment noun found; walks backward from it consuming FIT_MODIFIERS words
-// to form the category phrase, everything before that is the product name.
+// to form the category phrase. Everything before it is the product name, and any
+// words AFTER the noun (a colour, a suffix) stay with the name so nothing meaningful is
+// lost. At least one word always stays in the name ("Cargo Pant" -> "Cargo" + "Pant",
+// never the whole name repeated as its own category).
 // Falls back to { name: fullName, category: null } when no known garment
 // noun is found (an unfamiliar/new product type), rather than guessing.
 function splitProductNameByWords(fullName) {
@@ -131,42 +145,65 @@ function splitProductNameByWords(fullName) {
 
   let nounIdx = -1;
   for (let i = words.length - 1; i >= 0; i -= 1) {
-    if (GARMENT_NOUNS.has(normWord(words[i]))) { nounIdx = i; break; }
+    if (isGarmentNoun(words[i])) { nounIdx = i; break; }
   }
   if (nounIdx === -1) return { name: fullName.trim(), category: null };
 
   let startIdx = nounIdx;
-  while (startIdx - 1 >= 0 && FIT_MODIFIERS.has(normWord(words[startIdx - 1]))) {
+  while (startIdx - 1 >= 1 && FIT_MODIFIERS.has(normWord(words[startIdx - 1]))) {
     startIdx -= 1;
   }
 
   const category = words.slice(startIdx, nounIdx + 1).join(' ');
-  const name = words.slice(0, startIdx).join(' ').trim();
+  const name = [...words.slice(0, startIdx), ...words.slice(nounIdx + 1)].join(' ').trim();
   return { name: name || fullName.trim(), category };
 }
 
-// Product Name + Product Category for Ad Setup's Naming section (see the
-// brief, item 1). Prefers a REAL, specific style/category field over
-// parsing when one exists -- WNDRR/ApparelMagic's own `category` (via
-// styles.category_id) is checked first, but it's a coarse sync bucket
-// (APPAREL/ACCESSORIES/...), so a short, generic-looking value there is
-// treated as unreliable for this purpose and the word-split heuristic
-// above is used instead. When the structured category IS specific enough
-// to be useful, it's used directly and its words are stripped from the
-// Product Name so the two fields never repeat each other.
+// Where does `phrase` (a category such as "Box Fit Tee") sit inside `words` as a CONTIGUOUS run? -> start index or -1. Case-, punctuation- and plural-insensitive;
+// only a whole run of words counts, never a word here and there, so a meaningful style word that merely shares a word with the category is never removed.
+function findPhrase(words, phraseWords) {
+  const w = words.map(singular); const p = phraseWords.map(singular);
+  if (!p.length) return -1;
+  for (let i = w.length - p.length; i >= 0; i -= 1) {
+    if (p.every((x, k) => w[i + k] === x)) return i;
+  }
+  return -1;
+}
+
+// Product Name + Product Category for Ad Setup's Naming section. Prefers a REAL, specific category (the product's structured category) over parsing when it
+// is specific enough to be useful: its words must appear in the name as one contiguous run, and only that run is taken out of the name, so the two fields never
+// repeat each other ("ASSET RAGLAN BOX FIT TEE" + "BOX FIT TEE" -> "ASSET RAGLAN"). A coarse bucket (APPAREL, ACCESSORIES ...) or a category the name does not contain is
+// not used and the word heuristic above decides instead. This only changes how the name is REPRESENTED for Meta naming, never the underlying product record.
 const GENERIC_CATEGORY_VALUES = new Set(['apparel', 'accessories', 'general', 'uncategorized', 'misc', 'other']);
 function splitProductName(fullName, structuredCategory) {
   const trimmedName = String(fullName || '').trim();
-  const categoryWords = new Set(String(structuredCategory || '').trim().toLowerCase().split(/\s+/).filter(Boolean));
-  const structuredIsUsable = structuredCategory
-    && !GENERIC_CATEGORY_VALUES.has(String(structuredCategory).trim().toLowerCase())
-    && [...categoryWords].some((w) => trimmedName.toLowerCase().includes(w));
-
-  if (structuredIsUsable) {
-    const nameWords = trimmedName.split(/\s+/).filter((w) => !categoryWords.has(normWord(w)));
-    return { name: (nameWords.join(' ').trim() || trimmedName), category: structuredCategory.trim() };
+  const cat = String(structuredCategory || '').trim();
+  if (cat && !GENERIC_CATEGORY_VALUES.has(cat.toLowerCase())) {
+    const words = trimmedName.split(/\s+/).filter(Boolean);
+    const at = findPhrase(words, cat.split(/\s+/).filter(Boolean));
+    if (at >= 0) {
+      const catWords = cat.split(/\s+/).filter(Boolean);
+      const rest = [...words.slice(0, at), ...words.slice(at + catWords.length)].join(' ').trim();
+      // a coarse category ("Tees") sitting inside a more specific type in the name ("Box Fit Tee"): the specific type is the category, so "Box Fit" is not left in the name
+      const h = splitProductNameByWords(trimmedName);
+      const hc = h.category ? h.category.split(/\s+/) : [];
+      const hcTailIsCat = hc.length > catWords.length && hc.slice(-catWords.length).map(singular).join(' ') === catWords.map(singular).join(' ');
+      if (hcTailIsCat) return h;
+      if (rest) return { name: rest, category: cat };
+    }
   }
   return splitProductNameByWords(trimmedName);
+}
+
+// Does a product name already END with its category (case/plural-insensitive)? -> the name without it, else the name unchanged. Used only when the Meta ad name is built,
+// so a stored value (including one a person typed) is never edited: the generated name just never says the category twice.
+function nameWithoutCategory(productName, productCategory) {
+  const name = String(productName || '').trim(); const cat = String(productCategory || '').trim();
+  if (!name || !cat) return name;
+  const words = name.split(/\s+/); const catWords = cat.split(/\s+/);
+  if (words.length <= catWords.length) return name;
+  const tail = words.slice(-catWords.length).map(singular); const want = catWords.map(singular);
+  return tail.every((x, i) => x === want[i]) ? words.slice(0, -catWords.length).join(' ') : name;
 }
 
 // A small set of low-information words dropped from a shortened hook --
@@ -235,7 +272,7 @@ function buildMetaAdName(fields) {
   // stored fields themselves keep normal casing for readability elsewhere
   // in the UI -- Media/Ad Type/URL Link Page keep their own Title Case
   // labels, also matching the real convention.
-  segments.push(productName ? productName.toUpperCase() : PLACEHOLDER);
+  segments.push(productName ? nameWithoutCategory(productName, productCategory).toUpperCase() : PLACEHOLDER);
   segments.push(productCategory ? productCategory.toUpperCase() : PLACEHOLDER);
   segments.push(hookShort || PLACEHOLDER);
   segments.push(mediaType === 'video' ? 'Video' : mediaType === 'image' ? 'Image' : PLACEHOLDER);
@@ -253,6 +290,7 @@ module.exports = {
   detectAdCategory,
   detectPromotionStageType,
   splitProductName,
+  nameWithoutCategory,
   shortenHook,
   buildMetaAdName,
   AD_CATEGORY_LABELS,

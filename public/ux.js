@@ -110,7 +110,7 @@
 
   function placeholderHtml(m) {
     const word = FORMAT_WORD[m.format] || 'Creative';
-    const caption = m.kind === 'none' ? `${word} · no link yet` : (m.platform ? `${word} · ${m.platform}` : word);
+    const caption = m.kind === 'none' ? `${word} · no link yet` : (m.kind === 'link' || m.kind === 'drive' ? `${m.platform ? m.platform + ' · ' : ''}preview unavailable` : (m.platform ? `${word} · ${m.platform}` : word));
     return `<span class="ux-media-ph">${m.format === 'carousel' ? ICON.carousel : (m.isVideo ? ICON.video : ICON.image)}<span class="ux-media-ph-text">${esc(caption)}</span></span>`;
   }
 
@@ -141,6 +141,18 @@
     const m = classifyMedia(link, format);
     if ((m.kind === 'none' || m.kind === 'link') && productImage) return productFallbackHtml(productImage, o);
     return mediaThumbHtml(link, format, { ...o, fallbackImage: productImage || '' });
+  }
+
+  // The finished (final edited) creative itself, for Final Approval / Ad Setup. Unlike creativeThumbHtml it NEVER falls back to the product catalogue picture: a creative
+  // that cannot be previewed shows a neutral placeholder that says so (missing, or a link the browser cannot preview) and the link is still opened by "View creative".
+  function finalCreativeHtml(link, format, opts) {
+    const o = opts || {};
+    const m = classifyMedia(link, format);
+    if (m.kind === 'none') {
+      const size = o.size === 'sm' || o.size === 'lg' ? o.size : 'md';
+      return `<span class="ux-media ux-media-${size} ux-media-none ux-media-missing" data-media-kind="missing" data-media-format="${m.format}" role="img" aria-label="Final creative missing"><span class="ux-media-ph">${m.format === 'carousel' ? ICON.carousel : (m.isVideo ? ICON.video : ICON.image)}<span class="ux-media-ph-text">Final creative missing</span></span></span>`;
+    }
+    return mediaThumbHtml(link, format, { ...o, fallbackImage: '' });
   }
 
   function productFallbackHtml(url, o) {
@@ -324,5 +336,5 @@
     return `<div class="ux-progress${tone ? ` ux-progress-${tone}` : ''}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${p}"><div class="ux-progress-fill" style="width:${p}%"></div></div>`;
   }
 
-  return { garmentImgHtml, productImgFullHtml, garmentFit, garmentFitAll, garmentFitGeometry, garmentRectGeometry, garmentBBox, garmentPairMin, classifyMedia, mediaThumbHtml, creativeThumbHtml, productFallbackHtml, productThumbHtml, mediaFailed, placeholderHtml, pageHeaderHtml, statTilesHtml, badgeHtml, emptyStateHtml, progressBarHtml, esc };
+  return { garmentImgHtml, productImgFullHtml, garmentFit, garmentFitAll, garmentFitGeometry, garmentRectGeometry, garmentBBox, garmentPairMin, classifyMedia, mediaThumbHtml, creativeThumbHtml, finalCreativeHtml, productFallbackHtml, productThumbHtml, mediaFailed, placeholderHtml, pageHeaderHtml, statTilesHtml, badgeHtml, emptyStateHtml, progressBarHtml, esc };
 }));

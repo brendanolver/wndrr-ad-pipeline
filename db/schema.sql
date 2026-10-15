@@ -3492,6 +3492,10 @@ ALTER TABLE planning_settings ADD COLUMN IF NOT EXISTS drop_default_editor VARCH
 -- Rows created before this column existed are recognised at read time by that same rule (see AUTO_LINKED_SQL in src/lib/shootPlanSelection.js), so no existing row is rewritten.
 ALTER TABLE shoot_plan_items ADD COLUMN IF NOT EXISTS auto_linked BOOLEAN NOT NULL DEFAULT false;
 
+-- Batch 40: Ad Setup destination defaults. Set once per Ad Setup when the "Product" link page default has been considered, so a person's later choice of link page is never reset.
+-- Additive and nullable: existing rows keep NULL and are looked at once, only ever to fill an untouched destination.
+ALTER TABLE ad_setups ADD COLUMN IF NOT EXISTS destination_defaulted_at TIMESTAMPTZ;
+
 -- Approved Ad Matching concepts + historical-spelling aliases
 -- =====================================================================
 -- The concept list Ad Matching offers is the people-approved vocabulary: meta_matching_vocab rows of kind 'concept'. The 40 approved

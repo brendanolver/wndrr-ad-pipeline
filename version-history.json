@@ -2,6 +2,18 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.3.5",
+      "date": "2026-10-16",
+      "title": "Final Approval creative preview, naming and destination; Editing three stages; one set of Concept Development actions",
+      "changes": [
+        "Concept Development: the duplicate Creative Tools and + New Concept beside the New Concepts heading are gone; the page header's + New Concept now adds to the open product.",
+        "Editing: the status control shows three stages (Filmed, Editing, Approval) on one line with full labels; Booked is no longer a stage (editing days and scheduling are unchanged underneath); moving back from Editing keeps the editing day and edits, and Approval still goes back only through Request Changes in Final Approval.",
+        "Final Approval and Ad Setup show the finished creative (thumbnail, View creative link) and never substitute the product catalogue picture; a missing creative or an unpreviewable link shows a clear placeholder.",
+        "Ad Setup naming: Product Name no longer repeats the Product Category (whole-phrase split, structured category first); the Meta ad name keeps its structure and never repeats the category; product records are untouched.",
+        "Ad Setup destination: a single-product ad defaults to Product Page with the address resolved only from real data (Shopify product page, else an earlier Ad Setup of the same product), flagged when it cannot be found, never overwriting a saved choice; Final Check and Approve require a valid web address. Adds one nullable column, ad_setups.destination_defaulted_at."
+      ]
+    },
+    {
       "version": "1.3.4",
       "date": "2026-10-16",
       "title": "Planning thumbnails centred, tray remove, owner on New Concept, one-line status control",

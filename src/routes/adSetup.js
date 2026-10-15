@@ -1,8 +1,10 @@
 const express = require('express');
 const { pool } = require('../db');
 const {
-  weekCode, detectAdCategory, detectPromotionStageType, splitProductName, shortenHook, buildMetaAdName,
+  weekCode, detectAdCategory, detectPromotionStageType, nameWithoutCategory, shortenHook, buildMetaAdName,
 } = require('../lib/adSetupNaming');
+const { productScope, deriveProductNameAndCategory, deriveUrlLinkPage } = require('../lib/adSetupProduct');
+const productPageUrl = require('../lib/productPageUrl');
 const { generateCopyDrafts, defaultCta } = require('../lib/adCopyDraft');
 const { deriveCopyRule, mayAutoApply } = require('../lib/adCopyRules');
 
@@ -104,35 +106,8 @@ function saleDatesLabel(promotion) {
   return promotion.end_date ? `${fmt(promotion.start_date)}–${fmt(promotion.end_date)}` : fmt(promotion.start_date);
 }
 
-// Product Name + Product Category (see the brief, item 1). Single product:
-// split the real style name via splitProductName (canonical product/style
-// ID stays exactly as already linked -- this only changes how its name is
-// REPRESENTED for Meta naming, never the underlying record). Multi-product
-// (a Drop/multi-style concept): unchanged from before -- there's no single
-// garment name to split, so Name stays the collective Drop/Promotion label
-// and Category stays the distinct-category union (or OTHER).
-function deriveProductNameAndCategory(styles, dropName, promotion) {
-  if (styles.length === 1) {
-    return splitProductName(styles[0].name, styles[0].category_name);
-  }
-  const name = dropName || (promotion ? promotion.name : null) || (styles.length > 1 ? `${styles.length} Products` : null);
-  const distinctCategories = [...new Set(styles.map((s) => s.category_name).filter(Boolean))];
-  const category = distinctCategories.length === 1 ? distinctCategories[0] : (distinctCategories.length > 1 ? 'OTHER' : null);
-  return { name, category };
-}
-
-// URL link page suggestion (all values stay editable):
-//   product-specific ad (one linked product)  Product page
-//   Sale Hype                                 Sign Up page
-//   Sale Live / Mid Sale / Last Chance        left UNSELECTED for the team to choose (null)
-//   everything else (no product, or a multi-product drop)  New Arrivals
-function deriveUrlLinkPage(adCategory, styles, stageType) {
-  if (adCategory === 'promotion') return stageType === 'hype' ? 'sign_up' : null;
-  return styles.length === 1 ? 'product' : 'new_arrivals';
-}
-
 function copyContextFromLoaded(ctx, adCategory, stageType) {
-  const { name, category } = deriveProductNameAndCategory(ctx.styles, ctx.dropName, ctx.promotion);
+  const { name, category } = deriveProductNameAndCategory(ctx.styles, ctx.dropName, ctx.promotion, ctx.shootPlanItem);
   return {
     hook: ctx.finalEdit.confirmedHook,
     conceptLabel: ctx.finalEdit.concept_type,
@@ -157,7 +132,7 @@ function buildPrefill(ctx) {
   const mediaType = format === 'video' ? 'video' : format === 'static' ? 'image' : 'image';
   const adType = format === 'carousel' ? 'carousel' : 'single';
   const today = new Date();
-  const { name: productName, category: productCategory } = deriveProductNameAndCategory(ctx.styles, ctx.dropName, ctx.promotion);
+  const { name: productName, category: productCategory } = deriveProductNameAndCategory(ctx.styles, ctx.dropName, ctx.promotion, ctx.shootPlanItem);
   const copyCtx = copyContextFromLoaded(ctx, adCategory, stageType);
   const drafts = generateCopyDrafts(copyCtx);
   // Headline / Description / CTA come from the deterministic WNDRR rules, using the exact catalogue product name(s) and only a verified offer.
@@ -182,7 +157,7 @@ function buildPrefill(ctx) {
     // assignment exists -- never invented.
     creatorName: ctx.finalEdit.filming_owner || null,
     conceptLabel: ctx.finalEdit.concept_type || ctx.finalEdit.concept_name,
-    urlLinkPage: deriveUrlLinkPage(adCategory, ctx.styles, stageType),
+    urlLinkPage: deriveUrlLinkPage(adCategory, productScope(ctx), stageType),
     promotionStageId: ctx.promotionStage ? ctx.promotionStage.id : null,
     cta: rule.cta || defaultCta(adCategory, stageType),
     rule,
@@ -206,8 +181,8 @@ async function createAdSetupsForConcept(client, creativeAssetId) {
          week_no, ad_date, product_label, product_type, hook_short, media_type, ad_type,
          creator_name, concept_label, url_link_page, promotion_stage_id, cta,
          primary_text_options, headline_options,
-         selected_headline, selected_description, copy_rule_key, copy_rule_flags, naming_prefilled_at
-       ) VALUES ($1,$2,$3,true,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::jsonb, now())
+         selected_headline, selected_description, copy_rule_key, copy_rule_flags, naming_prefilled_at, destination_defaulted_at
+       ) VALUES ($1,$2,$3,true,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::jsonb, now(), now())
        ON CONFLICT (final_edit_id) DO NOTHING
        RETURNING id`,
       [
@@ -331,6 +306,57 @@ async function fillEmptyNamingFields(row) {
   return r.rows.length ? { ...row, ...r.rows[0] } : row;
 }
 
+// Drafts made before the Product Name / Category split carry the product's FULL name as Product Name ("ASSET RAGLAN BOX FIT TEE" + "BOX FIT TEE"). Only when the Product Name is
+// exactly a linked product's full catalogue name (i.e. it is still the automatic default, not something a person typed) is the repeated category taken off it. Any other
+// value, including a manual one that happens to end in the category, is left exactly as saved (the generated Meta ad name never repeats it either way: see nameWithoutCategory).
+async function normaliseLegacyProductLabel(row, products, shootPlanItemName) {
+  if (row.status !== 'draft' || !row.product_label || !row.product_type) return row;
+  const full = new Set([...products.map((x) => x.name), shootPlanItemName].filter(Boolean).map((x) => String(x).trim().toLowerCase()));
+  if (!full.has(String(row.product_label).trim().toLowerCase())) return row;
+  const next = nameWithoutCategory(row.product_label, row.product_type);
+  if (!next || next === String(row.product_label).trim()) return row;
+  const r = await pool.query("UPDATE ad_setups SET product_label = $1 WHERE id = $2 AND status = 'draft' AND product_label = $3 RETURNING *", [next, row.id, row.product_label]);
+  return r.rows.length ? { ...row, ...r.rows[0] } : row;
+}
+
+// Destination defaults for a DRAFT, without ever overwriting a person's choice:
+//  * once per Ad Setup (destination_defaulted_at): an ad about one specific product whose destination is untouched (no URL, link page empty or the old automatic "New Arrivals")
+//    gets "Product" as its link page;
+//  * whenever the link page is "Product" and the URL is empty: the product's page URL is filled in when it can be resolved from real data (Shopify, or an earlier Ad Setup of
+//    the same product). A URL that is already there is never replaced; if none can be resolved the answer says so and the Final Check keeps Destination open.
+async function applyDestinationDefaults(row) {
+  const info = { page_default_applied: false, product_page: { status: 'not_applicable', source: null, message: null } };
+  if (row.status !== 'draft') return { row, info };
+  let scope = null;
+  const scopeOf = async () => {
+    if (scope) return scope;
+    const c = await loadContext(pool, row.final_edit_id);
+    scope = c ? productScope(c) : { single: false, code: null };
+    return scope;
+  };
+  if (!row.destination_defaulted_at) {
+    const untouched = !String(row.destination_url || '').trim() && (!row.url_link_page || row.url_link_page === 'new_arrivals');
+    const makeProduct = row.ad_category !== 'promotion' && untouched && (await scopeOf()).single;
+    const r = await pool.query(
+      `UPDATE ad_setups SET destination_defaulted_at = now()${makeProduct ? ", url_link_page = 'product'" : ''} WHERE id = $1 AND destination_defaulted_at IS NULL RETURNING *`, [row.id]);
+    if (r.rows.length) { row = { ...row, ...r.rows[0] }; info.page_default_applied = !!makeProduct; }
+  }
+  if (row.url_link_page === 'product') {
+    if (String(row.destination_url || '').trim()) { info.product_page = { status: 'set', source: null, message: null }; return { row, info }; }
+    const sc = await scopeOf();
+    if (!sc.single) { info.product_page = { status: 'unresolved', source: null, message: 'This ad is not linked to one specific product, so there is no single product page. Paste the address.' }; return { row, info }; }
+    const found = await productPageUrl.resolveProductPageUrl(sc.code, { db: pool });
+    if (found.url) {
+      const r = await pool.query("UPDATE ad_setups SET destination_url = $1 WHERE id = $2 AND status = 'draft' AND (destination_url IS NULL OR btrim(destination_url) = '') RETURNING *", [found.url, row.id]);
+      if (r.rows.length) row = { ...row, ...r.rows[0] };
+      info.product_page = { status: 'resolved', source: found.source, message: null };
+    } else {
+      info.product_page = { status: 'unresolved', source: null, message: `${found.message || 'The product page address could not be found.'} Paste the product page address below.` };
+    }
+  }
+  return { row, info };
+}
+
 router.get('/:id', async (req, res, next) => {
   try {
     const rowResult = await pool.query(`${ROW_SELECT} WHERE au.id = $1`, [req.params.id]);
@@ -348,6 +374,9 @@ router.get('/:id', async (req, res, next) => {
     ]);
 
     row = await fillEmptyNamingFields(row);
+    row = await normaliseLegacyProductLabel(row, productsResult.rows, null);
+    const dest = await applyDestinationDefaults(row);
+    row = dest.row;
     const synced = await syncCopyRules(row, productsResult.rows);
     row = synced.row;
 
@@ -375,7 +404,23 @@ router.get('/:id', async (req, res, next) => {
       copy_sets: copySetsResult.rows,
       generated_meta_ad_name: generatedName,
       copy_rule: synced.info,
+      destination_info: dest.info,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// The product page address for this ad's product (used when a person picks "Product" as the link page): resolved from real data only; never written here.
+router.get('/:id/product-url', async (req, res, next) => {
+  try {
+    const r = await pool.query('SELECT final_edit_id FROM ad_setups WHERE id = $1', [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Ad Setup not found' });
+    const ctx = await loadContext(pool, r.rows[0].final_edit_id);
+    const scope = ctx ? productScope(ctx) : { single: false, code: null };
+    if (!scope.single) return res.json({ url: null, source: null, message: 'This ad is not linked to one specific product, so there is no single product page.' });
+    const found = await productPageUrl.resolveProductPageUrl(scope.code, { db: pool });
+    res.json({ url: found.url, source: found.source, message: found.url ? null : (found.message || 'The product page address could not be found.') });
   } catch (err) {
     next(err);
   }
@@ -585,7 +630,7 @@ router.post('/:id/approve', async (req, res, next) => {
       if (!row.copy_set_id && !row.selected_description) missing.push('Description');
     }
     if (!row.cta) missing.push('CTA');
-    if (!row.url_link_page || !row.destination_url) missing.push('Destination');
+    if (!row.url_link_page || !productPageUrl.isHttpUrl(row.destination_url)) missing.push(row.destination_url && row.url_link_page ? 'Destination (a valid web address)' : 'Destination');
     if (missing.length) {
       return res.status(400).json({ error: `Not ready to approve. Missing: ${missing.join(', ')}` });
     }

@@ -147,19 +147,22 @@ function fnSource(name) {
   return app.slice(start, i + 1);
 }
 
-test('Final Approval and Ad Setup thumbnails prefer the Final Edit creative; a product image is only a labelled fallback (never the other way round)', () => {
+test('Final Approval and Ad Setup thumbnails show the Final Edit creative only; the product image is never substituted (v1.3.5)', () => {
   for (const fn of ['finalApprovalVersions', 'finalApprovalMediaStripHtml', 'finalApprovalCardHtml', 'adSetupMediaHtml', 'adSetupCardHtml', 'adSetupApprovedCardHtml']) {
     const body = fnSource(fn);
     assert.doesNotMatch(body, /productThumbHtml|high-stock-thumb/, `${fn} must not render the product catalogue image as the creative`);
   }
-  assert.match(fnSource('finalApprovalMediaStripHtml'), /UX\.creativeThumbHtml\(v\.final_edit_link, v\.format, productImage/);
-  assert.match(fnSource('adSetupMediaHtml'), /UX\.creativeThumbHtml\(item\.final_edit_link/);
+  assert.match(fnSource('finalApprovalMediaStripHtml'), /UX\.finalCreativeHtml\(v\.final_edit_link, v\.format, \{/);
+  assert.doesNotMatch(fnSource('finalApprovalMediaStripHtml'), /productImage/);
+  assert.match(fnSource('adSetupMediaHtml'), /UX\.finalCreativeHtml\(item\.final_edit_link/);
+  assert.doesNotMatch(fnSource('adSetupMediaHtml'), /product_image_url/);
   const modal = fnSource('renderFinalApprovalModal');
   assert.match(modal, /UX\.mediaThumbHtml/); assert.doesNotMatch(modal, /image_url/);
-  // the helper itself: creative first, tagged product fallback, neutral placeholder
+  // the helpers: creativeThumbHtml (creative, else a tagged product fallback) stays for Shooting / Editing; finalCreativeHtml has no product fallback at all
   const uxSrc = read('public/ux.js');
   assert.match(uxSrc, /function creativeThumbHtml/);
   assert.match(uxSrc, /Product image/);
+  assert.match(uxSrc, /function finalCreativeHtml/);
 });
 
 test('the Final Approval queue returns every active version, additively', () => {

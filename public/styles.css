@@ -5748,3 +5748,9 @@ body{background:var(--bg);color:var(--text);}
   .shoot-status-segment{font-size:10px;padding:4px 2px;}
   .shoot-status-control{padding:2px;}
 }
+
+/* v1.3.5: Final Approval / Ad Setup shows the finished creative only (never the product catalogue picture); a missing one says so */
+.as-creative-thumb-link{display:block;flex:0 0 auto;text-decoration:none;color:inherit;border-radius:var(--r-md,10px);}
+.as-creative-thumb-link:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+.ux-media-missing{border:1px dashed var(--border);background:var(--surface2);}
+.ux-media-missing .ux-media-ph-text{color:var(--text-secondary);}
