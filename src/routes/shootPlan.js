@@ -53,7 +53,7 @@ router.get('/', async (req, res, next) => {
     }
 
     const itemsResult = await pool.query(
-      `SELECT spi.*, ca.status AS asset_status, p.id AS promotion_id, p.name AS promotion_name, ps.name AS promotion_stage_name,
+      `SELECT spi.*, ${selection.autoLinkedSql('spi')} AS auto_linked, ca.status AS asset_status, p.id AS promotion_id, p.name AS promotion_name, ps.name AS promotion_stage_name,
               (SELECT count(*)::int FROM creative_assets c2 WHERE c2.shoot_plan_item_id = spi.id AND c2.format = 'video') AS video_assets,
               (SELECT count(*)::int FROM creative_assets c2 WHERE c2.shoot_plan_item_id = spi.id AND c2.format = 'video' AND c2.status IN ('filming', 'editing', 'qc')) AS videos_in_production,
               (SELECT count(*)::int FROM creative_assets c2 WHERE c2.shoot_plan_item_id = spi.id AND c2.format = 'video' AND c2.status = 'uploaded_live') AS videos_completed

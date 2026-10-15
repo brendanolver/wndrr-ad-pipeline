@@ -71,6 +71,8 @@ test('Drops-created entries are not Planning selections (SQL rule used everywher
   assert.match(drops, /INSERT INTO shoot_plan_items \([^)]*auto_linked\)/, 'the Drops linkage marks its own entries');
   const sp = read('src', 'routes', 'shootPlan.js');
   assert.match(sp, /auto_linked: !!i\.auto_linked/);
+  const getQuery = sp.slice(sp.indexOf("router.get('/'"), sp.indexOf('const items = itemsResult.rows;'));
+  assert.match(getQuery, /\$\{selection\.autoLinkedSql\('spi'\)\} AS auto_linked/, 'GET /shoot-plan reports the rule, so entries created before the column existed are recognised too');
 });
 
 test('schema: auto_linked is an additive column; nothing is rewritten or dropped', () => {
