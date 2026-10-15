@@ -20,6 +20,7 @@ const CARD_QUERY = `
   FROM creative_assets ca
   LEFT JOIN styles s ON s.id = ca.style_id
   LEFT JOIN categories c ON c.id = s.category_id
+  WHERE ca.archived_at IS NULL
   ORDER BY ca.target_date NULLS LAST, ca.id
 `;
 

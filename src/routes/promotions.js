@@ -2,6 +2,8 @@ const express = require('express');
 const { pool } = require('../db');
 const { STATUS_LABELS } = require('../lib/statuses');
 
+const { validateOffer } = require('../lib/adCopyRules');
+
 const router = express.Router();
 
 // "Ready" means approved and genuinely usable, not merely committed to the
@@ -156,7 +158,7 @@ async function fetchStagesWithCoverage(promotions) {
     ? await pool.query(
         `SELECT spi.promotion_stage_id, ca.status FROM shoot_plan_items spi
          LEFT JOIN creative_assets ca ON ca.id = spi.asset_id
-         WHERE spi.promotion_stage_id = ANY($1::int[])`,
+         WHERE spi.promotion_stage_id = ANY($1::int[]) AND (spi.asset_id IS NULL OR ca.archived_at IS NULL)`,
         [stageIds]
       )
     : { rows: [] };
@@ -180,6 +182,24 @@ async function fetchStagesWithCoverage(promotions) {
   return stagesByPromotion;
 }
 
+// The verified offer used by Ad Setup's copy rules. Blank clears it; anything else must be a real phrase (see lib/adCopyRules.validateOffer).
+// Returns { error } or { set: true, offer, teaser } or { set: false } when the request did not mention it.
+function parseVerifiedOffer(body) {
+  const has = Object.prototype.hasOwnProperty.call(body || {}, 'verified_offer') || Object.prototype.hasOwnProperty.call(body || {}, 'verified_offer_teaser');
+  if (!has) return { set: false };
+  const read = (raw, label) => {
+    if (raw === undefined || raw === null || String(raw).trim() === '') return { value: null };
+    const v = validateOffer(raw);
+    return v.ok ? { value: v.value } : { error: `${label}: ${v.problem}` };
+  };
+  const offer = read(body.verified_offer, 'Verified offer');
+  if (offer.error) return { error: offer.error };
+  const teaser = read(body.verified_offer_teaser, 'Teaser wording');
+  if (teaser.error) return { error: teaser.error };
+  if (teaser.value && !offer.value) return { error: 'Add the verified offer before its teaser wording.' };
+  return { set: true, offer: offer.value, teaser: teaser.value };
+}
+
 router.get('/', async (req, res, next) => {
   try {
     const promotionsResult = await pool.query('SELECT * FROM promotions ORDER BY start_date ASC');
@@ -197,9 +217,12 @@ router.post('/', async (req, res, next) => {
     if (!name || !name.trim()) return res.status(400).json({ error: 'name is required' });
     if (!start_date) return res.status(400).json({ error: 'start_date is required' });
 
+    const vo = parseVerifiedOffer(req.body);
+    if (vo.error) return res.status(400).json({ error: vo.error });
     const result = await pool.query(
-      'INSERT INTO promotions (name, start_date, end_date, notes) VALUES ($1, $2, $3, $4) RETURNING *',
-      [name.trim(), start_date, end_date || null, notes && notes.trim() ? notes.trim() : null]
+      `INSERT INTO promotions (name, start_date, end_date, notes, verified_offer, verified_offer_teaser, verified_offer_at, verified_offer_by_user_id)
+       VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $5::text IS NULL THEN NULL ELSE now() END, CASE WHEN $5::text IS NULL THEN NULL ELSE $7::int END) RETURNING *`,
+      [name.trim(), start_date, end_date || null, notes && notes.trim() ? notes.trim() : null, vo.set ? vo.offer : null, vo.set ? vo.teaser : null, req.user ? req.user.id : null]
     );
     res.status(201).json(summarizePromotion(result.rows[0], []));
   } catch (err) {
@@ -278,9 +301,16 @@ router.put('/:id', async (req, res, next) => {
     if (!name || !name.trim()) return res.status(400).json({ error: 'name is required' });
     if (!start_date) return res.status(400).json({ error: 'start_date is required' });
 
+    const vo = parseVerifiedOffer(req.body);
+    if (vo.error) return res.status(400).json({ error: vo.error });
     const result = await pool.query(
-      `UPDATE promotions SET name = $1, start_date = $2, end_date = $3, notes = $4, updated_at = now() WHERE id = $5 RETURNING *`,
-      [name.trim(), start_date, end_date || null, notes && notes.trim() ? notes.trim() : null, req.params.id]
+      `UPDATE promotions SET name = $1, start_date = $2, end_date = $3, notes = $4,
+              verified_offer = CASE WHEN $6 THEN $7 ELSE verified_offer END,
+              verified_offer_teaser = CASE WHEN $6 THEN $8 ELSE verified_offer_teaser END,
+              verified_offer_at = CASE WHEN $6 THEN (CASE WHEN $7::text IS NULL THEN NULL ELSE now() END) ELSE verified_offer_at END,
+              verified_offer_by_user_id = CASE WHEN $6 THEN (CASE WHEN $7::text IS NULL THEN NULL ELSE $9::int END) ELSE verified_offer_by_user_id END,
+              updated_at = now() WHERE id = $5 RETURNING *`,
+      [name.trim(), start_date, end_date || null, notes && notes.trim() ? notes.trim() : null, req.params.id, vo.set, vo.set ? vo.offer : null, vo.set ? vo.teaser : null, req.user ? req.user.id : null]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Promotion not found' });
 
@@ -379,7 +409,7 @@ router.put('/stages/:stageId', async (req, res, next) => {
     const coveredResult = await pool.query(
       `SELECT ca.status FROM shoot_plan_items spi
        LEFT JOIN creative_assets ca ON ca.id = spi.asset_id
-       WHERE spi.promotion_stage_id = $1`,
+       WHERE spi.promotion_stage_id = $1 AND (spi.asset_id IS NULL OR ca.archived_at IS NULL)`,
       [req.params.stageId]
     );
     const counts = { ready: 0, planned: 0 };

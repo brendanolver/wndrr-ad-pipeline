@@ -3369,6 +3369,109 @@ CREATE INDEX IF NOT EXISTS idx_update_request_attachments_request ON update_requ
 -- =====================================================================
 ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS planned_style_ids INTEGER[];
 
+-- ---------------------------------------------------------------------------
+-- Batch 35: concept lifecycle (archive / kill / remove-test), deterministic
+-- Meta copy rules, approved Primary Text, and the read-only Google Sheets copy
+-- reference library for the AI Copy Assistant. Everything here is additive and
+-- idempotent: no existing column, row or constraint is altered.
+-- ---------------------------------------------------------------------------
+
+-- Archiving takes a concept out of every active queue and count while keeping
+-- the row and all of its history. archived_from_stage records where it was when
+-- archived so it can be restored to the same place (nothing else is changed).
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS archived_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS archive_reason TEXT;
+ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS archived_from_stage VARCHAR(30);
+CREATE INDEX IF NOT EXISTS idx_creative_assets_archived_at ON creative_assets(archived_at);
+
+-- Audit trail for every lifecycle action. creative_asset_id is deliberately NOT a
+-- foreign key: a removed test concept's row is gone, but the log of what was
+-- removed (with a JSON snapshot of the concept and what depended on it) stays.
+CREATE TABLE IF NOT EXISTS concept_lifecycle_log (
+  id SERIAL PRIMARY KEY,
+  creative_asset_id INTEGER NOT NULL,
+  concept_name VARCHAR(255),
+  action VARCHAR(20) NOT NULL CHECK (action IN ('archive', 'unarchive', 'kill', 'remove_test', 'remove_workspace')),
+  stage VARCHAR(30),
+  actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  reason TEXT,
+  snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_concept_lifecycle_log_asset ON concept_lifecycle_log(creative_asset_id);
+
+-- Ad Setup copy. Headline/Description/CTA come from deterministic rules
+-- (lib/adCopyRules.js); copy_fields_manual flips to true the moment a person edits
+-- any of them so the rules never overwrite it. Primary Text is approved
+-- explicitly; unfinished AI suggestions never count as approved copy.
+ALTER TABLE ad_setups ADD COLUMN IF NOT EXISTS selected_description TEXT;
+ALTER TABLE ad_setups ADD COLUMN IF NOT EXISTS copy_fields_manual BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE ad_setups ADD COLUMN IF NOT EXISTS copy_rule_key VARCHAR(40);
+ALTER TABLE ad_setups ADD COLUMN IF NOT EXISTS copy_rule_flags JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE ad_setups ADD COLUMN IF NOT EXISTS primary_text_approved BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE ad_setups ADD COLUMN IF NOT EXISTS primary_text_approved_at TIMESTAMPTZ;
+ALTER TABLE ad_setups ADD COLUMN IF NOT EXISTS primary_text_approved_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE ad_setups ADD COLUMN IF NOT EXISTS primary_text_source VARCHAR(12);
+ALTER TABLE ad_setups ADD COLUMN IF NOT EXISTS ai_draft_options JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+-- Campaign offer used by the deterministic Meta copy rules. Only a value a person
+-- typed here is ever used for Headline/Description; promotions.notes is free text
+-- and is never read as an offer. verified_offer is the offer phrase ("20-50% off
+-- everything"); verified_offer_teaser optionally overrides the Hype description.
+ALTER TABLE promotions ADD COLUMN IF NOT EXISTS verified_offer VARCHAR(255);
+ALTER TABLE promotions ADD COLUMN IF NOT EXISTS verified_offer_teaser VARCHAR(255);
+ALTER TABLE promotions ADD COLUMN IF NOT EXISTS verified_offer_at TIMESTAMPTZ;
+ALTER TABLE promotions ADD COLUMN IF NOT EXISTS verified_offer_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+
+-- One row per Generate / Refine request, so refinements keep their context and a
+-- person can see what was asked and what came back. Never treated as approved copy.
+CREATE TABLE IF NOT EXISTS ad_copy_generations (
+  id SERIAL PRIMARY KEY,
+  ad_setup_id INTEGER NOT NULL REFERENCES ad_setups(id) ON DELETE CASCADE,
+  kind VARCHAR(12) NOT NULL CHECK (kind IN ('generate', 'refine', 'more')),
+  instruction TEXT,
+  base_text TEXT,
+  options JSONB NOT NULL DEFAULT '[]'::jsonb,
+  model VARCHAR(80),
+  reference_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+  created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_ad_copy_generations_ad ON ad_copy_generations(ad_setup_id);
+
+-- Read-only cache of the WNDRR copy library (Google Sheets). The sheet itself is
+-- never written; these tables only hold what the last successful sync read.
+CREATE TABLE IF NOT EXISTS copy_reference_syncs (
+  id SERIAL PRIMARY KEY,
+  status VARCHAR(12) NOT NULL CHECK (status IN ('running', 'success', 'failed')),
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at TIMESTAMPTZ,
+  triggered_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  tabs JSONB NOT NULL DEFAULT '[]'::jsonb,
+  example_count INTEGER NOT NULL DEFAULT 0,
+  error TEXT
+);
+CREATE TABLE IF NOT EXISTS copy_reference_examples (
+  id SERIAL PRIMARY KEY,
+  sync_id INTEGER NOT NULL REFERENCES copy_reference_syncs(id) ON DELETE CASCADE,
+  tab VARCHAR(80) NOT NULL,
+  family VARCHAR(20) NOT NULL,
+  row_number INTEGER,
+  label VARCHAR(255),
+  body TEXT NOT NULL,
+  headline TEXT,
+  meta JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+CREATE INDEX IF NOT EXISTS idx_copy_reference_examples_sync ON copy_reference_examples(sync_id, family);
+CREATE TABLE IF NOT EXISTS copy_tone_guidelines (
+  id SERIAL PRIMARY KEY,
+  sync_id INTEGER NOT NULL REFERENCES copy_reference_syncs(id) ON DELETE CASCADE,
+  analysis JSONB NOT NULL,
+  ai_summary TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Approved Ad Matching concepts + historical-spelling aliases
 -- =====================================================================
 -- The concept list Ad Matching offers is the people-approved vocabulary: meta_matching_vocab rows of kind 'concept'. The 40 approved

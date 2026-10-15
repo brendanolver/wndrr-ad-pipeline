@@ -64,7 +64,7 @@ async function backfillApprovedConcepts() {
             COALESCE(spi.week_start, date_trunc('week', now())::date)
      FROM creative_assets ca
      LEFT JOIN shoot_plan_items spi ON spi.id = ca.shoot_plan_item_id
-     WHERE ca.concept_dev_status = 'approved'
+     WHERE ca.concept_dev_status = 'approved' AND ca.archived_at IS NULL
      ON CONFLICT (creative_asset_id) DO NOTHING`
   );
 }
@@ -86,7 +86,7 @@ router.get('/', async (req, res, next) => {
     const resolvedWeekStart = resolvedWeekResult.rows[0].week_start;
 
     const rowsResult = await pool.query(
-      `${SUMMARY_SELECT} WHERE ss.scheduled_week_start = $1 ORDER BY ca.concept_name ASC`,
+      `${SUMMARY_SELECT} WHERE ss.scheduled_week_start = $1 AND ca.archived_at IS NULL AND ca.concept_dev_status <> 'killed' ORDER BY ca.concept_name ASC`,
       [resolvedWeekStart]
     );
 
@@ -471,14 +471,16 @@ router.get('/history', async (req, res, next) => {
     await backfillApprovedConcepts();
     const result = await pool.query(
       `SELECT
-         original_week_start AS week_start,
+         ss.original_week_start AS week_start,
          COUNT(*)::int AS planned,
-         COUNT(*) FILTER (WHERE status = 'shot' AND scheduled_week_start = original_week_start)::int AS shot,
-         COUNT(*) FILTER (WHERE scheduled_week_start != original_week_start)::int AS carried_over,
-         COUNT(*) FILTER (WHERE status != 'shot' AND scheduled_week_start = original_week_start)::int AS not_completed
-       FROM shoot_schedule
-       GROUP BY original_week_start
-       ORDER BY original_week_start DESC`
+         COUNT(*) FILTER (WHERE ss.status = 'shot' AND ss.scheduled_week_start = ss.original_week_start)::int AS shot,
+         COUNT(*) FILTER (WHERE ss.scheduled_week_start != ss.original_week_start)::int AS carried_over,
+         COUNT(*) FILTER (WHERE ss.status != 'shot' AND ss.scheduled_week_start = ss.original_week_start)::int AS not_completed
+       FROM shoot_schedule ss
+       JOIN creative_assets ca ON ca.id = ss.creative_asset_id
+       WHERE ca.archived_at IS NULL AND ca.concept_dev_status <> 'killed'
+       GROUP BY ss.original_week_start
+       ORDER BY ss.original_week_start DESC`
     );
     res.json({ weeks: result.rows.map((w) => ({ ...w, week_start: dateStr(w.week_start) })) });
   } catch (err) {

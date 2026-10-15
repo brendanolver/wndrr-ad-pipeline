@@ -4,6 +4,7 @@ const {
   weekCode, detectAdCategory, detectPromotionStageType, splitProductName, shortenHook, buildMetaAdName,
 } = require('../lib/adSetupNaming');
 const { generateCopyDrafts, defaultCta } = require('../lib/adCopyDraft');
+const { deriveCopyRule, mayAutoApply } = require('../lib/adCopyRules');
 
 const router = express.Router();
 
@@ -69,7 +70,7 @@ async function loadContext(client, finalEditId) {
   let promotionStage = null;
   if (spi && spi.promotion_stage_id) {
     const stageResult = await client.query(
-      `SELECT ps.*, p.name AS promotion_name, p.start_date, p.end_date, p.notes AS promotion_notes
+      `SELECT ps.*, p.name AS promotion_name, p.start_date, p.end_date, p.notes AS promotion_notes, p.verified_offer, p.verified_offer_teaser
        FROM promotion_stages ps JOIN promotions p ON p.id = ps.promotion_id
        WHERE ps.id = $1`,
       [spi.promotion_stage_id]
@@ -81,6 +82,8 @@ async function loadContext(client, finalEditId) {
         start_date: promotionStage.start_date,
         end_date: promotionStage.end_date,
         notes: promotionStage.promotion_notes,
+        verified_offer: promotionStage.verified_offer,
+        verified_offer_teaser: promotionStage.verified_offer_teaser,
       };
     }
   }
@@ -154,6 +157,12 @@ function buildPrefill(ctx) {
   const { name: productName, category: productCategory } = deriveProductNameAndCategory(ctx.styles, ctx.dropName, ctx.promotion);
   const copyCtx = copyContextFromLoaded(ctx, adCategory, stageType);
   const drafts = generateCopyDrafts(copyCtx);
+  // Headline / Description / CTA come from the deterministic WNDRR rules, using the exact catalogue product name(s) and only a verified offer.
+  const rule = deriveCopyRule({
+    adCategory, stageType, productNames: ctx.styles.map((x) => x.name),
+    offer: ctx.promotion ? ctx.promotion.verified_offer : null, offerTeaser: ctx.promotion ? ctx.promotion.verified_offer_teaser : null,
+    promotionName: ctx.promotion ? ctx.promotion.name : null,
+  });
 
   return {
     adCategory,
@@ -172,7 +181,8 @@ function buildPrefill(ctx) {
     conceptLabel: ctx.finalEdit.concept_type || ctx.finalEdit.concept_name,
     urlLinkPage: deriveUrlLinkPage(adCategory, ctx.styles),
     promotionStageId: ctx.promotionStage ? ctx.promotionStage.id : null,
-    cta: defaultCta(adCategory, stageType),
+    cta: rule.cta || defaultCta(adCategory, stageType),
+    rule,
     primaryTextOptions: drafts.primaryTextOptions,
     headlineOptions: drafts.headlineOptions,
   };
@@ -192,14 +202,16 @@ async function createAdSetupsForConcept(client, creativeAssetId) {
          creative_asset_id, final_edit_id, ad_category, ad_category_auto_detected,
          week_no, ad_date, product_label, product_type, hook_short, media_type, ad_type,
          creator_name, concept_label, url_link_page, promotion_stage_id, cta,
-         primary_text_options, headline_options
-       ) VALUES ($1,$2,$3,true,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+         primary_text_options, headline_options,
+         selected_headline, selected_description, copy_rule_key, copy_rule_flags
+       ) VALUES ($1,$2,$3,true,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::jsonb)
        ON CONFLICT (final_edit_id) DO NOTHING
        RETURNING id`,
       [
         creativeAssetId, fe.id, p.adCategory, p.weekNo, p.adDate, p.productLabel, p.productType,
         p.hookShort, p.mediaType, p.adType, p.creatorName, p.conceptLabel, p.urlLinkPage,
         p.promotionStageId, p.cta, JSON.stringify(p.primaryTextOptions), JSON.stringify(p.headlineOptions),
+        p.rule.headline, p.rule.description, p.rule.ruleKey, JSON.stringify(p.rule.flags),
       ]
     );
     const adSetupId = insertResult.rows[0]?.id;
@@ -222,7 +234,7 @@ const ROW_SELECT = `
     au.*, ca.concept_name, ca.hook AS concept_hook, fe.asset_name AS final_edit_asset_name,
     fe.final_edit_link, fe.format AS final_edit_format, fe.editor,
     ab.batch_number, ab.name AS batch_name,
-    ps.name AS promotion_stage_name, p.name AS promotion_name
+    ps.name AS promotion_stage_name, p.name AS promotion_name, p.verified_offer, p.verified_offer_teaser
   FROM ad_setups au
   JOIN creative_assets ca ON ca.id = au.creative_asset_id
   JOIN final_edits fe ON fe.id = au.final_edit_id
@@ -241,8 +253,8 @@ router.get('/board', async (req, res, next) => {
       // rows stay in the database (reused, never re-created) but
       // shouldn't visibly sit in this tab while the concept itself is
       // parked one stage earlier.
-      pool.query(`${ROW_SELECT} WHERE au.status = 'draft' AND fe.is_active = true AND ca.final_approval_status = 'approved' ORDER BY au.created_at ASC`),
-      pool.query(`${ROW_SELECT} WHERE au.status = 'approved' AND fe.is_active = true ORDER BY au.updated_at DESC`),
+      pool.query(`${ROW_SELECT} WHERE au.status = 'draft' AND fe.is_active = true AND ca.final_approval_status = 'approved' AND ca.archived_at IS NULL AND ca.concept_dev_status <> 'killed' ORDER BY au.created_at ASC`),
+      pool.query(`${ROW_SELECT} WHERE au.status = 'approved' AND fe.is_active = true AND ca.archived_at IS NULL ORDER BY au.updated_at DESC`),
     ]);
     res.json({ ad_setup: adSetupResult.rows, approved: approvedResult.rows });
   } catch (err) {
@@ -250,11 +262,55 @@ router.get('/board', async (req, res, next) => {
   }
 });
 
+// ---------------------------------------------------------------------
+// Deterministic copy rules (lib/adCopyRules.js) applied to a row.
+//  * created rows get them at creation (createAdSetupsForConcept)
+//  * an untouched draft (no person has edited Headline/Description/CTA) follows the rules, so a verified offer added later flows through
+//  * a row a person has edited (copy_fields_manual) or that already holds chosen copy from before this release is never overwritten;
+//    the rule result is returned as `copy_rule` so the UI can offer "Apply WNDRR rules" explicitly.
+// ---------------------------------------------------------------------
+function ruleForRow(row, products) {
+  return deriveCopyRule({
+    adCategory: row.ad_category,
+    stageType: row.promotion_stage_name ? detectPromotionStageType(row.promotion_stage_name) : null,
+    productNames: products.map((p) => p.name),
+    offer: row.verified_offer, offerTeaser: row.verified_offer_teaser, promotionName: row.promotion_name,
+  });
+}
+
+async function syncCopyRules(row, products) {
+  const rule = ruleForRow(row, products);
+  const differs = (rule.headline !== undefined && rule.headline !== null && rule.headline !== row.selected_headline)
+    || (rule.description !== null && rule.description !== row.selected_description)
+    || (rule.cta !== null && rule.cta !== row.cta);
+  const legacyChosen = row.copy_rule_key === null && (row.selected_headline || row.selected_description);
+  let applied = false;
+  if (rule.ruleKey && row.status === 'draft' && !row.copy_set_id && mayAutoApply(row) && !legacyChosen) {
+    const result = await pool.query(
+      `UPDATE ad_setups SET selected_headline = $1, selected_description = $2, cta = COALESCE($3, cta), copy_rule_key = $4, copy_rule_flags = $5::jsonb, updated_at = now()
+       WHERE id = $6 RETURNING *`,
+      [rule.headline, rule.description, rule.cta, rule.ruleKey, JSON.stringify(rule.flags), row.id]
+    );
+    row = { ...row, ...result.rows[0] };
+    applied = true;
+  } else if (JSON.stringify(row.copy_rule_flags || []) !== JSON.stringify(rule.flags) && row.status === 'draft') {
+    await pool.query('UPDATE ad_setups SET copy_rule_flags = $1::jsonb WHERE id = $2', [JSON.stringify(rule.flags), row.id]);
+    row = { ...row, copy_rule_flags: rule.flags };
+  }
+  return {
+    row,
+    info: {
+      rule_key: rule.ruleKey, flags: rule.flags, rule: { headline: rule.headline, description: rule.description, cta: rule.cta },
+      auto_applied: applied, manual: !!row.copy_fields_manual, differs: !!rule.ruleKey && differs && !applied,
+    },
+  };
+}
+
 router.get('/:id', async (req, res, next) => {
   try {
     const rowResult = await pool.query(`${ROW_SELECT} WHERE au.id = $1`, [req.params.id]);
     if (!rowResult.rows.length) return res.status(404).json({ error: 'Ad Setup not found' });
-    const row = rowResult.rows[0];
+    let row = rowResult.rows[0];
 
     const [productsResult, batchesResult, copySetsResult] = await Promise.all([
       pool.query(
@@ -265,6 +321,9 @@ router.get('/:id', async (req, res, next) => {
       pool.query('SELECT id, batch_number, name FROM ad_batches ORDER BY batch_number DESC'),
       pool.query('SELECT id, name, primary_text, headline, cta FROM ad_copy_sets ORDER BY name ASC'),
     ]);
+
+    const synced = await syncCopyRules(row, productsResult.rows);
+    row = synced.row;
 
     const generatedName = buildMetaAdName({
       batchNumber: row.batch_number,
@@ -289,6 +348,7 @@ router.get('/:id', async (req, res, next) => {
       batches: batchesResult.rows,
       copy_sets: copySetsResult.rows,
       generated_meta_ad_name: generatedName,
+      copy_rule: synced.info,
     });
   } catch (err) {
     next(err);
@@ -301,7 +361,7 @@ router.get('/:id', async (req, res, next) => {
 const EDITABLE_FIELDS = [
   'ad_category', 'week_no', 'product_label', 'product_type', 'hook_short',
   'media_type', 'ad_type', 'creator_name', 'concept_label', 'url_link_page',
-  'destination_url', 'selected_primary_text', 'selected_headline', 'cta', 'copy_set_id',
+  'destination_url', 'selected_primary_text', 'selected_headline', 'selected_description', 'cta', 'copy_set_id', 'primary_text_source',
 ];
 const DATE_FIELDS = new Set(['ad_date']);
 
@@ -321,6 +381,10 @@ router.patch('/:id', async (req, res, next) => {
     }
 
     const body = req.body || {};
+    if ('primary_text_source' in body && body.primary_text_source !== null && !['ai', 'manual', 'template'].includes(body.primary_text_source)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'primary_text_source must be ai, manual or template' });
+    }
     const sets = [];
     const values = [];
     let i = 1;
@@ -329,6 +393,14 @@ router.patch('/:id', async (req, res, next) => {
       sets.push(`${field} = $${i}`);
       values.push(body[field] === '' ? null : body[field]);
       i += 1;
+    }
+
+    // Copy ownership: the moment a person changes Headline / Description / CTA, the deterministic rules stop managing them. Changing
+    // the Primary Text also withdraws any earlier approval of it (the new wording has not been approved).
+    const changedCopy = ['selected_headline', 'selected_description', 'cta'].some((f) => f in body && (body[f] === '' ? null : body[f]) !== existing[f]);
+    if (changedCopy) sets.push('copy_fields_manual = true');
+    if ('selected_primary_text' in body && (body.selected_primary_text === '' ? null : body.selected_primary_text) !== existing.selected_primary_text) {
+      sets.push('primary_text_approved = false', 'primary_text_approved_at = NULL', 'primary_text_approved_by_user_id = NULL');
     }
 
     // Batch assignment: allocate a Sale sequential ad number the first
@@ -397,6 +469,50 @@ router.post('/:id/regenerate-copy', async (req, res, next) => {
   }
 });
 
+// Applies the deterministic WNDRR rules on request. A row whose copy a person has edited is only overwritten with confirm_overwrite: true.
+router.post('/:id/apply-copy-rules', async (req, res, next) => {
+  try {
+    const rowResult = await pool.query(`${ROW_SELECT} WHERE au.id = $1`, [req.params.id]);
+    if (!rowResult.rows.length) return res.status(404).json({ error: 'Ad Setup not found' });
+    const row = rowResult.rows[0];
+    if (row.status === 'approved') return res.status(409).json({ error: 'This Ad Setup has already been approved.' });
+    const products = (await pool.query('SELECT s.id, s.style_code, s.name FROM ad_setup_products asp JOIN styles s ON s.id = asp.style_id WHERE asp.ad_setup_id = $1', [row.id])).rows;
+    const rule = ruleForRow(row, products);
+    if (!rule.ruleKey) return res.status(409).json({ error: (rule.flags[0] && rule.flags[0].message) || 'No rule applies to this ad.', flags: rule.flags });
+    const holdsCopy = row.copy_fields_manual || row.selected_headline || row.selected_description;
+    if (holdsCopy && (req.body || {}).confirm_overwrite !== true) {
+      return res.status(409).json({ error: 'This ad already has its own Headline / Description / CTA. Confirm to replace them with the WNDRR rules.', needs_confirmation: true });
+    }
+    const result = await pool.query(
+      `UPDATE ad_setups SET selected_headline = $1, selected_description = $2, cta = COALESCE($3, cta), copy_rule_key = $4, copy_rule_flags = $5::jsonb,
+              copy_fields_manual = false, copy_set_id = NULL, updated_at = now() WHERE id = $6 RETURNING *`,
+      [rule.headline, rule.description, rule.cta, rule.ruleKey, JSON.stringify(rule.flags), row.id]
+    );
+    res.json({ ...result.rows[0], copy_rule: { rule_key: rule.ruleKey, flags: rule.flags, rule: { headline: rule.headline, description: rule.description, cta: rule.cta }, auto_applied: true, manual: false, differs: false } });
+  } catch (err) { next(err); }
+});
+
+// Approve the Primary Text. The text may be passed (the wording being approved) or already saved; unfinished AI suggestions never count.
+router.post('/:id/approve-primary-text', async (req, res, next) => {
+  try {
+    const rowResult = await pool.query('SELECT * FROM ad_setups WHERE id = $1', [req.params.id]);
+    if (!rowResult.rows.length) return res.status(404).json({ error: 'Ad Setup not found' });
+    const row = rowResult.rows[0];
+    if (row.status === 'approved') return res.status(409).json({ error: 'This Ad Setup has already been approved.' });
+    const body = req.body || {};
+    const text = (typeof body.text === 'string' ? body.text : row.selected_primary_text || '').trim();
+    if (!text) return res.status(400).json({ error: 'There is no Primary Text to approve.' });
+    if (text.length > 2200) return res.status(400).json({ error: 'Primary Text is too long (2,200 characters max).' });
+    const source = ['ai', 'manual', 'template'].includes(body.source) ? body.source : (row.primary_text_source || 'manual');
+    const result = await pool.query(
+      `UPDATE ad_setups SET selected_primary_text = $1, primary_text_source = $2, primary_text_approved = true, primary_text_approved_at = now(),
+              primary_text_approved_by_user_id = $3, ai_draft_options = '[]'::jsonb, updated_at = now() WHERE id = $4 RETURNING *`,
+      [text, source, req.user.id, row.id]
+    );
+    res.json(result.rows[0]);
+  } catch (err) { next(err); }
+});
+
 // Approve Ad Setup -> Approved tab. Validates the same Final Check
 // readiness the UI shows, server-side too, so an incomplete record can't
 // be approved just by calling the API directly.
@@ -411,11 +527,18 @@ router.post('/:id/approve', async (req, res, next) => {
     const row = rowResult.rows[0];
     if (row.status === 'approved') return res.status(409).json({ error: 'Already approved' });
 
-    const hasCopy = row.copy_set_id || (row.selected_primary_text && row.selected_headline);
+    // Primary Text: a shared Copy Set, or this ad's own text that has been APPROVED. Copy from before approval existed (no source recorded) keeps counting;
+    // an AI suggestion that nobody approved does not.
+    const primaryOk = !!row.copy_set_id || (row.selected_primary_text && (row.primary_text_approved || !row.primary_text_source));
+    const hasCopy = primaryOk && (row.copy_set_id || (row.selected_headline && row.selected_description));
     const missing = [];
     if (!row.hook_short) missing.push('Meta Ad Name (Hook)');
     if (!row.creator_name && row.creator_name !== null) missing.push('Creator');
-    if (!hasCopy) missing.push('Primary Text/Headline');
+    if (!hasCopy) {
+      if (!primaryOk) missing.push(row.selected_primary_text ? 'Primary Text approval' : 'Primary Text');
+      if (!row.copy_set_id && !row.selected_headline) missing.push('Headline');
+      if (!row.copy_set_id && !row.selected_description) missing.push('Description');
+    }
     if (!row.cta) missing.push('CTA');
     if (!row.url_link_page || !row.destination_url) missing.push('Destination');
     if (missing.length) {

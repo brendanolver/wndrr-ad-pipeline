@@ -2,6 +2,19 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.2.9",
+      "date": "2026-10-15",
+      "title": "Tuesday Review fix, concept cleanup and WNDRR copy assistant",
+      "changes": [
+        "Tuesday Review now lists only concepts explicitly submitted with Ready for Review; drafts stay in Concept Development (fixed on the server, review counts are genuine)",
+        "Archive Concept, Kill Concept and Remove Test Concept (admin) from one three-dot menu on Concept Development, Shooting, Editing, Final Approval and Ad Setup; history and Meta ads are never deleted, and every action is audited",
+        "Removing an empty promotion workspace no longer requires moving concepts back; unwanted Final Approval and Ad Setup drafts can be archived (nothing is deleted automatically)",
+        "Automatic Meta Headline, Description and CTA for standard, hype, live, mid-sale and last-chance ads, using the exact catalogue name and a verified promotion offer only; manual edits are never overwritten",
+        "WNDRR AI Copy Assistant for Primary Text: read-only Google Sheets copy library, tone statistics, three options, refinement and an explicit approval step (needs GOOGLE_SERVICE_ACCOUNT_JSON and ANTHROPIC_API_KEY)",
+        "Concept editor sections as tabs with completion markers, a more compact Shoot Plan summary, and one status vocabulary on Shooting and Editing"
+      ]
+    },
+    {
       "version": "1.2.8",
       "date": "2026-10-15",
       "title": "Production workflow redesign",

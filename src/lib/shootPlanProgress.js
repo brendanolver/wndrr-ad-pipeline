@@ -40,7 +40,7 @@ const CONCEPT_SQL = `
          (SELECT json_agg(json_build_object('product_code', l.product_code, 'product_name', l.product_name, 'shoot_plan_item_id', l.shoot_plan_item_id) ORDER BY l.id)
             FROM concept_product_links l WHERE l.creative_asset_id = ca.id) AS links
     FROM creative_assets ca
-    JOIN shoot_plan_items spi ON spi.id = ca.shoot_plan_item_id
+    JOIN shoot_plan_items spi ON spi.id = ca.shoot_plan_item_id AND ca.archived_at IS NULL
     LEFT JOIN shoot_schedule ss ON ss.creative_asset_id = ca.id`;
 
 const shape = (r) => ({

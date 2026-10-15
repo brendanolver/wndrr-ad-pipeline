@@ -71,7 +71,7 @@ const CONCEPT_SELECT = `
   FROM shoot_schedule ss
   JOIN creative_assets ca ON ca.id = ss.creative_asset_id
   LEFT JOIN shoot_plan_items spi ON spi.id = ca.shoot_plan_item_id
-  WHERE ss.ready_for_editing = true AND ss.editing_week_start = $1
+  WHERE ss.ready_for_editing = true AND ss.editing_week_start = $1 AND ca.archived_at IS NULL AND ca.concept_dev_status <> 'killed'
   ORDER BY ca.concept_name ASC
 `;
 
@@ -517,7 +517,7 @@ router.get('/history', async (req, res, next) => {
          COUNT(*) FILTER (WHERE ca.editing_submitted_at IS NULL AND ss.editing_week_start = ss.editing_original_week_start)::int AS not_completed
        FROM shoot_schedule ss
        JOIN creative_assets ca ON ca.id = ss.creative_asset_id
-       WHERE ss.ready_for_editing = true
+       WHERE ss.ready_for_editing = true AND ca.archived_at IS NULL AND ca.concept_dev_status <> 'killed'
        GROUP BY ss.editing_original_week_start
        ORDER BY ss.editing_original_week_start DESC`
     );

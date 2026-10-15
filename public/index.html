@@ -1513,6 +1513,7 @@
         <button type="button" class="settings-subnav-btn" id="settings-meta-sync-tab-btn" data-settings-panel="meta-sync" style="display:none;">Meta Sync</button>
         <button type="button" class="settings-subnav-btn" id="settings-meta-benchmarks-tab-btn" data-settings-panel="meta-benchmarks" style="display:none;">Meta Performance</button>
         <button type="button" class="settings-subnav-btn" id="settings-classification-tab-btn" data-settings-panel="classification" style="display:none;">Creative Classification</button>
+        <button type="button" class="settings-subnav-btn" id="settings-copy-library-tab-btn" data-settings-panel="copy-library" style="display:none;">Copy Library</button>
       </div>
 
       <div class="settings-panel active" id="settings-panel-planning">
@@ -1683,6 +1684,15 @@
         </div>
         <div id="ca-list" class="pw-list"></div>
         <button class="btn btn-primary btn-sm" id="ca-add-btn">+ Add Customer Avatar</button>
+      </div>
+
+      <!-- Copy Library (admin-only): the read-only Google Sheets cache the AI Copy Assistant learns WNDRR's voice from. -->
+      <div class="settings-panel" id="settings-panel-copy-library">
+        <div class="planning-section-header">
+          <h2>Copy library</h2>
+          <span class="admin-note">WNDRR's Google Sheets copy library, read-only. The AI Copy Assistant uses it as reference for tone of voice. The spreadsheet is never changed.</span>
+        </div>
+        <div id="copy-library-body" class="cl-body"></div>
       </div>
 
       <!-- Creative Classification (admin-only; /api/meta-classification-options): the options Ad Matching offers for Concept, Creator and Creative Style.
@@ -2224,6 +2234,12 @@
       <label>Notes <span class="hint">(optional)</span>
         <input type="text" id="promotion-notes">
       </label>
+      <label>Verified offer <span class="hint">(used for Ad Setup headlines. Only what you type here is used; it is never guessed)</span>
+        <input type="text" id="promotion-verified-offer" placeholder="e.g. 20-50% off everything" maxlength="120">
+      </label>
+      <label>Teaser wording <span class="hint">(optional: the Hype description, if different from "&lt;offer&gt; sale")</span>
+        <input type="text" id="promotion-verified-offer-teaser" placeholder="e.g. 20-50% off everything sale" maxlength="120">
+      </label>
     </div>
     <div class="modal-footer">
       <button class="btn btn-danger" id="promotion-delete-btn" style="display:none;" onclick="deletePromotion()">Delete</button>
@@ -2448,13 +2464,16 @@
       <button class="modal-close" onclick="closeModal('concept-dev-modal')">&times;</button>
     </div>
     <div class="modal-body">
-      <nav class="cd-modal-nav" aria-label="Concept sections">
-        <button type="button" onclick="cdModalJump('cdm-sec-idea')">The Idea</button>
-        <button type="button" onclick="cdModalJump('cd-modal-audience-section')">Audience</button>
-        <button type="button" onclick="cdModalJump('cdm-sec-hook')">The Hook</button>
-        <button type="button" onclick="cdModalJump('cdm-sec-production')">Production</button>
-        <button type="button" onclick="cdModalJump('cdm-sec-references')">References</button>
-        <button type="button" onclick="cdModalJump('cdm-sec-setup')">Shoot Setup</button>
+      <nav class="cd-modal-nav" aria-label="Concept sections" id="cdm-nav">
+        <button type="button" data-cdm-target="cdm-sec-idea" onclick="cdModalShow('cdm-sec-idea')"><span class="cdm-mark"></span>The Idea</button>
+        <button type="button" data-cdm-target="cd-modal-audience-section" onclick="cdModalShow('cd-modal-audience-section')"><span class="cdm-mark"></span>Audience</button>
+        <button type="button" data-cdm-target="cdm-sec-hook" onclick="cdModalShow('cdm-sec-hook')"><span class="cdm-mark"></span>The Hook</button>
+        <button type="button" data-cdm-target="cdm-sec-production" onclick="cdModalShow('cdm-sec-production')"><span class="cdm-mark"></span>Production</button>
+        <button type="button" data-cdm-target="cdm-sec-references" onclick="cdModalShow('cdm-sec-references')"><span class="cdm-mark"></span>References</button>
+        <button type="button" data-cdm-target="cdm-sec-setup" onclick="cdModalShow('cdm-sec-setup')"><span class="cdm-mark"></span>Shoot Setup</button>
+        <span class="cdm-nav-spacer"></span>
+        <span class="cdm-progress" id="cdm-progress"></span>
+        <button type="button" class="cdm-all" id="cdm-all-btn" onclick="cdModalToggleAll()">Show all</button>
       </nav>
       <div class="cd-modal-context-row">
         <div class="cd-modal-context-compact" id="cd-modal-context"></div>
@@ -4106,6 +4125,20 @@
      for destructive actions -- see confirmDialog() in app.js. Rendered
      last so it always paints on top of any other open modal (e.g.
      confirming Delete from within the Edit Drop modal). -->
+<div id="lifecycle-modal" class="modal-backdrop">
+  <div class="modal ux-modal">
+    <div class="modal-header">
+      <div><h3 id="lifecycle-modal-title">Concept</h3></div>
+      <button class="modal-close" onclick="closeModal('lifecycle-modal')" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-body ux-modal-body" id="lifecycle-modal-body"></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('lifecycle-modal')">Cancel</button>
+      <button class="btn btn-primary" id="lifecycle-confirm-btn" onclick="confirmLifecycleAction()">Confirm</button>
+    </div>
+  </div>
+</div>
+
 <div id="confirm-modal" class="modal-backdrop">
   <div class="modal confirm-modal">
     <div class="modal-body">

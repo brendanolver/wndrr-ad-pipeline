@@ -224,6 +224,8 @@ function applySidebarModuleAccess() {
   if (metaSyncTabBtn) metaSyncTabBtn.style.display = state.currentUser && state.currentUser.role === 'admin' ? '' : 'none';
   const classTabBtn = document.getElementById('settings-classification-tab-btn');
   if (classTabBtn) classTabBtn.style.display = state.currentUser && state.currentUser.role === 'admin' ? '' : 'none';
+  const copyLibTabBtn = document.getElementById('settings-copy-library-tab-btn');
+  if (copyLibTabBtn) copyLibTabBtn.style.display = state.currentUser && state.currentUser.role === 'admin' ? '' : 'none';
   const metaBenchTabBtn = document.getElementById('settings-meta-benchmarks-tab-btn');
   if (metaBenchTabBtn) metaBenchTabBtn.style.display = state.currentUser && state.currentUser.role === 'admin' ? '' : 'none';
   // Meta Performance is admin-only (the API enforces it too). The loop above
@@ -439,6 +441,7 @@ function switchSettingsPanel(name) {
   if (name === 'meta-benchmarks') loadMetaBenchmarksPanel();
   if (name === 'planning') loadPriorityOverrides();
   if (name === 'classification') loadClassificationPanel();
+  if (name === 'copy-library') loadCopyLibraryPanel();
 }
 
 document.querySelectorAll('.settings-subnav-btn').forEach((btn) => {
@@ -446,6 +449,66 @@ document.querySelectorAll('.settings-subnav-btn').forEach((btn) => {
 });
 
 
+
+// ── Settings -> Copy library (read-only Google Sheets reference for the AI Copy Assistant) ───────────────────────────
+function copyLibDate(v) {
+  return v ? new Date(v).toLocaleString('en-AU', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—';
+}
+
+async function loadCopyLibraryPanel() {
+  const host = document.getElementById('copy-library-body');
+  if (!host) return;
+  host.innerHTML = '<div class="admin-note">Loading&hellip;</div>';
+  try {
+    const st = await api('/copy-library/status');
+    let g = null;
+    if (st.library) { try { g = await api('/copy-library/guidelines'); } catch (e) { g = null; } }
+    const tabs = (st.library && st.library.tabs) || [];
+    const o = g && g.analysis && g.analysis.overall;
+    host.innerHTML = `
+      <div class="ux-card cl-card">
+        <div class="cl-row"><span class="cl-k">Google Sheets</span>${st.sheets.configured ? UX.badgeHtml('Credentials configured', 'green') : UX.badgeHtml('Not connected', 'amber')}</div>
+        ${st.sheets.configured ? `<div class="cl-note">Reading spreadsheet <code>${escapeHtml(st.sheets.sheet_id)}</code> as <code>${escapeHtml(st.sheets.service_account)}</code> (read-only). The sheet must be shared with that address as a Viewer.</div>`
+          : `<div class="cl-note">${escapeHtml(st.sheets.reason || '')}<br>Set <code>GOOGLE_SERVICE_ACCOUNT_JSON</code> (the service-account key) and, if different from the default, <code>WNDRR_COPY_SHEET_ID</code>.</div>`}
+        <div class="cl-row"><span class="cl-k">AI provider</span>${st.ai.configured ? UX.badgeHtml('Configured', 'green') : UX.badgeHtml('Not configured', 'amber')}</div>
+        ${st.ai.configured ? '' : '<div class="cl-note">Set <code>ANTHROPIC_API_KEY</code> to enable Generate Copy. Without it the assistant stays switched off.</div>'}
+        <div class="cl-row"><span class="cl-k">Last successful update</span><span>${st.library ? `${copyLibDate(st.library.synced_at)} &middot; ${st.library.example_count} examples` : 'Never. The library has not been read yet.'}</span></div>
+        ${st.last_attempt && st.last_attempt.status === 'failed' ? `<div class="cl-warn">The latest refresh failed (${copyLibDate(st.last_attempt.at)}): ${escapeHtml(st.last_attempt.error || 'unknown error')}. The previous library is still in use.</div>` : ''}
+        <div class="cl-actions"><button type="button" class="btn btn-primary btn-sm" id="copy-library-refresh-btn" ${st.sheets.configured ? '' : 'disabled'}>Refresh library</button></div>
+      </div>
+      ${tabs.length ? `<div class="ux-card cl-card"><div class="ux-section-title">Tabs read</div>
+        <table class="cl-table"><thead><tr><th>Tab</th><th>Type</th><th>Examples</th><th>Copy column</th><th>Notes</th></tr></thead><tbody>
+        ${tabs.map((t) => `<tr><td>${escapeHtml(t.title)}</td><td>${escapeHtml(t.family)}</td><td>${t.found === false ? '—' : t.examples}</td><td>${t.found === false ? '—' : (t.header_found ? 'from header' : 'guessed')}</td><td>${(t.warnings || []).map(escapeHtml).join(' ')}</td></tr>`).join('')}
+        </tbody></table></div>` : ''}
+      ${o ? `<div class="ux-card cl-card"><div class="ux-section-title">What the examples show</div>
+        <div class="cl-note">Measured from ${g.analysis.examples} examples read on ${copyLibDate(g.synced_at)}. These are statistics, not rules.</div>
+        <ul class="cl-list">
+          <li>Typical length: median ${o.words.median} words (most between ${o.words.p10} and ${o.words.p90}); about ${o.sentences.avg_per_example} sentences, ${o.sentences.avg_words_per_sentence} words each.</li>
+          <li>Used in: emoji ${o.shares.emoji}%, exclamation marks ${o.shares.exclamation}%, urgency language ${o.shares.urgency_language}%, prices or discounts ${o.shares.price_or_discount}%, hashtags ${o.shares.hashtags}%.</li>
+          ${o.openers.length ? `<li>Common openings: ${o.openers.map((x) => `&ldquo;${escapeHtml(x.text)}&rdquo; (${x.count})`).join(', ')}</li>` : ''}
+          ${o.cta_phrases.length ? `<li>Calls to action: ${o.cta_phrases.map((x) => `&ldquo;${escapeHtml(x.text)}&rdquo; (${x.count})`).join(', ')}</li>` : ''}
+          ${(g.analysis.notes || []).map((n) => `<li>${escapeHtml(n)}</li>`).join('')}
+        </ul>
+        ${g.ai_summary ? `<div class="ux-section-title" style="margin-top:10px;">Written summary (AI, from the examples)</div><div class="cl-summary">${escapeHtml(g.ai_summary)}</div>` : '<div class="cl-note">No written summary yet (needs the AI provider to be configured, then a refresh).</div>'}
+      </div>` : ''}`;
+    const btn = document.getElementById('copy-library-refresh-btn');
+    if (btn) btn.addEventListener('click', refreshCopyLibrary);
+  } catch (e) {
+    host.innerHTML = `<div class="cl-warn">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function refreshCopyLibrary() {
+  const btn = document.getElementById('copy-library-refresh-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Reading the spreadsheet…'; }
+  try {
+    const out = await api('/copy-library/refresh', { method: 'POST' });
+    toast(`Library updated: ${out.examples} examples`);
+  } catch (e) {
+    toast(e.message, true);
+  }
+  loadCopyLibraryPanel();
+}
 
 // ── Settings -> Creative Classification ─────────────────────────────────
 // Concepts, Creators and Creative Styles are different things in the database (see src/lib/metaClassificationOptions.js), so this screen shows
@@ -4560,7 +4623,7 @@ async function loadAll() {
       api(`/concept-development?week_start=${conceptDevWeekStart()}`),
       api('/creative-resources'),
       api('/customer-avatars'),
-      api(`/concept-development?week_start=${tuesdayReviewWeekStart()}`),
+      api(`/concept-development?scope=review&week_start=${tuesdayReviewWeekStart()}`),
       api(`/shooting?week_start=${shootingWeekStart()}`),
       api(`/editing?week_start=${editingWeekStart()}`),
       api('/concept-development/locations'),
@@ -6312,6 +6375,110 @@ function confirmDialog(message, opts) {
   });
 }
 
+// ── Concept lifecycle: Archive / Kill / Remove Test Concept ────────────────────────────────────────────────────────
+// One "..." menu on every production card (Concept Development, Shooting, Editing, Final Approval, Ad Setup). What it offers
+// comes from GET /api/concept-lifecycle/:id (rules in src/lib/conceptLifecycle.js), never from the screen it was opened on,
+// so nobody has to move a concept back through earlier stages just to remove it.
+function lifecycleKebabHtml(conceptId, extraClass) {
+  return `<button type="button" class="ux-kebab ${extraClass || ''}" data-lifecycle-menu="${conceptId}" onclick="event.stopPropagation(); openLifecycleMenu(this, ${conceptId})" aria-label="More actions" title="More actions">&#8943;</button>`;
+}
+
+function closeLifecycleMenu() {
+  const m = document.getElementById('lifecycle-menu');
+  if (m) m.remove();
+}
+
+async function openLifecycleMenu(anchor, conceptId) {
+  closeLifecycleMenu();
+  const menu = document.createElement('div');
+  menu.className = 'ux-menu';
+  menu.id = 'lifecycle-menu';
+  menu.innerHTML = '<div class="ux-menu-note">Loading&hellip;</div>';
+  document.body.appendChild(menu);
+  const place = () => {
+    const r = anchor.getBoundingClientRect();
+    const w = menu.offsetWidth || 260;
+    menu.style.top = `${Math.min(window.innerHeight - menu.offsetHeight - 8, r.bottom + 4)}px`;
+    menu.style.left = `${Math.max(8, Math.min(window.innerWidth - w - 8, r.right - w))}px`;
+  };
+  place();
+  try {
+    const d = await api(`/concept-lifecycle/${conceptId}`);
+    menu.innerHTML = `
+      <div class="ux-menu-head">${escapeHtml(d.name)}<span>${escapeHtml(d.stage_label)}${d.archived ? ' &middot; Archived' : ''}${d.killed ? ' &middot; Killed' : ''}</span></div>
+      ${d.actions.map((a) => `
+        <button type="button" class="ux-menu-item${a.destructive ? ' ux-menu-item-danger' : ''}" ${a.allowed ? '' : 'disabled'} data-lifecycle-action="${a.key}" title="${escapeHtml(a.allowed ? a.description : (a.reason || ''))}">
+          ${escapeHtml(a.label)}${a.allowed ? '' : `<small>${escapeHtml(a.reason || 'Not available')}</small>`}
+        </button>`).join('')}`;
+    menu.querySelectorAll('[data-lifecycle-action]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        closeLifecycleMenu();
+        if (typeof closeAllShootCardMenus === 'function') closeAllShootCardMenus();
+        if (typeof closeAllEditingCardMenus === 'function') closeAllEditingCardMenus();
+        openLifecycleConfirm(d, btn.dataset.lifecycleAction);
+      });
+    });
+    place();
+  } catch (e) {
+    closeLifecycleMenu();
+    toast(e.message, true);
+  }
+}
+
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#lifecycle-menu') && !e.target.closest('[data-lifecycle-menu]')) closeLifecycleMenu();
+});
+
+let lifecyclePending = null;
+function openLifecycleConfirm(desc, actionKey) {
+  const action = desc.actions.find((a) => a.key === actionKey);
+  if (!action || !action.allowed) return;
+  lifecyclePending = { id: desc.id, key: actionKey };
+  document.getElementById('lifecycle-modal-title').textContent = action.label;
+  document.getElementById('lifecycle-modal-body').innerHTML = `
+    <div class="lc-concept"><b>${escapeHtml(desc.name)}</b><span>Currently in ${escapeHtml(desc.stage_label)}</span></div>
+    <p class="lc-desc">${escapeHtml(action.description)}</p>
+    ${desc.consequences.length && actionKey !== 'unarchive' ? `<ul class="lc-list">${desc.consequences.map((c) => `<li>${escapeHtml(c)}</li>`).join('')}</ul>` : ''}
+    <p class="lc-safe">Published Meta ads and external files are never deleted.</p>
+    ${actionKey === 'unarchive' ? '' : `<label class="lc-field">Reason <span class="ux-field-opt">Optional</span><textarea id="lifecycle-reason" rows="2" placeholder="e.g. test concept, duplicate, no longer relevant"></textarea></label>`}
+    ${action.destructive ? '<label class="lc-ack"><input type="checkbox" id="lifecycle-ack"> I understand this permanently deletes the concept and its drafts.</label>' : ''}`;
+  const btn = document.getElementById('lifecycle-confirm-btn');
+  btn.textContent = action.destructive ? 'Remove permanently' : action.label;
+  btn.className = `btn ${action.destructive ? 'btn-danger' : 'btn-primary'}`;
+  btn.disabled = !!action.destructive;
+  const ack = document.getElementById('lifecycle-ack');
+  if (ack) ack.addEventListener('change', () => { btn.disabled = !ack.checked; });
+  openModal('lifecycle-modal');
+}
+
+async function confirmLifecycleAction() {
+  if (!lifecyclePending) return;
+  const { id, key } = lifecyclePending;
+  const reasonEl = document.getElementById('lifecycle-reason');
+  const btn = document.getElementById('lifecycle-confirm-btn');
+  btn.disabled = true;
+  try {
+    const out = await api(`/concept-lifecycle/${id}/${key}`, { method: 'POST', body: JSON.stringify({ confirm: true, reason: reasonEl ? reasonEl.value : undefined }) });
+    closeModal('lifecycle-modal');
+    lifecyclePending = null;
+    const done = { archive: 'Archived', unarchive: 'Restored', kill: 'Killed', remove_test: 'Removed' }[key];
+    toast(out.already ? 'Already done' : `${done}: ${out.concept_name || 'concept'}`);
+    await refreshAfterLifecycle();
+  } catch (e) {
+    btn.disabled = false;
+    toast(e.message, true);
+  }
+}
+
+async function refreshAfterLifecycle() {
+  await loadAll();
+  const active = document.querySelector('.tab-panel.active');
+  const id = active ? active.id : '';
+  if (id === 'tab-final-approval') loadFinalApprovalActiveSubtab();
+  else if (id === 'tab-shooting' && typeof refreshCurrentShootingView === 'function') refreshCurrentShootingView();
+  else if (id === 'tab-editing' && typeof refreshCurrentEditingView === 'function') refreshCurrentEditingView();
+}
+
 document.getElementById('new-style-btn').addEventListener('click', () => openStyleModal(null));
 document.getElementById('new-category-btn').addEventListener('click', () => {
   document.getElementById('category-name').value = '';
@@ -7869,6 +8036,8 @@ function openPromotionModal(promotion) {
   document.getElementById('promotion-start-date').value = promotion ? promotion.start_date.slice(0, 10) : '';
   document.getElementById('promotion-end-date').value = promotion && promotion.end_date ? promotion.end_date.slice(0, 10) : '';
   document.getElementById('promotion-notes').value = (promotion && promotion.notes) || '';
+  document.getElementById('promotion-verified-offer').value = (promotion && promotion.verified_offer) || '';
+  document.getElementById('promotion-verified-offer-teaser').value = (promotion && promotion.verified_offer_teaser) || '';
   document.getElementById('promotion-save-btn').textContent = promotion ? 'Save' : 'Add';
   document.getElementById('promotion-delete-btn').style.display = promotion ? 'inline-block' : 'none';
   openModal('promotion-modal');
@@ -7880,17 +8049,19 @@ async function savePromotion() {
   const start_date = document.getElementById('promotion-start-date').value;
   const end_date = document.getElementById('promotion-end-date').value || null;
   const notes = document.getElementById('promotion-notes').value || null;
+  const verified_offer = document.getElementById('promotion-verified-offer').value.trim();
+  const verified_offer_teaser = document.getElementById('promotion-verified-offer-teaser').value.trim();
   if (!name.trim()) return toast('Promotion name is required', true);
   if (!start_date) return toast('Start date is required', true);
 
   try {
     if (id) {
-      await api(`/promotions/${id}`, { method: 'PUT', body: JSON.stringify({ name, start_date, end_date, notes }) });
+      await api(`/promotions/${id}`, { method: 'PUT', body: JSON.stringify({ name, start_date, end_date, notes, verified_offer, verified_offer_teaser }) });
       closeModal('promotion-modal');
       toast('Promotion saved');
       loadAll();
     } else {
-      const created = await api('/promotions', { method: 'POST', body: JSON.stringify({ name, start_date, end_date, notes }) });
+      const created = await api('/promotions', { method: 'POST', body: JSON.stringify({ name, start_date, end_date, notes, verified_offer, verified_offer_teaser }) });
       closeModal('promotion-modal');
       toast('Promotion added');
       await loadAll();
@@ -8884,11 +9055,129 @@ async function startBriefBuilderConcept() {
 // 'promotion'). No second concept system, no new entity.
 let adHocConceptStyles = [];
 
-// Concept editor: jump to a section from the sticky section nav. Pure scrolling -- every section stays mounted,
-// so nothing entered in one section is ever lost by moving to another.
-function cdModalJump(sectionId) {
-  const el = document.getElementById(sectionId);
-  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+// Concept editor sections. Every section stays mounted (tabs only toggle CSS), so nothing entered in one section is
+// ever lost by moving to another. "Show all" restores the original long scroll.
+const CDM_SECTIONS = ['cdm-sec-idea', 'cd-modal-audience-section', 'cdm-sec-hook', 'cdm-sec-production', 'cdm-sec-references', 'cdm-sec-setup'];
+let cdModalActive = CDM_SECTIONS[0];
+let cdModalShowAll = false;
+let cdModalListenersBound = false;
+
+function cdModalApplyView() {
+  const modal = document.getElementById('concept-dev-modal');
+  if (!modal) return;
+  modal.classList.toggle('cdm-tabbed', !cdModalShowAll);
+  CDM_SECTIONS.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('cdm-active', id === cdModalActive);
+  });
+  document.querySelectorAll('#cdm-nav button[data-cdm-target]').forEach((b) => {
+    const on = b.dataset.cdmTarget === cdModalActive && !cdModalShowAll;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-current', on ? 'true' : 'false');
+  });
+  const allBtn = document.getElementById('cdm-all-btn');
+  if (allBtn) allBtn.textContent = cdModalShowAll ? 'Show one section' : 'Show all';
+}
+
+function cdModalShow(sectionId) {
+  if (!CDM_SECTIONS.includes(sectionId)) return;
+  cdModalActive = sectionId;
+  if (cdModalShowAll) {
+    const el = document.getElementById(sectionId);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } else {
+    const body = document.querySelector('#concept-dev-modal .modal-body');
+    if (body) body.scrollTop = 0;
+  }
+  cdModalApplyView();
+}
+
+// Backwards-compatible name for the previous scroll-only navigation.
+function cdModalJump(sectionId) { cdModalShow(sectionId); }
+
+function cdModalToggleAll() {
+  cdModalShowAll = !cdModalShowAll;
+  cdModalApplyView();
+}
+
+// Make sure the section containing `el` is visible (a validation error must never point at a hidden field).
+function cdModalReveal(el) {
+  if (!el || cdModalShowAll) return;
+  const sec = el.closest ? el.closest('.cd-modal-section') : null;
+  if (sec && CDM_SECTIONS.includes(sec.id) && sec.id !== cdModalActive) {
+    cdModalActive = sec.id;
+    cdModalApplyView();
+  }
+}
+
+// Completion per section, mirroring the Ready for Review rules in saveConceptDevModal.
+function cdModalCompletion() {
+  const found = conceptDevModalConceptId ? findConceptDevConcept(conceptDevModalConceptId) : null;
+  const nameLocked = Boolean(found && found.concept.name_locked);
+  const nameOk = nameLocked || Boolean((document.getElementById('cd-modal-name').value || '').trim());
+  const angleOk = Boolean((document.getElementById('cd-modal-angle').value || '').trim());
+  const avatarSel = document.getElementById('cd-modal-avatar-select').value;
+  const avatarOk = avatarSel === '__other__'
+    ? Boolean((document.getElementById('cd-modal-avatar-custom-desc').value || '').trim())
+    : Boolean(avatarSel);
+  const hookOk = Boolean(((conceptDevModalHooks[0] && conceptDevModalHooks[0].text) || '').trim());
+  const named = conceptDevModalShots.filter((s) => (s.name || '').trim());
+  const shotsOk = named.length > 0 && named.every((s) => (s.location || '').trim());
+  const refs = conceptDevModalReferences.filter((r) => (r.url || '').trim()).length;
+  return {
+    'cdm-sec-idea': { required: true, done: nameOk && angleOk, hint: nameOk ? (angleOk ? '' : 'Add The Idea') : 'Concept Name is required' },
+    'cd-modal-audience-section': { required: true, done: avatarOk, hint: avatarOk ? '' : 'Choose a Customer Avatar' },
+    'cdm-sec-hook': { required: true, done: hookOk, hint: hookOk ? '' : 'Add a Primary Hook' },
+    'cdm-sec-production': { required: true, done: shotsOk, hint: named.length ? (shotsOk ? '' : 'Every Shot needs a Location') : 'Add at least one Shot' },
+    'cdm-sec-references': { required: false, done: refs > 0, hint: refs ? `${refs} added` : 'Optional' },
+    'cdm-sec-setup': { required: false, done: false, hint: 'Optional' },
+  };
+}
+
+function cdModalRefresh() {
+  if (!document.getElementById('cdm-nav')) return;
+  let c;
+  try { c = cdModalCompletion(); } catch { return; }
+  let reqDone = 0; let reqTotal = 0;
+  document.querySelectorAll('#cdm-nav button[data-cdm-target]').forEach((b) => {
+    const s = c[b.dataset.cdmTarget];
+    if (!s) return;
+    if (s.required) { reqTotal += 1; if (s.done) reqDone += 1; }
+    b.classList.toggle('done', s.done);
+    b.classList.toggle('todo', s.required && !s.done);
+    b.title = s.required ? (s.done ? 'Complete' : `Required for Ready for Review: ${s.hint}`) : s.hint;
+    const mark = b.querySelector('.cdm-mark');
+    if (mark) mark.textContent = s.done ? '\u2713' : (s.required ? '\u25CF' : '');
+  });
+  const prog = document.getElementById('cdm-progress');
+  if (prog) {
+    prog.textContent = reqDone === reqTotal ? 'Ready to submit' : `${reqDone}/${reqTotal} required sections`;
+    prog.classList.toggle('complete', reqDone === reqTotal);
+  }
+  // Keep the concept name prominent in the header while typing.
+  const nameInput = document.getElementById('cd-modal-name');
+  const titleEl = document.getElementById('cd-modal-title');
+  if (nameInput && titleEl && nameInput.style.display !== 'none') {
+    titleEl.textContent = (nameInput.value || '').trim() || 'New Concept';
+  }
+}
+
+function cdModalInit() {
+  cdModalActive = CDM_SECTIONS[0];
+  if (!cdModalListenersBound) {
+    const modal = document.getElementById('concept-dev-modal');
+    if (modal) {
+      const later = () => setTimeout(cdModalRefresh, 0);
+      modal.addEventListener('input', later);
+      modal.addEventListener('change', later);
+      modal.addEventListener('click', later);
+      cdModalListenersBound = true;
+    }
+  }
+  cdModalApplyView();
+  cdModalRefresh();
+  const body = document.querySelector('#concept-dev-modal .modal-body');
+  if (body) body.scrollTop = 0;
 }
 
 function openAdHocConceptModal() {
@@ -9055,6 +9344,13 @@ function shootPlanProductRowHtml(item) {
     ? `<button type="button" class="btn btn-ghost btn-sm" onclick="openShootPlanEditSizesModal(${item.id})">Edit sizes</button>`
     : '';
   const cw = item.styles.length;
+  // Derived from the concepts' real stages (no new state): the furthest-along unfinished step for this product.
+  const stageCount = (s) => concepts.filter((c) => c.stage === s).length;
+  const spStatus = !concepts.length ? UX.badgeHtml('Needs concept', 'amber')
+    : (stageCount('filmed') + stageCount('edited')) ? UX.badgeHtml('Ready to progress', 'purple')
+    : stageCount('awaiting_production') ? UX.badgeHtml('Awaiting production', 'neutral')
+    : concepts.every((c) => c.stage === 'approved' || c.stage === 'uploaded') ? UX.badgeHtml('Complete', 'green')
+    : UX.badgeHtml(`${concepts.length} in development`, 'neutral');
   const safeName = escapeHtml(item.product_name || '').replace(/'/g, '&#39;');
   const openBtn = concepts.length
     ? `<button type="button" class="ux-link-btn" data-sp-open="${item.id}" onclick="plOpenConceptFromShootPlan(${item.id})">Open concept${concepts.length === 1 ? '' : 's'} &rarr;</button>` : '';
@@ -9068,9 +9364,9 @@ function shootPlanProductRowHtml(item) {
         <div class="ux-pcard-body">
           <div class="ux-pcard-title shoot-plan-product-name">${escapeHtml(item.product_name)}</div>
           <div class="ux-pcard-sub shoot-plan-pathway-chip">${escapeHtml(shootPlanRequirementLabel(item))}</div>
-          <div class="ux-pcard-meta"><span class="shoot-plan-owner">Owner: ${escapeHtml(item.creator)}</span><span>${cw} colourway${cw === 1 ? '' : 's'}</span></div>
+          <div class="ux-pcard-meta"><span class="shoot-plan-owner">${String(item.creator || '').trim() ? `Owner: ${escapeHtml(item.creator)}` : '<span class="sp-unassigned">Unassigned</span>'}</span><span>${cw} colourway${cw === 1 ? '' : 's'}</span></div>
         </div>
-        <span class="shoot-plan-stock-badge ${ready ? 'shoot-plan-stock-ready' : 'shoot-plan-stock-warehouse'}">${ready ? 'Ready' : 'From warehouse'}</span>
+        <div class="sp-card-badges">${spStatus}<span class="shoot-plan-stock-badge ${ready ? 'shoot-plan-stock-ready' : 'shoot-plan-stock-warehouse'}">${ready ? 'Ready' : 'From warehouse'}</span></div>
       </div>
       ${!readOnly && typeof plShootPlanWarning === 'function' ? plShootPlanWarning(item) : ''}
       ${typeof wpShootPlanVideosHtml === 'function' ? wpShootPlanVideosHtml(item, readOnly) : ''}
@@ -9764,9 +10060,7 @@ function conceptDevConceptCtaLabel(status) {
 function conceptDevConceptCardHtml(concept, productSource) {
   const hasHook = Array.isArray(concept.hook_variations) && concept.hook_variations.some((h) => h.text && h.text.trim());
   const hasReference = Array.isArray(concept.reference_items) && concept.reference_items.length > 0;
-  const removeBtn = productSource !== 'drop'
-    ? `<button type="button" class="cd-concept-card-remove" onclick="event.stopPropagation(); deleteConceptDevConceptCard(${concept.id})" aria-label="Delete concept" title="Delete concept">&times;</button>`
-    : '';
+  const removeBtn = lifecycleKebabHtml(concept.id, 'cd-concept-card-kebab');
   return `
     <div class="cd-concept-card" onclick="openConceptDevModal(${concept.id})">
       ${removeBtn}
@@ -10634,6 +10928,7 @@ function openConceptDevModal(conceptId) {
   updateConceptDevFooterButtons(concept.concept_dev_status);
   fillConceptDevModalFields(concept);
   openModal('concept-dev-modal');
+  cdModalInit();
 }
 
 // Which footer action(s) make sense depends on how far along the concept
@@ -10702,6 +10997,7 @@ function openAddConceptModal(shootPlanItemId) {
 
   fillConceptDevModalFields(null);
   openModal('concept-dev-modal');
+  cdModalInit();
 
   // The modal body is a single reused scrollable element, so without this
   // a fresh New Concept form can open still scrolled to wherever the
@@ -10840,6 +11136,7 @@ async function saveConceptDevModal(targetStatus) {
 
     if (missing.length) {
       for (const m of missing) showConceptDevFieldError(m.field.id, m.errorId, m.message);
+      cdModalReveal(missing[0].field);
       missing[0].field.focus();
       missing[0].field.scrollIntoView({ block: 'center', behavior: 'smooth' });
       return;
@@ -10859,6 +11156,7 @@ async function saveConceptDevModal(targetStatus) {
       const shotsError = document.getElementById('cd-modal-shots-error');
       shotsError.textContent = 'Add at least one Shot';
       shotsError.classList.add('show');
+      cdModalReveal(shotsError);
       document.getElementById('cd-modal-shots-list').scrollIntoView({ block: 'center', behavior: 'smooth' });
       return;
     }
@@ -10871,6 +11169,7 @@ async function saveConceptDevModal(targetStatus) {
       const shotsError = document.getElementById('cd-modal-shots-error');
       shotsError.textContent = 'Add a Location for every Shot';
       shotsError.classList.add('show');
+      cdModalReveal(shotsError);
       document.getElementById('cd-modal-shots-list').scrollIntoView({ block: 'center', behavior: 'smooth' });
       return;
     }
@@ -11747,7 +12046,7 @@ function tuesdayReviewWeekNumber() {
 
 async function loadTuesdayReviewWeek() {
   try {
-    state.tuesdayReview.data = await api(`/concept-development?week_start=${tuesdayReviewWeekStart()}`);
+    state.tuesdayReview.data = await api(`/concept-development?scope=review&week_start=${tuesdayReviewWeekStart()}`);
     state.tuesdayReview.filter = tuesdayReviewDefaultFilter();
     renderTuesdayReviewWeekHeader();
     renderTuesdayReviewList();
@@ -12757,7 +13056,7 @@ function shootingMoveMenuItemsHtml(item) {
   const prevWeekItem = `<button type="button" class="shoot-card-menu-item" onclick="moveShootingCard(${item.id}, 'carry_prev_week', '${item.scheduled_week_start}'); closeAllShootCardMenus();">&larr; Move to previous week</button>`;
   const carryItem = `<button type="button" class="shoot-card-menu-item shoot-card-menu-item-carry" onclick="moveShootingCard(${item.id}, 'carry_next_week', '${item.scheduled_week_start}'); closeAllShootCardMenus();">Carry to next week &rarr;</button>`;
   const pickWeekItem = `<button type="button" class="shoot-card-menu-item" onclick="showShootWeekPicker(${item.id}, '${item.scheduled_week_start}')">Move to week&hellip;</button>`;
-  return `<div class="shoot-card-menu-label">Move to</div>${dayItems}${unscheduledItem}${prevWeekItem}${carryItem}${pickWeekItem}`;
+  return `<div class="shoot-card-menu-label">Move to</div>${dayItems}${unscheduledItem}${prevWeekItem}${carryItem}${pickWeekItem}<div class="shoot-card-menu-label">Manage</div><button type="button" class="shoot-card-menu-item" data-lifecycle-menu="${item.creative_asset_id}" onclick="openLifecycleMenu(this, ${item.creative_asset_id})">Archive / Kill / Remove&hellip;</button>`;
 }
 
 // "Move to week..." replaces the same dropdown's contents in place with the
@@ -12883,7 +13182,7 @@ async function unmarkShootingShot(scheduleId) {
 async function startShooting(scheduleId) {
   try {
     await api(`/shooting/${scheduleId}/start`, { method: 'POST' });
-    toast('Marked as In Progress');
+    toast('Marked as In production');
     refreshCurrentShootingView();
   } catch (e) {
     toast(e.message, true);
@@ -12940,7 +13239,7 @@ function shootingProductionLabel(format) {
 // arbitrary jumping between states.
 function shootingStatusControlHtml(item) {
   const stages = ['scheduled', 'in_progress', 'shot'];
-  const labels = { scheduled: 'Scheduled', in_progress: 'In Progress', shot: shootingProductionLabel(item.format) };
+  const labels = { scheduled: 'Scheduled', in_progress: 'In production', shot: shootingProductionLabel(item.format) };
   const currentIndex = stages.indexOf(item.status);
   return `<div class="shoot-status-control" onclick="event.stopPropagation()">${stages.map((stage, i) => {
     const isCurrent = i === currentIndex;
@@ -12969,7 +13268,7 @@ function shootingCardHtml(item, isUnscheduled = false) {
   const isShot = item.status === 'shot';
   const carriedBadge = item.carried_over ? `<span class="shoot-carried-badge">From W${isoWeekNumber(parseDateStr(item.original_week_start))}</span>` : '';
   const statusHtml = shootingStatusControlHtml(item);
-  const menuHtml = isShot ? '' : `
+  const menuHtml = isShot ? lifecycleKebabHtml(item.creative_asset_id) : `
         <div class="shoot-card-menu" onclick="event.stopPropagation()">
           <button type="button" class="shoot-card-menu-btn" onclick="toggleShootCardMenu(${item.id})" aria-label="Move concept">&bull;&bull;&bull;</button>
           <div class="shoot-card-menu-dropdown" id="shoot-card-menu-${item.id}">${shootingMoveMenuItemsHtml(item)}</div>
@@ -13124,7 +13423,7 @@ function shootingTodayItemHtml(item) {
   const dateText = uxDayDateText(item.scheduled_day, item.scheduled_week_start && String(item.scheduled_week_start).slice(0, 10));
   return `
     <div class="shoot-today-item ux-wcard ${isShot ? 'shoot-card-shot' : ''}">
-      <div class="ux-wcard-head"><div class="shoot-card-name">${escapeHtml(item.concept_name)}</div></div>
+      <div class="ux-wcard-head"><div class="shoot-card-name">${escapeHtml(item.concept_name)}</div>${lifecycleKebabHtml(item.creative_asset_id)}</div>
       <div class="shoot-card-product">${escapeHtml(item.product_name || '—')}${dropBadge}</div>
       <div class="ux-wcard-meta">
         ${uxPersonHtml('Filming', item.owner)}
@@ -14021,7 +14320,8 @@ function editingConceptEditorLabel(concept) {
   return concept.editing_owner || null;
 }
 
-const EDITING_STATUS_LABELS = { to_edit: 'To Edit', scheduled: 'Scheduled', editing: 'In Progress', ready_for_approval: 'Edited' };
+// Status wording follows the one pipeline vocabulary used everywhere (Scheduled, In production, Filmed, In editing, Awaiting approval, Completed).
+const EDITING_STATUS_LABELS = { to_edit: 'Filmed', scheduled: 'Scheduled', editing: 'In editing', ready_for_approval: 'Awaiting approval' };
 const EDITING_STATUS_CLASS = { to_edit: 'editing-status-to-edit', scheduled: 'editing-status-scheduled', editing: 'editing-status-editing', ready_for_approval: 'editing-status-ready' };
 
 // The same segmented production-status control Shooting cards already use
@@ -14059,19 +14359,19 @@ function editingStatusControlHtml(concept) {
     let title = '';
     if (stage === 'editing' && (status === 'to_edit' || status === 'scheduled')) {
       onclick = `advanceEditingToInProgress(${concept.creative_asset_id})`;
-      title = 'Mark as In Progress';
+      title = 'Mark as In editing';
     } else if (stage === 'ready_for_approval' && status === 'editing') {
       onclick = `advanceEditingToEdited(${concept.creative_asset_id})`;
-      title = 'Mark as Edited';
+      title = 'Mark as Awaiting approval';
     } else if (stage === 'scheduled' && status === 'editing' && hasDay) {
       onclick = `revertEditingToScheduled(${concept.creative_asset_id})`;
       title = 'Undo -- revert to Scheduled';
     } else if (stage === 'to_edit' && status === 'editing' && !hasDay) {
       onclick = `revertEditingToToEdit(${concept.creative_asset_id})`;
-      title = 'Undo -- revert to To Edit';
+      title = 'Undo -- revert to Filmed';
     } else if (stage === 'to_edit' && status === 'scheduled') {
       onclick = `revertEditingToToEdit(${concept.creative_asset_id})`;
-      title = 'Undo -- unschedule back to To Edit';
+      title = 'Undo -- unschedule back to Filmed';
     }
     return `<button type="button" class="shoot-status-segment${isCurrent ? ' shoot-status-segment-active' : ''}" ${onclick ? `onclick="${onclick}"` : 'disabled'} title="${title}">${EDITING_STATUS_LABELS[stage]}</button>`;
   }).join('')}</div>`;
@@ -14126,7 +14426,7 @@ async function advanceEditingToInProgress(conceptAssetId) {
   try {
     await api(`/editing/concepts/${conceptAssetId}/start`, { method: 'POST' });
     await refreshCurrentEditingView();
-    toast('Marked as In Progress');
+    toast('Marked as In editing');
   } catch (e) {
     toast(e.message, true);
   }
@@ -14250,7 +14550,7 @@ function renderEditingSummary() {
     { label: 'To edit', value: s.to_edit, tone: s.to_edit ? 'amber' : '' },
     { label: 'Scheduled', value: s.scheduled },
     { label: 'In progress', value: s.editing },
-    { label: 'Edited', value: s.ready_for_approval, tone: s.ready_for_approval ? 'green' : '' },
+    { label: 'Awaiting approval', value: s.ready_for_approval, tone: s.ready_for_approval ? 'green' : '' },
   ]);
 }
 
@@ -14272,7 +14572,7 @@ function editingConceptCardHtml(concept) {
   const dateText = uxDayDateText(concept.editing_day, concept.editing_week_start);
   return `
     <div class="cd-card editing-concept-card ux-wcard ${isReady ? 'editing-concept-card-ready shoot-card-shot' : ''}" onclick="openEditingConcept(${concept.creative_asset_id})">
-      <div class="ux-wcard-head"><div class="shoot-card-name editing-concept-name">${escapeHtml(concept.concept_name)}</div></div>
+      <div class="ux-wcard-head"><div class="shoot-card-name editing-concept-name">${escapeHtml(concept.concept_name)}</div>${lifecycleKebabHtml(concept.creative_asset_id)}</div>
       <div class="shoot-card-product editing-concept-product">${escapeHtml(concept.product_name || '—')}</div>
       <div class="ux-wcard-meta">${uxPersonHtml('Editor', concept.editing_owner)}</div>
       <div class="ux-wcard-meta">${uxDateChipHtml(dateText)}</div>
@@ -14368,7 +14668,7 @@ function editingMoveMenuItemsHtml(concept) {
   const prevWeekItem = `<button type="button" class="shoot-card-menu-item" onclick="moveEditingCard(${concept.shoot_schedule_id}, 'carry_prev_week', '${concept.editing_week_start}'); closeAllEditingCardMenus();">&larr; Move to previous week</button>`;
   const carryItem = `<button type="button" class="shoot-card-menu-item shoot-card-menu-item-carry" onclick="moveEditingCard(${concept.shoot_schedule_id}, 'carry_next_week', '${concept.editing_week_start}'); closeAllEditingCardMenus();">Carry to next week &rarr;</button>`;
   const pickWeekItem = `<button type="button" class="shoot-card-menu-item" onclick="showEditingWeekPicker(${concept.shoot_schedule_id}, '${concept.editing_week_start}')">Move to week&hellip;</button>`;
-  return `<div class="shoot-card-menu-label">Move to</div>${dayItems}${unscheduledItem}${prevWeekItem}${carryItem}${pickWeekItem}`;
+  return `<div class="shoot-card-menu-label">Move to</div>${dayItems}${unscheduledItem}${prevWeekItem}${carryItem}${pickWeekItem}<div class="shoot-card-menu-label">Manage</div><button type="button" class="shoot-card-menu-item" data-lifecycle-menu="${concept.creative_asset_id}" onclick="openLifecycleMenu(this, ${concept.creative_asset_id})">Archive / Kill / Remove&hellip;</button>`;
 }
 
 function showEditingWeekPicker(scheduleId, currentWeekStart) {
@@ -14994,6 +15294,7 @@ function finalApprovalCardHtml(c) {
   const resubmitted = c.final_approval_status === 'changes_required';
   return `
     <div class="cd-card ux-pcard fa-card${versions.length > 1 ? ' fa-card-multi' : ''}" role="button" tabindex="0" data-fa-concept="${c.creative_asset_id}" onclick="openFinalApprovalModal(${c.creative_asset_id})" onkeydown="if(event.key==='Enter'){openFinalApprovalModal(${c.creative_asset_id})}">
+      ${lifecycleKebabHtml(c.creative_asset_id, 'ux-pcard-kebab')}
       <div class="ux-pcard-main">
         ${finalApprovalMediaStripHtml(versions, 'md')}
         <div class="ux-pcard-body">
@@ -15181,6 +15482,7 @@ function adSetupCardHtml(item) {
   const category = AD_CATEGORY_LABELS[item.ad_category] || item.ad_category;
   return `
     <div class="cd-card ux-pcard fa-card" role="button" tabindex="0" data-ad-setup="${item.id}" onclick="openAdSetupModal(${item.id})" onkeydown="if(event.key==='Enter'){openAdSetupModal(${item.id})}">
+      ${lifecycleKebabHtml(item.creative_asset_id, 'ux-pcard-kebab')}
       <div class="ux-pcard-main">
         ${adSetupMediaHtml(item)}
         <div class="ux-pcard-body">
@@ -15206,6 +15508,7 @@ function renderAdSetupList() {
 function adSetupApprovedCardHtml(item) {
   return `
     <div class="cd-card ux-pcard fa-card" role="button" tabindex="0" data-ad-setup-approved="${item.id}" onclick="openAdSetupApprovedModal(${item.id})" onkeydown="if(event.key==='Enter'){openAdSetupApprovedModal(${item.id})}">
+      ${lifecycleKebabHtml(item.creative_asset_id, 'ux-pcard-kebab')}
       <div class="ux-pcard-main">
         ${adSetupMediaHtml(item)}
         <div class="ux-pcard-body">
@@ -15304,11 +15607,13 @@ function detectStageTypeClient(stageName) {
 
 function renderAdSetupReadiness() {
   const d = state.adSetup.draft;
-  const hasCopy = !!(d.copy_set_id || (d.selected_primary_text && d.selected_headline));
+  const ps = adSetupPrimaryState(d);
+  const hasCopy = !!d.copy_set_id || !!((d.selected_headline || '').trim() && (d.selected_description || '').trim());
   const items = [
     { label: 'Meta Ad Name (Hook)', ready: !!d.hook_short },
     { label: 'Creative', ready: !!d.final_edit_link },
-    { label: 'Primary Text / Headline', ready: hasCopy },
+    { label: 'Primary Text approved', ready: ps.approved && (!!d.copy_set_id || !!(d.selected_primary_text || '').trim()) },
+    { label: 'Headline and Description', ready: hasCopy },
     { label: 'CTA', ready: !!d.cta },
     { label: 'Destination', ready: !!(d.url_link_page && d.destination_url) },
   ];
@@ -15424,34 +15729,7 @@ function renderAdSetupModal() {
           </div>
         </section>
 
-        <section class="as-section as-card">
-          <div class="as-section-title">Copy</div>
-          <label>Copy set
-            <select onchange="onAdSetupCopySetChange(this.value)">
-              <option value="">-- Use this ad's own copy --</option>
-              ${copySetOptions}
-            </select>
-          </label>
-          ${usingCopySet
-            ? `<div class="as-section-note" style="margin:8px 0 0;">Using shared Copy Set: sharing Primary Text/Headline/CTA with every other ad in this set.</div>`
-            : `<div class="as-copy-cols">
-                 <div>
-                   <div class="admin-note" style="margin-bottom:6px;">Primary text</div>
-                   ${primaryOptions}
-                 </div>
-                 <div>
-                   <div class="admin-note" style="margin-bottom:6px;">Headline</div>
-                   ${headlineOptions}
-                 </div>
-               </div>
-               <div class="as-copy-actions">
-                 <button type="button" class="btn btn-ghost btn-sm" onclick="regenerateAdSetupCopy()">Regenerate</button>
-                 <button type="button" class="btn btn-ghost btn-sm" onclick="createAdSetupCopySetFromCurrent()">Save as New Copy Set</button>
-               </div>`}
-          <label style="margin-top:12px;">CTA
-            <select onchange="adSetupSet('cta', this.value)">${optionSelect('cta', CTA_LABELS, d.cta)}</select>
-          </label>
-        </section>
+        ${adSetupCopySectionHtml(d, { optionSelect, copySetOptions, primaryOptions, headlineOptions, usingCopySet })}
 
         <section class="as-section as-card">
           <div class="as-section-title">Destination</div>
@@ -15483,15 +15761,228 @@ function renderAdSetupModal() {
     </div>
   `;
   renderAdSetupReadiness();
+  if (asAi.adId !== state.adSetup.editingId || !asAi.status) loadAdSetupAi();
   const approveBtn = document.getElementById('ad-setup-approve-btn');
   if (approveBtn) approveBtn.style.display = d.status === 'approved' ? 'none' : '';
   const saveBtn = document.getElementById('ad-setup-save-btn');
   if (saveBtn) saveBtn.style.display = d.status === 'approved' ? 'none' : '';
 }
 
+// ── Ad Setup: Meta copy (deterministic rules + Primary Text with the AI Copy Assistant) ──────────────────────────────
+// Headline / Description / CTA follow the WNDRR rules (src/lib/adCopyRules.js) until a person edits them; Primary Text is written
+// by the assistant or by hand and counts only once it has been explicitly approved.
+const asAi = { adId: null, status: null, options: [], refs: [], notes: [], missing: [], loading: false, error: null, instruction: '' };
+const AS_REFINE_CHIPS = ['Make it shorter', 'More like our usual WNDRR copy', 'Focus on the fit', 'Less salesy', 'Make it more suitable for a new drop'];
+
+function adSetupPrimaryState(d) {
+  if (d.copy_set_id) return { label: 'From shared copy set', tone: 'green', approved: true };
+  const text = (d.selected_primary_text || '').trim();
+  if (!text) return { label: 'No Primary Text yet', tone: 'neutral', approved: false };
+  if (d.primary_text_approved || !d.primary_text_source) return { label: d.primary_text_approved ? 'Approved' : 'Selected', tone: 'green', approved: true };
+  return { label: d.primary_text_source === 'ai' ? 'AI suggestion: not approved' : 'Not approved yet', tone: 'amber', approved: false };
+}
+
+function adSetupCopyRuleHtml(d) {
+  const r = d.copy_rule || {};
+  const flags = (r.flags || []).map((f) => `<div class="as-flag">${escapeHtml(f.message)}</div>`).join('');
+  const ruleName = { standard: 'Standard product', hype: 'Sale hype / teaser', sale_live: 'Sale live', mid_sale: 'Mid sale', last_chance: 'Last chance' }[r.rule_key] || null;
+  const manual = d.copy_fields_manual !== undefined ? d.copy_fields_manual : r.manual;
+  const state = manual ? UX.badgeHtml('Edited by you', 'neutral') : (ruleName ? UX.badgeHtml(`WNDRR rule: ${ruleName}`, 'purple') : UX.badgeHtml('No rule applied', 'neutral'));
+  const canApply = r.rule_key && (manual || r.differs);
+  return `<div class="as-rule">${state}${canApply ? '<button type="button" class="ux-link-btn" id="as-apply-rules-btn" onclick="applyAdSetupCopyRules()">Apply WNDRR rules</button>' : ''}</div>${flags}`;
+}
+
+function adSetupAiPanelHtml(d) {
+  const st = asAi.status;
+  if (!st) return '<div class="as-ai"><div class="as-ai-head">AI Copy Assistant</div><div class="as-ai-note">Loading&hellip;</div></div>';
+  if (!st.ai_configured) return `<div class="as-ai"><div class="as-ai-head">AI Copy Assistant ${UX.badgeHtml('Not configured', 'amber')}</div><div class="as-ai-note">${escapeHtml(st.ai_reason || 'The AI provider is not configured.')} Until then, write the Primary Text yourself.</div></div>`;
+  if (!st.library) {
+    const why = st.sheets && !st.sheets.configured ? st.sheets.reason : 'The WNDRR copy library has not been read yet. An admin can refresh it in Settings > Copy Library.';
+    return `<div class="as-ai"><div class="as-ai-head">AI Copy Assistant ${UX.badgeHtml('Library not connected', 'amber')}</div><div class="as-ai-note">${escapeHtml(why)}</div></div>`;
+  }
+  const hasText = !!(d.selected_primary_text || '').trim();
+  const opts = asAi.options.map((o, i) => `
+    <div class="as-ai-option" data-ai-option="${i}">
+      <div class="as-ai-angle">${escapeHtml(o.angle || `Option ${i + 1}`)}</div>
+      <div class="as-ai-text">${escapeHtml(o.text)}</div>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="useAdSetupAiOption(${i})">Use this</button>
+    </div>`).join('');
+  return `<div class="as-ai">
+    <div class="as-ai-head">AI Copy Assistant <span class="as-ai-sub">Library updated ${escapeHtml(copyLibDate(st.library.synced_at))}</span></div>
+    <div class="as-ai-actions">
+      <button type="button" class="btn btn-primary btn-sm" id="as-ai-generate-btn" onclick="generateAdSetupCopy(${asAi.options.length ? 'true' : 'false'})" ${asAi.loading ? 'disabled' : ''}>${asAi.loading ? 'Writing&hellip;' : (asAi.options.length ? 'Give me another three' : 'Generate Copy')}</button>
+      <span class="as-ai-note">Three options, written from WNDRR's own examples and only the facts we hold for this ad.</span>
+    </div>
+    ${asAi.error ? `<div class="as-flag">${escapeHtml(asAi.error)}</div>` : ''}
+    ${(asAi.missing || []).map((m) => `<div class="as-flag">${escapeHtml(m)}</div>`).join('')}
+    ${opts ? `<div class="as-ai-options">${opts}</div>` : ''}
+    ${(asAi.notes || []).map((m) => `<div class="as-ai-note">${escapeHtml(m)}</div>`).join('')}
+    ${asAi.refs.length ? `<div class="as-ai-note">Written with ${asAi.refs.length} reference examples (${[...new Set(asAi.refs.map((r) => r.tab))].map(escapeHtml).join(', ')}).</div>` : ''}
+    ${hasText ? `<div class="as-ai-refine">
+      <div class="as-ai-chips">${AS_REFINE_CHIPS.map((c) => `<button type="button" class="as-chip" onclick="refineAdSetupCopy('${c.replace(/'/g, "\\'")}')">${escapeHtml(c)}</button>`).join('')}</div>
+      <div class="as-ai-ask"><input type="text" id="as-ai-instruction" placeholder="Ask for a change, e.g. make it shorter and focus on the fit" maxlength="500" onkeydown="if(event.key==='Enter'){refineAdSetupCopy()}"><button type="button" class="btn btn-ghost btn-sm" onclick="refineAdSetupCopy()">Refine</button></div>
+    </div>` : ''}
+  </div>`;
+}
+
+function adSetupCopySectionHtml(d, h) {
+  const ps = adSetupPrimaryState(d);
+  const usingSet = h.usingCopySet;
+  return `
+        <section class="as-section as-card" id="as-copy-section">
+          <div class="as-section-title">Meta copy</div>
+          ${usingSet ? '<div class="as-section-note">Using a shared Copy Set: its Primary Text, Headline and CTA apply to this ad.</div>' : adSetupCopyRuleHtml(d)}
+          <div class="as-grid">
+            <label>Headline<input type="text" id="as-headline" value="${escapeHtml(d.selected_headline || '')}" ${usingSet ? 'disabled' : ''} maxlength="255" oninput="adSetupSet('selected_headline', this.value)"></label>
+            <label>Description<input type="text" id="as-description" value="${escapeHtml(d.selected_description || '')}" ${usingSet ? 'disabled' : ''} maxlength="255" oninput="adSetupSet('selected_description', this.value)"></label>
+            <label>CTA<select id="as-cta" onchange="adSetupSet('cta', this.value)">${h.optionSelect('cta', CTA_LABELS, d.cta)}</select></label>
+          </div>
+          ${usingSet ? '' : `
+          <div class="as-primary">
+            <div class="as-primary-head"><span class="as-field-title">Primary Text</span><span id="as-primary-state">${UX.badgeHtml(ps.label, ps.tone)}</span></div>
+            <textarea id="as-primary-text" rows="6" maxlength="2200" placeholder="Write the Primary Text, or generate options below." oninput="adSetupPrimaryInput(this.value)">${escapeHtml(d.selected_primary_text || '')}</textarea>
+            <div class="as-primary-actions">
+              <button type="button" class="btn btn-ghost btn-sm" id="as-approve-primary-btn" onclick="approveAdSetupPrimaryText()" ${(d.selected_primary_text || '').trim() ? '' : 'disabled'}>Approve Primary Text</button>
+              <span class="as-ai-note" id="as-primary-count">${(d.selected_primary_text || '').length} characters</span>
+            </div>
+            <div id="as-ai-host">${adSetupAiPanelHtml(d)}</div>
+          </div>`}
+          <details class="as-more">
+            <summary>Shared copy sets${usingSet ? ' (in use)' : ''} and starter drafts</summary>
+            <label>Copy set
+              <select onchange="onAdSetupCopySetChange(this.value)">
+                <option value="">-- Use this ad's own copy --</option>
+                ${h.copySetOptions}
+              </select>
+            </label>
+            ${usingSet ? '' : `<div class="as-copy-cols">
+              <div><div class="admin-note" style="margin-bottom:6px;">Starter Primary Text (template)</div>${h.primaryOptions}</div>
+              <div><div class="admin-note" style="margin-bottom:6px;">Starter headlines (template)</div>${h.headlineOptions}</div>
+            </div>
+            <div class="as-copy-actions">
+              <button type="button" class="btn btn-ghost btn-sm" onclick="regenerateAdSetupCopy()">Regenerate starters</button>
+              <button type="button" class="btn btn-ghost btn-sm" onclick="createAdSetupCopySetFromCurrent()">Save as New Copy Set</button>
+            </div>`}
+          </details>
+        </section>`;
+}
+
+function adSetupPrimaryInput(value) {
+  const d = state.adSetup.draft;
+  if (d.selected_primary_text !== value) {
+    d.selected_primary_text = value;
+    d.primary_text_approved = false;
+    d.primary_text_source = d.primary_text_source === 'ai' ? 'ai' : 'manual';
+  }
+  const ps = adSetupPrimaryState(d);
+  const badge = document.getElementById('as-primary-state');
+  if (badge) badge.innerHTML = UX.badgeHtml(ps.label, ps.tone);
+  const count = document.getElementById('as-primary-count');
+  if (count) count.textContent = `${value.length} characters`;
+  const btn = document.getElementById('as-approve-primary-btn');
+  if (btn) btn.disabled = !value.trim();
+  renderAdSetupReadiness();
+}
+
+async function loadAdSetupAi() {
+  const id = state.adSetup.editingId;
+  asAi.adId = id; asAi.status = null; asAi.error = null; asAi.notes = []; asAi.missing = []; asAi.refs = [];
+  asAi.options = (state.adSetup.draft.ai_draft_options || []).filter((o) => o && o.text);
+  try {
+    asAi.status = await api(`/ad-setup/${id}/copy-ai`);
+  } catch (e) {
+    asAi.status = { ai_configured: false, ai_reason: e.message, library: null, sheets: null };
+  }
+  if (asAi.adId === state.adSetup.editingId) refreshAdSetupAiPanel();
+}
+
+function refreshAdSetupAiPanel() {
+  const host = document.getElementById('as-ai-host');
+  if (host) host.innerHTML = adSetupAiPanelHtml(state.adSetup.draft);
+}
+
+async function generateAdSetupCopy(more) {
+  if (asAi.loading) return;
+  asAi.loading = true; asAi.error = null; refreshAdSetupAiPanel();
+  try {
+    const out = await api(`/ad-setup/${state.adSetup.editingId}/copy-ai/generate`, { method: 'POST', body: JSON.stringify({ more: !!more }) });
+    asAi.options = out.options; asAi.refs = out.references || []; asAi.notes = out.notes || []; asAi.missing = out.missing || [];
+  } catch (e) {
+    asAi.error = e.message;
+  }
+  asAi.loading = false; refreshAdSetupAiPanel();
+}
+
+async function refineAdSetupCopy(chip) {
+  const input = document.getElementById('as-ai-instruction');
+  const instruction = (chip || (input ? input.value : '')).trim();
+  const d = state.adSetup.draft;
+  if (!instruction) return toast('Say what to change', true);
+  if (!(d.selected_primary_text || '').trim()) return toast('There is no Primary Text to refine yet', true);
+  if (asAi.loading) return;
+  asAi.loading = true; asAi.error = null; refreshAdSetupAiPanel();
+  try {
+    const out = await api(`/ad-setup/${state.adSetup.editingId}/copy-ai/refine`, { method: 'POST', body: JSON.stringify({ instruction, base_text: d.selected_primary_text }) });
+    asAi.options = out.options; asAi.refs = out.references || []; asAi.notes = out.notes || []; asAi.missing = out.missing || [];
+    toast('Here is the revised version. Use it to replace your text.');
+  } catch (e) {
+    asAi.error = e.message;
+  }
+  asAi.loading = false; refreshAdSetupAiPanel();
+}
+
+// Using a suggestion puts it in the editable box as a DRAFT; it is not approved until Approve Primary Text is clicked.
+function useAdSetupAiOption(index) {
+  const o = asAi.options[index];
+  if (!o) return;
+  const d = state.adSetup.draft;
+  d.selected_primary_text = o.text;
+  d.primary_text_source = 'ai';
+  d.primary_text_approved = false;
+  const box = document.getElementById('as-primary-text');
+  if (box) box.value = o.text;
+  adSetupPrimaryInput(o.text);
+  toast('Added to the Primary Text box. Edit it, then approve it.');
+}
+
+async function approveAdSetupPrimaryText() {
+  const d = state.adSetup.draft;
+  const text = (d.selected_primary_text || '').trim();
+  if (!text) return;
+  try {
+    const row = await api(`/ad-setup/${state.adSetup.editingId}/approve-primary-text`, { method: 'POST', body: JSON.stringify({ text, source: d.primary_text_source || 'manual' }) });
+    state.adSetup.draft = { ...state.adSetup.draft, ...row };
+    asAi.options = [];
+    toast('Primary Text approved');
+    renderAdSetupModal();
+    loadAdSetupAi();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function applyAdSetupCopyRules() {
+  const d = state.adSetup.draft;
+  const r = d.copy_rule || {};
+  let confirm = false;
+  if (r.manual || d.selected_headline || d.selected_description) {
+    if (!(await confirmDialog('Replace this ad\'s Headline, Description and CTA with the WNDRR rules? Your current wording will be overwritten.', { okLabel: 'Apply rules' }))) return;
+    confirm = true;
+  }
+  try {
+    const row = await api(`/ad-setup/${state.adSetup.editingId}/apply-copy-rules`, { method: 'POST', body: JSON.stringify({ confirm_overwrite: confirm }) });
+    state.adSetup.draft = { ...state.adSetup.draft, ...row, products: state.adSetup.draft.products, batches: state.adSetup.draft.batches, copy_sets: state.adSetup.draft.copy_sets };
+    toast('WNDRR rules applied');
+    renderAdSetupModal();
+    loadAdSetupAi();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
 function selectAdSetupCopy(kind, index) {
   const d = state.adSetup.draft;
-  if (kind === 'primary') d.selected_primary_text = d.primary_text_options[index];
+  if (kind === 'primary') { d.selected_primary_text = d.primary_text_options[index]; d.primary_text_source = 'template'; d.primary_text_approved = false; }
   else d.selected_headline = d.headline_options[index];
   renderAdSetupModal();
 }
@@ -15573,14 +16064,16 @@ async function saveAdSetupDraft() {
   const fields = [
     'ad_category', 'week_no', 'ad_date', 'product_label', 'product_type', 'hook_short',
     'media_type', 'ad_type', 'creator_name', 'concept_label', 'url_link_page', 'destination_url',
-    'selected_primary_text', 'selected_headline', 'cta',
+    'selected_primary_text', 'selected_headline', 'selected_description', 'cta', 'primary_text_source',
   ];
   const body = {};
   fields.forEach((f) => { body[f] = d[f]; });
   try {
     const updated = await api(`/ad-setup/${state.adSetup.editingId}`, { method: 'PATCH', body: JSON.stringify(body) });
     state.adSetup.draft = { ...state.adSetup.draft, ...updated };
+    try { const fresh = await api(`/ad-setup/${state.adSetup.editingId}`); state.adSetup.draft.copy_rule = fresh.copy_rule; } catch (e) { /* the rule note refreshes next time it opens */ }
     toast('Draft saved');
+    renderAdSetupModal();
     loadAdSetupBoard();
   } catch (e) {
     toast(e.message, true);
@@ -15632,6 +16125,7 @@ async function openAdSetupApprovedModal(id) {
         <div class="as-section-title">Copy</div>
         <div style="margin-bottom:8px;"><strong>Primary Text:</strong> ${escapeHtml(copyPrimary || '—')}</div>
         <div style="margin-bottom:8px;"><strong>Headline:</strong> ${escapeHtml(copyHeadline || '—')}</div>
+        <div style="margin-bottom:8px;"><strong>Description:</strong> ${escapeHtml(d.selected_description || '—')}</div>
         <div><strong>CTA:</strong> ${escapeHtml(CTA_LABELS[d.cta] || d.cta)}</div>
       </div>
       <div class="as-section">

@@ -673,6 +673,22 @@ document.addEventListener('click', (ev) => {
 })();
 
 // the Shoot Plan section's production progress (moved here from the top of Planning): concepts against the target, what still needs organising, and every stage
+// One compact line of facts that the stage chips below do not already show (batch 35): ownership, products with no concept yet, work that can move on, and unfinished work from earlier weeks.
+function plShootPlanStatusStrip(p, items, noConcept) {
+  const owned = items.filter((i) => String(i.creator || '').trim()).length;
+  const unowned = items.length - owned;
+  const ready = (p.counts.filmed || 0) + (p.counts.edited || 0);
+  const overdue = (p.carryover && p.carryover.count) || 0;
+  const bits = [
+    UX.badgeHtml(plPlural(items.length, 'product') + ' selected', 'neutral'),
+    unowned ? UX.badgeHtml(`${unowned} unassigned`, 'amber') : (items.length ? UX.badgeHtml('All assigned', 'green') : ''),
+    noConcept ? UX.badgeHtml(`${plPlural(noConcept, 'product')} need a concept`, 'amber') : '',
+    ready ? UX.badgeHtml(`${ready} ready to progress`, 'purple') : '',
+    overdue ? UX.badgeHtml(`${overdue} overdue from earlier weeks`, 'red') : '',
+  ].filter(Boolean).join('');
+  return `<div class="sp-strip" data-sp-strip>${bits}</div>`;
+}
+
 function plRenderShootPlanProgress() {
   const host = document.getElementById('shoot-plan-progress');
   if (!host) return;
@@ -686,13 +702,7 @@ function plRenderShootPlanProgress() {
   host.innerHTML = `<div class="ux-card pl-progress-card sp-progress">
     <div class="sp-progress-head"><div><div class="ux-eyebrow">Weekly concept progress</div><div class="sp-progress-title"><b>${p.planned} of ${p.target}</b> new concepts planned this week</div></div>${p.reached ? UX.badgeHtml('Target met', 'green') : UX.badgeHtml(`${p.remaining} to go`, 'neutral')}</div>
     ${UX.progressBarHtml(pct, p.reached ? 'green' : '')}
-    ${UX.statTilesHtml([
-      { label: items.length === 1 ? 'Product selected' : 'Products selected', value: items.length },
-      { label: 'New concepts planned', value: p.planned },
-      { label: 'Remaining', value: p.remaining, tone: p.remaining ? 'amber' : '' },
-      { label: 'Awaiting production', value: p.awaiting_production || 0 },
-    ])}
-    ${noConcept ? `<div class="sp-progress-note">${plPlural(noConcept, 'selected product')} still need a concept.</div>` : ''}
+    ${plShootPlanStatusStrip(p, items, noConcept)}
     <div class="pl-sp-label">Production progress</div><div class="pl-stages">${plStageChips(p.counts)}</div>
     ${sf && p.remaining > 0 ? `<div class="pl-shortfall">${plEsc(sf.text)}</div>` : ''}${carry}
     <details class="opp-more"><summary>How concepts are counted</summary><div class="hint">${plEsc(p.definition)}</div></details></div>`;

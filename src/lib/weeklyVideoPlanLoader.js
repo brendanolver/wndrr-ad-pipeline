@@ -28,11 +28,11 @@ async function loadShootPlanCounts(db, weekStart, lookbackWeeks) {
             COUNT(ca.id) FILTER (WHERE ca.format = 'video' AND ca.status IN ('awaiting_concept_development', 'concept_script', 'not_started', 'awaiting_proven_concept'))::int AS in_concept,
             COUNT(ca.id) FILTER (WHERE ca.format = 'video' AND ca.status IN ('filming', 'editing', 'qc'))::int AS in_production,
             COUNT(ca.id) FILTER (WHERE ca.format = 'video' AND ca.status = 'uploaded_live')::int AS completed
-       FROM shoot_plan_items spi LEFT JOIN creative_assets ca ON ca.shoot_plan_item_id = spi.id
+       FROM shoot_plan_items spi LEFT JOIN creative_assets ca ON ca.shoot_plan_item_id = spi.id AND ca.archived_at IS NULL
       WHERE spi.week_start = $1::date GROUP BY spi.id`, [weekStart])).rows;
   const earlier = (await db.query(
     `SELECT spi.product_code, COUNT(ca.id)::int AS n
-       FROM shoot_plan_items spi JOIN creative_assets ca ON ca.shoot_plan_item_id = spi.id
+       FROM shoot_plan_items spi JOIN creative_assets ca ON ca.shoot_plan_item_id = spi.id AND ca.archived_at IS NULL
       WHERE ca.format = 'video' AND ca.status <> 'uploaded_live' AND spi.week_start < $1::date AND spi.week_start >= ($1::date - ($2::int * 7))
       GROUP BY spi.product_code`, [weekStart, lookbackWeeks])).rows;
   const confirmed = (await db.query('SELECT confirmed_at FROM weekly_shoot_plan_confirmations WHERE week_start = $1::date', [weekStart])).rows[0] || null;

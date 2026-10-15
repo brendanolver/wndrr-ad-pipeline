@@ -29,6 +29,7 @@ async function loadWorkflowCounts(pool, weekStart, today = new Date()) {
        FROM creative_assets ca
        JOIN shoot_plan_items spi ON spi.id = ca.shoot_plan_item_id
        WHERE spi.week_start = $1::date
+         AND ca.archived_at IS NULL
          AND ca.concept_dev_status IN ('not_started', 'in_development', 'changes_required', 'ready_for_review')
        GROUP BY ca.concept_dev_status`,
       [monday]
@@ -37,7 +38,7 @@ async function loadWorkflowCounts(pool, weekStart, today = new Date()) {
       `SELECT COUNT(*)::int AS n FROM shoot_schedule ss
        JOIN creative_assets ca ON ca.id = ss.creative_asset_id
        WHERE ss.scheduled_week_start = $1::date AND ss.status IN ('unscheduled', 'scheduled')
-         AND ca.concept_dev_status = 'approved'`,
+         AND ca.concept_dev_status = 'approved' AND ca.archived_at IS NULL`,
       [monday]
     ),
     pool.query(
@@ -49,7 +50,8 @@ async function loadWorkflowCounts(pool, weekStart, today = new Date()) {
          COUNT(*) FILTER (WHERE ca.editing_submitted_at IS NOT NULL AND ca.final_approval_status = 'pending'
                           AND ca.editing_submitted_at < now() - ($2 || ' hours')::interval)::int AS approval_stale
        FROM creative_assets ca
-       LEFT JOIN shoot_schedule ss ON ss.creative_asset_id = ca.id`,
+       LEFT JOIN shoot_schedule ss ON ss.creative_asset_id = ca.id
+       WHERE ca.archived_at IS NULL AND ca.concept_dev_status <> 'killed'`,
       [String(EDITING_STALE_DAYS), String(APPROVAL_STALE_HOURS)]
     ),
     // A scheduled shoot is overdue once its scheduled weekday is before today.
@@ -57,7 +59,7 @@ async function loadWorkflowCounts(pool, weekStart, today = new Date()) {
       `SELECT COUNT(*)::int AS n FROM shoot_schedule ss
        JOIN creative_assets ca ON ca.id = ss.creative_asset_id
        WHERE ss.status = 'scheduled' AND ss.scheduled_day IS NOT NULL
-         AND ca.concept_dev_status = 'approved'
+         AND ca.concept_dev_status = 'approved' AND ca.archived_at IS NULL
          AND ss.scheduled_week_start + (CASE ss.scheduled_day
                WHEN 'monday' THEN 0 WHEN 'tuesday' THEN 1 WHEN 'wednesday' THEN 2
                WHEN 'thursday' THEN 3 ELSE 4 END) < $1::date`,

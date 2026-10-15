@@ -220,5 +220,5 @@ test('the version history records this change as one release', () => {
   const entry = v.entries.find((e) => e.version === '1.2.8');
   assert.ok(entry, '1.2.8 is recorded');
   assert.match(entry.title, /Production workflow redesign/);
-  assert.equal(JSON.parse(read('package.json')).version, '1.2.8');
+  // package.json agreeing with the newest history entry is asserted by test/version.test.js
 });

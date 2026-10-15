@@ -43,6 +43,8 @@ const editingRoutes = require('./routes/editing');
 const finalApprovalRoutes = require('./routes/finalApproval');
 const adSetupRoutes = require('./routes/adSetup');
 const moveBackRoutes = require('./routes/moveBack');
+const conceptLifecycleRoutes = require('./routes/conceptLifecycle');
+const { libraryRouter: copyLibraryRoutes, adRouter: copyAssistantRoutes } = require('./routes/copyAssistant');
 const promotionCreativeRoutes = require('./routes/promotionCreative');
 const metaSyncRoutes = require('./routes/metaSync');
 const metaClassificationOptionsRoutes = require('./routes/metaClassificationOptions');
@@ -149,13 +151,24 @@ app.use('/api/final-approval', requireAuth, requireModuleAccess('final-approval'
 // existing module key for this first version -- no new permission key,
 // per the brief's explicit preference, since nothing about who's allowed
 // to see Ad Setup differs from who's allowed to see Final Approval today.
+app.use('/api/ad-setup', requireAuth, requireModuleAccess('final-approval'), copyAssistantRoutes);
 app.use('/api/ad-setup', requireAuth, requireModuleAccess('final-approval'), adSetupRoutes);
+// WNDRR copy library (read-only Google Sheets cache + tone statistics) for the AI Copy Assistant.
+app.use('/api/copy-library', requireAuth, requireModuleAccess('final-approval'), copyLibraryRoutes);
 // Move Back (QA/testing + workflow correction) touches a concept across
 // every stage it can be sent back through, so -- like creative-assets --
 // it's gated by requireAnyModuleAccess rather than a single module; the
 // route file itself additionally requires requireAdmin on every action,
 // since sending real in-flight work backward is a much higher-consequence
 // action than viewing/editing within a module a user already has.
+// Archive / Kill / Remove Test Concept (see lib/conceptLifecycle.js): available from every production stage, so it is gated like
+// Move Back by any production module; Remove Test Concept additionally requires an admin inside the rules.
+app.use(
+  '/api/concept-lifecycle',
+  requireAuth,
+  requireAnyModuleAccess('concept-dev', 'tuesday-review', 'shooting', 'editing', 'final-approval'),
+  conceptLifecycleRoutes
+);
 app.use(
   '/api/move-back',
   requireAuth,

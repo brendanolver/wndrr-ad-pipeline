@@ -61,6 +61,18 @@
     return null;
   }
 
+  // Google Drive file id from /file/d/<id>/..., ?id=<id> or /open?id=<id>. Folders and anything else give null.
+  function driveFileId(url) {
+    try {
+      const u = new URL(url);
+      if (!/(^|\.)drive\.google\.com$/.test(u.hostname) && !/(^|\.)docs\.google\.com$/.test(u.hostname)) return null;
+      const m = u.pathname.match(/\/file\/d\/([\w-]{10,})/);
+      if (m) return m[1];
+      if (/^\/(open|uc|thumbnail)$/.test(u.pathname)) return u.searchParams.get('id');
+    } catch (e) { /* not a URL */ }
+    return null;
+  }
+
   // classifyMedia(link, format) -> how the creative behind a link can be shown.
   //   kind:     'youtube' | 'video-file' | 'image-file' | 'link' | 'none'
   //   thumbUrl: an image URL that IS the creative (youtube / image-file), else null
@@ -79,6 +91,10 @@
     if (yt) {
       return { ...base, kind: 'youtube', thumbUrl: `https://img.youtube.com/vi/${yt}/hqdefault.jpg`, isVideo: true, platform: 'YouTube' };
     }
+    // Drive: a thumbnail exists WITHOUT any sign-in only for files shared as "anyone with the link". For private files Google answers with a
+    // sign-in page, the image fails to load and the placeholder (which still names Drive) is shown instead. No Drive credentials are used.
+    const driveId = driveFileId(url);
+    if (driveId) return { ...base, kind: 'drive', thumbUrl: `https://drive.google.com/thumbnail?id=${encodeURIComponent(driveId)}&sz=w480`, platform: 'Google Drive' };
     if (VIDEO_EXT.test(url)) return { ...base, kind: 'video-file', videoUrl: url, isVideo: true, platform };
     if (IMAGE_EXT.test(url)) return { ...base, kind: 'image-file', thumbUrl: url, isVideo: false, platform };
     return { ...base, kind: 'link', platform };
@@ -114,7 +130,7 @@
     } else {
       inner = placeholderHtml(m);
     }
-    return `<span class="ux-media ux-media-${size} ux-media-${m.kind}" data-media-kind="${m.kind}" data-media-format="${m.format}" role="img" aria-label="${label}">${inner}</span>`;
+    return `<span class="ux-media ux-media-${size} ux-media-${m.kind}" data-media-kind="${m.kind}" data-media-format="${m.format}" data-media-platform="${esc(m.platform)}" role="img" aria-label="${label}">${inner}</span>`;
   }
 
   // A thumbnail that fails to load becomes the same neutral placeholder.
@@ -124,7 +140,7 @@
     const fmt = box.getAttribute('data-media-format') || 'video';
     box.setAttribute('data-media-kind', 'link');
     box.classList.add('ux-media-link');
-    box.innerHTML = placeholderHtml({ kind: 'link', platform: '', format: fmt, isVideo: fmt === 'video' });
+    box.innerHTML = placeholderHtml({ kind: 'link', platform: box.getAttribute('data-media-platform') || '', format: fmt, isVideo: fmt === 'video' });
   }
 
   // Product/catalogue thumbnail (Concept Development, Tuesday Review cards). NOT used for Final Approval,

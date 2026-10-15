@@ -6,6 +6,7 @@ const { generateOrTopUpPlan } = require('./dropProductPlans');
 const { loadBlackFridayShootContext } = require('../lib/blackFridayContext');
 const { requireAdmin } = require('../lib/permissions');
 const { loadMoveBackState, STAGE_LABELS } = require('./moveBack');
+const { planWorkspaceRemoval, loadFacts: loadLifecycleFacts } = require('../lib/conceptLifecycle');
 
 const router = express.Router();
 
@@ -108,6 +109,12 @@ async function reconcileFinalEditsWithHooks(creativeAssetId, hookVariations, for
   }
 }
 
+// A concept belongs in Tuesday Review only after someone submitted it (Ready for Review) -- or it
+// already has a review decision (changes required / approved). A killed concept only shows in
+// review if it was actually reviewed; killing a draft from Concept Development (lifecycle
+// "Kill Concept") must not create a review record. Exported for tests.
+const { isInTuesdayReview } = require('../lib/tuesdayReview');
+
 // The content creator's workspace for turning a CONFIRMED weekly Shoot Plan
 // into concepts ready for the Tuesday review meeting. Deliberately reads
 // only -- product/colourways/owner/source/initial idea all come straight
@@ -183,6 +190,7 @@ router.get('/', async (req, res, next) => {
          LEFT JOIN promotion_stages ps ON ps.id = spi.promotion_stage_id
          LEFT JOIN promotions p ON p.id = ps.promotion_id
          WHERE spi.source IN ('promotion', 'manual')
+           AND ca.archived_at IS NULL
            AND ca.concept_dev_status IN ('not_started', 'in_development', 'ready_for_review', 'changes_required')
          ORDER BY spi.created_at ASC`
       );
@@ -222,7 +230,7 @@ router.get('/', async (req, res, next) => {
     const nonDropItemIds = items.filter((i) => i.source !== 'drop').map((i) => i.id);
     const conceptsResult = nonDropItemIds.length
       ? await pool.query(
-          `SELECT * FROM creative_assets WHERE shoot_plan_item_id = ANY($1::int[]) AND concept_origin IS DISTINCT FROM 'existing' ORDER BY created_at ASC`,
+          `SELECT * FROM creative_assets WHERE shoot_plan_item_id = ANY($1::int[]) AND concept_origin IS DISTINCT FROM 'existing' AND archived_at IS NULL ORDER BY created_at ASC`,
           [nonDropItemIds]
         )
       : { rows: [] };
@@ -268,6 +276,7 @@ router.get('/', async (req, res, next) => {
          FROM drop_product_plan_slots dpps
          JOIN creative_assets ca ON ca.id = dpps.fulfilled_by_asset_id
          WHERE dpps.plan_id = $1 AND dpps.source = 'new'
+           AND ca.archived_at IS NULL
            AND NOT EXISTS (SELECT 1 FROM shoot_schedule ss WHERE ss.creative_asset_id = ca.id)
          ORDER BY dpps.slot_rank ASC`,
         [result.plan.id]
@@ -320,6 +329,16 @@ router.get('/', async (req, res, next) => {
       })),
       concepts: conceptsByItem.get(i.id) || [],
     }));
+
+    // scope=review is Tuesday Review's view of the same data: ONLY concepts a person explicitly
+    // submitted with Ready for Review (or that already have a review decision). Drafts
+    // (not_started / in_development) never enter review, so the review counts are genuine.
+    if (req.query.scope === 'review') {
+      const reviewProducts = products
+        .map((p) => ({ ...p, concepts: p.concepts.filter(isInTuesdayReview) }))
+        .filter((p) => p.concepts.length > 0);
+      return res.json({ week_start: resolvedWeekStart, confirmed: !!confirmation, confirmed_at: confirmation ? confirmation.confirmed_at : null, products: reviewProducts });
+    }
 
     res.json({ week_start: resolvedWeekStart, confirmed: !!confirmation, confirmed_at: confirmation ? confirmation.confirmed_at : null, products });
   } catch (err) {
@@ -505,14 +524,26 @@ router.delete('/workspace/:shootPlanItemId', requireAdmin, async (req, res, next
       [itemId]
     );
 
-    for (const concept of conceptsResult.rows) {
-      const state = await loadMoveBackState(concept.id);
-      if (state && state.currentStage !== 'concept-dev') {
-        await client.query('ROLLBACK');
-        return res.status(409).json({
-          error: `"${concept.concept_name}" has already progressed to ${STAGE_LABELS[state.currentStage] || state.currentStage} and can't be removed from Concept Development this way -- use Move Back to bring it back a stage first.`,
-        });
-      }
+    // Removing the WORKSPACE is not the same as removing a concept: an empty workspace is just deleted. A workspace that has
+    // concepts is removed only when every one of them may be permanently removed under the lifecycle rules (admin, nothing
+    // published/approved for Meta). It never asks anyone to move a concept back a stage; when something is protected the
+    // answer names it and points at Archive / Kill on that concept instead.
+    const plan = await planWorkspaceRemoval(client, itemId, req.user);
+    if (plan.blockers.length) {
+      await client.query('ROLLBACK');
+      const names = plan.blockers.map((b) => `"${b.name}" (${b.stage_label}: ${b.protected_reason || 'not allowed for your role'})`).join('; ');
+      return res.status(409).json({
+        error: `This workspace can't be removed because ${names}. Use Archive or Kill Concept from the concept's ... menu instead; nothing needs to be moved back.`,
+        blockers: plan.blockers.map((b) => ({ id: b.id, name: b.name, stage: b.stage, reason: b.protected_reason })),
+      });
+    }
+    for (const c of plan.concepts) {
+      const facts = await loadLifecycleFacts(client, c.id);
+      await client.query(
+        `INSERT INTO concept_lifecycle_log (creative_asset_id, concept_name, action, stage, actor_user_id, reason, snapshot)
+         VALUES ($1, $2, 'remove_workspace', $3, $4, 'Promotion workspace removed', $5::jsonb)`,
+        [c.id, c.name, c.stage, req.user.id, JSON.stringify({ counts: facts ? facts.counts : null })]
+      );
     }
 
     if (conceptsResult.rows.length) {
@@ -898,4 +929,5 @@ router.patch('/concepts/:id/review', async (req, res, next) => {
 // "reach approved -> get a shoot_schedule row" step, not a second copy of
 // it.
 router.ensureShootScheduleForApprovedConcept = ensureShootScheduleForApprovedConcept;
+router.isInTuesdayReview = isInTuesdayReview;
 module.exports = router;

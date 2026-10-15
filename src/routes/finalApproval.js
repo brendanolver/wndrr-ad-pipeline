@@ -28,7 +28,7 @@ const QUEUE_SELECT = `
   LEFT JOIN LATERAL (
     SELECT * FROM final_edits fe2 WHERE fe2.creative_asset_id = ca.id AND fe2.is_active = true ORDER BY fe2.created_at ASC LIMIT 1
   ) fe ON true
-  WHERE ca.editing_submitted_at IS NOT NULL AND ca.final_approval_status = 'pending'
+  WHERE ca.editing_submitted_at IS NOT NULL AND ca.final_approval_status = 'pending' AND ca.archived_at IS NULL AND ca.concept_dev_status <> 'killed'
   ORDER BY ca.editing_submitted_at ASC
 `;
 
