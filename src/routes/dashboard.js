@@ -1,6 +1,7 @@
 const express = require('express');
 const { pool } = require('../db');
 const { getWeekRange, formatWeekLabel } = require('../lib/week');
+const { loadWorkflowCounts } = require('../lib/dashboardWorkflow');
 
 const router = express.Router();
 
@@ -70,6 +71,9 @@ router.get('/', async (req, res, next) => {
       (r) => r.status === 'qc' && r.stage_entered_at && now - new Date(r.stage_entered_at).getTime() > 86400000
     ).length;
 
+    // Additive: real workflow-stage counts for the pipeline strip + attention list.
+    const workflow = await loadWorkflowCounts(pool, week.start);
+
     const planned = WEEKLY_TARGET;
     const remaining = Math.max(0, planned - shipped);
     const completionPct = planned > 0 ? Math.round((shipped / planned) * 100) : 0;
@@ -108,6 +112,7 @@ router.get('/', async (req, res, next) => {
         approved: { count: null, note: 'Not tracked yet — QC currently goes straight to Shipped' },
         shipped: { count: shipped },
       },
+      workflow,
       health: {
         overdue,
         avgProductionDays,

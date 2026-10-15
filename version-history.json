@@ -2,6 +2,17 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.2.8",
+      "date": "2026-10-15",
+      "title": "Production workflow redesign",
+      "changes": [
+        "New shared design system across Dashboard, Concept Development, Tuesday Review, Shooting, Editing and Final Approval: consistent headers, week selectors, summary tiles, filters, cards, status badges, empty states and modals",
+        "Dashboard rebuilt as weekly progress, production pipeline strip, needs-attention list and quick access, using real workflow counts",
+        "Final Approval and Ad Setup thumbnails are now the actual creative taken from the Final Edit link (video still with play icon, static image, one preview per version, clean placeholder when there is none)",
+        "Shoot Plan, New Concept, Concept editor and Ad Setup modals reorganised without removing fields or changing validation, naming, counting or workflow logic"
+      ]
+    },
+    {
       "version": "1.2.7",
       "date": "2026-10-15",
       "title": "Active Ads, creative deduplication and Meta navigation",

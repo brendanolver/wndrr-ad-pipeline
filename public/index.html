@@ -135,62 +135,60 @@
 
   <main>
     <section id="tab-dashboard" class="tab-panel active">
-      <div class="action-cards">
-        <button class="action-card action-orange" id="action-pipeline">
-          <span class="action-icon">▤</span>
-          <span class="action-title">Creative Pipeline</span>
-          <span class="action-sub">Open the full production pipeline</span>
-        </button>
-        <button class="action-card action-accent" id="action-brief-builder">
-          <span class="action-icon"><svg class=ic aria-hidden=true focusable=false><use href=#i-edit></use></svg></span>
-          <span class="action-title">Brief Builder</span>
-          <span class="action-sub">Briefs, hooks, concepts &amp; scripts</span>
-        </button>
-        <button class="action-card action-blue" id="action-library">
-          <span class="action-icon">▦</span>
-          <span class="action-title">Creative Library</span>
-          <span class="action-sub">Completed &amp; live creative work</span>
-        </button>
+      <div class="ux-page-header">
+        <div class="ux-page-header-text">
+          <h1 class="ux-page-title">Dashboard</h1>
+          <p class="ux-page-desc">Where this week's creative production stands, and what needs a decision.</p>
+        </div>
+        <div class="ux-page-header-actions">
+          <div class="ux-week-nav" id="dash-week-nav">
+            <button type="button" class="ux-week-btn" id="week-prev" title="Previous week" aria-label="Previous week">&lsaquo;</button>
+            <button type="button" class="ux-week-label" id="week-current" title="Jump to this week"><span id="hero-week-title">Week —</span><span class="ux-week-dates" id="hero-week-dates">—</span></button>
+            <button type="button" class="ux-week-btn" id="week-next" title="Next week" aria-label="Next week">&rsaquo;</button>
+          </div>
+        </div>
       </div>
 
-      <div class="core-weekly-card" id="dashboard-core-weekly-card"></div>
-
-      <div class="hero-card">
-        <div class="hero-top">
+      <div class="ux-card dash-week" id="dash-week-card">
+        <div class="dash-week-top">
           <div>
-            <div class="hero-label">Current Week</div>
-            <div class="hero-week" id="hero-week-title">Week —</div>
-            <div class="hero-dates" id="hero-week-dates">—</div>
+            <div class="ux-eyebrow">Weekly progress</div>
+            <div class="dash-week-headline" id="dash-week-headline">—</div>
           </div>
-          <div class="hero-week-nav">
-            <button class="week-nav-btn" id="week-prev" title="Previous week">&larr;</button>
-            <button class="week-nav-btn" id="week-current" title="Jump to current week">Today</button>
-            <button class="week-nav-btn" id="week-next" title="Next week">&rarr;</button>
-          </div>
-          <div class="hero-pct-block">
-            <div class="hero-pct" id="hero-pct">—%</div>
-            <div class="hero-pct-sub" id="hero-pct-sub">— / — shipped</div>
-          </div>
+          <span class="ux-badge ux-badge-neutral" id="hero-status-badge">—</span>
         </div>
-        <div class="hero-progress-track">
-          <div class="hero-progress-fill" id="hero-progress-fill" style="width:0%;"></div>
-        </div>
-        <div class="hero-bottom">
-          <div class="hero-stat"><span class="hero-stat-num" id="hero-shipped">—</span><span class="hero-stat-label">Shipped</span></div>
-          <div class="hero-stat"><span class="hero-stat-num" id="hero-remaining">—</span><span class="hero-stat-label">Remaining</span></div>
-          <div class="hero-stat"><span class="hero-stat-num" id="hero-planned">— <span class="sample-tag">sample</span></span><span class="hero-stat-label">Planned</span></div>
-          <div class="hero-stat"><span class="hero-stat-num" id="hero-days-remaining">—</span><span class="hero-stat-label">Days Remaining</span></div>
-          <div class="hero-status-badge" id="hero-status-badge">—</div>
-        </div>
+        <div class="ux-progress" id="dash-week-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="ux-progress-fill" id="hero-progress-fill" style="width:0%"></div></div>
+        <div class="ux-stats dash-week-stats" id="dash-week-stats"></div>
+        <div class="dash-week-note" id="pipeline-live-note" style="display:none;">Planning figures always reflect the current week; shipped is for the week shown.</div>
       </div>
 
-      <div class="live-state-note" id="pipeline-live-note" style="display:none;">Pipeline cards below show the live board right now, not a historical snapshot for this week.</div>
-      <div class="kpi-grid" id="pipeline-kpi-grid"></div>
+      <section class="dash-section">
+        <div class="ux-section-head"><h3 class="ux-section-title">Production pipeline</h3><span class="ux-section-hint" id="dash-pipeline-hint"></span></div>
+        <div class="dash-pipeline" id="dash-pipeline"></div>
+      </section>
 
-      <div class="health-row">
-        <div class="health-header">Creative Machine Health</div>
-        <div class="health-grid" id="health-grid"></div>
-      </div>
+      <section class="dash-section">
+        <div class="ux-section-head"><h3 class="ux-section-title">Needs attention</h3></div>
+        <div class="dash-attention" id="dash-attention"></div>
+      </section>
+
+      <section class="dash-section">
+        <div class="ux-section-head"><h3 class="ux-section-title">Quick access</h3></div>
+        <div class="dash-quick">
+          <button type="button" class="dash-quick-card" id="action-pipeline">
+            <span class="dash-quick-icon"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-layers"></use></svg></span>
+            <span class="dash-quick-text"><span class="dash-quick-title">Creative Pipeline</span><span class="dash-quick-sub">Open the full production board</span></span>
+          </button>
+          <button type="button" class="dash-quick-card" id="action-brief-builder">
+            <span class="dash-quick-icon"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-edit"></use></svg></span>
+            <span class="dash-quick-text"><span class="dash-quick-title">Brief Builder</span><span class="dash-quick-sub">Briefs, hooks, concepts &amp; scripts</span></span>
+          </button>
+          <button type="button" class="dash-quick-card" id="action-library">
+            <span class="dash-quick-icon"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-film"></use></svg></span>
+            <span class="dash-quick-text"><span class="dash-quick-title">Creative Library</span><span class="dash-quick-sub">Approved &amp; live creative work</span></span>
+          </button>
+        </div>
+      </section>
     </section>
 
     <!-- Meta Performance V1: reads ONLY the local Meta tables via
@@ -460,10 +458,12 @@
         <div class="mp-top pl-top">
           <div class="mp-title-block"><h2 id="planning-page-title">Planning</h2><div class="mp-subtitle" id="planning-page-subtitle">Identify the best opportunities for new Meta creative.</div></div>
           <div class="planning-week-nav">
-            <button type="button" class="week-nav-btn" id="planning-week-prev" onclick="changePlanningWeek(-1)" aria-label="Previous week">&lsaquo;</button>
-            <button type="button" class="planning-week-label-btn" id="planning-week-label" onclick="togglePlanningWeekPicker()"></button>
-            <button type="button" class="week-nav-btn" id="planning-week-next" onclick="changePlanningWeek(1)" aria-label="Next week">&rsaquo;</button>
-            <span class="planning-week-status" id="planning-week-status"></span>
+            <div class="ux-week-nav">
+              <button type="button" class="ux-week-btn" id="planning-week-prev" onclick="changePlanningWeek(-1)" aria-label="Previous week">&lsaquo;</button>
+              <button type="button" class="ux-week-label" id="planning-week-label" onclick="togglePlanningWeekPicker()"></button>
+              <button type="button" class="ux-week-btn" id="planning-week-next" onclick="changePlanningWeek(1)" aria-label="Next week">&rsaquo;</button>
+            </div>
+            <span class="planning-week-status ux-badge" id="planning-week-status"></span>
             <button type="button" class="btn btn-ghost btn-sm" id="planning-this-week-btn" onclick="goToCurrentPlanningWeek()" style="display:none;">This Week</button>
             <div class="planning-week-picker" id="planning-week-picker" style="display:none;"></div>
           </div>
@@ -841,21 +841,24 @@
     </section>
 
     <section id="tab-concept-dev" class="tab-panel">
-      <div class="planning-header">
-        <div class="planning-week-nav">
-          <button type="button" class="week-nav-btn" id="cd-week-prev" onclick="changeConceptDevWeek(-1)" aria-label="Previous week">&lsaquo;</button>
-          <button type="button" class="planning-week-label-btn" id="cd-week-label" onclick="toggleConceptDevWeekPicker()"></button>
-          <button type="button" class="week-nav-btn" id="cd-week-next" onclick="changeConceptDevWeek(1)" aria-label="Next week">&rsaquo;</button>
-          <span class="planning-week-status" id="cd-week-status"></span>
-          <button type="button" class="btn btn-ghost btn-sm" id="cd-this-week-btn" onclick="goToCurrentConceptDevWeek()" style="display:none;">This Week</button>
-          <div class="planning-week-picker" id="cd-week-picker" style="display:none;"></div>
+      <div class="ux-page-header">
+        <div class="ux-page-header-text">
+          <h1 class="ux-page-title">Concept Development</h1>
+          <p class="ux-page-desc">Turn this week's planned products into concepts that are ready for Tuesday Review.</p>
         </div>
-        <div class="planning-actions">
-          <button type="button" class="btn btn-primary btn-sm" onclick="openAdHocConceptModal()">+ New Concept</button>
+        <div class="ux-page-header-actions">
+          <div class="planning-week-nav ux-week-nav">
+            <button type="button" class="ux-week-btn" id="cd-week-prev" onclick="changeConceptDevWeek(-1)" aria-label="Previous week">&lsaquo;</button>
+            <button type="button" class="ux-week-label" id="cd-week-label" onclick="toggleConceptDevWeekPicker()"></button>
+            <button type="button" class="ux-week-btn" id="cd-week-next" onclick="changeConceptDevWeek(1)" aria-label="Next week">&rsaquo;</button>
+            <div class="planning-week-picker" id="cd-week-picker" style="display:none;"></div>
+          </div>
+          <span class="ux-badge" id="cd-week-status"></span>
+          <button type="button" class="btn btn-ghost btn-sm" id="cd-this-week-btn" onclick="goToCurrentConceptDevWeek()" style="display:none;">This Week</button>
           <button type="button" class="btn btn-ghost btn-sm" onclick="openCreativeToolkit()"><svg class=ic aria-hidden=true focusable=false><use href=#i-bulb></use></svg> Creative Toolkit</button>
+          <button type="button" class="btn btn-primary btn-sm" onclick="openAdHocConceptModal()">+ New Concept</button>
         </div>
       </div>
-
       <div id="concept-dev-list"></div>
     </section>
 
@@ -868,19 +871,24 @@
          classes) rather than reusing cd-modal-* -- this is a decision room,
          not another editable form. See loadTuesdayReviewWeek in app.js. -->
     <section id="tab-tuesday-review" class="tab-panel">
-      <h1 class="tr-page-title">Tuesday Creative Review</h1>
-      <div class="planning-header">
-        <div class="planning-week-nav">
-          <button type="button" class="week-nav-btn" id="tr-week-prev" onclick="changeTuesdayReviewWeek(-1)" aria-label="Previous week">&lsaquo;</button>
-          <button type="button" class="planning-week-label-btn" id="tr-week-label" onclick="toggleTuesdayReviewWeekPicker()"></button>
-          <button type="button" class="week-nav-btn" id="tr-week-next" onclick="changeTuesdayReviewWeek(1)" aria-label="Next week">&rsaquo;</button>
+      <div class="ux-page-header">
+        <div class="ux-page-header-text">
+          <h1 class="ux-page-title">Tuesday Review</h1>
+          <p class="ux-page-desc">Review each concept and decide what goes into production: approve it, ask for changes, or kill it.</p>
+        </div>
+        <div class="ux-page-header-actions">
+          <div class="planning-week-nav ux-week-nav">
+            <button type="button" class="ux-week-btn" id="tr-week-prev" onclick="changeTuesdayReviewWeek(-1)" aria-label="Previous week">&lsaquo;</button>
+            <button type="button" class="ux-week-label" id="tr-week-label" onclick="toggleTuesdayReviewWeekPicker()"></button>
+            <button type="button" class="ux-week-btn" id="tr-week-next" onclick="changeTuesdayReviewWeek(1)" aria-label="Next week">&rsaquo;</button>
+            <div class="planning-week-picker" id="tr-week-picker" style="display:none;"></div>
+          </div>
           <button type="button" class="btn btn-ghost btn-sm" id="tr-this-week-btn" onclick="goToCurrentTuesdayReviewWeek()" style="display:none;">This Week</button>
-          <div class="planning-week-picker" id="tr-week-picker" style="display:none;"></div>
         </div>
       </div>
 
-      <div class="shoot-summary-line" id="tr-summary"></div>
-      <div class="filter-tabs" id="tr-filters"></div>
+      <div class="tr-summary-wrap" id="tr-summary"></div>
+      <div class="ux-tabs filter-tabs" id="tr-filters"></div>
       <div id="tr-list"></div>
     </section>
 
@@ -892,27 +900,35 @@
          PATCH /concept-development/concepts/:id/review); the Concept itself
          is never re-created here, only referenced. -->
     <section id="tab-shooting" class="tab-panel">
-      <h1 class="tr-page-title">Shooting</h1>
-      <div class="shoot-subnav" id="shoot-subnav">
-        <button type="button" class="shoot-subnav-btn active" data-shoot-view="week" onclick="setShootingView('week')">Week</button>
-        <button type="button" class="shoot-subnav-btn" data-shoot-view="today" onclick="setShootingView('today')">Today</button>
-        <button type="button" class="shoot-subnav-btn" data-shoot-view="history" onclick="setShootingView('history')">History</button>
+      <div class="ux-page-header">
+        <div class="ux-page-header-text">
+          <h1 class="ux-page-title">Shooting</h1>
+          <p class="ux-page-desc">Schedule this week's shoots, brief the team and mark concepts as shot.</p>
+        </div>
+        <div class="ux-page-header-actions">
+          <div class="ux-seg shoot-subnav" id="shoot-subnav">
+            <button type="button" class="ux-seg-btn shoot-subnav-btn active" data-shoot-view="week" onclick="setShootingView('week')">Week</button>
+            <button type="button" class="ux-seg-btn shoot-subnav-btn" data-shoot-view="today" onclick="setShootingView('today')">Today</button>
+            <button type="button" class="ux-seg-btn shoot-subnav-btn" data-shoot-view="history" onclick="setShootingView('history')">History</button>
+          </div>
+        </div>
       </div>
 
       <!-- WEEK VIEW -->
       <div class="shoot-panel active" id="shoot-view-week">
-        <div class="planning-header">
-          <div class="planning-week-nav">
-            <button type="button" class="week-nav-btn" id="shoot-week-prev" onclick="changeShootingWeek(-1)" aria-label="Previous week">&lsaquo;</button>
-            <button type="button" class="planning-week-label-btn" id="shoot-week-label" onclick="toggleShootingWeekPicker()"></button>
-            <button type="button" class="week-nav-btn" id="shoot-week-next" onclick="changeShootingWeek(1)" aria-label="Next week">&rsaquo;</button>
-            <button type="button" class="btn btn-ghost btn-sm" id="shoot-this-week-btn" onclick="goToCurrentShootingWeek()" style="display:none;">This Week</button>
+        <div class="ux-toolbar planning-header">
+          <div class="planning-week-nav ux-week-nav">
+            <button type="button" class="ux-week-btn" id="shoot-week-prev" onclick="changeShootingWeek(-1)" aria-label="Previous week">&lsaquo;</button>
+            <button type="button" class="ux-week-label" id="shoot-week-label" onclick="toggleShootingWeekPicker()"></button>
+            <button type="button" class="ux-week-btn" id="shoot-week-next" onclick="changeShootingWeek(1)" aria-label="Next week">&rsaquo;</button>
             <div class="planning-week-picker" id="shoot-week-picker" style="display:none;"></div>
           </div>
+          <button type="button" class="btn btn-ghost btn-sm" id="shoot-this-week-btn" onclick="goToCurrentShootingWeek()" style="display:none;">This Week</button>
+          <div class="ux-toolbar-spacer"></div>
           <div class="person-filter" id="shoot-week-owner-filter"></div>
         </div>
         <div class="shoot-summary-line" id="shoot-week-summary"></div>
-        <div class="shoot-week-progress-bar" id="shoot-week-progress-bar"><div class="shoot-week-progress-fill" id="shoot-week-progress-fill"></div></div>
+        <div class="shoot-week-progress-bar ux-progress" id="shoot-week-progress-bar"><div class="shoot-week-progress-fill ux-progress-fill" id="shoot-week-progress-fill"></div></div>
 
         <div class="shoot-unscheduled" id="shoot-unscheduled" ondragover="onShootColumnDragOver(event)" ondragleave="onShootColumnDragLeave(event)" ondrop="onShootColumnDrop(event, null)"></div>
         <div class="shoot-week-grid" id="shoot-week-grid"></div>
@@ -920,12 +936,13 @@
 
       <!-- TODAY VIEW -->
       <div class="shoot-panel" id="shoot-view-today">
-        <div class="planning-header">
+        <div class="ux-toolbar planning-header">
           <h2 class="shoot-today-title" id="shoot-today-title"></h2>
+          <div class="ux-toolbar-spacer"></div>
           <div class="person-filter" id="shoot-today-owner-filter"></div>
         </div>
         <div class="shoot-summary-line" id="shoot-today-summary"></div>
-        <div class="shoot-today-list" id="shoot-today-list"></div>
+        <div class="shoot-today-list ux-grid" id="shoot-today-list"></div>
       </div>
 
       <!-- HISTORY VIEW -->
@@ -1103,25 +1120,29 @@
          applying across whichever of Week/Today is showing (see
          editingActiveConcepts in app.js), hidden for History. -->
     <section id="tab-editing" class="tab-panel">
-      <h1 class="tr-page-title">Editing</h1>
-      <div class="shoot-subnav" id="editing-subnav">
-        <button type="button" class="shoot-subnav-btn active" data-editing-view="week" onclick="setEditingView('week')">Week</button>
-        <button type="button" class="shoot-subnav-btn" data-editing-view="today" onclick="setEditingView('today')">Today</button>
-        <button type="button" class="shoot-subnav-btn" data-editing-view="history" onclick="setEditingView('history')">History</button>
+      <div class="ux-page-header">
+        <div class="ux-page-header-text">
+          <h1 class="ux-page-title">Editing</h1>
+          <p class="ux-page-desc">Schedule edits for shot concepts, paste the final edit link back and send it for approval.</p>
+        </div>
+        <div class="ux-page-header-actions">
+          <div class="ux-seg shoot-subnav" id="editing-subnav">
+            <button type="button" class="ux-seg-btn shoot-subnav-btn active" data-editing-view="week" onclick="setEditingView('week')">Week</button>
+            <button type="button" class="ux-seg-btn shoot-subnav-btn" data-editing-view="today" onclick="setEditingView('today')">Today</button>
+            <button type="button" class="ux-seg-btn shoot-subnav-btn" data-editing-view="history" onclick="setEditingView('history')">History</button>
+          </div>
+        </div>
       </div>
 
-      <div class="planning-header" id="editing-controls-row">
-        <div class="planning-week-nav" id="editing-week-nav">
-          <button type="button" class="week-nav-btn" id="editing-week-prev" onclick="changeEditingWeek(-1)" aria-label="Previous week">&lsaquo;</button>
-          <button type="button" class="planning-week-label-btn" id="editing-week-label" onclick="toggleEditingWeekPicker()"></button>
-          <button type="button" class="week-nav-btn" id="editing-week-next" onclick="changeEditingWeek(1)" aria-label="Next week">&rsaquo;</button>
-          <button type="button" class="btn btn-ghost btn-sm" id="editing-this-week-btn" onclick="goToCurrentEditingWeek()" style="display:none;">This Week</button>
+      <div class="ux-toolbar planning-header" id="editing-controls-row">
+        <div class="planning-week-nav ux-week-nav" id="editing-week-nav">
+          <button type="button" class="ux-week-btn" id="editing-week-prev" onclick="changeEditingWeek(-1)" aria-label="Previous week">&lsaquo;</button>
+          <button type="button" class="ux-week-label" id="editing-week-label" onclick="toggleEditingWeekPicker()"></button>
+          <button type="button" class="ux-week-btn" id="editing-week-next" onclick="changeEditingWeek(1)" aria-label="Next week">&rsaquo;</button>
           <div class="planning-week-picker" id="editing-week-picker" style="display:none;"></div>
         </div>
-        <!-- Narrows WHICH person's queue is shown, same compact
-             person-filter pattern as Shooting's Filming filter, reading
-             editing_owner (see G's investigation: this is the first real
-             consumer of that column). -->
+        <button type="button" class="btn btn-ghost btn-sm" id="editing-this-week-btn" onclick="goToCurrentEditingWeek()" style="display:none;">This Week</button>
+        <div class="ux-toolbar-spacer"></div>
         <div class="person-filter" id="editing-editor-filter"></div>
       </div>
       <div class="shoot-summary-line" id="editing-summary"></div>
@@ -1135,7 +1156,7 @@
       <!-- TODAY VIEW -->
       <div class="shoot-panel" id="editing-view-today">
         <h2 class="shoot-today-title" id="editing-today-title"></h2>
-        <div id="editing-today-list" class="cd-product-grid"></div>
+        <div id="editing-today-list" class="ux-grid cd-product-grid"></div>
       </div>
 
       <!-- HISTORY VIEW -->
@@ -1155,31 +1176,36 @@
          Template/Meta-prep stage would build from -- no Meta automation
          here yet. -->
     <section id="tab-final-approval" class="tab-panel">
-      <h1 class="tr-page-title">Final Approval</h1>
-      <div class="fa-subtabs">
-        <button type="button" class="fa-subtab active" data-fa-subtab="ready" onclick="switchFinalApprovalSubtab('ready')">Ready for Approval <span class="fa-subtab-count" id="fa-count-ready"></span></button>
-        <button type="button" class="fa-subtab" data-fa-subtab="ad-setup" onclick="switchFinalApprovalSubtab('ad-setup')">Ad Setup <span class="fa-subtab-count" id="fa-count-ad-setup"></span></button>
-        <button type="button" class="fa-subtab" data-fa-subtab="approved" onclick="switchFinalApprovalSubtab('approved')">Approved <span class="fa-subtab-count" id="fa-count-approved"></span></button>
+      <div class="ux-page-header">
+        <div class="ux-page-header-text">
+          <h1 class="ux-page-title">Final Approval</h1>
+          <p class="ux-page-desc">Approve finished edits, then set up each approved creative as a named Meta ad.</p>
+        </div>
+      </div>
+      <div class="ux-tabs fa-subtabs">
+        <button type="button" class="ux-tab fa-subtab active" data-fa-subtab="ready" onclick="switchFinalApprovalSubtab('ready')">Ready for Approval<span class="ux-tab-count fa-subtab-count" id="fa-count-ready"></span></button>
+        <button type="button" class="ux-tab fa-subtab" data-fa-subtab="ad-setup" onclick="switchFinalApprovalSubtab('ad-setup')">Ad Setup<span class="ux-tab-count fa-subtab-count" id="fa-count-ad-setup"></span></button>
+        <button type="button" class="ux-tab fa-subtab" data-fa-subtab="approved" onclick="switchFinalApprovalSubtab('approved')">Approved<span class="ux-tab-count fa-subtab-count" id="fa-count-approved"></span></button>
       </div>
 
       <div id="fa-panel-ready" class="fa-subtab-panel">
         <div class="shoot-summary-line" id="final-approval-summary"></div>
-        <div id="final-approval-list" class="cd-product-grid"></div>
+        <div id="final-approval-list" class="ux-grid ux-grid-wide cd-product-grid"></div>
       </div>
 
       <div id="fa-panel-ad-setup" class="fa-subtab-panel" style="display:none;">
         <div class="shoot-summary-line" id="ad-setup-summary"></div>
-        <div id="ad-setup-list" class="cd-product-grid"></div>
+        <div id="ad-setup-list" class="ux-grid ux-grid-wide cd-product-grid"></div>
       </div>
 
       <div id="fa-panel-approved" class="fa-subtab-panel" style="display:none;">
         <div class="shoot-summary-line" id="ad-setup-approved-summary"></div>
-        <div id="ad-setup-approved-list" class="cd-product-grid"></div>
+        <div id="ad-setup-approved-list" class="ux-grid ux-grid-wide cd-product-grid"></div>
       </div>
     </section>
 
     <div id="final-approval-modal" class="modal-backdrop">
-      <div class="modal" style="max-width:480px;">
+      <div class="modal fa-modal" style="max-width:640px;">
         <div class="modal-header">
           <div>
             <h3 id="final-approval-modal-title"></h3>
@@ -1208,7 +1234,7 @@
          is future work this data model is meant to support, not built
          here (see the Part C brief). -->
     <div id="ad-setup-modal" class="modal-backdrop">
-      <div class="modal cd-modal-workspace" style="width:70vw;min-width:720px;max-width:1100px;">
+      <div class="modal cd-modal-workspace as-modal" style="width:78vw;min-width:720px;max-width:1180px;">
         <div class="modal-header">
           <div class="cd-modal-header-title">
             <h3 id="ad-setup-modal-title">Ad Setup</h3>
@@ -2422,6 +2448,14 @@
       <button class="modal-close" onclick="closeModal('concept-dev-modal')">&times;</button>
     </div>
     <div class="modal-body">
+      <nav class="cd-modal-nav" aria-label="Concept sections">
+        <button type="button" onclick="cdModalJump('cdm-sec-idea')">The Idea</button>
+        <button type="button" onclick="cdModalJump('cd-modal-audience-section')">Audience</button>
+        <button type="button" onclick="cdModalJump('cdm-sec-hook')">The Hook</button>
+        <button type="button" onclick="cdModalJump('cdm-sec-production')">Production</button>
+        <button type="button" onclick="cdModalJump('cdm-sec-references')">References</button>
+        <button type="button" onclick="cdModalJump('cdm-sec-setup')">Shoot Setup</button>
+      </nav>
       <div class="cd-modal-context-row">
         <div class="cd-modal-context-compact" id="cd-modal-context"></div>
         <button type="button" class="link-btn cd-modal-tools-trigger" onclick="openCreativeToolsFromConceptModal()"><svg class=ic aria-hidden=true focusable=false><use href=#i-wrench></use></svg> Creative Tools &#9662;</button>
@@ -2445,7 +2479,7 @@
         <button type="button" class="link-btn" onclick="confirmEditApprovedConcept()">Edit Approved Concept</button>
       </div>
 
-      <div class="cd-modal-section">
+      <div class="cd-modal-section" id="cdm-sec-idea">
         <div class="cd-modal-section-title">The Idea</div>
         <div class="hint cd-modal-section-helper">Describe the concept in 1–2 sentences.</div>
         <div class="cd-modal-idea-row">
@@ -2504,7 +2538,8 @@
            has this answer, so nothing already written is hidden or lost.
            See fillConceptDevModalFields/hasLegacyWhyCare in app.js. -->
       <div class="cd-modal-section" id="cd-modal-audience-section">
-        <div class="cd-modal-section-title">Who's It For?</div>
+        <div class="cd-modal-section-title">Audience</div>
+        <div class="hint cd-modal-section-helper">Who exactly are we making this for?</div>
         <label><span class="cd-field-label">Customer Avatar<span class="cd-req-mark">*</span></span>
           <select id="cd-modal-avatar-select" onchange="onConceptDevAvatarChange()"></select>
           <div class="cd-field-error" id="cd-modal-avatar-select-error"></div>
@@ -2532,7 +2567,7 @@
            nudge) since a concept without one gives Tuesday Review nothing
            to actually judge for attention. Alternative Hooks stay opt-in
            progressive disclosure -- no minimum count enforced there. -->
-      <div class="cd-modal-section">
+      <div class="cd-modal-section" id="cdm-sec-hook">
         <div class="cd-modal-section-title-row">
           <div class="cd-modal-section-title">The Hook</div>
           <span class="cd-req-mark">*</span>
@@ -2553,8 +2588,11 @@
            the rest of the form) since it's shared across every concept on
            this same shoot_plan_item, same as Planning's own colourway
            picker. -->
-      <div class="cd-modal-section">
-        <div class="cd-modal-section-title">Styles Needed <span class="hint">(optional)</span></div>
+      <div class="cd-modal-section cd-modal-group" id="cdm-sec-production">
+        <div class="cd-modal-section-title">Production Requirements</div>
+        <div class="hint cd-modal-section-helper">What needs to be shot, and which products are involved.</div>
+      <div class="cd-modal-subsection">
+        <div class="cd-modal-subsection-title">Styles needed <span class="hint">(optional)</span></div>
         <div class="hint cd-modal-section-helper">Products/colourways this concept needs, if any. Leave empty if no products are required.</div>
         <div id="cd-modal-styles-list" class="cd-modal-styles-list"></div>
         <div class="promo-shoot-search">
@@ -2575,9 +2613,9 @@
            quick-add menu of common shot types so a Shot Name rarely needs
            typing from scratch -- see conceptDevModalShots/
            toggleConceptDevShotQuickAdd/addConceptDevQuickShot in app.js. -->
-      <div class="cd-modal-section">
+      <div class="cd-modal-subsection">
         <div class="cd-modal-section-title-row">
-          <div class="cd-modal-section-title">What to Shoot</div>
+          <div class="cd-modal-subsection-title">What to shoot</div>
           <span class="cd-req-mark">*</span>
         </div>
         <div class="hint cd-modal-section-helper">List the footage that must be captured to make this concept.</div>
@@ -2589,7 +2627,7 @@
         <div class="cd-field-error" id="cd-modal-shots-error"></div>
       </div>
 
-      <div class="cd-modal-section">
+      <div class="cd-modal-subsection">
         <div id="cd-modal-script-toggle-wrap">
           <button type="button" class="link-btn" onclick="toggleConceptDevScript()">+ Add Script / Talking Points <span class="hint">(optional)</span></button>
         </div>
@@ -2607,10 +2645,11 @@
            dropped) when reopening a concept that already has this data
            from before structured Shots existed, so nothing already written
            is hidden or silently lost. See fillConceptDevModalFields. -->
-      <div class="cd-modal-section" id="cd-modal-execution-legacy-section" style="display:none;">
+      <div class="cd-modal-subsection" id="cd-modal-execution-legacy-section" style="display:none;">
         <div class="cd-modal-section-title">Execution / Shot Plan <span class="hint">(legacy)</span></div>
         <div class="hint cd-modal-section-helper">Kept from before structured Shots existed — no longer required.</div>
         <textarea id="cd-modal-execution" rows="4"></textarea>
+      </div>
       </div>
 
       <!-- References: one "+ Add Reference" trigger opens a small menu
@@ -2619,7 +2658,7 @@
            card (label + truncated note) with Edit/Remove, rather than
            permanently showing full URL/note text fields for every
            reference -- see renderConceptDevModalReferences in app.js. -->
-      <div class="cd-modal-section">
+      <div class="cd-modal-section" id="cdm-sec-references">
         <div class="cd-modal-section-title">References</div>
         <div class="hint cd-modal-section-helper">Add inspiration or examples for this concept.</div>
         <div id="cd-modal-references-list"></div>
@@ -2656,7 +2695,7 @@
            whole shoot, never location twice. Historical `location` data on
            older concepts is untouched in the database, just no longer shown
            or editable here. -->
-      <div class="cd-modal-section">
+      <div class="cd-modal-section" id="cdm-sec-setup">
         <div class="cd-modal-section-title">Shoot Setup</div>
         <div id="cd-modal-shoot-req-toggle-wrap">
           <button type="button" class="link-btn" onclick="toggleConceptDevShootRequirements()">+ Add Shoot Setup</button>
@@ -3511,32 +3550,39 @@
      every other source uses (source: 'manual') -- no second concept system,
      see saveAdHocConcept in app.js. -->
 <div id="adhoc-concept-modal" class="modal-backdrop">
-  <div class="modal">
+  <div class="modal ux-modal">
     <div class="modal-header">
-      <h3>New Concept</h3>
-      <button class="modal-close" onclick="closeModal('adhoc-concept-modal')">&times;</button>
+      <div>
+        <h3>New Concept</h3>
+        <div class="hint ux-modal-sub">Start a concept that isn't tied to this week's Shoot Plan.</div>
+      </div>
+      <button class="modal-close" onclick="closeModal('adhoc-concept-modal')" aria-label="Close">&times;</button>
     </div>
-    <div class="modal-body">
-      <label>Concept Name<span class="cd-req-mark">*</span>
+    <div class="modal-body ux-modal-body">
+      <div class="ux-field">
+        <label for="adhoc-concept-name">Concept name<span class="cd-req-mark">*</span></label>
         <input type="text" id="adhoc-concept-name" placeholder="e.g. UGC unboxing hook">
-      </label>
-      <label>Product(s) / style(s) <span class="hint">(optional -- search by SKU or product name, leave empty if not product-specific)</span>
+      </div>
+      <div class="ux-field">
+        <label for="adhoc-concept-style-search">Product / style <span class="ux-field-opt">Optional</span></label>
         <div class="promo-shoot-search">
-          <input type="text" id="adhoc-concept-style-search" placeholder="Search SKU or product name…" autocomplete="off" oninput="filterAdHocConceptStyles()" onfocus="filterAdHocConceptStyles()">
+          <input type="text" id="adhoc-concept-style-search" placeholder="Search by SKU or product name…" autocomplete="off" oninput="filterAdHocConceptStyles()" onfocus="filterAdHocConceptStyles()">
           <div id="adhoc-concept-style-results" class="promo-shoot-search-results" style="display:none;"></div>
         </div>
         <div id="adhoc-concept-style-chips"></div>
-      </label>
-      <label>Format
+        <div class="ux-field-help">Leave empty if the concept isn't specific to a product.</div>
+      </div>
+      <div class="ux-field">
+        <label for="adhoc-concept-format">Format</label>
         <select id="adhoc-concept-format">
           <option value="video">Video</option>
           <option value="static">Static</option>
         </select>
-      </label>
+      </div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('adhoc-concept-modal')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveAdHocConcept()">Create Concept &rarr;</button>
+      <button class="btn btn-primary" onclick="saveAdHocConcept()">Create concept</button>
     </div>
   </div>
 </div>
@@ -4073,6 +4119,7 @@
   </div>
 </div>
 
+<script src="ux.js"></script>
 <script src="app.js"></script>
 <script src="planningExplain.js"></script>
 <script src="planning.js"></script>

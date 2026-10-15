@@ -32,10 +32,27 @@ const QUEUE_SELECT = `
   ORDER BY ca.editing_submitted_at ASC
 `;
 
+// Every active Final Edit (version) per concept, so Final Approval can show each version's own creative.
+// Additive: the single-edit fields above (final_edit_link, editor, ...) are unchanged for existing callers.
+async function attachFinalEdits(concepts) {
+  if (!concepts.length) return concepts;
+  const edits = await pool.query(
+    `SELECT id, creative_asset_id, asset_name, format, variation_text, editor, final_edit_link, editor_notes
+     FROM final_edits WHERE creative_asset_id = ANY($1::int[]) AND is_active = true ORDER BY created_at ASC, id ASC`,
+    [concepts.map((c) => c.creative_asset_id)]
+  );
+  const byConcept = new Map();
+  for (const e of edits.rows) {
+    if (!byConcept.has(e.creative_asset_id)) byConcept.set(e.creative_asset_id, []);
+    byConcept.get(e.creative_asset_id).push(e);
+  }
+  return concepts.map((c) => ({ ...c, final_edits: byConcept.get(c.creative_asset_id) || [] }));
+}
+
 router.get('/', async (req, res, next) => {
   try {
     const result = await pool.query(QUEUE_SELECT);
-    res.json({ concepts: result.rows });
+    res.json({ concepts: await attachFinalEdits(result.rows) });
   } catch (err) {
     next(err);
   }

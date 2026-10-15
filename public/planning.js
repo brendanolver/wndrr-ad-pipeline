@@ -603,10 +603,18 @@ function wpShootPlanVideosHtml(item, readOnly) {
   const cs = plConceptsFor(item.id).filter((c) => !c.killed);
   const rows = cs.map((c) => {
     const others = (c.products || []).filter((p) => !p.primary).map((p) => p.product_name || p.product_code);
-    return `<li class="pl-concept" data-concept-id="${c.id}"><span class="pl-concept-name">${plEsc(c.name)}</span><span class="pl-stage-tag" data-stage="${plEsc(c.stage)}">${plEsc(c.stage_label)}</span>${others.length ? `<span class="pl-also" title="One concept adapted for these products; it counts once">also for ${plEsc(others.join(', '))}</span>` : ''}${readOnly ? '' : `<button type="button" class="link-btn" data-pl-adapt="${c.id}" data-pl-adapt-name="${plEsc(c.name)}">Adapt for another product</button>`}</li>`;
+    return `<li class="pl-concept" data-concept-id="${c.id}"><span class="pl-concept-name">${plEsc(c.name)}</span><span class="pl-stage-tag" data-stage="${plEsc(c.stage)}">${plEsc(c.stage_label)}</span>${others.length ? `<span class="pl-also" title="One concept adapted for these products; it counts once">also for ${plEsc(others.join(', '))}</span>` : ''}${readOnly ? '' : `<button type="button" class="link-btn pl-adapt-link" title="Adapt this concept for another product" data-pl-adapt="${c.id}" data-pl-adapt-name="${plEsc(c.name)}">Adapt</button>`}</li>`;
   }).join('');
-  const add = readOnly ? '' : `<button type="button" class="link-btn" onclick="plAddConcepts(${item.id}, '${plEsc(item.product_name || '').replace(/'/g, '&#39;')}')">Add concepts</button>`;
-  return `<div class="pl-concepts" data-shoot-plan-videos="${item.id}"><div class="pl-concepts-head"><b>${cs.length}</b> concept${cs.length === 1 ? '' : 's'} ${add}</div>${rows ? `<ul class="pl-concept-list">${rows}</ul>` : '<div class="hint">No concepts yet.</div>'}</div>`;
+  return `<div class="pl-concepts" data-shoot-plan-videos="${item.id}"><div class="pl-concepts-head"><b>${cs.length}</b> concept${cs.length === 1 ? '' : 's'}</div>${rows ? `<ul class="pl-concept-list">${rows}</ul>` : '<div class="hint">No concepts yet. Add one to start development.</div>'}</div>`;
+}
+
+// Shoot Plan card -> that product's workspace in Concept Development, for the week being planned.
+async function plOpenConceptFromShootPlan(itemId) {
+  state.conceptDev.weekOffset = state.planningWeekOffset || 0;
+  state.conceptDev.view = 'list';
+  switchTab('concept-dev');
+  await loadConceptDevWeek();
+  openConceptDevProduct(itemId);
 }
 
 async function plAddConcepts(itemId, name) {
@@ -671,9 +679,20 @@ function plRenderShootPlanProgress() {
   const p = state.conceptProgress;
   if (!p) { host.innerHTML = ''; return; }
   const sf = state.opportunities && state.opportunities.shortfall;
-  const noConcept = (state.shootPlan || []).filter((i) => !plConceptsFor(i.id).filter((c) => !c.killed).length).length;
+  const items = state.shootPlan || [];
+  const noConcept = items.filter((i) => !plConceptsFor(i.id).filter((c) => !c.killed).length).length;
+  const pct = p.target ? Math.max(0, Math.min(100, Math.round((p.planned / p.target) * 100))) : 0;
   const carry = p.carryover && p.carryover.count ? `<details class="opp-more"><summary>${plPlural(p.carryover.count, 'unfinished concept')} from earlier weeks</summary><ul class="pl-concept-list">${p.carryover.concepts.slice(0, 40).map((c) => `<li class="pl-concept"><span class="pl-concept-name">${plEsc(c.name)}</span><span class="pl-stage-tag" data-stage="${plEsc(c.stage)}">${plEsc(c.stage_label)}</span><span class="hint">${plEsc(c.product_name || '')} &middot; week of ${plEsc(c.week_start)}</span></li>`).join('')}</ul><div class="hint">Nothing is reset or removed when a new week starts; these stay in their real stage and are not counted toward this week's target.</div></details>` : '';
-  host.innerHTML = `<div class="pl-progress-card"><div class="pl-progress-head"><b>${p.planned} of ${p.target}</b> new concepts planned this week &middot; ${p.remaining} remaining${noConcept ? ` <span class="pl-sp-muted">&middot; ${plPlural(noConcept, 'product')} still need${noConcept === 1 ? 's' : ''} a concept</span>` : ''}</div>
+  host.innerHTML = `<div class="ux-card pl-progress-card sp-progress">
+    <div class="sp-progress-head"><div><div class="ux-eyebrow">Weekly concept progress</div><div class="sp-progress-title"><b>${p.planned} of ${p.target}</b> new concepts planned this week</div></div>${p.reached ? UX.badgeHtml('Target met', 'green') : UX.badgeHtml(`${p.remaining} to go`, 'neutral')}</div>
+    ${UX.progressBarHtml(pct, p.reached ? 'green' : '')}
+    ${UX.statTilesHtml([
+      { label: items.length === 1 ? 'Product selected' : 'Products selected', value: items.length },
+      { label: 'New concepts planned', value: p.planned },
+      { label: 'Remaining', value: p.remaining, tone: p.remaining ? 'amber' : '' },
+      { label: 'Awaiting production', value: p.awaiting_production || 0 },
+    ])}
+    ${noConcept ? `<div class="sp-progress-note">${plPlural(noConcept, 'selected product')} still need a concept.</div>` : ''}
     <div class="pl-sp-label">Production progress</div><div class="pl-stages">${plStageChips(p.counts)}</div>
     ${sf && p.remaining > 0 ? `<div class="pl-shortfall">${plEsc(sf.text)}</div>` : ''}${carry}
     <details class="opp-more"><summary>How concepts are counted</summary><div class="hint">${plEsc(p.definition)}</div></details></div>`;

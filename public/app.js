@@ -4756,16 +4756,68 @@ async function changeStatus(id, status, selectEl) {
 // ── Dashboard ────────────────────────────────────────
 const STATUS_LABEL_TEXT = { on_track: 'On Track', at_risk: 'At Risk', off_track: 'Off Track' };
 
-const KPI_CARDS = [
-  { key: 'planned', icon: '▤', label: 'Planned', defaultSub: 'Committed for this week' },
-  { key: 'briefing', icon: '<svg class=ic aria-hidden=true focusable=false><use href=#i-edit></use></svg>', label: 'Briefing', defaultSub: 'Currently being briefed' },
-  { key: 'in_production', icon: '●', label: 'In Production', defaultSub: 'Being shot / designed' },
-  { key: 'editing', icon: '<svg class=ic aria-hidden=true focusable=false><use href=#i-scissors></use></svg>', label: 'Editing', defaultSub: 'Currently being edited' },
-  { key: 'awaiting_review', icon: '<svg class=ic aria-hidden=true focusable=false><use href=#i-hourglass></use></svg>', label: 'Awaiting Review', defaultSub: 'Waiting for approval' },
-  { key: 'changes', icon: '↺', label: 'Changes', defaultSub: 'Changes requested' },
-  { key: 'approved', icon: '✓', label: 'Approved', defaultSub: 'Approved, not yet uploaded' },
-  { key: 'shipped', icon: '<svg class=ic aria-hidden=true focusable=false><use href=#i-rocket></use></svg>', label: 'Shipped', defaultSub: 'Uploaded to Meta this week' },
+// Pipeline strip stages, in workflow order. Every stage links to the page that
+// works it; counts come from the additive `workflow` block of GET /dashboard
+// (see src/lib/dashboardWorkflow.js) so each figure matches its destination page.
+const DASH_PIPELINE_STAGES = [
+  { key: 'concept_development', label: 'Concept Development', tab: 'concept-dev', unit: 'in development' },
+  { key: 'tuesday_review', label: 'Tuesday Review', tab: 'tuesday-review', unit: 'to review' },
+  { key: 'shooting', label: 'Shooting', tab: 'shooting', unit: 'to shoot' },
+  { key: 'editing', label: 'Editing', tab: 'editing', unit: 'to edit' },
+  { key: 'final_approval', label: 'Final Approval', tab: 'final-approval', unit: 'to approve' },
+  { key: 'shipped', label: 'Shipped', tab: 'board', unit: 'this week' },
 ];
+
+function dashPlural(n, one, many) { return `${n} ${n === 1 ? one : (many || `${one}s`)}`; }
+
+// Only alerts that currently apply are returned, so an empty list means "all clear".
+function dashboardAttentionItems(workflow) {
+  const a = (workflow && workflow.attention) || {};
+  const items = [];
+  if (a.concepts_awaiting_review > 0) {
+    items.push({ tone: 'amber', tab: 'tuesday-review', action: 'Open Tuesday Review', text: `${dashPlural(a.concepts_awaiting_review, 'concept')} waiting for review` });
+  }
+  if (a.overdue_shoots > 0) {
+    items.push({ tone: 'red', tab: 'shooting', action: 'Open Shooting', text: `${dashPlural(a.overdue_shoots, 'shoot')} past the scheduled day` });
+  }
+  if (a.editing_backlog > 0) {
+    items.push({ tone: 'amber', tab: 'editing', action: 'Open Editing', text: `${dashPlural(a.editing_backlog, 'shot concept')} waiting over ${a.editing_backlog_days} days for editing` });
+  }
+  if (a.awaiting_approval > 0) {
+    const stale = a.awaiting_approval_stale > 0 ? ` (${a.awaiting_approval_stale} waiting over 24h)` : '';
+    items.push({ tone: a.awaiting_approval_stale > 0 ? 'amber' : 'neutral', tab: 'final-approval', action: 'Open Final Approval', text: `${dashPlural(a.awaiting_approval, 'creative')} awaiting final approval${stale}` });
+  }
+  return items;
+}
+
+function renderDashboardWeekCard() {
+  const d = state.dashboard;
+  const card = document.getElementById('dash-week-stats');
+  if (!d || !card) return;
+  const w = state.coreWeekly || { planned: 0, target: 0, remaining: 0 };
+  const wf = d.workflow || {};
+  const inProduction = (wf.shooting || 0) + (wf.editing || 0) + (wf.final_approval || 0);
+  const pct = w.target > 0 ? Math.min(100, Math.round((w.planned / w.target) * 100)) : 0;
+  const met = w.target > 0 && w.planned >= w.target;
+
+  document.getElementById('dash-week-headline').textContent = w.target > 0
+    ? `${w.planned} of ${w.target} new concepts planned`
+    : 'No weekly concept target set';
+  const progress = document.getElementById('dash-week-progress');
+  progress.setAttribute('aria-valuenow', String(pct));
+  document.getElementById('hero-progress-fill').style.width = `${pct}%`;
+  progress.classList.toggle('ux-progress-done', met);
+  const badge = document.getElementById('hero-status-badge');
+  badge.textContent = met ? 'Target met' : (w.target > 0 ? `${w.remaining} to go` : 'No target');
+  badge.className = `ux-badge ux-badge-${met ? 'green' : 'neutral'}`;
+
+  card.innerHTML = [
+    { label: 'Weekly creative target', value: w.target },
+    { label: 'New concepts planned', value: w.planned },
+    { label: 'Creatives in production', value: inProduction },
+    { label: 'Creatives shipped', value: d.current.shipped },
+  ].map((m) => `<div class="ux-stat"><div class="ux-stat-value">${m.value}</div><div class="ux-stat-label">${m.label}</div></div>`).join('');
+}
 
 function renderDashboard() {
   const d = state.dashboard;
@@ -4773,64 +4825,34 @@ function renderDashboard() {
 
   document.getElementById('hero-week-title').textContent = `Week ${d.week.number}`;
   document.getElementById('hero-week-dates').textContent = d.week.label;
-  document.getElementById('hero-pct').textContent = `${d.current.completionPct}%`;
-  document.getElementById('hero-pct-sub').textContent = `${d.current.shipped} / ${d.current.planned} shipped`;
-  document.getElementById('hero-progress-fill').style.width = `${Math.min(100, d.current.completionPct)}%`;
-  document.getElementById('hero-shipped').textContent = d.current.shipped;
-  document.getElementById('hero-remaining').textContent = d.current.remaining;
-  document.getElementById('hero-planned').innerHTML = `${d.current.planned} <span class="sample-tag">sample</span>`;
-  document.getElementById('hero-days-remaining').textContent = d.week.daysRemaining;
-
-  const badge = document.getElementById('hero-status-badge');
-  badge.textContent = STATUS_LABEL_TEXT[d.current.status];
-  badge.className = `hero-status-badge ${d.current.status}`;
-
   document.getElementById('pipeline-live-note').style.display = d.week.offset !== 0 ? 'block' : 'none';
 
-  const kpiGrid = document.getElementById('pipeline-kpi-grid');
-  kpiGrid.innerHTML = KPI_CARDS.map((cfg) => {
-    const v = d.pipeline[cfg.key] || {};
-    const numHtml =
-      v.count === null || v.count === undefined
-        ? '<span class="kpi-num muted">—</span>'
-        : `<span class="kpi-num">${v.count}</span>${v.sample ? ' <span class="sample-tag">sample</span>' : ''}`;
-    const sub = v.staleNote || v.note || cfg.defaultSub;
-    const subClass = v.staleNote ? 'kpi-sub warn' : 'kpi-sub';
-    return `
-      <button class="kpi-card" data-kpi="${cfg.key}">
-        <span class="kpi-icon">${cfg.icon}</span>
-        ${numHtml}
-        <span class="kpi-label">${cfg.label}</span>
-        <span class="${subClass}">${sub}</span>
-      </button>`;
-  }).join('');
-  kpiGrid.querySelectorAll('.kpi-card').forEach((btn) => {
-    btn.addEventListener('click', () => switchTab('board'));
-  });
+  renderDashboardWeekCard();
 
-  const h = d.health;
-  const healthGrid = document.getElementById('health-grid');
-  healthGrid.innerHTML = `
-    <div class="health-card">
-      <span class="health-num ${h.overdue > 0 ? 'danger' : ''}">${h.overdue}</span>
-      <div class="health-label">Overdue</div>
-      <div class="health-sub ${h.overdue > 0 ? 'warn' : ''}">${h.overdue > 0 ? 'Requires attention' : 'All on schedule'}</div>
-    </div>
-    <div class="health-card">
-      <span class="health-num">${h.avgProductionDays !== null ? h.avgProductionDays.toFixed(1) + 'd' : '—'}</span>
-      <div class="health-label">Avg. Production Time</div>
-      <div class="health-sub">Brief &rarr; Shipped</div>
-    </div>
-    <div class="health-card">
-      <span class="health-num">${h.newConcepts.actual} / ${h.newConcepts.target} <span class="sample-tag">sample</span></span>
-      <div class="health-label">New Concepts</div>
-      <div class="health-sub">Weekly target</div>
-    </div>
-    <div class="health-card">
-      <span class="health-num">${h.adVariations.actual} / ${h.adVariations.target}${h.adVariations.targetIsSample ? ' <span class="sample-tag">sample target</span>' : ''}</span>
-      <div class="health-label">Ad Variations</div>
-      <div class="health-sub">Weekly target</div>
-    </div>`;
+  const wf = d.workflow || {};
+  const counts = { ...wf, shipped: d.current.shipped };
+  document.getElementById('dash-pipeline-hint').textContent = 'Shooting, Editing and Final Approval show the live queue';
+  document.getElementById('dash-pipeline').innerHTML = DASH_PIPELINE_STAGES.map((st, i) => `
+    <button type="button" class="dash-stage" data-dash-tab="${st.tab}" data-stage="${st.key}">
+      <span class="dash-stage-step">${i + 1}</span>
+      <span class="dash-stage-count">${counts[st.key] == null ? '—' : counts[st.key]}</span>
+      <span class="dash-stage-label">${st.label}</span>
+      <span class="dash-stage-unit">${st.unit}</span>
+    </button>`).join('');
+
+  const items = dashboardAttentionItems(wf);
+  document.getElementById('dash-attention').innerHTML = items.length
+    ? items.map((it) => `
+      <div class="dash-alert dash-alert-${it.tone}" data-alert-tab="${it.tab}">
+        <span class="dash-alert-dot" aria-hidden="true"></span>
+        <span class="dash-alert-text">${it.text}</span>
+        <button type="button" class="ux-link-btn" data-dash-tab="${it.tab}">${it.action} &rarr;</button>
+      </div>`).join('')
+    : UX.emptyStateHtml('Nothing needs attention right now', 'Reviews, shoots, edits and approvals are all on track.');
+
+  document.querySelectorAll('#tab-dashboard [data-dash-tab]').forEach((el) => {
+    el.onclick = () => switchTab(el.dataset.dashTab);
+  });
 }
 
 document.getElementById('week-prev').addEventListener('click', () => {
@@ -5143,8 +5165,9 @@ function renderPlanningWeekHeader() {
   document.getElementById('planning-this-week-btn').style.display = state.planningWeekOffset === 0 ? 'none' : '';
   const status = planningWeekStatus();
   const statusEl = document.getElementById('planning-week-status');
-  statusEl.textContent = status.label;
-  statusEl.className = `planning-week-status planning-week-status-${status.cls}`;
+  statusEl.textContent = status.label.replace(/^✓\s*/, '');
+  const tone = { confirmed: 'green', completed: 'green', upcoming: 'purple', 'in-progress': 'amber' }[status.cls] || 'neutral';
+  statusEl.className = `planning-week-status planning-week-status-${status.cls} ux-badge ux-badge-${tone}`;
 }
 
 function changePlanningWeek(delta) {
@@ -6590,6 +6613,7 @@ function renderCoreWeeklyCard() {
   const w = state.coreWeekly || { planned: 0, target: 0, remaining: 0 };
   const pct = w.target > 0 ? Math.min(100, Math.round((w.planned / w.target) * 100)) : 0;
   const met = w.target > 0 && w.planned >= w.target;
+  if (typeof renderDashboardWeekCard === 'function') renderDashboardWeekCard();
   document.querySelectorAll('.core-weekly-card').forEach((card) => {
     card.className = `core-weekly-card ${met ? 'core-weekly-met' : ''}`;
     card.innerHTML = `
@@ -8860,6 +8884,13 @@ async function startBriefBuilderConcept() {
 // 'promotion'). No second concept system, no new entity.
 let adHocConceptStyles = [];
 
+// Concept editor: jump to a section from the sticky section nav. Pure scrolling -- every section stays mounted,
+// so nothing entered in one section is ever lost by moving to another.
+function cdModalJump(sectionId) {
+  const el = document.getElementById(sectionId);
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 function openAdHocConceptModal() {
   adHocConceptStyles = [];
   document.getElementById('adhoc-concept-name').value = '';
@@ -9005,48 +9036,60 @@ async function saveShootPlanEditSizes() {
   }
 }
 
+// Shoot Plan product card (Batch 34): same card language as Concept Development. The headline facts are always visible
+// (product, owner, stage of each concept, next action); colourways, sizes and the saved idea sit under one "Details" fold.
+const SHOOT_PLAN_PRODUCTION_STAGES = ['awaiting_production', 'filmed', 'edited', 'approved', 'uploaded'];
+
 function shootPlanProductRowHtml(item) {
-  const thumb = item.image_url
-    ? `<img class="high-stock-thumb" src="${item.image_url}" alt="">`
-    : '<span class="high-stock-thumb high-stock-noimg"><svg class=ic aria-hidden=true focusable=false><use href=#i-image></use></svg></span>';
   const ready = item.stock_status === 'in_office';
-  const chips = item.styles
-    .map((s) => `<span class="shoot-plan-style-chip">${escapeHtml(s.colour_label || s.style_code)}${s.size ? ` · ${escapeHtml(s.size)}` : ''}</span>`)
-    .join('');
   // Past weeks are a read-only historical record -- no editing what
   // already happened. Sizes only matter for colourways being pulled from
   // the warehouse -- an "in office" sample has nothing to correct.
   const readOnly = state.planningWeekOffset < 0;
+  const concepts = typeof plConceptsFor === 'function' ? plConceptsFor(item.id).filter((c) => !c.killed) : [];
+  const inProduction = concepts.some((c) => SHOOT_PLAN_PRODUCTION_STAGES.includes(c.stage));
+  const chips = item.styles
+    .map((s) => `<span class="shoot-plan-style-chip">${escapeHtml(s.colour_label || s.style_code)}${s.size ? ` · ${escapeHtml(s.size)}` : ''}</span>`)
+    .join('');
   const editSizesBtn = !ready && !readOnly
-    ? `<button type="button" class="btn btn-ghost btn-sm" onclick="openShootPlanEditSizesModal(${item.id})">Edit Sizes</button>`
+    ? `<button type="button" class="btn btn-ghost btn-sm" onclick="openShootPlanEditSizesModal(${item.id})">Edit sizes</button>`
     : '';
-  const removeBtn = readOnly
-    ? ''
-    : `<button type="button" class="btn btn-ghost btn-sm" onclick="removeShootPlanItem(${item.id})">Remove</button>`;
+  const cw = item.styles.length;
+  const safeName = escapeHtml(item.product_name || '').replace(/'/g, '&#39;');
+  const openBtn = concepts.length
+    ? `<button type="button" class="ux-link-btn" data-sp-open="${item.id}" onclick="plOpenConceptFromShootPlan(${item.id})">Open concept${concepts.length === 1 ? '' : 's'} &rarr;</button>` : '';
+  const addBtn = readOnly ? '' : `<button type="button" class="btn btn-ghost btn-sm" data-sp-add="${item.id}" onclick="plAddConcepts(${item.id}, '${safeName}')">Add concept</button>`;
+  const continueBtn = inProduction ? `<button type="button" class="ux-link-btn" data-sp-continue="${item.id}" onclick="switchTab('shooting')">Continue to production &rarr;</button>` : '';
+  const removeBtn = readOnly ? '' : `<button type="button" class="ux-link-btn ux-link-muted" data-sp-remove="${item.id}" onclick="removeShootPlanItem(${item.id})">Remove from plan</button>`;
   return `
-    <div class="shoot-plan-product-row">
-      ${thumb}
-      <div class="shoot-plan-product-main">
-        <div class="shoot-plan-product-top">
-          <span class="shoot-plan-product-name">${escapeHtml(item.product_name)}</span>
-          <span class="shoot-plan-stock-badge ${ready ? 'shoot-plan-stock-ready' : 'shoot-plan-stock-warehouse'}">${ready ? 'Ready' : 'Bring from Warehouse'}</span>
+    <div class="shoot-plan-product-row ux-pcard sp-card" data-sp-item="${item.id}">
+      <div class="ux-pcard-main">
+        ${UX.productThumbHtml(item.image_url)}
+        <div class="ux-pcard-body">
+          <div class="ux-pcard-title shoot-plan-product-name">${escapeHtml(item.product_name)}</div>
+          <div class="ux-pcard-sub shoot-plan-pathway-chip">${escapeHtml(shootPlanRequirementLabel(item))}</div>
+          <div class="ux-pcard-meta"><span class="shoot-plan-owner">Owner: ${escapeHtml(item.creator)}</span><span>${cw} colourway${cw === 1 ? '' : 's'}</span></div>
         </div>
-        <div class="shoot-plan-product-meta">
-          <span class="shoot-plan-owner">Owner: ${escapeHtml(item.creator)}</span>
-          <span class="shoot-plan-pathway-chip">${escapeHtml(shootPlanRequirementLabel(item))}</span>
-        </div>
-        <div class="shoot-plan-style-chips">${chips}</div>
-        ${!readOnly && typeof plShootPlanWarning === 'function' ? plShootPlanWarning(item) : ''}
-        ${typeof wpShootPlanVideosHtml === 'function' ? wpShootPlanVideosHtml(item, readOnly) : ''}
-        ${item.quick_note ? `<div class="shoot-plan-idea"><svg class=ic aria-hidden=true focusable=false><use href=#i-bulb></use></svg> ${escapeHtml(item.quick_note)}</div>` : ''}
+        <span class="shoot-plan-stock-badge ${ready ? 'shoot-plan-stock-ready' : 'shoot-plan-stock-warehouse'}">${ready ? 'Ready' : 'From warehouse'}</span>
       </div>
-      <div class="shoot-plan-row-actions">${editSizesBtn}${removeBtn}</div>
+      ${!readOnly && typeof plShootPlanWarning === 'function' ? plShootPlanWarning(item) : ''}
+      ${typeof wpShootPlanVideosHtml === 'function' ? wpShootPlanVideosHtml(item, readOnly) : ''}
+      <details class="sp-details">
+        <summary>Details</summary>
+        <div class="shoot-plan-style-chips">${chips || '<span class="hint">No colourways selected.</span>'}</div>
+        ${editSizesBtn}
+        ${item.quick_note ? `<div class="shoot-plan-idea"><svg class=ic aria-hidden=true focusable=false><use href=#i-bulb></use></svg> ${escapeHtml(item.quick_note)}</div>` : ''}
+      </details>
+      <div class="ux-pcard-foot sp-foot">
+        <div class="sp-foot-actions">${addBtn}${openBtn}${continueBtn}</div>
+        ${removeBtn}
+      </div>
     </div>`;
 }
 
 function shootPlanGroupedHtml(emptyMessage) {
   if (!state.shootPlan.length) {
-    return `<div class="attention-empty">${emptyMessage}</div>`;
+    return UX.emptyStateHtml(emptyMessage.split(' — ')[0].replace(/\.$/, ''), emptyMessage.includes(' — ') ? emptyMessage.split(' — ').slice(1).join(' — ') : '');
   }
   const bySource = new Map();
   for (const item of state.shootPlan) {
@@ -9057,10 +9100,10 @@ function shootPlanGroupedHtml(emptyMessage) {
   return SHOOT_PLAN_SOURCE_ORDER
     .filter((key) => bySource.has(key))
     .map((key) => `
-      <div class="shoot-plan-source-group">
-        <div class="shoot-plan-source-label">${SHOOT_PLAN_SOURCE_LABELS[key]}</div>
-        ${bySource.get(key).map(shootPlanProductRowHtml).join('')}
-      </div>`)
+      <section class="shoot-plan-source-group ux-group">
+        <div class="ux-group-head"><h4 class="shoot-plan-source-label ux-group-title">${SHOOT_PLAN_SOURCE_LABELS[key]}</h4><span class="ux-group-count">${bySource.get(key).length}</span></div>
+        <div class="ux-grid ux-grid-wide">${bySource.get(key).map(shootPlanProductRowHtml).join('')}</div>
+      </section>`)
     .join('');
 }
 
@@ -9299,8 +9342,8 @@ function renderConceptDevWeekHeader() {
   document.getElementById('cd-this-week-btn').style.display = state.conceptDev.weekOffset === 0 ? 'none' : '';
   const confirmed = Boolean(state.conceptDev.data && state.conceptDev.data.confirmed);
   const statusEl = document.getElementById('cd-week-status');
-  statusEl.textContent = confirmed ? '✓ Confirmed' : 'Not Confirmed Yet';
-  statusEl.className = `planning-week-status ${confirmed ? 'planning-week-status-confirmed' : ''}`;
+  statusEl.textContent = confirmed ? 'Shoot Plan confirmed' : 'Shoot Plan not confirmed';
+  statusEl.className = `ux-badge ${confirmed ? 'ux-badge-green' : 'ux-badge-amber'}`;
 }
 
 // Compact wording for the landing-page card -- deliberately shorter than
@@ -9364,27 +9407,42 @@ function conceptDevProductCtaLabel(product) {
 // per product, no concept-level detail (that's the Product Workspace's
 // job). Reuses .high-stock-thumb for the image, same as everywhere else a
 // product thumbnail appears in Planning.
+// The one badge a card carries: where the product sits overall (same buckets as the filters).
+const CONCEPT_DEV_BUCKET_BADGE = {
+  needs_development: { text: 'Needs development', tone: 'amber' },
+  ready_for_review: { text: 'Ready for review', tone: 'purple' },
+  approved: { text: 'Approved', tone: 'green' },
+};
+function conceptDevBreakdownTitle(concepts) {
+  return conceptDevStatusBreakdown(concepts).map((s) => `${s.count} ${CONCEPT_DEV_STATUS_LABELS[s.status] || s.status}`).join(' · ');
+}
+function conceptDevConceptCountText(count) {
+  return count ? `${count} concept${count === 1 ? '' : 's'}` : 'No concepts yet';
+}
+
 function conceptDevProductCardHtml(product) {
-  const thumb = product.image_url
-    ? `<img class="high-stock-thumb" src="${product.image_url}" alt="">`
-    : '<span class="high-stock-thumb high-stock-noimg"><svg class=ic aria-hidden=true focusable=false><use href=#i-image></use></svg></span>';
   const sourceLabel = CONCEPT_DEV_SOURCE_LABELS[product.source] || product.source || '—';
   const count = product.concepts.length;
-  const breakdown = conceptDevStatusBreakdown(product.concepts);
+  const badge = count ? CONCEPT_DEV_BUCKET_BADGE[conceptDevProductBucket(product)] : { text: 'Not started', tone: 'neutral' };
+  const cw = product.colourways.length;
+  const title = product.product_name || (product.concepts[0] && product.concepts[0].concept_name) || 'Ad-hoc concept';
+  const pathway = conceptDevPathwayBadgeLabel(product);
+  const subLine = [sourceLabel, pathway].filter((x) => x && x !== '—').join(' · ');
   return `
-    <div class="cd-card" onclick="openConceptDevProduct(${product.shoot_plan_item_id})">
-      <div class="cd-card-top">
-        ${thumb}
-        <div class="cd-card-name">${escapeHtml(product.product_name)}</div>
+    <div class="cd-card ux-pcard" role="button" tabindex="0" onclick="openConceptDevProduct(${product.shoot_plan_item_id})" onkeydown="if(event.key==='Enter'){openConceptDevProduct(${product.shoot_plan_item_id})}">
+      <div class="ux-pcard-main">
+        ${UX.productThumbHtml(product.image_url)}
+        <div class="ux-pcard-body">
+          <div class="ux-pcard-title cd-card-name">${escapeHtml(title)}</div>
+          <div class="ux-pcard-sub">${escapeHtml(subLine)}</div>
+          <div class="ux-pcard-meta"><span>Owner: ${escapeHtml(product.creator || '—')}</span><span>${cw} colourway${cw === 1 ? '' : 's'}</span></div>
+        </div>
       </div>
-      <div class="cd-card-badges">
-        <span class="cd-badge">${escapeHtml(sourceLabel)}</span>
-        <span class="cd-badge cd-badge-pathway">${escapeHtml(conceptDevPathwayBadgeLabel(product))}</span>
+      <div class="ux-pcard-status" title="${escapeHtml(conceptDevBreakdownTitle(product.concepts))}">
+        ${UX.badgeHtml(badge.text, badge.tone)}
+        <span class="ux-pcard-count">${conceptDevConceptCountText(count)}</span>
       </div>
-      <div class="cd-card-count">${count ? `${count} New Concept${count === 1 ? '' : 's'}` : 'No new concepts yet'}</div>
-      ${breakdown.length ? `<div class="cd-card-status-row">${breakdown.map((s) => `<span class="cd-concept-status-pill ${CONCEPT_DEV_STATUS_CLASS[s.status] || ''}">${s.count} ${CONCEPT_DEV_STATUS_LABELS[s.status] || s.status}</span>`).join('')}</div>` : ''}
-      <div class="cd-card-meta">${product.colourways.length} Colourway${product.colourways.length === 1 ? '' : 's'} &middot; Owner: ${escapeHtml(product.creator || '—')}</div>
-      <div class="cd-card-action">${conceptDevProductCtaLabel(product)} &rarr;</div>
+      <div class="ux-pcard-foot"><span class="ux-pcard-next">${conceptDevProductCtaLabel(product)} &rarr;</span></div>
     </div>`;
 }
 
@@ -9421,14 +9479,22 @@ function conceptDevPromotionCardHtml(product) {
   const removeBtn = state.currentUser && state.currentUser.role === 'admin'
     ? `<button type="button" class="cd-concept-card-remove" onclick="event.stopPropagation(); removeConceptDevWorkspace(${product.shoot_plan_item_id}, ${count})" aria-label="Remove from Concept Development" title="${count ? 'Remove this from Concept Development' : 'Remove this empty workspace'}">&times;</button>`
     : '';
+  const badge = count ? CONCEPT_DEV_BUCKET_BADGE[conceptDevProductBucket(product)] : { text: 'Not started', tone: 'neutral' };
   return `
-    <div class="cd-card cd-card-promo" onclick="openConceptDevProduct(${product.shoot_plan_item_id})">
+    <div class="cd-card cd-card-promo ux-pcard" role="button" tabindex="0" onclick="openConceptDevProduct(${product.shoot_plan_item_id})" onkeydown="if(event.key==='Enter'){openConceptDevProduct(${product.shoot_plan_item_id})}">
       ${removeBtn}
-      <div class="cd-card-name">${escapeHtml(title)}</div>
-      <div class="cd-card-meta">${stagesLine}</div>
-      <div class="cd-card-meta">Owner: ${escapeHtml(product.creator || '—')}</div>
-      ${breakdown.length ? `<div class="cd-card-status-row">${breakdown.map((s) => `<span class="cd-concept-status-pill ${CONCEPT_DEV_STATUS_CLASS[s.status] || ''}">${s.count} ${CONCEPT_DEV_STATUS_LABELS[s.status] || s.status}</span>`).join('')}</div>` : `<div class="cd-card-count">${count ? '' : 'No new concepts yet'}</div>`}
-      <div class="cd-card-action">${conceptDevProductCtaLabel(product)} &rarr;</div>
+      <div class="ux-pcard-main">
+        <div class="ux-pcard-body">
+          <div class="ux-pcard-title cd-card-name">${escapeHtml(title)}</div>
+          <div class="ux-pcard-sub">${stagesLine}</div>
+          <div class="ux-pcard-meta"><span>Owner: ${escapeHtml(product.creator || '—')}</span></div>
+        </div>
+      </div>
+      <div class="ux-pcard-status" title="${escapeHtml(conceptDevBreakdownTitle(product.concepts))}">
+        ${UX.badgeHtml(badge.text, badge.tone)}
+        <span class="ux-pcard-count">${conceptDevConceptCountText(count)}</span>
+      </div>
+      <div class="ux-pcard-foot"><span class="ux-pcard-next">${conceptDevProductCtaLabel(product)} &rarr;</span></div>
     </div>`;
 }
 
@@ -9475,7 +9541,17 @@ function conceptDevWeekSummaryLineHtml(data) {
   const readyForReview = data.products.reduce(
     (sum, p) => sum + p.concepts.filter((c) => c.concept_dev_status === 'ready_for_review').length, 0
   );
-  return `<div class="cd-week-summary-line">${data.products.length} Product${data.products.length === 1 ? '' : 's'} &middot; ${totalConcepts} Concept${totalConcepts === 1 ? '' : 's'} &middot; ${readyForReview} Ready for Review</div>`;
+  const needsWork = data.products.reduce(
+    (sum, p) => sum + p.concepts.filter((c) => ['not_started', 'in_development', 'changes_required'].includes(c.concept_dev_status)).length, 0
+  );
+  const approved = data.products.reduce((sum, p) => sum + p.concepts.filter((c) => c.concept_dev_status === 'approved').length, 0);
+  return `<div class="cd-week-summary-line">${UX.statTilesHtml([
+    { label: data.products.length === 1 ? 'Product' : 'Products', value: data.products.length },
+    { label: totalConcepts === 1 ? 'Concept' : 'Concepts', value: totalConcepts },
+    { label: 'Needs development', value: needsWork, tone: needsWork ? 'amber' : '' },
+    { label: 'Ready for review', value: readyForReview },
+    { label: 'Approved', value: approved, tone: approved ? 'green' : '' },
+  ])}</div>`;
 }
 
 // No "Approved" tab here -- Concept Development is the active workspace
@@ -9504,9 +9580,9 @@ function conceptDevFilterCounts(data) {
 function conceptDevFiltersHtml(data) {
   const counts = conceptDevFilterCounts(data);
   return `
-    <div class="filter-tabs">
+    <div class="ux-tabs filter-tabs">
       ${CONCEPT_DEV_FILTERS.map((f) => `
-        <button type="button" class="filter-tab ${state.conceptDev.filter === f.key ? 'active' : ''}" onclick="setConceptDevFilter('${f.key}')">${escapeHtml(f.label)} <span class="filter-tab-count">${counts[f.key]}</span></button>`).join('')}
+        <button type="button" class="ux-tab filter-tab ${state.conceptDev.filter === f.key ? 'active' : ''}" onclick="setConceptDevFilter('${f.key}')">${escapeHtml(f.label)}<span class="ux-tab-count filter-tab-count">${counts[f.key]}</span></button>`).join('')}
     </div>`;
 }
 
@@ -9767,12 +9843,12 @@ function renderConceptDevList() {
   // only pending Promotion concepts both fall through to the normal list.
   if (!data || (!data.confirmed && !data.products.length)) {
     state.conceptDev.view = 'list';
-    list.innerHTML = `<div class="attention-empty">Shoot Plan for Week ${conceptDevWeekNumber()} hasn't been confirmed yet — nothing to prepare. <button type="button" class="link-btn" onclick="switchTab('planning')">Go to Planning &rarr;</button></div>`;
+    list.innerHTML = `${UX.emptyStateHtml(`Week ${conceptDevWeekNumber()}'s Shoot Plan isn't confirmed yet`, 'Confirm the Shoot Plan in Planning and its products will appear here.')}<div class="ux-empty-action"><button type="button" class="btn btn-primary btn-sm" onclick="switchTab('planning')">Go to Planning</button></div>`;
     return;
   }
   if (!data.products.length) {
     state.conceptDev.view = 'list';
-    list.innerHTML = '<div class="attention-empty">Nothing was in this week\'s Shoot Plan.</div>';
+    list.innerHTML = UX.emptyStateHtml('No products in this week\'s Shoot Plan', 'Add products in Planning, or start a New Concept above.');
     return;
   }
 
@@ -9789,7 +9865,7 @@ function renderConceptDevList() {
   list.innerHTML = `
     ${conceptDevWeekSummaryLineHtml(data)}
     ${conceptDevFiltersHtml(data)}
-    ${filtered.length ? conceptDevGroupedSectionsHtml(filtered) : '<div class="attention-empty">No products match this filter.</div>'}`;
+    ${filtered.length ? conceptDevGroupedSectionsHtml(filtered) : UX.emptyStateHtml('Nothing matches this filter', 'Try another filter to see the rest of the week.')}`;
 }
 
 // UX follow-up brief, item 2: Day-to-Day vs Promotions is a presentation
@@ -9807,11 +9883,11 @@ function renderConceptDevList() {
 function conceptDevGroupedSectionsHtml(filtered) {
   const dayToDay = filtered.filter((p) => p.source !== 'promotion');
   const promotions = filtered.filter((p) => p.source === 'promotion');
+  const grid = (items, fn) => `<div class="ux-grid cd-product-grid">${items.map(fn).join('')}</div>`;
+  const head = (title, count) => `<div class="ux-group-head"><h2 class="ux-group-title">${escapeHtml(title)}</h2><span class="ux-group-count">${count}</span></div>`;
   if (!promotions.length) {
-    // The overwhelming common case (no Promotion work in flight this week)
-    // -- renders exactly the single plain grid this screen always has, no
-    // empty "Promotions" heading ever shown for nothing.
-    return `<div class="cd-product-grid">${dayToDay.map(conceptDevProductCardHtml).join('')}</div>`;
+    // No Promotion work in flight this week: one plain section, no empty "Promotions" heading.
+    return `<section class="ux-group">${head('Day-to-day concepts', dayToDay.length)}${grid(dayToDay, conceptDevProductCardHtml)}</section>`;
   }
   const groups = new Map();
   for (const p of promotions) {
@@ -9822,14 +9898,11 @@ function conceptDevGroupedSectionsHtml(filtered) {
   const promoGroupsHtml = [...groups.entries()].map(([name, products]) => `
     <div class="cd-promo-group">
       <div class="cd-promo-group-title">${escapeHtml(name)}</div>
-      <div class="cd-product-grid">${products.map(conceptDevPromotionCardHtml).join('')}</div>
+      ${grid(products, conceptDevPromotionCardHtml)}
     </div>`).join('');
   return `
-    ${dayToDay.length ? `
-      <div class="cd-section-title">Day-to-Day Concept Development</div>
-      <div class="cd-product-grid">${dayToDay.map(conceptDevProductCardHtml).join('')}</div>` : ''}
-    <div class="cd-section-title cd-section-title-promotions">Promotions</div>
-    ${promoGroupsHtml}`;
+    ${dayToDay.length ? `<section class="ux-group">${head('Day-to-day concepts', dayToDay.length)}${grid(dayToDay, conceptDevProductCardHtml)}</section>` : ''}
+    <section class="ux-group">${head('Promotions', promotions.length)}${promoGroupsHtml}</section>`;
 }
 
 function findConceptDevConcept(conceptId) {
@@ -11781,11 +11854,18 @@ function tuesdayReviewAdsToFilmCount() {
 }
 
 function renderTuesdayReviewSummary() {
-  const activeConcepts = tuesdayReviewAllConcepts().filter((x) => x.concept.concept_dev_status !== 'killed').length;
-  const adsCount = tuesdayReviewAdsToFilmCount();
   const el = document.getElementById('tr-summary');
   if (!el) return;
-  el.textContent = `${activeConcepts} Concept${activeConcepts === 1 ? '' : 's'} · ${adsCount} Ad${adsCount === 1 ? '' : 's'} to Film This Week`;
+  const activeConcepts = tuesdayReviewAllConcepts().filter((x) => x.concept.concept_dev_status !== 'killed').length;
+  const adsCount = tuesdayReviewAdsToFilmCount();
+  const c = tuesdayReviewCounts();
+  el.innerHTML = UX.statTilesHtml([
+    { label: activeConcepts === 1 ? 'Concept in play' : 'Concepts in play', value: activeConcepts },
+    { label: adsCount === 1 ? 'Ad to film' : 'Ads to film', value: adsCount },
+    { label: 'Ready to review', value: c.readyForReview },
+    { label: 'Approved', value: c.approved, tone: c.approved ? 'green' : '' },
+    { label: 'Changes required', value: c.changesRequired, tone: c.changesRequired ? 'amber' : '' },
+  ]);
 }
 
 // While the meeting is still working through the queue, landing on Ready
@@ -11811,7 +11891,7 @@ const TUESDAY_REVIEW_FILTERS = [
 function renderTuesdayReviewFilters() {
   const c = tuesdayReviewCounts();
   document.getElementById('tr-filters').innerHTML = TUESDAY_REVIEW_FILTERS.map((f) => `
-    <button type="button" class="filter-tab ${state.tuesdayReview.filter === f.value ? 'active' : ''}" onclick="setTuesdayReviewFilter('${f.value}')">${f.label} <span class="filter-tab-count">${c[f.countKey]}</span></button>`).join('');
+    <button type="button" class="ux-tab filter-tab ${state.tuesdayReview.filter === f.value ? 'active' : ''}" onclick="setTuesdayReviewFilter('${f.value}')">${f.label}<span class="ux-tab-count filter-tab-count">${c[f.countKey]}</span></button>`).join('');
 }
 
 function setTuesdayReviewFilter(filter) {
@@ -11861,13 +11941,39 @@ function tuesdayReviewOverviewMetaText(concept, product) {
 // read Idea/Opening previews (that's the whole modal's job). A <button>
 // (not a div+onclick) so the entire tile is a single native, keyboard-
 // reachable control -- no separate "Review Concept ->" text needed.
-function tuesdayReviewConceptTileHtml(concept) {
+const TUESDAY_REVIEW_STATUS_TONE = {
+  not_started: 'neutral', in_development: 'neutral', ready_for_review: 'purple',
+  approved: 'green', changes_required: 'amber', killed: 'red',
+};
+const TUESDAY_REVIEW_STATUS_TEXT = { ready_for_review: 'Ready to review' };
+const TUESDAY_REVIEW_ACTION = {
+  ready_for_review: 'Review concept', approved: 'View decision', changes_required: 'View feedback', killed: 'View decision',
+};
+
+function tuesdayReviewConceptTileHtml(concept, product) {
   const avatarLabel = tuesdayReviewAvatarLabel(concept);
+  const status = concept.concept_dev_status;
+  const statusText = TUESDAY_REVIEW_STATUS_TEXT[status] || CONCEPT_DEV_STATUS_LABELS[status] || status;
+  const owner = concept.concept_assignee || (product && product.creator) || null;
+  const bf = product && product.black_friday_context;
+  const subject = (product && (product.product_name || (bf && bf.idea_title) || product.promotion_name)) || '';
+  const hooks = tuesdayReviewHookCount(concept);
   return `
-    <button type="button" class="tr-concept-tile" onclick="openTuesdayReviewConcept(${concept.id})">
-      <div class="tr-concept-tile-name">${escapeHtml(concept.concept_name)}</div>
-      ${avatarLabel ? `<div class="tr-concept-tile-avatar">${escapeHtml(avatarLabel)}</div>` : ''}
-      <span class="cd-concept-status-pill ${CONCEPT_DEV_STATUS_CLASS[concept.concept_dev_status] || ''}">${CONCEPT_DEV_STATUS_LABELS[concept.concept_dev_status] || concept.concept_dev_status}</span>
+    <button type="button" class="tr-concept-tile ux-pcard" onclick="openTuesdayReviewConcept(${concept.id})">
+      <div class="ux-pcard-main">
+        ${UX.productThumbHtml(product && product.image_url)}
+        <div class="ux-pcard-body">
+          <div class="ux-pcard-title tr-concept-tile-name">${escapeHtml(concept.concept_name)}</div>
+          ${subject && subject !== concept.concept_name ? `<div class="ux-pcard-sub">${escapeHtml(subject)}</div>` : ''}
+          <div class="ux-pcard-meta">
+            ${owner ? `<span>Owner: ${escapeHtml(owner)}</span>` : ''}
+            ${hooks ? `<span>${hooks} hook${hooks === 1 ? '' : 's'}</span>` : ''}
+            ${avatarLabel ? `<span class="tr-concept-tile-avatar">${escapeHtml(avatarLabel)}</span>` : ''}
+          </div>
+        </div>
+      </div>
+      <div class="ux-pcard-status">${UX.badgeHtml(statusText, TUESDAY_REVIEW_STATUS_TONE[status] || 'neutral')}</div>
+      <div class="ux-pcard-foot"><span class="ux-pcard-next">${TUESDAY_REVIEW_ACTION[status] || 'Open concept'} &rarr;</span></div>
     </button>`;
 }
 
@@ -11879,7 +11985,7 @@ function renderTuesdayReviewList() {
   // Same reasoning as renderConceptDevList: a Promotion New Concept can be
   // ready for review well before its own week's Shoot Plan is confirmed.
   if (!data || (!data.confirmed && !data.products.length)) {
-    list.innerHTML = `<div class="attention-empty">Shoot Plan for Week ${tuesdayReviewWeekNumber()} hasn't been confirmed yet — nothing to review.</div>`;
+    list.innerHTML = UX.emptyStateHtml(`Week ${tuesdayReviewWeekNumber()}'s Shoot Plan isn't confirmed yet`, 'Nothing to review until the Shoot Plan is confirmed in Planning.');
     return;
   }
   const filter = state.tuesdayReview.filter;
@@ -11889,22 +11995,35 @@ function renderTuesdayReviewList() {
 
   if (!groups.length) {
     if (filter === 'all') {
-      list.innerHTML = '<div class="attention-empty">No concepts submitted for Tuesday Review yet.</div>';
+      list.innerHTML = UX.emptyStateHtml('No concepts submitted yet', 'Concepts appear here once they are marked Ready for Review in Concept Development.');
       return;
     }
     const filterLabel = (TUESDAY_REVIEW_FILTERS.find((f) => f.value === filter) || {}).label || filter;
-    list.innerHTML = `<div class="attention-empty">No concepts are currently ${filterLabel}.</div>`;
+    list.innerHTML = UX.emptyStateHtml(`No ${filterLabel.toLowerCase()} concepts`, 'Try another filter to see the rest of the week.');
     return;
   }
 
-  list.innerHTML = groups.map((g) => `
-    <div class="tr-product-group">
-      <div class="tr-product-header">
-        <div class="tr-product-name">${escapeHtml(g.product.product_name || 'No products required')}</div>
-        <div class="tr-product-meta">${escapeHtml(tuesdayReviewProductMetaText(g.product))}</div>
+  // Grouped by where the work comes from (Core, High Stock, Drops, Promotions, Ad-hoc) so a week
+  // with many single-concept products still reads as a few tidy grids, not a long list of headings.
+  const SOURCE_ORDER = ['core', 'high_stock', 'drop', 'promotion', 'manual'];
+  const SOURCE_TITLE = { core: 'Core', high_stock: 'High Stock', drop: 'Upcoming Drops', promotion: 'Promotions', manual: 'Ad-hoc concepts' };
+  const bySource = new Map();
+  for (const g of groups) {
+    const key = SOURCE_ORDER.includes(g.product.source) ? g.product.source : 'manual';
+    if (!bySource.has(key)) bySource.set(key, []);
+    for (const c of g.concepts) bySource.get(key).push({ concept: c, product: g.product });
+  }
+  list.innerHTML = SOURCE_ORDER.filter((k) => bySource.has(k)).map((k) => {
+    const items = bySource.get(k);
+    return `
+    <section class="ux-group tr-product-group" data-tr-source="${k}">
+      <div class="ux-group-head tr-product-header">
+        <h2 class="ux-group-title tr-product-name">${SOURCE_TITLE[k]}</h2>
+        <span class="ux-group-count tr-product-meta">${items.length}</span>
       </div>
-      <div class="tr-concept-list">${g.concepts.map((c) => tuesdayReviewConceptTileHtml(c)).join('')}</div>
-    </div>`).join('');
+      <div class="ux-grid tr-concept-list">${items.map((x) => tuesdayReviewConceptTileHtml(x.concept, x.product)).join('')}</div>
+    </section>`;
+  }).join('');
 }
 
 // The review queue Previous/Next walks -- scoped to the currently active
@@ -12781,6 +12900,29 @@ async function unstartShooting(scheduleId) {
   }
 }
 
+// Shared by the Shooting and Editing cards (Batch 34): a person as a small neutral initial + name, a calendar date
+// chip, and the summary tiles. Person colours were dropped on purpose; the name is the signal.
+function uxPersonHtml(label, name) {
+  if (!name) return `<span class="ux-person ux-person-none"><span class="ux-person-label">${escapeHtml(label)}</span> Unassigned</span>`;
+  return `<span class="ux-person"><span class="ux-avatar" aria-hidden="true">${escapeHtml(String(name).trim().charAt(0).toUpperCase())}</span><span class="ux-person-label">${escapeHtml(label)}</span> <strong>${escapeHtml(name)}</strong></span>`;
+}
+
+// "Tue 14 Oct" for a weekday key inside the week starting at weekStartStr (YYYY-MM-DD); '' when unscheduled.
+function uxDayDateText(dayKey, weekStartStr) {
+  if (!dayKey || !weekStartStr) return '';
+  const idx = SHOOT_DAY_KEYS.indexOf(dayKey);
+  if (idx < 0) return '';
+  const d = parseDateStr(weekStartStr);
+  d.setDate(d.getDate() + idx);
+  return d.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
+}
+
+function uxDateChipHtml(text) {
+  return text
+    ? `<span class="ux-datechip"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-calendar"></use></svg>${escapeHtml(text)}</span>`
+    : '<span class="ux-datechip ux-datechip-none">Not scheduled</span>';
+}
+
 // "Shot" for a static/photo concept, "Filmed" for video -- same format-aware
 // labelling convention Upcoming Drops' own progress checkboxes already use
 // (see conceptProgressStageLabel), reused here rather than a second mapping.
@@ -12850,28 +12992,28 @@ function shootingCardHtml(item, isUnscheduled = false) {
   // small pill next to the name are purely supplementary scanning aids for
   // the All view -- the written "Filming: Name" label stays as the actual
   // source of truth, never colour alone (see personAccentKey).
-  const personKey = personAccentKey(item.owner);
   // The pill is redundant noise once a single person is already the active
   // filter (every visible card is already theirs) -- it only earns its
   // place in the "All" view, where distinguishing cards at a glance is the
   // actual problem being solved. The left-edge accent stays in every view
   // regardless -- it's subtle enough not to add noise on its own.
-  const personPill = item.owner && state.shooting.ownerFilter === 'all' ? `<span class="shoot-card-person-pill person-accent-${personKey}">${escapeHtml(item.owner)}</span>` : '';
-  const filmingHtml = item.owner ? `<div class="shoot-card-filming">Filming: <strong>${escapeHtml(item.owner)}</strong></div>` : '';
   const metaParts = [item.location].filter(Boolean);
+  const dateText = uxDayDateText(item.scheduled_day, item.scheduled_week_start && String(item.scheduled_week_start).slice(0, 10));
   return `
-    <div class="shoot-card ${personKey ? `person-accent-${personKey}` : ''} ${isShot ? 'shoot-card-shot' : ''}" ${isShot ? '' : 'draggable="true"'} ondragstart="onShootCardDragStart(event, ${item.id})" onclick="openShootingBrief(${item.id})">
-      <div class="shoot-card-name">${dragHandle}${escapeHtml(item.concept_name)}${personPill}</div>
-      <div class="shoot-card-product">${escapeHtml(item.product_name || '—')}${dropBadge}</div>
-      ${filmingHtml}
-      ${metaParts.length ? `<div class="shoot-card-meta">${escapeHtml(metaParts.join(' · '))}</div>` : ''}
-      <div class="shoot-card-footer">
-        ${statusHtml}
-        ${carriedBadge}
-      </div>
-      <div class="shoot-card-actions">
-        <button type="button" class="link-btn" onclick="event.stopPropagation(); openShootingBrief(${item.id})">View Brief &rarr;</button>
+    <div class="shoot-card ux-wcard ${isShot ? 'shoot-card-shot' : ''}" ${isShot ? '' : 'draggable="true"'} ondragstart="onShootCardDragStart(event, ${item.id})" onclick="openShootingBrief(${item.id})">
+      <div class="ux-wcard-head">
+        <div class="shoot-card-name">${dragHandle}${escapeHtml(item.concept_name)}</div>
         ${menuHtml}
+      </div>
+      <div class="shoot-card-product">${escapeHtml(item.product_name || '—')}${dropBadge}</div>
+      <div class="ux-wcard-meta">
+        ${uxPersonHtml('Filming', item.owner)}
+        ${metaParts.length ? `<span class="shoot-card-meta">${escapeHtml(metaParts.join(' · '))}</span>` : ''}
+      </div>
+      <div class="ux-wcard-meta">${uxDateChipHtml(dateText)}${carriedBadge}</div>
+      <div class="shoot-card-footer">${statusHtml}</div>
+      <div class="shoot-card-actions">
+        <button type="button" class="ux-link-btn" onclick="event.stopPropagation(); openShootingBrief(${item.id})">View brief &rarr;</button>
       </div>
     </div>`;
 }
@@ -12924,11 +13066,12 @@ function renderShootingWeekView() {
   });
   const completionPct = planned > 0 ? Math.round((shot / planned) * 100) : null;
 
-  document.getElementById('shoot-week-summary').innerHTML = `
-    <span class="shoot-summary-stat"><strong>${planned}</strong> Scheduled</span>
-    <span class="shoot-summary-stat"><strong>${shot}</strong> Shot</span>
-    <span class="shoot-summary-stat"><strong>${planned - shot}</strong> Remaining</span>
-    ${completionPct !== null ? `<span class="shoot-summary-stat"><strong>${completionPct}%</strong> Complete</span>` : ''}`;
+  document.getElementById('shoot-week-summary').innerHTML = UX.statTilesHtml([
+    { label: 'Scheduled', value: planned },
+    { label: 'Shot', value: shot, tone: shot ? 'green' : '' },
+    { label: 'Remaining', value: planned - shot, tone: planned - shot ? 'amber' : '' },
+    ...(completionPct !== null ? [{ label: 'Complete', value: `${completionPct}%` }] : []),
+  ]);
 
   const weekProgressBar = document.getElementById('shoot-week-progress-bar');
   weekProgressBar.style.display = completionPct !== null ? '' : 'none';
@@ -12949,7 +13092,7 @@ function renderShootingWeekView() {
       <div class="shoot-day-column${isToday ? ' shoot-day-column-today' : ''}" ondragover="onShootColumnDragOver(event)" ondragleave="onShootColumnDragLeave(event)" ondrop="onShootColumnDrop(event, '${day}')">
         <div class="shoot-day-header">${shootingDayHeaderHtml(day, items, isToday)}</div>
         <div class="shoot-day-cards">
-          ${items.length ? items.map((item) => shootingCardHtml(item)).join('') : '<div class="shoot-day-empty">—</div>'}
+          ${items.length ? items.map((item) => shootingCardHtml(item)).join('') : '<div class="shoot-day-empty">Nothing scheduled</div>'}
         </div>
       </div>`;
   }).join('');
@@ -12978,20 +13121,19 @@ function shootingTodayItemHtml(item) {
   const metaParts = [item.location].filter(Boolean);
   const dropBadge = item.source === 'drop' && item.drop_name
     ? `<span class="shoot-card-drop-badge">${escapeHtml(item.drop_name)}</span>` : '';
-  const filmingHtml = item.owner ? `<div class="shoot-card-filming">Filming: <strong>${escapeHtml(item.owner)}</strong></div>` : '';
+  const dateText = uxDayDateText(item.scheduled_day, item.scheduled_week_start && String(item.scheduled_week_start).slice(0, 10));
   return `
-    <div class="shoot-today-item ${isShot ? 'shoot-card-shot' : ''}">
-      <div class="shoot-today-item-main">
-        <div class="shoot-card-name">${escapeHtml(item.concept_name)}</div>
-        <div class="shoot-card-product">${escapeHtml(item.product_name || '—')}${dropBadge}</div>
-        ${filmingHtml}
-        ${metaParts.length ? `<div class="shoot-card-meta">${escapeHtml(metaParts.join(' · '))}</div>` : ''}
-        ${hookPreview ? `<div class="shoot-today-hook">&ldquo;${escapeHtml(hookPreview)}&rdquo;</div>` : ''}
+    <div class="shoot-today-item ux-wcard ${isShot ? 'shoot-card-shot' : ''}">
+      <div class="ux-wcard-head"><div class="shoot-card-name">${escapeHtml(item.concept_name)}</div></div>
+      <div class="shoot-card-product">${escapeHtml(item.product_name || '—')}${dropBadge}</div>
+      <div class="ux-wcard-meta">
+        ${uxPersonHtml('Filming', item.owner)}
+        ${metaParts.length ? `<span class="shoot-card-meta">${escapeHtml(metaParts.join(' · '))}</span>` : ''}
       </div>
-      <div class="shoot-today-item-actions">
-        ${shootingStatusControlHtml(item)}
-        <button type="button" class="link-btn" onclick="openShootingBrief(${item.id})">View Shoot Brief &rarr;</button>
-      </div>
+      <div class="ux-wcard-meta">${uxDateChipHtml(dateText)}</div>
+      ${hookPreview ? `<div class="shoot-today-hook">&ldquo;${escapeHtml(hookPreview)}&rdquo;</div>` : ''}
+      <div class="shoot-card-footer">${shootingStatusControlHtml(item)}</div>
+      <div class="shoot-card-actions"><button type="button" class="ux-link-btn" onclick="openShootingBrief(${item.id})">View brief &rarr;</button></div>
     </div>`;
 }
 
@@ -13002,16 +13144,20 @@ function renderShootingTodayView() {
 
   const list = document.getElementById('shoot-today-list');
   if (!dayKey) {
-    document.getElementById('shoot-today-summary').textContent = '';
-    list.innerHTML = '<div class="attention-empty">No shoots are scheduled on weekends.</div>';
+    document.getElementById('shoot-today-summary').innerHTML = '';
+    list.innerHTML = UX.emptyStateHtml('No shoots on weekends', 'Shoots are scheduled Monday to Friday.');
     return;
   }
   const data = state.shooting.todayData;
   if (!data) return;
   const items = ((data.days && data.days[dayKey]) || []).filter(shootingOwnerMatches);
   const shotCount = items.filter((i) => i.status === 'shot').length;
-  document.getElementById('shoot-today-summary').textContent = `${items.length} Planned · ${shotCount} Shot · ${items.length - shotCount} Remaining`;
-  list.innerHTML = items.length ? items.map((item) => shootingTodayItemHtml(item)).join('') : '<div class="attention-empty">Nothing scheduled for today.</div>';
+  document.getElementById('shoot-today-summary').innerHTML = UX.statTilesHtml([
+    { label: 'Planned', value: items.length },
+    { label: 'Shot', value: shotCount, tone: shotCount ? 'green' : '' },
+    { label: 'Remaining', value: items.length - shotCount, tone: items.length - shotCount ? 'amber' : '' },
+  ]);
+  list.innerHTML = items.length ? items.map((item) => shootingTodayItemHtml(item)).join('') : UX.emptyStateHtml('Nothing scheduled for today', 'Drag concepts onto a day in the Week view to schedule them.');
 }
 
 async function loadShootingHistory() {
@@ -13040,7 +13186,7 @@ function renderShootingHistoryView() {
   const weeks = (state.shooting.historyData && state.shooting.historyData.weeks) || [];
   const list = document.getElementById('shoot-history-list');
   if (!weeks.length) {
-    list.innerHTML = '<div class="attention-empty">No Shooting history yet.</div>';
+    list.innerHTML = UX.emptyStateHtml('No shooting history yet', 'Completed weeks will appear here.');
     return;
   }
   list.innerHTML = weeks.map((w) => {
@@ -14099,9 +14245,13 @@ function editingComputeSummary() {
 // own card/workspace, not up here.
 function renderEditingSummary() {
   const s = editingComputeSummary();
-  const parts = [`${s.concepts} Concept${s.concepts === 1 ? '' : 's'}`, `${s.to_edit} To Edit`, `${s.scheduled} Scheduled`, `${s.editing} In Progress`];
-  if (s.ready_for_approval > 0) parts.push(`${s.ready_for_approval} Edited`);
-  document.getElementById('editing-summary').textContent = parts.join(' · ');
+  document.getElementById('editing-summary').innerHTML = UX.statTilesHtml([
+    { label: s.concepts === 1 ? 'Concept' : 'Concepts', value: s.concepts },
+    { label: 'To edit', value: s.to_edit, tone: s.to_edit ? 'amber' : '' },
+    { label: 'Scheduled', value: s.scheduled },
+    { label: 'In progress', value: s.editing },
+    { label: 'Edited', value: s.ready_for_approval, tone: s.ready_for_approval ? 'green' : '' },
+  ]);
 }
 
 // Same compact 3-across card grid as Concept Development (.cd-card /
@@ -14119,22 +14269,15 @@ function editingConceptCtaLabel(status) {
 function editingConceptCardHtml(concept) {
   const status = editingConceptStatus(concept);
   const isReady = status === 'ready_for_approval';
-  const thumb = concept.image_url
-    ? `<img class="high-stock-thumb" src="${concept.image_url}" alt="">`
-    : '<span class="high-stock-thumb high-stock-noimg"><svg class=ic aria-hidden=true focusable=false><use href=#i-image></use></svg></span>';
-  // Same person-accent convention as Shooting (see personAccentKey) --
-  // consistent colour identification anywhere an assignment is surfaced.
-  const personKey = personAccentKey(concept.editing_owner);
+  const dateText = uxDayDateText(concept.editing_day, concept.editing_week_start);
   return `
-    <div class="cd-card editing-concept-card ${personKey ? `person-accent-${personKey}` : ''} ${isReady ? 'editing-concept-card-ready' : ''}" onclick="openEditingConcept(${concept.creative_asset_id})">
-      <div class="cd-card-top">
-        ${thumb}
-        <div class="editing-concept-product">${escapeHtml(concept.product_name || '—')}</div>
-      </div>
-      <div class="editing-concept-name">${escapeHtml(concept.concept_name)}</div>
-      ${editingStatusControlHtml(concept)}
-      <div class="cd-card-meta">Editing: <strong>${concept.editing_owner ? escapeHtml(concept.editing_owner) : 'Unassigned'}</strong></div>
-      <div class="cd-card-action">${editingConceptCtaLabel(status)} &rarr;</div>
+    <div class="cd-card editing-concept-card ux-wcard ${isReady ? 'editing-concept-card-ready shoot-card-shot' : ''}" onclick="openEditingConcept(${concept.creative_asset_id})">
+      <div class="ux-wcard-head"><div class="shoot-card-name editing-concept-name">${escapeHtml(concept.concept_name)}</div></div>
+      <div class="shoot-card-product editing-concept-product">${escapeHtml(concept.product_name || '—')}</div>
+      <div class="ux-wcard-meta">${uxPersonHtml('Editor', concept.editing_owner)}</div>
+      <div class="ux-wcard-meta">${uxDateChipHtml(dateText)}</div>
+      <div class="shoot-card-footer">${editingStatusControlHtml(concept)}</div>
+      <div class="shoot-card-actions"><span class="ux-pcard-next">${editingConceptCtaLabel(status)} &rarr;</span></div>
     </div>`;
 }
 
@@ -14313,25 +14456,24 @@ function editingDayCardHtml(concept, isUnscheduled = false) {
   const carriedBadge = concept.carried_over
     ? `<span class="shoot-carried-badge">From W${isoWeekNumber(parseDateStr(concept.editing_original_week_start))}</span>` : '';
   const dragHandle = isUnscheduled ? '<span class="shoot-card-drag-handle" title="Drag onto a day to schedule">⠿</span>' : '';
-  const editingHtml = `<div class="shoot-card-filming">Editing: <strong>${concept.editing_owner ? escapeHtml(concept.editing_owner) : 'Unassigned'}</strong></div>`;
-  // Same person-accent convention as Shooting/Editing's grid card -- see
-  // personAccentKey.
-  const personKey = personAccentKey(concept.editing_owner);
-  return `
-    <div class="shoot-card ${personKey ? `person-accent-${personKey}` : ''} ${isReady ? 'shoot-card-shot' : ''}" draggable="true" ondragstart="onEditingCardDragStart(event, ${concept.shoot_schedule_id})" onclick="openEditingConcept(${concept.creative_asset_id})">
-      <div class="shoot-card-name">${dragHandle}${escapeHtml(concept.concept_name)}</div>
-      <div class="shoot-card-product">${escapeHtml(concept.product_name || '—')}</div>
-      ${editingHtml}
-      <div class="shoot-card-footer">
-        ${editingStatusControlHtml(concept)}
-        ${carriedBadge}
-      </div>
-      <div class="shoot-card-actions">
-        <button type="button" class="link-btn" onclick="event.stopPropagation(); openEditingConcept(${concept.creative_asset_id})">${editingConceptCtaLabel(status)} &rarr;</button>
+  const dateText = uxDayDateText(concept.editing_day, concept.editing_week_start);
+  const menuHtml = `
         <div class="shoot-card-menu" onclick="event.stopPropagation()">
           <button type="button" class="shoot-card-menu-btn" onclick="toggleEditingCardMenu(${concept.shoot_schedule_id})" aria-label="Move concept">&bull;&bull;&bull;</button>
           <div class="shoot-card-menu-dropdown" id="editing-card-menu-${concept.shoot_schedule_id}">${editingMoveMenuItemsHtml(concept)}</div>
-        </div>
+        </div>`;
+  return `
+    <div class="shoot-card ux-wcard ${isReady ? 'shoot-card-shot' : ''}" draggable="true" ondragstart="onEditingCardDragStart(event, ${concept.shoot_schedule_id})" onclick="openEditingConcept(${concept.creative_asset_id})">
+      <div class="ux-wcard-head">
+        <div class="shoot-card-name">${dragHandle}${escapeHtml(concept.concept_name)}</div>
+        ${menuHtml}
+      </div>
+      <div class="shoot-card-product">${escapeHtml(concept.product_name || '—')}</div>
+      <div class="ux-wcard-meta">${uxPersonHtml('Editor', concept.editing_owner)}</div>
+      <div class="ux-wcard-meta">${uxDateChipHtml(dateText)}${carriedBadge}</div>
+      <div class="shoot-card-footer">${editingStatusControlHtml(concept)}</div>
+      <div class="shoot-card-actions">
+        <button type="button" class="ux-link-btn" onclick="event.stopPropagation(); openEditingConcept(${concept.creative_asset_id})">${editingConceptCtaLabel(status)} &rarr;</button>
       </div>
     </div>`;
 }
@@ -14367,7 +14509,7 @@ function renderEditingWeekView() {
       <div class="shoot-day-column${isToday ? ' shoot-day-column-today' : ''}" ondragover="onEditingColumnDragOver(event)" ondragleave="onEditingColumnDragLeave(event)" ondrop="onEditingColumnDrop(event, '${day}')">
         <div class="shoot-day-header">${editingDayHeaderHtml(day, items, isToday)}</div>
         <div class="shoot-day-cards">
-          ${items.length ? items.map((c) => editingDayCardHtml(c)).join('') : '<div class="shoot-day-empty">—</div>'}
+          ${items.length ? items.map((c) => editingDayCardHtml(c)).join('') : '<div class="shoot-day-empty">Nothing scheduled</div>'}
         </div>
       </div>`;
   }).join('');
@@ -14394,11 +14536,11 @@ function renderEditingTodayView() {
 
   const list = document.getElementById('editing-today-list');
   if (!dayKey) {
-    list.innerHTML = '<div class="attention-empty">No editing is scheduled on weekends.</div>';
+    list.innerHTML = UX.emptyStateHtml('No editing on weekends', 'Edits are scheduled Monday to Friday.');
     return;
   }
   const filtered = editingVisibleConcepts().filter((c) => c.editing_day === dayKey);
-  list.innerHTML = filtered.length ? filtered.map(editingConceptCardHtml).join('') : '<div class="attention-empty">Nothing scheduled for editing today.</div>';
+  list.innerHTML = filtered.length ? filtered.map(editingConceptCardHtml).join('') : UX.emptyStateHtml('Nothing scheduled for editing today', 'Schedule shot concepts onto a day in the Week view.');
 }
 
 async function loadEditingHistory() {
@@ -14423,7 +14565,7 @@ function renderEditingHistoryView() {
   const weeks = (state.editing.historyData && state.editing.historyData.weeks) || [];
   const list = document.getElementById('editing-history-list');
   if (!weeks.length) {
-    list.innerHTML = '<div class="attention-empty">No Editing history yet.</div>';
+    list.innerHTML = UX.emptyStateHtml('No editing history yet', 'Completed weeks will appear here.');
     return;
   }
   list.innerHTML = weeks.map((w) => {
@@ -14830,26 +14972,59 @@ async function loadFinalApproval() {
   }
 }
 
+// Final Approval thumbnails are the CREATIVE itself, derived from the Final Edit link the editor pasted back
+// (see public/ux.js classifyMedia): a YouTube still, the first frame of a direct video file, a direct image, or a
+// neutral "no preview" tile. They are never the product catalogue image.
+function finalApprovalVersions(c) {
+  const edits = Array.isArray(c.final_edits) && c.final_edits.length ? c.final_edits : [{
+    id: c.final_edit_id, asset_name: c.final_edit_asset_name, format: c.format, final_edit_link: c.final_edit_link, editor: c.editor,
+  }];
+  return edits.map((e) => ({ ...e, format: e.format || c.format || 'video' }));
+}
+
+function finalApprovalMediaStripHtml(versions, size) {
+  const shown = versions.slice(0, 3);
+  const extra = versions.length - shown.length;
+  return `<div class="fa-media-strip">${shown.map((v) => UX.mediaThumbHtml(v.final_edit_link, v.format, { size, label: v.asset_name || 'Creative preview' })).join('')}${extra > 0 ? `<span class="fa-media-more">+${extra}</span>` : ''}</div>`;
+}
+
 function finalApprovalCardHtml(c) {
-  const hasLink = !!c.final_edit_link;
+  const versions = finalApprovalVersions(c);
+  const missing = versions.filter((v) => !v.final_edit_link).length;
+  const resubmitted = c.final_approval_status === 'changes_required';
   return `
-    <div class="cd-card" onclick="openFinalApprovalModal(${c.creative_asset_id})">
-      <div class="cd-card-top"><div class="cd-card-name">${escapeHtml(c.product_name || c.concept_name)}</div></div>
-      <div class="cd-card-meta">${escapeHtml(c.concept_name)}</div>
-      ${c.final_approval_status === 'changes_required' ? '<span class="cd-concept-status-pill editing-status-to-edit">Resubmitted</span>' : ''}
-      ${hasLink ? '' : '<div class="editing-final-edit-empty">No Final Edit link yet</div>'}
+    <div class="cd-card ux-pcard fa-card${versions.length > 1 ? ' fa-card-multi' : ''}" role="button" tabindex="0" data-fa-concept="${c.creative_asset_id}" onclick="openFinalApprovalModal(${c.creative_asset_id})" onkeydown="if(event.key==='Enter'){openFinalApprovalModal(${c.creative_asset_id})}">
+      <div class="ux-pcard-main">
+        ${finalApprovalMediaStripHtml(versions, 'md')}
+        <div class="ux-pcard-body">
+          <div class="ux-pcard-title cd-card-name">${escapeHtml(c.concept_name)}</div>
+          <div class="ux-pcard-sub">${escapeHtml(c.product_name || '—')}</div>
+          <div class="ux-pcard-meta">${c.editor ? `<span>Editor: ${escapeHtml(c.editor)}</span>` : ''}<span>${versions.length} version${versions.length === 1 ? '' : 's'}</span></div>
+        </div>
+      </div>
+      <div class="ux-pcard-status">
+        ${resubmitted ? UX.badgeHtml('Resubmitted', 'amber') : UX.badgeHtml('Awaiting approval', 'purple')}
+        ${missing ? UX.badgeHtml(`${missing} without link`, 'neutral') : ''}
+      </div>
+      <div class="ux-pcard-foot"><span class="ux-pcard-next">Review &amp; approve &rarr;</span></div>
     </div>`;
 }
 
 function renderFinalApprovalList() {
-  const count = state.finalApproval.data.length;
-  document.getElementById('final-approval-summary').textContent =
-    count ? `${count} concept${count === 1 ? '' : 's'} awaiting Final Approval` : 'Nothing awaiting Final Approval';
+  const data = state.finalApproval.data;
+  const count = data.length;
+  const versions = data.reduce((n, c) => n + finalApprovalVersions(c).length, 0);
+  const resubmitted = data.filter((c) => c.final_approval_status === 'changes_required').length;
+  document.getElementById('final-approval-summary').innerHTML = count ? UX.statTilesHtml([
+    { label: count === 1 ? 'Concept awaiting approval' : 'Concepts awaiting approval', value: count },
+    { label: versions === 1 ? 'Creative version' : 'Creative versions', value: versions },
+    { label: 'Resubmitted', value: resubmitted, tone: resubmitted ? 'amber' : '' },
+  ]) : '';
 
   const list = document.getElementById('final-approval-list');
   list.innerHTML = count
-    ? state.finalApproval.data.map(finalApprovalCardHtml).join('')
-    : '<div class="attention-empty">Nothing awaiting Final Approval right now.</div>';
+    ? data.map(finalApprovalCardHtml).join('')
+    : UX.emptyStateHtml('Nothing awaiting final approval', 'Concepts appear here once Editing marks them as Edited.');
 }
 
 function finalApprovalFindConcept(creativeAssetId) {
@@ -14880,16 +15055,26 @@ function renderFinalApprovalModal() {
   document.getElementById('final-approval-modal-title').textContent = concept.concept_name;
   document.getElementById('final-approval-modal-subtitle').textContent = concept.product_name || '';
 
-  const hasLink = !!concept.final_edit_link;
+  const versions = finalApprovalVersions(concept);
   document.getElementById('final-approval-modal-body').innerHTML = `
-    <div class="editing-final-edit-row">
-      ${concept.editor ? `<div class="editing-final-edit-field"><span class="editing-final-edit-field-label">Editor</span>${escapeHtml(concept.editor)}</div>` : ''}
-      ${hasLink
-        ? `<a href="${escapeHtml(concept.final_edit_link)}" target="_blank" rel="noopener" class="link-btn">View Final Edit &rarr;</a>`
-        : '<div class="editing-final-edit-empty">No link pasted back yet.</div>'}
-      ${concept.editor_notes ? `<div class="editing-final-edit-notes">${escapeHtml(concept.editor_notes)}</div>` : ''}
+    <div class="fa-versions">
+      ${versions.map((v, i) => `
+        <div class="fa-version" data-fa-version="${i}">
+          ${UX.mediaThumbHtml(v.final_edit_link, v.format, { size: 'lg', label: v.asset_name || `Version ${i + 1}` })}
+          <div class="fa-version-body">
+            <div class="fa-version-title">${escapeHtml(v.asset_name || `Version ${i + 1}`)}</div>
+            <div class="fa-version-meta">${escapeHtml(({ video: 'Video', static: 'Static', carousel: 'Carousel' })[v.format] || 'Creative')}${v.variation_text ? ` &middot; &ldquo;${escapeHtml(truncateText(v.variation_text, 70))}&rdquo;` : ''}</div>
+            ${v.final_edit_link
+              ? `<a href="${escapeHtml(v.final_edit_link)}" target="_blank" rel="noopener" class="ux-link-btn">Open final edit &rarr;</a>`
+              : '<div class="editing-final-edit-empty">No Final Edit link pasted back yet.</div>'}
+          </div>
+        </div>`).join('')}
     </div>
-    ${concept.shoot_schedule_id ? `<button type="button" class="link-btn" onclick="openFinalApprovalBrief()">View Shoot Brief &rarr;</button>` : ''}`;
+    <div class="fa-modal-notes">
+      ${concept.editor ? `<div class="editing-final-edit-field"><span class="editing-final-edit-field-label">Editor</span>${escapeHtml(concept.editor)}</div>` : ''}
+      ${concept.editor_notes ? `<div class="editing-final-edit-notes">${escapeHtml(concept.editor_notes)}</div>` : ''}
+      ${concept.shoot_schedule_id ? `<button type="button" class="ux-link-btn" onclick="openFinalApprovalBrief()">View shoot brief &rarr;</button>` : ''}
+    </div>`;
 
   const showForm = state.finalApproval.showFeedbackForm;
   const feedbackSection = document.getElementById('final-approval-feedback-section');
@@ -14982,47 +15167,65 @@ async function loadAdSetupBoard() {
 }
 
 function renderAdSetupSubtabCounts() {
-  document.getElementById('fa-count-ready').textContent = state.finalApproval.data.length ? `(${state.finalApproval.data.length})` : '';
-  document.getElementById('fa-count-ad-setup').textContent = state.adSetup.board.ad_setup.length ? `(${state.adSetup.board.ad_setup.length})` : '';
-  document.getElementById('fa-count-approved').textContent = state.adSetup.board.approved.length ? `(${state.adSetup.board.approved.length})` : '';
+  document.getElementById('fa-count-ready').textContent = state.finalApproval.data.length ? `${state.finalApproval.data.length}` : '';
+  document.getElementById('fa-count-ad-setup').textContent = state.adSetup.board.ad_setup.length ? `${state.adSetup.board.ad_setup.length}` : '';
+  document.getElementById('fa-count-approved').textContent = state.adSetup.board.approved.length ? `${state.adSetup.board.approved.length}` : '';
+}
+
+// One Ad Setup row = one Final Edit (version), so each card shows that version's own creative.
+function adSetupMediaHtml(item) {
+  return UX.mediaThumbHtml(item.final_edit_link, item.final_edit_format || item.media_type || 'video', { size: 'md', label: item.final_edit_asset_name || item.concept_name });
 }
 
 function adSetupCardHtml(item) {
-  const batch = item.batch_number ? `<div class="as-card-batch">#${item.batch_number}</div>` : '';
+  const category = AD_CATEGORY_LABELS[item.ad_category] || item.ad_category;
   return `
-    <div class="cd-card" onclick="openAdSetupModal(${item.id})">
-      ${batch}
-      <div class="cd-card-top"><div class="cd-card-name">${escapeHtml(item.product_label || item.concept_name)}</div></div>
-      <div class="cd-card-meta">${escapeHtml(item.concept_name)} &middot; ${escapeHtml(AD_CATEGORY_LABELS[item.ad_category] || item.ad_category)}</div>
+    <div class="cd-card ux-pcard fa-card" role="button" tabindex="0" data-ad-setup="${item.id}" onclick="openAdSetupModal(${item.id})" onkeydown="if(event.key==='Enter'){openAdSetupModal(${item.id})}">
+      <div class="ux-pcard-main">
+        ${adSetupMediaHtml(item)}
+        <div class="ux-pcard-body">
+          <div class="ux-pcard-title cd-card-name">${escapeHtml(item.product_label || item.concept_name)}</div>
+          <div class="ux-pcard-sub">${escapeHtml(item.concept_name)}</div>
+          <div class="ux-pcard-meta">${category ? `<span>${escapeHtml(category)}</span>` : ''}${item.batch_number ? `<span>Batch #${item.batch_number}</span>` : ''}</div>
+        </div>
+      </div>
+      <div class="ux-pcard-status">${UX.badgeHtml('Draft', 'neutral')}</div>
+      <div class="ux-pcard-foot"><span class="ux-pcard-next">Set up ad &rarr;</span></div>
     </div>`;
 }
 
 function renderAdSetupList() {
   const items = state.adSetup.board.ad_setup;
-  document.getElementById('ad-setup-summary').textContent = items.length
-    ? `${items.length} creative${items.length === 1 ? '' : 's'} in Ad Setup` : 'Nothing in Ad Setup right now.';
+  document.getElementById('ad-setup-summary').innerHTML = items.length
+    ? UX.statTilesHtml([{ label: items.length === 1 ? 'Creative in Ad Setup' : 'Creatives in Ad Setup', value: items.length }]) : '';
   document.getElementById('ad-setup-list').innerHTML = items.length
     ? items.map(adSetupCardHtml).join('')
-    : '<div class="attention-empty">Nothing in Ad Setup right now.</div>';
+    : UX.emptyStateHtml('Nothing in Ad Setup', 'Approved creatives move here so you can name and prepare them for Meta.');
 }
 
 function adSetupApprovedCardHtml(item) {
-  const batch = item.batch_number ? `<div class="as-card-batch">#${item.batch_number}</div>` : '';
   return `
-    <div class="cd-card" onclick="openAdSetupApprovedModal(${item.id})">
-      ${batch}
-      <div class="cd-card-top"><div class="cd-card-name">${escapeHtml(item.product_label || item.concept_name)}</div></div>
-      <div class="cd-card-meta">${escapeHtml(item.concept_name)}</div>
+    <div class="cd-card ux-pcard fa-card" role="button" tabindex="0" data-ad-setup-approved="${item.id}" onclick="openAdSetupApprovedModal(${item.id})" onkeydown="if(event.key==='Enter'){openAdSetupApprovedModal(${item.id})}">
+      <div class="ux-pcard-main">
+        ${adSetupMediaHtml(item)}
+        <div class="ux-pcard-body">
+          <div class="ux-pcard-title cd-card-name">${escapeHtml(item.product_label || item.concept_name)}</div>
+          <div class="ux-pcard-sub">${escapeHtml(item.concept_name)}</div>
+          <div class="ux-pcard-meta">${item.batch_number ? `<span>Batch #${item.batch_number}</span>` : ''}</div>
+        </div>
+      </div>
+      <div class="ux-pcard-status">${UX.badgeHtml('Approved', 'green')}</div>
+      <div class="ux-pcard-foot"><span class="ux-pcard-next">View ad &rarr;</span></div>
     </div>`;
 }
 
 function renderAdSetupApprovedList() {
   const items = state.adSetup.board.approved;
-  document.getElementById('ad-setup-approved-summary').textContent = items.length
-    ? `${items.length} approved ad${items.length === 1 ? '' : 's'}` : 'Nothing approved yet.';
+  document.getElementById('ad-setup-approved-summary').innerHTML = items.length
+    ? UX.statTilesHtml([{ label: items.length === 1 ? 'Approved ad' : 'Approved ads', value: items.length }]) : '';
   document.getElementById('ad-setup-approved-list').innerHTML = items.length
     ? items.map(adSetupApprovedCardHtml).join('')
-    : '<div class="attention-empty">Nothing approved yet.</div>';
+    : UX.emptyStateHtml('Nothing approved yet', 'Ads you approve in Ad Setup are listed here.');
 }
 
 // Client-side mirror of lib/adSetupNaming.js's buildMetaAdName, so the
@@ -15141,123 +15344,142 @@ function renderAdSetupModal() {
 
   const usingCopySet = !!d.copy_set_id;
 
+  const namePreview = buildMetaAdNamePreviewClient({
+    ad_category: d.ad_category, stage_type: d.promotion_stage_name ? detectStageTypeClient(d.promotion_stage_name) : null,
+    sale_sequence_number: d.sale_sequence_number, batch_number: d.batch_number, week_no: d.week_no, ad_date: d.ad_date,
+    product_label: d.product_label, product_type: d.product_type,
+    hook_short: d.hook_short, creator_name: d.creator_name, concept_label: d.concept_label,
+    media_type: d.media_type, ad_type: d.ad_type, url_link_page: d.url_link_page,
+  });
+  const productNames = (d.products || []).map((p) => p.name).filter(Boolean);
+
   document.getElementById('ad-setup-modal-body').innerHTML = `
-    <div class="as-section">
-      <div class="as-section-title">Ad Details</div>
-      ${originLine ? `<div class="hint" style="margin-bottom:10px;">${originLine}</div>` : ''}
-      <div class="as-grid">
-        <label>Ad Category
-          <select onchange="adSetupSet('ad_category', this.value)">${optionSelect('ad_category', AD_CATEGORY_LABELS, d.ad_category)}</select>
-        </label>
-        <label>Batch
-          <select onchange="onAdSetupBatchChange(this.value)">
-            <option value="">-- None --</option>
-            ${batchOptions}
-            <option value="__new__">+ New Batch&hellip;</option>
-          </select>
-        </label>
-        <label>Week No.
-          <input type="text" value="${escapeHtml(d.week_no || '')}" oninput="adSetupSet('week_no', this.value)">
-        </label>
-        <label>Date
-          <input type="date" value="${d.ad_date ? String(d.ad_date).slice(0, 10) : ''}" oninput="adSetupSet('ad_date', this.value)">
-        </label>
+    <div class="as-layout">
+      <div class="as-main">
+        <section class="as-section as-card">
+          <div class="as-section-title">Ad details</div>
+          ${originLine ? `<div class="as-section-note">${originLine}</div>` : ''}
+          <div class="as-grid as-grid-4">
+            <label>Ad category
+              <select onchange="adSetupSet('ad_category', this.value)">${optionSelect('ad_category', AD_CATEGORY_LABELS, d.ad_category)}</select>
+            </label>
+            <label>Batch
+              <select onchange="onAdSetupBatchChange(this.value)">
+                <option value="">-- None --</option>
+                ${batchOptions}
+                <option value="__new__">+ New Batch&hellip;</option>
+              </select>
+            </label>
+            <label>Week no.
+              <input type="text" value="${escapeHtml(d.week_no || '')}" oninput="adSetupSet('week_no', this.value)">
+            </label>
+            <label>Date
+              <input type="date" value="${d.ad_date ? String(d.ad_date).slice(0, 10) : ''}" oninput="adSetupSet('ad_date', this.value)">
+            </label>
+          </div>
+        </section>
+
+        <section class="as-section as-card">
+          <div class="as-section-title">Creative naming</div>
+          <div class="as-section-note">These fields only name the ad in Meta. Editing them never changes the linked WNDRR/ApparelMagic product record.</div>
+          <div class="as-grid">
+            <label>Product name
+              <input type="text" value="${escapeHtml(d.product_label || '')}" oninput="adSetupSet('product_label', this.value)">
+            </label>
+            <label>Product category
+              <input type="text" value="${escapeHtml(d.product_type || '')}" oninput="adSetupSet('product_type', this.value)">
+            </label>
+            <label>Hook (short)
+              <input type="text" value="${escapeHtml(d.hook_short || '')}" oninput="adSetupSet('hook_short', this.value)">
+            </label>
+            <label>Media
+              <select onchange="adSetupSet('media_type', this.value)">
+                <option value="video" ${d.media_type === 'video' ? 'selected' : ''}>Video</option>
+                <option value="image" ${d.media_type === 'image' ? 'selected' : ''}>Image</option>
+              </select>
+            </label>
+            <label>Ad type
+              <select onchange="adSetupSet('ad_type', this.value)">
+                <option value="single" ${d.ad_type === 'single' ? 'selected' : ''}>Single</option>
+                <option value="carousel" ${d.ad_type === 'carousel' ? 'selected' : ''}>Carousel</option>
+              </select>
+            </label>
+            <label>Creator
+              <input type="text" value="${escapeHtml(d.creator_name || '')}" placeholder="n/a" oninput="adSetupSet('creator_name', this.value)">
+            </label>
+            <label>Concept
+              <input type="text" value="${escapeHtml(d.concept_label || '')}" oninput="adSetupSet('concept_label', this.value)">
+            </label>
+            <label>URL link page
+              <select onchange="adSetupSet('url_link_page', this.value)">${optionSelect('url_link_page', URL_LINK_PAGE_LABELS, d.url_link_page)}</select>
+            </label>
+          </div>
+        </section>
+
+        <section class="as-section as-card as-name-card">
+          <div class="as-section-title">Generated Meta name</div>
+          <div class="as-name-preview">
+            <span id="as-name-preview-text">${escapeHtml(namePreview)}</span>
+            <button type="button" class="btn btn-ghost btn-sm" style="flex-shrink:0;" onclick="copyAdSetupName()">Copy Name</button>
+          </div>
+        </section>
+
+        <section class="as-section as-card">
+          <div class="as-section-title">Copy</div>
+          <label>Copy set
+            <select onchange="onAdSetupCopySetChange(this.value)">
+              <option value="">-- Use this ad's own copy --</option>
+              ${copySetOptions}
+            </select>
+          </label>
+          ${usingCopySet
+            ? `<div class="as-section-note" style="margin:8px 0 0;">Using shared Copy Set: sharing Primary Text/Headline/CTA with every other ad in this set.</div>`
+            : `<div class="as-copy-cols">
+                 <div>
+                   <div class="admin-note" style="margin-bottom:6px;">Primary text</div>
+                   ${primaryOptions}
+                 </div>
+                 <div>
+                   <div class="admin-note" style="margin-bottom:6px;">Headline</div>
+                   ${headlineOptions}
+                 </div>
+               </div>
+               <div class="as-copy-actions">
+                 <button type="button" class="btn btn-ghost btn-sm" onclick="regenerateAdSetupCopy()">Regenerate</button>
+                 <button type="button" class="btn btn-ghost btn-sm" onclick="createAdSetupCopySetFromCurrent()">Save as New Copy Set</button>
+               </div>`}
+          <label style="margin-top:12px;">CTA
+            <select onchange="adSetupSet('cta', this.value)">${optionSelect('cta', CTA_LABELS, d.cta)}</select>
+          </label>
+        </section>
+
+        <section class="as-section as-card">
+          <div class="as-section-title">Destination</div>
+          <label>Destination URL
+            <input type="text" value="${escapeHtml(d.destination_url || '')}" placeholder="https://" oninput="adSetupSet('destination_url', this.value)">
+          </label>
+        </section>
       </div>
-    </div>
 
-    <div class="as-section">
-      <div class="as-section-title">Naming</div>
-      <div class="hint" style="margin-bottom:10px;">Product Name/Category here are how this ad is named in Meta only -- editing them never changes the linked WNDRR/ApparelMagic product record.</div>
-      <div class="as-grid">
-        <label>Product Name
-          <input type="text" value="${escapeHtml(d.product_label || '')}" oninput="adSetupSet('product_label', this.value)">
-        </label>
-        <label>Product Category
-          <input type="text" value="${escapeHtml(d.product_type || '')}" oninput="adSetupSet('product_type', this.value)">
-        </label>
-        <label>Hook (short)
-          <input type="text" value="${escapeHtml(d.hook_short || '')}" oninput="adSetupSet('hook_short', this.value)">
-        </label>
-        <label>Media
-          <select onchange="adSetupSet('media_type', this.value)">
-            <option value="video" ${d.media_type === 'video' ? 'selected' : ''}>Video</option>
-            <option value="image" ${d.media_type === 'image' ? 'selected' : ''}>Image</option>
-          </select>
-        </label>
-        <label>Ad Type
-          <select onchange="adSetupSet('ad_type', this.value)">
-            <option value="single" ${d.ad_type === 'single' ? 'selected' : ''}>Single</option>
-            <option value="carousel" ${d.ad_type === 'carousel' ? 'selected' : ''}>Carousel</option>
-          </select>
-        </label>
-        <label>Creator
-          <input type="text" value="${escapeHtml(d.creator_name || '')}" placeholder="n/a" oninput="adSetupSet('creator_name', this.value)">
-        </label>
-        <label>Concept
-          <input type="text" value="${escapeHtml(d.concept_label || '')}" oninput="adSetupSet('concept_label', this.value)">
-        </label>
-        <label>URL Link Page
-          <select onchange="adSetupSet('url_link_page', this.value)">${optionSelect('url_link_page', URL_LINK_PAGE_LABELS, d.url_link_page)}</select>
-        </label>
-      </div>
-      <div class="as-name-preview" style="margin-top:12px;">
-        <span id="as-name-preview-text">${escapeHtml(buildMetaAdNamePreviewClient({
-          ad_category: d.ad_category, stage_type: d.promotion_stage_name ? detectStageTypeClient(d.promotion_stage_name) : null,
-          sale_sequence_number: d.sale_sequence_number, batch_number: d.batch_number, week_no: d.week_no, ad_date: d.ad_date,
-          product_label: d.product_label, product_type: d.product_type,
-          hook_short: d.hook_short, creator_name: d.creator_name, concept_label: d.concept_label,
-          media_type: d.media_type, ad_type: d.ad_type, url_link_page: d.url_link_page,
-        }))}</span>
-        <button type="button" class="btn btn-ghost" style="flex-shrink:0;" onclick="copyAdSetupName()">Copy Name</button>
-      </div>
-    </div>
-
-    <div class="as-section">
-      <div class="as-section-title">Creative</div>
-      ${d.final_edit_link
-        ? `<a href="${escapeHtml(d.final_edit_link)}" target="_blank" rel="noopener" class="link-btn">View Creative &rarr;</a> <span class="hint">${escapeHtml(d.final_edit_asset_name || '')}</span>`
-        : '<div class="editing-final-edit-empty">No final creative link on record.</div>'}
-    </div>
-
-    <div class="as-section">
-      <div class="as-section-title">Copy</div>
-      <label>Copy Set
-        <select onchange="onAdSetupCopySetChange(this.value)">
-          <option value="">-- Use this ad's own copy --</option>
-          ${copySetOptions}
-        </select>
-      </label>
-      ${usingCopySet
-        ? `<div class="hint" style="margin:8px 0;">Using shared Copy Set: sharing Primary Text/Headline/CTA with every other ad in this set.</div>`
-        : `<div style="display:flex;gap:16px;margin-top:10px;flex-wrap:wrap;">
-             <div style="flex:1;min-width:240px;">
-               <div class="admin-note" style="margin-bottom:6px;">Primary Text</div>
-               ${primaryOptions}
-             </div>
-             <div style="flex:1;min-width:240px;">
-               <div class="admin-note" style="margin-bottom:6px;">Headline</div>
-               ${headlineOptions}
-             </div>
-           </div>
-           <button type="button" class="btn btn-ghost" style="margin-top:8px;" onclick="regenerateAdSetupCopy()">Regenerate</button>
-           <button type="button" class="btn btn-ghost" style="margin-top:8px;" onclick="createAdSetupCopySetFromCurrent()">Save as New Copy Set</button>`}
-      <label style="margin-top:12px;">CTA
-        <select onchange="adSetupSet('cta', this.value)">${optionSelect('cta', CTA_LABELS, d.cta)}</select>
-      </label>
-    </div>
-
-    <div class="as-section">
-      <div class="as-section-title">Destination</div>
-      <div class="as-grid">
-        <label>Destination URL
-          <input type="text" value="${escapeHtml(d.destination_url || '')}" placeholder="https://" oninput="adSetupSet('destination_url', this.value)">
-        </label>
-      </div>
-    </div>
-
-    <div class="as-section">
-      <div class="as-section-title">Final Check</div>
-      <ul class="as-readiness-list" id="as-readiness-list"></ul>
+      <aside class="as-side">
+        <section class="as-section as-card">
+          <div class="as-section-title">Creative</div>
+          <div class="as-creative">
+            ${UX.mediaThumbHtml(d.final_edit_link, d.final_edit_format || d.media_type || 'video', { size: 'lg', label: d.final_edit_asset_name || d.concept_name })}
+            <div class="as-creative-body">
+              <div class="as-creative-name">${escapeHtml(d.final_edit_asset_name || d.concept_name || '')}</div>
+              ${productNames.length ? `<div class="as-section-note" style="margin:0;">${escapeHtml(productNames.join(', '))}</div>` : ''}
+              ${d.final_edit_link
+                ? `<a href="${escapeHtml(d.final_edit_link)}" target="_blank" rel="noopener" class="ux-link-btn">View creative &rarr;</a>`
+                : '<div class="editing-final-edit-empty">No final creative link on record.</div>'}
+            </div>
+          </div>
+        </section>
+        <section class="as-section as-card">
+          <div class="as-section-title">Final check</div>
+          <ul class="as-readiness-list" id="as-readiness-list"></ul>
+        </section>
+      </aside>
     </div>
   `;
   renderAdSetupReadiness();
