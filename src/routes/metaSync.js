@@ -51,6 +51,11 @@ router.get('/status', requireAdmin, async (req, res, next) => {
   }
 });
 
+// Read-only: what the deployed process sees for the automatic sync (switch value, credential presence, scheduler state, recent automatic runs).
+router.get('/auto-status', requireAdmin, async (req, res, next) => {
+  try { res.json(await require('../lib/metaAutoSync').status()); } catch (err) { next(err); }
+});
+
 // Routine (lightweight) performance sync: account settings + daily ad-level
 // Insights for an explicit range, or the safe default (Sydney today back 2
 // days) when no range is given, plus a metadata lookup for ONLY those ads in

@@ -130,7 +130,22 @@
     } else {
       inner = placeholderHtml(m);
     }
-    return `<span class="ux-media ux-media-${size} ux-media-${m.kind}" data-media-kind="${m.kind}" data-media-format="${m.format}" data-media-platform="${esc(m.platform)}" role="img" aria-label="${label}">${inner}</span>`;
+    return `<span class="ux-media ux-media-${size} ux-media-${m.kind}" data-media-kind="${m.kind}" data-media-format="${m.format}" data-media-platform="${esc(m.platform)}"${o.fallbackImage ? ` data-fallback-image="${esc(o.fallbackImage)}"` : ''} role="img" aria-label="${label}">${inner}</span>`;
+  }
+
+  // Creative preview with an honest fallback. Priority: the actual creative (video still, static image, YouTube thumbnail) ->
+  // the linked product image (clearly tagged "Product image", never presented as the finished video) -> a neutral placeholder.
+  // A creative thumbnail that fails to load (for example a private Drive file) falls back the same way.
+  function creativeThumbHtml(link, format, productImage, opts) {
+    const o = opts || {};
+    const m = classifyMedia(link, format);
+    if ((m.kind === 'none' || m.kind === 'link') && productImage) return productFallbackHtml(productImage, o);
+    return mediaThumbHtml(link, format, { ...o, fallbackImage: productImage || '' });
+  }
+
+  function productFallbackHtml(url, o) {
+    const size = o && (o.size === 'sm' || o.size === 'lg') ? o.size : 'md';
+    return `<span class="ux-media ux-media-${size} ux-media-product ux-media-fallback" data-media-kind="product-fallback" role="img" aria-label="Product image (no creative preview available)"><img src="${esc(url)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.remove()"><span class="ux-media-tag">Product image</span></span>`;
   }
 
   // A thumbnail that fails to load becomes the same neutral placeholder.
@@ -138,6 +153,13 @@
     const box = el && el.closest ? el.closest('.ux-media') : null;
     if (!box) return;
     const fmt = box.getAttribute('data-media-format') || 'video';
+    const fb = box.getAttribute('data-fallback-image');
+    if (fb) {
+      box.setAttribute('data-media-kind', 'product-fallback');
+      box.classList.add('ux-media-product', 'ux-media-fallback');
+      box.innerHTML = `<img src="${esc(fb)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.remove()"><span class="ux-media-tag">Product image</span>`;
+      return;
+    }
     box.setAttribute('data-media-kind', 'link');
     box.classList.add('ux-media-link');
     box.innerHTML = placeholderHtml({ kind: 'link', platform: box.getAttribute('data-media-platform') || '', format: fmt, isVideo: fmt === 'video' });
@@ -177,5 +199,5 @@
     return `<div class="ux-progress${tone ? ` ux-progress-${tone}` : ''}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${p}"><div class="ux-progress-fill" style="width:${p}%"></div></div>`;
   }
 
-  return { classifyMedia, mediaThumbHtml, productThumbHtml, mediaFailed, placeholderHtml, pageHeaderHtml, statTilesHtml, badgeHtml, emptyStateHtml, progressBarHtml, esc };
+  return { classifyMedia, mediaThumbHtml, creativeThumbHtml, productFallbackHtml, productThumbHtml, mediaFailed, placeholderHtml, pageHeaderHtml, statTilesHtml, badgeHtml, emptyStateHtml, progressBarHtml, esc };
 }));

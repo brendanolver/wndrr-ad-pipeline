@@ -239,8 +239,8 @@ function selectExamples(all, { adCategory, stageType, productName, productCatego
 
 // ── database: sync + reads ─────────────────────────────────────────────────────────────────────────────────────────
 // Never throws for an expected failure: the sync row records it and the previous successful sync stays the active library.
-async function syncLibrary({ db, sheets, userId = null }) {
-  const started = await db.query("INSERT INTO copy_reference_syncs (status, triggered_by_user_id) VALUES ('running', $1) RETURNING id", [userId]);
+async function syncLibrary({ db, sheets, userId = null, source = 'sheets' }) {
+  const started = await db.query("INSERT INTO copy_reference_syncs (status, triggered_by_user_id, source) VALUES ('running', $1, $2) RETURNING id", [userId, source]);
   const syncId = started.rows[0].id;
   const fail = async (err) => {
     await db.query("UPDATE copy_reference_syncs SET status = 'failed', finished_at = now(), error = $2 WHERE id = $1", [syncId, String(err.message || err).slice(0, 500)]);
@@ -292,10 +292,10 @@ async function status(db, sheets, aiConfigured) {
   const g = last ? (await db.query('SELECT analysis, ai_summary, created_at FROM copy_tone_guidelines WHERE sync_id = $1 ORDER BY id DESC LIMIT 1', [last.id])).rows[0] : null;
   return {
     sheets: { configured: cfg.configured, reason: cfg.reason, sheet_id: sheets.sheetId(), service_account: cfg.configured ? cfg.credentials.client_email : null },
-    library: last ? { synced_at: last.finished_at, example_count: last.example_count, tabs: last.tabs } : null,
+    library: last ? { synced_at: last.finished_at, example_count: last.example_count, tabs: last.tabs, source: last.source || 'sheets' } : null,
     last_attempt: attempt && (!last || attempt.id !== last.id) ? { status: attempt.status, at: attempt.finished_at || attempt.started_at, error: attempt.error } : null,
     guidelines: g ? { generated_at: g.created_at, has_ai_summary: !!g.ai_summary } : null,
-    ai: { configured: !!aiConfigured },
+    ai: { configured: !!aiConfigured, reason: aiConfigured ? null : require('./copyAi').aiConfig().reason },
   };
 }
 

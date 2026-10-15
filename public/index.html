@@ -1653,6 +1653,20 @@
         </div>
 
         <div class="planning-section-header">
+          <h2>Upcoming Drops: default assignments <span id="drop-defaults-status"></span></h2>
+          <span class="admin-note">Who is filled in automatically as Assigned To (filming / production) and Editing when a NEW Required Concept is created on an Upcoming Drop product. Existing concepts and anything chosen by hand are never changed, and each person can still be changed per concept. Choosing the filming person queues the concept for Shooting, exactly as picking them by hand does. Leave both on "No default" to keep assigning manually.</span>
+        </div>
+        <div class="settings-field-row">
+          <label for="drop-default-assignee">Assigned To (filming / production)</label>
+          <select id="drop-default-assignee"></select>
+        </div>
+        <div class="settings-field-row">
+          <label for="drop-default-editor">Editing</label>
+          <select id="drop-default-editor"></select>
+          <button class="btn btn-primary btn-sm" id="drop-defaults-save-btn">Save</button>
+        </div>
+
+        <div class="planning-section-header">
           <h2>Content Creators</h2>
           <span class="admin-note">Who can be assigned as Content Creator in Shoot This Week -- the default pre-selects there. (Colourway size defaults now live in Default Shoot Sizes above, shared across every creator rather than set per creator.)</span>
         </div>
@@ -1804,7 +1818,7 @@
             <div><dt>Daily insight rows stored</dt><dd id="meta-sync-rows">&mdash;</dd></div>
             <div><dt>Unmatched ads</dt><dd id="meta-sync-unmatched">&mdash;</dd></div>
             <div><dt>Last inventory refresh</dt><dd id="meta-sync-inventory-last">&mdash;</dd></div>
-            <div><dt>Automatic sync</dt><dd id="meta-sync-auto">&mdash;</dd></div>
+            <div><dt>Automatic sync</dt><dd id="meta-sync-auto">&mdash;</dd><dd id="meta-sync-auto-detail" class="hint" style="margin-top:2px;"></dd></div>
           </dl>
           <div class="meta-sync-actions">
             <button type="button" class="btn btn-primary" id="meta-sync-run-btn">Run 3-Day Sync</button>
@@ -1997,7 +2011,7 @@
 <div id="meta-match-modal" class="modal-backdrop">
   <div class="modal mm-modal">
     <div class="modal-header">
-      <h3 id="mm-modal-title">Match ad</h3>
+      <div class="mm-head-text"><h3 id="mm-modal-title">Match ad</h3><p id="mm-modal-sub" class="mm-modal-sub"></p></div>
       <button class="modal-close" onclick="closeModal('meta-match-modal')">&times;</button>
     </div>
     <div class="modal-body mm-modal-body" id="mm-modal-body"></div>

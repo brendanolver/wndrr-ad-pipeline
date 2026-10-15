@@ -1,12 +1,14 @@
 const express = require('express');
 const { pool } = require('../db');
 
+const { CONCEPT_ASSIGNEES } = require('../lib/statuses');
+
 const router = express.Router();
 
 router.get('/', async (req, res, next) => {
   try {
     const result = await pool.query('SELECT * FROM planning_settings WHERE id = 1');
-    res.json(result.rows[0]);
+    res.json({ ...result.rows[0], assignee_roster: CONCEPT_ASSIGNEES });
   } catch (err) {
     next(err);
   }
@@ -64,6 +66,14 @@ router.put('/', async (req, res, next) => {
       updates[field] = v;
     }
 
+    // Upcoming Drops default assignments: a person from the existing assignee roster, or empty to clear.
+    for (const field of ['drop_default_assignee', 'drop_default_editor']) {
+      if (body[field] === undefined) continue;
+      const v = body[field] === null ? '' : String(body[field]).trim();
+      if (v && !CONCEPT_ASSIGNEES.includes(v)) return res.status(400).json({ error: `${field} must be one of: ${CONCEPT_ASSIGNEES.join(', ')}, or empty` });
+      updates[field] = v || null;
+    }
+
     const keys = Object.keys(updates);
     if (!keys.length) {
       return res.status(400).json({ error: 'No valid fields provided' });
@@ -78,7 +88,7 @@ router.put('/', async (req, res, next) => {
     );
     try { require('./weeklyVideoPlan').invalidate(); } catch (e) { /* cache only */ }
     try { require('../lib/planningOpportunitiesLoader').invalidate(); } catch (e) { /* cache only */ }
-    res.json(result.rows[0]);
+    res.json({ ...result.rows[0], assignee_roster: CONCEPT_ASSIGNEES });
   } catch (err) {
     next(err);
   }

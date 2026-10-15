@@ -15,6 +15,8 @@ const CLASSIFICATION_LABELS = { tested_proven: 'Tested/Proven', new_experimental
 // concept_assignee column comment in schema.sql for why this is separate
 // from strategy_owner/filming_owner/etc. and from content_creators.
 const CONCEPT_ASSIGNEES = ['Mark', 'Shez', 'Til'];
+// The live roster comes from the server (src/lib/statuses.js) with Planning settings; this constant is only the fallback before they load.
+function conceptAssignees() { return (state.planningSettings && state.planningSettings.assignee_roster) || CONCEPT_ASSIGNEES; }
 
 let state = {
   currentUser: null,
@@ -442,6 +444,7 @@ function switchSettingsPanel(name) {
   if (name === 'planning') loadPriorityOverrides();
   if (name === 'classification') loadClassificationPanel();
   if (name === 'copy-library') loadCopyLibraryPanel();
+  if (typeof uxCardifySettings === 'function') uxCardifySettings(name);
 }
 
 document.querySelectorAll('.settings-subnav-btn').forEach((btn) => {
@@ -453,6 +456,58 @@ document.querySelectorAll('.settings-subnav-btn').forEach((btn) => {
 // ── Settings -> Copy library (read-only Google Sheets reference for the AI Copy Assistant) ───────────────────────────
 function copyLibDate(v) {
   return v ? new Date(v).toLocaleString('en-AU', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—';
+}
+
+// Settings visual system (Batch 36): every Settings page gets the same shape as Meta Performance Settings: a page header (title + one line) and
+// compact cards. Done once per panel by regrouping the existing nodes (ids and listeners are kept, nothing is re-created or removed), so every
+// control, save button and list keeps working exactly as before.
+const SETTINGS_PAGE_HEADERS = {
+  'shoot-prep': ['Shoot Prep', 'Defaults used when preparing the weekly shoot and assigning Upcoming Drops concepts.'],
+  'meta-mapping': ['Meta Mapping', 'Map each Meta product name combination once to a stable internal product family.'],
+  classification: ['Creative Classification', 'Concepts, Creators and Creative Styles offered in Ad Matching. Renaming or merging always shows its impact first.'],
+  planning: ['Planning', 'Thresholds and rules behind the weekly creative recommendations.'],
+  'creative-playbook': ['Creative Playbook', 'Proven winners, research resources and customer avatars used across planning and concept development.'],
+};
+function uxGroupIntoCards(container) {
+  const kids = Array.from(container.children);
+  let card = null; let body = null;
+  for (const el of kids) {
+    if (el.classList.contains('planning-section-header')) {
+      card = document.createElement('section'); card.className = 'st-card';
+      body = document.createElement('div'); body.className = 'st-card-body';
+      container.insertBefore(card, el);
+      card.appendChild(el); card.appendChild(body);
+    } else if (card) body.appendChild(el);
+  }
+}
+function uxCardifySettings(name) {
+  const panel = document.getElementById(`settings-panel-${name}`);
+  if (!panel || panel.dataset.stDone === '1' || !SETTINGS_PAGE_HEADERS[name]) return;
+  panel.dataset.stDone = '1';
+  panel.classList.add('st-panel');
+  const [title, desc] = SETTINGS_PAGE_HEADERS[name];
+  const head = document.createElement('div');
+  head.className = 'st-page-header';
+  head.innerHTML = `<h2>${escapeHtml(title)}</h2><p>${escapeHtml(desc)}</p>`;
+  panel.insertBefore(head, panel.firstChild);
+  if (name === 'meta-mapping' || name === 'classification') {
+    // one header already names the page: fold its text into the page header and keep everything else in a single card
+    const first = panel.querySelector(':scope > .planning-section-header');
+    const note = first && first.querySelector('.admin-note');
+    if (note) head.querySelector('p').textContent = note.textContent;
+    if (first) first.remove();
+    const card = document.createElement('section'); card.className = 'st-card st-card-flush';
+    const body = document.createElement('div'); body.className = 'st-card-body';
+    card.appendChild(body);
+    Array.from(panel.children).filter((c) => c !== head).forEach((c) => body.appendChild(c));
+    panel.appendChild(card);
+    return;
+  }
+  if (name === 'planning') {
+    panel.querySelectorAll('.pl-set-group').forEach(uxGroupIntoCards);
+    return;
+  }
+  uxGroupIntoCards(panel);
 }
 
 async function loadCopyLibraryPanel() {
@@ -471,10 +526,17 @@ async function loadCopyLibraryPanel() {
         ${st.sheets.configured ? `<div class="cl-note">Reading spreadsheet <code>${escapeHtml(st.sheets.sheet_id)}</code> as <code>${escapeHtml(st.sheets.service_account)}</code> (read-only). The sheet must be shared with that address as a Viewer.</div>`
           : `<div class="cl-note">${escapeHtml(st.sheets.reason || '')}<br>Set <code>GOOGLE_SERVICE_ACCOUNT_JSON</code> (the service-account key) and, if different from the default, <code>WNDRR_COPY_SHEET_ID</code>.</div>`}
         <div class="cl-row"><span class="cl-k">AI provider</span>${st.ai.configured ? UX.badgeHtml('Configured', 'green') : UX.badgeHtml('Not configured', 'amber')}</div>
-        ${st.ai.configured ? '' : '<div class="cl-note">Set <code>ANTHROPIC_API_KEY</code> to enable Generate Copy. Without it the assistant stays switched off.</div>'}
-        <div class="cl-row"><span class="cl-k">Last successful update</span><span>${st.library ? `${copyLibDate(st.library.synced_at)} &middot; ${st.library.example_count} examples` : 'Never. The library has not been read yet.'}</span></div>
+        ${st.ai.configured ? '' : `<div class="cl-note">${escapeHtml(st.ai.reason || '')} Set <code>ANTHROPIC_API_KEY</code> to enable Generate Copy.</div>`}
+        <div class="cl-row"><span class="cl-k">Last successful update</span><span>${st.library ? `${copyLibDate(st.library.synced_at)} &middot; ${st.library.example_count} examples &middot; ${st.library.source === 'import' ? 'imported from CSV files' : 'read from Google Sheets'}` : 'Never. The library has not been loaded yet.'}</span></div>
         ${st.last_attempt && st.last_attempt.status === 'failed' ? `<div class="cl-warn">The latest refresh failed (${copyLibDate(st.last_attempt.at)}): ${escapeHtml(st.last_attempt.error || 'unknown error')}. The previous library is still in use.</div>` : ''}
         <div class="cl-actions"><button type="button" class="btn btn-primary btn-sm" id="copy-library-refresh-btn" ${st.sheets.configured ? '' : 'disabled'}>Refresh library</button></div>
+      </div>
+      <div class="ux-card cl-card" id="copy-library-import">
+        <div class="ux-section-title">Import from CSV files</div>
+        <div class="cl-note">No Google connection needed. In the WNDRR - AD COPY sheet open each tab you want, choose <b>File &rarr; Download &rarr; Comma-separated values (.csv)</b>, then select the files here and check which tab each one is. Importing replaces the library with exactly the files chosen, so include every tab you want used. The spreadsheet itself is never touched.</div>
+        <input type="file" id="copy-import-files" accept=".csv,.tsv,.txt,text/csv" multiple>
+        <div id="copy-import-list" class="cl-import-list"></div>
+        <div class="cl-actions"><button type="button" class="btn btn-primary btn-sm" id="copy-import-btn" disabled>Import files</button></div>
       </div>
       ${tabs.length ? `<div class="ux-card cl-card"><div class="ux-section-title">Tabs read</div>
         <table class="cl-table"><thead><tr><th>Tab</th><th>Type</th><th>Examples</th><th>Copy column</th><th>Notes</th></tr></thead><tbody>
@@ -493,9 +555,51 @@ async function loadCopyLibraryPanel() {
       </div>` : ''}`;
     const btn = document.getElementById('copy-library-refresh-btn');
     if (btn) btn.addEventListener('click', refreshCopyLibrary);
+    const fileInput = document.getElementById('copy-import-files');
+    if (fileInput) fileInput.addEventListener('change', prepareCopyImport);
+    const impBtn = document.getElementById('copy-import-btn');
+    if (impBtn) impBtn.addEventListener('click', runCopyImport);
   } catch (e) {
     host.innerHTML = `<div class="cl-warn">${escapeHtml(e.message)}</div>`;
   }
+}
+
+// CSV import: pick files, match each to a tab by file name (longest tab name contained in it), let the person correct it, then upload the text.
+let copyImportFiles = [];
+const COPY_TABS = ['CORE', 'CORE 26', 'SALES', '2026 SALES', 'BUNDLES', 'BUNDLES 26', 'USA - BUNDLES 26', '2024 RANGES', '2025 RANGES', '2026 RANGES', 'PINTEREST'];
+function guessCopyTab(name) {
+  const n = String(name).toLowerCase().replace(/\.(csv|tsv|txt)$/i, '').replace(/[_]+/g, ' ');
+  const hits = COPY_TABS.filter((t) => n.includes(t.toLowerCase())).sort((a, b) => b.length - a.length);
+  return hits[0] || '';
+}
+async function prepareCopyImport() {
+  const input = document.getElementById('copy-import-files');
+  copyImportFiles = [];
+  for (const f of Array.from(input.files || [])) {
+    if (f.size > 3 * 1024 * 1024) { toast(`${f.name} is too large (3 MB max)`, true); continue; }
+    copyImportFiles.push({ name: f.name, tab: guessCopyTab(f.name), text: await f.text() });
+  }
+  const list = document.getElementById('copy-import-list');
+  list.innerHTML = copyImportFiles.map((f, i) => `
+    <div class="cl-import-row"><span class="cl-import-name">${escapeHtml(f.name)}</span>
+      <select data-copy-import="${i}"><option value="">Choose tab&hellip;</option>${COPY_TABS.map((t) => `<option value="${escapeHtml(t)}" ${t === f.tab ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('')}</select></div>`).join('');
+  list.querySelectorAll('select').forEach((s) => s.addEventListener('change', () => { copyImportFiles[Number(s.dataset.copyImport)].tab = s.value; updateCopyImportButton(); }));
+  updateCopyImportButton();
+}
+function updateCopyImportButton() {
+  const btn = document.getElementById('copy-import-btn');
+  const tabs = copyImportFiles.map((f) => f.tab);
+  if (btn) btn.disabled = !copyImportFiles.length || tabs.some((t) => !t) || new Set(tabs).size !== tabs.length;
+}
+async function runCopyImport() {
+  const btn = document.getElementById('copy-import-btn');
+  btn.disabled = true; btn.textContent = 'Importing\u2026';
+  try {
+    const out = await api('/copy-library/import', { method: 'POST', body: JSON.stringify({ files: copyImportFiles.map((f) => ({ tab: f.tab, text: f.text })) }) });
+    toast(`Imported ${out.examples} examples`);
+  } catch (e) { toast(e.message, true); }
+  btn.textContent = 'Import files';
+  loadCopyLibraryPanel();
 }
 
 async function refreshCopyLibrary() {
@@ -2797,13 +2901,13 @@ function mmSessBarHtml() {
   const c = mmSessCounts(s);
   const idx = s.current ? s.queue.findIndex((x) => x.key === s.currentKey) : -1;
   const pct = c.total ? Math.round((c.resolved / c.total) * 100) : 100;
-  const head = s.finished ? 'Review complete' : `Creative ${idx >= 0 ? idx + 1 : '?'} of ${c.total}`;
-  const parts = [`<b>${head}</b>`, `<b class="mm-sess-left">${c.left}</b> left in this session`, `${c.confirmed} confirmed`];
+  const head = s.finished ? 'Review complete' : `${idx >= 0 ? idx + 1 : '?'} of ${c.total}`;
+  const parts = [`<b class="mm-sess-left">${c.left}</b> left in this session`, `${c.confirmed} confirmed`];
   if (c.copied) parts.push(`${c.copied} copied`);
   parts.push(`${c.skipped} skipped`);
   if (c.already) parts.push(`${c.already} already done`);
   const wl = mmRv.left !== null && mmRv.left !== undefined ? ` <span class="mm-sess-wl" title="Creatives still needing review across the whole database, not just this session">· whole workload: ${Number(mmRv.left).toLocaleString('en-AU')}</span>` : '';
-  return `<div class="mm-sess-bar" id="mm-sess-bar"><span class="mm-sess-count">${parts.join(' · ')}${wl}</span><span class="mm-rv-prog" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><i style="width:${pct}%"></i></span></div>`;
+  return `<div class="mm-sess-bar" id="mm-sess-bar"><span class="mm-sess-pos">${head}</span><span class="mm-rv-prog" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><i style="width:${pct}%"></i></span><span class="mm-sess-count">${parts.join(' &bull; ')}${wl}</span></div>`;
 }
 const mmFormSig = (f) => ({ p: f.products.map((x) => x.key).sort(), n: !!f.nps, c: f.concept ? (f.concept.concept_type_id || f.concept.label) : null, cr: f.creator || null, m: f.media ? f.media.key : null, s: f.style ? f.style.key : null, a: f.adSetupId || null });
 
@@ -3075,6 +3179,7 @@ function mmSessOfferShow(sourceId, offer) {
     offer.conflict_count ? `${offer.conflict_count} already classified differently — <b>not changed</b>, review separately` : '',
   ].filter(Boolean).join(' · ');
   document.getElementById('mm-modal-title').textContent = 'Review creative';
+  { const sub = document.getElementById('mm-modal-sub'); if (sub) sub.textContent = 'Confirm this Meta ad is correctly matched and classified.'; }
   document.getElementById('mm-modal-body').innerHTML = `${mmSessBarHtml()}
     <div class="mm-copy-offer" id="mm-copy-offer" role="alertdialog" aria-labelledby="mm-copy-title">
       <div class="mm-copy-title" id="mm-copy-title"><b>${n} matching cop${n === 1 ? 'y' : 'ies'} found.</b> Apply this classification to ${n === 1 ? 'it' : `all ${n}`}?</div>
@@ -3894,6 +3999,8 @@ async function openMatchWorkspace(adId, opts = {}) {
   const title = document.getElementById('mm-modal-title');
   const body = document.getElementById('mm-modal-body');
   title.textContent = review ? 'Review creative' : 'Match Meta ad';
+  const sub = document.getElementById('mm-modal-sub');
+  if (sub) sub.textContent = review ? 'Confirm this Meta ad is correctly matched and classified.' : 'Choose the product, concept and media type this Meta ad belongs to.';
   body.innerHTML = `${review && mmRv.sess ? mmSessBarHtml() : ''}<div class="mp-table-empty">Loading…</div>`;
   openModal('meta-match-modal');
   try {
@@ -3910,6 +4017,27 @@ async function openMatchWorkspace(adId, opts = {}) {
       document.getElementById('mm-sess-skip').addEventListener('click', () => { const s = mmRv.sess; if (s) { s.ctx = { adId, key: mmSessKey(s, adId), saved: false, errEl: { textContent: '' } }; mmSessSkip(); } });
     } else body.innerHTML = `<div class="mp-table-empty">${escapeHtml(e.message)}</div>`;
   }
+}
+
+// Open in Meta (Meta's own preview link, fetched on click and cached), copy the Ad ID, and the "Check naming" popover.
+function mmWireWorkspaceChrome(body, ad) {
+  const open = body.querySelector('#mm-open-meta');
+  if (open) open.addEventListener('click', async () => {
+    open.disabled = true;
+    try {
+      const r = await api(`/ad-creative/${encodeURIComponent(ad.meta_ad_id)}`);
+      const c = (r && r.creative) || {};
+      const link = c.share_link || c.preview_iframe_src;
+      if (link && /^https:\/\//.test(link)) window.open(link, '_blank', 'noopener,noreferrer');
+      else toast('Meta did not provide a preview link for this ad.', true);
+    } catch (e) { toast(e.message, true); }
+    open.disabled = false;
+  });
+  const copy = body.querySelector('[data-copy-id]');
+  if (copy) copy.addEventListener('click', () => navigator.clipboard.writeText(copy.dataset.copyId).then(() => toast('Ad ID copied')).catch(() => toast('Could not copy', true)));
+  const warn = body.querySelector('#mm-warn-btn');
+  const pop = body.querySelector('#mm-warn-pop');
+  if (warn && pop) warn.addEventListener('click', (e) => { e.stopPropagation(); const show = pop.hidden; pop.hidden = !show; warn.setAttribute('aria-expanded', String(show)); });
 }
 
 function renderMatchWorkspace(ws, options, sess = null, rv = {}) {
@@ -3964,62 +4092,85 @@ function renderMatchWorkspace(ws, options, sess = null, rv = {}) {
     ? `<div class="mm-muted-line mm-conflict-line">This creative is used in ${cr.other_ads + 1} ads and people classified some of them differently (${escapeHtml((cr.conflict_on || []).join(' / '))}). Nothing is inherited until that is settled. <button type="button" class="link-btn" data-conflict-creative="${escapeHtml(cr.meta_creative_id || '')}">Compare &amp; resolve</button></div>`
     : cr.other_ads > 0 ? `<div class="mm-muted-line">This exact creative is used in ${cr.other_ads} other ad${cr.other_ads === 1 ? '' : 's'}${cr.state === 'source' && !cls.confirmed ? ' — a person has already classified it.' : '. Confirming this one covers the others that nobody has classified.'}</div>` : '';
 
+  // Evidence labels reflect what the matching actually found; a suggestion is never labelled as confirmed unless a person (or a previously confirmed ad) confirmed it.
+  const af = cls.auto_fields || {};
+  const BASIS_LABEL = { creative_inherited: 'Previously confirmed', confirmed_pair: 'Previously confirmed', meta_mapping: 'Meta mapping', catalogue_exact: 'Exact product match', existing_concept: 'Exact match', catalogue_similar: 'Best match', legacy_text: 'Parsed from ad name', media_token: 'Parsed from ad name', ad_type: 'Parsed from ad name', roster: 'Creator list' };
+  const evidenceHtml = (k) => {
+    const label = cls.confirmed ? 'Manually selected' : (af[k] && BASIS_LABEL[af[k].basis]) || null;
+    return label ? `<span class="mm-ev ${label === 'Previously confirmed' || label === 'Manually selected' || label === 'Exact product match' || label === 'Exact match' ? 'strong' : ''}">${escapeHtml(label)}</span>` : '';
+  };
+  const warnLines = [parsedNote, ...(!cls.confirmed ? reasons.slice(0, 3) : [])].filter(Boolean);
+  const warnHtml = warnLines.length || (!ws.parsed.structured && !ws.parsed.legacy)
+    ? `<span class="mm-warn-wrap"><button type="button" class="mm-warn" id="mm-warn-btn" aria-expanded="false" title="Click for details"><i></i>Check naming <span aria-hidden="true">&#9432;</span></button><div class="mm-warn-pop" id="mm-warn-pop" hidden>${warnLines.length ? `<ul>${warnLines.map((l) => `<li>${escapeHtml(l)}</li>`).join('')}</ul>` : 'This ad name does not follow the standard WNDRR naming pattern. Check the classification against the creative.'}<div class="mm-warn-foot">A non-standard name never stops you confirming valid classifications.</div></div></span>`
+    : '';
+  const extrasSet = [cls.creator_name, cls.creative_style_id, cls.ad_setup].filter(Boolean).length;
   body.innerHTML = `
     ${sess ? mmSessBarHtml() : ''}
     <div class="mm-grid">
       <section class="mm-evidence">
+        <div class="mm-ev-top">${mpStatusChip(ad.effective_status)}<span class="mm-created">Created ${created}</span><button type="button" class="btn btn-ghost btn-sm mm-open-meta" id="mm-open-meta" title="Opens Meta's own preview of this ad (read-only)">Open in Meta &#8599;</button></div>
         <div class="mm-ws-thumb">${ccThumbHtml(ad.meta_ad_id, { large: true })}</div>
         <div class="mm-adname" title="${escapeHtml(ad.ad_name || '')}">${escapeHtml(ad.ad_name || '(unnamed ad)')}</div>
         <div class="mm-metaline">
-          <span class="mm-idtag" title="Meta Ad ID">${escapeHtml(ad.meta_ad_id)}</span>
-          ${mpStatusChip(ad.effective_status)}
-          <span>Created ${created}</span>
+          <span>Ad ID: <span class="mm-idtag" title="Meta Ad ID">${escapeHtml(ad.meta_ad_id)}</span> <button type="button" class="mm-copy-id" data-copy-id="${escapeHtml(ad.meta_ad_id)}" title="Copy Meta Ad ID" aria-label="Copy Meta Ad ID"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#i-clipboard"></use></svg></button></span>
+          ${ws.parsed.structured && ws.parsed.structured.batch ? `<span>Batch: <b>${escapeHtml(ws.parsed.structured.batch)}</b></span>` : ''}
         </div>
         <div class="mm-perf">
-          <div><b>${mpFmt(m.spend, 'money')}</b><span>30d spend</span></div>
-          <div><b>${mpFmt(m.purchases, 'int')}</b><span>purchases</span></div>
+          <div><b>${mpFmt(m.spend, 'money')}</b><span>30D spend</span></div>
+          <div><b>${mpFmt(m.purchases, 'int')}</b><span>Purchases</span></div>
           <div><b>${mpFmt(m.cpa, 'money')}</b><span>CPA</span></div>
-          <div><b>${mpFmt(m.add_to_cart, 'int')}</b><span>adds to cart</span></div>
+          <div><b>${mpFmt(m.add_to_cart, 'int')}</b><span>Adds to cart</span></div>
         </div>
         <div class="mm-muted-line">Lifetime ${mpFmt(perf.lifetime_spend, 'money')}${perf.first_active ? ` · ${escapeHtml(mpDate(perf.first_active, true))} – ${escapeHtml(mpDate(perf.last_active, true))}` : ''}</div>
         ${creativeNote}
-        <div class="mm-label">Parsed from the name</div>
-        <div class="mm-pcs">${chips.join('') || ''}</div>
-        ${parsedNote ? `<div class="mm-muted-line">${parsedNote}</div>` : ''}
+        <details class="mm-orig">
+          <summary>View original Meta ad name</summary>
+          <div class="mm-orig-name">${escapeHtml(ad.ad_name || '(unnamed ad)')}</div>
+          ${chips.length ? `<div class="mm-label">Parsed from the name</div><div class="mm-pcs">${chips.join('')}</div>` : ''}
+          ${parsedNote ? `<div class="mm-muted-line">${escapeHtml(parsedNote)}</div>` : ''}
+        </details>
       </section>
 
       <section class="mm-mapping" id="mm-mapping">
-        <div class="mm-mapping-head">${stateNote}
-          ${hasValues || sess ? '' : '<button type="button" class="btn btn-ghost btn-sm" id="mm-fill">Fill from suggestions</button>'}</div>
         ${sess ? '<div class="mm-sess-note" id="mm-sess-note"></div>' : ''}
+        <div class="mm-mapping-head"><span class="mm-req-title">Required classification</span><span class="mm-head-right">${warnHtml}${hasValues || sess ? '' : '<button type="button" class="btn btn-ghost btn-sm" id="mm-fill">Fill from suggestions</button>'}</span></div>
+        ${stateNote ? `<div class="mm-state-line">${stateNote}</div>` : ''}
 
-        <div class="mm-field mm-full"><div class="mm-lab"><span>WNDRR Ad Setup</span><small>optional — only if this ad came from the pipeline</small></div>
-          <div class="mm-inline"><div id="mm-f-adsetup" class="mm-grow"></div><span id="mm-adsetup-prefill"></span></div>
-          ${(sg.ad_setup || []).slice(0, 1).map((x) => `<div class="mm-sugg"><button type="button" class="mm-sugg-chip ${MM_LABEL_CLASS[x.confidence_label]}" data-field="ad_setup" data-i="0" title="${escapeHtml(x.reason)}">+ Link Ad Setup #${x.value_ref}<span>${x.confidence_label}</span></button><div class="mm-reason" title="${escapeHtml(x.reason)}">${escapeHtml(x.reason)}</div></div>`).join('')}
-        </div>
-
-        <div class="mm-fields">
-          <div class="mm-field"><div class="mm-lab"><span>Product(s)</span><label class="mm-check"><input type="checkbox" id="mm-nps"> Not product-specific</label></div>
-            <div id="mm-f-products"></div>
+        <div class="mm-req">
+          <div class="mm-field mm-req-row"><div class="mm-lab"><span class="mm-lab-main"><b>Product(s)</b><small>Which product is this ad for?</small></span><label class="mm-check"><input type="checkbox" id="mm-nps"> Not product-specific</label></div>
+            <div class="mm-req-ctl"><div id="mm-f-products"></div>${evidenceHtml('product')}
             ${mmSuggChips(sg.product, 'product', 3)}
-            ${(sg.scope || []).length ? `<div class="mm-sugg"><button type="button" class="mm-sugg-chip ${MM_LABEL_CLASS[sg.scope[0].confidence_label]}" data-field="scope" data-i="0" title="${escapeHtml(sg.scope[0].reason)}">+ Not product-specific<span>${sg.scope[0].confidence_label}</span></button></div>` : ''}</div>
-          <div class="mm-field"><div class="mm-lab"><span>Media Type</span></div>
-            <div id="mm-f-media"></div>${mmSuggChips(sg.media_type, 'media_type')}</div>
-          <div class="mm-field"><div class="mm-lab"><span>Concept</span><small>approved list — or add one</small></div>
-            <div id="mm-f-concept"></div>${mmSuggChips(sg.concept, 'concept')}</div>
-          <div class="mm-field"><div class="mm-lab"><span>Creator</span></div>
-            <div id="mm-f-creator"></div>${mmSuggChips(sg.creator, 'creator')}</div>
-          <div class="mm-field"><div class="mm-lab"><span>Creative Style</span><small>separate from Concept</small></div>
-            <div id="mm-f-style"></div>${mmSuggChips(sg.creative_style, 'creative_style')}</div>
-          <div class="mm-field mm-reviewbox">${!cls.confirmed && reasons.length ? `<div class="mm-lab"><span>Check before confirming</span></div><ul>${reasons.slice(0, 3).map((r) => `<li>${escapeHtml(r)}</li>`).join('')}</ul>` : ''}</div>
+            ${(sg.scope || []).length ? `<div class="mm-sugg"><button type="button" class="mm-sugg-chip ${MM_LABEL_CLASS[sg.scope[0].confidence_label]}" data-field="scope" data-i="0" title="${escapeHtml(sg.scope[0].reason)}">+ Not product-specific<span>${sg.scope[0].confidence_label}</span></button></div>` : ''}</div></div>
+          <div class="mm-field mm-req-row"><div class="mm-lab"><span class="mm-lab-main"><b>Concept</b><small>What is the main concept / style?</small></span></div>
+            <div class="mm-req-ctl"><div id="mm-f-concept"></div>${evidenceHtml('concept')}${mmSuggChips(sg.concept, 'concept')}</div></div>
+          <div class="mm-field mm-req-row"><div class="mm-lab"><span class="mm-lab-main"><b>Media Type</b><small>What type of creative is this?</small></span></div>
+            <div class="mm-req-ctl"><div id="mm-f-media"></div>${evidenceHtml('media_type')}${mmSuggChips(sg.media_type, 'media_type')}</div></div>
         </div>
+
+        <details class="mm-more" id="mm-more" ${extrasSet ? 'open' : ''}>
+          <summary>Additional details <span class="mm-opt">(optional)</span><span class="mm-more-count" id="mm-more-count">${extrasSet ? `${extrasSet} set` : ''}</span></summary>
+          <div class="mm-more-grid">
+            <div class="mm-field"><div class="mm-lab"><span>Creator</span></div>
+              <div id="mm-f-creator"></div>${mmSuggChips(sg.creator, 'creator')}</div>
+            <div class="mm-field"><div class="mm-lab"><span>Creative Style</span><small>separate from Concept</small></div>
+              <div id="mm-f-style"></div>${mmSuggChips(sg.creative_style, 'creative_style')}</div>
+            <div class="mm-field mm-full"><div class="mm-lab"><span>WNDRR Ad Setup</span><small>only if this ad came from the pipeline</small></div>
+              <div class="mm-inline"><div id="mm-f-adsetup" class="mm-grow"></div><span id="mm-adsetup-prefill"></span></div>
+              ${(sg.ad_setup || []).slice(0, 1).map((x) => `<div class="mm-sugg"><button type="button" class="mm-sugg-chip ${MM_LABEL_CLASS[x.confidence_label]}" data-field="ad_setup" data-i="0" title="${escapeHtml(x.reason)}">+ Link Ad Setup #${x.value_ref}<span>${x.confidence_label}</span></button><div class="mm-reason" title="${escapeHtml(x.reason)}">${escapeHtml(x.reason)}</div></div>`).join('')}
+            </div>
+          </div>
+        </details>
         <div class="mm-error" id="mm-error"></div>
       </section>
     </div>
     ${sess ? `<div class="mm-actions mm-sess-actions">
-      <div class="mm-actions-left"><button type="button" class="btn btn-ghost" id="mm-sess-close-btn">Close Review</button><button type="button" class="btn btn-ghost" id="mm-sess-prev" title="Go back to the previous creative (Alt + ←). Nothing is saved by going back."${sess.tpos > 0 ? '' : ' disabled'}>← Previous</button><button type="button" class="btn btn-ghost" id="mm-sess-skip">${(cls.confirmed || cls.auto_matched) ? 'Next →' : 'Skip &amp; Next'}</button></div>
-      <span class="mm-sess-hint">${(cls.confirmed || cls.auto_matched) ? 'Press <kbd>Enter</kbd> to save a correction · <kbd>Alt</kbd>+<kbd>←</kbd> previous' : 'Press <kbd>Enter</kbd> to confirm · <kbd>Alt</kbd>+<kbd>←</kbd> previous'}</span>
-      <button type="button" class="btn btn-primary" id="mm-sess-confirm">${(cls.confirmed || cls.auto_matched) ? 'Save correction &amp; Next' : 'Confirm &amp; Next'}</button>
+      <div class="mm-actions-left"><button type="button" class="btn btn-ghost" id="mm-sess-close-btn">Close Review</button></div>
+      <div class="mm-actions-right">
+        <button type="button" class="btn btn-ghost mm-prev" id="mm-sess-prev" title="Go back to the previous creative (Alt + ←). Nothing is saved by going back."${sess.tpos > 0 ? '' : ' disabled'}>← Previous</button>
+        <button type="button" class="btn btn-ghost" id="mm-sess-skip">${(cls.confirmed || cls.auto_matched) ? 'Next →' : 'Skip &amp; Next'}</button>
+        <button type="button" class="btn btn-primary" id="mm-sess-confirm">${(cls.confirmed || cls.auto_matched) ? 'Save correction &amp; Next' : 'Confirm &amp; Next'}</button>
+      </div>
+      <div class="mm-sess-hint">${(cls.confirmed || cls.auto_matched) ? 'Press <kbd>Enter</kbd> to save a correction · <kbd>Alt</kbd>+<kbd>←</kbd> previous' : 'Press <kbd>Enter</kbd> to confirm · <kbd>Alt</kbd>+<kbd>←</kbd> previous'}</div>
     </div>` : `<div class="mm-actions">
       <div class="mm-actions-left">
         ${cls.excluded
@@ -4029,6 +4180,7 @@ function renderMatchWorkspace(ws, options, sess = null, rv = {}) {
       </div>
       <button type="button" class="btn btn-primary" id="mm-confirm">${cls.auto_matched ? 'Confirm' : 'Confirm Mapping'}</button>
     </div>`}`;
+  mmWireWorkspaceChrome(body, ad);
 
   ccHydrateThumbs(body);
   // ---- pickers ----
@@ -4205,6 +4357,13 @@ function renderMatchWorkspace(ws, options, sess = null, rv = {}) {
     filled.forEach((name) => {
       const f = document.getElementById(fieldHost[name]).closest('.mm-field');
       f.classList.add('mm-autofilled'); if (fromCopy) f.classList.add('mm-fromcopy');
+      // what the suggestion rests on: a previously confirmed ad, or the matcher's own confidence for that field (never "confirmed" for a guess)
+      const SG = { Product: 'product', Concept: 'concept', Media: 'media_type', Creator: 'creator', 'Creative style': 'creative_style' }[name];
+      const top = SG && (sg[SG] || [])[0];
+      const evText = fromCopy ? 'Previously confirmed' : (top ? ({ Exact: 'Exact match', Likely: 'Likely match', Weak: 'Weak suggestion' }[top.confidence_label] || null) : null);
+      const ctl = f.querySelector('.mm-req-ctl') || f;
+      if (evText && !ctl.querySelector('.mm-ev')) ctl.insertAdjacentHTML('beforeend', `<span class="mm-ev ${fromCopy || evText === 'Exact match' ? 'strong' : ''}">${evText}</span>`);
+      if (name === 'Creator' || name === 'Creative style') { const more = document.getElementById('mm-more'); if (more) more.open = true; }
       const clear = () => { f.classList.remove('mm-autofilled', 'mm-fromcopy'); f.removeEventListener('pointerdown', clear); f.removeEventListener('keydown', clear); };
       f.addEventListener('pointerdown', clear); f.addEventListener('keydown', clear); // touching a suggested field means a person is checking it
     });
@@ -4218,12 +4377,19 @@ function renderMatchWorkspace(ws, options, sess = null, rv = {}) {
     document.getElementById('mm-sess-note').innerHTML = hasValues
       ? `<b>${cls.confirmed ? 'Saved classification' : 'Classified automatically'}</b> — shown below. Change anything and press <kbd>Enter</kbd> to save a correction, or <b>Next</b> to leave it as it is. Nothing changes unless you save.${relNote}`
       : fromCopy
-      ? `<span class="mm-copy-badge" title="A person already confirmed an ad with the same name apart from a “- Copy” suffix">from a previously confirmed ad</span> <b>Pre-filled</b> (${filled.join(', ')}) from “${fromName}”${pf.matches > 1 ? ` and ${pf.matches - 1} other confirmed cop${pf.matches === 2 ? 'y' : 'ies'}` : ''}. It is a different creative id, so check it against this creative, then press <kbd>Enter</kbd> (or Confirm &amp; Next). Nothing is saved until you confirm.`
+      ? `<div class="mm-prev"><span class="mm-prev-ic" aria-hidden="true">&#10003;</span><div class="mm-prev-text"><b>Previously matched ad found</b><span>These values have been suggested from a previously confirmed ad. Please review before confirming.</span><div class="mm-prev-detail" id="mm-prev-detail" hidden>Pre-filled (${filled.join(', ')}) from &ldquo;${fromName}&rdquo;${pf.matches > 1 ? ` and ${pf.matches - 1} other confirmed cop${pf.matches === 2 ? 'y' : 'ies'}` : ''}. It is a different creative id, so check it against this creative. Nothing is saved until you confirm.</div></div><button type="button" class="btn btn-ghost btn-sm" id="mm-prev-btn" aria-expanded="false">View matched ad &rarr;</button></div>`
       : copyConflict
       ? `<b>Matching copies were classified differently</b> (${pf.matches}${pf.examples && pf.examples.length ? `: ${pf.examples.map((e) => `“${escapeHtml(e.ad_name || e.meta_ad_id)}”`).join(', ')}` : ''}). Nothing was pre-filled — choose the product (or tick Not product-specific) yourself, then press <kbd>Enter</kbd>.`
       : filled.length
       ? `<b>Suggestions filled in:</b> ${filled.join(', ')}. Check them against the creative, then press <kbd>Enter</kbd> (or Confirm &amp; Next). Nothing is saved until you confirm.${productPicker.get().length || nps.checked ? '' : ' <b>No product could be identified reliably — choose one, or tick Not product-specific.</b>'}`
       : `<b>No reliable suggestion for this creative.</b> Choose a product (or tick Not product-specific), then press <kbd>Enter</kbd> to confirm.`;
+    const noteEl = document.getElementById('mm-sess-note');
+    if (noteEl) noteEl.classList.toggle('mm-sess-prev', fromCopy);
+    const prevBtn2 = document.getElementById('mm-prev-btn');
+    if (prevBtn2) prevBtn2.addEventListener('click', () => {
+      const d = document.getElementById('mm-prev-detail'); const show = d.hidden; d.hidden = !show; prevBtn2.setAttribute('aria-expanded', String(show));
+      prevBtn2.innerHTML = show ? 'Hide matched ad &uarr;' : 'View matched ad &rarr;';
+    });
     // focus the modal itself so Enter belongs to it as soon as the creative is shown
     body.setAttribute('tabindex', '-1'); body.focus({ preventScroll: true });
   }
@@ -4273,6 +4439,7 @@ async function loadMetaSyncPanel() {
     const auto = status.auto_sync || null;
     document.getElementById('meta-sync-auto').textContent = auto && auto.enabled
       ? `On — last ${auto.window_days} days every ${auto.refresh_every_hours} h` : 'Off';
+    loadMetaAutoSyncDetail(fmtWhen);
     if (!status.configured && !metaSyncRunning) {
       setMetaSyncMessage('Meta is not configured on this server (META_AD_ACCOUNT_ID / META_ACCESS_TOKEN missing).', 'err');
     } else if (status.rate_limit_cooldown_seconds > 0 && !metaSyncRunning && !document.getElementById('meta-sync-message').textContent) {
@@ -4282,6 +4449,24 @@ async function loadMetaSyncPanel() {
   } catch (e) {
     setMetaSyncMessage(`Could not load sync status: ${e.message}`, 'err');
   }
+}
+
+// Read-only diagnostics for the automatic sync: what THIS deployed process sees (switch value, credentials present, scheduler started, recent automatic runs).
+async function loadMetaAutoSyncDetail(fmtWhen) {
+  const el = document.getElementById('meta-sync-auto-detail');
+  if (!el) return;
+  try {
+    const s = await api('/meta-sync/auto-status');
+    const lastRun = s.recent_runs && s.recent_runs[0];
+    const bits = [
+      `META_AUTO_SYNC: ${s.switch.value}`,
+      s.meta_credentials_present ? 'Meta credentials present' : 'Meta credentials missing',
+      s.scheduler.running_here ? `scheduler running (since ${fmtWhen(s.scheduler.startedAt)})` : `scheduler not running (${s.scheduler.startNote || 'not started in this process'})`,
+      lastRun ? `last automatic run ${lastRun.status} ${lastRun.finished_at ? fmtWhen(lastRun.finished_at) : ''}${lastRun.status === 'failed' && lastRun.error_message ? ` (${lastRun.error_message})` : ''}` : 'no automatic run recorded yet',
+      s.next ? (s.next.due ? 'next check will sync' : `next: ${s.next.reason}`) : null,
+    ].filter(Boolean);
+    el.textContent = bits.join(' · ');
+  } catch (e) { el.textContent = ''; }
 }
 
 // Routine, lightweight performance sync (daily Insights for Sydney today +
@@ -5956,13 +6141,13 @@ function renderRequiredConcepts(data) {
     const assigneeControl = fulfilled ? `
         <select class="pw-slot-assignee-select" data-asset-id="${s.asset_id}" title="Assigned To">
           <option value=""${!s.asset_concept_assignee ? ' selected' : ''}>Unassigned</option>
-          ${CONCEPT_ASSIGNEES.map((name) => `<option value="${name}"${s.asset_concept_assignee === name ? ' selected' : ''}>${name}</option>`).join('')}
+          ${conceptAssignees().map((name) => `<option value="${name}"${s.asset_concept_assignee === name ? ' selected' : ''}>${name}</option>`).join('')}
         </select>
       ` : '<span class="pw-slot-control-empty">—</span>';
     const editingControl = fulfilled ? `
         <select class="pw-slot-editing-select" data-asset-id="${s.asset_id}" title="Editing">
           <option value=""${!s.asset_editing_owner ? ' selected' : ''}>Unassigned</option>
-          ${CONCEPT_ASSIGNEES.map((name) => `<option value="${name}"${s.asset_editing_owner === name ? ' selected' : ''}>${name}</option>`).join('')}
+          ${conceptAssignees().map((name) => `<option value="${name}"${s.asset_editing_owner === name ? ' selected' : ''}>${name}</option>`).join('')}
         </select>
       ` : '<span class="pw-slot-control-empty">—</span>';
     // A slot's asset is created automatically the moment the slot exists
@@ -6406,10 +6591,16 @@ async function openLifecycleMenu(anchor, conceptId) {
     const d = await api(`/concept-lifecycle/${conceptId}`);
     menu.innerHTML = `
       <div class="ux-menu-head">${escapeHtml(d.name)}<span>${escapeHtml(d.stage_label)}${d.archived ? ' &middot; Archived' : ''}${d.killed ? ' &middot; Killed' : ''}</span></div>
-      ${d.actions.map((a) => `
+      ${d.actions.filter((a) => a.key === 'kill' || a.key === 'unarchive').map((a) => `
         <button type="button" class="ux-menu-item${a.destructive ? ' ux-menu-item-danger' : ''}" ${a.allowed ? '' : 'disabled'} data-lifecycle-action="${a.key}" title="${escapeHtml(a.allowed ? a.description : (a.reason || ''))}">
           ${escapeHtml(a.label)}${a.allowed ? '' : `<small>${escapeHtml(a.reason || 'Not available')}</small>`}
         </button>`).join('')}`;
+    if (state.currentUser && state.currentUser.role === 'admin' && d.stage !== 'concept-dev' && !d.archived) {
+      const mb = document.createElement('button');
+      mb.type = 'button'; mb.className = 'ux-menu-item'; mb.dataset.moveBack = String(d.id); mb.innerHTML = '&larr; Move back one stage';
+      mb.addEventListener('click', () => { closeLifecycleMenu(); openMoveBackModal(d.id); });
+      menu.appendChild(mb);
+    }
     menu.querySelectorAll('[data-lifecycle-action]').forEach((btn) => {
       btn.addEventListener('click', () => {
         closeLifecycleMenu();
@@ -6444,7 +6635,7 @@ function openLifecycleConfirm(desc, actionKey) {
     ${action.destructive ? '<label class="lc-ack"><input type="checkbox" id="lifecycle-ack"> I understand this permanently deletes the concept and its drafts.</label>' : ''}`;
   const btn = document.getElementById('lifecycle-confirm-btn');
   btn.textContent = action.destructive ? 'Remove permanently' : action.label;
-  btn.className = `btn ${action.destructive ? 'btn-danger' : 'btn-primary'}`;
+  btn.className = `btn ${action.destructive || actionKey === 'kill' ? 'btn-danger' : 'btn-primary'}`;
   btn.disabled = !!action.destructive;
   const ack = document.getElementById('lifecycle-ack');
   if (ack) ack.addEventListener('change', () => { btn.disabled = !ack.checked; });
@@ -10491,15 +10682,16 @@ function conceptDevModalContextHtml(product) {
     : '<span class="cd-modal-context-thumb cd-modal-context-noimg"><svg class=ic aria-hidden=true focusable=false><use href=#i-image></use></svg></span>';
   const sourceLabel = CONCEPT_DEV_SOURCE_LABELS[product.source] || product.source || '—';
   const pathwayLabel = conceptDevPathwayBadgeLabel(product);
-  const skuInfo = product.colourways
-    .map((c) => `${c.style_code || c.colour_label}${c.size ? `-${c.size}` : ''}`)
-    .join(', ');
+  // A long SKU list stays out of the header: the first couple are shown, the rest are a "+N" with the full list on hover.
+  const skuAll = product.colourways.map((c) => `${c.style_code || c.colour_label}${c.size ? `-${c.size}` : ''}`);
+  const skuInfo = skuAll.length > 2 ? `${skuAll.slice(0, 2).join(', ')} +${skuAll.length - 2} more` : skuAll.join(', ');
+  const skuTitle = skuAll.join(', ');
   const line = [
     `<strong>${escapeHtml(product.product_name || 'No products required')}</strong>`,
     escapeHtml(sourceLabel),
     escapeHtml(pathwayLabel),
     `Owner: ${escapeHtml(product.creator || '—')}`,
-    escapeHtml(skuInfo),
+    skuInfo ? `<span title="${escapeHtml(skuTitle)}">${escapeHtml(skuInfo)}</span>` : '',
   ].filter(Boolean).join(' &middot; ');
   // Promotion Message/Offer -- surfaces the Promotion's own notes field
   // read-only as the offer reference, per the brief: reuse the existing
@@ -13056,7 +13248,7 @@ function shootingMoveMenuItemsHtml(item) {
   const prevWeekItem = `<button type="button" class="shoot-card-menu-item" onclick="moveShootingCard(${item.id}, 'carry_prev_week', '${item.scheduled_week_start}'); closeAllShootCardMenus();">&larr; Move to previous week</button>`;
   const carryItem = `<button type="button" class="shoot-card-menu-item shoot-card-menu-item-carry" onclick="moveShootingCard(${item.id}, 'carry_next_week', '${item.scheduled_week_start}'); closeAllShootCardMenus();">Carry to next week &rarr;</button>`;
   const pickWeekItem = `<button type="button" class="shoot-card-menu-item" onclick="showShootWeekPicker(${item.id}, '${item.scheduled_week_start}')">Move to week&hellip;</button>`;
-  return `<div class="shoot-card-menu-label">Move to</div>${dayItems}${unscheduledItem}${prevWeekItem}${carryItem}${pickWeekItem}<div class="shoot-card-menu-label">Manage</div><button type="button" class="shoot-card-menu-item" data-lifecycle-menu="${item.creative_asset_id}" onclick="openLifecycleMenu(this, ${item.creative_asset_id})">Archive / Kill / Remove&hellip;</button>`;
+  return `<div class="shoot-card-menu-label">Move to</div>${dayItems}${unscheduledItem}${prevWeekItem}${carryItem}${pickWeekItem}<div class="shoot-card-menu-label">Manage</div>${moveBackMenuItemHtml(item.creative_asset_id)}<button type="button" class="shoot-card-menu-item shoot-card-menu-item-danger" data-lifecycle-menu="${item.creative_asset_id}" onclick="openLifecycleMenu(this, ${item.creative_asset_id})">Kill Concept&hellip;</button>`;
 }
 
 // "Move to week..." replaces the same dropdown's contents in place with the
@@ -13248,7 +13440,7 @@ function shootingStatusControlHtml(item) {
     if (isNext) onclick = stage === 'in_progress' ? `startShooting(${item.id})` : `markShootingShot(${item.id})`;
     else if (isCurrent && i > 0) onclick = stage === 'in_progress' ? `unstartShooting(${item.id})` : `unmarkShootingShot(${item.id})`;
     const title = isNext ? `Mark as ${labels[stage]}` : (onclick ? `Undo -- revert to ${labels[stages[i - 1]]}` : '');
-    return `<button type="button" class="shoot-status-segment${isCurrent ? ' shoot-status-segment-active' : ''}" ${onclick ? `onclick="${onclick}"` : 'disabled'} title="${title}">${labels[stage]}</button>`;
+    return `<button type="button" class="shoot-status-segment${isCurrent ? ' shoot-status-segment-active' : (i < currentIndex ? ' shoot-status-segment-done' : '')}" ${isCurrent ? 'aria-current="step"' : ''} ${onclick ? `onclick="${onclick}"` : 'disabled'} title="${title}">${labels[stage]}</button>`;
   }).join('')}</div>`;
 }
 
@@ -13264,6 +13456,13 @@ function shootingStatusControlHtml(item) {
 // underneath (see markShootingShot/unmarkShootingShot), this just reads
 // scheduled_day to say something more specific than "Planned" for where the
 // concept actually sits in the Shooting workflow.
+// Small card thumbnail: the actual creative when a Final Edit link exists, otherwise the linked product image, otherwise a neutral placeholder
+// (non-product-specific concepts). A product image is never presented as the finished video (see UX.creativeThumbHtml).
+function shootCardThumbHtml(productImage, finalEdit, format) {
+  if (finalEdit && finalEdit.final_edit_link) return UX.creativeThumbHtml(finalEdit.final_edit_link, finalEdit.format || format || 'video', productImage, { size: 'sm', label: 'Creative preview' });
+  return UX.productThumbHtml(productImage, 'sm');
+}
+
 function shootingCardHtml(item, isUnscheduled = false) {
   const isShot = item.status === 'shot';
   const carriedBadge = item.carried_over ? `<span class="shoot-carried-badge">From W${isoWeekNumber(parseDateStr(item.original_week_start))}</span>` : '';
@@ -13304,7 +13503,7 @@ function shootingCardHtml(item, isUnscheduled = false) {
         <div class="shoot-card-name">${dragHandle}${escapeHtml(item.concept_name)}</div>
         ${menuHtml}
       </div>
-      <div class="shoot-card-product">${escapeHtml(item.product_name || '—')}${dropBadge}</div>
+      <div class="shoot-card-product">${shootCardThumbHtml(item.image_url, null, item.format)}<span class="shoot-card-product-name">${escapeHtml(item.product_name || '—')}</span>${dropBadge}</div>
       <div class="ux-wcard-meta">
         ${uxPersonHtml('Filming', item.owner)}
         ${metaParts.length ? `<span class="shoot-card-meta">${escapeHtml(metaParts.join(' · '))}</span>` : ''}
@@ -13424,7 +13623,7 @@ function shootingTodayItemHtml(item) {
   return `
     <div class="shoot-today-item ux-wcard ${isShot ? 'shoot-card-shot' : ''}">
       <div class="ux-wcard-head"><div class="shoot-card-name">${escapeHtml(item.concept_name)}</div>${lifecycleKebabHtml(item.creative_asset_id)}</div>
-      <div class="shoot-card-product">${escapeHtml(item.product_name || '—')}${dropBadge}</div>
+      <div class="shoot-card-product">${shootCardThumbHtml(item.image_url, null, item.format)}<span class="shoot-card-product-name">${escapeHtml(item.product_name || '—')}</span>${dropBadge}</div>
       <div class="ux-wcard-meta">
         ${uxPersonHtml('Filming', item.owner)}
         ${metaParts.length ? `<span class="shoot-card-meta">${escapeHtml(metaParts.join(' · '))}</span>` : ''}
@@ -14373,7 +14572,8 @@ function editingStatusControlHtml(concept) {
       onclick = `revertEditingToToEdit(${concept.creative_asset_id})`;
       title = 'Undo -- unschedule back to Filmed';
     }
-    return `<button type="button" class="shoot-status-segment${isCurrent ? ' shoot-status-segment-active' : ''}" ${onclick ? `onclick="${onclick}"` : 'disabled'} title="${title}">${EDITING_STATUS_LABELS[stage]}</button>`;
+    const done = stages.indexOf(stage) < stages.indexOf(status);
+    return `<button type="button" class="shoot-status-segment${isCurrent ? ' shoot-status-segment-active' : (done ? ' shoot-status-segment-done' : '')}" ${isCurrent ? 'aria-current="step"' : ''} ${onclick ? `onclick="${onclick}"` : 'disabled'} title="${title}">${EDITING_STATUS_LABELS[stage]}</button>`;
   }).join('')}</div>`;
 }
 
@@ -14573,7 +14773,7 @@ function editingConceptCardHtml(concept) {
   return `
     <div class="cd-card editing-concept-card ux-wcard ${isReady ? 'editing-concept-card-ready shoot-card-shot' : ''}" onclick="openEditingConcept(${concept.creative_asset_id})">
       <div class="ux-wcard-head"><div class="shoot-card-name editing-concept-name">${escapeHtml(concept.concept_name)}</div>${lifecycleKebabHtml(concept.creative_asset_id)}</div>
-      <div class="shoot-card-product editing-concept-product">${escapeHtml(concept.product_name || '—')}</div>
+      <div class="shoot-card-product editing-concept-product">${shootCardThumbHtml(concept.image_url, (concept.final_edits || []).find((fe) => fe.final_edit_link), concept.concept_format)}<span class="shoot-card-product-name">${escapeHtml(concept.product_name || '—')}</span></div>
       <div class="ux-wcard-meta">${uxPersonHtml('Editor', concept.editing_owner)}</div>
       <div class="ux-wcard-meta">${uxDateChipHtml(dateText)}</div>
       <div class="shoot-card-footer">${editingStatusControlHtml(concept)}</div>
@@ -14668,7 +14868,7 @@ function editingMoveMenuItemsHtml(concept) {
   const prevWeekItem = `<button type="button" class="shoot-card-menu-item" onclick="moveEditingCard(${concept.shoot_schedule_id}, 'carry_prev_week', '${concept.editing_week_start}'); closeAllEditingCardMenus();">&larr; Move to previous week</button>`;
   const carryItem = `<button type="button" class="shoot-card-menu-item shoot-card-menu-item-carry" onclick="moveEditingCard(${concept.shoot_schedule_id}, 'carry_next_week', '${concept.editing_week_start}'); closeAllEditingCardMenus();">Carry to next week &rarr;</button>`;
   const pickWeekItem = `<button type="button" class="shoot-card-menu-item" onclick="showEditingWeekPicker(${concept.shoot_schedule_id}, '${concept.editing_week_start}')">Move to week&hellip;</button>`;
-  return `<div class="shoot-card-menu-label">Move to</div>${dayItems}${unscheduledItem}${prevWeekItem}${carryItem}${pickWeekItem}<div class="shoot-card-menu-label">Manage</div><button type="button" class="shoot-card-menu-item" data-lifecycle-menu="${concept.creative_asset_id}" onclick="openLifecycleMenu(this, ${concept.creative_asset_id})">Archive / Kill / Remove&hellip;</button>`;
+  return `<div class="shoot-card-menu-label">Move to</div>${dayItems}${unscheduledItem}${prevWeekItem}${carryItem}${pickWeekItem}<div class="shoot-card-menu-label">Manage</div>${moveBackMenuItemHtml(concept.creative_asset_id)}<button type="button" class="shoot-card-menu-item shoot-card-menu-item-danger" data-lifecycle-menu="${concept.creative_asset_id}" onclick="openLifecycleMenu(this, ${concept.creative_asset_id})">Kill Concept&hellip;</button>`;
 }
 
 function showEditingWeekPicker(scheduleId, currentWeekStart) {
@@ -14768,7 +14968,7 @@ function editingDayCardHtml(concept, isUnscheduled = false) {
         <div class="shoot-card-name">${dragHandle}${escapeHtml(concept.concept_name)}</div>
         ${menuHtml}
       </div>
-      <div class="shoot-card-product">${escapeHtml(concept.product_name || '—')}</div>
+      <div class="shoot-card-product">${shootCardThumbHtml(concept.image_url, (concept.final_edits || []).find((fe) => fe.final_edit_link), concept.concept_format)}<span class="shoot-card-product-name">${escapeHtml(concept.product_name || '—')}</span></div>
       <div class="ux-wcard-meta">${uxPersonHtml('Editor', concept.editing_owner)}</div>
       <div class="ux-wcard-meta">${uxDateChipHtml(dateText)}${carriedBadge}</div>
       <div class="shoot-card-footer">${editingStatusControlHtml(concept)}</div>
@@ -15282,10 +15482,10 @@ function finalApprovalVersions(c) {
   return edits.map((e) => ({ ...e, format: e.format || c.format || 'video' }));
 }
 
-function finalApprovalMediaStripHtml(versions, size) {
+function finalApprovalMediaStripHtml(versions, size, productImage) {
   const shown = versions.slice(0, 3);
   const extra = versions.length - shown.length;
-  return `<div class="fa-media-strip">${shown.map((v) => UX.mediaThumbHtml(v.final_edit_link, v.format, { size, label: v.asset_name || 'Creative preview' })).join('')}${extra > 0 ? `<span class="fa-media-more">+${extra}</span>` : ''}</div>`;
+  return `<div class="fa-media-strip">${shown.map((v) => UX.creativeThumbHtml(v.final_edit_link, v.format, productImage, { size, label: v.asset_name || 'Creative preview' })).join('')}${extra > 0 ? `<span class="fa-media-more">+${extra}</span>` : ''}</div>`;
 }
 
 function finalApprovalCardHtml(c) {
@@ -15296,7 +15496,7 @@ function finalApprovalCardHtml(c) {
     <div class="cd-card ux-pcard fa-card${versions.length > 1 ? ' fa-card-multi' : ''}" role="button" tabindex="0" data-fa-concept="${c.creative_asset_id}" onclick="openFinalApprovalModal(${c.creative_asset_id})" onkeydown="if(event.key==='Enter'){openFinalApprovalModal(${c.creative_asset_id})}">
       ${lifecycleKebabHtml(c.creative_asset_id, 'ux-pcard-kebab')}
       <div class="ux-pcard-main">
-        ${finalApprovalMediaStripHtml(versions, 'md')}
+        ${finalApprovalMediaStripHtml(versions, 'md', c.image_url)}
         <div class="ux-pcard-body">
           <div class="ux-pcard-title cd-card-name">${escapeHtml(c.concept_name)}</div>
           <div class="ux-pcard-sub">${escapeHtml(c.product_name || '—')}</div>
@@ -15436,8 +15636,18 @@ async function submitFinalApprovalRequestChanges() {
 // (routes/adSetup.js) is explicit that "Create in Meta ->" is future work
 // this data model is meant to support, not built here.
 
-const AD_CATEGORY_LABELS = { new_drop: 'New Drop/Product Launch', core: 'Core', promotion: 'Promotion/Sale', organic_first: 'Organic-first' };
-const URL_LINK_PAGE_LABELS = { product: 'Product', category: 'Category', new_arrivals: 'New Arrivals', home: 'Home Page', sale_bundle: 'Sale/Bundle Page', other: 'Other' };
+// Two categories are offered (Product / Sale). Stored values are unchanged: promotion = Sale; new_drop, core and organic_first (all existing
+// records) display and behave as Product, and a record's stored value is only rewritten if the person actually switches category.
+const AD_CATEGORY_LABELS = { new_drop: 'Product', core: 'Product', promotion: 'Sale', organic_first: 'Product' };
+const AD_CATEGORY_CHOICES = { product: 'Product', sale: 'Sale' };
+function adCategoryChoice(stored) { return stored === 'promotion' ? 'sale' : 'product'; }
+function adSetupSetCategory(choice) {
+  const d = state.adSetup.draft;
+  if (choice === 'sale') d.ad_category = 'promotion';
+  else if (d.ad_category === 'promotion') d.ad_category = 'core';
+  renderAdSetupNamePreview();
+}
+const URL_LINK_PAGE_LABELS = { product: 'Product', category: 'Category', new_arrivals: 'New Arrivals', home: 'Home Page', sale_bundle: 'Sale/Bundle Page', sign_up: 'Sign Up Page', other: 'Other' };
 const CTA_LABELS = { shop_now: 'Shop Now', sign_up: 'Sign Up', learn_more: 'Learn More', shop_the_sale: 'Shop the Sale' };
 const STAGE_TAGS = { hype: 'HYPE', sale_live: 'LIVE', mid_sale: 'MID SALE', last_chance: 'LAST CHANCE' };
 
@@ -15475,7 +15685,7 @@ function renderAdSetupSubtabCounts() {
 
 // One Ad Setup row = one Final Edit (version), so each card shows that version's own creative.
 function adSetupMediaHtml(item) {
-  return UX.mediaThumbHtml(item.final_edit_link, item.final_edit_format || item.media_type || 'video', { size: 'md', label: item.final_edit_asset_name || item.concept_name });
+  return UX.creativeThumbHtml(item.final_edit_link, item.final_edit_format || item.media_type || 'video', item.product_image_url, { size: 'md', label: item.final_edit_asset_name || item.concept_name });
 }
 
 function adSetupCardHtml(item) {
@@ -15633,8 +15843,6 @@ function renderAdSetupModal() {
   const optionSelect = (field, labelMap, current) => Object.entries(labelMap)
     .map(([val, label]) => `<option value="${val}" ${val === current ? 'selected' : ''}>${escapeHtml(label)}</option>`).join('');
 
-  const batchOptions = (d.batches || []).map((b) => `<option value="${b.id}" ${b.id === d.ad_batch_id ? 'selected' : ''}>#${b.batch_number} ${escapeHtml(b.name || '')}</option>`).join('');
-
   const copySetOptions = (d.copy_sets || []).map((cs) => `<option value="${cs.id}" ${cs.id === d.copy_set_id ? 'selected' : ''}>${escapeHtml(cs.name)}</option>`).join('');
 
   const primaryOptions = (d.primary_text_options || []).map((t, i) => `
@@ -15662,18 +15870,14 @@ function renderAdSetupModal() {
     <div class="as-layout">
       <div class="as-main">
         <section class="as-section as-card">
-          <div class="as-section-title">Ad details</div>
+          <div class="as-section-head"><div class="as-section-title">Ad details</div><button type="button" class="ux-link-btn" onclick="copyAdSetupName()" title="Copies the generated Meta ad name">Copy Meta ad name</button></div>
           ${originLine ? `<div class="as-section-note">${originLine}</div>` : ''}
           <div class="as-grid as-grid-4">
             <label>Ad category
-              <select onchange="adSetupSet('ad_category', this.value)">${optionSelect('ad_category', AD_CATEGORY_LABELS, d.ad_category)}</select>
+              <select onchange="adSetupSetCategory(this.value)">${optionSelect('ad_category', AD_CATEGORY_CHOICES, adCategoryChoice(d.ad_category))}</select>
             </label>
             <label>Batch
-              <select onchange="onAdSetupBatchChange(this.value)">
-                <option value="">-- None --</option>
-                ${batchOptions}
-                <option value="__new__">+ New Batch&hellip;</option>
-              </select>
+              <input type="text" id="as-batch" value="${escapeHtml(d.batch !== undefined ? d.batch : (d.batch_number ? String(d.batch_number) : ''))}" placeholder="e.g. 215" maxlength="20" inputmode="numeric" oninput="adSetupSet('batch', this.value)">
             </label>
             <label>Week no.
               <input type="text" value="${escapeHtml(d.week_no || '')}" oninput="adSetupSet('week_no', this.value)">
@@ -15716,16 +15920,11 @@ function renderAdSetupModal() {
               <input type="text" value="${escapeHtml(d.concept_label || '')}" oninput="adSetupSet('concept_label', this.value)">
             </label>
             <label>URL link page
-              <select onchange="adSetupSet('url_link_page', this.value)">${optionSelect('url_link_page', URL_LINK_PAGE_LABELS, d.url_link_page)}</select>
+              <select onchange="adSetupSet('url_link_page', this.value || null)">
+                <option value="" ${d.url_link_page ? '' : 'selected'}>-- Choose page --</option>
+                ${optionSelect('url_link_page', URL_LINK_PAGE_LABELS, d.url_link_page)}
+              </select>
             </label>
-          </div>
-        </section>
-
-        <section class="as-section as-card as-name-card">
-          <div class="as-section-title">Generated Meta name</div>
-          <div class="as-name-preview">
-            <span id="as-name-preview-text">${escapeHtml(namePreview)}</span>
-            <button type="button" class="btn btn-ghost btn-sm" style="flex-shrink:0;" onclick="copyAdSetupName()">Copy Name</button>
           </div>
         </section>
 
@@ -15743,7 +15942,7 @@ function renderAdSetupModal() {
         <section class="as-section as-card">
           <div class="as-section-title">Creative</div>
           <div class="as-creative">
-            ${UX.mediaThumbHtml(d.final_edit_link, d.final_edit_format || d.media_type || 'video', { size: 'lg', label: d.final_edit_asset_name || d.concept_name })}
+            ${UX.creativeThumbHtml(d.final_edit_link, d.final_edit_format || d.media_type || 'video', d.product_image_url, { size: 'lg', label: d.final_edit_asset_name || d.concept_name })}
             <div class="as-creative-body">
               <div class="as-creative-name">${escapeHtml(d.final_edit_asset_name || d.concept_name || '')}</div>
               ${productNames.length ? `<div class="as-section-note" style="margin:0;">${escapeHtml(productNames.join(', '))}</div>` : ''}
@@ -15797,8 +15996,8 @@ function adSetupAiPanelHtml(d) {
   if (!st) return '<div class="as-ai"><div class="as-ai-head">AI Copy Assistant</div><div class="as-ai-note">Loading&hellip;</div></div>';
   if (!st.ai_configured) return `<div class="as-ai"><div class="as-ai-head">AI Copy Assistant ${UX.badgeHtml('Not configured', 'amber')}</div><div class="as-ai-note">${escapeHtml(st.ai_reason || 'The AI provider is not configured.')} Until then, write the Primary Text yourself.</div></div>`;
   if (!st.library) {
-    const why = st.sheets && !st.sheets.configured ? st.sheets.reason : 'The WNDRR copy library has not been read yet. An admin can refresh it in Settings > Copy Library.';
-    return `<div class="as-ai"><div class="as-ai-head">AI Copy Assistant ${UX.badgeHtml('Library not connected', 'amber')}</div><div class="as-ai-note">${escapeHtml(why)}</div></div>`;
+    const why = st.sheets && st.sheets.configured ? 'The WNDRR copy library has not been read yet. An admin can refresh it in Settings > Copy Library.' : 'The WNDRR copy library has not been loaded yet. An admin can import the copy tabs as CSV files (or connect Google Sheets) in Settings > Copy Library.';
+    return `<div class="as-ai"><div class="as-ai-head">AI Copy Assistant ${UX.badgeHtml('Library not loaded', 'amber')}</div><div class="as-ai-note">${escapeHtml(why)}</div></div>`;
   }
   const hasText = !!(d.selected_primary_text || '').trim();
   const opts = asAi.options.map((o, i) => `
@@ -15998,33 +16197,6 @@ async function regenerateAdSetupCopy() {
   }
 }
 
-async function onAdSetupBatchChange(value) {
-  if (value === '__new__') return createAdSetupBatchAndAssign();
-  try {
-    const updated = await api(`/ad-setup/${state.adSetup.editingId}`, { method: 'PATCH', body: JSON.stringify({ ad_batch_id: value ? Number(value) : null }) });
-    state.adSetup.draft = { ...state.adSetup.draft, ...updated };
-    toast('Batch assigned');
-    renderAdSetupModal();
-    loadAdSetupBoard();
-  } catch (e) {
-    toast(e.message, true);
-  }
-}
-
-async function createAdSetupBatchAndAssign() {
-  const name = prompt('Name for this new batch (optional):', '');
-  try {
-    const batch = await api('/ad-setup/batches', { method: 'POST', body: JSON.stringify({ name: name || undefined }) });
-    const updated = await api(`/ad-setup/${state.adSetup.editingId}`, { method: 'PATCH', body: JSON.stringify({ ad_batch_id: batch.id }) });
-    state.adSetup.draft = { ...state.adSetup.draft, ...updated, batches: [...(state.adSetup.draft.batches || []), batch] };
-    toast(`Batch #${batch.batch_number} created and assigned`);
-    renderAdSetupModal();
-    loadAdSetupBoard();
-  } catch (e) {
-    toast(e.message, true);
-  }
-}
-
 async function onAdSetupCopySetChange(value) {
   try {
     const updated = await api(`/ad-setup/${state.adSetup.editingId}`, { method: 'PATCH', body: JSON.stringify({ copy_set_id: value ? Number(value) : null }) });
@@ -16055,7 +16227,14 @@ async function createAdSetupCopySetFromCurrent() {
 }
 
 function copyAdSetupName() {
-  const text = document.getElementById('as-name-preview-text').textContent;
+  const d = state.adSetup.draft;
+  const text = buildMetaAdNamePreviewClient({
+    ad_category: d.ad_category, stage_type: d.promotion_stage_name ? detectStageTypeClient(d.promotion_stage_name) : null,
+    sale_sequence_number: d.sale_sequence_number, batch_number: d.batch !== undefined && /\d+/.test(d.batch) ? Number(String(d.batch).match(/\d+/)[0]) : d.batch_number,
+    week_no: d.week_no, ad_date: d.ad_date, product_label: d.product_label, product_type: d.product_type,
+    hook_short: d.hook_short, creator_name: d.creator_name, concept_label: d.concept_label,
+    media_type: d.media_type, ad_type: d.ad_type, url_link_page: d.url_link_page,
+  });
   navigator.clipboard.writeText(text).then(() => toast('Copied')).catch(() => toast('Could not copy', true));
 }
 
@@ -16068,10 +16247,15 @@ async function saveAdSetupDraft() {
   ];
   const body = {};
   fields.forEach((f) => { body[f] = d[f]; });
+  if (d.batch !== undefined) body.batch = d.batch;
   try {
     const updated = await api(`/ad-setup/${state.adSetup.editingId}`, { method: 'PATCH', body: JSON.stringify(body) });
     state.adSetup.draft = { ...state.adSetup.draft, ...updated };
-    try { const fresh = await api(`/ad-setup/${state.adSetup.editingId}`); state.adSetup.draft.copy_rule = fresh.copy_rule; } catch (e) { /* the rule note refreshes next time it opens */ }
+    delete state.adSetup.draft.batch;
+    try {
+      const fresh = await api(`/ad-setup/${state.adSetup.editingId}`);
+      Object.assign(state.adSetup.draft, { copy_rule: fresh.copy_rule, batch_number: fresh.batch_number, batch_name: fresh.batch_name, sale_sequence_number: fresh.sale_sequence_number, generated_meta_ad_name: fresh.generated_meta_ad_name });
+    } catch (e) { /* the rule note refreshes next time it opens */ }
     toast('Draft saved');
     renderAdSetupModal();
     loadAdSetupBoard();
@@ -17480,6 +17664,12 @@ async function saveBfPlanSourceUrl(id) {
 // stage the concept will land in.
 let moveBackConceptId = null;
 
+// Card-menu entry for Move Back (admin only, like the endpoints behind it); the confirmation names the real target stage.
+function moveBackMenuItemHtml(conceptId) {
+  if (!(state.currentUser && state.currentUser.role === 'admin')) return '';
+  return `<button type="button" class="shoot-card-menu-item" data-move-back="${conceptId}" onclick="closeAllShootCardMenus(); if (typeof closeAllEditingCardMenus === 'function') closeAllEditingCardMenus(); openMoveBackModal(${conceptId})">&larr; Move back</button>`;
+}
+
 async function openMoveBackModal(creativeAssetId) {
   if (creativeAssetId == null) return;
   try {
@@ -18444,6 +18634,34 @@ function renderPlanningSettingsForm() {
   document.getElementById('default-shoot-top-size-input').value = state.planningSettings.default_shoot_top_size;
   document.getElementById('default-shoot-bottom-alpha-size-input').value = state.planningSettings.default_shoot_bottom_alpha_size;
   document.getElementById('default-shoot-bottom-waist-size-input').value = state.planningSettings.default_shoot_bottom_waist_size;
+  renderDropDefaultAssignments();
+}
+
+// Upcoming Drops: default Assigned To / Editing for NEW Required Concepts (never applied to existing ones or over a manual choice).
+function renderDropDefaultAssignments() {
+  const s = state.planningSettings;
+  const roster = conceptAssignees();
+  for (const [id, field] of [['drop-default-assignee', 'drop_default_assignee'], ['drop-default-editor', 'drop_default_editor']]) {
+    const sel = document.getElementById(id);
+    if (!sel) continue;
+    sel.innerHTML = `<option value="">No default</option>${roster.map((n) => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('')}`;
+    sel.value = (s && s[field]) || '';
+  }
+  const note = document.getElementById('drop-defaults-status');
+  if (note) note.innerHTML = s && (s.drop_default_assignee || s.drop_default_editor)
+    ? UX.badgeHtml('Configured', 'green') : UX.badgeHtml('Not configured', 'neutral');
+}
+
+async function saveDropDefaultAssignments() {
+  try {
+    const updated = await api('/planning-settings', { method: 'PUT', body: JSON.stringify({
+      drop_default_assignee: document.getElementById('drop-default-assignee').value || null,
+      drop_default_editor: document.getElementById('drop-default-editor').value || null,
+    }) });
+    state.planningSettings = updated;
+    renderDropDefaultAssignments();
+    toast('Default assignments saved');
+  } catch (e) { toast(e.message, true); }
 }
 
 async function saveWeeklyTarget() {
@@ -18739,6 +18957,7 @@ document.getElementById('po-list').addEventListener('click', async (ev) => {
   try { await api(`/creative-priority-overrides/${b.dataset.poRemove}`, { method: 'DELETE' }); toast('Override removed'); await loadPriorityOverrides(); } catch (e) { toast(e.message, true); }
 });
 document.getElementById('default-shoot-top-size-save-btn').addEventListener('click', () => saveDefaultShootSize('top'));
+document.getElementById('drop-defaults-save-btn').addEventListener('click', saveDropDefaultAssignments);
 document.getElementById('default-shoot-bottom-alpha-size-save-btn').addEventListener('click', () => saveDefaultShootSize('bottom_alpha'));
 document.getElementById('default-shoot-bottom-waist-size-save-btn').addEventListener('click', () => saveDefaultShootSize('bottom_waist'));
 
@@ -19437,3 +19656,6 @@ document.addEventListener('paste', (e) => {
   if (!files.length) return;
   e.preventDefault(); urAddFiles(files);
 });
+
+// Settings opens on Planning, so its sections are regrouped into cards at load (the other pages when first opened).
+uxCardifySettings('planning');

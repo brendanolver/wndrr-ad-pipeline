@@ -121,11 +121,14 @@ function deriveProductNameAndCategory(styles, dropName, promotion) {
   return { name, category };
 }
 
-function deriveUrlLinkPage(adCategory, styles) {
-  if (adCategory === 'promotion') return 'sale_bundle';
-  if (styles.length > 1) return 'new_arrivals';
-  if (adCategory === 'new_drop') return 'new_arrivals';
-  return 'product';
+// URL link page suggestion (all values stay editable):
+//   product-specific ad (one linked product)  Product page
+//   Sale Hype                                 Sign Up page
+//   Sale Live / Mid Sale / Last Chance        left UNSELECTED for the team to choose (null)
+//   everything else (no product, or a multi-product drop)  New Arrivals
+function deriveUrlLinkPage(adCategory, styles, stageType) {
+  if (adCategory === 'promotion') return stageType === 'hype' ? 'sign_up' : null;
+  return styles.length === 1 ? 'product' : 'new_arrivals';
 }
 
 function copyContextFromLoaded(ctx, adCategory, stageType) {
@@ -179,7 +182,7 @@ function buildPrefill(ctx) {
     // assignment exists -- never invented.
     creatorName: ctx.finalEdit.filming_owner || null,
     conceptLabel: ctx.finalEdit.concept_type || ctx.finalEdit.concept_name,
-    urlLinkPage: deriveUrlLinkPage(adCategory, ctx.styles),
+    urlLinkPage: deriveUrlLinkPage(adCategory, ctx.styles, stageType),
     promotionStageId: ctx.promotionStage ? ctx.promotionStage.id : null,
     cta: rule.cta || defaultCta(adCategory, stageType),
     rule,
@@ -203,8 +206,8 @@ async function createAdSetupsForConcept(client, creativeAssetId) {
          week_no, ad_date, product_label, product_type, hook_short, media_type, ad_type,
          creator_name, concept_label, url_link_page, promotion_stage_id, cta,
          primary_text_options, headline_options,
-         selected_headline, selected_description, copy_rule_key, copy_rule_flags
-       ) VALUES ($1,$2,$3,true,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::jsonb)
+         selected_headline, selected_description, copy_rule_key, copy_rule_flags, naming_prefilled_at
+       ) VALUES ($1,$2,$3,true,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::jsonb, now())
        ON CONFLICT (final_edit_id) DO NOTHING
        RETURNING id`,
       [
@@ -234,9 +237,10 @@ const ROW_SELECT = `
     au.*, ca.concept_name, ca.hook AS concept_hook, fe.asset_name AS final_edit_asset_name,
     fe.final_edit_link, fe.format AS final_edit_format, fe.editor,
     ab.batch_number, ab.name AS batch_name,
-    ps.name AS promotion_stage_name, p.name AS promotion_name, p.verified_offer, p.verified_offer_teaser
+    ps.name AS promotion_stage_name, p.name AS promotion_name, p.verified_offer, p.verified_offer_teaser, spi_img.image_url AS product_image_url
   FROM ad_setups au
   JOIN creative_assets ca ON ca.id = au.creative_asset_id
+  LEFT JOIN shoot_plan_items spi_img ON spi_img.id = ca.shoot_plan_item_id
   JOIN final_edits fe ON fe.id = au.final_edit_id
   LEFT JOIN ad_batches ab ON ab.id = au.ad_batch_id
   LEFT JOIN promotion_stages ps ON ps.id = au.promotion_stage_id
@@ -254,7 +258,7 @@ router.get('/board', async (req, res, next) => {
       // shouldn't visibly sit in this tab while the concept itself is
       // parked one stage earlier.
       pool.query(`${ROW_SELECT} WHERE au.status = 'draft' AND fe.is_active = true AND ca.final_approval_status = 'approved' AND ca.archived_at IS NULL AND ca.concept_dev_status <> 'killed' ORDER BY au.created_at ASC`),
-      pool.query(`${ROW_SELECT} WHERE au.status = 'approved' AND fe.is_active = true AND ca.archived_at IS NULL ORDER BY au.updated_at DESC`),
+      pool.query(`${ROW_SELECT} WHERE au.status = 'approved' AND fe.is_active = true AND ca.archived_at IS NULL AND ca.concept_dev_status <> 'killed' ORDER BY au.updated_at DESC`),
     ]);
     res.json({ ad_setup: adSetupResult.rows, approved: approvedResult.rows });
   } catch (err) {
@@ -306,6 +310,27 @@ async function syncCopyRules(row, products) {
   };
 }
 
+// One-time fill of EMPTY Creative Naming fields on a draft that was created before the auto-fill existed. Never overwrites a value (a person's
+// or an earlier default's); `naming_prefilled_at` makes it run once, so a field cleared on purpose afterwards is not refilled.
+async function fillEmptyNamingFields(row) {
+  if (row.status !== 'draft' || row.naming_prefilled_at) return row;
+  const ctx = await loadContext(pool, row.final_edit_id);
+  if (!ctx) return row;
+  const p = buildPrefill(ctx);
+  const map = {
+    product_label: p.productLabel, product_type: p.productType, hook_short: p.hookShort, creator_name: p.creatorName,
+    concept_label: p.conceptLabel, media_type: p.mediaType, url_link_page: p.urlLinkPage,
+  };
+  const sets = []; const values = []; let i = 1;
+  for (const [col, val] of Object.entries(map)) {
+    if ((row[col] === null || row[col] === undefined || row[col] === '') && val) { sets.push(`${col} = $${i}`); values.push(val); i += 1; }
+  }
+  sets.push('naming_prefilled_at = now()');
+  values.push(row.id);
+  const r = await pool.query(`UPDATE ad_setups SET ${sets.join(', ')} WHERE id = $${i} AND naming_prefilled_at IS NULL RETURNING *`, values);
+  return r.rows.length ? { ...row, ...r.rows[0] } : row;
+}
+
 router.get('/:id', async (req, res, next) => {
   try {
     const rowResult = await pool.query(`${ROW_SELECT} WHERE au.id = $1`, [req.params.id]);
@@ -322,6 +347,7 @@ router.get('/:id', async (req, res, next) => {
       pool.query('SELECT id, name, primary_text, headline, cta FROM ad_copy_sets ORDER BY name ASC'),
     ]);
 
+    row = await fillEmptyNamingFields(row);
     const synced = await syncCopyRules(row, productsResult.rows);
     row = synced.row;
 
@@ -403,6 +429,25 @@ router.patch('/:id', async (req, res, next) => {
       sets.push('primary_text_approved = false', 'primary_text_approved_at = NULL', 'primary_text_approved_by_user_id = NULL');
     }
 
+    // Batch typed as plain text ("215", "#215", "Batch 215"): find or create the numbered batch and link it, so the Meta name and the Sale sequence
+    // counter keep working exactly as before. Empty clears it.
+    if ('batch' in body) {
+      const raw = String(body.batch === null || body.batch === undefined ? '' : body.batch).trim();
+      if (!raw) body.ad_batch_id = null;
+      else {
+        const m = raw.match(/\d+/);
+        if (!m || Number(m[0]) < 1 || Number(m[0]) > 2147483000) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: 'Batch must include a number, for example 215.' });
+        }
+        const found = await client.query(
+          `INSERT INTO ad_batches (batch_number, created_by_user_id) VALUES ($1, $2)
+           ON CONFLICT (batch_number) DO UPDATE SET batch_number = EXCLUDED.batch_number RETURNING id`,
+          [Number(m[0]), req.user ? req.user.id : null]
+        );
+        body.ad_batch_id = found.rows[0].id;
+      }
+    }
     // Batch assignment: allocate a Sale sequential ad number the first
     // time a Promotion ad with a known stage gets a batch, atomically and
     // exactly once (see the counters table) -- never on a plain re-save.

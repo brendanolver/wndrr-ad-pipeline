@@ -10,6 +10,8 @@ A concept enters Tuesday Review only when someone explicitly submits it with **R
 
 ## 2. Archive / Kill / Remove Test Concept
 
+> From v1.3.0 the UI offers **Kill Concept** only (see `docs/ux-workflow-refinement-v1.3.0.md`). Archive, Restore and Remove Test Concept remain as API actions with the rules below, except that an approved (unpublished) Ad Setup no longer blocks Kill (it still blocks permanent removal).
+
 One consistent three-dot menu on Concept Development, Shooting, Editing, Final Approval and Ad Setup cards. The same two endpoints serve every screen, because the rules depend on the concept's real state, not on where the button was clicked:
 
 * `GET /api/concept-lifecycle/:id` returns what is allowed and the consequences.

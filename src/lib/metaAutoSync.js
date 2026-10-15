@@ -86,6 +86,8 @@ async function planNextRun(now = new Date()) {
 }
 
 let inFlight = false;
+// Observability only (read by status()): when the scheduler started and what its last tick did. Nothing here changes behaviour.
+const runtime = { started: false, startedAt: null, startNote: null, lastTickAt: null, lastTickResult: null };
 
 // One scheduler tick. Never throws; returns what happened (for logs/tests).
 async function runOnce({ now = new Date(), sync = metaSync.runSync } = {}) {
@@ -111,15 +113,36 @@ async function runOnce({ now = new Date(), sync = metaSync.runSync } = {}) {
 }
 
 function startScheduler() {
-  if (!enabled()) { console.log('Meta auto-sync: disabled (META_AUTO_SYNC=off)'); return null; }
-  if (!configured()) { console.log('Meta auto-sync: not started (Meta is not configured)'); return null; }
-  const tick = () => runOnce().then((r) => { if (r.ran) console.log(`Meta auto-sync: synced ${r.since}..${r.until}`); }).catch(() => {});
+  if (!enabled()) { runtime.startNote = 'not started: META_AUTO_SYNC=off'; console.log('Meta auto-sync: disabled (META_AUTO_SYNC=off)'); return null; }
+  if (!configured()) { runtime.startNote = 'not started: Meta is not configured (META_AD_ACCOUNT_ID / META_ACCESS_TOKEN)'; console.log('Meta auto-sync: not started (Meta is not configured)'); return null; }
+  const tick = () => runOnce().then((r) => { runtime.lastTickAt = new Date().toISOString(); runtime.lastTickResult = r.ran ? `synced ${r.since}..${r.until}` : `skipped: ${r.reason}`; if (r.ran) console.log(`Meta auto-sync: synced ${r.since}..${r.until}`); }).catch(() => {});
+  runtime.started = true; runtime.startedAt = new Date().toISOString(); runtime.startNote = 'running';
   const first = setTimeout(tick, FIRST_CHECK_DELAY_MS);
   const timer = setInterval(tick, CHECK_EVERY_MS);
   if (first.unref) first.unref();
   if (timer.unref) timer.unref();
   console.log(`Meta auto-sync: on -- checks every ${CHECK_EVERY_MS / 60000} min, refreshes the last ${NORMAL_WINDOW_DAYS} days every ${REFRESH_EVERY_HOURS} h (last ${SETTLE_WINDOW_DAYS} days once a day)`);
   return () => { clearTimeout(first); clearInterval(timer); };
+}
+
+// What the deployed process actually sees: the raw switch, whether Meta credentials are present (presence only, never the values), whether the
+// scheduler started in THIS process, its last tick, and the recent automatic runs (run_type 'default' with no user). Pure DB reads + env checks.
+async function status(now = new Date()) {
+  const raw = process.env.META_AUTO_SYNC;
+  const runs = (await pool.query(
+    `SELECT id, status, range_since, range_until, started_at, finished_at, left(coalesce(error_message, ''), 160) AS error_message
+       FROM meta_sync_runs WHERE run_type = 'default' AND started_by_user_id IS NULL ORDER BY id DESC LIMIT 8`
+  )).rows;
+  let plan = null;
+  try { plan = await planNextRun(now); } catch (e) { plan = { due: false, reason: 'could not read sync history' }; }
+  return {
+    switch: { value: raw === undefined || raw === '' ? 'unset (defaults to on)' : String(raw), effective: enabled() },
+    meta_credentials_present: !!configured(),
+    scheduler: { ...runtime, running_here: runtime.started },
+    cadence: { check_every_minutes: CHECK_EVERY_MS / 60000, refresh_every_hours: REFRESH_EVERY_HOURS, window_days: NORMAL_WINDOW_DAYS, settle_window_days: SETTLE_WINDOW_DAYS, max_window_days: MAX_WINDOW_DAYS },
+    next: plan ? { due: !!plan.due, reason: plan.reason || null, since: plan.since || null, until: plan.until || null } : null,
+    recent_runs: runs,
+  };
 }
 
 function describe() {
@@ -133,6 +156,6 @@ function describe() {
 }
 
 module.exports = {
-  enabled, windowFor, planNextRun, runOnce, startScheduler, describe,
+  enabled, windowFor, planNextRun, runOnce, startScheduler, describe, status,
   NORMAL_WINDOW_DAYS, SETTLE_WINDOW_DAYS, MAX_WINDOW_DAYS, REFRESH_EVERY_HOURS, CHECK_EVERY_MS,
 };

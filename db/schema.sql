@@ -1799,7 +1799,7 @@ ALTER TABLE ad_setups ADD CONSTRAINT ad_setups_ad_type_check
   CHECK (ad_type IN ('single', 'carousel'));
 ALTER TABLE ad_setups DROP CONSTRAINT IF EXISTS ad_setups_url_link_page_check;
 ALTER TABLE ad_setups ADD CONSTRAINT ad_setups_url_link_page_check
-  CHECK (url_link_page IN ('product', 'category', 'new_arrivals', 'home', 'sale_bundle', 'other'));
+  CHECK (url_link_page IS NULL OR url_link_page IN ('product', 'category', 'new_arrivals', 'home', 'sale_bundle', 'other', 'sign_up'));
 ALTER TABLE ad_setups DROP CONSTRAINT IF EXISTS ad_setups_cta_check;
 ALTER TABLE ad_setups ADD CONSTRAINT ad_setups_cta_check
   CHECK (cta IN ('shop_now', 'sign_up', 'learn_more', 'shop_the_sale'));
@@ -3471,6 +3471,20 @@ CREATE TABLE IF NOT EXISTS copy_tone_guidelines (
   ai_summary TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Batch 36: Ad Setup naming auto-fill. url_link_page may be left unselected (Sale Live / Last Chance: the team chooses) and gains a
+-- 'sign_up' page for Sale Hype; naming_prefilled_at records that the one-time fill of EMPTY naming fields has happened, so a field a person later
+-- clears is never refilled. Additive and idempotent.
+ALTER TABLE ad_setups ALTER COLUMN url_link_page DROP NOT NULL;
+ALTER TABLE ad_setups ALTER COLUMN url_link_page DROP DEFAULT;
+ALTER TABLE ad_setups ADD COLUMN IF NOT EXISTS naming_prefilled_at TIMESTAMPTZ;
+
+-- Copy library may also be filled from uploaded CSV files when direct Google Sheets access is not configured ('sheets' | 'import').
+ALTER TABLE copy_reference_syncs ADD COLUMN IF NOT EXISTS source VARCHAR(12) NOT NULL DEFAULT 'sheets';
+
+-- Upcoming Drops: default people applied to NEW Required Concepts (never to existing ones, never over a manual choice). Both are optional; unset = no default.
+ALTER TABLE planning_settings ADD COLUMN IF NOT EXISTS drop_default_assignee VARCHAR(60);
+ALTER TABLE planning_settings ADD COLUMN IF NOT EXISTS drop_default_editor VARCHAR(60);
 
 -- Approved Ad Matching concepts + historical-spelling aliases
 -- =====================================================================

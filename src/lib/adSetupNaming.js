@@ -48,6 +48,7 @@ const URL_LINK_PAGE_LABELS = {
   new_arrivals: 'New Arrivals',
   home: 'Home Page',
   sale_bundle: 'Sale/Bundle Page',
+  sign_up: 'Sign Up Page',
   other: 'Other',
 };
 

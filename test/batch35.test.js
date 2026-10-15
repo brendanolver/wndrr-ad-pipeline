@@ -46,8 +46,8 @@ test('lifecycle: an ordinary concept can be archived, killed and (admin only) re
   assert.equal(action(admin, 'remove_test').destructive, true);
 });
 
-test('lifecycle: published, approved-Ad-Setup and Meta-linked concepts can only be archived', () => {
-  for (const f of [{ published: true }, { approvedAdSetup: true }, { metaLinked: true }]) {
+test('lifecycle: published and Meta-linked concepts can only be archived; an approved Ad Setup alone does not block Kill', () => {
+  for (const f of [{ published: true }, { metaLinked: true }]) {
     const r = evaluateLifecycle(facts(f), { isAdmin: true });
     assert.equal(r.protected, true);
     assert.equal(action(r, 'archive').allowed, true);
@@ -55,6 +55,13 @@ test('lifecycle: published, approved-Ad-Setup and Meta-linked concepts can only 
     assert.equal(action(r, 'remove_test').allowed, false);
     assert.ok(r.protected_reason);
   }
+});
+
+test('lifecycle: an approved Ad Setup that was never published can be killed, and the consequence says what happens', () => {
+  const r = evaluateLifecycle(facts({ stage: 'approved', approvedAdSetup: true }), { isAdmin: false });
+  assert.equal(r.protected, false);
+  assert.equal(action(r, 'kill').allowed, true);
+  assert.ok(r.consequences.some((c) => /approved Ad Setup leaves the Approved list/.test(c)));
 });
 
 test('lifecycle: archived concepts offer restore, not archive; killed concepts cannot be killed twice', () => {

@@ -147,15 +147,19 @@ function fnSource(name) {
   return app.slice(start, i + 1);
 }
 
-test('Final Approval and Ad Setup thumbnails come from the Final Edit link, never from a product image', () => {
+test('Final Approval and Ad Setup thumbnails prefer the Final Edit creative; a product image is only a labelled fallback (never the other way round)', () => {
   for (const fn of ['finalApprovalVersions', 'finalApprovalMediaStripHtml', 'finalApprovalCardHtml', 'adSetupMediaHtml', 'adSetupCardHtml', 'adSetupApprovedCardHtml']) {
     const body = fnSource(fn);
-    assert.doesNotMatch(body, /image_url|productThumbHtml|high-stock-thumb/, `${fn} must not use the product catalogue image`);
+    assert.doesNotMatch(body, /productThumbHtml|high-stock-thumb/, `${fn} must not render the product catalogue image as the creative`);
   }
-  assert.match(fnSource('finalApprovalMediaStripHtml'), /UX\.mediaThumbHtml\(v\.final_edit_link, v\.format/);
-  assert.match(fnSource('adSetupMediaHtml'), /UX\.mediaThumbHtml\(item\.final_edit_link/);
+  assert.match(fnSource('finalApprovalMediaStripHtml'), /UX\.creativeThumbHtml\(v\.final_edit_link, v\.format, productImage/);
+  assert.match(fnSource('adSetupMediaHtml'), /UX\.creativeThumbHtml\(item\.final_edit_link/);
   const modal = fnSource('renderFinalApprovalModal');
   assert.match(modal, /UX\.mediaThumbHtml/); assert.doesNotMatch(modal, /image_url/);
+  // the helper itself: creative first, tagged product fallback, neutral placeholder
+  const uxSrc = read('public/ux.js');
+  assert.match(uxSrc, /function creativeThumbHtml/);
+  assert.match(uxSrc, /Product image/);
 });
 
 test('the Final Approval queue returns every active version, additively', () => {
@@ -197,11 +201,12 @@ test('Concept editor sections follow the requested order and the footer keeps it
   void order;
 });
 
-test('Ad Setup: sections, footer order and the naming logic are as specified and untouched', () => {
+test('Ad Setup: sections, footer order and the naming logic are as specified (the generated-name panel is gone, the logic is not)', () => {
   const body = fnSource('renderAdSetupModal');
   const titles = [...body.matchAll(/as-section-title">([^<]+)</g)].map((m) => m[1]);
-  assert.deepEqual(titles.slice(0, 3), ['Ad details', 'Creative naming', 'Generated Meta name']);
-  assert.match(body, /Copy Name/);
+  assert.deepEqual(titles.slice(0, 2), ['Ad details', 'Creative naming']);
+  assert.ok(!titles.includes('Generated Meta name'), 'the large Generated Meta name panel is removed');
+  assert.match(fnSource('copyAdSetupName'), /buildMetaAdNamePreviewClient/, 'the name can still be copied');
   const footer = html.slice(html.indexOf('id="ad-setup-modal-footer"'));
   const labels = [...footer.slice(0, footer.indexOf('</div>')).matchAll(/<button[^>]*>([^<]*)</g)].map((m) => m[1].replace(/&[a-z]+;/g, '').trim());
   assert.deepEqual(labels, ['Move Back', 'Close', 'Save Draft', 'Approve Ad Setup']);

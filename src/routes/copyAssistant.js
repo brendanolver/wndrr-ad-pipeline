@@ -5,6 +5,7 @@ const { pool } = require('../db');
 const { requireAdmin } = require('../lib/permissions');
 const sheets = require('../lib/googleSheets');
 const library = require('../lib/copyLibrary');
+const { parseCsv } = require('../lib/csvParse');
 const ai = require('../lib/copyAi');
 const { detectPromotionStageType, AD_CATEGORY_LABELS } = require('../lib/adSetupNaming');
 
@@ -39,6 +40,39 @@ libraryRouter.post('/refresh', requireAdmin, async (req, res, next) => {
       try { summary = await summariseStyle(out.sync_id); } catch (e) { summary = { error: e.message }; }
     }
     res.json({ ok: true, examples: out.examples, tabs: out.tabs, ai_summary: summary && !summary.error ? 'written' : (summary ? `not written: ${summary.error}` : 'not configured') });
+  } catch (err) { next(err); }
+});
+
+// Import path when direct Google Sheets access is not configured: the tabs downloaded from the sheet as CSV (File > Download > .csv), one file per tab.
+// Replaces the library with exactly the files sent (same parsing, tone statistics and failure handling as a Sheets refresh). Admin only.
+libraryRouter.post('/import', requireAdmin, async (req, res, next) => {
+  try {
+    const files = Array.isArray((req.body || {}).files) ? req.body.files : [];
+    if (!files.length) return res.status(400).json({ error: 'Choose at least one CSV file.' });
+    if (files.length > 20) return res.status(400).json({ error: 'Import at most 20 tabs at once.' });
+    const byKey = new Map(library.EXPECTED_TABS.map((t) => [t.title.toLowerCase(), t.title]));
+    const tabs = new Map();
+    for (const f of files) {
+      const title = byKey.get(String((f && f.tab) || '').trim().toLowerCase());
+      if (!title) return res.status(400).json({ error: `"${(f && f.tab) || ''}" is not one of the copy tabs (${library.EXPECTED_TABS.map((t) => t.title).join(', ')}).` });
+      const text = String((f && f.text) || '');
+      if (!text.trim()) return res.status(400).json({ error: `The file for ${title} is empty.` });
+      if (text.length > 3 * 1024 * 1024) return res.status(400).json({ error: `The file for ${title} is too large (3 MB max).` });
+      if (tabs.has(title)) return res.status(400).json({ error: `${title} was chosen more than once.` });
+      tabs.set(title, parseCsv(text));
+    }
+    const running = await pool.query("SELECT 1 FROM copy_reference_syncs WHERE status = 'running' AND started_at > now() - interval '5 minutes' LIMIT 1");
+    if (running.rows.length) return res.status(409).json({ error: 'A refresh or import is already running. Give it a minute.' });
+    const fake = {
+      listTabs: async () => [...tabs.keys()].map((title) => ({ title })),
+      readTab: async (title) => tabs.get(title) || [],
+      readCredentials: sheets.readCredentials, sheetId: sheets.sheetId,
+    };
+    const out = await library.syncLibrary({ db: pool, sheets: fake, userId: req.user.id, source: 'import' });
+    if (!out.ok) return res.status(422).json({ code: out.code, error: out.error });
+    let summary = null;
+    if (ai.aiConfig().configured) { try { summary = await summariseStyle(out.sync_id); } catch (e) { summary = { error: e.message }; } }
+    res.json({ ok: true, source: 'import', examples: out.examples, tabs: out.tabs, ai_summary: summary && !summary.error ? 'written' : (summary ? `not written: ${summary.error}` : 'not configured') });
   } catch (err) { next(err); }
 });
 
@@ -101,7 +135,7 @@ async function preflight(res) {
   const { sync, examples } = await library.loadExamples(pool);
   if (!sync || !examples.length) {
     const sc = sheets.readCredentials();
-    res.status(409).json({ code: 'library_unavailable', error: sc.configured ? 'The WNDRR copy library has not been read yet. Ask an admin to refresh it (Settings > Copy library).' : `The WNDRR copy library is not connected. ${sc.reason}` });
+    res.status(409).json({ code: 'library_unavailable', error: sc.configured ? 'The WNDRR copy library has not been read yet. Ask an admin to refresh it (Settings > Copy Library).' : 'The WNDRR copy library has not been loaded yet. An admin can import the copy tabs as CSV files in Settings > Copy Library (or connect Google Sheets there).' });
     return null;
   }
   return { examples, sync };

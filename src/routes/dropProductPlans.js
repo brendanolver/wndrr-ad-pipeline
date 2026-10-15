@@ -147,6 +147,7 @@ async function generateOrTopUpPlan(dropId, productCode) {
           asset.id,
           slotResult.rows[0].id,
         ]);
+        await applyDropAssignmentDefaults(client, asset.id);
         nextRank += 1;
       }
     }
@@ -232,6 +233,26 @@ async function ensureDropProductionLinkage(client, { assetId, styleId, styleCode
   );
 }
 
+// Default people for a NEW Required Concept (Settings > Shoot Prep). Only fills what is empty on a concept that was just created, so a manual choice is never
+// replaced and existing concepts are never touched. Choosing the filming person is what queues a Drop concept for Shooting (see
+// ensureDropProductionLinkage), so a configured default behaves exactly like picking that person by hand. Unconfigured = no change at all.
+async function applyDropAssignmentDefaults(client, assetId) {
+  const s = (await client.query('SELECT drop_default_assignee, drop_default_editor FROM planning_settings WHERE id = 1')).rows[0];
+  if (!s || (!s.drop_default_assignee && !s.drop_default_editor)) return false;
+  const cur = (await client.query(
+    `SELECT ca.concept_assignee, ca.editing_owner, ca.style_id, ca.shoot_plan_item_id, st.style_code, st.drop_id
+       FROM creative_assets ca LEFT JOIN styles st ON st.id = ca.style_id WHERE ca.id = $1 FOR UPDATE OF ca`, [assetId])).rows[0];
+  if (!cur) return false;
+  const nextAssignee = cur.concept_assignee || s.drop_default_assignee || null;
+  const nextEditor = cur.editing_owner || s.drop_default_editor || null;
+  if (nextAssignee === cur.concept_assignee && nextEditor === cur.editing_owner) return false;
+  await client.query('UPDATE creative_assets SET concept_assignee = $1, editing_owner = $2, updated_at = now() WHERE id = $3', [nextAssignee, nextEditor, assetId]);
+  if (nextAssignee && !cur.concept_assignee && cur.drop_id) {
+    await ensureDropProductionLinkage(client, { assetId, styleId: cur.style_id, styleCode: cur.style_code, shootPlanItemId: cur.shoot_plan_item_id, filmingPerson: nextAssignee });
+  }
+  return true;
+}
+
 router.post('/', async (req, res, next) => {
   try {
     const { drop_id, product_code } = req.body || {};
@@ -299,6 +320,7 @@ router.post('/:id/slots', async (req, res, next) => {
         asset.id,
       ]);
     }
+    await applyDropAssignmentDefaults(client, asset.id);
     await client.query('COMMIT');
 
     const data = await fetchPlanWithSlots(req.params.id);
@@ -404,4 +426,4 @@ router.delete('/:id/slots/:slotId/fulfill', async (req, res, next) => {
   }
 });
 
-module.exports = { router, generateOrTopUpPlan, ensureDropProductionLinkage };
+module.exports = { router, generateOrTopUpPlan, ensureDropProductionLinkage, applyDropAssignmentDefaults };

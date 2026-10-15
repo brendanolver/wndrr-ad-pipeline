@@ -15,9 +15,20 @@ class AiError extends Error {
   constructor(code, message, status) { super(message); this.code = code; this.status = status || null; }
 }
 
+// The key is read from the server environment at request time (never cached, never sent to the browser). Surrounding quotes and whitespace that
+// are easy to paste in by accident are ignored. When it is missing the reason names exactly what the process can see (variable NAMES only, never values),
+// so a misnamed variable, an empty value or a service that was not redeployed after adding it can be told apart.
 function aiConfig(env = process.env) {
-  const key = (env.ANTHROPIC_API_KEY || '').trim();
-  return { configured: !!key, model: (env.COPY_AI_MODEL || DEFAULT_MODEL).trim(), reason: key ? null : 'ANTHROPIC_API_KEY is not set. Add it to the environment to enable the AI Copy Assistant.' };
+  const rawValue = env.ANTHROPIC_API_KEY;
+  const key = String(rawValue === undefined ? '' : rawValue).trim().replace(/^["']+|["']+$/g, '').trim();
+  const model = (env.COPY_AI_MODEL || DEFAULT_MODEL).trim();
+  if (key) return { configured: true, model, key, reason: null };
+  const near = Object.keys(env).filter((k) => /anthropic|claude/i.test(k) && k !== 'ANTHROPIC_API_KEY');
+  let reason;
+  if (rawValue !== undefined) reason = 'ANTHROPIC_API_KEY exists on the server but its value is empty. Set the key as the variable value and redeploy.';
+  else if (near.length) reason = `ANTHROPIC_API_KEY is not set on this server. Variables with similar names were found (${near.join(', ')}); the assistant only reads ANTHROPIC_API_KEY.`;
+  else reason = 'ANTHROPIC_API_KEY is not set on this server. Add it to the Railway service that runs the app (not another service or a different environment) and let it redeploy.';
+  return { configured: false, model, key: null, reason };
 }
 
 async function callModel({ system, messages, maxTokens = 1800, temperature = 0.8, env = process.env, fetchImpl = fetch }) {
@@ -30,7 +41,7 @@ async function callModel({ system, messages, maxTokens = 1800, temperature = 0.8
   try {
     res = await fetchImpl(`${base}/v1/messages`, {
       method: 'POST', signal: controller.signal,
-      headers: { 'content-type': 'application/json', 'x-api-key': env.ANTHROPIC_API_KEY.trim(), 'anthropic-version': '2023-06-01' },
+      headers: { 'content-type': 'application/json', 'x-api-key': cfg.key, 'anthropic-version': '2023-06-01' },
       body: JSON.stringify({ model: cfg.model, max_tokens: maxTokens, temperature, system, messages }),
     });
   } catch (e) {

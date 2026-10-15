@@ -67,6 +67,7 @@ const PORT = process.env.PORT || 3000;
 // Reference Library covers arrive as base64 (5 MB images), so it also gets a larger JSON limit.
 app.use('/api/reference-library', cookieParser(), requireAuth, express.json({ limit: '12mb' }));
 app.use('/api/update-requests', cookieParser(), requireAuth, express.json({ limit: '40mb' }), updateRequestRoutes);
+app.use('/api/copy-library', cookieParser(), requireAuth, express.json({ limit: '8mb' })); // CSV import of the copy reference tabs
 app.use(express.json());
 app.use(cookieParser());
 

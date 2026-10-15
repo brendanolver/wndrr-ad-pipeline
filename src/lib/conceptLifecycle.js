@@ -47,15 +47,14 @@ function evaluateLifecycle(facts, { isAdmin = false } = {}) {
     ? 'This creative has been published to Meta, so its history must stay.'
     : f.metaLinked
       ? 'A live Meta ad is matched to this creative, so its history must stay.'
-      : f.approvedAdSetup
-        ? 'Its Ad Setup has been approved for Meta, so its history must stay.'
-        : null;
+      : null;
 
   const consequences = [];
   if (c.shoot && !c.shot) consequences.push('It is scheduled for shooting; that booking leaves the Shooting calendar.');
   if (c.shot) consequences.push('Filming is already marked done; the footage itself is not touched.');
   if (c.finalEdits) consequences.push(`${c.finalEdits} final edit record${c.finalEdits === 1 ? '' : 's'} (links only, no files) stay attached.`);
   if (c.adSetups) consequences.push(`${c.adSetups} Ad Setup draft${c.adSetups === 1 ? '' : 's'} leave the Ad Setup queue.`);
+  if (f.approvedAdSetup) consequences.push('Its approved Ad Setup leaves the Approved list; the record is kept and nothing is created or changed in Meta.');
 
   const actions = [];
   if (f.archived) {
@@ -67,11 +66,11 @@ function evaluateLifecycle(facts, { isAdmin = false } = {}) {
     const canKill = !f.killed && !protectedReason;
     actions.push({ key: 'kill', label: ACTION_LABELS.kill, allowed: canKill,
       reason: f.killed ? 'Already killed.' : protectedReason,
-      description: 'Marks it as a legitimate concept that will not proceed. Reason and history are kept.' });
+      description: 'Takes this concept out of every active queue and count, wherever it is now. Its history and any Meta relationships are kept; nothing is deleted.' });
   }
-  const canRemove = isAdmin && !protectedReason;
+  const canRemove = isAdmin && !protectedReason && !f.approvedAdSetup;
   actions.push({ key: 'remove_test', label: ACTION_LABELS.remove_test, allowed: canRemove,
-    reason: !isAdmin ? 'Only an admin can permanently remove a concept.' : protectedReason,
+    reason: !isAdmin ? 'Only an admin can permanently remove a concept.' : (protectedReason || (f.approvedAdSetup ? 'Its Ad Setup has been approved, so the record is kept; use Kill Concept.' : null)),
     description: 'Permanently deletes a disposable test concept and its drafts. A record of what was removed is kept in the audit log.',
     destructive: true });
 

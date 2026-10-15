@@ -2,6 +2,19 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.3.0",
+      "date": "2026-10-15",
+      "title": "UX, workflow and Final Approval refinement",
+      "changes": [
+        "Kill Concept is now the single concept action on every production screen, works from any stage, and Move Back is on Shooting and Editing cards",
+        "Ad Setup: Product or Sale category, typed batch, automatic Creative Naming fields and URL page rules, no large generated-name panel; creative previews fall back to a labelled product image",
+        "Review creative (Ad Matching) redesigned as a fast two-column queue with a compact previous-match notice and evidence labels",
+        "Upcoming Drops alignment, larger progress checkboxes and configurable default Assigned To / Editing for new Required Concepts; Settings pages restyled to match Meta Performance",
+        "Copy library can be imported from CSV files when Google Sheets is not connected; clearer AI key diagnostics; read-only Meta auto sync status",
+        "Compact Shoot Plan summary and concept editor header; stage stepper on Shooting and Editing cards"
+      ]
+    },
+    {
       "version": "1.2.9",
       "date": "2026-10-15",
       "title": "Tuesday Review fix, concept cleanup and WNDRR copy assistant",
