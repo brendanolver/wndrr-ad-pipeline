@@ -52,7 +52,7 @@ async function plLoadProgress() {
     if (seq !== plProgSeq) return;
     state.conceptProgress = p;
   } catch (e) { if (seq !== plProgSeq) return; state.conceptProgress = null; }
-  try { renderProductionHeader(); plRenderShootPlanProgress(); if (typeof renderShootPlanStep === 'function') renderShootPlanStep(); } catch (e) { console.error('progress render failed', e); }
+  try { renderProductionHeader(); if (typeof renderShootPlanStep === 'function') renderShootPlanStep(); } catch (e) { console.error('progress render failed', e); }
 }
 // the old name the rest of the app calls after any change: refresh both
 function loadWeeklyVideoPlan(fresh) { plLoadProgress(); plLoadOpportunities(!!fresh); }
@@ -66,22 +66,35 @@ function plStageChips(counts, { compact } = {}) {
 }
 
 
-// compact weekly strip (Core / High Stocks): concepts planned vs target, kept distinct from products selected and from concepts carried over from earlier weeks
+// ── Batch 37: the Shoot Plan selection tray ─────────────────────────────────────────────────────────────────────────
+// Products a person explicitly added to THIS planning week's Shoot Plan (shoot_plan_items; entries a Drops assignment created for Shooting are not selections).
+// The tray sits directly under the Planning tabs on Core / High Stocks / Creative Insights, stays put while the page scrolls, and is hidden when nothing is selected.
+// It replaces the old "This Week's Shoot Plan" panel (target bar, counters, carry-over line).
+const plSelected = () => (state.shootPlan || []).filter((i) => !i.auto_linked);
+const PL_TRAY_KEY = 'wndrr.planning.trayCollapsed';
+const plTrayCollapsed = () => { try { return localStorage.getItem(PL_TRAY_KEY) === '1'; } catch (e) { return false; } };
+function plToggleTray() { try { localStorage.setItem(PL_TRAY_KEY, plTrayCollapsed() ? '0' : '1'); } catch (e) { /* storage unavailable: the choice just is not remembered */ } renderProductionHeader(); }
+const PL_TRAY_MAX = 5;
+const PL_CAMERA = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.5"/></svg>';
+function plTrayThumb(i) {
+  const img = i.image_url || ((i.styles || []).find((s) => s.image_url) || {}).image_url || '';
+  return `<span class="pl-tray-th" title="${plEsc(i.product_name || 'Product')}">${img ? `<img src="${plEsc(img)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}<span class="pl-tray-th-none" aria-hidden="true">${PL_NOIMG}</span></span>`;
+}
 function renderProductionHeader() {
   const el = document.getElementById('planning-production-header');
   if (!el) return;
-  const w = PE.weeklySummary(state.conceptProgress, (state.shootPlan || []).length, state.planningSettings && state.planningSettings.weekly_new_concept_target);
-  const title = plReadOnly() ? "That week's Shoot Plan" : "This Week's Shoot Plan";
-  if (!w.loaded) { el.innerHTML = `<div class="pl-week-row"><span class="pl-week-label">${title}</span><span class="pl-week-muted">Concept progress is loading.</span></div>`; return; }
-  const bits = [`${plPlural(w.products, 'product')} selected`];
-  if (w.carried) bits.push(`${w.carried} carried over from earlier weeks`);
-  const pct = w.target ? Math.max(0, Math.min(100, Math.round((w.planned / w.target) * 100))) : 0;
-  el.innerHTML = `<div class="pl-week-row"><span class="pl-week-label">${title}</span>
-    <span class="pl-week-fig"><b>${w.planned}</b> ${w.planned === 1 ? 'concept' : 'concepts'} planned${w.target ? ` / ${w.target} target` : ''}</span>
-    ${w.remaining !== null && w.target ? `<span class="pl-week-sep">&mdash;</span><span class="pl-week-fig">${w.remaining} ${w.remaining === 1 ? 'concept' : 'concepts'} remaining</span>` : ''}
-    <span class="pl-week-muted">${plEsc(bits.join(' · '))}</span>
-    <button type="button" class="btn btn-sm pl-week-link" onclick="setPlanningStep('shoot-plan')">View Shoot Plan &rarr;</button></div>
-    ${w.target ? `<div class="pl-week-goal"><span>Weekly creative goal</span><span class="pl-goal-bar" role="progressbar" aria-valuemin="0" aria-valuemax="${w.target}" aria-valuenow="${w.planned}" aria-label="Concepts planned against the weekly target"><i style="width:${pct}%"></i></span><span class="pl-goal-fig">${w.planned} / ${w.target} concepts</span></div>` : ''}`;
+  const items = plSelected();
+  if (!items.length) { el.hidden = true; el.innerHTML = ''; return; }
+  el.hidden = false;
+  const collapsed = plTrayCollapsed();
+  const more = items.length - PL_TRAY_MAX;
+  const label = `${plPlural(items.length, 'product')} selected`;
+  el.innerHTML = `<div class="pl-tray${collapsed ? ' collapsed' : ''}" role="region" aria-label="Shoot Plan selection" data-pl-tray data-count="${items.length}">
+    <div class="pl-tray-id"><span class="pl-tray-ic">${PL_CAMERA}</span><span class="pl-tray-txt"><b>Shoot Plan</b><small data-pl-tray-count>${label}</small></span></div>
+    ${collapsed ? '' : `<div class="pl-tray-thumbs" aria-label="Selected products">${items.slice(0, PL_TRAY_MAX).map(plTrayThumb).join('')}${more > 0 ? `<span class="pl-tray-more" title="${plEsc(items.slice(PL_TRAY_MAX).map((i) => i.product_name).filter(Boolean).join(', '))}">+${more}</span>` : ''}</div>`}
+    <button type="button" class="btn btn-primary pl-tray-go" onclick="setPlanningStep('shoot-plan')">View Shoot Plan &rarr;</button>
+    <button type="button" class="pl-tray-toggle" onclick="plToggleTray()" aria-expanded="${collapsed ? 'false' : 'true'}" aria-label="${collapsed ? 'Expand' : 'Collapse'} the Shoot Plan selection" title="${collapsed ? 'Show products' : 'Hide products'}">${PL_ICON.chev}</button>
+  </div>`;
 }
 
 // ── opportunity tables: Core and High Stocks share ONE interface (summary, compact filters, prioritised table, expandable explanation, Add to Shoot Plan) ──────────────
@@ -138,7 +151,7 @@ function plCreativeDate(c) {
 const PL_BLOCKED = ['not_launched', 'launch_unknown', 'unavailable'];
 function plInThisWeeksPlan(it) {
   const codes = new Set((it.codes || []).concat(it.product_code ? [it.product_code] : []));
-  return (state.shootPlan || []).some((s) => codes.has(s.product_code));
+  return plSelected().some((s) => codes.has(s.product_code));
 }
 
 // ── filters, sort, rendering ──
@@ -198,12 +211,12 @@ function plCoreStatusCell(it) {
   return `<td class="pt-status"><span class="pl-status" data-tone="${plEsc(st.tone)}"><i aria-hidden="true"></i>${plEsc(st.label)}</span><span class="pt-why-text">${plEsc(st.text)}</span>${tag}</td>`;
 }
 // ONE add button, the same in the row and in the panel: purple for products that need creative, a quieter outline for the others (Core never pushes a shoot on a covered product).
-// Once the product is in this week's plan it says so and a click adds another concept to the same record (the Shoot Plan modal never creates a duplicate product).
+// One click adds the product to this week's Shoot Plan (plQuickAdd); once it is in the plan the button says "Added" and does nothing (more concepts are added from the Shoot Plan tile).
 function plCoreAddBtn(it, cls = '') {
   if (plReadOnly() || PL_BLOCKED.includes(it.status)) return '';
   const needs = PE.categoryOf(it) === 'needs'; const inPlan = plInThisWeeksPlan(it); const k = plEsc(it.key);
-  if (inPlan) return `<button type="button" class="btn btn-sm pl-act pl-act-planned ${cls}" data-opp-add="${k}" title="Already in this week's Shoot Plan. Click to add another concept." aria-label="${plEsc(it.name)} is in the Shoot Plan. Add another concept">${PL_ICON.check} In Shoot Plan</button>`;
-  return `<button type="button" class="btn btn-sm pl-act ${needs ? 'pl-act-add' : 'pl-act-soft'} ${cls}" data-opp-add="${k}" title="Add this product to this week's Shoot Plan" aria-label="Add ${plEsc(it.name)} to the Shoot Plan">+ Add to Shoot Plan</button>`;
+  if (inPlan) return `<button type="button" class="btn btn-sm pl-act pl-act-planned ${cls}" data-opp-added="${k}" aria-pressed="true" title="Already in this week's Shoot Plan" aria-label="${plEsc(it.name)} has been added to the Shoot Plan">${PL_ICON.check} Added</button>`;
+  return `<button type="button" class="btn btn-sm pl-act ${needs ? 'pl-act-add' : 'pl-act-soft'} ${cls}" data-opp-add="${k}" title="Add this product to this week's Shoot Plan" aria-label="Add ${plEsc(it.name)} to the Shoot Plan">Add to Shoot</button>`;
 }
 function plCoreActionCell(it, mode) {
   const open = !!state.oppOpen[`${mode}:${it.key}`];
@@ -271,7 +284,7 @@ function plCoreDetailHtml(it, mode, ncols) {
     <div class="pl-cx-top">
       <div class="pl-cx-pic">${plMainImg(it.image_url)}${plCoreThumbs(it)}</div>
       <div class="pl-cx-main">
-        <div class="pl-cx-head"><div class="pl-cx-id"><h4>${plEsc(it.name)}</h4>${prio}<span class="pl-x-cat">${plEsc(it.category || '')}</span></div><span class="pl-cx-add">${plCoreAddBtn(it)}${PL_BLOCKED.includes(it.status) ? '<span class="hint">This product cannot be planned yet.</span>' : ''}${plReadOnly() ? '<span class="hint">Past weeks are read-only.</span>' : ''}</span></div>
+        <div class="pl-cx-head"><div class="pl-cx-id"><h4>${plEsc(it.name)}</h4>${prio}<span class="pl-x-cat">${plEsc(it.category || '')}</span></div><span class="pl-cx-add">${plCoreAddBtn(it)}${plReadOnly() || PL_BLOCKED.includes(it.status) ? '' : `<button type="button" class="link-btn pl-more-opts" data-opp-plan="${plEsc(it.key)}" title="Open the full Shoot This Week form: colourways, sizes, concept type, how many concepts">${plInThisWeeksPlan(it) ? 'Add another concept\u2026' : 'More options\u2026'}</button>`}${PL_BLOCKED.includes(it.status) ? '<span class="hint">This product cannot be planned yet.</span>' : ''}${plReadOnly() ? '<span class="hint">Past weeks are read-only.</span>' : ''}</span></div>
         <div class="pl-cx-why" data-tone="${plEsc(st.tone)}"><span class="pl-cx-why-ic">${PL_ICON.target}</span><div><b>${heading}</b><p>${plEsc(PE.whyShoot(it, cfg))}</p></div></div>
         ${plCoreMetrics(it)}
         ${plCoreColourCards(it)}
@@ -458,13 +471,14 @@ document.addEventListener('click', (ev) => {
   if (view) { const [mode, key] = view.dataset.oppView.split(':'); state.oppView[mode] = key; state.oppLimit[mode] = PL_PAGE; plRerender(mode); return; }
   if (ev.target.closest('[data-opp-refresh]')) { plLoadOpportunities(true); return; }
   const plan = ev.target.closest('[data-opp-plan]');
-  if (plan) { plPlan(plan.dataset.oppPlan, plan.dataset.oppColour || null); return; }
+  if (plan) { plPlan(plan.dataset.oppPlan, plan.dataset.oppColour || null, plan.dataset.oppColour ? {} : { styleCodes: plPickedFor(plan.dataset.oppPlan) }); return; }
   const swap = ev.target.closest('[data-opp-swap]');
   if (swap) { const box = swap.closest('.pl-cx') && swap.closest('.pl-cx').querySelector('.pl-cx-img'); if (box) box.innerHTML = `<img src="${plEsc(swap.dataset.oppSwap)}" alt="">`; return; }
   const meta = ev.target.closest('[data-opp-meta]');
   if (meta) { plViewMetaAds(meta.dataset.oppMeta); return; }
   const quick = ev.target.closest('[data-opp-add]');
-  if (quick) { plPlan(quick.dataset.oppAdd, null, { noConfirm: false, styleCodes: plPickedFor(quick.dataset.oppAdd) }); return; }
+  if (quick) { plQuickAdd(quick.dataset.oppAdd, { styleCodes: plPickedFor(quick.dataset.oppAdd) }); return; }
+  if (ev.target.closest('[data-opp-added]')) return;
   const ins = ev.target.closest('[data-ins-add]');
   if (ins) { plInsightAdd(ins.dataset.insAdd, ins.dataset.insConcept); return; }
   const insRow = ev.target.closest('[data-ins-row]');
@@ -537,6 +551,54 @@ function plSyncChrome() {
   });
   const main = document.getElementById('sidebar-planning');
   if (main) { main.classList.toggle('mp-open', open); main.setAttribute('aria-expanded', open ? 'true' : 'false'); }
+}
+
+// ── choosing a product: ONE click adds it to this week's Shoot Plan (Batch 37) ──
+// Uses the same prepare step and the same POST /shoot-plan the "Shoot This Week" form uses, so the production record, its Concept Development concept, colourways and the
+// duplicate rule are exactly the existing ones. The colourways that can be shot now (or the ones ticked in the expanded row) are included with the default sizes from
+// Settings, the default content creator owns it, and one concept is started. Everything can be changed afterwards from the Shoot Plan tile / Concept Development.
+// If no colourway can be shot right now the full form opens instead (it asks before including a restricted one).
+const PL_ADDING = new Set();
+function plSetBusy(key, on) { document.querySelectorAll(`[data-opp-add="${CSS.escape(key)}"]`).forEach((b) => { b.disabled = !!on; b.classList.toggle('is-busy', !!on); }); }
+async function plRefreshSelection() {
+  const w = planningWeekStart();
+  const [items, progress] = await Promise.all([api(`/shoot-plan?week_start=${w}`), apiAllowedOr(`/shoot-plan/progress?week_start=${w}`, null)]);
+  state.shootPlan = items;
+  if (progress) state.conceptProgress = progress;
+  for (const fn of [plRenderCore, plRenderHighStocks, renderProductionHeader, renderShootPlanStep, renderPlanningShootSummary, plSyncChrome]) { try { fn(); } catch (e) { console.error('selection refresh failed', e); } }
+  try { if (state.insights && state.insights.data && state.planningStep === 'creative-insights') plRenderInsights(); } catch (e) { /* insights optional */ }
+}
+async function plQuickAdd(key, extra = {}) {
+  if (plReadOnly() || PL_ADDING.has(key)) return;
+  const it = plFindItem(key);
+  if (it && plInThisWeeksPlan(it)) return; // already selected this week: never a second record
+  if (Array.isArray(extra.styleCodes) && !extra.styleCodes.length && it && (it.colourways || []).some((c) => c.viable)) return toast('Select at least one colourway to include in the Shoot Plan', true);
+  PL_ADDING.add(key); plSetBusy(key, true);
+  try {
+    const prep = await api('/opportunities/prepare-shoot', { method: 'POST', body: JSON.stringify({ key }) });
+    if (!prep.product_code) return toast('This product has no product code, so it cannot be planned here', true);
+    if (plSelected().some((i) => i.product_code === prep.product_code && !i.promotion_stage_id)) { await plRefreshSelection(); return; }
+    const colours = prep.colours || [];
+    const wanted = Array.isArray(extra.styleCodes) && extra.styleCodes.length ? new Set(extra.styleCodes) : null;
+    const chosen = colours.filter((c) => c.viable !== false && (!wanted || wanted.has(c.style_code)));
+    if (!chosen.length) { PL_ADDING.delete(key); plSetBusy(key, false); return plPlan(key, null, extra); } // nothing shootable: the full form, which asks before overriding
+    const garment = classifyGarmentType(prep.category);
+    const snapshot = extra.reason ? { ...(prep.snapshot || {}), reason: extra.reason, why: [extra.reason, ...(((prep.snapshot || {}).why) || [])], concept: extra.concept || null } : prep.snapshot;
+    const creatorEntry = (state.contentCreators || []).find((c) => c.is_default) || (state.contentCreators || [])[0];
+    const payload = {
+      product_code: prep.product_code, product_name: prep.product_name, source: prep.source || null, week_start: planningWeekStart(), concepts: 1,
+      stock_status: 'needs_to_be_brought_in', creator: creatorEntry ? creatorEntry.name : DEFAULT_CREATOR,
+      image_url: (colours.find((c) => c.image_url) || {}).image_url || null,
+      colourways: chosen.map((c) => ({ style_id: c.style_id, size: defaultSizeForColourway(garment, c.sizing_system, c.sizes) || null, colour_label: c.colour_label || null })),
+    };
+    if (extra.concept) payload.concept_type = extra.concept;
+    if (snapshot) payload.recommendation_snapshot = snapshot;
+    await createShootPlanSelection(payload); // app.js: the same POST /shoot-plan the Shoot This Week form uses
+    toast(`${prep.product_name || 'Product'} added to the Shoot Plan`);
+    await plRefreshSelection();
+    plLoadOpportunities(false); // the recommendation engine now sees the planned work (nothing about how it scores changes)
+  } catch (e) { toast(e.message, true); }
+  finally { PL_ADDING.delete(key); plSetBusy(key, false); }
 }
 
 // ── choosing a product: the explicit step into the Shoot Plan (via the existing modal) ──
@@ -613,6 +675,8 @@ async function plOpenConceptFromShootPlan(itemId) {
   state.conceptDev.weekOffset = state.planningWeekOffset || 0;
   state.conceptDev.view = 'list';
   switchTab('concept-dev');
+  // Concept Development lists a week's products once its Shoot Plan has been sent; before that the product's own workspace is opened directly (read from the same records).
+  if (!state.weeklyShootPlanConfirmation) { await openConceptDevProductStandalone(itemId); return; }
   await loadConceptDevWeek();
   openConceptDevProduct(itemId);
 }
@@ -671,43 +735,6 @@ document.addEventListener('click', (ev) => {
   const q = document.getElementById('pl-adapt-q'); if (q) q.addEventListener('input', () => { clearTimeout(PL_ADAPT.timer); PL_ADAPT.timer = setTimeout(plAdaptSearch, 250); });
   const s = document.getElementById('pl-adapt-save'); if (s) s.addEventListener('click', plAdaptSave);
 })();
-
-// the Shoot Plan section's production progress (moved here from the top of Planning): concepts against the target, what still needs organising, and every stage
-// One compact line of facts that the stage chips below do not already show (batch 35): ownership, products with no concept yet, work that can move on, and unfinished work from earlier weeks.
-function plShootPlanStatusStrip(p, items, noConcept) {
-  const owned = items.filter((i) => String(i.creator || '').trim()).length;
-  const unowned = items.length - owned;
-  const ready = (p.counts.filmed || 0) + (p.counts.edited || 0);
-  const overdue = (p.carryover && p.carryover.count) || 0;
-  const bits = [
-    UX.badgeHtml(plPlural(items.length, 'product') + ' selected', 'neutral'),
-    unowned ? UX.badgeHtml(`${unowned} unassigned`, 'amber') : (items.length ? UX.badgeHtml('All assigned', 'green') : ''),
-    noConcept ? UX.badgeHtml(`${plPlural(noConcept, 'product')} need a concept`, 'amber') : '',
-    ready ? UX.badgeHtml(`${ready} ready to progress`, 'purple') : '',
-    overdue ? UX.badgeHtml(`${overdue} overdue from earlier weeks`, 'red') : '',
-  ].filter(Boolean).join('');
-  return `<div class="sp-strip" data-sp-strip>${bits}</div>`;
-}
-
-function plRenderShootPlanProgress() {
-  const host = document.getElementById('shoot-plan-progress');
-  if (!host) return;
-  const p = state.conceptProgress;
-  if (!p) { host.innerHTML = ''; return; }
-  const sf = state.opportunities && state.opportunities.shortfall;
-  const items = state.shootPlan || [];
-  const noConcept = items.filter((i) => !plConceptsFor(i.id).filter((c) => !c.killed).length).length;
-  const pct = p.target ? Math.max(0, Math.min(100, Math.round((p.planned / p.target) * 100))) : 0;
-  const carry = p.carryover && p.carryover.count ? `<details class="opp-more"><summary>${plPlural(p.carryover.count, 'unfinished concept')} from earlier weeks</summary><ul class="pl-concept-list">${p.carryover.concepts.slice(0, 40).map((c) => `<li class="pl-concept"><span class="pl-concept-name">${plEsc(c.name)}</span><span class="pl-stage-tag" data-stage="${plEsc(c.stage)}">${plEsc(c.stage_label)}</span><span class="hint">${plEsc(c.product_name || '')} &middot; week of ${plEsc(c.week_start)}</span></li>`).join('')}</ul><div class="hint">Nothing is reset or removed when a new week starts; these stay in their real stage and are not counted toward this week's target.</div></details>` : '';
-  host.innerHTML = `<div class="ux-card pl-progress-card sp-progress">
-    <div class="sp-progress-head"><div><div class="ux-eyebrow">Weekly concept progress</div><div class="sp-progress-title"><b>${p.planned} of ${p.target}</b> new concepts planned this week</div></div>${p.reached ? UX.badgeHtml('Target met', 'green') : UX.badgeHtml(`${p.remaining} to go`, 'neutral')}</div>
-    ${UX.progressBarHtml(pct, p.reached ? 'green' : '')}
-    ${plShootPlanStatusStrip(p, items, noConcept)}
-    <div class="pl-sp-label">Production progress</div><div class="pl-stages">${plStageChips(p.counts)}</div>
-    ${sf && p.remaining > 0 ? `<div class="pl-shortfall">${plEsc(sf.text)}</div>` : ''}${carry}
-    <details class="opp-more"><summary>How concepts are counted</summary><div class="hint">${plEsc(p.definition)}</div></details></div>`;
-}
-
 
 // ── Settings → Planning ───────────────────────────────
 const WPS = { config: null, pick: null, timer: null, overrides: [] };
@@ -1018,7 +1045,7 @@ function plRenderInsights() {
 async function plInsightAdd(itemKey, conceptLabel) {
   const d = plInsState().data; const c = d && (d.concepts || []).find((x) => x.label === conceptLabel);
   const s = c && (c.suggestions || []).find((x) => x.item_key === itemKey);
-  await plPlan(itemKey, null, { concept: conceptLabel, reason: s ? s.reason : null, noConfirm: true });
+  await plQuickAdd(itemKey, { concept: conceptLabel, reason: s ? s.reason : null });
 }
 document.addEventListener('change', (ev) => { const f = ev.target.closest && ev.target.closest('[data-ins-status]'); if (f) { plInsState().status = f.value; plRenderInsights(); } });
 document.addEventListener('input', (ev) => {

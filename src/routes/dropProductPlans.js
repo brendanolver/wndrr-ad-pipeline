@@ -212,8 +212,8 @@ async function ensureDropProductionLinkage(client, { assetId, styleId, styleCode
     const am = await fetchAmData();
     const details = am.amDetails ? am.amDetails.get(styleCode) : null;
     const itemResult = await client.query(
-      `INSERT INTO shoot_plan_items (product_code, product_name, stock_status, creator, source, image_url, week_start, asset_id)
-       VALUES ($1, $2, 'needs_to_be_brought_in', $3, 'drop', $4, date_trunc('week', now())::date, $5) RETURNING id`,
+      `INSERT INTO shoot_plan_items (product_code, product_name, stock_status, creator, source, image_url, week_start, asset_id, auto_linked)
+       VALUES ($1, $2, 'needs_to_be_brought_in', $3, 'drop', $4, date_trunc('week', now())::date, $5, true) RETURNING id`,
       [productCode, details ? details.productName : null, filmingPerson, details ? details.imageUrl : null, assetId]
     );
     itemId = itemResult.rows[0].id;

@@ -179,7 +179,7 @@ test('every id the production-page handlers and earlier journeys rely on survive
     'ad-setup-modal-body', 'ad-setup-move-back-btn', 'ad-setup-save-btn', 'ad-setup-approve-btn',
     'adhoc-concept-name', 'adhoc-concept-style-search', 'adhoc-concept-style-results', 'adhoc-concept-style-chips', 'adhoc-concept-format',
     'week-prev', 'week-current', 'week-next', 'hero-week-title', 'hero-week-dates', 'pipeline-live-note', 'action-pipeline', 'action-brief-builder', 'action-library',
-    'planning-week-prev', 'planning-week-label', 'planning-week-next', 'planning-week-status', 'planning-this-week-btn', 'planning-week-picker', 'shoot-plan-progress', 'shoot-plan-grouped', 'shoot-plan-confirm-btn',
+    'planning-week-prev', 'planning-week-label', 'planning-week-next', 'planning-week-status', 'planning-this-week-btn', 'planning-week-picker', 'shoot-plan-grouped', 'shoot-plan-confirm-btn',
   ];
   const missing = ids.filter((id) => !html.includes(`id="${id}"`));
   assert.deepEqual(missing, []);

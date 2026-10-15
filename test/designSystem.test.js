@@ -63,7 +63,7 @@ test('Planning wiring (Batch 14): Core -> High Stocks -> Shoot Plan, no Weekly P
   for (const sec of ['core', 'high-stocks', 'creative-insights', 'shoot-plan']) assert.ok(html.includes(`data-pl-nav="${sec}"`), `sidebar sub-menu entry for ${sec}`);
   assert.ok(html.includes('id="sidebar-planning-subnav"'));
   assert.doesNotMatch(html, /data-pl-nav="(momentum|protect|revival)/, 'Protect Momentum is not a sidebar page');
-  for (const id of ['planning-production-header', 'core-plan', 'high-stock-list', 'shoot-plan-progress', 'shoot-plan-videos', 'shoot-plan-recommendation', 'pl-adapt-modal', 'season-immediate-days-input', 'season-secondary-days-input', 'wpc-groups', 'lo-list', 'weekly-target-input']) {
+  for (const id of ['planning-production-header', 'core-plan', 'high-stock-list', 'shoot-plan-grouped', 'shoot-plan-videos', 'shoot-plan-recommendation', 'pl-adapt-modal', 'season-immediate-days-input', 'season-secondary-days-input', 'wpc-groups', 'lo-list', 'weekly-target-input']) {
     assert.ok(html.includes(`id="${id}"`), `#${id} exists`);
   }
   assert.ok(!html.includes('weekly-video-target-input'), 'the 25-video target field is gone from Settings');

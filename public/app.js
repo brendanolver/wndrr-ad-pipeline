@@ -5182,7 +5182,9 @@ function setPlanningStep(key, { fromHash = false } = {}) {
   document.querySelectorAll('.planning-step-panel').forEach((panel) => panel.classList.toggle('active', panel.dataset.step === key));
   // The weekly strip is the Core / High Stocks summary; the Shoot Plan section carries the full production progress itself.
   const strip = document.getElementById('planning-production-header');
-  if (strip) strip.style.display = key === 'shoot-plan' ? 'none' : '';
+  if (strip) strip.style.display = key === 'shoot-plan' ? 'none' : ''; // the tray is for Core / High Stocks / Creative Insights; the Shoot Plan page shows the products themselves
+  const actions = document.getElementById('shoot-plan-actions');
+  if (actions) actions.hidden = key !== 'shoot-plan';
   if (!fromHash && document.getElementById('tab-planning').classList.contains('active') && window.location.hash !== `#planning/${key}`) window.location.hash = `#planning/${key}`;
   if (key === 'creative-insights' && typeof plLoadInsights === 'function') plLoadInsights();
   if (typeof plSyncChrome === 'function') plSyncChrome();
@@ -7911,6 +7913,11 @@ function applyShootPlanSizeDefaults() {
   });
 }
 
+// One explicit selection: the same endpoint the form below posts to (it keeps the one-record-per-product-per-week rule and starts the Concept Development concept).
+function createShootPlanSelection(payload) {
+  return api('/shoot-plan', { method: 'POST', body: JSON.stringify(payload) });
+}
+
 async function saveShootPlanItem() {
   // Size is only meaningful when something needs to be picked and brought
   // in -- if it's already in the office, nobody needs a size on a pull
@@ -7975,13 +7982,25 @@ async function saveShootPlanItem() {
 
 async function removeShootPlanItem(id) {
   if (state.planningWeekOffset < 0) return; // past weeks are read-only
-  if (!(await confirmDialog("Remove this product from this week's shoot plan? The creator's in-progress concept work is not affected."))) return;
+  const item = (state.shootPlan || []).find((i) => i.id === id);
+  const name = (item && item.product_name) || 'this product';
   try {
+    // ask first what removing would do: an untouched draft goes quietly; work that has started keeps the product in the plan and says where to deal with it
+    const impact = await api(`/shoot-plan/${id}/removal`);
+    if (!impact.removable) {
+      if (await confirmDialog(impact.message || `${name} has work in progress, so it cannot be removed from the plan.`, { okLabel: 'Open concept' })) plOpenConceptFromShootPlan(id);
+      return;
+    }
+    const n = impact.concepts.length;
+    const msg = `Remove ${name} from this week's Shoot Plan?${n ? ` Its ${n} untouched draft concept${n === 1 ? ' is' : 's are'} archived with it (history is kept).` : ''} The product itself is not affected.`;
+    if (!(await confirmDialog(msg, { okLabel: 'Remove from plan' }))) return;
     await api(`/shoot-plan/${id}`, { method: 'DELETE' });
-    toast('Removed from shoot plan');
+    toast('Removed from the Shoot Plan');
+    if (typeof plRefreshSelection === 'function') await plRefreshSelection(); else await loadAll();
     loadAll();
   } catch (e) {
     toast(e.message, true);
+    if (typeof plRefreshSelection === 'function') plRefreshSelection().catch(() => {});
   }
 }
 
@@ -9516,98 +9535,61 @@ async function saveShootPlanEditSizes() {
   }
 }
 
-// Shoot Plan product card (Batch 34): same card language as Concept Development. The headline facts are always visible
-// (product, owner, stage of each concept, next action); colourways, sizes and the saved idea sit under one "Details" fold.
+// Shoot Plan (Batch 37): a plain grid of compact product tiles -- only what the team deliberately selected for the week. One tile per product however many concepts
+// it has. No progress counters, targets, carry-over or recommendation text here; the tray in Planning and Concept Development carry the rest.
 const SHOOT_PLAN_PRODUCTION_STAGES = ['awaiting_production', 'filmed', 'edited', 'approved', 'uploaded'];
+const SHOOT_PLAN_TILE_SOURCE = { core: 'Core', high_stock: 'High Stocks', momentum: 'Protect Momentum', drop: 'Upcoming Drop', promotion: 'Promotion', manual: 'Added manually' };
+const SHOOT_PLAN_TILE_CONCEPTS = 2; // concept names shown before "+N more"
 
-function shootPlanProductRowHtml(item) {
-  const ready = item.stock_status === 'in_office';
-  // Past weeks are a read-only historical record -- no editing what
-  // already happened. Sizes only matter for colourways being pulled from
-  // the warehouse -- an "in office" sample has nothing to correct.
+// Only products a person chose appear here: entries an Upcoming Drops assignment created for Shooting (auto_linked) are not part of the Planning selection.
+const shootPlanSelected = () => (state.shootPlan || []).filter((i) => !i.auto_linked);
+
+function shootPlanTileHtml(item) {
   const readOnly = state.planningWeekOffset < 0;
-  const concepts = typeof plConceptsFor === 'function' ? plConceptsFor(item.id).filter((c) => !c.killed) : [];
-  const inProduction = concepts.some((c) => SHOOT_PLAN_PRODUCTION_STAGES.includes(c.stage));
-  const chips = item.styles
-    .map((s) => `<span class="shoot-plan-style-chip">${escapeHtml(s.colour_label || s.style_code)}${s.size ? ` · ${escapeHtml(s.size)}` : ''}</span>`)
-    .join('');
-  const editSizesBtn = !ready && !readOnly
-    ? `<button type="button" class="btn btn-ghost btn-sm" onclick="openShootPlanEditSizesModal(${item.id})">Edit sizes</button>`
-    : '';
-  const cw = item.styles.length;
-  // Derived from the concepts' real stages (no new state): the furthest-along unfinished step for this product.
-  const stageCount = (s) => concepts.filter((c) => c.stage === s).length;
-  const spStatus = !concepts.length ? UX.badgeHtml('Needs concept', 'amber')
-    : (stageCount('filmed') + stageCount('edited')) ? UX.badgeHtml('Ready to progress', 'purple')
-    : stageCount('awaiting_production') ? UX.badgeHtml('Awaiting production', 'neutral')
-    : concepts.every((c) => c.stage === 'approved' || c.stage === 'uploaded') ? UX.badgeHtml('Complete', 'green')
-    : UX.badgeHtml(`${concepts.length} in development`, 'neutral');
+  const concepts = typeof plConceptsFor === 'function' && state.conceptProgress ? plConceptsFor(item.id).filter((c) => !c.killed) : null;
+  const cw = (item.styles || []).length;
+  const owner = String(item.creator || '').trim();
+  const source = SHOOT_PLAN_TILE_SOURCE[item.source] || '';
+  const img = item.image_url || ((item.styles || []).find((s) => s.image_url) || {}).image_url || '';
+  const names = concepts ? concepts.map((c) => c.name) : [];
+  const shown = names.slice(0, SHOOT_PLAN_TILE_CONCEPTS);
+  const rest = names.slice(SHOOT_PLAN_TILE_CONCEPTS);
+  // the first names are always readable; the rest (and each concept's stage and "Adapt for another product") sit one click down
+  const conceptList = !concepts ? ''
+    : names.length
+      ? `<ul class="sp2-concepts">${shown.map((n) => `<li title="${escapeHtml(n)}">${escapeHtml(n)}</li>`).join('')}</ul><details class="sp2-more"><summary>${rest.length ? `+${rest.length} more` : 'Manage concepts'}</summary>${typeof wpShootPlanVideosHtml === 'function' ? wpShootPlanVideosHtml(item, readOnly) : ''}</details>`
+      : '<div class="sp2-none">No concepts yet</div>';
   const safeName = escapeHtml(item.product_name || '').replace(/'/g, '&#39;');
-  const openBtn = concepts.length
-    ? `<button type="button" class="ux-link-btn" data-sp-open="${item.id}" onclick="plOpenConceptFromShootPlan(${item.id})">Open concept${concepts.length === 1 ? '' : 's'} &rarr;</button>` : '';
-  const addBtn = readOnly ? '' : `<button type="button" class="btn btn-ghost btn-sm" data-sp-add="${item.id}" onclick="plAddConcepts(${item.id}, '${safeName}')">Add concept</button>`;
-  const continueBtn = inProduction ? `<button type="button" class="ux-link-btn" data-sp-continue="${item.id}" onclick="switchTab('shooting')">Continue to production &rarr;</button>` : '';
-  const removeBtn = readOnly ? '' : `<button type="button" class="ux-link-btn ux-link-muted" data-sp-remove="${item.id}" onclick="removeShootPlanItem(${item.id})">Remove from plan</button>`;
-  return `
-    <div class="shoot-plan-product-row ux-pcard sp-card" data-sp-item="${item.id}">
-      <div class="ux-pcard-main">
-        ${UX.productThumbHtml(item.image_url)}
-        <div class="ux-pcard-body">
-          <div class="ux-pcard-title shoot-plan-product-name">${escapeHtml(item.product_name)}</div>
-          <div class="ux-pcard-sub shoot-plan-pathway-chip">${escapeHtml(shootPlanRequirementLabel(item))}</div>
-          <div class="ux-pcard-meta"><span class="shoot-plan-owner">${String(item.creator || '').trim() ? `Owner: ${escapeHtml(item.creator)}` : '<span class="sp-unassigned">Unassigned</span>'}</span><span>${cw} colourway${cw === 1 ? '' : 's'}</span></div>
-        </div>
-        <div class="sp-card-badges">${spStatus}<span class="shoot-plan-stock-badge ${ready ? 'shoot-plan-stock-ready' : 'shoot-plan-stock-warehouse'}">${ready ? 'Ready' : 'From warehouse'}</span></div>
+  const openLabel = concepts && concepts.length > 1 ? 'Open concepts' : 'Open concept';
+  return `<article class="sp2-tile" data-sp-item="${item.id}">
+    <div class="sp2-top">
+      <span class="sp2-thumb">${img ? `<img src="${escapeHtml(img)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}<span class="sp2-thumb-none" aria-hidden="true"><svg class=ic focusable=false><use href=#i-image></use></svg></span></span>
+      <div class="sp2-main">
+        <h4 class="sp2-name" title="${escapeHtml(item.product_name || '')}">${escapeHtml(item.product_name || 'No product')}</h4>
+        <div class="sp2-facts"><span>${cw} colourway${cw === 1 ? '' : 's'}</span><span>${concepts ? `${concepts.length} concept${concepts.length === 1 ? '' : 's'}` : ''}</span></div>
+        ${conceptList}
+        <div class="sp2-owner">${owner ? `Owner: ${escapeHtml(owner)}` : '<span class="sp2-none">Owner not set</span>'}${source ? `<span class="sp2-src">${escapeHtml(source)}</span>` : ''}</div>
       </div>
-      ${!readOnly && typeof plShootPlanWarning === 'function' ? plShootPlanWarning(item) : ''}
-      ${typeof wpShootPlanVideosHtml === 'function' ? wpShootPlanVideosHtml(item, readOnly) : ''}
-      <details class="sp-details">
-        <summary>Details</summary>
-        <div class="shoot-plan-style-chips">${chips || '<span class="hint">No colourways selected.</span>'}</div>
-        ${editSizesBtn}
-        ${item.quick_note ? `<div class="shoot-plan-idea"><svg class=ic aria-hidden=true focusable=false><use href=#i-bulb></use></svg> ${escapeHtml(item.quick_note)}</div>` : ''}
-      </details>
-      <div class="ux-pcard-foot sp-foot">
-        <div class="sp-foot-actions">${addBtn}${openBtn}${continueBtn}</div>
-        ${removeBtn}
-      </div>
-    </div>`;
+    </div>
+    ${!readOnly && typeof plShootPlanWarning === 'function' ? plShootPlanWarning(item) : ''}
+    <div class="sp2-foot">
+      <button type="button" class="ux-link-btn" data-sp-open="${item.id}" onclick="plOpenConceptFromShootPlan(${item.id})">${openLabel} &rarr;</button>
+      ${readOnly ? '' : `<span class="sp2-foot-end"><button type="button" class="ux-link-btn ux-link-muted" data-sp-add="${item.id}" onclick="plAddConcepts(${item.id}, '${safeName}')" title="Start another concept for this product">+ Concept</button><button type="button" class="ux-link-btn ux-link-muted" data-sp-remove="${item.id}" onclick="removeShootPlanItem(${item.id})"><svg class="ic" aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-12M9 7V4h6v3"/></svg> Remove from plan</button></span>`}
+    </div>
+  </article>`;
 }
 
-function shootPlanGroupedHtml(emptyMessage) {
-  if (!state.shootPlan.length) {
-    return UX.emptyStateHtml(emptyMessage.split(' — ')[0].replace(/\.$/, ''), emptyMessage.includes(' — ') ? emptyMessage.split(' — ').slice(1).join(' — ') : '');
+function shootPlanGridHtml() {
+  const items = shootPlanSelected();
+  if (!items.length) {
+    return `<div class="sp2-empty"><div class="sp2-empty-ic" aria-hidden="true">${typeof PL_CAMERA !== 'undefined' ? PL_CAMERA : ''}</div><div class="sp2-empty-t">No products added to this week's shoot plan yet.</div><button type="button" class="btn btn-ghost sp2-empty-go" onclick="setPlanningStep('core')">Browse Creative Opportunities &rarr;</button></div>`;
   }
-  const bySource = new Map();
-  for (const item of state.shootPlan) {
-    const key = SHOOT_PLAN_SOURCE_ORDER.includes(item.source) ? item.source : 'other';
-    if (!bySource.has(key)) bySource.set(key, []);
-    bySource.get(key).push(item);
-  }
-  return SHOOT_PLAN_SOURCE_ORDER
-    .filter((key) => bySource.has(key))
-    .map((key) => `
-      <section class="shoot-plan-source-group ux-group">
-        <div class="ux-group-head"><h4 class="shoot-plan-source-label ux-group-title">${SHOOT_PLAN_SOURCE_LABELS[key]}</h4><span class="ux-group-count">${bySource.get(key).length}</span></div>
-        <div class="ux-grid ux-grid-wide">${bySource.get(key).map(shootPlanProductRowHtml).join('')}</div>
-      </section>`)
-    .join('');
+  return `<div class="sp2-grid">${items.map(shootPlanTileHtml).join('')}</div>`;
 }
 
-// Same grouped row list Shoot Plan itself uses -- so while working through
-// Core/High Stock/Upcoming Drops/Promotions, you can see exactly what's
-// been selected so far without switching tabs. "Go to Shoot Plan" still
-// jumps to the full step for the stat bar, Confirm & Send, and CSV export.
+// The persistent list under Core / High Stocks is gone (Batch 28); since Batch 37 the sticky selection tray (planning.js) shows the week's selection on every Planning tab.
 function renderPlanningShootPlanSummary() {
-  // The persistent "This Week's Shoot Plan" list under Core / High Stocks was removed (Batch 28): the weekly strip and the Shoot Plan section replace it.
-  const list = document.getElementById('planning-shoot-plan-summary-list');
-  if (!list) return;
-  const count = state.shootPlan.length;
-  document.getElementById('planning-shoot-plan-summary-count').textContent =
-    count ? `${count} product${count === 1 ? '' : 's'} selected this week` : 'Nothing selected yet this week';
-  document.getElementById('planning-shoot-plan-summary-link').style.display = count ? '' : 'none';
-  list.innerHTML =
-    shootPlanGroupedHtml('Nothing selected yet this week — use + Shoot This Week on a Core, High Stock, Upcoming Drop, or Promotion product to add one.');
+  if (typeof renderProductionHeader === 'function') renderProductionHeader();
 }
 
 // Colourway+size rows across every "Bring from Warehouse" selection --
@@ -9619,29 +9601,19 @@ function shootPlanWarehouseRows() {
 }
 
 function renderShootPlanStep() {
-  const total = state.shootPlan.length;
+  const items = shootPlanSelected();
+  const grid = document.getElementById('shoot-plan-grouped');
+  if (grid) grid.innerHTML = shootPlanGridHtml();
+  // Apparel Magic CSV: a quiet utility under the grid, shown only when there is something to pull
   const samplesRequired = shootPlanWarehouseRows().length;
-  // Once confirmed, the products/samples counts stay the headline -- "Sent
-  // to Content" collapses to a plain checkmark rather than a duplicate
-  // count, so this bar stays a glance-length summary, not another stat row.
-  const confirmedActive = Boolean(state.weeklyShootPlanConfirmation) && !state.shootPlanEditMode;
-  document.getElementById('shoot-plan-summary-stats').innerHTML = confirmedActive
-    ? `<span><strong>${total}</strong> Product${total === 1 ? '' : 's'}</span><span class="shoot-plan-summary-sep">&middot;</span>${wpVideosStatHtml()}<span class="shoot-plan-summary-sep">&middot;</span><span><strong>${samplesRequired}</strong> Sample${samplesRequired === 1 ? '' : 's'}</span><span class="shoot-plan-summary-sep">&middot;</span><span class="shoot-plan-summary-sent">&#10003; Sent to Content</span>`
-    : `<span><strong>${total}</strong> Product${total === 1 ? '' : 's'} Selected</span><span class="shoot-plan-summary-sep">&middot;</span>${wpVideosStatHtml()}<span class="shoot-plan-summary-sep">&middot;</span><span><strong>${samplesRequired}</strong> Sample${samplesRequired === 1 ? '' : 's'} Required</span><span class="shoot-plan-summary-sep">&middot;</span><span><strong>0</strong> Sent to Content</span>`;
-
-  document.getElementById('shoot-plan-grouped').innerHTML =
-    shootPlanGroupedHtml('Nothing planned yet this week — use + Shoot This Week on a Core, High Stock, Upcoming Drop, or Promotion product to add one.');
-
-  document.getElementById('shoot-plan-samples-required-count').textContent =
-    `${samplesRequired} sample${samplesRequired === 1 ? '' : 's'} required`;
-  document.getElementById('shoot-plan-csv-btn').disabled = !samplesRequired;
-
-  document.getElementById('shoot-plan-confirm-subtext').textContent =
-    `${total} product${total === 1 ? '' : 's'} will be added to the content workflow.`;
-
+  const csvRow = document.getElementById('shoot-plan-csv-row');
+  if (csvRow) csvRow.hidden = !samplesRequired;
+  const csvCount = document.getElementById('shoot-plan-samples-required-count');
+  if (csvCount) csvCount.textContent = `${samplesRequired} sample${samplesRequired === 1 ? '' : 's'} required`;
+  const csvBtn = document.getElementById('shoot-plan-csv-btn');
+  if (csvBtn) csvBtn.disabled = !samplesRequired;
   renderWeeklyShootPlanConfirmation();
-  if (typeof renderProductionHeader === 'function') renderProductionHeader(); // planned / sent totals come from this same list
-  if (typeof plRenderShootPlanProgress === 'function') plRenderShootPlanProgress(); // the section's own production progress (needs the current list)
+  if (typeof renderProductionHeader === 'function') renderProductionHeader(); // the Planning tray follows the same selection
 }
 
 // Formats a confirmation timestamp with both date and time, since "sent
@@ -9654,55 +9626,75 @@ function formatDateTime(value) {
   });
 }
 
+// The primary action sits top right on the Shoot Plan page. Once the plan has been sent it becomes a quiet "Sent" status with a way into Concept Development:
+// anything added afterwards reaches Concept Development by itself (it lists every product of a confirmed week), so there is nothing more to confirm.
 function renderWeeklyShootPlanConfirmation() {
   const cta = document.getElementById('shoot-plan-confirm-cta');
   const confirmed = document.getElementById('shoot-plan-confirmed-state');
   const btn = document.getElementById('shoot-plan-confirm-btn');
-  const editBtn = document.getElementById('shoot-plan-edit-plan-btn');
+  if (!cta || !confirmed || !btn) return;
   const readOnly = state.planningWeekOffset < 0;
-
-  if (state.weeklyShootPlanConfirmation && !state.shootPlanEditMode) {
-    cta.style.display = 'none';
-    confirmed.style.display = '';
-    document.getElementById('shoot-plan-confirmed-timestamp').textContent =
-      formatDateTime(state.weeklyShootPlanConfirmation.confirmed_at);
-    // No editing a past week's already-confirmed plan.
-    editBtn.style.display = readOnly ? 'none' : '';
+  const sent = state.weeklyShootPlanConfirmation;
+  cta.hidden = !!sent;
+  confirmed.hidden = !sent;
+  if (sent) {
+    document.getElementById('shoot-plan-confirmed-timestamp').textContent = formatDateTime(sent.confirmed_at);
   } else {
-    cta.style.display = '';
-    confirmed.style.display = 'none';
-    btn.disabled = !state.shootPlan.length || readOnly;
+    btn.disabled = !shootPlanSelected().length || readOnly;
+    btn.title = readOnly ? 'A past week is a read-only record.' : (!shootPlanSelected().length ? 'Add at least one product first.' : '');
   }
 }
 
-// "Edit Plan" doesn't undo the weekly confirmation record (it's idempotent
-// by design -- re-confirming just returns the existing row) -- it only
-// re-reveals the CTA so the team can keep adjusting the plan without the
-// confirmed card sitting in the way. Confirming again from here is a no-op
-// against the backend and simply returns to the confirmed view.
-function editShootPlan() {
-  state.shootPlanEditMode = true;
-  // The top summary's "Sent to Content" checkmark also depends on edit
-  // mode now, so this needs the full step repaint, not just the
-  // confirmation row.
-  renderShootPlanStep();
+function openConceptDevForPlanWeek() {
+  state.conceptDev.weekOffset = state.planningWeekOffset || 0;
+  state.conceptDev.view = 'list';
+  switchTab('concept-dev');
+  loadConceptDevWeek();
+}
+
+// Confirm & Send Shoot Plan: ask the server what it will hand over (and anything worth knowing first), show it, and only then send.
+let shootPlanConfirmBusy = false;
+async function openShootPlanConfirm() {
+  if (state.planningWeekOffset < 0 || shootPlanConfirmBusy) return;
+  const body = document.getElementById('shoot-plan-confirm-body');
+  const go = document.getElementById('shoot-plan-confirm-go');
+  body.innerHTML = '<div class="hint">Checking the plan&hellip;</div>';
+  go.disabled = true;
+  openModal('shoot-plan-confirm-modal');
+  try {
+    const pv = await api(`/weekly-shoot-plan-confirmation/preview?week_start=${planningWeekStart()}`);
+    const rows = pv.products.map((p) => `<li class="spc-row"><span class="spc-name">${escapeHtml(p.product_name || 'No product')}</span><span class="spc-concepts">${p.concepts.length ? p.concepts.map((c) => escapeHtml(c.name)).join(' &middot; ') : '<span class="sp2-none">No concepts yet</span>'}</span>${p.notes.length ? `<span class="spc-note">${p.notes.map(escapeHtml).join(' ')}</span>` : ''}</li>`).join('');
+    body.innerHTML = `<div class="spc-sum"><b>${pv.product_count}</b> product${pv.product_count === 1 ? '' : 's'} &middot; <b>${pv.concept_count}</b> concept${pv.concept_count === 1 ? '' : 's'}</div>
+      ${pv.blockers.length ? `<div class="spc-block">${pv.blockers.map(escapeHtml).join(' ')}</div>` : `<ul class="spc-list">${rows}</ul>`}
+      ${pv.notes_count ? `<div class="spc-flag">${pv.notes_count} thing${pv.notes_count === 1 ? '' : 's'} worth a look (shown above). You can still send the plan.</div>` : ''}
+      <p class="spc-effect">${escapeHtml(pv.effect)}</p>`;
+    go.disabled = !!pv.blockers.length;
+  } catch (e) {
+    body.innerHTML = `<div class="spc-block">${escapeHtml(e.message)}</div>`;
+  }
 }
 
 async function confirmWeeklyShootPlan() {
+  if (shootPlanConfirmBusy) return; // a second click while the first is in flight does nothing; the server is idempotent as well
+  shootPlanConfirmBusy = true;
+  const go = document.getElementById('shoot-plan-confirm-go');
+  if (go) go.disabled = true;
   try {
     state.weeklyShootPlanConfirmation = await api('/weekly-shoot-plan-confirmation', {
       method: 'POST',
       body: JSON.stringify({ week_start: planningWeekStart() }),
     });
-    state.shootPlanEditMode = false;
+    closeModal('shoot-plan-confirm-modal');
     renderShootPlanStep();
-    // The "5 Shoot Plan" nav tick and the week-header badge both derive
-    // from this same confirmation, so they need their own repaint here.
     renderPlanningStepNav();
     renderPlanningWeekHeader();
     toast('Shoot plan sent to Concept Development');
+    loadAll();
   } catch (e) {
     toast(e.message, true);
+    if (go) go.disabled = false;
+  } finally {
+    shootPlanConfirmBusy = false;
   }
 }
 

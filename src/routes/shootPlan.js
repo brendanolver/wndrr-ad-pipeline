@@ -11,6 +11,7 @@ const bust = () => {
   try { require('../lib/planningOpportunitiesLoader').invalidate(); } catch (e) { /* cache only */ }
 };
 const progressLib = require('../lib/shootPlanProgress');
+const selection = require('../lib/shootPlanSelection');
 const MAX_CONCEPTS = 10;
 
 const STOCK_STATUSES = ['in_office', 'needs_to_be_brought_in'];
@@ -108,6 +109,7 @@ router.get('/', async (req, res, next) => {
       asset_status: i.asset_status,
       asset_status_label: i.asset_status ? (STATUS_LABELS[i.asset_status] || i.asset_status) : null,
       source: i.source,
+      auto_linked: !!i.auto_linked,
       planned_videos: Math.max(i.planned_videos || 1, i.video_assets || 0),
       planned_videos_set: i.planned_videos || 1,
       video_assets: i.video_assets || 0,
@@ -450,13 +452,34 @@ router.patch('/:id/week', async (req, res, next) => {
   }
 });
 
+// What removing a plan entry would do (read-only): which concepts exist, and whether any has work on it. The Shoot Plan asks before removing.
+router.get('/:id/removal', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid item id' });
+    const a = await selection.assessRemoval(pool, id);
+    if (!a) return res.status(404).json({ error: 'Shoot plan item not found' });
+    res.json({ item_id: id, removable: a.removable, concepts: a.concepts, message: a.blocking.length ? selection.blockingMessage(a) : null });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Remove a product from the week's Shoot Plan. Untouched draft concepts are archived with it (history kept); if any concept already has work on it the plan entry
+// stays and the answer (409) says which concept and where to close it. The product record itself is never touched. Past weeks are a read-only record.
 router.delete('/:id', async (req, res, next) => {
   try {
-    const result = await pool.query('DELETE FROM shoot_plan_items WHERE id = $1 RETURNING id', [req.params.id]);
-    if (!result.rows.length) return res.status(404).json({ error: 'Shoot plan item not found' });
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid item id' });
+    const week = (await pool.query("SELECT (week_start < date_trunc('week', now())::date) AS past FROM shoot_plan_items WHERE id = $1", [id])).rows[0];
+    if (!week) return res.status(404).json({ error: 'Shoot plan item not found' });
+    if (week.past) return res.status(409).json({ error: 'A past week is a read-only record.' });
+    const lifecycle = require('../lib/conceptLifecycle');
+    const out = await selection.removeSelection(pool, id, (conceptId, reason) => lifecycle.applyAction(conceptId, 'archive', req.user, { reason }));
     bust();
-    res.status(204).send();
+    res.json(out);
   } catch (err) {
+    if (err instanceof selection.RemovalError) return res.status(err.status).json({ error: err.message, blocking: err.blocking || undefined });
     next(err);
   }
 });

@@ -48,11 +48,11 @@ test('creative status: it only re-words the engine output (no recalculation of s
   st(it); assert.deepEqual(it, copy, 'the engine item is not mutated');
 });
 
-test('redesign wiring: row cells, planned state and the weekly goal strip', () => {
+test('redesign wiring: row cells, planned state and the selection tray', () => {
   const pl = fs.readFileSync(path.join(__dirname, '..', 'public', 'planning.js'), 'utf8');
   const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
   assert.match(pl, /plCoreStatusCell\(it\)/); assert.match(pl, /plCoreSalesCell\(it\)/); assert.match(pl, /plCoreCoverageCell\(it\)/); assert.match(pl, /plCoreActionCell\(it, mode\)/);
   assert.match(pl, /pl-act-planned/, 'a selected product shows a planned state');
-  assert.match(pl, /pl-week-goal/); assert.match(pl, /Weekly creative goal/); assert.match(pl, /View Shoot Plan/);
+  assert.match(pl, /View Shoot Plan/); // Batch 37: the weekly-goal strip became the selection tray
   for (const tone of ['red', 'amber', 'green', 'grey']) assert.match(css, new RegExp(`\\.pl-status\\[data-tone="${tone}"\\]`), `${tone} tone styled`);
 });

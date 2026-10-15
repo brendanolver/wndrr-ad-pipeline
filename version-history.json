@@ -2,6 +2,18 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.3.1",
+      "date": "2026-10-15",
+      "title": "Planning: selection tray and simplified Shoot Plan",
+      "changes": [
+        "Planning: a sticky selection tray under the tabs (Core, High Stocks, Creative Insights) shows the products added to the week's Shoot Plan, with thumbnails and View Shoot Plan.",
+        "Add to Shoot is one click and the product shows Added; selections persist per week and a repeat never duplicates.",
+        "The Shoot Plan page is now a grid of compact product tiles (only products explicitly added) with Confirm & Send Shoot Plan at the top right and a confirmation summary that does not submit anything for Tuesday Review.",
+        "Remove from plan archives untouched drafts and is refused, with an explanation, once a concept has work on it.",
+        "The old This Week's Shoot Plan panel, progress counters and Upcoming Drops auto-population are removed from Planning."
+      ]
+    },
+    {
       "version": "1.3.0",
       "date": "2026-10-15",
       "title": "UX, workflow and Final Approval refinement",

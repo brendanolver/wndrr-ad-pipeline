@@ -470,15 +470,27 @@
         </div>
 
         <!-- Section navigation: the same four sections as the sidebar sub-menu, kept in step with it (plSyncChrome). -->
+        <div class="pl-navrow">
         <div class="pl-topnav" id="planning-topnav" role="tablist" aria-label="Planning sections">
           <button type="button" class="pl-topnav-btn" data-pl-nav="core" role="tab">Core</button>
           <button type="button" class="pl-topnav-btn" data-pl-nav="high-stocks" role="tab">High Stocks</button>
           <button type="button" class="pl-topnav-btn" data-pl-nav="creative-insights" role="tab">Creative Insights</button>
           <button type="button" class="pl-topnav-btn" data-pl-nav="shoot-plan" role="tab">Shoot Plan</button>
         </div>
+        <!-- The primary action of the Shoot Plan page: top right, level with the tabs. Shown only on that page. -->
+        <div class="pl-navrow-action" id="shoot-plan-actions" hidden>
+          <div id="shoot-plan-confirm-cta">
+            <button type="button" class="btn btn-primary shoot-plan-cta-btn" id="shoot-plan-confirm-btn" onclick="openShootPlanConfirm()">Confirm &amp; Send Shoot Plan &rarr;</button>
+          </div>
+          <div id="shoot-plan-confirmed-state" class="shoot-plan-confirmed-row" hidden>
+            <span class="shoot-plan-confirmed-status"><span class="shoot-plan-confirmed-tick">&#10003;</span> Sent to Concept Development &middot; <span id="shoot-plan-confirmed-timestamp"></span></span>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="openConceptDevForPlanWeek()">Open Concept Development &rarr;</button>
+          </div>
+        </div>
+        </div>
 
-        <!-- Compact weekly strip (Core / High Stocks): concepts planned against the target. The full production progress lives on the Shoot Plan page. -->
-        <div id="planning-production-header" class="pl-week-strip" aria-live="polite"></div>
+        <!-- Shoot Plan selection tray (Core / High Stocks / Creative Insights): the products chosen for this week, directly under the tabs, sticky while scrolling; hidden when nothing is selected. -->
+        <div id="planning-production-header" class="pl-tray-host" aria-live="polite" hidden></div>
 
         <div class="planning-step-panel active" data-step="core" id="planning-step-core">
           <div id="core-plan" class="core-plan"></div>
@@ -521,32 +533,15 @@
         <div class="planning-step-panel" data-step="shoot-plan" id="planning-step-shoot-plan">
           <div class="pl-section-head">
             <h3 class="pl-section-title">Shoot Plan</h3>
-            <span class="pl-section-sub">What we are shooting this week, the concepts behind it, and what is already in production.</span>
-          </div>
-
-          <div id="shoot-plan-progress"></div>
-
-          <div class="shoot-plan-summary-bar">
-            <div class="shoot-plan-summary-stats" id="shoot-plan-summary-stats"></div>
-            <button type="button" class="shoot-plan-csv-link" id="shoot-plan-csv-btn" onclick="downloadApparelMagicCsv()">
-              <span id="shoot-plan-samples-required-count">0 samples required</span> · Download Apparel Magic CSV &darr;
-            </button>
+            <span class="pl-section-sub">Products and concepts selected for this week's shoot.</span>
           </div>
 
           <div id="shoot-plan-grouped"></div>
 
-          <div class="shoot-plan-primary-handoff">
-            <div id="shoot-plan-confirm-cta">
-              <button type="button" class="btn btn-primary shoot-plan-cta-btn" id="shoot-plan-confirm-btn" onclick="confirmWeeklyShootPlan()">Confirm &amp; Send Shoot Plan &rarr;</button>
-              <div class="admin-note" id="shoot-plan-confirm-subtext">0 products will be added to the content workflow.</div>
-            </div>
-            <!-- Compact, one-row completed state -- a small green tick +
-                 timestamp, not another coloured panel competing with the
-                 products list above. -->
-            <div id="shoot-plan-confirmed-state" class="shoot-plan-confirmed-row" style="display:none;">
-              <span class="shoot-plan-confirmed-status"><span class="shoot-plan-confirmed-tick">&#10003;</span> Shoot Plan Confirmed &middot; <span id="shoot-plan-confirmed-timestamp"></span></span>
-              <button type="button" class="btn btn-ghost btn-sm" id="shoot-plan-edit-plan-btn" onclick="editShootPlan()">Edit Plan</button>
-            </div>
+          <div class="sp2-csv" id="shoot-plan-csv-row" hidden>
+            <button type="button" class="shoot-plan-csv-link" id="shoot-plan-csv-btn" onclick="downloadApparelMagicCsv()">
+              <span id="shoot-plan-samples-required-count">0 samples required</span> &middot; Download Apparel Magic CSV &darr;
+            </button>
           </div>
         </div>
       </div>
@@ -4131,6 +4126,21 @@
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('shoot-plan-edit-sizes-modal')">Cancel</button>
       <button class="btn btn-primary" onclick="saveShootPlanEditSizes()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Confirm & Send Shoot Plan: what will be handed to Concept Development, anything worth knowing first, and what it does not do (it never submits a concept for Tuesday Review). -->
+<div id="shoot-plan-confirm-modal" class="modal-backdrop">
+  <div class="modal spc-modal">
+    <div class="modal-header">
+      <h3>Confirm &amp; Send Shoot Plan</h3>
+      <button class="modal-close" onclick="closeModal('shoot-plan-confirm-modal')">&times;</button>
+    </div>
+    <div class="modal-body" id="shoot-plan-confirm-body"></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('shoot-plan-confirm-modal')">Cancel</button>
+      <button class="btn btn-primary" id="shoot-plan-confirm-go" onclick="confirmWeeklyShootPlan()">Confirm &amp; Send</button>
     </div>
   </div>
 </div>

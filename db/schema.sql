@@ -3486,6 +3486,12 @@ ALTER TABLE copy_reference_syncs ADD COLUMN IF NOT EXISTS source VARCHAR(12) NOT
 ALTER TABLE planning_settings ADD COLUMN IF NOT EXISTS drop_default_assignee VARCHAR(60);
 ALTER TABLE planning_settings ADD COLUMN IF NOT EXISTS drop_default_editor VARCHAR(60);
 
+-- Batch 37: Planning > Shoot Plan shows only products a person explicitly chose. Assigning a filming person to a Drop Required Concept creates a
+-- shoot_plan_items row of its own (source 'drop') so Shooting can pick the concept up; auto_linked marks those rows so Planning does not present them as
+-- deliberate Shoot Plan selections. Nothing is removed or changed for Shooting, Editing or Concept Development. Additive and idempotent.
+-- Rows created before this column existed are recognised at read time by that same rule (see AUTO_LINKED_SQL in src/lib/shootPlanSelection.js), so no existing row is rewritten.
+ALTER TABLE shoot_plan_items ADD COLUMN IF NOT EXISTS auto_linked BOOLEAN NOT NULL DEFAULT false;
+
 -- Approved Ad Matching concepts + historical-spelling aliases
 -- =====================================================================
 -- The concept list Ad Matching offers is the people-approved vocabulary: meta_matching_vocab rows of kind 'concept'. The 40 approved
