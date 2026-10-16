@@ -7365,6 +7365,7 @@ function renderCoreStepFooter() {
 function renderCoreShootPlanning() {
   const list = document.getElementById('core-shoot-planning-list');
   renderCoreStepFooter();
+  if (typeof plApplyCoreTab === 'function') plApplyCoreTab();
   if (!state.coreProducts.length) {
     list.innerHTML = '<div class="attention-empty">No Core products found yet.</div>';
     return;

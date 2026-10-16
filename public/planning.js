@@ -468,12 +468,41 @@ function plUnavailableHtml() {
 function plPageHtml(mode, extra = '') {
   return `<div class="opp-panel pl-page pl-core" data-opp-panel="${mode}">${extra}${plSummaryHtml(mode, { slim: true })}${plCoreCardHtml(mode)}</div>`;
 }
+// ── Core page: one tab bar, not two stacked sections: "Creative Opportunities" (the recommendations table) | "Core Catalogue" (every category and product) ────────────────────────────────
+// Only the selected view shows. The choice is kept for the session; the counts come from the same results the views show.
+const PL_CORE_TABS = ['opportunities', 'catalogue'];
+function plCoreTab() { try { const v = sessionStorage.getItem('wndrr.coreTab'); if (PL_CORE_TABS.includes(v)) return v; } catch (e) { /* storage unavailable: the default is fine */ } return state.coreTab && PL_CORE_TABS.includes(state.coreTab) ? state.coreTab : 'opportunities'; }
+function plApplyCoreTab() {
+  const tab = plCoreTab(); state.coreTab = tab;
+  document.querySelectorAll('#core-tabs .core-tab').forEach((b) => { const on = b.dataset.coreTab === tab; b.classList.toggle('active', on); b.setAttribute('aria-selected', on ? 'true' : 'false'); b.tabIndex = on ? 0 : -1; });
+  const opp = document.getElementById('core-plan'); const cat = document.getElementById('core-view-catalogue');
+  if (opp) opp.hidden = tab !== 'opportunities';
+  if (cat) cat.hidden = tab !== 'catalogue';
+  const o = state.opportunities; const a = document.getElementById('core-tab-count-opportunities'); const c = document.getElementById('core-tab-count-catalogue');
+  if (a) a.textContent = o && o.available && o.core && o.core.actionable !== undefined ? String(o.core.actionable) : '';
+  if (c) c.textContent = Array.isArray(state.coreProducts) && state.coreProducts.length ? String(state.coreProducts.length) : '';
+}
+function plSetCoreTab(tab, focus) {
+  if (!PL_CORE_TABS.includes(tab)) return;
+  try { sessionStorage.setItem('wndrr.coreTab', tab); } catch (e) { /* kept for this page view only */ }
+  state.coreTab = tab; plApplyCoreTab();
+  if (focus) { const b = document.getElementById(`core-tab-${tab}`); if (b) b.focus(); }
+}
+document.addEventListener('click', (ev) => { const b = ev.target.closest('#core-tabs [data-core-tab]'); if (b) plSetCoreTab(b.dataset.coreTab); });
+document.addEventListener('keydown', (ev) => {
+  const b = ev.target.closest && ev.target.closest('#core-tabs [data-core-tab]'); if (!b) return;
+  const i = PL_CORE_TABS.indexOf(b.dataset.coreTab);
+  if (ev.key === 'ArrowRight' || ev.key === 'ArrowLeft') { ev.preventDefault(); plSetCoreTab(PL_CORE_TABS[(i + (ev.key === 'ArrowRight' ? 1 : PL_CORE_TABS.length - 1)) % PL_CORE_TABS.length], true); }
+  else if (ev.key === 'Home') { ev.preventDefault(); plSetCoreTab(PL_CORE_TABS[0], true); } else if (ev.key === 'End') { ev.preventDefault(); plSetCoreTab(PL_CORE_TABS[PL_CORE_TABS.length - 1], true); }
+});
+
 function plRenderCore() {
   const host = document.getElementById('core-plan');
   if (!host) return;
   const o = state.opportunities;
-  if (!o || !o.available) { host.innerHTML = plUnavailableHtml(); return; }
+  if (!o || !o.available) { host.innerHTML = plUnavailableHtml(); plApplyCoreTab(); return; }
   host.innerHTML = plPageHtml('core');
+  plApplyCoreTab();
   if (typeof renderPlanningStepNav === 'function') renderPlanningStepNav();
 }
 

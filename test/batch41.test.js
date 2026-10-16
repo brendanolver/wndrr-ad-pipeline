@@ -59,9 +59,16 @@ test('category rows and product rows use those results; the older flags are only
   assert.match(pl, /renderCoreShootPlanning\(\); \} catch \(e\) \{ console\.error\('core catalogue render failed'/, 're-rendered when the Planning results arrive');
 });
 
-test('the panel header is a prominent, obviously clickable card (still a details/summary, so keyboard and screen readers work)', () => {
-  assert.match(html, /<details class="co-how core-browse"><summary><span class="core-browse-chev"[^>]*><\/span><span class="core-browse-text"><span class="core-browse-title">Browse the full Core catalogue<\/span>/);
-  assert.match(css, /details\.core-browse > summary\{display:flex;[^}]*cursor:pointer/);
-  assert.match(css, /\.core-browse-cta::before\{content:'Show categories';\}/); assert.match(css, /details\.core-browse\[open\] > summary \.core-browse-cta::before\{content:'Hide';\}/);
-  assert.match(css, /\.core-browse-title\{font-size:17px/);
+test('the Core page has ONE tab bar (Creative Opportunities | Core Catalogue); only the selected view shows (v1.4.2)', () => {
+  assert.match(html, /<div class="core-tabs" id="core-tabs" role="tablist"/);
+  assert.match(html, /data-core-tab="opportunities"[\s\S]*data-core-tab="catalogue"/);
+  assert.match(html, /<div id="core-plan" class="core-plan" role="tabpanel"/);
+  assert.match(html, /<div class="core-catalogue-panel" id="core-view-catalogue" role="tabpanel"[^>]*\bhidden\b/, 'the catalogue is its own panel, hidden until its tab is chosen');
+  assert.doesNotMatch(html, /core-browse|<summary>Browse the full/, 'the dropdown is gone');
+  const apply = fn(pl, 'plApplyCoreTab');
+  assert.match(apply, /aria-selected/); assert.match(apply, /opp\.hidden = tab !== 'opportunities'/); assert.match(apply, /cat\.hidden = tab !== 'catalogue'/);
+  assert.match(apply, /o\.core\.actionable/, 'the Opportunities count is the table\'s own "needs creative" total');
+  assert.match(pl, /sessionStorage\.setItem\('wndrr\.coreTab'/); assert.match(pl, /ArrowRight/); assert.match(pl, /ev\.key === 'Home'/);
+  assert.match(pl, /host\.innerHTML = plPageHtml\('core'\);\n  plApplyCoreTab\(\);/, 're-applied whenever the Core table re-renders');
+  assert.match(css, /\.core-tab\.active\{[^}]*border-bottom-color/); assert.match(css, /\.core-plan\[hidden\],\.core-catalogue-panel\[hidden\]\{display:none;\}/);
 });

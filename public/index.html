@@ -493,8 +493,12 @@
         <div id="planning-production-header" class="pl-tray-host" aria-live="polite" hidden></div>
 
         <div class="planning-step-panel active" data-step="core" id="planning-step-core">
-          <div id="core-plan" class="core-plan"></div>
-          <details class="co-how core-browse"><summary><span class="core-browse-chev" aria-hidden="true"></span><span class="core-browse-text"><span class="core-browse-title">Browse the full Core catalogue</span><span class="core-browse-note">Every Core category and product, with sales, stock and creative status (not recommendations)</span></span><span class="core-browse-cta"></span></summary>
+          <div class="core-tabs" id="core-tabs" role="tablist" aria-label="Core view">
+            <button type="button" class="core-tab active" id="core-tab-opportunities" role="tab" aria-selected="true" aria-controls="core-plan" data-core-tab="opportunities"><span>Creative Opportunities</span><span class="core-tab-count" id="core-tab-count-opportunities"></span></button>
+            <button type="button" class="core-tab" id="core-tab-catalogue" role="tab" aria-selected="false" aria-controls="core-view-catalogue" tabindex="-1" data-core-tab="catalogue"><span>Core Catalogue</span><span class="core-tab-count" id="core-tab-count-catalogue"></span></button>
+          </div>
+          <div id="core-plan" class="core-plan" role="tabpanel" aria-labelledby="core-tab-opportunities"></div>
+          <div class="core-catalogue-panel" id="core-view-catalogue" role="tabpanel" aria-labelledby="core-tab-catalogue" hidden>
           <div class="core-shoot-planning-title">Core Shoot Planning</div>
           <div class="core-shoot-planning-subtitle">Which Core products should we shoot this week?</div>
           <div class="core-shoot-category-header">
@@ -519,7 +523,7 @@
             <div id="core-products-list" class="core-products-list"></div>
           </div>
 
-          </details>
+          </div>
         </div>
 
         <div class="planning-step-panel" data-step="high-stocks" id="planning-step-high-stocks">

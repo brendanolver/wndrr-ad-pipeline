@@ -2,6 +2,14 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.4.2",
+      "date": "2026-10-16",
+      "title": "Core planning: one tab bar (Creative Opportunities | Core Catalogue)",
+      "changes": [
+        "The Core page now has a single tab bar to swap between Creative Opportunities and the Core Catalogue (every category and product), replacing the two stacked sections and the dropdown. Only the selected view shows; each tab carries a count; the choice is remembered for the session and the tabs work with the keyboard."
+      ]
+    },
+    {
       "version": "1.4.1",
       "date": "2026-10-16",
       "title": "Core catalogue: Creative Attention and Freshness match the Core table; more prominent panel",
