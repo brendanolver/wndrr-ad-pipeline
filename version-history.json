@@ -2,6 +2,14 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.4.1",
+      "date": "2026-10-16",
+      "title": "Core catalogue: Creative Attention and Freshness match the Core table; more prominent panel",
+      "changes": [
+        "Core Shoot Planning (Browse the full Core catalogue): Creative Attention and Creative Freshness now use the same results as the Core table above. Categories show how many products need creative attention (with High priority and needs-review counts) and how many are stale; expanded products show the table's own status, priority, Active Ads, and the latest creative date with how long ago and a Recent / Ageing / Stale band, using the Planning settings' windows. The panel header is now a prominent card with a Show categories / Hide button."
+      ]
+    },
+    {
       "version": "1.4.0",
       "date": "2026-10-16",
       "title": "Planning: product names under the Shoot Plan bar thumbnails",

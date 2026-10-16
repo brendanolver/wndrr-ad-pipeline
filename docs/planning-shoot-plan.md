@@ -60,6 +60,16 @@ Limitations: the left half is assumed to be the front (the catalogue convention;
 - **Status control.** Shooting (Scheduled / In production / Filmed) and Editing (Filmed / Scheduled / In editing / Awaiting approval) share one single-line stepper. Any stage can be chosen, forwards or backwards, through the existing endpoints; leaving Filmed asks first, and a concept already in Final Approval is directed to Request Changes there. Nothing is deleted.
 - No database change.
 
+## Core catalogue: Creative Attention and Creative Freshness (v1.4.1)
+
+The "Browse the full Core catalogue" panel (Core Shoot Planning) no longer uses its own older flag / stale count. Both columns now come from the same results as the Core table above (`plCatalogueMap` in `planning.js`, keyed by product code):
+
+* **Creative Attention** (category row): how many products need creative attention (the Core table's "needs creative" category), how many of those are High priority, and how many need review. Categories are ranked by that count. **Product row**: the Core table's own status pill (for example "No Active Creative"), its priority, the status sentence and "N Active Ads". Only products the Core table lists as needing creative are shown under a category, ordered by priority then score.
+* **Creative Freshness** (category row): how many products have a stale (or no) latest creative. **Product row**: the Core table's "Latest creative" date, how long ago, and a band. Bands use the engine's own windows from the Planning settings: Recent (under `recent_creative_days`, default 30), Ageing, Stale (`stale_creative_days`, default 90 or more), and "No creative" when nothing is on record. Creatives without a reliable date show "Unknown" and no band.
+* Products the Core table has not assessed show "Not assessed". If the Planning results are not loaded, the panel falls back to the older flags until they arrive, and re-renders when they do.
+
+The panel header is a prominent card (title, one-line explanation, "Show categories" / "Hide" button); it is still a `<details>` element.
+
 ## Creative coverage dates (v1.3.3)
 
 The "Latest:" date in Core and High Stocks (one shared cell, `plCoreCoverageCell` -> `PlanningExplain.coverage`) is always `D Mon YYYY`, using the year in the creative's own source date (never the current year, never invented). Missing creative dates stay `Unknown` / `None`; an impossible date is treated as unavailable. Display only: counting and recommendations are unchanged.

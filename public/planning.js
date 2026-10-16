@@ -39,6 +39,7 @@ async function plLoadOpportunities(fresh) {
     state.opportunitiesError = e.message;
   }
   try { plRenderCore(); plRenderHighStocks(); } catch (e) { console.error('opportunity render failed', e); }
+  try { if (typeof renderCoreShootPlanning === 'function' && Array.isArray(state.coreProducts)) renderCoreShootPlanning(); } catch (e) { console.error('core catalogue render failed', e); } // its Attention / Freshness come from the same results
   try { plRenderSettingsInfo(); } catch (e) { console.error('planning settings info failed', e); }
   try { if (typeof renderShootPlanStep === 'function' && Array.isArray(state.shootPlan)) renderShootPlanStep(); } catch (e) { console.error('shoot plan stock warnings failed', e); } // the stock warnings on planned work follow the latest assessment
   try { renderProductionHeader(); } catch (e) { /* header is optional */ }
@@ -221,6 +222,52 @@ function plCoreActiveAdsLine(it) {
   const c = PE.coverage(it, ((state.opportunities || {}).today || '').slice(0, 4));
   if (!c.known) return '';
   return `<small class="pt-active" title="${plEsc(c.title)}">${c.activeKnown ? plNum(c.active) : plNone} Active ${c.activeKnown && c.active === 1 ? 'Ad' : 'Ads'}</small>`;
+}
+// ── "Browse the full Core catalogue": the SAME engine results as the Core table above, per product and per category ───────────────────────────────────────────────────────────────
+// Attention = the table's own status / category (needs creative | covered | needs review) and priority; Freshness = the table's "Latest creative" date, banded with the engine's own
+// windows (recent_creative_days / stale_creative_days from the Planning settings); nothing here classifies a product itself. The catalogue (app.js) is keyed by product_code.
+function plFreshBand(cov, cfg) {
+  if (!cov || !cov.known || cov.latest === null) return null;
+  if (!cov.latestKnown) return cov.latest === 'None' ? { key: 'stale', label: 'No creative' } : null; // "Unknown": creatives exist but no reliable date, so no band
+  if (cov.days === null || cov.days === undefined) return null;
+  const recent = Number(cfg.recent_creative_days) || 30; const stale = Number(cfg.stale_creative_days) || 90;
+  return cov.days < recent ? { key: 'fresh', label: 'Recent' } : cov.days < stale ? { key: 'aging', label: 'Ageing' } : { key: 'stale', label: 'Stale' };
+}
+function plCatalogueMap() {
+  const o = state.opportunities;
+  if (!o || !o.available || !o.core || !Array.isArray(o.core.items)) return null;
+  const cfg = plCfg(); const year = String(o.today || '').slice(0, 4); const m = new Map();
+  for (const it of o.core.items) {
+    const cov = PE.coverage(it, year);
+    const info = { it, cat: PE.categoryOf(it), st: PE.coreStatus(it, cfg), cov, band: plFreshBand(cov, cfg), high: it.priority === 'high' && PE.categoryOf(it) === 'needs' };
+    for (const code of [it.product_code, ...(it.codes || [])]) if (code && !m.has(code)) m.set(code, info);
+  }
+  return m;
+}
+// the two category-level numbers: how many products need creative attention (and how many of those are High priority), and how many have stale (or no) creative
+function plCatalogueStats(products, map) {
+  const seen = new Set(); const out = { matched: 0, needs: 0, high: 0, review: 0, stale: 0 };
+  for (const p of products) {
+    const info = map.get(p.product_code); if (!info || seen.has(info.it.key)) continue; seen.add(info.it.key);
+    out.matched += 1;
+    if (info.cat === 'needs') { out.needs += 1; if (info.high) out.high += 1; } else if (info.cat === 'review') out.review += 1;
+    if (info.band && info.band.key === 'stale') out.stale += 1;
+  }
+  return out;
+}
+function plCatalogueAttentionHtml(info) {
+  if (!info) return '<span class="core-cat-none">Not assessed</span>';
+  const st = info.st; const pr = info.it.actionable && info.it.priority ? `<span class="opp-priority" data-priority="${plEsc(info.it.priority)}">${plEsc(info.it.priority)}</span>` : '';
+  const ads = info.cov.activeKnown ? `<small class="core-cat-ads">${plNum(info.cov.active)} Active ${info.cov.active === 1 ? 'Ad' : 'Ads'}</small>` : '';
+  return `<div class="core-cat-attn"><div class="core-cat-attn-top"><span class="pl-status" data-tone="${plEsc(st.tone)}"><i aria-hidden="true"></i>${plEsc(st.label)}</span>${pr}</div><span class="core-cat-why">${plEsc(st.text)}</span>${ads}</div>`;
+}
+function plCatalogueFreshnessHtml(info) {
+  if (!info || !info.cov.known || info.cov.latest === null) return '<span class="core-cat-none">&mdash;</span>';
+  const c = info.cov; const b = info.band;
+  const date = `<b class="core-cat-date${c.latestKnown ? '' : ' none'}">${plEsc(c.latest)}</b>`;
+  const age = c.latestKnown && c.days !== null && c.days !== undefined ? `<small>${plEsc(plAgo(c.days))}</small>` : '';
+  const chip = b ? `<span class="core-fresh-chip" data-band="${b.key}">${plEsc(b.label)}</span>` : '';
+  return `<div class="core-cat-fresh" title="${plEsc(c.title)}">${date}${age}${chip}</div>`;
 }
 function plCoreStatusCell(it) {
   const st = PE.coreStatus(it, plCfg());

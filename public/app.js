@@ -7060,6 +7060,7 @@ function coreProblemProductsHeaderHtml() {
       <span>7D Sales</span>
       <span>MTD vs LY</span>
       <span>Creative Attention</span>
+      <span>Creative Freshness</span>
       <span>This Week</span>
     </div>`;
 }
@@ -7096,17 +7097,22 @@ function coreAttentionChipsHtml(p) {
   return chips.map((c) => `<span class="core-reason-chip">${escapeHtml(coreTitleCaseChip(c))}</span>`).join('');
 }
 
-function coreProblemProductRowHtml(p, selectedCodes) {
-  const badge = p.flag === 'needs_attention' ? '<span class="dot dot-r" aria-hidden="true"></span>' : p.flag === 'opportunity' ? '<span class="dot dot-o" aria-hidden="true"></span>' : '';
+function coreProblemProductRowHtml(p, selectedCodes, eng) {
+  const info = eng ? eng.get(p.product_code) || null : null;
+  const badge = eng ? (info && info.cat === 'needs' ? '<span class="dot dot-r" aria-hidden="true"></span>' : '') : (p.flag === 'needs_attention' ? '<span class="dot dot-r" aria-hidden="true"></span>' : p.flag === 'opportunity' ? '<span class="dot dot-o" aria-hidden="true"></span>' : '');
   const isSelected = selectedCodes.has(p.product_code);
   const trend = coreProductTrendInfo(p);
+  // Creative Attention and Creative Freshness are the Core table's own results (status, priority, Active Ads, Latest creative); the older flag / chips only when those are not loaded
+  const attention = eng ? plCatalogueAttentionHtml(info) : coreAttentionChipsHtml(p);
+  const freshness = eng ? plCatalogueFreshnessHtml(info) : '<span class="core-cat-none">&mdash;</span>';
   return `
     <div class="core-shoot-review-row core-product-row${isSelected ? ' core-row-selected' : ''}">
       <div class="core-shoot-review-col-product">${badge ? badge + ' ' : ''}<span class="core-shoot-review-name">${escapeHtml(p.product_name)}</span></div>
       <div class="core-shoot-review-col-inventory">${coreInventoryCellHtml(p)}</div>
       <div class="core-shoot-review-col-7d">${core7dCellHtml(trend)}</div>
       <div class="core-shoot-review-col-cadence">${coreCadenceBoxHtml(trend)}</div>
-      <div class="core-shoot-review-col-reasons">${coreAttentionChipsHtml(p)}</div>
+      <div class="core-shoot-review-col-reasons">${attention}</div>
+      <div class="core-shoot-review-col-fresh">${freshness}</div>
       <div class="core-shoot-review-col-action">${shootActionHtml(p.product_code, 'shootThisWeekForCore', selectedCodes)}</div>
     </div>`;
 }
@@ -7294,7 +7300,23 @@ function core7dCellHtml(trend) {
     </div>`;
 }
 
-function coreShootCategoryRowHtml(cat, selectedCodes) {
+// Category-level Creative Attention / Freshness: the Core table's own counts (products needing creative, High priority among them, products needing review, products whose latest
+// creative is stale or missing); the older flag counts only while those results are not loaded.
+function coreCategoryAttentionHtml(cat) {
+  if (!cat.eng) return cat.needsAttention ? `<span class="core-shoot-stat"><span class="dot dot-r" aria-hidden="true"></span> <span class="core-shoot-stat-count core-shoot-count-red">${cat.needsAttention}</span> needing attention</span>` : '';
+  const s = cat.eng;
+  if (!s.matched) return '<span class="core-cat-none">Not assessed</span>';
+  if (!s.needs && !s.review) return '<span class="core-shoot-stat core-cat-ok">&#10003; None needing attention</span>';
+  return `<div class="core-stat-stack">${s.needs ? `<span class="core-shoot-stat"><span class="dot dot-r" aria-hidden="true"></span> <span class="core-shoot-stat-count core-shoot-count-red">${s.needs}</span> needing attention</span>` : ''}${s.high ? `<span class="core-shoot-sub">${s.high} High priority</span>` : ''}${s.review ? `<span class="core-shoot-sub">${s.review} need${s.review === 1 ? 's' : ''} review</span>` : ''}</div>`;
+}
+function coreCategoryFreshnessHtml(cat) {
+  if (!cat.eng) return cat.stale ? `<span class="core-shoot-stat">${cat.stale} stale/untested</span>` : '';
+  const s = cat.eng;
+  if (!s.matched) return '<span class="core-cat-none">&mdash;</span>';
+  return s.stale ? `<div class="core-stat-stack"><span class="core-shoot-stat"><span class="core-shoot-stat-count core-shoot-count-amber">${s.stale}</span> stale</span><span class="core-shoot-sub">latest creative old or none</span></div>` : '<span class="core-shoot-stat core-cat-ok">&#10003; None stale</span>';
+}
+
+function coreShootCategoryRowHtml(cat, selectedCodes, eng) {
   const isOpen = state.coreShootExpandedCategories.has(cat.name);
   const trend = coreCategoryTrendInfo(cat.name);
   return `
@@ -7312,10 +7334,10 @@ function coreShootCategoryRowHtml(cat, selectedCodes) {
           ${coreCadenceCellHtml(trend)}
         </span>
         <span class="core-shoot-stat-col">
-          ${cat.needsAttention ? `<span class="core-shoot-stat"><span class="dot dot-r" aria-hidden="true"></span> <span class="core-shoot-stat-count core-shoot-count-red">${cat.needsAttention}</span> needing attention</span>` : ''}
+          ${coreCategoryAttentionHtml(cat)}
         </span>
         <span class="core-shoot-stat-col">
-          ${cat.stale ? `<span class="core-shoot-stat">${cat.stale} stale/untested</span>` : ''}
+          ${coreCategoryFreshnessHtml(cat)}
         </span>
         <span class="core-shoot-stat-col">
           ${cat.selectedCount ? `<span class="core-shoot-stat core-shoot-stat-selected">✓ ${cat.selectedCount} selected this week</span>` : ''}
@@ -7323,8 +7345,8 @@ function coreShootCategoryRowHtml(cat, selectedCodes) {
       </button>
       ${isOpen ? `<div class="core-shoot-category-body">
         ${cat.problemProducts.length
-          ? coreProblemProductsHeaderHtml() + cat.problemProducts.map((p) => coreProblemProductRowHtml(p, selectedCodes)).join('')
-          : '<div class="attention-empty">No problem products in this category right now.</div>'}
+          ? coreProblemProductsHeaderHtml() + cat.problemProducts.map((p) => coreProblemProductRowHtml(p, selectedCodes, eng)).join('')
+          : '<div class="attention-empty">No products in this category need creative attention right now.</div>'}
       </div>` : ''}
     </div>`;
 }
@@ -7356,25 +7378,39 @@ function renderCoreShootPlanning() {
     byCategory.get(p.category).push(p);
   }
 
-  const categories = [...byCategory.entries()].map(([name, products]) => ({
-    name,
-    total: products.length,
-    needsAttention: products.filter((p) => p.flag === 'needs_attention').length,
-    opportunity: products.filter((p) => p.flag === 'opportunity').length,
-    stale: products.filter((p) => p.days_since_last_new_concept == null || p.days_since_last_new_concept > CORE_STALE_DAYS).length,
-    selectedCount: selectedCounts.get(name) || 0,
-    problemProducts: products.filter((p) => p.flag === 'needs_attention' || p.flag === 'opportunity'),
-  }));
+  const eng = typeof plCatalogueMap === 'function' ? plCatalogueMap() : null; // the Core table's own results, when loaded
+  const categories = [...byCategory.entries()].map(([name, products]) => {
+    const stats = eng ? plCatalogueStats(products, eng) : null;
+    const rank = (p) => { const i = eng.get(p.product_code); return i ? (i.high ? 2000 : 0) + (i.it.score || 0) : -1; };
+    return {
+      name,
+      total: products.length,
+      eng: stats,
+      needsAttention: products.filter((p) => p.flag === 'needs_attention').length,
+      opportunity: products.filter((p) => p.flag === 'opportunity').length,
+      stale: products.filter((p) => p.days_since_last_new_concept == null || p.days_since_last_new_concept > CORE_STALE_DAYS).length,
+      selectedCount: selectedCounts.get(name) || 0,
+      problemProducts: eng
+        ? products.filter((p) => { const i = eng.get(p.product_code); return i && i.cat === 'needs'; }).sort((a, b) => rank(b) - rank(a))
+        : products.filter((p) => p.flag === 'needs_attention' || p.flag === 'opportunity'),
+    };
+  });
 
-  // Rank by how much creative attention each category currently needs.
+  // Rank by how much creative attention each category currently needs (the Core table's own count when loaded).
   categories.sort((a, b) => {
+    if (eng) {
+      if (b.eng.needs !== a.eng.needs) return b.eng.needs - a.eng.needs;
+      if (b.eng.high !== a.eng.high) return b.eng.high - a.eng.high;
+      if (b.eng.stale !== a.eng.stale) return b.eng.stale - a.eng.stale;
+      return a.name.localeCompare(b.name);
+    }
     if (b.needsAttention !== a.needsAttention) return b.needsAttention - a.needsAttention;
     if (b.opportunity !== a.opportunity) return b.opportunity - a.opportunity;
     if (b.stale !== a.stale) return b.stale - a.stale;
     return a.name.localeCompare(b.name);
   });
 
-  list.innerHTML = categories.map((cat) => coreShootCategoryRowHtml(cat, selectedCodes)).join('');
+  list.innerHTML = categories.map((cat) => coreShootCategoryRowHtml(cat, selectedCodes, eng)).join('');
   list.querySelectorAll('.core-shoot-category-toggle').forEach((btn) => {
     btn.addEventListener('click', () => toggleCoreShootCategory(btn.dataset.category));
   });
