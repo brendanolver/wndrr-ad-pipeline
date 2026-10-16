@@ -140,7 +140,7 @@ test('ui: Priority exists only in Needs creative and + Add in all three; Priorit
   assert.match(pl, /priority: \{[^}]*only: 'needs'/); assert.match(pl, /const needs = cat === 'needs'/, 'Priority is a column only in Needs creative');
   assert.match(pl.slice(pl.indexOf('function plCoreAddBtn'), pl.indexOf('// colourway cards')), /data-opp-add/, 'the Add action exists in every category');
   assert.match(pl, /\$\{cur === 'needs' \? `<label class="pl-f"><span>Priority/, 'the Priority filter is also only offered in Needs creative');
-  const cov = pl.slice(pl.indexOf('function plCoreCoverageCell'), pl.indexOf('function plCoreStatusCell'));
+  const cov = pl.slice(pl.indexOf('function plCoreActiveAdsLine'), pl.indexOf('function plCoreStatusCell'));
   assert.doesNotMatch(cov, /Meta ad|running as/, 'Active Ads is the number and its label, nothing else');
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
   for (const sec of ['core', 'high-stocks', 'creative-insights', 'shoot-plan']) assert.equal((html.match(new RegExp(`data-pl-nav="${sec}"`, 'g')) || []).length, 2, `${sec} is in both the top navigation and the sidebar`);

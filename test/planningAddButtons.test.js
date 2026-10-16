@@ -19,7 +19,7 @@ const v = (k, s, o = {}) => ({ ...cr(k, s, { age: o.age === undefined ? 120 : o.
 test('add: the Action column (+ Add) is in every category; Priority only in Needs creative', () => {
   const table = pl.slice(pl.indexOf('function plCoreTableHtml'), pl.indexOf('const PL_CORE_TITLE'));
   assert.match(table, /const needs = cat === 'needs'/);
-  assert.match(table, /needs \? '<th class="pt-w-rank">#<\/th>' : ''[\s\S]*th\('Product'[\s\S]*th\('Sales \(30D\)'[\s\S]*th\('Stock'[\s\S]*th\('Creative coverage'[\s\S]*'Creative gap'[\s\S]*needs \? th\('Priority'[\s\S]*th\('Action'/, '# | Product | Sales (30D) | Stock | Creative coverage | Creative gap | Priority (Needs only) | Action');
+  assert.match(table, /needs \? '<th class="pt-w-rank">#<\/th>' : ''[\s\S]*th\('Product'[\s\S]*th\('Sales \(30D\)'[\s\S]*th\('Stock'[\s\S]*th\('Latest creative'[\s\S]*'Creative gap'[\s\S]*needs \? th\('Priority'[\s\S]*th\('Action'/, '# | Product | Sales (30D) | Stock | Latest creative | Creative gap | Priority (Needs only) | Action');
   assert.match(pl, /priority: \{[^}]*only: 'needs'/, 'the Priority sort is offered only in Needs creative');
   const act = pl.slice(pl.indexOf('function plCoreAddBtn'), pl.indexOf('// colourway cards'));
   assert.match(act, /needs \? 'pl-act-add' : 'pl-act-soft'[\s\S]*data-opp-add/, 'Needs: the purple + Add; Covered / Needs review: the same add as a quiet outline button');

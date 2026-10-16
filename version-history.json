@@ -2,6 +2,14 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.3.8",
+      "date": "2026-10-16",
+      "title": "Core and High Stocks: Active Ads under the product name; Latest creative column",
+      "changes": [
+        "In the Core and High Stocks tables, \"N Active Ads\" now sits under the product name, and the Creative coverage column is now \"Latest creative\": the date (for example 30 Sep 2026) with how long ago it was (for example 18 days ago) underneath. Unknown and None are unchanged."
+      ]
+    },
+    {
       "version": "1.3.7",
       "date": "2026-10-16",
       "title": "Dashboard: bigger shortcuts to Upcoming Drops, Promotions and Reference Library",

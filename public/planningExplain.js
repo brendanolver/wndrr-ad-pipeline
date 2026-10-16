@@ -247,8 +247,8 @@
     if (lc.has_conflicts) bits.push('Some copies carry a different date; the original ad\u2019s date is used.');
     return { known: true, day: d.day, year: d.year, long: d.long, days: num(lc.days_since) === null ? null : Math.max(0, num(lc.days_since)), name: lc.creative_name || null, uncertain: !!lc.possibly_newer_undated, title: `Last creative: ${d.long}. ${note}${bits.length ? ` ${bits.join(' ')}` : ''}`, caveat: bits.join(' ') || null };
   }
-  // CREATIVE COVERAGE (the table column): line 1 = ACTIVE ADS, the number of genuinely different creatives delivering on Meta right now (one creative running in several campaigns, ad sets or
-  // funnels, or as "- Copy" duplicates, counts once; a creative counts when at least one matched, active, non-DPA instance delivered inside the delivery window). Line 2 = the newest creative
+  // CREATIVE COVERAGE: ACTIVE ADS (shown under the product name in the Core table), the number of genuinely different creatives delivering on Meta right now (one creative running in several campaigns, ad sets or
+  // funnels, or as "- Copy" duplicates, counts once; a creative counts when at least one matched, active, non-DPA instance delivered inside the delivery window). The "Latest creative" column = the newest creative
   // date written in the ad names, from ANY matched creative (paused and historical included), never a delivery or modified date. The two populations differ on purpose:
   // "0 Active Ads, Latest: 18 Sep 2026" is correct. The year is always shown (creative history spans several years); it is the year written in the ad name, never assumed. "Unknown" = creatives exist but none has a reliable name date; "None" = no creative on record.
   function coverage(item, refYear) {
@@ -259,7 +259,8 @@
     const note = lc && lc.possibly_newer_undated ? ' A creative without a valid date in its name may be newer.' : '';
     const activeTxt = lv.known ? `${plural(lv.count, 'active ad')} (unique creatives delivering in the last ${plural(lv.window, 'day')}; duplicates across campaigns, ad sets, funnels and Copy suffixes count once).` : `Active ads cannot be counted: ${lv.title}`;
     const latestTxt = latest === null ? 'Creative dates could not be loaded.' : `Latest is the newest creative date written in the ad names${d ? ` (${d.long})` : ''}, from any matched creative including paused and historical ones. It is not a delivery date.`;
-    return { known: lv.known || latest !== null, active: lv.known ? lv.count : null, activeKnown: lv.known, count: total, latest, latestKnown, uncertain: !!(lc && lc.possibly_newer_undated), title: `${activeTxt} ${latestTxt}${note}` };
+    const days = lc && num(lc.days_since) !== null && latestKnown ? Math.max(0, num(lc.days_since)) : null;
+    return { known: lv.known || latest !== null, active: lv.known ? lv.count : null, activeKnown: lv.known, count: total, latest, latestKnown, days, uncertain: !!(lc && lc.possibly_newer_undated), title: `${activeTxt} ${latestTxt}${note}` };
   }
   // one creative in the live-ads table: its original creative date, or why there is none
   function creativeDate(c) {

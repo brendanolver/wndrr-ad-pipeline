@@ -5765,3 +5765,9 @@ body{background:var(--bg);color:var(--text);}
 .dash-quick-icon .ic{width:24px;height:24px;}
 .dash-quick-title{font-size:16px;}
 .dash-quick-sub{font-size:13px;}
+
+/* v1.3.8: Core / High Stocks: Active Ads sit under the product name; the coverage column is "Latest creative" (date, then how long ago) */
+.pl-table-core .pt-name .pt-active{color:var(--text-secondary);font-weight:600;}
+.pl-table-core .pt-cov b.pt-cov-d{font-weight:600;color:var(--text);white-space:nowrap;}
+.pl-table-core .pt-cov b.pt-cov-d.none{font-weight:500;color:var(--text-muted);}
+.pl-table-core .pt-cov small{color:var(--text-muted);}

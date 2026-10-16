@@ -128,8 +128,10 @@ test('live ads: Live Ads, coverage, concentration and the explanation agree on t
 
 test('live ads: page wiring (Active Ads in the Creative coverage column on both pages, settings)', () => {
   const pl = fs.readFileSync(path.join(__dirname, '..', 'public', 'planning.js'), 'utf8');
-  const cell = pl.slice(pl.indexOf('function plCoreCoverageCell'), pl.indexOf('function plCoreStatusCell'));
-  assert.ok(cell.indexOf('Active ') > -1 && cell.indexOf('Active ') < cell.indexOf('Latest: '), 'Creative coverage: Active Ads first, then the latest creative date');
+  const cell = pl.slice(pl.indexOf('function plCoreCoverageCell'), pl.indexOf('function plCoreActiveAdsLine'));
+  const active = pl.slice(pl.indexOf('function plCoreActiveAdsLine'), pl.indexOf('function plCoreStatusCell'));
+  assert.ok(active.includes('Active ') && pl.slice(pl.indexOf('function plCoreProductCell'), pl.indexOf('// the trend is shown')).includes('plCoreActiveAdsLine(it)'), 'Active Ads sit under the product name');
+  assert.ok(cell.includes('pt-cov-d') && !/Active \$\{/.test(cell), 'the Latest creative column holds only the date and how long ago');
   assert.ok(pl.includes("plPageHtml(mode") || (pl.includes("plPageHtml('core')") && pl.includes("plPageHtml('high', tierNote)")), 'Core and High Stocks share one table');
   assert.ok(Object.keys(cfgLib.LABEL).includes('live_delivery_days'));
 });

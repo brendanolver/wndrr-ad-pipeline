@@ -146,7 +146,7 @@ test('page wiring: sidebar sub-menu replaces the in-page step buttons; six defau
   assert.match(app, /hash === '#planning' \|\| hash\.startsWith\('#planning\/'\)/);
   assert.match(app, /#planning\/drop/, 'the pre-restructure #planning/drop links still redirect');
   const head = pl.slice(pl.indexOf('function plCoreTableHtml'), pl.indexOf('const PL_CORE_TITLE'));
-  for (const h of ["th('Product'", "th('Sales (30D)'", "th('Stock'", "th('Creative coverage'", "'Creative gap'", "th('Priority'", "th('Action'"]) assert.ok(head.includes(h), `column ${h}`);
+  for (const h of ["th('Product'", "th('Sales (30D)'", "th('Stock'", "th('Latest creative'", "'Creative gap'", "th('Priority'", "th('Action'"]) assert.ok(head.includes(h), `column ${h}`);
   for (const gone of ['Sales 7d', 'Sales trend', 'Active creatives', 'Effective creatives', 'Last new creative', 'Opportunity type']) assert.ok(!head.includes(gone), `${gone} is not a default column`);
   assert.match(pl, /plPageHtml\('core'\)/); assert.match(pl, /plPageHtml\('high', tierNote\)/, 'Core and High Stocks render through the same function');
   assert.match(pl, /Add to Shoot Plan/);

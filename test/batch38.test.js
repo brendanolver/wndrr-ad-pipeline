@@ -91,7 +91,7 @@ test('creative coverage date: missing or impossible dates show a placeholder, ne
 });
 test('Core and High Stocks share ONE coverage cell, so one formatting change covers both', () => {
   const cell = pl.slice(pl.indexOf('function plCoreCoverageCell'), pl.indexOf('function plCoreStatusCell'));
-  assert.match(cell, /PE\.coverage\(it,/); assert.match(cell, /Latest:/);
+  assert.match(cell, /PE\.coverage\(it,/); assert.match(cell, /pt-cov-d/); assert.match(cell, /plAgo\(c\.days\)/, 'the date, then how long ago');
   assert.match(pl, /plCoreTableHtml\(mode, items, cat\)/); assert.match(pl, /plCoreCoverageCell\(it\)\}\$\{plCoreStatusCell\(it\)/);
   assert.doesNotMatch(pl, /toLocaleDateString|\.getFullYear\(\)/, 'no second date formatter in the Planning page');
 });

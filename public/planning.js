@@ -189,7 +189,7 @@ function plCoreProductCell(it) {
   const notCore = it.mode === 'momentum' && !it.is_core ? '<small class="pt-class">Not Core: recent launch</small>' : '';
   const prod = PE.productionActivity(it, PL_STAGE_LABEL);
   const inProd = prod.active ? `<small class="pt-prod" title="${plEsc(prod.text)}">In production</small>` : '';
-  return `<td class="pt-product"><div class="pt-pwrap"><span class="pt-thumb">${plThumb(it.image_url) || `<span class="pt-thumb-none">${PL_NOIMG}</span>`}</span><span class="pt-name"><b>${plEsc(it.name)}</b><small>${plEsc(it.category || '')}</small>${notCore}${inProd}</span></div></td>`;
+  return `<td class="pt-product"><div class="pt-pwrap"><span class="pt-thumb">${plThumb(it.image_url) || `<span class="pt-thumb-none">${PL_NOIMG}</span>`}</span><span class="pt-name"><b>${plEsc(it.name)}</b><small>${plEsc(it.category || '')}</small>${plCoreActiveAdsLine(it)}${notCore}${inProd}</span></div></td>`;
 }
 // the trend is shown the same way in the row and in the panel: colour only for rising / falling
 function plTrendHtml(it, long) {
@@ -207,12 +207,20 @@ function plCoreStockCell(it) {
   const cover = f.cover_weeks !== null && f.cover_weeks !== undefined ? `<small>${plEsc(f.cover_weeks)} weeks</small>` : '';
   return `<td class="pt-num pt-stock" title="${plEsc(it.stock && it.stock.notes ? it.stock.notes.join(' ') : 'Available sellable stock')}"><b>${f.stock_units === null || f.stock_units === undefined ? plNone : plNum(f.stock_units)}</b><small>In stock</small>${cover}${warn ? `<small class="pt-warn">${plEsc(warn)}</small>` : ''}</td>`;
 }
+// "Latest creative" column: the newest creative date written in the ad names (bold) and how long ago that was. Active Ads now sit under the product name (plCoreActiveAdsLine).
+const plAgo = (d) => (d === null || d === undefined ? '' : d === 0 ? 'today' : `${d} ${d === 1 ? 'day' : 'days'} ago`);
 function plCoreCoverageCell(it) {
   const c = PE.coverage(it, ((state.opportunities || {}).today || '').slice(0, 4));
-  if (!c.known) return `<td class="pt-num pt-cov" title="${plEsc(c.title)}"><b>${plNone}</b></td>`;
-  const first = c.activeKnown ? `<b>${plNum(c.active)} <span class="pt-cov-u">Active ${c.active === 1 ? 'Ad' : 'Ads'}</span></b>` : `<b>${plNone} <span class="pt-cov-u">Active Ads</span></b>`;
-  const second = c.latest === null ? '' : `<small>Latest: <span class="pt-cov-d${c.latestKnown ? '' : ' none'}">${plEsc(c.latest)}</span>${c.uncertain ? ' <em class="pt-warn" aria-label="A creative without a valid date may be newer">?</em>' : ''}</small>`;
-  return `<td class="pt-num pt-cov" title="${plEsc(c.title)}">${first}${second}</td>`;
+  if (!c.known || c.latest === null) return `<td class="pt-num pt-cov" title="${plEsc(c.title)}"><b>${plNone}</b></td>`;
+  const warn = c.uncertain ? ' <em class="pt-warn" aria-label="A creative without a valid date may be newer">?</em>' : '';
+  const age = c.latestKnown && c.days !== null ? `<small>${plEsc(plAgo(c.days))}${warn}</small>` : (warn ? `<small>${warn}</small>` : '');
+  return `<td class="pt-num pt-cov" title="${plEsc(c.title)}"><b class="pt-cov-d${c.latestKnown ? '' : ' none'}">${plEsc(c.latest)}</b>${age}</td>`;
+}
+// "N Active Ads" under the product name
+function plCoreActiveAdsLine(it) {
+  const c = PE.coverage(it, ((state.opportunities || {}).today || '').slice(0, 4));
+  if (!c.known) return '';
+  return `<small class="pt-active" title="${plEsc(c.title)}">${c.activeKnown ? plNum(c.active) : plNone} Active ${c.activeKnown && c.active === 1 ? 'Ad' : 'Ads'}</small>`;
 }
 function plCoreStatusCell(it) {
   const st = PE.coreStatus(it, plCfg());
@@ -307,7 +315,7 @@ function plCoreTableHtml(mode, items, cat) {
   const sort = state.oppSort[mode];
   const th = (label, cls, key) => { const def = key && PL_SORTS[key] && (!PL_SORTS[key].only || PL_SORTS[key].only === cat) ? key : null; const on = def && sort && sort.key === def; return `<th class="${cls}${def ? ' pt-sortable' : ''}${on ? ' sorted' : ''}"${def ? ` data-opp-sort="${mode}:${def}" role="button" tabindex="0" aria-sort="${on ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}"` : ''}>${plEsc(label)}${on ? (sort.dir === 'asc' ? ' &uarr;' : ' &darr;') : ''}</th>`; };
   const needs = cat === 'needs'; const ncols = needs ? 8 : 6;
-  const head = `${needs ? '<th class="pt-w-rank">#</th>' : ''}${th('Product', 'pt-w-product', 'product')}${th('Sales (30D)', 'pt-w-sales', 'u30')}${th('Stock', 'pt-w-stockc', 'stock')}${th('Creative coverage', 'pt-w-cov', null)}${th(needs ? 'Creative gap' : 'Creative status', 'pt-w-gap', null)}${needs ? th('Priority', 'pt-w-prio', 'priority') : ''}${th('Action', 'pt-w-act', null)}`;
+  const head = `${needs ? '<th class="pt-w-rank">#</th>' : ''}${th('Product', 'pt-w-product', 'product')}${th('Sales (30D)', 'pt-w-sales', 'u30')}${th('Stock', 'pt-w-stockc', 'stock')}${th('Latest creative', 'pt-w-cov', null)}${th(needs ? 'Creative gap' : 'Creative status', 'pt-w-gap', null)}${needs ? th('Priority', 'pt-w-prio', 'priority') : ''}${th('Action', 'pt-w-act', null)}`;
   const limit = state.oppLimit[mode] || PL_PAGE;
   const body = items.slice(0, limit).map((it, n) => {
     const open = !!state.oppOpen[`${mode}:${it.key}`];
