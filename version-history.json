@@ -2,6 +2,14 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.4.3",
+      "date": "2026-10-16",
+      "title": "Planning thumbnails: slightly tilted garments are levelled",
+      "changes": [
+        "In the small product thumbnails (Planning tray, Shoot Plan tiles, Upcoming Drops), a catalogue picture that is a degree or two off level is drawn level. The tilt is estimated from the garment's own symmetry and corrected only when it is small (up to 5 degrees) and clearly better; level pictures, large tilts and unclear pictures are left exactly as they were. The large preview is never rotated."
+      ]
+    },
+    {
       "version": "1.4.2",
       "date": "2026-10-16",
       "title": "Core planning: one tab bar (Creative Opportunities | Core Catalogue)",

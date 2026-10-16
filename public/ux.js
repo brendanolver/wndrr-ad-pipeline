@@ -204,9 +204,8 @@
   const GT_PROXY = '/api/product-image?u=';
   function garmentPairMin(category) { const c = String(category || ''); return GT_LONG_BOTTOM.test(c) && !GT_SHORT.test(c) ? GT_PAIR_MIN_LONG_BOTTOM : GT_PAIR_MIN; }
   const round2 = (n) => Math.round(n * 100) / 100;
-  // pure: bounding box of the garment inside `region` ({x0,y0,x1,y1} in pixels of an RGBA array w x h). Background = transparent, or the colour of the region's corners.
-  // A row / column only counts when it holds at least two garment pixels, so a speck or a compression artefact cannot stretch the box. null when nothing garment-like is found.
-  function garmentBBox(data, w, h, region) {
+  // pure: which pixels of `region` are the garment? Background = transparent, or the colour of the region's corners. -> { x0, y0, x1, y1, isFg(x, y), count } | null
+  function garmentFg(data, w, h, region) {
     const r = region || { x0: 0, y0: 0, x1: w, y1: h };
     const x0 = Math.max(0, Math.floor(r.x0)); const y0 = Math.max(0, Math.floor(r.y0)); const x1 = Math.min(w, Math.ceil(r.x1)); const y1 = Math.min(h, Math.ceil(r.y1));
     const rw = x1 - x0; const rh = y1 - y0;
@@ -216,17 +215,67 @@
     for (const [cx, cy] of [[x0, y0], [x1 - cs, y0], [x0, y1 - cs], [x1 - cs, y1 - cs]]) for (let j = 0; j < cs; j++) for (let i = 0; i < cs; i++) corners.push(px(cx + i, cy + j));
     const med = (k) => { const v = corners.map((c) => c[k]).sort((a, b) => a - b); return v[Math.floor(v.length / 2)]; };
     const bg = [med(0), med(1), med(2), med(3)]; const transparentBg = bg[3] < 20;
-    const cols = new Array(rw).fill(0); const rows = new Array(rh).fill(0); let fg = 0;
-    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
-      const [R, G, B, A] = px(x, y);
-      const isFg = transparentBg ? A >= 40 : (A >= 40 && Math.max(Math.abs(R - bg[0]), Math.abs(G - bg[1]), Math.abs(B - bg[2])) > 30);
-      if (isFg) { cols[x - x0] += 1; rows[y - y0] += 1; fg += 1; }
-    }
-    if (fg < rw * rh * 0.005) return null;
+    const isFg = (x, y) => {
+      if (x < x0 || x >= x1 || y < y0 || y >= y1) return false;
+      const k = (y * w + x) * 4; const A = data[k + 3];
+      return transparentBg ? A >= 40 : (A >= 40 && Math.max(Math.abs(data[k] - bg[0]), Math.abs(data[k + 1] - bg[1]), Math.abs(data[k + 2] - bg[2])) > 30);
+    };
+    let count = 0; for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) if (isFg(x, y)) count += 1;
+    return { x0, y0, x1, y1, isFg, count };
+  }
+  // pure: bounding box of the garment inside `region` ({x0,y0,x1,y1} in pixels of an RGBA array w x h).
+  // A row / column only counts when it holds at least two garment pixels, so a speck or a compression artefact cannot stretch the box. null when nothing garment-like is found.
+  function garmentBBox(data, w, h, region) {
+    const f = garmentFg(data, w, h, region);
+    if (!f) return null;
+    const rw = f.x1 - f.x0; const rh = f.y1 - f.y0;
+    if (f.count < rw * rh * 0.005) return null;
+    const cols = new Array(rw).fill(0); const rows = new Array(rh).fill(0);
+    for (let y = f.y0; y < f.y1; y++) for (let x = f.x0; x < f.x1; x++) if (f.isFg(x, y)) { cols[x - f.x0] += 1; rows[y - f.y0] += 1; }
     const first = (a) => a.findIndex((n) => n >= 2); const last = (a) => { for (let i = a.length - 1; i >= 0; i--) if (a[i] >= 2) return i; return -1; };
     const bx0 = first(cols); const bx1 = last(cols); const by0 = first(rows); const by1 = last(rows);
     if (bx0 < 0 || by0 < 0 || bx1 <= bx0 || by1 <= by0) return null;
-    return { x0: x0 + bx0, y0: y0 + by0, x1: x0 + bx1 + 1, y1: y0 + by1 + 1 };
+    return { x0: f.x0 + bx0, y0: f.y0 + by0, x1: f.x0 + bx1 + 1, y1: f.y0 + by1 + 1 };
+  }
+  // pure: how far is the garment tilted? A front view of a garment is (nearly) left-right symmetric about an upright axis, so the tilt is the rotation that makes its silhouette
+  // most symmetric. Returns the rotation in degrees to APPLY (CSS rotate, clockwise positive) to level it, or 0 when it is already level, when the picture is not clear enough, or
+  // when the best answer is not clearly better than leaving it alone. Small tilts only (+-GT_TILT_MAX): a bigger "tilt" is more likely a pose or design than a crooked picture, and
+  // an answer at the edge of the search range is not trusted. Nothing is ever stretched: this only chooses an angle.
+  const GT_TILT_MAX = 5; const GT_TILT_STEP = 0.25; const GT_TILT_MIN = 0.6; const GT_TILT_GAIN = 0.012;
+  function garmentTilt(data, w, h, region) {
+    const f = garmentFg(data, w, h, region);
+    if (!f || f.count < (f.x1 - f.x0) * (f.y1 - f.y0) * 0.02) return 0;
+    let sx = 0; let sy = 0;
+    for (let y = f.y0; y < f.y1; y++) for (let x = f.x0; x < f.x1; x++) if (f.isFg(x, y)) { sx += x; sy += y; }
+    const cx = sx / f.count; const cy = sy / f.count;
+    // work on a grid covering the garment plus a margin for the rotation
+    const bb = garmentBBox(data, w, h, region); if (!bb) return 0;
+    const gw = bb.x1 - bb.x0; const gh = bb.y1 - bb.y0; const m = Math.ceil(Math.max(gw, gh) * 0.12);
+    const gx0 = bb.x0 - m; const gy0 = bb.y0 - m; const GW = gw + 2 * m; const GH = gh + 2 * m;
+    const sym = (deg) => {
+      const t = deg * Math.PI / 180; const c = Math.cos(t); const sn = Math.sin(t);
+      const M = new Uint8Array(GW * GH);
+      for (let j = 0; j < GH; j++) for (let i = 0; i < GW; i++) {
+        const x = gx0 + i; const y = gy0 + j; // the rotated picture's pixel (x, y) shows the source pixel one rotation back
+        const srcX = Math.round(cx + (x - cx) * c + (y - cy) * sn); const srcY = Math.round(cy - (x - cx) * sn + (y - cy) * c);
+        if (f.isFg(srcX, srcY)) M[j * GW + i] = 1;
+      }
+      let inter = 0; let uni = 0;
+      for (let j = 0; j < GH; j++) for (let i = 0; i < GW; i++) {
+        const mi = Math.round(2 * (cx - gx0) - i);
+        const a = M[j * GW + i]; const b = mi >= 0 && mi < GW ? M[j * GW + mi] : 0;
+        if (a & b) inter += 1; if (a | b) uni += 1;
+      }
+      return uni ? inter / uni : 0;
+    };
+    const base = sym(0); let best = 0; let bestScore = base;
+    for (let d = -GT_TILT_MAX; d <= GT_TILT_MAX + 1e-9; d += GT_TILT_STEP) {
+      if (Math.abs(d) < 1e-9) continue;
+      const sc = sym(d); if (sc > bestScore + 1e-9) { bestScore = sc; best = d; }
+    }
+    if (Math.abs(best) < GT_TILT_MIN || Math.abs(best) >= GT_TILT_MAX - 1e-9) return 0;
+    if (bestScore - base < GT_TILT_GAIN) return 0;
+    return round2(best);
   }
   // pure: show the rectangle `rect` ({x0,y0,x1,y1} in the picture's own pixels) centred in a bw x bh box, scaled to fit (never stretched). Returns percentages of the BOX for
   // the picture element (left / top / width / height) and of the PICTURE for the clip that hides everything outside the rectangle (so the other view cannot show beside it).
@@ -251,13 +300,15 @@
       rect = { x0: Math.max(region.x0, measured.x0 - pad), y0: Math.max(region.y0, measured.y0 - pad), x1: Math.min(region.x1, measured.x1 + pad), y1: Math.min(region.y1, measured.y1 + pad) };
     } else if (pair) rect = region;
     if (!rect) return { view: 'whole' };
-    return { view: pair ? 'front-crop' : 'centred', pair, region, ...garmentRectGeometry(nw, nh, rect, bw, bh) };
+    const tilt = measured && Number(measured.tilt) ? Number(measured.tilt) : 0;
+    const origin = measured ? { x: round2((measured.x0 + measured.x1) / 2 / nw * 100), y: round2((measured.y0 + measured.y1) / 2 / nh * 100) } : null;
+    return { view: pair ? 'front-crop' : 'centred', pair, region, tilt, origin, ...garmentRectGeometry(nw, nh, rect, bw, bh) };
   }
   const gtCache = new Map(); // `${url}|${pair}` -> measured box in picture pixels | false (could not be measured)
   const gtPending = new Set();
   function gtKey(url, pair) { return `${url}|${pair ? 1 : 0}`; }
-  function gtStored(key) { try { const v = sessionStorage.getItem('gt:' + key); return v ? JSON.parse(v) : undefined; } catch (e) { return undefined; } }
-  function gtStore(key, v) { try { sessionStorage.setItem('gt:' + key, JSON.stringify(v)); } catch (e) { /* storage unavailable: just measured again next time */ } }
+  function gtStored(key) { try { const v = sessionStorage.getItem('gt2:' + key); return v ? JSON.parse(v) : undefined; } catch (e) { return undefined; } }
+  function gtStore(key, v) { try { sessionStorage.setItem('gt2:' + key, JSON.stringify(v)); } catch (e) { /* storage unavailable: just measured again next time */ } }
   // measure the picture once (through the same-origin proxy so its pixels are readable), then place every thumbnail of it again
   function gtMeasure(img, url, pair, nw, nh) {
     const key = gtKey(url, pair);
@@ -275,7 +326,7 @@
         const bb = garmentBBox(data, cw, ch, pair ? { x0: 0, y0: 0, x1: cw / 2, y1: ch } : null);
         const regW = pair ? cw / 2 : cw;
         // a box that is tiny compared with its view is a white garment on a white page (or noise): do not trust it
-        if (bb && (bb.x1 - bb.x0) >= regW * 0.2 && (bb.y1 - bb.y0) >= ch * 0.2) { const sx = nw / cw; const sy = nh / ch; result = { x0: bb.x0 * sx, y0: bb.y0 * sy, x1: bb.x1 * sx, y1: bb.y1 * sy }; } // canvas pixels -> the picture's own pixels
+        if (bb && (bb.x1 - bb.x0) >= regW * 0.2 && (bb.y1 - bb.y0) >= ch * 0.2) { const sx = nw / cw; const sy = nh / ch; result = { x0: bb.x0 * sx, y0: bb.y0 * sy, x1: bb.x1 * sx, y1: bb.y1 * sy, tilt: garmentTilt(data, cw, ch, pair ? { x0: 0, y0: 0, x1: cw / 2, y1: ch } : null) }; } // canvas pixels -> the picture's own pixels; tilt = the small rotation (degrees) that levels it, or 0
       } catch (e) { result = false; }
       gtCache.set(key, result); gtPending.delete(key); if (result) gtStore(key, result);
       document.querySelectorAll('img.gt-img').forEach((i) => { if (i.getAttribute('data-gt-key') === key) garmentFit(i); });
@@ -295,7 +346,8 @@
     const g = measured ? garmentFitGeometry(img.naturalWidth, img.naturalHeight, bw, bh, cat, single, measured) : first;
     img.setAttribute('data-gt-view', g.view);
     img.setAttribute('data-gt-measured', measured ? '1' : '0');
-    if (g.view === 'whole') img.style.cssText = ''; else img.style.cssText = `left:${g.left}%;top:${g.top}%;width:${g.width}%;height:${g.height}%;object-fit:fill;clip-path:inset(${g.clip.t}% ${g.clip.r}% ${g.clip.b}% ${g.clip.l}%);`;
+    if (g.view === 'whole') img.style.cssText = ''; else img.style.cssText = `left:${g.left}%;top:${g.top}%;width:${g.width}%;height:${g.height}%;object-fit:fill;clip-path:inset(${g.clip.t}% ${g.clip.r}% ${g.clip.b}% ${g.clip.l}%);${g.tilt && g.origin ? `transform:rotate(${g.tilt}deg);transform-origin:${g.origin.x}% ${g.origin.y}%;` : ''}`;
+    img.setAttribute('data-gt-tilt', g.tilt ? String(g.tilt) : '0');
     if (!measured && !gtCache.has(key) && typeof document !== 'undefined' && document.createElement) gtMeasure(img, url, pair, img.naturalWidth, img.naturalHeight);
   }
   function garmentFitAll(root) { (root || document).querySelectorAll('img.gt-img').forEach((i) => { if (i.complete) garmentFit(i); }); }
@@ -336,5 +388,5 @@
     return `<div class="ux-progress${tone ? ` ux-progress-${tone}` : ''}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${p}"><div class="ux-progress-fill" style="width:${p}%"></div></div>`;
   }
 
-  return { garmentImgHtml, productImgFullHtml, garmentFit, garmentFitAll, garmentFitGeometry, garmentRectGeometry, garmentBBox, garmentPairMin, classifyMedia, mediaThumbHtml, creativeThumbHtml, finalCreativeHtml, productFallbackHtml, productThumbHtml, mediaFailed, placeholderHtml, pageHeaderHtml, statTilesHtml, badgeHtml, emptyStateHtml, progressBarHtml, esc };
+  return { garmentImgHtml, productImgFullHtml, garmentFit, garmentFitAll, garmentFitGeometry, garmentRectGeometry, garmentBBox, garmentFg, garmentTilt, garmentPairMin, classifyMedia, mediaThumbHtml, creativeThumbHtml, finalCreativeHtml, productFallbackHtml, productThumbHtml, mediaFailed, placeholderHtml, pageHeaderHtml, statTilesHtml, badgeHtml, emptyStateHtml, progressBarHtml, esc };
 }));

@@ -60,6 +60,12 @@ Limitations: the left half is assumed to be the front (the catalogue convention;
 - **Status control.** Shooting (Scheduled / In production / Filmed) and Editing (Filmed / Scheduled / In editing / Awaiting approval) share one single-line stepper. Any stage can be chosen, forwards or backwards, through the existing endpoints; leaving Filmed asks first, and a concept already in Final Approval is directed to Request Changes there. Nothing is deleted.
 - No database change.
 
+## Levelling slightly tilted pictures (v1.4.3)
+
+Catalogue pictures are sometimes a degree or two off level. In the small thumbnails (Planning tray, Shoot Plan tiles, Upcoming Drops colour cards and Drop tiles) the shared helper now levels them. While it measures a picture for centring, it also estimates the garment's tilt (`UX.garmentTilt`): a front view is nearly left-right symmetric, so the tilt is the rotation that makes the silhouette most symmetric. That rotation is applied with CSS about the garment's own centre, so nothing is stretched or redrawn.
+
+Guard rails: only small tilts (up to 5 degrees) and only when levelling is clearly better than leaving it (a tilt under 0.6 degrees, a blurry or white-on-white picture, a garment with no clear symmetry, or an answer at the edge of the range all give no rotation). For a front-and-back picture only the front half is measured. The large preview is never rotated. The cached measurement key changed (`gt2:`) so earlier cached boxes are re-measured once.
+
 ## Core catalogue: Creative Attention and Creative Freshness (v1.4.1)
 
 The "Browse the full Core catalogue" panel (Core Shoot Planning) no longer uses its own older flag / stale count. Both columns now come from the same results as the Core table above (`plCatalogueMap` in `planning.js`, keyed by product code):
