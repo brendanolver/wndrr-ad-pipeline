@@ -2,6 +2,14 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.3.7",
+      "date": "2026-10-16",
+      "title": "Dashboard: bigger shortcuts to Upcoming Drops, Promotions and Reference Library",
+      "changes": [
+        "The Dashboard's Quick access cards are larger and now open Upcoming Drops, Promotions and Reference Library (replacing Creative Pipeline, Brief Builder and Creative Library). A card is hidden for a user whose access to that module is restricted."
+      ]
+    },
+    {
       "version": "1.3.6",
       "date": "2026-10-16",
       "title": "Dashboard: thicker weekly progress bar",

@@ -215,6 +215,9 @@ function applySidebarModuleAccess() {
   document.querySelectorAll('.tab-btn[data-tab]').forEach((btn) => {
     btn.style.display = restricted.has(btn.dataset.tab) ? 'none' : '';
   });
+  document.querySelectorAll('.dash-quick-card[data-go-tab]').forEach((card) => {
+    card.style.display = restricted.has(card.dataset.goTab) ? 'none' : '';
+  });
   document.querySelectorAll('.sidebar-group').forEach((group) => {
     const items = group.querySelectorAll('.tab-btn[data-tab]');
     const allHidden = items.length > 0 && Array.from(items).every((btn) => restricted.has(btn.dataset.tab));
@@ -5116,27 +5119,9 @@ document.getElementById('week-current').addEventListener('click', () => {
   loadDashboard();
 });
 
-document.getElementById('action-pipeline').addEventListener('click', () => switchTab('board'));
-// Item 12 (production follow-up pass): audited where approved creative
-// currently goes -- Final Approval's Approve action sets creative_assets.
-// status to 'qc' (src/routes/finalApproval.js), and the Board/Kanban tab
-// already shows every asset grouped by that same status with no filter, so
-// approved work was never actually inaccessible -- it just wasn't obvious
-// this card led there. Rather than building a second storage/filtered view,
-// this still opens the existing Board, now scrolled straight to the QC
-// column (where Approve lands a concept) so the two "action cards" read
-// differently for the same destination instead of behaving identically.
-document.getElementById('action-library').addEventListener('click', () => scrollToApprovedCreative());
-
-function scrollToApprovedCreative() {
-  switchTab('board');
-  requestAnimationFrame(() => {
-    const col = document.querySelector('#board .column[data-status="qc"]') || document.querySelector('#board .column[data-status="uploaded_live"]');
-    if (col) col.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' });
-  });
-}
-document.getElementById('action-brief-builder').addEventListener('click', () => {
-  openBriefBuilderModal();
+// Dashboard shortcuts: each card opens the page named in its data-go-tab (hidden for a user whose access to that module is restricted, see applySidebarModuleAccess).
+document.querySelectorAll('.dash-quick-card[data-go-tab]').forEach((card) => {
+  card.addEventListener('click', () => switchTab(card.dataset.goTab));
 });
 
 // ── Planning ─────────────────────────────────────────
