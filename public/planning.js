@@ -88,7 +88,7 @@ function plTrayThumb(i) {
   // each thumbnail carries its own remove control (visible on hover / keyboard focus, always visible on touch screens); it uses the Shoot Plan's normal removal, so a product
   // whose concepts have work on them stays in the plan and the dialog says why (removeShootPlanItem)
   const nm = plEsc(i.product_name || 'this product');
-  return `<span class="pl-tray-th" title="${nm}" data-pl-tray-item="${i.id}">${UX.garmentImgHtml({ url: img, front: i.front_image_url, category: i.category || i.product_name })}<span class="pl-tray-th-none" aria-hidden="true">${PL_NOIMG}</span><button type="button" class="pl-tray-x" data-pl-tray-remove="${i.id}" aria-label="Remove ${nm} from this week's Shoot Plan" title="Remove from plan"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></span>`;
+  return `<span class="pl-tray-item"><span class="pl-tray-th" title="${nm}" data-pl-tray-item="${i.id}">${UX.garmentImgHtml({ url: img, front: i.front_image_url, category: i.category || i.product_name })}<span class="pl-tray-th-none" aria-hidden="true">${PL_NOIMG}</span><button type="button" class="pl-tray-x" data-pl-tray-remove="${i.id}" aria-label="Remove ${nm} from this week's Shoot Plan" title="Remove from plan"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></span><small class="pl-tray-cap" title="${nm}">${nm}</small></span>`;
 }
 function renderProductionHeader() {
   const el = document.getElementById('planning-production-header');
