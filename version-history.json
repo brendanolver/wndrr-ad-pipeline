@@ -2,6 +2,14 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.3.9",
+      "date": "2026-10-16",
+      "title": "Planning: more prominent Shoot Plan selection bar",
+      "changes": [
+        "The Shoot Plan bar under the Planning tabs is more prominent: a tinted card with a purple edge, a larger title and selected-count, larger product thumbnails (64px, was 40px) and a bigger View Shoot Plan button. Behaviour is unchanged."
+      ]
+    },
+    {
       "version": "1.3.8",
       "date": "2026-10-16",
       "title": "Core and High Stocks: Active Ads under the product name; Latest creative column",

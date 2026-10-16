@@ -5771,3 +5771,19 @@ body{background:var(--bg);color:var(--text);}
 .pl-table-core .pt-cov b.pt-cov-d{font-weight:600;color:var(--text);white-space:nowrap;}
 .pl-table-core .pt-cov b.pt-cov-d.none{font-weight:500;color:var(--text-muted);}
 .pl-table-core .pt-cov small{color:var(--text-muted);}
+
+/* v1.3.9: a more prominent Planning selection tray (Shoot Plan bar under the tabs) */
+.pl-tray{padding:14px 18px 14px 20px;gap:22px;background:linear-gradient(0deg,var(--accent-softer,#f5f3ff),var(--surface));border:1px solid var(--accent-border,#d9d2fb);border-left:5px solid var(--accent-strong,#5b4bdb);border-radius:16px;box-shadow:0 6px 20px rgba(76,63,192,.14);}
+.pl-tray-id{gap:14px;}
+.pl-tray-ic{width:44px;height:44px;border-radius:12px;background:var(--accent-soft,#ece9fd);align-items:center;justify-content:center;}
+.pl-tray-ic .ic{width:24px;height:24px;}
+.pl-tray-txt b{font-size:18px;font-weight:700;letter-spacing:-.005em;}
+.pl-tray-txt small{font-size:14px;font-weight:600;color:var(--accent-text,#4c3fc0);}
+.pl-tray-thumbs{gap:12px;padding-left:22px;}
+.pl-tray-th,.pl-tray-more{width:64px;height:64px;border-radius:12px;border:1px solid var(--accent-border,#d9d2fb);background:var(--surface);}
+.pl-tray-th img{background:var(--surface);}
+.pl-tray-more{font-size:15px;}
+.pl-tray-x{width:20px;height:20px;top:3px;right:3px;}
+.pl-tray-go.btn{font-size:14.5px;font-weight:700;padding:12px 22px;border-radius:12px;box-shadow:0 2px 8px rgba(76,63,192,.28);}
+.pl-tray-toggle{width:36px;height:36px;}
+@media (max-width:900px){.pl-tray{padding:12px 14px;border-left-width:4px;}.pl-tray-th,.pl-tray-more{width:52px;height:52px;}.pl-tray-ic{width:38px;height:38px;}.pl-tray-txt b{font-size:16px;}}
