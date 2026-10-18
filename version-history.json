@@ -2,6 +2,16 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.4.4",
+      "date": "2026-10-18",
+      "title": "AI Copy Assistant: fixed the HTTP 400 on Generate Copy",
+      "changes": [
+        "Primary Text requests no longer send a temperature setting, which the current Claude model rejects with HTTP 400.",
+        "The AI answer limit now leaves room for the model's thinking, so answers are not cut off.",
+        "If the AI provider rejects a request, the app shows a short reference (status, error type, request id) and records the details, without any credentials, in the server log."
+      ]
+    },
+    {
       "version": "1.4.3",
       "date": "2026-10-16",
       "title": "Planning thumbnails: slightly tilted garments are levelled",
