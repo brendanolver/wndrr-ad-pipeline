@@ -114,3 +114,21 @@ creative format) from CREATIVE DIRECTION (concept, hook, idea, audience: mood on
 colours or ways to wear it ("One tee, three completely different fits"), features, fabric and quality, popularity and "best", launch wording (only for New Range / New Colourways), availability, colours,
 offers, prices, stock, shipping and deadlines are rejected unless supported. Options that copy eight or more consecutive words of a reference, or open the same way as another option, are dropped. The model
 is asked for extra candidates (5 for three options) so three clean, different options usually survive. A "feature-led" angle is offered only when verified features exist (none are held today).
+
+## Claude and OpenAI side by side (v1.4.6, a controlled comparison)
+
+The AI Copy Assistant can write with **Claude** (default) or **OpenAI**; the choice is a `Claude | OpenAI` selector in the Ad Setup panel. Only the transport differs (`src/lib/aiProviders.js`):
+the Copy Type, the selected reference examples (masked), the verified facts, the creative direction, the brand instructions and the factual safeguards are built once (`copyAi.generate`) and both
+providers receive exactly the same `{ system, messages }`. Claude is unchanged. OpenAI uses the Responses API (`POST /v1/responses`; `instructions` = the same system text, `input` = the same messages,
+`max_output_tokens` 8000, `reasoning.effort` low, structured JSON answer, `store: false`, no sampling settings). If a configured model rejects one of those settings the request is retried once with only
+the essentials. Errors are mapped to plain messages (rejected key, no API credit / quota, rate limit, unknown model, bad request, cut-off answer, refusal); provider messages and keys never reach the browser
+and the server log holds only status, error type / code, a scrubbed message, the request id and the model.
+
+**Results are kept per provider.** Every generation is a row in `ad_copy_generations` with its `provider` and the `model` the provider actually served. The panel shows each provider's latest "three options"
+set (and its latest revision) side by side, tagged with the provider and model; generating with one provider replaces only that provider's latest entry on screen, and nothing is ever deleted. "Give me
+another three" and refinement use only the same provider's earlier answers. Nothing is selected or approved automatically; "Use this" and "Approve Primary Text" work as before, and an approved Ad Setup
+cannot be regenerated with either provider. A generation from before providers existed (no provider) is Claude's.
+
+Configuration (Railway service variables; never in code): `OPENAI_API_KEY` (required for OpenAI; API billing is separate from ChatGPT), optional `OPENAI_COPY_MODEL` (default `gpt-5.5`) and
+`OPENAI_COPY_REASONING` (default `low`; `off` sends no reasoning setting). A provider without its key shows "(not set up)" and the other keeps working. Database: one additive column,
+`ad_copy_generations.provider`.

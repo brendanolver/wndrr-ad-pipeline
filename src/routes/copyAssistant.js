@@ -7,6 +7,7 @@ const sheets = require('../lib/googleSheets');
 const library = require('../lib/copyLibrary');
 const { parseCsv } = require('../lib/csvParse');
 const ai = require('../lib/copyAi');
+const providers = require('../lib/aiProviders');
 const { detectPromotionStageType, AD_CATEGORY_LABELS } = require('../lib/adSetupNaming');
 const copyTypes = require('../lib/copyTypes');
 const { normalizeUnicode } = require('../lib/copyText');
@@ -17,7 +18,7 @@ const adRouter = express.Router();
 
 // ── library ─────────────────────────────────────────────────────────────────────────────────────────────────────
 libraryRouter.get('/status', async (req, res, next) => {
-  try { res.json(await library.status(pool, sheets, ai.aiConfig().configured)); } catch (err) { next(err); }
+  try { res.json({ ...(await library.status(pool, sheets, ai.aiConfig().configured)), providers: providers.allProviders() }); } catch (err) { next(err); }
 });
 
 libraryRouter.get('/guidelines', async (req, res, next) => {
@@ -193,9 +194,9 @@ function referenceSummary(e) {
   return { id: e.id, tab: e.tab, family: e.family, kind: e.kind, label: e.subject || e.label || null, range: e.label && e.subject && e.label !== e.subject ? e.label : null, snippet: first.length > 140 ? `${first.slice(0, 137)}...` : first };
 }
 
-async function preflight(res) {
-  const cfg = ai.aiConfig();
-  if (!cfg.configured) { res.status(503).json({ code: 'ai_not_configured', error: cfg.reason }); return null; }
+async function preflight(res, provider) {
+  const cfg = providers.providerConfig(provider);
+  if (!cfg.configured) { res.status(503).json({ code: 'ai_not_configured', provider, error: cfg.reason }); return null; }
   const { sync, examples } = await library.loadExamples(pool);
   if (!sync || !examples.length) {
     const sc = sheets.readCredentials();
@@ -211,14 +212,18 @@ async function run(req, res, next, mode) {
     const loaded = await loadAdFacts(id);
     if (!loaded) return res.status(404).json({ error: 'Ad Setup not found' });
     if (loaded.row.status === 'approved') return res.status(409).json({ error: 'This Ad Setup has already been approved.' });
-    const pre = await preflight(res);
-    if (!pre) return;
     const body = req.body || {};
+    // Which AI writes this request. Claude is the default; the choice only decides who is asked, never what they are given.
+    const provider = body.provider === undefined || body.provider === null || body.provider === '' ? providers.DEFAULT_PROVIDER : body.provider;
+    if (!providers.isProvider(provider)) return res.status(400).json({ error: `provider must be one of: ${Object.keys(providers.PROVIDERS).join(', ')}.` });
+    const pre = await preflight(res, provider);
+    if (!pre) return;
     const instruction = typeof body.instruction === 'string' ? body.instruction.trim().slice(0, 500) : '';
     const baseText = typeof body.base_text === 'string' ? body.base_text.trim() : '';
     if (mode === 'refine' && (!instruction || !baseText)) return res.status(400).json({ error: 'Say what to change and which text to change.' });
 
-    const history = (await pool.query('SELECT kind, instruction, options FROM ad_copy_generations WHERE ad_setup_id = $1 ORDER BY id DESC LIMIT 4', [id])).rows.reverse();
+    // A provider's conversation (earlier requests, "another three") only ever contains its OWN earlier answers, so both providers are given equivalent inputs.
+    const history = (await pool.query("SELECT kind, instruction, options FROM ad_copy_generations WHERE ad_setup_id = $1 AND COALESCE(provider, 'anthropic') = $2 ORDER BY id DESC LIMIT 4", [id, provider])).rows.reverse();
     const previousTexts = history.flatMap((h) => (h.options || []).map((o) => o.text)).slice(-9);
     const g = await library.loadGuidelines(pool);
     const copyType = loaded.eff.type;
@@ -233,17 +238,19 @@ async function run(req, res, next, mode) {
     const out = await ai.generate({
       mode, facts: loaded.facts, guidelines, examples: examples.map(library.promptExample), referenceTexts: examples.map((e) => e.body),
       instruction, baseText, history, ruleKey: loaded.ruleKey, previousTexts, copyType,
+      call: (request) => providers.callProvider(provider, request),
     });
     const kind = mode === 'more' ? 'more' : mode;
     const saved = await pool.query(
-      `INSERT INTO ad_copy_generations (ad_setup_id, kind, instruction, base_text, options, model, reference_ids, created_by_user_id, copy_type, copy_type_source)
-       VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7::jsonb,$8,$9,$10) RETURNING id, created_at`,
-      [id, kind, instruction || null, baseText || null, JSON.stringify(out.options), out.model, JSON.stringify(examples.map((e) => e.id)), req.user.id, copyType, loaded.eff.source]
+      `INSERT INTO ad_copy_generations (ad_setup_id, kind, instruction, base_text, options, model, reference_ids, created_by_user_id, copy_type, copy_type_source, provider)
+       VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7::jsonb,$8,$9,$10,$11) RETURNING id, created_at`,
+      [id, kind, instruction || null, baseText || null, JSON.stringify(out.options), out.model, JSON.stringify(examples.map((e) => e.id)), req.user.id, copyType, loaded.eff.source, provider]
     );
     // Remember the latest suggestions on the ad (clearly unapproved) so a reload does not lose them.
     await pool.query('UPDATE ad_setups SET ai_draft_options = $1::jsonb, updated_at = now() WHERE id = $2', [JSON.stringify(out.options), id]);
     res.json({
       generation_id: saved.rows[0].id, options: out.options, model: out.model, dropped: out.dropped.length,
+      provider, provider_label: providers.providerLabel(provider), kind, created_at: saved.rows[0].created_at,
       copy_type: copyTypeInfo(loaded),
       references: examples.map(referenceSummary), approved: false,
       notes: out.dropped.length ? [`${out.dropped.length} suggestion(s) were discarded because they stated details we have no record of.`] : [],
@@ -251,7 +258,7 @@ async function run(req, res, next, mode) {
     });
   } catch (err) {
     if (err instanceof ai.AiError) {
-      const status = { not_configured: 503, auth_failed: 502, rate_limited: 429, network: 502, rejected: 422, bad_output: 502, empty: 502, api_error: 502, bad_request: 502, model_not_found: 502, truncated: 502 }[err.code] || 502;
+      const status = { not_configured: 503, auth_failed: 502, rate_limited: 429, network: 502, rejected: 422, bad_output: 502, empty: 502, api_error: 502, bad_request: 502, model_not_found: 502, truncated: 502, billing: 402 }[err.code] || 502;
       return res.status(status).json({ code: err.code, error: err.message });
     }
     next(err);
@@ -261,14 +268,31 @@ async function run(req, res, next, mode) {
 adRouter.post('/:id/copy-ai/generate', (req, res, next) => run(req, res, next, (req.body || {}).more ? 'more' : 'generate'));
 adRouter.post('/:id/copy-ai/refine', (req, res, next) => run(req, res, next, 'refine'));
 
+// The saved results of both providers for one Ad Setup: for each provider its latest "three options" set (generate / another three) and, if newer, its latest revision.
+// Nothing is ever replaced: every generation stays in ad_copy_generations; this only picks what to show.
+async function loadResults(id) {
+  const rows = (await pool.query(
+    `SELECT DISTINCT ON (COALESCE(provider, 'anthropic'), (kind = 'refine')) id, kind, options, model, provider, copy_type, copy_type_source, created_at
+       FROM ad_copy_generations WHERE ad_setup_id = $1 ORDER BY COALESCE(provider, 'anthropic'), (kind = 'refine'), id DESC`, [id])).rows;
+  const out = {};
+  for (const p of Object.keys(providers.PROVIDERS)) {
+    const set = rows.find((r) => providers.providerOf(r.provider) === p && r.kind !== 'refine') || null;
+    const rev = rows.find((r) => providers.providerOf(r.provider) === p && r.kind === 'refine') || null;
+    const shape = (r) => (r ? { generation_id: r.id, kind: r.kind, options: r.options || [], model: r.model, provider: p, provider_label: providers.providerLabel(p), copy_type: r.copy_type, created_at: r.created_at } : null);
+    out[p] = { set: shape(set), revision: rev && (!set || rev.id > set.id) ? shape(rev) : null };
+  }
+  return out;
+}
+
 adRouter.get('/:id/copy-ai', async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     const loaded = await loadAdFacts(id);
     if (!loaded) return res.status(404).json({ error: 'Ad Setup not found' });
     const row = loaded.row;
-    const generations = (await pool.query('SELECT id, kind, instruction, options, model, reference_ids, copy_type, copy_type_source, created_at FROM ad_copy_generations WHERE ad_setup_id = $1 ORDER BY id DESC LIMIT 10', [id])).rows;
+    const generations = (await pool.query('SELECT id, kind, instruction, options, model, provider, reference_ids, copy_type, copy_type_source, created_at FROM ad_copy_generations WHERE ad_setup_id = $1 ORDER BY id DESC LIMIT 20', [id])).rows;
     const st = await library.status(pool, sheets, ai.aiConfig().configured);
+    const list = providers.allProviders();
     // the references behind the latest generation, so a reload still shows them
     let lastReferences = [];
     const latest = generations[0];
@@ -278,8 +302,11 @@ adRouter.get('/:id/copy-ai', async (req, res, next) => {
       lastReferences = latest.reference_ids.map((rid) => byId.get(rid)).filter(Boolean).map(referenceSummary);
     }
     res.json({
-      ai_configured: st.ai.configured, ai_reason: ai.aiConfig().reason, library: st.library, sheets: st.sheets, draft_options: row.ai_draft_options || [], approved: row.primary_text_approved,
-      generations: generations.map(({ reference_ids: _ids, ...g }) => g), copy_type: copyTypeInfo(loaded), last_references: lastReferences, status: row.status,
+      // ai_configured: at least one provider can write (the panel opens); each provider's own state is in `providers`
+      ai_configured: list.some((p) => p.configured), ai_reason: ai.aiConfig().reason, providers: list, default_provider: providers.DEFAULT_PROVIDER,
+      library: st.library, sheets: st.sheets, draft_options: row.ai_draft_options || [], approved: row.primary_text_approved,
+      results: await loadResults(id),
+      generations: generations.map(({ reference_ids: _ids, ...g }) => ({ ...g, provider: providers.providerOf(g.provider) })), copy_type: copyTypeInfo(loaded), last_references: lastReferences, status: row.status,
     });
   } catch (err) { next(err); }
 });

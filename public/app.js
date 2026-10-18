@@ -530,6 +530,7 @@ async function loadCopyLibraryPanel() {
           : `<div class="cl-note">${escapeHtml(st.sheets.reason || '')}<br>Set <code>GOOGLE_SERVICE_ACCOUNT_JSON</code> (the service-account key) and, if different from the default, <code>WNDRR_COPY_SHEET_ID</code>.</div>`}
         <div class="cl-row"><span class="cl-k">AI provider</span>${st.ai.configured ? UX.badgeHtml('Configured', 'green') : UX.badgeHtml('Not configured', 'amber')}</div>
         ${st.ai.configured ? '' : `<div class="cl-note">${escapeHtml(st.ai.reason || '')} Set <code>ANTHROPIC_API_KEY</code> to enable Generate Copy.</div>`}
+        ${(() => { const o = (st.providers || []).find((x) => x.id === 'openai'); if (!o) return ''; return `<div class="cl-row"><span class="cl-k">OpenAI (comparison)</span>${o.configured ? UX.badgeHtml(`Configured &middot; ${escapeHtml(o.model)}`, 'green') : UX.badgeHtml('Not configured', 'amber')}</div>${o.configured ? '' : `<div class="cl-note">${escapeHtml(o.reason || '')} Set <code>OPENAI_API_KEY</code> to compare OpenAI with Claude in Ad Setup. OpenAI API usage is billed separately from ChatGPT.</div>`}`; })()}
         <div class="cl-row"><span class="cl-k">Last successful update</span><span>${st.library ? `${copyLibDate(st.library.synced_at)} &middot; ${st.library.example_count} examples &middot; ${st.library.source === 'import' ? 'imported from CSV files' : 'read from Google Sheets'}` : 'Never. The library has not been loaded yet.'}</span></div>
         ${st.last_attempt && st.last_attempt.status === 'failed' ? `<div class="cl-warn">The latest refresh failed (${copyLibDate(st.last_attempt.at)}): ${escapeHtml(st.last_attempt.error || 'unknown error')}. The previous library is still in use.</div>` : ''}
         <div class="cl-actions"><button type="button" class="btn btn-ghost btn-sm" id="copy-library-check-btn" ${st.sheets.configured ? '' : 'disabled'} title="Reads and checks the spreadsheet without changing the library">Check before refreshing</button> <button type="button" class="btn btn-primary btn-sm" id="copy-library-refresh-btn" ${st.sheets.configured ? '' : 'disabled'}>Refresh library</button></div>
@@ -16136,7 +16137,12 @@ function renderAdSetupModal() {
 // ── Ad Setup: Meta copy (deterministic rules + Primary Text with the AI Copy Assistant) ──────────────────────────────
 // Headline / Description / CTA follow the WNDRR rules (src/lib/adCopyRules.js) until a person edits them; Primary Text is written
 // by the assistant or by hand and counts only once it has been explicitly approved.
-const asAi = { adId: null, status: null, options: [], refs: [], notes: [], missing: [], loading: false, error: null, instruction: '' };
+// provider: which AI the next request goes to ('anthropic' = Claude, the default; 'openai'). sets: each provider's own saved results ({ set, revision }); nothing is shared or replaced between them.
+const asAi = { adId: null, status: null, provider: 'anthropic', sets: { anthropic: null, openai: null }, refs: [], notes: [], missing: [], loading: 0, error: null, instruction: '' };
+const AS_PROVIDER_ORDER = ['anthropic', 'openai'];
+const asProviderLabel = (p) => (p === 'openai' ? 'OpenAI' : 'Claude');
+const asProviderInfo = (p) => ((asAi.status && asAi.status.providers) || []).find((x) => x.id === p) || { id: p, label: asProviderLabel(p), configured: true, model: '' };
+const asHasSet = (p) => !!(asAi.sets[p] && asAi.sets[p].set && (asAi.sets[p].set.options || []).length);
 const AS_REFINE_CHIPS = ['Make it shorter', 'More like our usual WNDRR copy', 'Focus on how it is worn', 'Less salesy', 'Make it more suitable for a new drop'];
 
 function adSetupPrimaryState(d) {
@@ -16207,27 +16213,48 @@ function adSetupAiPanelHtml(d) {
   }
   const hasText = !!(d.selected_primary_text || '').trim();
   const typeBlock = adSetupCopyTypeHtml(d);
-  const opts = asAi.options.map((o, i) => `
-    <div class="as-ai-option" data-ai-option="${i}">
-      <div class="as-ai-angle">${escapeHtml(o.angle || `Option ${i + 1}`)}</div>
+  const sel = asProviderInfo(asAi.provider);
+  const both = AS_PROVIDER_ORDER.every((p) => asProviderInfo(p).configured);
+  const busy = asAi.loading > 0;
+  const provBlock = `<div class="as-prov" id="as-provider">
+      <span class="as-ct-k">AI</span>
+      <div class="as-prov-seg" role="radiogroup" aria-label="AI provider">${AS_PROVIDER_ORDER.map((p) => { const pi = asProviderInfo(p); return `<button type="button" class="as-prov-btn${asAi.provider === p ? ' on' : ''}" role="radio" aria-checked="${asAi.provider === p}" data-provider="${p}" onclick="setAdSetupProvider('${p}')" ${busy ? 'disabled' : ''}>${escapeHtml(pi.label)}${pi.configured ? '' : ' (not set up)'}</button>`; }).join('')}</div>
+      ${sel.configured ? `<span class="as-ai-note as-prov-model">${escapeHtml(sel.model || '')}</span>` : ''}
+      ${both ? `<button type="button" class="ux-link-btn" id="as-ai-both-btn" onclick="generateAdSetupCopyBoth()" ${busy ? 'disabled' : ''} title="Writes with Claude and with OpenAI from exactly the same inputs, to compare">Generate with both</button>` : ''}
+    </div>
+    ${sel.configured ? '' : `<div class="as-flag">${escapeHtml(sel.label)} is not set up on this server. ${escapeHtml(sel.reason || '')}</div>`}`;
+  const optionHtml = (p, o, i, revised) => `
+    <div class="as-ai-option${revised ? ' as-ai-revised' : ''}" data-ai-option="${revised ? 'rev' : i}" data-provider="${p}">
+      <div class="as-ai-angle"><span class="as-prov-tag as-prov-tag-${p}">${escapeHtml(asProviderLabel(p))}</span> ${escapeHtml(revised ? 'Revised version' : (o.angle || `Option ${i + 1}`))}</div>
       <div class="as-ai-text">${escapeHtml(o.text)}</div>
-      <button type="button" class="btn btn-ghost btn-sm" onclick="useAdSetupAiOption(${i})">Use this</button>
-    </div>`).join('');
+      <button type="button" class="btn btn-ghost btn-sm" onclick="useAdSetupAiOption('${p}', ${revised ? "'rev'" : i})">Use this</button>
+    </div>`;
+  const cards = AS_PROVIDER_ORDER.map((p) => {
+    const r = asAi.sets[p]; if (!r || (!r.set && !r.revision)) return '';
+    const g = r.set || r.revision;
+    return `<div class="as-prov-card" data-provider="${p}">
+      <div class="as-prov-head"><b>${escapeHtml(asProviderLabel(p))}</b> <span class="as-prov-model">${escapeHtml(g.model || '')}</span> <span class="as-prov-when">${escapeHtml(copyLibDate(g.created_at))}</span></div>
+      <div class="as-ai-options">${r.set ? (r.set.options || []).map((o, i) => optionHtml(p, o, i, false)).join('') : ''}${r.revision ? (r.revision.options || []).slice(0, 1).map((o) => optionHtml(p, o, 0, true)).join('') : ''}</div>
+    </div>`;
+  }).join('');
+  const nCards = AS_PROVIDER_ORDER.filter((p) => asAi.sets[p] && (asAi.sets[p].set || asAi.sets[p].revision)).length;
+  const mainLabel = busy ? 'Writing&hellip;' : (asHasSet(asAi.provider) ? 'Give me another three' : 'Generate Copy');
   return `<div class="as-ai">
     <div class="as-ai-head">AI Copy Assistant <span class="as-ai-sub">Library updated ${escapeHtml(copyLibDate(st.library.synced_at))}</span></div>
     ${typeBlock}
+    ${provBlock}
     <div class="as-ai-actions">
-      <button type="button" class="btn btn-primary btn-sm" id="as-ai-generate-btn" onclick="generateAdSetupCopy(${asAi.options.length ? 'true' : 'false'})" ${asAi.loading ? 'disabled' : ''}>${asAi.loading ? 'Writing&hellip;' : (asAi.options.length ? 'Give me another three' : 'Generate Copy')}</button>
+      <button type="button" class="btn btn-primary btn-sm" id="as-ai-generate-btn" onclick="generateAdSetupCopy(${asHasSet(asAi.provider) ? 'true' : 'false'})" ${busy || !sel.configured ? 'disabled' : ''}>${mainLabel}</button>
       <span class="as-ai-note">Three options, written from WNDRR's own examples and only the facts we hold for this ad.</span>
     </div>
     ${asAi.error ? `<div class="as-flag">${escapeHtml(asAi.error)}</div>` : ''}
     ${(asAi.missing || []).map((m) => `<div class="as-flag">${escapeHtml(m)}</div>`).join('')}
-    ${opts ? `<div class="as-ai-options">${opts}</div>` : ''}
+    ${cards ? `<div class="as-prov-grid${nCards > 1 ? ' two' : ''}" id="as-results">${cards}</div>` : ''}
     ${(asAi.notes || []).map((m) => `<div class="as-ai-note">${escapeHtml(m)}</div>`).join('')}
     ${adSetupReferencesHtml()}
     ${hasText ? `<div class="as-ai-refine">
       <div class="as-ai-chips">${AS_REFINE_CHIPS.map((c) => `<button type="button" class="as-chip" onclick="refineAdSetupCopy('${c.replace(/'/g, "\\'")}')">${escapeHtml(c)}</button>`).join('')}</div>
-      <div class="as-ai-ask"><input type="text" id="as-ai-instruction" placeholder="Ask for a change, e.g. make it shorter and focus on how it is worn" maxlength="500" onkeydown="if(event.key==='Enter'){refineAdSetupCopy()}"><button type="button" class="btn btn-ghost btn-sm" onclick="refineAdSetupCopy()">Refine</button></div>
+      <div class="as-ai-ask"><input type="text" id="as-ai-instruction" placeholder="Ask for a change, e.g. make it shorter and focus on how it is worn" maxlength="500" onkeydown="if(event.key==='Enter'){refineAdSetupCopy()}"><button type="button" class="btn btn-ghost btn-sm" onclick="refineAdSetupCopy()">Refine with ${escapeHtml(asProviderLabel(asAi.provider))}</button></div>
     </div>` : ''}
   </div>`;
 }
@@ -16293,11 +16320,14 @@ function adSetupPrimaryInput(value) {
 
 async function loadAdSetupAi() {
   const id = state.adSetup.editingId;
+  const sameAd = asAi.adId === id;
   asAi.adId = id; asAi.status = null; asAi.error = null; asAi.notes = []; asAi.missing = []; asAi.refs = [];
-  asAi.options = (state.adSetup.draft.ai_draft_options || []).filter((o) => o && o.text);
+  if (!sameAd) { asAi.provider = 'anthropic'; asAi.sets = { anthropic: null, openai: null }; } // Claude is the default; a person's choice is kept while this Ad Setup stays open
   try {
     asAi.status = await api(`/ad-setup/${id}/copy-ai`);
     asAi.refs = asAi.status.last_references || [];
+    asAi.sets = asAi.status.results || { anthropic: null, openai: null };
+    if (!sameAd) asAi.provider = asAi.status.default_provider || 'anthropic';
   } catch (e) {
     asAi.status = { ai_configured: false, ai_reason: e.message, library: null, sheets: null };
   }
@@ -16309,17 +16339,43 @@ function refreshAdSetupAiPanel() {
   if (host) host.innerHTML = adSetupAiPanelHtml(state.adSetup.draft);
 }
 
+// Who writes the next request. Switching only changes the selector: nothing already generated, edited or approved is touched.
+function setAdSetupProvider(p) {
+  if (asAi.loading || !AS_PROVIDER_ORDER.includes(p)) return;
+  asAi.provider = p; asAi.error = null;
+  refreshAdSetupAiPanel();
+}
+
+// One request to one provider. Its saved result replaces only THAT provider's own "latest" entry on screen; the other provider's results and every earlier generation stay.
+async function runAdSetupProvider(provider, path, body, apply) {
+  const out = await api(`/ad-setup/${state.adSetup.editingId}/copy-ai/${path}`, { method: 'POST', body: JSON.stringify({ ...body, provider }) });
+  const cur = asAi.sets[provider] || { set: null, revision: null };
+  const entry = { generation_id: out.generation_id, kind: out.kind, options: out.options, model: out.model, provider, provider_label: out.provider_label, copy_type: out.copy_type && out.copy_type.effective && out.copy_type.effective.type, created_at: out.created_at };
+  asAi.sets[provider] = apply === 'revision' ? { set: cur.set, revision: entry } : { set: entry, revision: null };
+  asAi.refs = out.references || []; asAi.notes = out.notes || []; asAi.missing = out.missing || [];
+  if (out.copy_type && asAi.status) asAi.status.copy_type = out.copy_type;
+  return out;
+}
+
 async function generateAdSetupCopy(more) {
   if (asAi.loading) return;
-  asAi.loading = true; asAi.error = null; refreshAdSetupAiPanel();
-  try {
-    const out = await api(`/ad-setup/${state.adSetup.editingId}/copy-ai/generate`, { method: 'POST', body: JSON.stringify({ more: !!more }) });
-    asAi.options = out.options; asAi.refs = out.references || []; asAi.notes = out.notes || []; asAi.missing = out.missing || [];
-    if (out.copy_type && asAi.status) asAi.status.copy_type = out.copy_type;
-  } catch (e) {
-    asAi.error = e.message;
-  }
-  asAi.loading = false; refreshAdSetupAiPanel();
+  asAi.loading += 1; asAi.error = null; refreshAdSetupAiPanel();
+  try { await runAdSetupProvider(asAi.provider, 'generate', { more: !!more }, 'set'); }
+  catch (e) { asAi.error = `${asProviderLabel(asAi.provider)}: ${e.message}`; }
+  asAi.loading -= 1; refreshAdSetupAiPanel();
+}
+
+// For the comparison: the same request to both providers at once (each does what its own button would do: "Generate Copy", or "another three" if it already has a set).
+async function generateAdSetupCopyBoth() {
+  if (asAi.loading) return;
+  asAi.loading += AS_PROVIDER_ORDER.length; asAi.error = null; refreshAdSetupAiPanel();
+  const errors = [];
+  await Promise.all(AS_PROVIDER_ORDER.map(async (p) => {
+    try { await runAdSetupProvider(p, 'generate', { more: asHasSet(p) }, 'set'); }
+    catch (e) { errors.push(`${asProviderLabel(p)}: ${e.message}`); }
+    asAi.loading -= 1;
+  }));
+  asAi.error = errors.join(' ') || null; refreshAdSetupAiPanel();
 }
 
 async function refineAdSetupCopy(chip) {
@@ -16329,21 +16385,20 @@ async function refineAdSetupCopy(chip) {
   if (!instruction) return toast('Say what to change', true);
   if (!(d.selected_primary_text || '').trim()) return toast('There is no Primary Text to refine yet', true);
   if (asAi.loading) return;
-  asAi.loading = true; asAi.error = null; refreshAdSetupAiPanel();
+  asAi.loading += 1; asAi.error = null; refreshAdSetupAiPanel();
   try {
-    const out = await api(`/ad-setup/${state.adSetup.editingId}/copy-ai/refine`, { method: 'POST', body: JSON.stringify({ instruction, base_text: d.selected_primary_text }) });
-    asAi.options = out.options; asAi.refs = out.references || []; asAi.notes = out.notes || []; asAi.missing = out.missing || [];
-    if (out.copy_type && asAi.status) asAi.status.copy_type = out.copy_type;
-    toast('Here is the revised version. Use it to replace your text.');
+    await runAdSetupProvider(asAi.provider, 'refine', { instruction, base_text: d.selected_primary_text }, 'revision');
+    toast(`Here is the revised version from ${asProviderLabel(asAi.provider)}. Use it to replace your text.`);
   } catch (e) {
-    asAi.error = e.message;
+    asAi.error = `${asProviderLabel(asAi.provider)}: ${e.message}`;
   }
-  asAi.loading = false; refreshAdSetupAiPanel();
+  asAi.loading -= 1; refreshAdSetupAiPanel();
 }
 
 // Using a suggestion puts it in the editable box as a DRAFT; it is not approved until Approve Primary Text is clicked.
-function useAdSetupAiOption(index) {
-  const o = asAi.options[index];
+function useAdSetupAiOption(provider, which) {
+  const r = asAi.sets[provider];
+  const o = r && (which === 'rev' ? (r.revision && r.revision.options[0]) : (r.set && r.set.options[which]));
   if (!o) return;
   const d = state.adSetup.draft;
   d.selected_primary_text = o.text;
@@ -16362,7 +16417,6 @@ async function approveAdSetupPrimaryText() {
   try {
     const row = await api(`/ad-setup/${state.adSetup.editingId}/approve-primary-text`, { method: 'POST', body: JSON.stringify({ text, source: d.primary_text_source || 'manual' }) });
     state.adSetup.draft = { ...state.adSetup.draft, ...row };
-    asAi.options = [];
     toast('Primary Text approved');
     renderAdSetupModal();
     loadAdSetupAi();

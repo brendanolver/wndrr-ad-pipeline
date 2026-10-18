@@ -3510,6 +3510,12 @@ ALTER TABLE copy_reference_examples ADD COLUMN IF NOT EXISTS kind VARCHAR(20);
 ALTER TABLE copy_reference_examples ADD COLUMN IF NOT EXISTS excluded BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE copy_reference_examples ADD COLUMN IF NOT EXISTS exclude_reason VARCHAR(30);
 
+-- AI Copy Assistant: which AI provider wrote each generation (a controlled Claude / OpenAI comparison). NULL = a generation from before providers existed (Claude).
+-- Additive and idempotent; no existing row is rewritten.
+ALTER TABLE ad_copy_generations ADD COLUMN IF NOT EXISTS provider VARCHAR(12);
+ALTER TABLE ad_copy_generations DROP CONSTRAINT IF EXISTS ad_copy_generations_provider_check;
+ALTER TABLE ad_copy_generations ADD CONSTRAINT ad_copy_generations_provider_check CHECK (provider IS NULL OR provider IN ('anthropic', 'openai'));
+
 -- Approved Ad Matching concepts + historical-spelling aliases
 -- =====================================================================
 -- The concept list Ad Matching offers is the people-approved vocabulary: meta_matching_vocab rows of kind 'concept'. The 40 approved
