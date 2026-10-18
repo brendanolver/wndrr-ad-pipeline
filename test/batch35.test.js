@@ -313,7 +313,7 @@ test('library: examples are selected by ad type; sales ads only ever get sales c
 });
 
 // ── AI copy assistant ───────────────────────────────────────────────────────────────────────────────────────────
-const FACTS = { productName: 'Asset Raglan Tee', productCategory: 'Tees', productNames: ['Asset Raglan Tee'], adCategoryLabel: 'Core product', conceptName: '3 Ways to Style', isPromotion: false };
+const FACTS = { productName: 'Asset Raglan Box Fit Tee', productCategory: 'Box Fit Tee', productNames: ['Asset Raglan Box Fit Tee'], adCategoryLabel: 'Core product', conceptName: '3 Ways to Style', isPromotion: false };
 
 test('ai: configuration is reported, never assumed', () => {
   assert.equal(ai.aiConfig({}).configured, false);
@@ -345,7 +345,9 @@ test('ai: facts guard rejects invented discounts, prices, specs, GSM, stock, shi
     stock: 'Selling fast, only 5 left.', shipping: 'Free shipping on every order.', deadline: 'Ends Sunday.', terms: 'A great deal.',
   };
   for (const [k, text] of Object.entries(bad)) assert.ok(ai.findUnsupportedClaims(text, { text: ai.factsToText(FACTS), isPromotion: false }).length > 0, k);
-  assert.deepEqual(ai.findUnsupportedClaims('Boxy fit, easy to style three ways.', { text: ai.factsToText(FACTS), isPromotion: false }), []);
+  // the product name supports "box fit"; a count of ways to style it comes from the creative concept, which is direction and not a verified fact (v1.4.5)
+  assert.deepEqual(ai.findUnsupportedClaims('Boxy fit, easy to style.', { text: ai.factsToText(FACTS), isPromotion: false }), []);
+  assert.ok(ai.findUnsupportedClaims('Boxy fit, easy to style three ways.', { text: ai.factsToText(FACTS), isPromotion: false }).some((c) => c.code === 'count'));
 });
 
 test('ai: a verified offer in the facts permits that offer and nothing else', () => {
@@ -357,7 +359,7 @@ test('ai: a verified offer in the facts permits that offer and nothing else', ()
 });
 
 const answer = (...texts) => JSON.stringify({ options: texts.map((t, i) => ({ angle: `a${i}`, text: t })) });
-const THREE = answer('Boxy fit that sits right.\nMade to be worn on repeat.', 'Three ways to wear one tee, from the gym to the weekend.', 'Pair it back with relaxed cargos and clean sneakers.');
+const THREE = answer('Boxy fit that sits right.\nMade to be worn on repeat.', 'One tee for the gym, the street and everything in between.', 'Pair it back with relaxed cargos and clean sneakers.');
 
 test('ai: generate returns three distinct, fact-safe options', async () => {
   const out = await ai.generate({ facts: FACTS, guidelines: 'g', examples: [], ruleKey: 'standard', call: async () => ({ text: THREE, model: 'm' }) });
@@ -403,6 +405,7 @@ test('ai: the prompt gives sales ads sales angles and forbids copying or inventi
   assert.match(sale.system, /Do NOT invent/);
   const std2 = ai.buildMessages({ mode: 'generate', facts: FACTS, guidelines: '', examples: [], ruleKey: 'standard' });
   assert.match(std2.messages[0].content, /product-led/);
-  assert.match(std2.messages[0].content, /feature-led/);
-  assert.match(std2.messages[0].content, /styling or lifestyle-led/);
+  assert.match(std2.messages[0].content, /idea-led/);
+  assert.match(std2.messages[0].content, /occasion-led/);
+  assert.doesNotMatch(std2.messages[0].content, /feature-led/, 'no feature-led option without verified features (v1.4.5)');
 });

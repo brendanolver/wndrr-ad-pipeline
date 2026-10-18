@@ -8,6 +8,9 @@ const library = require('../lib/copyLibrary');
 const { parseCsv } = require('../lib/csvParse');
 const ai = require('../lib/copyAi');
 const { detectPromotionStageType, AD_CATEGORY_LABELS } = require('../lib/adSetupNaming');
+const copyTypes = require('../lib/copyTypes');
+const { normalizeUnicode } = require('../lib/copyText');
+const { deriveProductCode } = require('../lib/apparelmagic');
 
 const libraryRouter = express.Router();
 const adRouter = express.Router();
@@ -28,18 +31,22 @@ libraryRouter.get('/guidelines', async (req, res, next) => {
 // Reads the spreadsheet again. Admin only; never writes to the spreadsheet.
 libraryRouter.post('/refresh', requireAdmin, async (req, res, next) => {
   try {
+    const body = req.body || {};
+    const dryRun = !!body.dry_run;
     const running = await pool.query("SELECT 1 FROM copy_reference_syncs WHERE status = 'running' AND started_at > now() - interval '5 minutes' LIMIT 1");
-    if (running.rows.length) return res.status(409).json({ error: 'A refresh is already running. Give it a minute.' });
+    if (running.rows.length && !dryRun) return res.status(409).json({ error: 'A refresh is already running. Give it a minute.' });
     const cfg = sheets.readCredentials();
     if (!cfg.configured) return res.status(503).json({ code: 'sheets_not_configured', error: cfg.reason });
-    const out = await library.syncLibrary({ db: pool, sheets, userId: req.user.id });
+    // dry_run: read, parse and validate the spreadsheet and report what a refresh WOULD do. Nothing is written to the database (or to the spreadsheet, which is never written).
+    if (dryRun) return res.json(await library.syncLibrary({ db: pool, sheets, userId: req.user.id, dryRun: true, acceptSmaller: !!body.accept_smaller }));
+    const out = await library.syncLibrary({ db: pool, sheets, userId: req.user.id, acceptSmaller: !!body.accept_smaller });
     if (!out.ok) return res.status(out.code === 'not_configured' ? 503 : 502).json({ code: out.code, error: out.error });
     // Optional plain-language summary of the measured statistics, when an AI provider is configured. Failure never fails the refresh.
     let summary = null;
     if (ai.aiConfig().configured) {
       try { summary = await summariseStyle(out.sync_id); } catch (e) { summary = { error: e.message }; }
     }
-    res.json({ ok: true, examples: out.examples, tabs: out.tabs, ai_summary: summary && !summary.error ? 'written' : (summary ? `not written: ${summary.error}` : 'not configured') });
+    res.json({ ok: true, examples: out.examples, excluded: out.excluded, warnings: out.warnings, tabs: out.tabs, ai_summary: summary && !summary.error ? 'written' : (summary ? `not written: ${summary.error}` : 'not configured') });
   } catch (err) { next(err); }
 });
 
@@ -61,13 +68,15 @@ libraryRouter.post('/import', requireAdmin, async (req, res, next) => {
       if (tabs.has(title)) return res.status(400).json({ error: `${title} was chosen more than once.` });
       tabs.set(title, parseCsv(text));
     }
+    const dryRun = !!(req.body || {}).dry_run;
     const running = await pool.query("SELECT 1 FROM copy_reference_syncs WHERE status = 'running' AND started_at > now() - interval '5 minutes' LIMIT 1");
-    if (running.rows.length) return res.status(409).json({ error: 'A refresh or import is already running. Give it a minute.' });
+    if (running.rows.length && !dryRun) return res.status(409).json({ error: 'A refresh or import is already running. Give it a minute.' });
     const fake = {
       listTabs: async () => [...tabs.keys()].map((title) => ({ title })),
       readTab: async (title) => tabs.get(title) || [],
       readCredentials: sheets.readCredentials, sheetId: sheets.sheetId,
     };
+    if (dryRun) return res.json(await library.syncLibrary({ db: pool, sheets: fake, userId: req.user.id, source: 'import', dryRun: true }));
     const out = await library.syncLibrary({ db: pool, sheets: fake, userId: req.user.id, source: 'import' });
     if (!out.ok) return res.status(422).json({ code: out.code, error: out.error });
     let summary = null;
@@ -82,7 +91,7 @@ async function summariseStyle(syncId) {
   const sample = (await pool.query('SELECT family, label, body FROM copy_reference_examples WHERE sync_id = $1 ORDER BY (id * 7919) % 101, id LIMIT 24', [syncId])).rows;
   const stats = library.guidelinesText(g.analysis, null, []);
   const out = await ai.callModel({
-    system: 'You describe the house writing style of a brand from measured statistics and real examples. Be concrete and brief (under 220 words, plain bullet points). Describe only patterns visible in the material provided; do not invent rules. Cover: sentence length and structure, how products are introduced, typical phrasing, differences between the copy families, how urgency / calls to action are used, typical length, and things the examples avoid.',
+    system: 'You describe the house writing style of a brand from measured statistics and real examples. Be concrete and brief (under 220 words, plain bullet points). Describe only patterns visible in the material provided; do not invent rules. Describe voice, structure and formatting only: never mention specific products, materials, features, colours, counts, prices or offers. Cover: sentence length and structure, how products are introduced, typical phrasing, differences between the copy families, how urgency / calls to action are used, typical length, and things the examples avoid.',
     messages: [{ role: 'user', content: `Measured statistics:\n${stats}\n\nSample examples:\n${sample.map((s, i) => `${i + 1}. [${s.family}] ${s.body}`).join('\n\n')}` }],
     maxTokens: 3000,
   });
@@ -90,43 +99,98 @@ async function summariseStyle(syncId) {
   return { ok: true };
 }
 
-// ── per-ad assistant ─────────────────────────────────────────────────────────────────────────────────────────────
+// ── per-ad assistant ─────────────────────────────────────────────────────────────────────────────────────────────────────
+// Everything the application already knows about the ad, split into
+//   * evidence for the automatic Copy Type (planning source, promotion stage, linked products and their drops, the creative brief), and
+//   * VERIFIED FACTS (product name / category, promotion, verified offer, drop launch date, creative format) that the writer may state.
+// The creative concept, hook and angle are carried separately as creative direction: they shape the mood of the copy but are never evidence for a product claim.
 async function loadAdFacts(adSetupId) {
   const r = await pool.query(
     `SELECT au.*, ca.concept_name, ca.concept_type, ca.angle, ca.hook, ca.hook_variations, ca.customer_avatar_id,
             fe.variation_text, fe.format AS fe_format,
             ps.name AS promotion_stage_name, p.name AS promotion_name, p.verified_offer, p.start_date, p.end_date,
-            av.name AS avatar_name
+            av.name AS avatar_name,
+            spi.source AS spi_source, spi.product_name AS spi_product_name, spi.initial_idea AS spi_initial_idea, spi.recommendation_snapshot AS spi_snapshot
      FROM ad_setups au
      JOIN creative_assets ca ON ca.id = au.creative_asset_id
      JOIN final_edits fe ON fe.id = au.final_edit_id
      LEFT JOIN promotion_stages ps ON ps.id = au.promotion_stage_id
      LEFT JOIN promotions p ON p.id = ps.promotion_id
      LEFT JOIN customer_avatars av ON av.id = ca.customer_avatar_id
+     LEFT JOIN shoot_plan_items spi ON spi.id = ca.shoot_plan_item_id
      WHERE au.id = $1`, [adSetupId]);
   if (!r.rows.length) return null;
   const row = r.rows[0];
   const products = (await pool.query(
-    `SELECT s.name, c.name AS category_name FROM ad_setup_products asp JOIN styles s ON s.id = asp.style_id LEFT JOIN categories c ON c.id = s.category_id WHERE asp.ad_setup_id = $1`, [adSetupId])).rows;
+    `SELECT s.id AS style_id, s.style_code, s.name, s.tier, c.name AS category_name, d.name AS drop_name, d.launch_date AS drop_launch_date
+     FROM ad_setup_products asp JOIN styles s ON s.id = asp.style_id
+     LEFT JOIN categories c ON c.id = s.category_id LEFT JOIN drops d ON d.id = s.drop_id
+     WHERE asp.ad_setup_id = $1 ORDER BY s.id`, [adSetupId])).rows;
+  // the same product launched earlier in other colourways (only when the catalogue's own drops say so)
+  let siblingColourwaysEarlier = false;
+  if (products.length) {
+    const sib = await pool.query(
+      `SELECT 1 FROM styles s1 JOIN drops d1 ON d1.id = s1.drop_id
+         JOIN styles s2 ON left(s2.style_code, 8) = left(s1.style_code, 8) AND s2.id <> s1.id JOIN drops d2 ON d2.id = s2.drop_id
+        WHERE s1.id = ANY($1::int[]) AND s1.style_code ~ '^W[0-9]{2}[A-Z]{2}[0-9]{3}' AND d2.launch_date < d1.launch_date - interval '30 days'
+          AND d1.launch_date >= CURRENT_DATE - interval '120 days' AND NOT (s2.id = ANY($1::int[])) LIMIT 1`, [products.map((x) => x.style_id)]);
+    siblingColourwaysEarlier = sib.rows.length > 0;
+  }
   const stageType = row.promotion_stage_name ? detectPromotionStageType(row.promotion_stage_name) : null;
-  const isPromotion = row.ad_category === 'promotion';
   const fmtDate = (d) => new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'long' });
   const hook = row.variation_text || (Array.isArray(row.hook_variations) && row.hook_variations.find((h) => h && h.text) && row.hook_variations.find((h) => h && h.text).text) || row.hook || null;
+  const codes = new Set(products.map((x) => deriveProductCode(x.style_code)).filter(Boolean));
+  const oneProduct = codes.size === 1 || products.length === 1;
+
+  const planningReason = row.spi_snapshot && typeof row.spi_snapshot === 'object' && typeof row.spi_snapshot.reason === 'string' ? row.spi_snapshot.reason : null;
+  const evidence = {
+    adCategory: row.ad_category, stageType, promotionStageName: row.promotion_stage_name || null, promotionName: row.promotion_name || null,
+    shootPlanSource: row.spi_source || null, planningReason, productCount: codes.size || products.length,
+    styles: products.map((x) => ({ style_code: x.style_code, name: x.name, tier: x.tier, drop_name: x.drop_name, drop_launch_date: x.drop_launch_date })),
+    siblingColourwaysEarlier,
+    texts: { conceptName: row.concept_name, hook, angle: row.angle, productLabel: row.product_label, initialIdea: row.spi_initial_idea, promotionName: row.promotion_name },
+  };
+  const auto = copyTypes.classifyCopyType(evidence);
+  const eff = copyTypes.effectiveCopyType(row.copy_type_override, auto);
+  const isPromotion = eff.type === 'sale';
+  const dropStyle = products.find((x) => x.drop_name || x.drop_launch_date);
   const facts = {
-    productName: products.length === 1 ? products[0].name : null,
-    productNames: products.map((p) => p.name),
-    productCategory: [...new Set(products.map((p) => p.category_name).filter(Boolean))].join(', ') || row.product_type || null,
+    productName: oneProduct ? (row.spi_product_name || (products[0] && products[0].name) || null) : null,
+    productNames: products.map((x) => x.name),
+    productCategory: [...new Set(products.map((x) => x.category_name).filter(Boolean))].join(', ') || row.product_type || null,
     adCategoryLabel: AD_CATEGORY_LABELS[row.ad_category] || row.ad_category,
+    copyType: eff.type, copyTypeLabel: eff.label, newnessAllowed: eff.newnessAllowed,
     promotionName: isPromotion ? row.promotion_name : null,
     stageLabel: isPromotion ? row.promotion_stage_name : null,
     offer: isPromotion ? row.verified_offer : null,
     campaignDates: isPromotion && row.start_date ? `${fmtDate(row.start_date)}${row.end_date ? ` to ${fmtDate(row.end_date)}` : ''}` : null,
-    conceptName: row.concept_name, conceptType: row.concept_type, hook, angle: row.angle,
-    audience: row.avatar_name, format: row.fe_format || row.media_type,
+    dropName: dropStyle ? dropStyle.drop_name : null,
+    dropLaunch: dropStyle && dropStyle.drop_launch_date ? String(dropStyle.drop_launch_date).slice(0, 10) : null,
+    format: row.fe_format || row.media_type,
+    verifiedFeatures: [], // the application holds no verified product features today; when it does they are listed here and only then may copy state them
+    // creative direction (never evidence for a claim)
+    conceptName: row.concept_name, conceptType: row.concept_type, hook, angle: row.angle, audience: row.avatar_name, productNote: row.spi_initial_idea,
     isPromotion,
   };
   const ruleKey = isPromotion ? ({ hype: 'hype', sale_live: 'sale_live', mid_sale: 'mid_sale', last_chance: 'last_chance' }[stageType] || 'standard') : 'standard';
-  return { row, facts, stageType, ruleKey, products };
+  return { row, facts, stageType, ruleKey, products, auto, eff };
+}
+
+// What the assistant panel shows and what the person can change.
+function copyTypeInfo(loaded) {
+  const { auto, eff, row } = loaded;
+  return {
+    auto: { type: auto.type, label: auto.label, confidence: auto.confidence, fallback: auto.fallback, reasons: auto.reasons },
+    override: row.copy_type_override || null,
+    effective: { type: eff.type, label: eff.label, source: eff.source },
+    options: copyTypes.COPY_TYPES.map((t) => ({ value: t.value, label: t.label, hint: t.hint })),
+  };
+}
+
+// What the person sees under "References used": where the example came from and how it starts. Never the prompt, never credentials.
+function referenceSummary(e) {
+  const first = normalizeUnicode(String(e.body || '').split('\n').find((l) => l.trim()) || '').trim();
+  return { id: e.id, tab: e.tab, family: e.family, kind: e.kind, label: e.subject || e.label || null, range: e.label && e.subject && e.label !== e.subject ? e.label : null, snippet: first.length > 140 ? `${first.slice(0, 137)}...` : first };
 }
 
 async function preflight(res) {
@@ -157,25 +221,31 @@ async function run(req, res, next, mode) {
     const history = (await pool.query('SELECT kind, instruction, options FROM ad_copy_generations WHERE ad_setup_id = $1 ORDER BY id DESC LIMIT 4', [id])).rows.reverse();
     const previousTexts = history.flatMap((h) => (h.options || []).map((o) => o.text)).slice(-9);
     const g = await library.loadGuidelines(pool);
+    const copyType = loaded.eff.type;
+    // Style references for THIS copy type (a person's override has already been applied in loadAdFacts). They are shown to the model with another product's details removed.
     const examples = library.selectExamples(pre.examples, {
-      adCategory: loaded.row.ad_category, stageType: loaded.stageType, productName: loaded.facts.productName, productCategory: loaded.facts.productCategory, limit: 6,
+      copyType, stageType: loaded.stageType, productName: loaded.facts.productName, productCategory: loaded.facts.productCategory, limit: 6,
     });
-    const guidelines = library.guidelinesText(g && g.analysis, g && g.ai_summary, library.familiesFor({ adCategory: loaded.row.ad_category, productName: loaded.facts.productName, productCategory: loaded.facts.productCategory }));
+    const plan = copyTypes.TAB_PLAN[copyType];
+    const families = [...new Set([...plan.families.primary, ...plan.families.secondary])];
+    const guidelines = library.guidelinesText(g && g.analysis, g && g.ai_summary, families);
 
     const out = await ai.generate({
-      mode, facts: loaded.facts, guidelines, examples, instruction, baseText, history, ruleKey: loaded.ruleKey, previousTexts,
+      mode, facts: loaded.facts, guidelines, examples: examples.map(library.promptExample), referenceTexts: examples.map((e) => e.body),
+      instruction, baseText, history, ruleKey: loaded.ruleKey, previousTexts, copyType,
     });
     const kind = mode === 'more' ? 'more' : mode;
     const saved = await pool.query(
-      `INSERT INTO ad_copy_generations (ad_setup_id, kind, instruction, base_text, options, model, reference_ids, created_by_user_id)
-       VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7::jsonb,$8) RETURNING id, created_at`,
-      [id, kind, instruction || null, baseText || null, JSON.stringify(out.options), out.model, JSON.stringify(examples.map((e) => e.id)), req.user.id]
+      `INSERT INTO ad_copy_generations (ad_setup_id, kind, instruction, base_text, options, model, reference_ids, created_by_user_id, copy_type, copy_type_source)
+       VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7::jsonb,$8,$9,$10) RETURNING id, created_at`,
+      [id, kind, instruction || null, baseText || null, JSON.stringify(out.options), out.model, JSON.stringify(examples.map((e) => e.id)), req.user.id, copyType, loaded.eff.source]
     );
     // Remember the latest suggestions on the ad (clearly unapproved) so a reload does not lose them.
     await pool.query('UPDATE ad_setups SET ai_draft_options = $1::jsonb, updated_at = now() WHERE id = $2', [JSON.stringify(out.options), id]);
     res.json({
       generation_id: saved.rows[0].id, options: out.options, model: out.model, dropped: out.dropped.length,
-      references: examples.map((e) => ({ id: e.id, tab: e.tab, label: e.label })), approved: false,
+      copy_type: copyTypeInfo(loaded),
+      references: examples.map(referenceSummary), approved: false,
       notes: out.dropped.length ? [`${out.dropped.length} suggestion(s) were discarded because they stated details we have no record of.`] : [],
       missing: loaded.facts.isPromotion && !loaded.facts.offer ? ['No verified offer is recorded for this promotion, so the copy does not mention one.'] : [],
     });
@@ -194,12 +264,41 @@ adRouter.post('/:id/copy-ai/refine', (req, res, next) => run(req, res, next, 're
 adRouter.get('/:id/copy-ai', async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    const row = (await pool.query('SELECT id, ai_draft_options, primary_text_approved, primary_text_source FROM ad_setups WHERE id = $1', [id])).rows[0];
-    if (!row) return res.status(404).json({ error: 'Ad Setup not found' });
-    const generations = (await pool.query('SELECT id, kind, instruction, options, model, created_at FROM ad_copy_generations WHERE ad_setup_id = $1 ORDER BY id DESC LIMIT 10', [id])).rows;
+    const loaded = await loadAdFacts(id);
+    if (!loaded) return res.status(404).json({ error: 'Ad Setup not found' });
+    const row = loaded.row;
+    const generations = (await pool.query('SELECT id, kind, instruction, options, model, reference_ids, copy_type, copy_type_source, created_at FROM ad_copy_generations WHERE ad_setup_id = $1 ORDER BY id DESC LIMIT 10', [id])).rows;
     const st = await library.status(pool, sheets, ai.aiConfig().configured);
-    res.json({ ai_configured: st.ai.configured, ai_reason: ai.aiConfig().reason, library: st.library, sheets: st.sheets, draft_options: row.ai_draft_options || [], approved: row.primary_text_approved, generations });
+    // the references behind the latest generation, so a reload still shows them
+    let lastReferences = [];
+    const latest = generations[0];
+    if (latest && Array.isArray(latest.reference_ids) && latest.reference_ids.length && st.library) {
+      const { examples } = await library.loadExamples(pool);
+      const byId = new Map(examples.map((e) => [e.id, e]));
+      lastReferences = latest.reference_ids.map((rid) => byId.get(rid)).filter(Boolean).map(referenceSummary);
+    }
+    res.json({
+      ai_configured: st.ai.configured, ai_reason: ai.aiConfig().reason, library: st.library, sheets: st.sheets, draft_options: row.ai_draft_options || [], approved: row.primary_text_approved,
+      generations: generations.map(({ reference_ids: _ids, ...g }) => g), copy_type: copyTypeInfo(loaded), last_references: lastReferences, status: row.status,
+    });
   } catch (err) { next(err); }
 });
 
-module.exports = { libraryRouter, adRouter, loadAdFacts };
+// Set or clear the Copy Type override for this Ad Setup. copy_type: one of the types, or null / "auto" to go back to automatic detection.
+// The choice is stored on the Ad Setup, so it applies to every later generation until it is reset. An approved Ad Setup is never changed.
+adRouter.put('/:id/copy-type', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const existing = (await pool.query('SELECT id, status FROM ad_setups WHERE id = $1', [id])).rows[0];
+    if (!existing) return res.status(404).json({ error: 'Ad Setup not found' });
+    if (existing.status === 'approved') return res.status(409).json({ error: 'This Ad Setup has already been approved.' });
+    const raw = (req.body || {}).copy_type;
+    const value = raw === null || raw === undefined || raw === '' || raw === 'auto' ? null : raw;
+    if (value !== null && !copyTypes.isCopyType(value)) return res.status(400).json({ error: `copy_type must be one of: ${copyTypes.VALUES.join(', ')}, or null for automatic.` });
+    await pool.query("UPDATE ad_setups SET copy_type_override = $1 WHERE id = $2 AND status = 'draft'", [value, id]);
+    const loaded = await loadAdFacts(id);
+    res.json({ copy_type: copyTypeInfo(loaded) });
+  } catch (err) { next(err); }
+});
+
+module.exports = { libraryRouter, adRouter, loadAdFacts, copyTypeInfo, referenceSummary };

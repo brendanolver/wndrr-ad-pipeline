@@ -6,7 +6,14 @@
 // Every generated option is checked against those facts: discounts, prices, specifications, GSM, fabric, stock, shipping and deadlines that
 // are not in the facts are rejected. If the provider is not configured, or the library has never been read, nothing is generated.
 //
+// Reference examples teach TONE, STRUCTURE and FORMATTING only. They are shown with another product's details removed (lib/copyClaims.js maskClaims), the writer is told they are
+// not facts, and every generated option is checked against the VERIFIED FACTS the application holds (creative concept / hook / angle are creative direction, not facts).
+//
 // Configuration: ANTHROPIC_API_KEY (required), COPY_AI_MODEL (optional, default below). ANTHROPIC_API_BASE exists for tests only.
+
+const { findUnsupportedClaims } = require('./copyClaims');
+const { similarity, contentWords, plain } = require('./copyText');
+const copyTypes = require('./copyTypes');
 
 const DEFAULT_MODEL = 'claude-sonnet-5-5';
 const MAX_PRIMARY_TEXT = 2200;
@@ -90,78 +97,94 @@ async function callModel({ system, messages, maxTokens = 8000, env = process.env
   return { text, model: json.model || cfg.model };
 }
 
-// ── facts guard ─────────────────────────────────────────────────────────────────────────────────────────────────────
-const MONTHS = 'jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?';
-const DAYS = 'monday|tuesday|wednesday|thursday|friday|saturday|sunday|tonight|tomorrow|midnight|weekend';
-const RULES = [
-  { code: 'discount', re: /\b\d{1,3}(?:\.\d+)?\s?(?:%|percent)/gi, numeric: true, label: 'a percentage' },
-  { code: 'price', re: /(?:[$€£]\s?\d[\d,.]*|\b\d[\d,.]*\s?(?:aud|usd|dollars?|bucks)\b)/gi, numeric: true, label: 'a price' },
-  { code: 'gsm', re: /\b\d{2,4}\s?gsm\b/gi, numeric: true, label: 'a fabric weight (GSM)' },
-  { code: 'fabric', re: /\b(?:cotton|polyester|nylon|linen|wool|fleece|terry|denim|viscose|elastane|spandex|rayon|merino|organic cotton|heavyweight|lightweight|breathable|moisture[- ]wicking|water[- ]resistant|waterproof)\b/gi, label: 'a fabric or performance claim' },
-  { code: 'stock', re: /\b(?:selling fast|almost gone|nearly sold out|sold out|low stock|limited stock|few (?:left|remaining)|last few|while (?:stocks?|supplies) last|back in stock|only \d+ left|limited quantities|in stock)\b/gi, label: 'a stock-availability claim' },
-  { code: 'shipping', re: /\b(?:free (?:shipping|delivery|returns?)|express (?:shipping|delivery)|next[- ]day (?:delivery|shipping)|worldwide shipping|fast shipping|ships? (?:today|free|worldwide))\b/gi, label: 'a shipping claim' },
-  { code: 'deadline', re: new RegExp(`\\b(?:ends? (?:in|on|at)?\\s?(?:${DAYS})|until (?:${DAYS})|\\d+\\s?(?:hours?|days?|mins?|minutes?) left|today only|tonight only|this weekend(?: only)?|all weekend|ends? soon|ends? tonight|this week only|(?:\\d{1,2}(?:st|nd|rd|th)?\\s(?:${MONTHS}))\\b|(?:${MONTHS})\\s\\d{1,2}(?:st|nd|rd|th)?)`, 'gi'), label: 'a deadline or date' },
-  { code: 'offer_terms', re: /\b(?:discount|clearance|bogo|buy \d+|free gift|gift with purchase|gwp|bundle (?:and|&) save|save \$?\d+|deal)\b/gi, label: 'promotional terms' },
-  { code: 'sale_word', re: /\b(?:sale|on sale|\d+% off|% off|markdown)\b/gi, label: 'sale wording', onlyWhen: (facts) => !facts.isPromotion },
-];
-
-const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ');
-
-// facts: { text: <everything the model was allowed to know, as one string>, isPromotion }
-// Returns [{ code, match, label }] for each claim that is not supported by the facts.
-function findUnsupportedClaims(text, facts) {
-  const allowed = norm(facts.text);
-  const out = [];
-  for (const rule of RULES) {
-    if (rule.onlyWhen && !rule.onlyWhen(facts)) continue;
-    const matches = String(text).match(rule.re) || [];
-    for (const m of matches) {
-      const needle = norm(m);
-      const supported = rule.numeric ? allowed.includes(needle.replace(/\s+/g, '')) || allowed.replace(/\s+/g, '').includes(needle.replace(/\s+/g, '')) : allowed.includes(needle);
-      if (!supported) out.push({ code: rule.code, match: m.trim(), label: rule.label });
-    }
-  }
-  const seen = new Set();
-  return out.filter((c) => { const k = `${c.code}:${c.match.toLowerCase()}`; if (seen.has(k)) return false; seen.add(k); return true; });
-}
-
-const words = (t) => new Set(norm(t).replace(/[^a-z0-9\s']/g, ' ').split(' ').filter((w) => w.length > 3));
-function overlap(a, b) { const A = words(a); const B = words(b); if (!A.size || !B.size) return 0; let n = 0; A.forEach((w) => { if (B.has(w)) n += 1; }); return n / Math.min(A.size, B.size); }
-
 // ── prompt ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+// Angles are different ways in. None of them asks for product features: the application holds no verified features, so a "feature-led" option is only offered when
+// facts.verifiedFeatures lists some.
 const ANGLES = {
-  standard: ['product-led', 'feature-led', 'styling or lifestyle-led'],
+  standard: ['product-led (name the product, one confident reason to click, verified facts only)', 'idea-led (build on the creative direction without stating product facts)', 'occasion-led (when or where it gets worn, no product claims)'],
   hype: ['teaser-led', 'anticipation-led', 'sign-up-led'],
   sale_live: ['offer-led', 'product-in-the-sale-led', 'lifestyle-led'],
   mid_sale: ['offer-led', 'product-in-the-sale-led', 'lifestyle-led'],
   last_chance: ['urgency-led', 'offer-led', 'product-led'],
 };
+const TYPE_ANGLES = {
+  new_range: ['launch-led (the range or drop is the news)', 'product-led (name the product, verified facts only)', 'idea-led (build on the creative direction)'],
+  new_colourways: ['colour-news-led (new colours are in; do not name or count them)', 'product-led (name the product, verified facts only)', 'idea-led (build on the creative direction)'],
+  bundle: ['build-your-set-led (the mix-and-match idea, no prices or quantities)', 'product-led (name the products, verified facts only)', 'occasion-led (when or where the set gets worn)'],
+  usa_bundle: ['build-your-set-led (the mix-and-match idea, no prices or quantities)', 'product-led (name the products, verified facts only)', 'occasion-led (when or where the set gets worn)'],
+};
+function anglesFor(ruleKey, copyType, facts) {
+  let list = copyType && copyType !== 'sale' && TYPE_ANGLES[copyType] ? TYPE_ANGLES[copyType] : (ANGLES[ruleKey] || ANGLES.standard);
+  if (facts && Array.isArray(facts.verifiedFeatures) && facts.verifiedFeatures.length) list = [...list, 'feature-led (use ONLY the verified features listed)'];
+  return list;
+}
 
 const SYSTEM = `You write the Primary Text for WNDRR's Meta (Facebook/Instagram) ads, in WNDRR's own voice.
-You are given FACTS (the only things you may state about the product or campaign), WNDRR STYLE NOTES measured from real WNDRR copy, and REFERENCE EXAMPLES of real WNDRR copy.
+You are given: the COPY TYPE, VERIFIED FACTS, CREATIVE DIRECTION, STYLE NOTES and STYLE REFERENCES.
 Hard rules:
-- Use the examples for voice, rhythm and structure only. Never copy a sentence from them. Never reuse another product's details.
-- State only what the FACTS support. Do NOT invent or imply: discounts, percentages, prices, product specifications, fabric or composition, GSM, features, stock levels or availability, shipping offers, deadlines, dates or campaign terms. If a detail is not in the FACTS, leave it out.
-- No discount or offer wording unless a verified offer is in the FACTS. If the ad is a sale ad without a verified offer, write copy that does not mention any offer.
+- VERIFIED FACTS are the only things you may state about the product or campaign. CREATIVE DIRECTION (concept, hook, idea, audience) is a brief for mood and angle; it is NOT a fact about the product, so never state it as one.
+- STYLE REFERENCES are real WNDRR ads for OTHER products. Take their voice, rhythm, sentence structure, line breaks, emoji use, calls to action and formatting only. Square-bracket placeholders such as [PRODUCT], [COUNT] or [DETAIL] mark details that were removed on purpose: never fill them in and never carry over anything about those products.
+- Never copy a sentence from a reference. Never reuse another product's details.
+- Do NOT invent or imply anything that is not in the VERIFIED FACTS: discounts, percentages, prices, specifications, fabric or composition, GSM, features, fit variations, how many fits, colours or ways to wear it, best-seller or popularity claims, reviews, "new" or launch wording (unless the COPY TYPE allows it), availability, stock levels, shipping, deadlines, dates or campaign terms. If a detail is not in the facts, leave it out.
+- No discount or offer wording unless a verified offer is in the VERIFIED FACTS.
 - Do not write the headline, description or call-to-action button; write the Primary Text only.
+- The options must be genuinely different from each other: a different opening line, a different structure and a different angle. 
 - Return ONLY JSON, no commentary, in exactly this shape: {"options":[{"angle":"...","text":"..."}]}. Use real line breaks inside "text" as \\n.`;
 
+// Everything the writer may state (and nothing else): the facts the application actually holds.
 function factsToText(facts) {
   const lines = [];
   const add = (k, v) => { if (v !== undefined && v !== null && String(v).trim() !== '') lines.push(`${k}: ${v}`); };
   add('Product name', facts.productName); add('Product category', facts.productCategory); add('Products covered', (facts.productNames || []).join(', '));
-  add('Ad type', facts.adCategoryLabel); add('Campaign', facts.promotionName); add('Campaign stage', facts.stageLabel);
+  add('Ad type', facts.adCategoryLabel); add('Copy type', facts.copyTypeLabel); add('Campaign', facts.promotionName); add('Campaign stage', facts.stageLabel);
   add('Verified offer', facts.offer); add('Campaign dates (from the promotion record)', facts.campaignDates);
-  add('Creative concept', facts.conceptName); add('Concept type', facts.conceptType); add('Hook', facts.hook); add('Concept idea', facts.angle);
-  add('Audience note', facts.audience); add('Creative format', facts.format); add('Product note from planning', facts.productNote);
+  add('Drop', facts.dropName); add('Drop launch date', facts.dropLaunch);
+  add('Creative format', facts.format);
+  (facts.verifiedFeatures || []).forEach((f) => add('Verified feature', f));
   return lines.join('\n');
 }
 
-function buildMessages({ mode, facts, guidelines, examples, instruction, baseText, history, ruleKey, previousTexts }) {
-  const angles = ANGLES[ruleKey] || ANGLES.standard;
+// The creative brief: direction for the writer, never evidence for a claim.
+function directionToText(facts) {
+  const lines = [];
+  const add = (k, v) => { if (v !== undefined && v !== null && String(v).trim() !== '') lines.push(`${k}: ${v}`); };
+  add('Creative concept', facts.conceptName); add('Concept type', facts.conceptType); add('Hook', facts.hook); add('Concept idea', facts.angle);
+  add('Audience note', facts.audience); add('Note from planning', facts.productNote);
+  return lines.join('\n');
+}
+
+const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ');
+const words = (t) => new Set(norm(t).replace(/[^a-z0-9\s']/g, ' ').split(' ').filter((w) => w.length > 3));
+function overlap(a, b) { const A = words(a); const B = words(b); if (!A.size || !B.size) return 0; let n = 0; A.forEach((w) => { if (B.has(w)) n += 1; }); return n / Math.min(A.size, B.size); }
+const opener = (t) => contentWords(plain(t).split(' ').slice(0, 6).join(' ')).slice(0, 2).join(' ');
+
+// Longest run of consecutive words a text shares with any reference (copying guard).
+function longestSharedRun(text, refs) {
+  const t = plain(text).split(' ').filter(Boolean);
+  let best = 0;
+  for (const r of refs) {
+    const rw = plain(r).split(' ').filter(Boolean);
+    const at = new Map(); rw.forEach((w, i) => { if (!at.has(w)) at.set(w, []); at.get(w).push(i); });
+    for (let i = 0; i < t.length; i += 1) for (const j of at.get(t[i]) || []) { let k = 0; while (i + k < t.length && j + k < rw.length && t[i + k] === rw[j + k]) k += 1; if (k > best) best = k; }
+  }
+  return best;
+}
+const MAX_COPIED_RUN = 8;
+
+function buildMessages({ mode, facts, guidelines, examples, instruction, baseText, history, ruleKey, previousTexts, copyType, wanted }) {
+  const type = copyTypes.isCopyType(copyType) ? copyType : (facts.copyType || null);
+  const angles = anglesFor(ruleKey, type, facts);
   const factText = factsToText(facts);
-  const exampleText = examples.map((e, i) => `Example ${i + 1}${e.label ? ` (${e.label})` : ''}:\n${e.body}`).join('\n\n');
-  const context = `FACTS (the only things you may state):\n${factText}\n\nWNDRR STYLE NOTES (measured from real WNDRR copy):\n${guidelines || '(none)'}\n\nREFERENCE EXAMPLES (voice only, do not copy):\n${exampleText || '(none)'}`;
+  const directionText = directionToText(facts);
+  const exampleText = examples.map((e, i) => `Reference ${i + 1}${e.tab ? ` (${e.tab}${e.label ? `, ${e.label}` : ''})` : (e.label ? ` (${e.label})` : '')}:\n${e.body}`).join('\n\n');
+  const typeBlock = type ? `COPY TYPE: ${copyTypes.LABELS[type]}\n${copyTypes.GUIDANCE[type]}` : '';
+  const context = [
+    typeBlock,
+    `VERIFIED FACTS (the only things you may state):\n${factText || '(none)'}`,
+    `CREATIVE DIRECTION (mood and angle only, NOT facts about the product):\n${directionText || '(none)'}`,
+    `STYLE NOTES (measured from real WNDRR copy; style only):\n${guidelines || '(none)'}`,
+    `STYLE REFERENCES (other products' ads with their details removed; voice, structure and formatting only):\n${exampleText || '(none)'}`,
+  ].filter(Boolean).join('\n\n');
   const messages = [];
   (history || []).forEach((h) => {
     messages.push({ role: 'user', content: h.instruction ? `Request: ${h.instruction}` : 'Write three Primary Text options.' });
@@ -169,11 +192,11 @@ function buildMessages({ mode, facts, guidelines, examples, instruction, baseTex
   });
   let ask;
   if (mode === 'refine') {
-    ask = `Rewrite this Primary Text following the request, keeping the same facts and WNDRR voice. Return exactly one option.\n\nCurrent text:\n${baseText}\n\nRequest: ${instruction}`;
+    ask = `Rewrite this Primary Text following the request, keeping the same facts and WNDRR voice. Return ${wanted || 1} version${(wanted || 1) > 1 ? 's' : ''}, best first.\n\nCurrent text:\n${baseText}\n\nRequest: ${instruction}`;
   } else if (mode === 'more') {
-    ask = `Write three NEW Primary Text options, clearly different in approach from these earlier ones:\n${(previousTexts || []).map((t, i) => `${i + 1}. ${t}`).join('\n')}\n${instruction ? `\nAdditional request: ${instruction}` : ''}\nAngles to use: ${angles.join('; ')}.`;
+    ask = `Write ${wanted || 3} NEW Primary Text options, clearly different in approach from these earlier ones:\n${(previousTexts || []).map((t, i) => `${i + 1}. ${t}`).join('\n')}\n${instruction ? `\nAdditional request: ${instruction}` : ''}\nAngles to use: ${angles.join('; ')}.`;
   } else {
-    ask = `Write three Primary Text options that are meaningfully different from each other, one per angle: ${angles.join('; ')}.${instruction ? `\nAdditional request: ${instruction}` : ''}`;
+    ask = `Write ${wanted || 3} Primary Text options that are meaningfully different from each other (opening line, structure and angle), spread across these angles: ${angles.join('; ')}.${instruction ? `\nAdditional request: ${instruction}` : ''}`;
   }
   messages.push({ role: 'user', content: `${context}\n\n${ask}` });
   return { system: SYSTEM, messages };
@@ -191,42 +214,46 @@ function parseOptions(text) {
 }
 
 // Orchestrates one request. `call` is callModel (injectable). Returns { options, dropped, model, attempts }.
-async function generate({ mode = 'generate', facts, guidelines, examples, instruction, baseText, history, ruleKey, previousTexts, call = callModel }) {
-  const factGuard = { text: `${factsToText(facts)}\n${instruction || ''}\n${baseText || ''}`, isPromotion: !!facts.isPromotion };
+// The model is asked for extra candidates (5 for "three options", 2 for a refinement): the ones that pass the facts guard and are genuinely different are kept, best first.
+async function generate({ mode = 'generate', facts, guidelines, examples, instruction, baseText, history, ruleKey, previousTexts, copyType, referenceTexts, call = callModel }) {
+  const type = copyTypes.isCopyType(copyType) ? copyType : (facts.copyType || null);
+  // What the writer may state: verified facts + what the person typed in this request. Creative direction is deliberately not included.
+  const factGuard = {
+    text: `${factsToText(facts)}\n${instruction || ''}\n${baseText || ''}`,
+    isPromotion: !!facts.isPromotion,
+    newnessAllowed: facts.newnessAllowed !== undefined ? !!facts.newnessAllowed : (type === 'new_range' || type === 'new_colourways'),
+  };
+  const refTexts = referenceTexts || examples.map((e) => e.body);
   const want = mode === 'refine' ? 1 : 3;
+  const candidates = mode === 'refine' ? 2 : 5;
   let model = null;
   let problems = [];
   let kept = [];
-  const dropped = [];
+  let dropped = [];
   for (let attempt = 1; attempt <= 2; attempt += 1) {
-    const built = buildMessages({ mode, facts, guidelines, examples, instruction, baseText, history, ruleKey, previousTexts });
+    const built = buildMessages({ mode, facts, guidelines, examples, instruction, baseText, history, ruleKey, previousTexts, copyType: type, wanted: candidates });
     if (attempt > 1) built.messages[built.messages.length - 1].content += `\n\nYour previous answer was rejected: ${problems.join(' ')} Write it again and fix this.`;
     const out = await call({ system: built.system, messages: built.messages });
     model = out.model;
     let options;
     try { options = parseOptions(out.text); } catch (e) { if (attempt === 2) throw e; problems = ['The answer was not valid JSON in the required shape.']; continue; }
-    problems = [];
-    const checked = options.slice(0, want).map((o) => {
+    problems = []; kept = []; dropped = [];
+    options.forEach((o, i) => {
       const unsupported = findUnsupportedClaims(o.text, factGuard);
-      const tooLong = o.text.length > MAX_PRIMARY_TEXT;
-      return { ...o, unsupported, tooLong };
-    });
-    kept = [];
-    checked.forEach((o, i) => {
-      if (o.unsupported.length) { problems.push(`Option ${i + 1} stated things not in the FACTS: ${o.unsupported.map((u) => `"${u.match}" (${u.label})`).join(', ')}.`); return; }
-      if (o.tooLong) { problems.push(`Option ${i + 1} is too long.`); return; }
+      if (unsupported.length) { problems.push(`Option ${i + 1} stated things not in the VERIFIED FACTS: ${unsupported.map((u) => `"${u.match}" (${u.label})`).join(', ')}.`); dropped.push({ text: o.text, reasons: unsupported.map((u) => `${u.label}: "${u.match}"`) }); return; }
+      if (o.text.length > MAX_PRIMARY_TEXT) { problems.push(`Option ${i + 1} is too long.`); dropped.push({ text: o.text, reasons: ['too long'] }); return; }
+      if (longestSharedRun(o.text, refTexts) >= MAX_COPIED_RUN) { problems.push(`Option ${i + 1} copies wording from a style reference; write it fresh.`); dropped.push({ text: o.text, reasons: ['copies a reference'] }); return; }
+      if (mode !== 'refine') {
+        const twin = kept.findIndex((k) => overlap(k.text, o.text) > 0.7 || (opener(k.text) && opener(k.text) === opener(o.text)));
+        if (twin >= 0) { problems.push(`Option ${i + 1} is too similar to another option; make each genuinely different.`); return; }
+      }
       kept.push({ angle: o.angle, text: o.text });
     });
-    if (mode !== 'refine') {
-      for (let i = 0; i < kept.length; i += 1) for (let j = i + 1; j < kept.length; j += 1) {
-        if (overlap(kept[i].text, kept[j].text) > 0.7) problems.push(`Options ${i + 1} and ${j + 1} are too similar; make them genuinely different.`);
-      }
-    }
-    if (kept.length === want && !problems.length) { checked.forEach(() => {}); return { options: kept, dropped, model, attempts: attempt }; }
-    if (attempt === 2) checked.forEach((o) => { if (o.unsupported.length || o.tooLong) dropped.push({ text: o.text, reasons: o.unsupported.map((u) => `${u.label}: "${u.match}"`).concat(o.tooLong ? ['too long'] : []) }); });
+    kept = kept.slice(0, want);
+    if (kept.length === want) return { options: kept, dropped: dropped.slice(0, 6), model, attempts: attempt };
   }
-  if (!kept.length) throw new AiError('rejected', 'The AI wrote copy that stated things we have no record of (for example a discount or a specification), so nothing was kept. Try again, or write the copy yourself.');
-  return { options: kept, dropped, model, attempts: 2 };
+  if (!kept.length) throw new AiError('rejected', 'The AI wrote copy that stated things we have no record of (for example a discount, a specification or a number of fits), so nothing was kept. Try again, or write the copy yourself.');
+  return { options: kept, dropped: dropped.slice(0, 6), model, attempts: 2 };
 }
 
-module.exports = { aiConfig, callModel, scrub, generate, buildMessages, parseOptions, findUnsupportedClaims, factsToText, AiError, DEFAULT_MODEL, MAX_PRIMARY_TEXT, ANGLES, overlap };
+module.exports = { aiConfig, callModel, scrub, generate, buildMessages, parseOptions, findUnsupportedClaims, factsToText, directionToText, AiError, DEFAULT_MODEL, MAX_PRIMARY_TEXT, ANGLES, TYPE_ANGLES, anglesFor, overlap, longestSharedRun };

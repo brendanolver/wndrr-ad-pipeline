@@ -3496,6 +3496,20 @@ ALTER TABLE shoot_plan_items ADD COLUMN IF NOT EXISTS auto_linked BOOLEAN NOT NU
 -- Additive and nullable: existing rows keep NULL and are looked at once, only ever to fill an untouched destination.
 ALTER TABLE ad_setups ADD COLUMN IF NOT EXISTS destination_defaulted_at TIMESTAMPTZ;
 
+-- AI Copy Assistant v2: automatic Copy Type with a persistent manual override, and a library importer that keeps the "What" (product / subject) column and
+-- marks the rows that must never be used as style references. Additive and idempotent; no existing row is rewritten, and an Ad Setup that has no override stays on
+-- automatic detection.
+ALTER TABLE ad_setups ADD COLUMN IF NOT EXISTS copy_type_override VARCHAR(20);
+ALTER TABLE ad_setups DROP CONSTRAINT IF EXISTS ad_setups_copy_type_override_check;
+ALTER TABLE ad_setups ADD CONSTRAINT ad_setups_copy_type_override_check
+  CHECK (copy_type_override IS NULL OR copy_type_override IN ('core', 'new_range', 'new_colourways', 'bundle', 'usa_bundle', 'sale', 'general'));
+ALTER TABLE ad_copy_generations ADD COLUMN IF NOT EXISTS copy_type VARCHAR(20);
+ALTER TABLE ad_copy_generations ADD COLUMN IF NOT EXISTS copy_type_source VARCHAR(8);
+ALTER TABLE copy_reference_examples ADD COLUMN IF NOT EXISTS subject TEXT;
+ALTER TABLE copy_reference_examples ADD COLUMN IF NOT EXISTS kind VARCHAR(20);
+ALTER TABLE copy_reference_examples ADD COLUMN IF NOT EXISTS excluded BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE copy_reference_examples ADD COLUMN IF NOT EXISTS exclude_reason VARCHAR(30);
+
 -- Approved Ad Matching concepts + historical-spelling aliases
 -- =====================================================================
 -- The concept list Ad Matching offers is the people-approved vocabulary: meta_matching_vocab rows of kind 'concept'. The 40 approved

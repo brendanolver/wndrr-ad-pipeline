@@ -85,3 +85,32 @@ Setup: create a Google service account with the Sheets API enabled, **share the 
 ## 6. Database changes (additive, idempotent, in `db/schema.sql`)
 
 `creative_assets` archive columns; `concept_lifecycle_log`; `ad_setups` copy columns (`selected_description`, `copy_fields_manual`, `copy_rule_key`, `copy_rule_flags`, `primary_text_approved*`, `primary_text_source`, `ai_draft_options`); `promotions.verified_offer*`; `ad_copy_generations`; `copy_reference_syncs`, `copy_reference_examples`, `copy_tone_guidelines`. Existing rows are never rewritten.
+
+## AI Copy Assistant v2: Copy Type, reference selection and product claims (v1.4.5)
+
+**Copy Type** (`src/lib/copyTypes.js`) says what kind of ad the Primary Text is for: Core / Evergreen, New Range / Drop, New Colourways, Bundle, USA Bundle, Sale / Promotion, or the
+General product copy fallback. It is worked out from what the pipeline already holds, in this order: a Promotion stage (Sale); a bundle in the creative brief ("bundle", "3 for $150", "mix & match",
+and, with a USA mention, USA Bundle: several linked products alone never make a bundle); new colours in the brief or planning reason, or the catalogue showing the same product launched earlier in
+other colours (New Colourways); a drop planned from Upcoming Drops / Protect Momentum, or a new-drop product whose drop launched in the last 120 days or launches within 60 (New Range); Core planning
+or a core/proven catalogue tier (Core); otherwise General. Nothing is guessed: no evidence, no type, and "new", "new colours" or "bestseller" are never assumed. The result and its reasons are shown in
+the AI panel. A person can override it (**Copy type** menu); the choice is saved on the Ad Setup (`ad_setups.copy_type_override`), wins over automatic detection in every later generation and every
+later session, and **Reset to automatic** clears it. An approved Ad Setup is never changed (the endpoint answers 409).
+
+**Reference selection** (`copyLibrary.selectExamples`). Each type has its own tabs (`copyTypes.TAB_PLAN`): Core: CORE 26 + CORE; New Range: the RANGES tabs; New Colourways: CORE + RANGES (colour
+wording preferred); Bundle: BUNDLES + BUNDLES 26; USA Bundle: USA - BUNDLES 26; Sale: SALES + 2026 SALES; General: CORE + RANGES. The secondary tabs only fill places the primary tabs cannot. Within the tabs,
+references are scored on whole-word product matches (decorative lettering such as 𝐇𝐢𝐣𝐚𝐜𝐤 is normalised with NFKC; "boxy" is not "box", "fits" is "fit"), garment type and kind, the best are chosen with a
+penalty for near-identical texts, one example per product, and at most half the set from one tab. Recruitment ads, customer testimonials and non-Meta-ad rows (Pinterest) are kept in the library but
+never used (`excluded`, `exclude_reason`).
+
+**Importer.** The sheet's columns are `Range | What | Copy`: "What" is the product / subject (stored in `copy_reference_examples.subject`, with `kind`), Range is the label; Range cells (and the sales
+tabs' stage) that are merged over several rows are carried down; a `[merged]` marker is never content. Ranges rows whose What is just "Product" take the product name from the copy ("... | The Junkyard Box
+Fit Tee"). Rows imported by an earlier version are enriched when read, so no re-import is needed. A refresh is validated before it replaces anything: no examples, fewer than 5 usable examples, or
+a library under 60% of the current size (unless accepted explicitly) is rejected and the current library stays active. **Settings > Copy Library > Check before refreshing** (and `POST /api/copy-library/refresh`
+with `{ "dry_run": true }`) reads and validates the sheet and reports per-tab counts without writing anything. The sheet itself is only ever read.
+
+**Product claims** (`src/lib/copyClaims.js`). References teach tone, structure and formatting; they are never facts. The model sees a reference with another product's details removed (names, bullet lists,
+counts, materials, features, colours, prices, offers, popularity: `[PRODUCT]`, `[DETAIL]`, `[COUNT]` ...). The prompt separates VERIFIED FACTS (product name / category, promotion and verified offer, drop,
+creative format) from CREATIVE DIRECTION (concept, hook, idea, audience: mood only). Every generated option is checked against the verified facts plus what the person typed in the request: counts of fits,
+colours or ways to wear it ("One tee, three completely different fits"), features, fabric and quality, popularity and "best", launch wording (only for New Range / New Colourways), availability, colours,
+offers, prices, stock, shipping and deadlines are rejected unless supported. Options that copy eight or more consecutive words of a reference, or open the same way as another option, are dropped. The model
+is asked for extra candidates (5 for three options) so three clean, different options usually survive. A "feature-led" angle is offered only when verified features exist (none are held today).

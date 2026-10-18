@@ -5829,3 +5829,19 @@ body{background:var(--bg);color:var(--text);}
 .core-shoot-count-amber{color:#9a5b00;font-weight:700;}
 @media (max-width:1150px){.core-shoot-review-header.core-product-row,.core-shoot-review-row.core-product-row{grid-template-columns:minmax(90px,1fr) 80px 74px 104px minmax(125px,1.5fr) minmax(92px,1fr) 80px;gap:8px;}.core-product-row > *{min-width:0;}.core-cat-date{white-space:normal;}}
 .core-stat-stack{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0;}
+
+/* v1.4.5 AI Copy Assistant: Copy Type selector, References used, library check report */
+.as-ct{display:flex;flex-direction:column;align-items:stretch;text-align:left;gap:6px;padding:8px 10px;background:var(--surface);border:1px solid var(--border);border-radius:10px;}
+.as-ct-row{display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:10px;flex-wrap:wrap;margin:0;}
+.as-ct-k{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--accent-text);}
+.as-ct select{min-width:220px;max-width:100%;}
+.as-ct-why summary{font-size:12px;color:var(--text-muted);cursor:pointer;}
+.as-ct-why ul{margin:6px 0 0 18px;padding:0;font-size:12px;color:var(--text-muted);line-height:1.5;}
+.as-refs{border-top:1px solid var(--accent-border);padding-top:8px;}
+.as-refs summary{font-size:12.5px;font-weight:600;color:var(--accent-text);cursor:pointer;}
+.as-refs-list{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:6px;}
+.as-refs-list li{font-size:12.5px;line-height:1.4;}
+.as-refs-tab{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted);border:1px solid var(--border);border-radius:6px;padding:0 6px;}
+.as-refs-snippet{color:var(--text-muted);font-size:12px;margin-top:2px;}
+.cl-check{display:flex;flex-direction:column;gap:8px;margin-top:10px;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--surface2);}
+.cl-check.ok{border-color:#86efac;} .cl-check.bad{border-color:#fca5a5;}

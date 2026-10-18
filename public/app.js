@@ -532,7 +532,8 @@ async function loadCopyLibraryPanel() {
         ${st.ai.configured ? '' : `<div class="cl-note">${escapeHtml(st.ai.reason || '')} Set <code>ANTHROPIC_API_KEY</code> to enable Generate Copy.</div>`}
         <div class="cl-row"><span class="cl-k">Last successful update</span><span>${st.library ? `${copyLibDate(st.library.synced_at)} &middot; ${st.library.example_count} examples &middot; ${st.library.source === 'import' ? 'imported from CSV files' : 'read from Google Sheets'}` : 'Never. The library has not been loaded yet.'}</span></div>
         ${st.last_attempt && st.last_attempt.status === 'failed' ? `<div class="cl-warn">The latest refresh failed (${copyLibDate(st.last_attempt.at)}): ${escapeHtml(st.last_attempt.error || 'unknown error')}. The previous library is still in use.</div>` : ''}
-        <div class="cl-actions"><button type="button" class="btn btn-primary btn-sm" id="copy-library-refresh-btn" ${st.sheets.configured ? '' : 'disabled'}>Refresh library</button></div>
+        <div class="cl-actions"><button type="button" class="btn btn-ghost btn-sm" id="copy-library-check-btn" ${st.sheets.configured ? '' : 'disabled'} title="Reads and checks the spreadsheet without changing the library">Check before refreshing</button> <button type="button" class="btn btn-primary btn-sm" id="copy-library-refresh-btn" ${st.sheets.configured ? '' : 'disabled'}>Refresh library</button></div>
+        <div id="copy-check-report"></div>
       </div>
       <div class="ux-card cl-card" id="copy-library-import">
         <div class="ux-section-title">Import from CSV files</div>
@@ -542,8 +543,8 @@ async function loadCopyLibraryPanel() {
         <div class="cl-actions"><button type="button" class="btn btn-primary btn-sm" id="copy-import-btn" disabled>Import files</button></div>
       </div>
       ${tabs.length ? `<div class="ux-card cl-card"><div class="ux-section-title">Tabs read</div>
-        <table class="cl-table"><thead><tr><th>Tab</th><th>Type</th><th>Examples</th><th>Copy column</th><th>Notes</th></tr></thead><tbody>
-        ${tabs.map((t) => `<tr><td>${escapeHtml(t.title)}</td><td>${escapeHtml(t.family)}</td><td>${t.found === false ? '—' : t.examples}</td><td>${t.found === false ? '—' : (t.header_found ? 'from header' : 'guessed')}</td><td>${(t.warnings || []).map(escapeHtml).join(' ')}</td></tr>`).join('')}
+        <table class="cl-table"><thead><tr><th>Tab</th><th>Type</th><th>Examples</th><th>Not used as references</th><th>Copy column</th><th>Notes</th></tr></thead><tbody>
+        ${tabs.map((t) => `<tr><td>${escapeHtml(t.title)}</td><td>${escapeHtml(t.family)}</td><td>${t.found === false ? '—' : t.examples}</td><td>${t.found === false ? '—' : (t.excluded === undefined ? '—' : t.excluded)}</td><td>${t.found === false ? '—' : (t.header_found ? 'from header' : 'guessed')}</td><td>${(t.warnings || []).map(escapeHtml).join(' ')}</td></tr>`).join('')}
         </tbody></table></div>` : ''}
       ${o ? `<div class="ux-card cl-card"><div class="ux-section-title">What the examples show</div>
         <div class="cl-note">Measured from ${g.analysis.examples} examples read on ${copyLibDate(g.synced_at)}. These are statistics, not rules.</div>
@@ -558,6 +559,8 @@ async function loadCopyLibraryPanel() {
       </div>` : ''}`;
     const btn = document.getElementById('copy-library-refresh-btn');
     if (btn) btn.addEventListener('click', refreshCopyLibrary);
+    const checkBtn = document.getElementById('copy-library-check-btn');
+    if (checkBtn) checkBtn.addEventListener('click', checkCopyLibrary);
     const fileInput = document.getElementById('copy-import-files');
     if (fileInput) fileInput.addEventListener('change', prepareCopyImport);
     const impBtn = document.getElementById('copy-import-btn');
@@ -603,6 +606,27 @@ async function runCopyImport() {
   } catch (e) { toast(e.message, true); }
   btn.textContent = 'Import files';
   loadCopyLibraryPanel();
+}
+
+// Reads and validates the spreadsheet WITHOUT replacing the library: what a refresh would import, per tab, and whether it would be accepted.
+async function checkCopyLibrary() {
+  const btn = document.getElementById('copy-library-check-btn');
+  const host = document.getElementById('copy-check-report');
+  if (btn) { btn.disabled = true; btn.textContent = 'Checking\u2026'; }
+  try {
+    const r = await api('/copy-library/refresh', { method: 'POST', body: JSON.stringify({ dry_run: true }) });
+    const cur = r.current ? `${r.current.examples} examples now` : 'no library yet';
+    host.innerHTML = `
+      <div class="cl-check ${r.ok ? 'ok' : 'bad'}">
+        <div><b>${r.ok ? 'This import would be accepted.' : 'This import would be rejected; the current library stays in use.'}</b> ${r.examples} examples found (${r.usable} usable as references, ${r.excluded} kept but never used); ${cur}. Nothing was changed.</div>
+        ${(r.errors || []).map((e) => `<div class="cl-warn">${escapeHtml(e.message)}</div>`).join('')}
+        <table class="cl-table"><thead><tr><th>Tab</th><th>Examples</th><th>Not used</th><th>With product</th><th>Notes</th></tr></thead><tbody>
+        ${(r.tabs || []).map((t) => `<tr><td>${escapeHtml(t.title)}</td><td>${t.found ? t.examples : 'not found'}</td><td>${t.found ? t.excluded : '—'}</td><td>${t.found ? t.with_subject : '—'}</td><td>${(t.warnings || []).map(escapeHtml).join(' ')}</td></tr>`).join('')}
+        </tbody></table>
+        ${(r.warnings || []).length ? `<ul class="cl-list">${r.warnings.map((w) => `<li>${escapeHtml(w)}</li>`).join('')}</ul>` : ''}
+      </div>`;
+  } catch (e) { host.innerHTML = `<div class="cl-warn">${escapeHtml(e.message)}</div>`; }
+  if (btn) { btn.disabled = false; btn.textContent = 'Check before refreshing'; }
 }
 
 async function refreshCopyLibrary() {
@@ -16113,7 +16137,7 @@ function renderAdSetupModal() {
 // Headline / Description / CTA follow the WNDRR rules (src/lib/adCopyRules.js) until a person edits them; Primary Text is written
 // by the assistant or by hand and counts only once it has been explicitly approved.
 const asAi = { adId: null, status: null, options: [], refs: [], notes: [], missing: [], loading: false, error: null, instruction: '' };
-const AS_REFINE_CHIPS = ['Make it shorter', 'More like our usual WNDRR copy', 'Focus on the fit', 'Less salesy', 'Make it more suitable for a new drop'];
+const AS_REFINE_CHIPS = ['Make it shorter', 'More like our usual WNDRR copy', 'Focus on how it is worn', 'Less salesy', 'Make it more suitable for a new drop'];
 
 function adSetupPrimaryState(d) {
   if (d.copy_set_id) return { label: 'From shared copy set', tone: 'green', approved: true };
@@ -16133,6 +16157,46 @@ function adSetupCopyRuleHtml(d) {
   return `<div class="as-rule">${state}${canApply ? '<button type="button" class="ux-link-btn" id="as-apply-rules-btn" onclick="applyAdSetupCopyRules()">Apply WNDRR rules</button>' : ''}</div>${flags}`;
 }
 
+// Copy Type: worked out automatically (and shown with the reasons); a person's choice is saved on the Ad Setup and always wins until it is reset to Automatic.
+function adSetupCopyTypeHtml(d) {
+  const ct = asAi.status && asAi.status.copy_type;
+  if (!ct) return '';
+  const locked = d.status === 'approved';
+  const isManual = !!ct.override;
+  const opts = [`<option value="">Automatic (${escapeHtml(ct.auto.label)})</option>`].concat(ct.options.map((o) => `<option value="${escapeHtml(o.value)}" ${ct.override === o.value ? 'selected' : ''}>${escapeHtml(o.label)}</option>`)).join('');
+  const why = (ct.auto.reasons || []).map((r) => `<li>${escapeHtml(r)}</li>`).join('');
+  return `<div class="as-ct" id="as-copy-type">
+    <label class="as-ct-row"><span class="as-ct-k">Copy type</span>
+      <select id="as-copy-type-select" onchange="setAdSetupCopyType(this.value)" ${locked || asAi.loading ? 'disabled' : ''}>${opts}</select>
+      ${isManual ? UX.badgeHtml('Set by you', 'purple') : UX.badgeHtml(ct.auto.fallback ? 'General (not enough information)' : `Detected automatically${ct.auto.confidence === 'low' ? '' : ` \u00b7 ${ct.auto.confidence} confidence`}`, ct.auto.fallback ? 'neutral' : 'green')}
+      ${isManual && !locked ? '<button type="button" class="ux-link-btn" id="as-copy-type-reset" onclick="setAdSetupCopyType(\'\')">Reset to automatic</button>' : ''}
+    </label>
+    <details class="as-ct-why"><summary>${isManual ? `Automatic detection would choose ${escapeHtml(ct.auto.label)}` : 'Why this type?'}</summary><ul>${why}</ul></details>
+  </div>`;
+}
+
+// "References used": which spreadsheet tabs and examples shaped the style of the last generation (names and first lines only; never the prompt).
+function adSetupReferencesHtml() {
+  const refs = asAi.refs || [];
+  if (!refs.length) return '';
+  const tabs = [...new Set(refs.map((r) => r.tab).filter(Boolean))];
+  return `<details class="as-refs" id="as-refs"><summary>References used (${refs.length}${tabs.length ? ` from ${tabs.map(escapeHtml).join(', ')}` : ''})</summary>
+    <div class="as-ai-note">These past WNDRR ads were used for tone, structure and style only. Their product details are not used.</div>
+    <ul class="as-refs-list">${refs.map((r) => `<li><span class="as-refs-tab">${escapeHtml(r.tab || r.family || '')}</span>${r.label ? ` <b>${escapeHtml(r.label)}</b>` : ''}${r.snippet ? `<div class="as-refs-snippet">${escapeHtml(r.snippet)}</div>` : ''}</li>`).join('')}</ul>
+  </details>`;
+}
+
+async function setAdSetupCopyType(value) {
+  if (asAi.loading) return;
+  const id = state.adSetup.editingId;
+  try {
+    const out = await api(`/ad-setup/${id}/copy-type`, { method: 'PUT', body: JSON.stringify({ copy_type: value || null }) });
+    if (asAi.status) asAi.status.copy_type = out.copy_type;
+    toast(value ? `Copy type set to ${out.copy_type.effective.label}` : `Back to automatic: ${out.copy_type.effective.label}`);
+  } catch (e) { toast(e.message, true); }
+  refreshAdSetupAiPanel();
+}
+
 function adSetupAiPanelHtml(d) {
   const st = asAi.status;
   if (!st) return '<div class="as-ai"><div class="as-ai-head">AI Copy Assistant</div><div class="as-ai-note">Loading&hellip;</div></div>';
@@ -16142,6 +16206,7 @@ function adSetupAiPanelHtml(d) {
     return `<div class="as-ai"><div class="as-ai-head">AI Copy Assistant ${UX.badgeHtml('Library not loaded', 'amber')}</div><div class="as-ai-note">${escapeHtml(why)}</div></div>`;
   }
   const hasText = !!(d.selected_primary_text || '').trim();
+  const typeBlock = adSetupCopyTypeHtml(d);
   const opts = asAi.options.map((o, i) => `
     <div class="as-ai-option" data-ai-option="${i}">
       <div class="as-ai-angle">${escapeHtml(o.angle || `Option ${i + 1}`)}</div>
@@ -16150,6 +16215,7 @@ function adSetupAiPanelHtml(d) {
     </div>`).join('');
   return `<div class="as-ai">
     <div class="as-ai-head">AI Copy Assistant <span class="as-ai-sub">Library updated ${escapeHtml(copyLibDate(st.library.synced_at))}</span></div>
+    ${typeBlock}
     <div class="as-ai-actions">
       <button type="button" class="btn btn-primary btn-sm" id="as-ai-generate-btn" onclick="generateAdSetupCopy(${asAi.options.length ? 'true' : 'false'})" ${asAi.loading ? 'disabled' : ''}>${asAi.loading ? 'Writing&hellip;' : (asAi.options.length ? 'Give me another three' : 'Generate Copy')}</button>
       <span class="as-ai-note">Three options, written from WNDRR's own examples and only the facts we hold for this ad.</span>
@@ -16158,10 +16224,10 @@ function adSetupAiPanelHtml(d) {
     ${(asAi.missing || []).map((m) => `<div class="as-flag">${escapeHtml(m)}</div>`).join('')}
     ${opts ? `<div class="as-ai-options">${opts}</div>` : ''}
     ${(asAi.notes || []).map((m) => `<div class="as-ai-note">${escapeHtml(m)}</div>`).join('')}
-    ${asAi.refs.length ? `<div class="as-ai-note">Written with ${asAi.refs.length} reference examples (${[...new Set(asAi.refs.map((r) => r.tab))].map(escapeHtml).join(', ')}).</div>` : ''}
+    ${adSetupReferencesHtml()}
     ${hasText ? `<div class="as-ai-refine">
       <div class="as-ai-chips">${AS_REFINE_CHIPS.map((c) => `<button type="button" class="as-chip" onclick="refineAdSetupCopy('${c.replace(/'/g, "\\'")}')">${escapeHtml(c)}</button>`).join('')}</div>
-      <div class="as-ai-ask"><input type="text" id="as-ai-instruction" placeholder="Ask for a change, e.g. make it shorter and focus on the fit" maxlength="500" onkeydown="if(event.key==='Enter'){refineAdSetupCopy()}"><button type="button" class="btn btn-ghost btn-sm" onclick="refineAdSetupCopy()">Refine</button></div>
+      <div class="as-ai-ask"><input type="text" id="as-ai-instruction" placeholder="Ask for a change, e.g. make it shorter and focus on how it is worn" maxlength="500" onkeydown="if(event.key==='Enter'){refineAdSetupCopy()}"><button type="button" class="btn btn-ghost btn-sm" onclick="refineAdSetupCopy()">Refine</button></div>
     </div>` : ''}
   </div>`;
 }
@@ -16231,6 +16297,7 @@ async function loadAdSetupAi() {
   asAi.options = (state.adSetup.draft.ai_draft_options || []).filter((o) => o && o.text);
   try {
     asAi.status = await api(`/ad-setup/${id}/copy-ai`);
+    asAi.refs = asAi.status.last_references || [];
   } catch (e) {
     asAi.status = { ai_configured: false, ai_reason: e.message, library: null, sheets: null };
   }
@@ -16248,6 +16315,7 @@ async function generateAdSetupCopy(more) {
   try {
     const out = await api(`/ad-setup/${state.adSetup.editingId}/copy-ai/generate`, { method: 'POST', body: JSON.stringify({ more: !!more }) });
     asAi.options = out.options; asAi.refs = out.references || []; asAi.notes = out.notes || []; asAi.missing = out.missing || [];
+    if (out.copy_type && asAi.status) asAi.status.copy_type = out.copy_type;
   } catch (e) {
     asAi.error = e.message;
   }
@@ -16265,6 +16333,7 @@ async function refineAdSetupCopy(chip) {
   try {
     const out = await api(`/ad-setup/${state.adSetup.editingId}/copy-ai/refine`, { method: 'POST', body: JSON.stringify({ instruction, base_text: d.selected_primary_text }) });
     asAi.options = out.options; asAi.refs = out.references || []; asAi.notes = out.notes || []; asAi.missing = out.missing || [];
+    if (out.copy_type && asAi.status) asAi.status.copy_type = out.copy_type;
     toast('Here is the revised version. Use it to replace your text.');
   } catch (e) {
     asAi.error = e.message;
