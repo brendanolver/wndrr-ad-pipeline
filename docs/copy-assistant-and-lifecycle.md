@@ -129,6 +129,16 @@ set (and its latest revision) side by side, tagged with the provider and model; 
 another three" and refinement use only the same provider's earlier answers. Nothing is selected or approved automatically; "Use this" and "Approve Primary Text" work as before, and an approved Ad Setup
 cannot be regenerated with either provider. A generation from before providers existed (no provider) is Claude's.
 
-Configuration (Railway service variables; never in code): `OPENAI_API_KEY` (required for OpenAI; API billing is separate from ChatGPT), optional `OPENAI_COPY_MODEL` (default `gpt-5.5`) and
+### OpenAI model (verified against OpenAI's own documentation)
+
+The default is **`gpt-6-sol`** (GPT-6 Sol). OpenAI's model page lists it for the Responses API (`/v1/responses`) with structured outputs, reasoning effort `none | low | medium (default) | high | xhigh | max`,
+a 1,050,000-token context window, 128,000 maximum output tokens, and $2.00 / $10.00 per 1M input / output tokens ($0.20 cached input). The request settings used are all documented for the GPT-6 models:
+`text.format` JSON schema (strict), `reasoning.effort` low, `max_output_tokens` 8000 (it counts reasoning as well as the visible answer; minimum 16), `store: false`; `temperature` / `top_p` are never sent
+(rejected whenever reasoning is active). OpenAI's pages also list a newer **`gpt-6.1-sol`** (same $2 / $10, $0.10 cached input, reasoning effort `low` and above only, no `none`): set
+`OPENAI_COPY_MODEL=gpt-6.1-sol` to use it, no code change. Any model ID that OpenAI accepts can be set the same way; the ID is never guessed in code. The model OpenAI actually served is recorded with each generation.
+
+Configuration (Railway service variables; never in code): `OPENAI_API_KEY` (required for OpenAI; API billing is separate from ChatGPT), optional `OPENAI_COPY_MODEL` (default `gpt-6-sol`) and
+`OPENAI_COPY_REASONING` (default `low`; `off` sends no reasoning setting). A provider without its key shows "(not set up)" and the other keeps working. Database: one additive column,
+`ad_copy_generations.provider`.
 `OPENAI_COPY_REASONING` (default `low`; `off` sends no reasoning setting). A provider without its key shows "(not set up)" and the other keeps working. Database: one additive column,
 `ad_copy_generations.provider`.

@@ -5,6 +5,10 @@
 //
 // Anthropic is unchanged (copyAi.callModel). OpenAI uses the Responses API (POST /v1/responses), OpenAI's recommended text API for new work.
 //
+// Request settings, all documented for the GPT-6 models on the Responses API: `instructions` + `input`; `text.format` json_schema (strict) for the JSON answer; `reasoning.effort`
+// (low by default: copywriting needs little reasoning); `max_output_tokens` (counts reasoning as well as the visible answer; minimum 16); `store: false` (stateless: nothing kept by OpenAI).
+// temperature / top_p are NOT sent: they are rejected whenever reasoning is active.
+//
 // Configuration (server environment only; never in code, the browser, logs or responses):
 //   ANTHROPIC_API_KEY, COPY_AI_MODEL                 Claude (existing)
 //   OPENAI_API_KEY                                   OpenAI. API usage is billed separately from any ChatGPT subscription.
@@ -20,7 +24,10 @@ const PROVIDERS = {
   openai: { id: 'openai', label: 'OpenAI' },
 };
 const DEFAULT_PROVIDER = 'anthropic';
-const OPENAI_DEFAULT_MODEL = 'gpt-5.5';
+// Verified against OpenAI's own model page (developers.openai.com/api/docs/models/gpt-6-sol): API ID `gpt-6-sol`, served by the Responses API (/v1/responses), structured outputs
+// supported, reasoning effort none | low | medium (default) | high | xhigh | max, $2 / $10 per 1M input / output tokens, 1,050,000-token context, 128,000 max output tokens.
+// OpenAI's pages also list a newer `gpt-6.1-sol` (same price, cheaper cached input; reasoning effort low and above only): choose it with OPENAI_COPY_MODEL, no code change needed.
+const OPENAI_DEFAULT_MODEL = 'gpt-6-sol';
 const OPENAI_TIMEOUT_MS = 90000;
 const OPENAI_MAX_OUTPUT_TOKENS = 8000; // reasoning tokens count toward this limit as well as the visible answer
 
