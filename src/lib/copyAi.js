@@ -12,7 +12,30 @@ const DEFAULT_MODEL = 'claude-sonnet-5-5';
 const MAX_PRIMARY_TEXT = 2200;
 
 class AiError extends Error {
-  constructor(code, message, status) { super(message); this.code = code; this.status = status || null; }
+  // `detail` is for the server log only (sanitised provider diagnostics); it is never sent to the browser.
+  constructor(code, message, status, detail) { super(message); this.code = code; this.status = status || null; this.detail = detail || null; }
+}
+
+// Provider diagnostics that are safe to log: the HTTP status, the provider's error type, its (credential-scrubbed, truncated) message and its request id.
+// The message is NEVER returned to the browser: it can quote parts of the request. Any key-shaped token, and the configured key itself, is removed.
+function scrub(text, key) {
+  let t = String(text == null ? '' : text).replace(/\s+/g, ' ').trim();
+  if (key) t = t.split(key).join('[redacted]');
+  return t.replace(/sk-[A-Za-z0-9_-]{8,}/g, '[redacted]').replace(/(x-api-key|authorization|bearer)\s*[:=]?\s*\S+/gi, '$1 [redacted]').slice(0, 400);
+}
+async function providerDetail(res, key, model) {
+  let body = null;
+  try { body = await res.json(); } catch (e) { body = null; }
+  const err = body && typeof body === 'object' && body.error && typeof body.error === 'object' ? body.error : {};
+  const header = (n) => { try { return res.headers && res.headers.get ? res.headers.get(n) : null; } catch (e) { return null; } };
+  return {
+    status: res.status, type: typeof err.type === 'string' ? err.type.slice(0, 60) : null, message: scrub(err.message, key),
+    request_id: scrub((body && body.request_id) || header('request-id') || header('x-request-id') || '', key) || null, model,
+  };
+}
+function logProviderError(detail) {
+  // one line, no credentials: status, error type, scrubbed provider message, request id, model
+  console.error(`[copy-ai] provider error status=${detail.status} type=${detail.type || 'unknown'} model=${detail.model} request_id=${detail.request_id || 'n/a'} message="${detail.message}"`);
 }
 
 // The key is read from the server environment at request time (never cached, never sent to the browser). Surrounding quotes and whitespace that
@@ -31,7 +54,9 @@ function aiConfig(env = process.env) {
   return { configured: false, model, key: null, reason };
 }
 
-async function callModel({ system, messages, maxTokens = 1800, temperature = 0.8, env = process.env, fetchImpl = fetch }) {
+// No sampling parameters (temperature / top_p / top_k) are sent. The current Claude models reject a non-default value with HTTP 400 and default to adaptive thinking, whose tokens
+// count toward max_tokens -- so the default limit leaves room for the reasoning as well as three Primary Text options. Variety between options comes from the prompt (one angle each).
+async function callModel({ system, messages, maxTokens = 8000, env = process.env, fetchImpl = fetch }) {
   const cfg = aiConfig(env);
   if (!cfg.configured) throw new AiError('not_configured', cfg.reason);
   const base = env.ANTHROPIC_API_BASE || 'https://api.anthropic.com';
@@ -42,15 +67,24 @@ async function callModel({ system, messages, maxTokens = 1800, temperature = 0.8
     res = await fetchImpl(`${base}/v1/messages`, {
       method: 'POST', signal: controller.signal,
       headers: { 'content-type': 'application/json', 'x-api-key': cfg.key, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: cfg.model, max_tokens: maxTokens, temperature, system, messages }),
+      body: JSON.stringify({ model: cfg.model, max_tokens: maxTokens, system, messages }),
     });
   } catch (e) {
     throw new AiError('network', e.name === 'AbortError' ? 'The AI provider took too long to answer. Try again.' : `Could not reach the AI provider: ${e.message}`);
   } finally { clearTimeout(timer); }
-  if (res.status === 401 || res.status === 403) throw new AiError('auth_failed', 'The AI provider rejected the API key.', res.status);
-  if (res.status === 429) throw new AiError('rate_limited', 'The AI provider is rate limiting requests. Try again shortly.', 429);
-  if (!res.ok) throw new AiError('api_error', `The AI provider returned an error (${res.status}).`, res.status);
+  if (!res.ok) {
+    const detail = await providerDetail(res, cfg.key, cfg.model);
+    logProviderError(detail);
+    const ref = detail.request_id ? ` Reference: ${detail.request_id}.` : '';
+    if (res.status === 401 || res.status === 403) throw new AiError('auth_failed', 'The AI provider rejected the API key.', res.status, detail);
+    if (res.status === 429) throw new AiError('rate_limited', 'The AI provider is rate limiting requests. Try again shortly.', 429, detail);
+    if (res.status === 400) throw new AiError('bad_request', `The AI provider rejected the request (400${detail.type ? ` ${detail.type}` : ''}). The cause is recorded in the server log.${ref}`, 400, detail);
+    if (res.status === 404) throw new AiError('model_not_found', `The AI provider does not know the configured model (${cfg.model}). Check COPY_AI_MODEL.${ref}`, 404, detail);
+    throw new AiError('api_error', `The AI provider returned an error (${res.status}).${ref}`, res.status, detail);
+  }
   const json = await res.json();
+  if (json.stop_reason === 'refusal') throw new AiError('rejected', 'The AI provider declined to write this copy. Try again, or write it yourself.');
+  if (json.stop_reason === 'max_tokens') throw new AiError('truncated', 'The AI answer was cut off before it finished. Try again.');
   const text = (json.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
   if (!text) throw new AiError('empty', 'The AI provider returned no text.');
   return { text, model: json.model || cfg.model };
@@ -195,4 +229,4 @@ async function generate({ mode = 'generate', facts, guidelines, examples, instru
   return { options: kept, dropped, model, attempts: 2 };
 }
 
-module.exports = { aiConfig, callModel, generate, buildMessages, parseOptions, findUnsupportedClaims, factsToText, AiError, DEFAULT_MODEL, MAX_PRIMARY_TEXT, ANGLES, overlap };
+module.exports = { aiConfig, callModel, scrub, generate, buildMessages, parseOptions, findUnsupportedClaims, factsToText, AiError, DEFAULT_MODEL, MAX_PRIMARY_TEXT, ANGLES, overlap };

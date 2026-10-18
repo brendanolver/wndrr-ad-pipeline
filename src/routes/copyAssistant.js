@@ -84,7 +84,7 @@ async function summariseStyle(syncId) {
   const out = await ai.callModel({
     system: 'You describe the house writing style of a brand from measured statistics and real examples. Be concrete and brief (under 220 words, plain bullet points). Describe only patterns visible in the material provided; do not invent rules. Cover: sentence length and structure, how products are introduced, typical phrasing, differences between the copy families, how urgency / calls to action are used, typical length, and things the examples avoid.',
     messages: [{ role: 'user', content: `Measured statistics:\n${stats}\n\nSample examples:\n${sample.map((s, i) => `${i + 1}. [${s.family}] ${s.body}`).join('\n\n')}` }],
-    maxTokens: 700, temperature: 0.2,
+    maxTokens: 3000,
   });
   await pool.query('UPDATE copy_tone_guidelines SET ai_summary = $1 WHERE id = $2', [out.text, g.id]);
   return { ok: true };
@@ -181,7 +181,7 @@ async function run(req, res, next, mode) {
     });
   } catch (err) {
     if (err instanceof ai.AiError) {
-      const status = { not_configured: 503, auth_failed: 502, rate_limited: 429, network: 502, rejected: 422, bad_output: 502, empty: 502, api_error: 502 }[err.code] || 502;
+      const status = { not_configured: 503, auth_failed: 502, rate_limited: 429, network: 502, rejected: 422, bad_output: 502, empty: 502, api_error: 502, bad_request: 502, model_not_found: 502, truncated: 502 }[err.code] || 502;
       return res.status(status).json({ code: err.code, error: err.message });
     }
     next(err);
