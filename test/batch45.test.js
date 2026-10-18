@@ -13,7 +13,7 @@ const OPENAI_KEY = 'sk-proj-openai-unit-secret-0123456789';
 const ANTHROPIC_KEY = 'sk-ant-unit-secret-0123456789';
 const ENV = { OPENAI_API_KEY: OPENAI_KEY, OPENAI_API_BASE: 'http://openai-mock', ANTHROPIC_API_KEY: ANTHROPIC_KEY, ANTHROPIC_API_BASE: 'http://anthropic-mock' };
 const answerJson = (...t) => JSON.stringify({ options: t.map((x, i) => ({ angle: `a${i}`, text: x })) });
-const respOk = (text, model = 'gpt-6-sol-2026-09-22') => ({ ok: true, status: 200, headers: { get: () => null }, json: async () => ({ id: 'resp_1', status: 'completed', model, output: [{ type: 'reasoning', summary: [] }, { type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] }] }) });
+const respOk = (text, model = 'gpt-6.1-sol-2026-09-22') => ({ ok: true, status: 200, headers: { get: () => null }, json: async () => ({ id: 'resp_1', status: 'completed', model, output: [{ type: 'reasoning', summary: [] }, { type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] }] }) });
 const respErr = (status, error, reqId = 'req_oa1') => ({ ok: false, status, headers: { get: (n) => (n === 'x-request-id' ? reqId : null) }, json: async () => ({ error }) });
 
 // ── 1. configuration ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -31,9 +31,10 @@ test('providers: Claude is the default; each provider reports its own configurat
 });
 
 test('openai config: key and model come from the environment; the reason says what is wrong using names only', () => {
-  assert.equal(providers.OPENAI_DEFAULT_MODEL, 'gpt-6-sol', 'the verified GPT-6 Sol API ID');
+  assert.equal(providers.OPENAI_DEFAULT_MODEL, 'gpt-6.1-sol', 'the release default: GPT-6.1 Sol');
+  assert.equal(providers.openaiConfig({ OPENAI_API_KEY: 'k' }).model, 'gpt-6.1-sol', 'with no OPENAI_COPY_MODEL the default is used');
   assert.equal(providers.openaiConfig({ OPENAI_API_KEY: '  "sk-x-123"  ' }).key, 'sk-x-123');
-  assert.equal(providers.openaiConfig({ OPENAI_API_KEY: 'k', OPENAI_COPY_MODEL: 'gpt-6.1-sol' }).model, 'gpt-6.1-sol', 'OPENAI_COPY_MODEL overrides the default');
+  assert.equal(providers.openaiConfig({ OPENAI_API_KEY: 'k', OPENAI_COPY_MODEL: 'gpt-6-sol' }).model, 'gpt-6-sol', 'OPENAI_COPY_MODEL overrides the default');
   assert.equal(providers.openaiConfig({ OPENAI_API_KEY: 'k' }).reasoning, 'low');
   const missing = providers.openaiConfig({});
   assert.equal(missing.configured, false); assert.match(missing.reason, /OPENAI_API_KEY is not set/); assert.match(missing.reason, /billing is separate from a ChatGPT subscription/);
@@ -53,7 +54,10 @@ test('openai call: Responses API, bearer key in a header only, no sampling setti
   assert.equal(seen[0].opts.method, 'POST');
   assert.equal(seen[0].opts.headers.authorization, `Bearer ${OPENAI_KEY}`);
   const b = seen[0].body;
-  assert.equal(b.model, 'gpt-6-sol'); assert.equal(b.instructions, 'SYS');
+  assert.equal(b.model, 'gpt-6.1-sol'); assert.equal(b.instructions, 'SYS');
+  assert.deepEqual(b.reasoning, { effort: 'low' }, 'reasoning effort low'); assert.equal(b.store, false, 'store: false');
+  assert.equal(b.text.format.type, 'json_schema', 'structured JSON output'); assert.equal(b.text.format.strict, true);
+  assert.equal(b.temperature, undefined); assert.equal(b.top_p, undefined);
   assert.deepEqual(b.input, [{ role: 'user', content: 'U1' }, { role: 'assistant', content: 'A1' }, { role: 'user', content: 'U2' }]);
   assert.ok(b.max_output_tokens >= 4000); assert.equal(b.store, false);
   assert.equal(b.temperature, undefined); assert.equal(b.top_p, undefined);
@@ -61,9 +65,9 @@ test('openai call: Responses API, bearer key in a header only, no sampling setti
   assert.equal(b.text.format.type, 'json_schema'); assert.equal(b.text.format.strict, true); assert.deepEqual(b.text.format.schema.required, ['options']);
   assert.ok(!seen[0].opts.body.includes(OPENAI_KEY), 'the key is not in the request body');
   assert.deepEqual(ai.parseOptions(out.text).map((o) => o.text), ['One.', 'Two.']);
-  assert.equal(out.model, 'gpt-6-sol-2026-09-22', 'the model OpenAI actually served is the one recorded');
-  await providers.callOpenAI({ system: 's', messages: [], env: { ...ENV, OPENAI_COPY_REASONING: 'off', OPENAI_COPY_MODEL: 'gpt-6.1-sol' }, fetchImpl: async (u, o) => { seen.push({ body: JSON.parse(o.body) }); return respOk('{"options":[{"angle":"a","text":"t"}]}'); } });
-  assert.equal(seen[seen.length - 1].body.model, 'gpt-6.1-sol', 'an override model is the one sent'); assert.equal(seen[seen.length - 1].body.reasoning, undefined, '"off" sends no reasoning setting');
+  assert.equal(out.model, 'gpt-6.1-sol-2026-09-22', 'the model OpenAI actually served is the one recorded');
+  await providers.callOpenAI({ system: 's', messages: [], env: { ...ENV, OPENAI_COPY_REASONING: 'off', OPENAI_COPY_MODEL: 'gpt-6-sol' }, fetchImpl: async (u, o) => { seen.push({ body: JSON.parse(o.body) }); return respOk('{"options":[{"angle":"a","text":"t"}]}'); } });
+  assert.equal(seen[seen.length - 1].body.model, 'gpt-6-sol', 'an override model is the one sent'); assert.equal(seen[seen.length - 1].body.reasoning, undefined, '"off" sends no reasoning setting');
   await assert.rejects(() => providers.callOpenAI({ system: 's', messages: [], env: {} }), (e) => e.code === 'not_configured');
 });
 
@@ -113,7 +117,7 @@ test('openai errors: each failure has a plain message and a code; nothing sensit
     await assert.rejects(() => providers.callOpenAI({ system: 's', messages: [], env: ENV, fetchImpl: async () => { throw new Error('ECONNRESET'); } }), (e) => e.code === 'network');
     const bad = await run(400, { type: 'invalid_request_error', message: `odd value ${OPENAI_KEY} in input` }).catch((e) => e);
     assert.doesNotMatch(JSON.stringify(bad.detail), /unit-secret/); assert.equal(bad.status, 400);
-    assert.ok(logged.length >= 7 && logged.every((l) => /^\[copy-ai\] openai error status=\d+ type=\S+ code=\S+ model=gpt-6-sol request_id=\S+ message=/.test(l)));
+    assert.ok(logged.length >= 7 && logged.every((l) => /^\[copy-ai\] openai error status=\d+ type=\S+ code=\S+ model=gpt-6.1-sol request_id=\S+ message=/.test(l)));
     assert.ok(logged.every((l) => !l.includes(OPENAI_KEY) && !/unit-secret/.test(l)), 'the key never reaches the log');
   } finally { console.error = orig; }
 });

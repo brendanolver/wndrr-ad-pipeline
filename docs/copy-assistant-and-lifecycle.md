@@ -131,13 +131,13 @@ cannot be regenerated with either provider. A generation from before providers e
 
 ### OpenAI model (verified against OpenAI's own documentation)
 
-The default is **`gpt-6-sol`** (GPT-6 Sol). OpenAI's model page lists it for the Responses API (`/v1/responses`) with structured outputs, reasoning effort `none | low | medium (default) | high | xhigh | max`,
-a 1,050,000-token context window, 128,000 maximum output tokens, and $2.00 / $10.00 per 1M input / output tokens ($0.20 cached input). The request settings used are all documented for the GPT-6 models:
+The default is **`gpt-6.1-sol`** (GPT-6.1 Sol), chosen for the v1.4.6 release. OpenAI's model pages list it for the Responses API (`/v1/responses`) with structured outputs, at $2.00 / $10.00 per 1M input /
+output tokens ($0.10 cached input), reasoning effort `low` and above only (it does not take `none`, which is why the default effort is `low`). The request settings used are all documented for the GPT-6 models:
 `text.format` JSON schema (strict), `reasoning.effort` low, `max_output_tokens` 8000 (it counts reasoning as well as the visible answer; minimum 16), `store: false`; `temperature` / `top_p` are never sent
-(rejected whenever reasoning is active). OpenAI's pages also list a newer **`gpt-6.1-sol`** (same $2 / $10, $0.10 cached input, reasoning effort `low` and above only, no `none`): set
-`OPENAI_COPY_MODEL=gpt-6.1-sol` to use it, no code change. Any model ID that OpenAI accepts can be set the same way; the ID is never guessed in code. The model OpenAI actually served is recorded with each generation.
+(rejected whenever reasoning is active). The earlier **`gpt-6-sol`** (same $2 / $10, $0.20 cached input, effort `none` to `max`) stays selectable: set `OPENAI_COPY_MODEL=gpt-6-sol`, no code change. Any model ID
+that OpenAI accepts can be set the same way; `OPENAI_COPY_MODEL` always overrides the default. The model OpenAI actually served is recorded with each generation. Claude Sonnet 5.5 remains the default provider.
 
-Configuration (Railway service variables; never in code): `OPENAI_API_KEY` (required for OpenAI; API billing is separate from ChatGPT), optional `OPENAI_COPY_MODEL` (default `gpt-6-sol`) and
+Configuration (Railway service variables; never in code): `OPENAI_API_KEY` (required for OpenAI; API billing is separate from ChatGPT), optional `OPENAI_COPY_MODEL` (default `gpt-6.1-sol`) and
 `OPENAI_COPY_REASONING` (default `low`; `off` sends no reasoning setting). A provider without its key shows "(not set up)" and the other keeps working. Database: one additive column,
 `ad_copy_generations.provider`.
 `OPENAI_COPY_REASONING` (default `low`; `off` sends no reasoning setting). A provider without its key shows "(not set up)" and the other keeps working. Database: one additive column,

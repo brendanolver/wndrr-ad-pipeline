@@ -2,6 +2,17 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.4.6",
+      "date": "2026-10-19",
+      "title": "AI Copy Assistant: Claude and OpenAI side by side",
+      "changes": [
+        "Ad Setup > Primary Text can generate with Claude (default) or OpenAI, or both at once, and show the two sets side by side with provider and model recorded",
+        "OpenAI default model is gpt-6.1-sol (Responses API, reasoning effort low, structured JSON output, store false); OPENAI_COPY_MODEL overrides it",
+        "Both providers receive identical Copy Library references, Copy Type, verified product facts and safeguards; nothing is selected or approved automatically",
+        "Additive database column ad_copy_generations.provider; earlier generations count as Claude"
+      ]
+    },
+    {
       "version": "1.4.5",
       "date": "2026-10-19",
       "title": "AI Copy Assistant: automatic Copy Type, better references, product-claim safeguards",

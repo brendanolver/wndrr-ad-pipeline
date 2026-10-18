@@ -24,10 +24,10 @@ const PROVIDERS = {
   openai: { id: 'openai', label: 'OpenAI' },
 };
 const DEFAULT_PROVIDER = 'anthropic';
-// Verified against OpenAI's own model page (developers.openai.com/api/docs/models/gpt-6-sol): API ID `gpt-6-sol`, served by the Responses API (/v1/responses), structured outputs
-// supported, reasoning effort none | low | medium (default) | high | xhigh | max, $2 / $10 per 1M input / output tokens, 1,050,000-token context, 128,000 max output tokens.
-// OpenAI's pages also list a newer `gpt-6.1-sol` (same price, cheaper cached input; reasoning effort low and above only): choose it with OPENAI_COPY_MODEL, no code change needed.
-const OPENAI_DEFAULT_MODEL = 'gpt-6-sol';
+// Default model: `gpt-6.1-sol`, as chosen for release (v1.4.6). OpenAI's own model pages list it on the Responses API (/v1/responses) with structured outputs, at $2 / $10 per 1M input / output tokens
+// (cached input $0.10). It takes reasoning effort `low` and above only (no `none` / `minimal`), which is why the default effort is `low`. `gpt-6-sol` (verified the same way) remains selectable with
+// OPENAI_COPY_MODEL, no code change needed. Any other model id can be set the same way.
+const OPENAI_DEFAULT_MODEL = 'gpt-6.1-sol';
 const OPENAI_TIMEOUT_MS = 90000;
 const OPENAI_MAX_OUTPUT_TOKENS = 8000; // reasoning tokens count toward this limit as well as the visible answer
 
