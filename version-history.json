@@ -2,6 +2,17 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.4.5",
+      "date": "2026-10-19",
+      "title": "AI Copy Assistant: automatic Copy Type, better references, product-claim safeguards",
+      "changes": [
+        "The assistant works out the Copy Type (Core, New Range, New Colourways, Bundle, USA Bundle, Sale, or General) from information the pipeline already holds, shows why, and lets you override it; the override is saved on the Ad Setup and can be reset to automatic.",
+        "Reference examples now come from the right spreadsheet tabs for the Copy Type, matched by whole words and product type, without recruitment ads or near-duplicates; the sheet's What column is used as the product.",
+        "Past ads only shape tone and structure: other products' details are removed before the AI sees them, and claims such as fits, colourway counts, features, fabric, popularity or launch wording are rejected unless the app holds the fact.",
+        "Settings > Copy Library has a Check before refreshing report, and a refresh that would shrink the library sharply is rejected."
+      ]
+    },
+    {
       "version": "1.4.4",
       "date": "2026-10-18",
       "title": "AI Copy Assistant: fixed the HTTP 400 on Generate Copy",
