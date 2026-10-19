@@ -27,24 +27,24 @@ test('Creative Attention: red "N need creative", green "Covered", awaiting revie
   assert.equal(attention({ eng: null, needsAttention: 0 }), '');
 });
 
-test('Creative Freshness: amber "N stale" with the oldest age; green "Up to date" only when every product is assessed and none is stale; otherwise neutral', () => {
+test('Creative Freshness: amber "N Need Refresh" with the oldest product\'s age; green "Up to Date" only when every product is assessed and none needs refreshing; otherwise neutral "Not Assessed"', () => {
   const stale = freshness({ total: 6, eng: eng({ stale: 2, oldestDays: 49, assessed: 6 }) });
-  assert.equal(text(stale), '2 stale Oldest: 49 days ago'); assert.match(stale, /data-tone="amber"/);
+  assert.equal(text(stale), '2 Need Refresh Oldest product: 49 days'); assert.doesNotMatch(stale, /stale/i, 'the word Stale is replaced'); assert.match(stale, /data-tone="amber"/);
   const ok = freshness({ total: 3, eng: eng({ stale: 0, assessed: 3, latestDays: 12 }) });
-  assert.equal(text(ok), 'Up to date Latest: 12 days ago'); assert.match(ok, /data-tone="green"/);
+  assert.equal(text(ok), 'Up to Date Latest creative: 12 days ago'); assert.match(ok, /data-tone="green"/);
   const partial = freshness({ total: 5, eng: eng({ stale: 0, assessed: 3 }) });
-  assert.equal(text(partial), 'Not assessed 3 of 5 assessed'); assert.match(partial, /data-tone="neutral"/); assert.doesNotMatch(partial, /Up to date/, 'too little data is never "Up to date"');
+  assert.equal(text(partial), 'Not Assessed 3 of 5 products assessed'); assert.match(partial, /data-tone="neutral"/); assert.doesNotMatch(partial, /Up to Date/, 'too little data is never "Up to Date"');
   const none = freshness({ total: 2, eng: eng({ stale: 0, assessed: 0, latestDays: null }) });
-  assert.equal(text(none), 'Not assessed'); assert.doesNotMatch(none, /Up to date/);
-  assert.equal(text(freshness({ total: 1, eng: eng({ stale: 0, assessed: 1, latestDays: 0 }) })), 'Up to date Latest: today');
-  assert.equal(text(freshness({ total: 1, eng: eng({ stale: 1, oldestDays: 1, assessed: 1 }) })), '1 stale Oldest: 1 day ago');
-  assert.equal(text(freshness({ total: 1, eng: eng({ stale: 1, oldestDays: null, assessed: 1 }) })), '1 stale', 'no secondary line without a reliable date');
-  assert.equal(text(freshness({ eng: null, stale: 2 })), '2 stale');
+  assert.equal(text(none), 'Not Assessed'); assert.doesNotMatch(none, /Up to Date/);
+  assert.equal(text(freshness({ total: 1, eng: eng({ stale: 0, assessed: 1, latestDays: 0 }) })), 'Up to Date Latest creative: today');
+  assert.equal(text(freshness({ total: 1, eng: eng({ stale: 1, oldestDays: 1, assessed: 1 }) })), '1 Need Refresh Oldest product: 1 day');
+  assert.equal(text(freshness({ total: 1, eng: eng({ stale: 1, oldestDays: null, assessed: 1 }) })), '1 Need Refresh', 'no secondary line without a reliable date');
+  assert.equal(text(freshness({ eng: null, stale: 2 })), '2 Need Refresh');
 });
 
 test('Attention and Freshness are independent: a Covered category can hold stale creative', () => {
   const e = eng({ needs: 0, stale: 2, assessed: 3, oldestDays: 71 });
-  assert.equal(text(attention({ eng: e })), 'Covered'); assert.equal(text(freshness({ total: 3, eng: e })), '2 stale Oldest: 71 days ago');
+  assert.equal(text(attention({ eng: e })), 'Covered'); assert.equal(text(freshness({ total: 3, eng: e })), '2 Need Refresh Oldest product: 71 days');
 });
 
 test("This Week's Shoot: a green \"N Selected\" badge, else a grey dash", () => {
@@ -65,4 +65,13 @@ test('header and styling', () => {
   assert.match(css, /\.core-badge\[data-tone="red"\]\{background:#fdeceb/); assert.match(css, /\.core-badge\[data-tone="green"\]\{background:#e8f5ee/); assert.match(css, /\.core-badge\[data-tone="amber"\]\{background:#fff3df/);
   assert.match(css, /\.core-cell-sub\{[^}]*font-size:11\.5px[^}]*color:var\(--text-muted\)/, 'secondary information is smaller and muted');
   assert.doesNotMatch(app.slice(app.indexOf('function coreShootCategoryRowHtml'), app.indexOf('function renderCoreStepFooter')), /background/, 'rows are not highlighted');
+});
+
+test('wording never claims "new concept": freshness is the age of the newest creative, shown as such', () => {
+  const fresh = block.slice(block.indexOf('function coreCategoryFreshnessHtml'), block.indexOf('const coreSelectedHtml'));
+  assert.doesNotMatch(fresh, /concept/i);
+  assert.match(fresh, /Oldest product: /); assert.match(fresh, /Latest creative: /);
+  const band = pl.slice(pl.indexOf('function plFreshBand'), pl.indexOf('function plCatalogueMap'));
+  assert.match(band, /label: 'Needs refresh'/, 'the product-level chip says Needs refresh as well');
+  assert.doesNotMatch(band, /label: 'Stale'/);
 });

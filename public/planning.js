@@ -231,7 +231,7 @@ function plFreshBand(cov, cfg) {
   if (!cov.latestKnown) return cov.latest === 'None' ? { key: 'stale', label: 'No creative' } : null; // "Unknown": creatives exist but no reliable date, so no band
   if (cov.days === null || cov.days === undefined) return null;
   const recent = Number(cfg.recent_creative_days) || 30; const stale = Number(cfg.stale_creative_days) || 90;
-  return cov.days < recent ? { key: 'fresh', label: 'Recent' } : cov.days < stale ? { key: 'aging', label: 'Ageing' } : { key: 'stale', label: 'Stale' };
+  return cov.days < recent ? { key: 'fresh', label: 'Recent' } : cov.days < stale ? { key: 'aging', label: 'Ageing' } : { key: 'stale', label: 'Needs refresh' };
 }
 function plCatalogueMap() {
   const o = state.opportunities;

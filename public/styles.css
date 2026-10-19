@@ -5878,7 +5878,7 @@ body{background:var(--bg);color:var(--text);}
 .core-badge[data-tone="green"]{background:#e8f5ee;color:#1a7f4b;}
 .core-badge[data-tone="neutral"]{background:#eef0f4;color:#4a5068;}
 .core-cell-stack{display:flex;flex-direction:column;align-items:flex-start;gap:5px;min-width:0;}
-.core-cell-sub{font-size:11.5px;font-weight:400;color:var(--text-muted);padding-left:2px;white-space:nowrap;}
+.core-cell-sub{font-size:11.5px;font-weight:400;color:var(--text-muted);padding-left:2px;line-height:1.35;}
 .core-dash{color:var(--border-strong);font-size:16px;line-height:1;}
 .core-info{vertical-align:-2px;margin-left:3px;color:var(--text-muted);opacity:.8;}
 .core-th-nw{white-space:nowrap;}

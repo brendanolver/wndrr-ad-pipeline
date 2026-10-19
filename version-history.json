@@ -2,6 +2,16 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.5.6",
+      "date": "2026-10-19",
+      "title": "Creative Freshness wording",
+      "changes": [
+        "Creative Freshness badges now read Up to Date, N Need Refresh and Not Assessed (Stale is replaced by Need Refresh, including the product chip)",
+        "Supporting line states what is measured: Latest creative, Oldest product, or N of M products assessed",
+        "Display only: freshness calculation, thresholds and recommendations are unchanged"
+      ]
+    },
+    {
       "version": "1.5.5",
       "date": "2026-10-19",
       "title": "Core Shoot Planning badges",

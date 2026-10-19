@@ -7334,7 +7334,7 @@ const CORE_BADGE_ICON = {
   clock: '<svg class="core-badge-ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/></svg>',
 };
 const coreBadge = (tone, icon, text, title) => `<span class="core-badge" data-tone="${tone}"${title ? ` title="${escapeHtml(title)}"` : ''}>${CORE_BADGE_ICON[icon] || ''}${escapeHtml(text)}</span>`;
-const coreCellStack = (badge, sub) => `<div class="core-cell-stack">${badge}${sub ? `<span class="core-cell-sub">${escapeHtml(sub)}</span>` : ''}</div>`;
+const coreCellStack = (badge, sub, subTitle) => `<div class="core-cell-stack">${badge}${sub ? `<span class="core-cell-sub"${subTitle ? ` title="${escapeHtml(subTitle)}"` : ''}>${escapeHtml(sub)}</span>` : ''}</div>`;
 const coreDaysAgo = (d) => (d === 0 ? 'today' : `${d} ${d === 1 ? 'day' : 'days'} ago`);
 
 function coreCategoryAttentionHtml(cat) {
@@ -7346,15 +7346,18 @@ function coreCategoryAttentionHtml(cat) {
   if (s.review >= s.matched) return coreCellStack(coreBadge('neutral', 'dot', 'Awaiting review')); // nothing here is assessed yet, so it is not "covered"
   return coreCellStack(coreBadge('green', 'check', 'Covered'), review);
 }
-// Freshness: amber when any product's latest creative is stale or missing (the existing bands and thresholds); green "Up to date" only when EVERY product in the category has a freshness
-// verdict and none is stale; otherwise a neutral "Not assessed" (never "Up to date" on too little data).
+// Freshness = how long since each product's NEWEST CREATIVE (the creative date written in its ad name; see lastCreativeDate.js), against the existing Planning bands and thresholds. It is not
+// yet a measure of genuinely NEW CONCEPTS (a new hook on an existing concept is a new creative and counts), so the wording says "creative", never "concept". Amber "N Need Refresh" when any
+// product's latest creative is old or missing; green "Up to Date" only when EVERY product in the category has a freshness verdict and none needs refreshing; otherwise a neutral "Not Assessed"
+// (never "Up to Date" on too little data). Display only: freshness does not feed Creative Attention or any recommendation.
+// At category level the ages are those of the product with the oldest / newest creative, not the whole category.
 function coreCategoryFreshnessHtml(cat) {
-  if (!cat.eng) return cat.stale ? coreCellStack(coreBadge('amber', 'clock', `${cat.stale} stale`)) : '';
+  if (!cat.eng) return cat.stale ? coreCellStack(coreBadge('amber', 'clock', `${cat.stale} Need Refresh`)) : '';
   const s = cat.eng;
   if (!s.matched) return '<span class="core-cat-none">&mdash;</span>';
-  if (s.stale) return coreCellStack(coreBadge('amber', 'clock', `${s.stale} stale`, 'Products whose latest creative is old, or that have none (Planning settings set the thresholds)'), s.oldestDays !== null ? `Oldest: ${coreDaysAgo(s.oldestDays)}` : '');
-  if (cat.total > 0 && s.assessed === cat.total) return coreCellStack(coreBadge('green', 'check', 'Up to date'), s.latestDays !== null ? `Latest: ${coreDaysAgo(s.latestDays)}` : '');
-  return coreCellStack(coreBadge('neutral', 'clock', 'Not assessed', 'Not every product in this category has a reliable creative date, so freshness cannot be confirmed'), s.assessed ? `${s.assessed} of ${cat.total} assessed` : '');
+  if (s.stale) return coreCellStack(coreBadge('amber', 'clock', `${s.stale} Need Refresh`, 'Products whose newest creative is older than the Planning threshold, or that have no creative. Freshness is separate from performance: it does not by itself mean a new shoot is needed.'), s.oldestDays !== null ? `Oldest product: ${s.oldestDays} ${s.oldestDays === 1 ? 'day' : 'days'}` : '', 'Days since the newest creative of the product in this category with the oldest creative (not the whole category).');
+  if (cat.total > 0 && s.assessed === cat.total) return coreCellStack(coreBadge('green', 'check', 'Up to Date', 'Every product in this category has a reliable creative date and none is past the Planning threshold'), s.latestDays !== null ? `Latest creative: ${coreDaysAgo(s.latestDays)}` : '', 'The newest creative across the products in this category.');
+  return coreCellStack(coreBadge('neutral', 'clock', 'Not Assessed', 'Not every product in this category has a reliable creative date, so freshness cannot be confirmed'), s.assessed ? `${s.assessed} of ${cat.total} products assessed` : '', 'Products with a reliable creative date.');
 }
 const coreSelectedHtml = (n) => (n ? `<span class="core-badge" data-tone="green">${CORE_BADGE_ICON.check}${n} Selected</span>` : '<span class="core-dash" aria-label="Nothing selected">&mdash;</span>');
 
