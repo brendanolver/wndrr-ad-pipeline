@@ -2,6 +2,15 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.5.2",
+      "date": "2026-10-19",
+      "title": "Clearer Creative Performance card",
+      "changes": [
+        "Core product card now reads 1 of 9 with Active creatives performing, a not-performing line and N previous creatives tested",
+        "Not performing is red only when creatives are judged over the approved limit; testing and unrated stay neutral"
+      ]
+    },
+    {
       "version": "1.5.1",
       "date": "2026-10-19",
       "title": "Always show creative history",
