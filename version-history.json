@@ -2,6 +2,14 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.5.1",
+      "date": "2026-10-19",
+      "title": "Always show creative history",
+      "changes": [
+        "The creatives card always shows its history line when known: No earlier creatives, or N earlier creatives, with the all-time total"
+      ]
+    },
+    {
       "version": "1.5.0",
       "date": "2026-10-19",
       "title": "Earlier creatives on the Core product card",
