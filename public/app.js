@@ -7080,7 +7080,7 @@ function shootActionHtml(productCode, onclickFn, selectedCodes) {
 function coreProblemProductsHeaderHtml() {
   return `
     <div class="core-shoot-review-header core-product-row">
-      <span></span>
+      <span>Product</span>
       <span>Inventory</span>
       <span>7D Sales</span>
       <span>MTD vs LY</span>
@@ -7122,17 +7122,23 @@ function coreAttentionChipsHtml(p) {
   return chips.map((c) => `<span class="core-reason-chip">${escapeHtml(coreTitleCaseChip(c))}</span>`).join('');
 }
 
+// The product's real catalogue picture (the Core table's family image, else the first colourway that has one: the same ApparelMagic images the rest of Planning uses); the image icon only when it has none.
+function coreProductThumbHtml(p, info) {
+  const url = (info && info.it && info.it.image_url) || ((p.colours || []).find((c) => c.image_url) || {}).image_url || '';
+  const none = '<span class="core-prod-thumb-none"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-image"></use></svg></span>';
+  return `<span class="core-prod-thumb">${url ? `<img src="${escapeHtml(url)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.remove()">` : none}</span>`;
+}
+
 function coreProblemProductRowHtml(p, selectedCodes, eng) {
   const info = eng ? eng.get(p.product_code) || null : null;
   const badge = eng ? (info && info.cat === 'needs' ? '<span class="dot dot-r" aria-hidden="true"></span>' : '') : (p.flag === 'needs_attention' ? '<span class="dot dot-r" aria-hidden="true"></span>' : p.flag === 'opportunity' ? '<span class="dot dot-o" aria-hidden="true"></span>' : '');
-  const isSelected = selectedCodes.has(p.product_code);
   const trend = coreProductTrendInfo(p);
   // Creative Attention and Creative Freshness are the Core table's own results (status, priority, Active Ads, Latest creative); the older flag / chips only when those are not loaded
   const attention = eng ? plCatalogueAttentionHtml(info) : coreAttentionChipsHtml(p);
   const freshness = eng ? plCatalogueFreshnessHtml(info) : '<span class="core-cat-none">&mdash;</span>';
   return `
-    <div class="core-shoot-review-row core-product-row${isSelected ? ' core-row-selected' : ''}">
-      <div class="core-shoot-review-col-product">${badge ? badge + ' ' : ''}<span class="core-shoot-review-name">${escapeHtml(p.product_name)}</span></div>
+    <div class="core-shoot-review-row core-product-row">
+      <div class="core-shoot-review-col-product">${badge || ''}${coreProductThumbHtml(p, info)}<span class="core-shoot-review-name">${escapeHtml(p.product_name)}</span></div>
       <div class="core-shoot-review-col-inventory">${coreInventoryCellHtml(p)}</div>
       <div class="core-shoot-review-col-7d">${core7dCellHtml(trend)}</div>
       <div class="core-shoot-review-col-cadence">${coreCadenceBoxHtml(trend)}</div>

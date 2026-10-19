@@ -2,6 +2,17 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.5.8",
+      "date": "2026-10-19",
+      "title": "Core Shoot Planning product rows",
+      "changes": [
+        "Product picture next to every product name, with the attention dot, and a Product column header",
+        "Creative Attention: status and priority on one line with one supporting sentence (for example 0 of 2 active ads performing); the repeated Active Ads line is removed",
+        "Creative Freshness: age of the newest creative first, a Recent / Ageing / Needs refresh / Not assessed indicator, the creative date underneath",
+        "A selected product no longer tints its row; the Shooting indicator says it. Display only: all calculations unchanged"
+      ]
+    },
+    {
       "version": "1.5.7",
       "date": "2026-10-19",
       "title": "Last-year MTD tile label",

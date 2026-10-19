@@ -259,19 +259,30 @@ function plCatalogueStats(products, map) {
   }
   return out;
 }
+// One short supporting sentence under the status, built from the engine's own counts (facts.performing of facts.unique_creatives), so the number of active ads is not repeated elsewhere.
+function plCatalogueSupport(info) {
+  const st = info.st; const f = info.it.facts || {};
+  if (st.label === 'No Active Creative') { const lead = (/^([^,]+),/.exec(st.text) || [])[1]; return lead ? `${lead} · 0 active ads` : '0 active ads'; }
+  const total = f.unique_creatives;
+  if (st.label === 'Underperforming Creative' && total !== null && total !== undefined && total > 0 && f.active_ads !== null && f.active_ads !== undefined) return `${plNum(f.performing || 0)} of ${plNum(total)} active ads performing`;
+  return st.text;
+}
 function plCatalogueAttentionHtml(info) {
   if (!info) return '<span class="core-cat-none">Not assessed</span>';
   const st = info.st; const pr = info.it.actionable && info.it.priority ? `<span class="opp-priority" data-priority="${plEsc(info.it.priority)}">${plEsc(info.it.priority)}</span>` : '';
-  const ads = info.cov.activeKnown ? `<small class="core-cat-ads">${plNum(info.cov.active)} Active ${info.cov.active === 1 ? 'Ad' : 'Ads'}</small>` : '';
-  return `<div class="core-cat-attn"><div class="core-cat-attn-top"><span class="pl-status" data-tone="${plEsc(st.tone)}"><i aria-hidden="true"></i>${plEsc(st.label)}</span>${pr}</div><span class="core-cat-why">${plEsc(st.text)}</span>${ads}</div>`;
+  return `<div class="core-cat-attn"><div class="core-cat-attn-top"><span class="pl-status" data-tone="${plEsc(st.tone)}"><i aria-hidden="true"></i>${plEsc(st.label)}</span>${pr}</div><span class="core-cat-why">${plEsc(plCatalogueSupport(info))}</span></div>`;
 }
+// Freshness: how long ago the product's newest creative is (primary), a colour-coded band from the existing Planning thresholds, and the creative date underneath. The date is the creative date
+// written in the ad name (see lastCreativeDate.js), not a Meta delivery date, and it is not limited to genuinely new concepts, so it is described as the newest creative.
 function plCatalogueFreshnessHtml(info) {
-  if (!info || !info.cov.known || info.cov.latest === null) return '<span class="core-cat-none">&mdash;</span>';
+  const note = 'The creative date written in the ad name of the newest creative matched to this product (any status). It is not a Meta delivery date and is not limited to new concepts.';
+  if (!info || !info.cov.known || info.cov.latest === null) return `<div class="core-cat-fresh"><span class="core-cat-age none">&mdash;</span><span class="core-fresh-chip">Not assessed</span></div>`;
   const c = info.cov; const b = info.band;
-  const date = `<b class="core-cat-date${c.latestKnown ? '' : ' none'}">${plEsc(c.latest)}</b>`;
-  const age = c.latestKnown && c.days !== null && c.days !== undefined ? `<small>${plEsc(plAgo(c.days))}</small>` : '';
-  const chip = b ? `<span class="core-fresh-chip" data-band="${b.key}">${plEsc(b.label)}</span>` : '';
-  return `<div class="core-cat-fresh" title="${plEsc(c.title)}">${date}${age}${chip}</div>`;
+  if (c.latest === 'None') return `<div class="core-cat-fresh" title="${plEsc(note)}"><div class="core-cat-fresh-top"><span class="core-cat-age none">No creative</span><span class="core-fresh-chip" data-band="stale">Needs refresh</span></div></div>`;
+  if (!c.latestKnown) return `<div class="core-cat-fresh" title="${plEsc(note)}"><div class="core-cat-fresh-top"><span class="core-cat-age none">Date unknown</span><span class="core-fresh-chip">Not assessed</span></div></div>`;
+  const age = c.days !== null && c.days !== undefined ? plAgo(c.days) : '';
+  const chip = b ? `<span class="core-fresh-chip" data-band="${b.key}">${plEsc(b.label)}</span>` : '<span class="core-fresh-chip">Not assessed</span>';
+  return `<div class="core-cat-fresh" title="${plEsc(`${c.title} ${note}`)}"><div class="core-cat-fresh-top"><b class="core-cat-age">${plEsc(age || c.latest)}</b>${chip}</div>${age ? `<small class="core-cat-datesub">${plEsc(c.latest)}</small>` : ''}</div>`;
 }
 function plCoreStatusCell(it) {
   const st = PE.coreStatus(it, plCfg());
