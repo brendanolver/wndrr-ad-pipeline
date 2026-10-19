@@ -5867,4 +5867,4 @@ body{background:var(--bg);color:var(--text);}
 .pl-cm .pl-cm-bad{color:#b42318;font-weight:600;}
 .pl-cm .pl-cm-wait{color:var(--text-muted);}
 .pl-cm b.pl-cm-none{font-size:22px;line-height:1.3;padding-right:44px;}
-.pl-cm .pl-cm-hist{display:block;margin-top:8px;min-height:0;color:var(--text-secondary);font-weight:400;}
+.pl-cm .pl-cm-hist{display:block;margin-top:8px;min-height:0;font-size:11.5px;color:#8b92a5;font-weight:400;}

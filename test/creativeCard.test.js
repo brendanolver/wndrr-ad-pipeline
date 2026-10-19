@@ -60,7 +60,8 @@ test('card wording and colours (display only)', () => {
   assert.match(m, /cc\.underperforming \? part\(cc\.underperforming, 'underperforming', 'pl-cm-bad'\)/, 'only non-zero categories');
   assert.match(m, /cc\.awaiting \? part\(cc\.awaiting, 'awaiting data', 'pl-cm-wait'\)/);
   assert.match(m, /join\(' &middot; '\)/);
-  assert.match(m, /previous .* tested/);
+  assert.match(m, /past \$\{hist\.earlier === 1 \? 'creative' : 'creatives'\}/, '"15 past creatives", the number stays dynamic'); assert.doesNotMatch(m, /previous .* tested/);
   const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
+  assert.match(css, /\.pl-cm \.pl-cm-hist\{[^}]*font-size:11\.5px;color:#8b92a5/, 'the history line is small and lighter: secondary context');
   assert.match(css, /\.pl-cm \.pl-cm-bad\{color:#b42318/); assert.match(css, /\.pl-cm \.pl-cm-wait\{color:var\(--text-muted\)/);
 });

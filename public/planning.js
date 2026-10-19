@@ -326,7 +326,7 @@ function plCoreMetrics(it) {
     effSub = bits.length ? bits.join(' &middot; ') : 'All performing';
   }
   const hist = cc.history;
-  const histLine = hist ? `<small class="pl-cm-hist" title="Unique creatives matched to this product (any status, a creative run in several campaigns counts once) that are not on an active ad now. Only ads in the synced Meta data that are matched to this product are counted.">${hist.earlier > 0 ? `${plNum(hist.earlier)} previous ${hist.earlier === 1 ? 'creative' : 'creatives'} tested` : 'No previous creatives tested'}</small>` : '';
+  const histLine = hist ? `<small class="pl-cm-hist" title="Unique creatives matched to this product (any status, a creative run in several campaigns counts once) that are not on an active ad now. Only ads in the synced Meta data that are matched to this product are counted.">${hist.earlier > 0 ? `${plNum(hist.earlier)} past ${hist.earlier === 1 ? 'creative' : 'creatives'}` : 'No past creatives'}</small>` : '';
   const card = (icon, tone, value, label, sub, extra = '', { head = '', valCls = '' } = {}) => `<div class="pl-cm">${head ? `<span class="pl-cm-h">${head}</span>` : ''}<span class="pl-cm-ic" data-tone="${tone}">${icon}</span><b${valCls ? ` class="${valCls}"` : ''}>${value}</b><span class="pl-cm-l">${label}</span>${sub ? `<small>${sub}</small>` : ''}${extra}</div>`;
   return `<div class="pl-cx-metrics">
     ${card(PL_ICON.chart, 'green', f.units30 === null || f.units30 === undefined ? '&ndash;' : plNum(f.units30), 'Sales (30D)', plTrendHtml(it, true))}

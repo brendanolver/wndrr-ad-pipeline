@@ -2,6 +2,14 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.5.4",
+      "date": "2026-10-19",
+      "title": "Subtler past creatives line",
+      "changes": [
+        "Creative Performance card footer now reads N past creatives, in smaller, lighter grey text"
+      ]
+    },
+    {
       "version": "1.5.3",
       "date": "2026-10-19",
       "title": "Creative Performance card display logic",
