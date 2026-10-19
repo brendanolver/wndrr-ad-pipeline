@@ -2,6 +2,15 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.6.4",
+      "date": "2026-10-20",
+      "title": "High Stocks: Almost qualifying section",
+      "changes": [
+        "High Stocks now lists up to 10 products in all: the recommendations as before, then an Almost qualifying section with the next closest Platinum / Rocket products that narrowly missed one rule (each says which), with Add to Shoot available",
+        "No rule, threshold, score or recommendation changed; the section shows results the engine already returns"
+      ]
+    },
+    {
       "version": "1.6.3",
       "date": "2026-10-20",
       "title": "Core Catalogue: add any product to the Shoot Plan",

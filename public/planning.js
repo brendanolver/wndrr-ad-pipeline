@@ -384,9 +384,9 @@ function plCoreDetailHtml(it, mode, ncols) {
     ${plMetaBtn(it)}
   </div></td></tr>`;
 }
-function plCoreTableHtml(mode, items, cat) {
+function plCoreTableHtml(mode, items, cat, { fixed = false } = {}) {
   const sort = state.oppSort[mode];
-  const th = (label, cls, key) => { const def = key && PL_SORTS[key] && (!PL_SORTS[key].only || PL_SORTS[key].only === cat) ? key : null; const on = def && sort && sort.key === def; return `<th class="${cls}${def ? ' pt-sortable' : ''}${on ? ' sorted' : ''}"${def ? ` data-opp-sort="${mode}:${def}" role="button" tabindex="0" aria-sort="${on ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}"` : ''}>${plEsc(label)}${on ? (sort.dir === 'asc' ? ' &uarr;' : ' &darr;') : ''}</th>`; };
+  const th = (label, cls, key) => { const def = !fixed && key && PL_SORTS[key] && (!PL_SORTS[key].only || PL_SORTS[key].only === cat) ? key : null; const on = def && sort && sort.key === def; return `<th class="${cls}${def ? ' pt-sortable' : ''}${on ? ' sorted' : ''}"${def ? ` data-opp-sort="${mode}:${def}" role="button" tabindex="0" aria-sort="${on ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}"` : ''}>${plEsc(label)}${on ? (sort.dir === 'asc' ? ' &uarr;' : ' &darr;') : ''}</th>`; };
   const needs = cat === 'needs'; const ncols = needs ? 8 : 6;
   const head = `${needs ? '<th class="pt-w-rank">#</th>' : ''}${th('Product', 'pt-w-product', 'product')}${th('Sales (30D)', 'pt-w-sales', 'u30')}${th('Stock', 'pt-w-stockc', 'stock')}${th('Latest creative', 'pt-w-cov', null)}${th(needs ? 'Creative gap' : 'Creative status', 'pt-w-gap', null)}${needs ? th('Priority', 'pt-w-prio', 'priority') : ''}${th('Action', 'pt-w-act', null)}`;
   const limit = state.oppLimit[mode] || PL_PAGE;
@@ -533,6 +533,27 @@ function plRenderCore() {
 }
 
 
+// High Stocks, "Almost qualifying": Platinum / Rocket products with enough stock that the engine did NOT recommend because of ONE rule (sales too low, stock runway, out of season, not enough
+// selling history yet), closest to selling first, listed under the recommendations until the page shows PL_HS_TARGET products in all. They are NOT recommendations: each row says which rule it
+// missed (the engine's own status and sentence), and can still be added by hand like any product. Nothing about how the engine scores or classifies changes; these are items it already returns.
+const PL_NEAR_MISS = ['weak_demand', 'low_stock', 'out_of_season', 'too_new'];
+const PL_HS_TARGET = 10;
+function plNearMisses() {
+  const o = state.opportunities; if (!o || !o.available || !o.high_stocks) return [];
+  const room = PL_HS_TARGET - plBase('high').length; if (room <= 0) return [];
+  const q = state.oppQuery.high.trim().toLowerCase();
+  return o.high_stocks.items
+    .filter((i) => !PE.isVisible(i) && PL_NEAR_MISS.includes(i.status) && (!q || String(i.name).toLowerCase().includes(q) || String(i.category || '').toLowerCase().includes(q)))
+    .sort((a, b) => ((b.facts || {}).units30 || 0) - ((a.facts || {}).units30 || 0) || String(a.name).localeCompare(String(b.name)))
+    .slice(0, room);
+}
+function plNearMissHtml() {
+  const items = plNearMisses(); if (!items.length) return '';
+  return `<div class="pl-core-card pl-nearmiss" data-opp-nearmiss="high">
+    <div class="pl-core-head"><div class="pl-core-title"><h3>Almost qualifying</h3><p>Platinum / Rocket products with plenty of stock that narrowly missed a High Stocks rule, closest to selling first. These are not recommendations: each says which rule it missed.</p><div class="pl-core-pills"><span class="pl-sumcount">${plPlural(items.length, 'product')}</span></div></div></div>
+    ${plCoreTableHtml('high', items, 'covered', { fixed: true })}
+  </div>`;
+}
 function plRenderHighStocks() {
   const host = document.getElementById('high-stock-list');
   if (!host) return;
@@ -540,7 +561,7 @@ function plRenderHighStocks() {
   if (!o || !o.available) { host.innerHTML = plUnavailableHtml(); return; }
   const hs = o.high_stocks;
   const tierNote = hs.tier_state !== 'ok' ? `<div class="opp-tier-note" role="note">${plEsc(hs.tier_note || 'The Platinum / Rocket classification is unavailable.')} High Stocks cannot recommend a product without it.</div>` : '';
-  host.innerHTML = plPageHtml('high', tierNote);
+  host.innerHTML = plPageHtml('high', tierNote) + plNearMissHtml();
   if (typeof renderPlanningStepNav === 'function') renderPlanningStepNav();
 }
 
