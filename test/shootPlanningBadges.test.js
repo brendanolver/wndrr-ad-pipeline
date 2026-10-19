@@ -27,15 +27,17 @@ test('Creative Attention: red "N need creative", green "Covered", awaiting revie
   assert.equal(attention({ eng: null, needsAttention: 0 }), '');
 });
 
-test('Creative Freshness: amber "N Need Refresh" with the oldest product\'s age; green "Up to Date" only when every product is assessed and none needs refreshing; otherwise neutral "Not Assessed"', () => {
+test('Creative Freshness: amber "N Need Refresh" with the oldest product\'s age; amber "N Unassessed" while coverage is incomplete; green "Up to Date" only when every product is assessed and none needs refreshing', () => {
   const stale = freshness({ total: 6, eng: eng({ stale: 2, oldestDays: 49, assessed: 6 }) });
   assert.equal(text(stale), '2 Need Refresh Oldest product: 49 days'); assert.doesNotMatch(stale, /stale/i, 'the word Stale is replaced'); assert.match(stale, /data-tone="amber"/);
   const ok = freshness({ total: 3, eng: eng({ stale: 0, assessed: 3, latestDays: 12 }) });
   assert.equal(text(ok), 'Up to Date Latest creative: 12 days ago'); assert.match(ok, /data-tone="green"/);
-  const partial = freshness({ total: 5, eng: eng({ stale: 0, assessed: 3 }) });
-  assert.equal(text(partial), 'Not Assessed 3 of 5 products assessed'); assert.match(partial, /data-tone="neutral"/); assert.doesNotMatch(partial, /Up to Date/, 'too little data is never "Up to Date"');
+  const partial = freshness({ total: 12, eng: eng({ stale: 0, assessed: 9 }) });
+  assert.equal(text(partial), '3 Unassessed 9 of 12 products assessed'); assert.match(partial, /data-tone="amber"/); assert.doesNotMatch(partial, /Up to Date|Not Assessed/, 'incomplete coverage is never "Up to Date"');
   const none = freshness({ total: 2, eng: eng({ stale: 0, assessed: 0, latestDays: null }) });
-  assert.equal(text(none), 'Not Assessed'); assert.doesNotMatch(none, /Up to Date/);
+  assert.equal(text(none), '2 Unassessed 0 of 2 products assessed'); assert.doesNotMatch(none, /Up to Date/);
+  assert.equal(text(freshness({ total: 1, eng: eng({ matched: 0, stale: 0, assessed: 0, latestDays: null }) })), '1 Unassessed 0 of 1 product assessed', 'a category with no engine results is unassessed, not blank');
+  assert.equal(text(freshness({ total: 4, eng: eng({ stale: 1, assessed: 3, oldestDays: 90 }) })), '1 Need Refresh Oldest product: 90 days', 'a known problem is still shown first');
   assert.equal(text(freshness({ total: 1, eng: eng({ stale: 0, assessed: 1, latestDays: 0 }) })), 'Up to Date Latest creative: today');
   assert.equal(text(freshness({ total: 1, eng: eng({ stale: 1, oldestDays: 1, assessed: 1 }) })), '1 Need Refresh Oldest product: 1 day');
   assert.equal(text(freshness({ total: 1, eng: eng({ stale: 1, oldestDays: null, assessed: 1 }) })), '1 Need Refresh', 'no secondary line without a reliable date');

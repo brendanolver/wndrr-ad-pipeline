@@ -7122,6 +7122,27 @@ function coreAttentionChipsHtml(p) {
   return chips.map((c) => `<span class="core-reason-chip">${escapeHtml(coreTitleCaseChip(c))}</span>`).join('');
 }
 
+// Two products with the same name in a category are told apart by their colourway: the colour name(s) from the product data (ApparelMagic colour labels), e.g. "OFFEND BEACH SHORT - BLACK". No colour is
+// ever invented: a product with no usable colour label, with more than two colourways, or whose colours do not tell the group apart is distinguished by its real product code instead.
+let coreSuffixCache = { src: null, n: -1, map: new Map() };
+function coreNameSuffixes() {
+  const list = state.coreProducts || [];
+  if (coreSuffixCache.src === list && coreSuffixCache.n === list.length) return coreSuffixCache.map;
+  const groups = new Map();
+  for (const p of list) { const k = `${p.category || ''}|${String(p.product_name || '').trim().toUpperCase()}`; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(p); }
+  const map = new Map();
+  for (const g of groups.values()) {
+    if (g.length < 2) continue;
+    const colourOf = (p) => { const labels = [...new Set((p.colours || []).map((c) => String(c.colour_label || '').trim()).filter(Boolean))]; return labels.length >= 1 && labels.length <= 2 ? labels.join(' / ').toUpperCase() : ''; };
+    const colours = g.map(colourOf);
+    const distinct = colours.every(Boolean) && new Set(colours).size === g.length;
+    g.forEach((p, i) => map.set(p.product_code, distinct ? colours[i] : String(p.product_code || '')));
+  }
+  coreSuffixCache = { src: list, n: list.length, map };
+  return map;
+}
+const coreColourwaySuffixHtml = (p) => { const s = coreNameSuffixes().get(p.product_code); return s ? ` <span class="core-prod-colour">&mdash; ${escapeHtml(s)}</span>` : ''; };
+
 // The product's real catalogue picture (the Core table's family image, else the first colourway that has one: the same ApparelMagic images the rest of Planning uses); the image icon only when it has none.
 function coreProductThumbHtml(p, info) {
   const url = (info && info.it && info.it.image_url) || ((p.colours || []).find((c) => c.image_url) || {}).image_url || '';
@@ -7131,14 +7152,13 @@ function coreProductThumbHtml(p, info) {
 
 function coreProblemProductRowHtml(p, selectedCodes, eng) {
   const info = eng ? eng.get(p.product_code) || null : null;
-  const badge = eng ? (info && info.cat === 'needs' ? '<span class="dot dot-r" aria-hidden="true"></span>' : '') : (p.flag === 'needs_attention' ? '<span class="dot dot-r" aria-hidden="true"></span>' : p.flag === 'opportunity' ? '<span class="dot dot-o" aria-hidden="true"></span>' : '');
   const trend = coreProductTrendInfo(p);
   // Creative Attention and Creative Freshness are the Core table's own results (status, priority, Active Ads, Latest creative); the older flag / chips only when those are not loaded
   const attention = eng ? plCatalogueAttentionHtml(info) : coreAttentionChipsHtml(p);
   const freshness = eng ? plCatalogueFreshnessHtml(info) : '<span class="core-cat-none">&mdash;</span>';
   return `
     <div class="core-shoot-review-row core-product-row">
-      <div class="core-shoot-review-col-product">${badge || ''}${coreProductThumbHtml(p, info)}<span class="core-shoot-review-name">${escapeHtml(p.product_name)}</span></div>
+      <div class="core-shoot-review-col-product">${coreProductThumbHtml(p, info)}<span class="core-shoot-review-name">${escapeHtml(p.product_name)}${coreColourwaySuffixHtml(p)}</span></div>
       <div class="core-shoot-review-col-inventory">${coreInventoryCellHtml(p)}</div>
       <div class="core-shoot-review-col-7d">${core7dCellHtml(trend)}</div>
       <div class="core-shoot-review-col-cadence">${coreCadenceBoxHtml(trend)}</div>
@@ -7369,10 +7389,11 @@ function coreCategoryAttentionHtml(cat) {
 function coreCategoryFreshnessHtml(cat) {
   if (!cat.eng) return cat.stale ? coreCellStack(coreBadge('amber', 'clock', `${cat.stale} Need Refresh`)) : '';
   const s = cat.eng;
-  if (!s.matched) return '<span class="core-cat-none">&mdash;</span>';
-  if (s.stale) return coreCellStack(coreBadge('amber', 'clock', `${s.stale} Need Refresh`, 'Products whose newest creative is older than the Planning threshold, or that have no creative. Freshness is separate from performance: it does not by itself mean a new shoot is needed.'), s.oldestDays !== null ? `Oldest product: ${s.oldestDays} ${s.oldestDays === 1 ? 'day' : 'days'}` : '', 'Days since the newest creative of the product in this category with the oldest creative (not the whole category).');
-  if (cat.total > 0 && s.assessed === cat.total) return coreCellStack(coreBadge('green', 'check', 'Up to Date', 'Every product in this category has a reliable creative date and none is past the Planning threshold'), s.latestDays !== null ? `Latest creative: ${coreDaysAgo(s.latestDays)}` : '', 'The newest creative across the products in this category.');
-  return coreCellStack(coreBadge('neutral', 'clock', 'Not Assessed', 'Not every product in this category has a reliable creative date, so freshness cannot be confirmed'), s.assessed ? `${s.assessed} of ${cat.total} products assessed` : '', 'Products with a reliable creative date.');
+  if (s.stale) return coreCellStack(coreBadge('amber', 'clock', `${s.stale} Need Refresh`, 'Products whose newest creative is older than the Planning threshold, or that have no creative. Freshness is separate from performance: it does not by itself mean a new shoot is needed.' + (s.assessed < cat.total ? ` ${cat.total - s.assessed} more ${cat.total - s.assessed === 1 ? 'product has' : 'products have'} no reliable creative date yet.` : '')), s.oldestDays !== null ? `Oldest product: ${s.oldestDays} ${s.oldestDays === 1 ? 'day' : 'days'}` : '', 'Days since the newest creative of the product in this category with the oldest creative (not the whole category).');
+  // Coverage first: while some products have no reliable creative date the category cannot be called fresh, so the badge says how many still need assessing.
+  if (s.assessed < cat.total) { const left = cat.total - s.assessed; return coreCellStack(coreBadge('amber', 'clock', `${left} Unassessed`, 'Products in this category with no reliable creative date (no matched creative, or none with a usable date in its ad name), so their freshness cannot be confirmed'), `${s.assessed} of ${cat.total} ${cat.total === 1 ? 'product' : 'products'} assessed`, 'Products with a reliable creative date.'); }
+  // Everything is assessed, and nothing needs refreshing: that is a freshness result (every product's newest creative is inside the Planning threshold), not just completeness.
+  return coreCellStack(coreBadge('green', 'check', 'Up to Date', 'Every product in this category has a reliable creative date and none is past the Planning threshold'), s.latestDays !== null ? `Latest creative: ${coreDaysAgo(s.latestDays)}` : '', 'The newest creative across the products in this category.');
 }
 const coreSelectedHtml = (n) => (n ? `<span class="core-badge" data-tone="green">${CORE_BADGE_ICON.check}${n} Selected</span>` : '<span class="core-dash" aria-label="Nothing selected">&mdash;</span>');
 

@@ -2,6 +2,16 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.5.9",
+      "date": "2026-10-19",
+      "title": "Final Core Shoot Planning refinements",
+      "changes": [
+        "Red dot removed from product names; products sharing a name show their colourway (for example OFFEND BEACH SHORT - BLACK), or the real product code when colours do not tell them apart",
+        "Category Creative Freshness shows an amber N Unassessed badge with 'X of Y products assessed' when coverage is incomplete; Up to Date only when every product is assessed and none needs refreshing",
+        "Display only: calculations, recommendations and integrations unchanged"
+      ]
+    },
+    {
       "version": "1.5.8",
       "date": "2026-10-19",
       "title": "Core Shoot Planning product rows",

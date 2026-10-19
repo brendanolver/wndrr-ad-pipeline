@@ -5923,3 +5923,6 @@ body{background:var(--bg);color:var(--text);}
   .core-prod-thumb{width:34px;height:34px;flex-basis:34px;}
   .core-cat-age{white-space:normal;}
 }
+
+/* Core Shoot Planning product rows: colourway beside a repeated product name */
+.core-prod-colour{font-weight:600;color:var(--text-secondary);white-space:nowrap;}

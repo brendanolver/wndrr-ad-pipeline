@@ -45,7 +45,9 @@ test('product rows: a real picture next to every name, no tinted selected row, h
   const thumb = fnSrc(app, 'coreProductThumbHtml');
   assert.match(thumb, /info\.it\.image_url/); assert.match(thumb, /p\.colours/); assert.match(thumb, /#i-image/, 'the icon only when no picture exists');
   const row = fnSrc(app, 'coreProblemProductRowHtml');
-  assert.match(row, /\$\{badge \|\| ''\}\$\{coreProductThumbHtml\(p, info\)\}<span class="core-shoot-review-name">/, 'attention dot, picture, then the name');
+  assert.match(row, /<div class="core-shoot-review-col-product">\$\{coreProductThumbHtml\(p, info\)\}<span class="core-shoot-review-name">/, 'picture, then the name');
+  assert.doesNotMatch(row, /dot dot-r|badge/, 'no red dot beside the product name: Creative Attention already says it');
+  assert.match(row, /coreColourwaySuffixHtml\(p\)/);
   assert.doesNotMatch(row, /core-row-selected/, 'a selected product is not a coloured row');
   assert.match(row, /shootActionHtml\(p\.product_code, 'shootThisWeekForCore', selectedCodes\)/, 'the Shoot / Shooting indicator is unchanged');
   const head = fnSrc(app, 'coreProblemProductsHeaderHtml');
@@ -59,4 +61,20 @@ test('the existing calculations are untouched: status, priority and the freshnes
   const att = fnSrc(pl, 'plCatalogueAttentionHtml'); assert.match(att, /info\.st/); assert.match(att, /info\.it\.priority/);
   assert.match(fnSrc(pl, 'plCatalogueMap'), /PE\.coreStatus/); assert.match(fnSrc(pl, 'plCatalogueMap'), /plFreshBand\(cov, cfg\)/);
   assert.equal(typeof E.coreStatus, 'function');
+});
+
+test('products that share a name are told apart by their real colourway (or product code), never an invented colour', () => {
+  const src = fnSrc(app, 'coreNameSuffixes') ;
+  const mk = (list) => { const state = { coreProducts: list }; const esc = (v) => String(v); const f = new Function('state', 'escapeHtml', `let coreSuffixCache = { src: null, n: -1, map: new Map() }; ${src}; const coreColourwaySuffixHtml = (p) => { const s = coreNameSuffixes().get(p.product_code); return s ? ' <span class="core-prod-colour">&mdash; ' + escapeHtml(s) + '</span>' : ''; }; return { map: coreNameSuffixes, html: coreColourwaySuffixHtml };`); return f(state, esc); };
+  const P = (code, name, labels, cat = 'SHORTS') => ({ product_code: code, product_name: name, category: cat, colours: labels.map((l) => ({ colour_label: l })) });
+  const a = mk([P('A1', 'Offend Beach Short', ['Black']), P('A2', 'Offend Beach Short', ['Grey']), P('B1', 'Rothman Sport Short', ['Black'])]);
+  assert.equal(a.map().get('A1'), 'BLACK'); assert.equal(a.map().get('A2'), 'GREY'); assert.equal(a.map().has('B1'), false, 'a unique name gets no suffix');
+  assert.match(a.html(P('A1', 'x', [])), /&mdash; BLACK/); assert.equal(a.html(P('B1', 'x', [])), '');
+  const same = mk([P('A1', 'Offend Beach Short', ['Black']), P('A2', 'Offend Beach Short', ['Black'])]);
+  assert.deepEqual([same.map().get('A1'), same.map().get('A2')], ['A1', 'A2'], 'colours that do not tell them apart: the real product code');
+  const none = mk([P('A1', 'Offend Beach Short', []), P('A2', 'Offend Beach Short', ['Grey'])]);
+  assert.deepEqual([none.map().get('A1'), none.map().get('A2')], ['A1', 'A2'], 'no colour name is invented for a product without one');
+  const two = mk([P('A1', 'Hood', ['Black', 'Grey']), P('A2', 'Hood', ['Navy'])]); assert.equal(two.map().get('A1'), 'BLACK / GREY');
+  const many = mk([P('A1', 'Hood', ['A', 'B', 'C']), P('A2', 'Hood', ['Navy'])]); assert.equal(many.map().get('A1'), 'A1', 'more than two colourways: the product code, not a guess');
+  const other = mk([P('A1', 'Offend Beach Short', ['Black']), P('C1', 'Offend Beach Short', ['Black'], 'OTHER')]); assert.equal(other.map().size, 0, 'the same name in different categories is not a clash');
 });
