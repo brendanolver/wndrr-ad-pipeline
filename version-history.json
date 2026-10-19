@@ -2,6 +2,15 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.6.3",
+      "date": "2026-10-20",
+      "title": "Core Catalogue: add any product to the Shoot Plan",
+      "changes": [
+        "Covered and not-recommended products in the Core Catalogue now have a quiet outline + Shoot (they had only View), so any product can be added by hand; the shoot form still asks before using a restricted colourway",
+        "Products that cannot be planned (not launched, launch not confirmed, past weeks) keep a plain View"
+      ]
+    },
+    {
       "version": "1.6.2",
       "date": "2026-10-20",
       "title": "Core Catalogue: category top level restored",

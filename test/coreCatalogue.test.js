@@ -14,12 +14,12 @@ const escapeHtml = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').repl
 const names = ['coreFamilies', 'coreFamilySales', 'coreSalesCellHtml', 'coreFamilyStock', 'coreStockCellHtml', 'coreCreativeStatus', 'coreFamilyPriority', 'coreFamilyInfo', 'coreFamilySelected', 'coreActionHtml'];
 const state = { coreProducts: [] };
 const plCatalogueSupport = new Function('plNum', `${fnSrc(pl, 'plCatalogueSupport')}; return plCatalogueSupport;`)((v) => Number(v || 0).toLocaleString('en-AU'));
-const C = new Function('state', 'escapeHtml', 'PE', 'plCatalogueSupport', `
+const C = new Function('state', 'escapeHtml', 'PE', 'plCatalogueSupport', 'PL_BLOCKED', `
   const coreNum = (n) => Number(n).toLocaleString('en-AU');
   let coreFamilyCache = { src: null, n: -1, list: [] };
   const coreNeedsAttention = (info) => !!info && (info.cat === 'needs' || info.cat === 'review');
   ${names.map((n) => fnSrc(app, n)).join('\n')}
-  return { ${names.join(', ')}, coreNeedsAttention };`)(state, escapeHtml, PE, plCatalogueSupport);
+  return { ${names.join(', ')}, coreNeedsAttention };`)(state, escapeHtml, PE, plCatalogueSupport, ['not_launched', 'launch_unknown', 'unavailable']);
 const text = (h) => h.replace(/<[^>]+>/g, ' ').replace(/&uarr;/g, '↑').replace(/&darr;/g, '↓').replace(/&rarr;/g, '→').replace(/&mdash;/g, '—').replace(/\s+/g, ' ').trim();
 const prod = (code, o = {}) => ({ product_code: code, product_name: o.name || 'Offend Tee', category: o.cat || 'TEES', colours: o.colours || [], soh: 'soh' in o ? o.soh : 100, on_order: 'oo' in o ? o.oo : 50, vel30: 'vel30' in o ? o.vel30 : 10, weeks_cover: 'wk' in o ? o.wk : 10, cadence: o.cadence, flag: o.flag });
 const cad = (cur, prev, pct) => ({ has_data: true, last_7d_units: cur, prev_7d_units: prev, last_7d_pct_change: pct });
@@ -82,13 +82,16 @@ test('Creative Status: one badge and one short line, from the engine\'s own resu
   const html = C.coreCreativeStatus(null, gap); assert.ok(html.title.includes('No Active Creative'), 'the engine\'s own label stays in the tooltip');
 });
 
-test('Action: + Shoot where creative is needed, ✓ Shooting once selected, a quiet View for covered products', () => {
+test('Action: every product can be added; black + Shoot where creative is needed, an outline one where it is not recommended, ✓ Shooting once selected', () => {
   const fam = { id: 'A1', name: 'Offend Tee', members: [prod('A1')] };
-  assert.match(C.coreActionHtml(fam, needs('x'), new Set()), /class="cat2-shoot"[^>]*data-opp-add="k"[^>]*>\+ Shoot</, 'engine result: the Creative Opportunities add, which carries the ticked colourways');
-  assert.match(C.coreActionHtml(fam, null, new Set()), /onclick="shootThisWeekForCore\('A1'\)"/, 'no engine result: the existing Shoot Plan form');
+  const all = (info) => C.coreActionHtml(fam, info, new Set());
+  assert.match(all(needs('x')), /class="cat2-shoot"[^>]*data-opp-add="k"[^>]*>\+ Shoot</, 'engine result: the Creative Opportunities add, which carries the ticked colourways');
   assert.match(C.coreActionHtml(fam, needs('x'), new Set(['A1'])), /✓ Shooting/); assert.doesNotMatch(C.coreActionHtml(fam, needs('x'), new Set(['A1'])), /\+ Shoot/);
-  const cov = C.coreActionHtml(fam, { cat: 'covered', it: {} }, new Set()); assert.match(cov, /class="cat2-view"/); assert.doesNotMatch(cov, /\+ Shoot|\+ Plan/);
-  assert.match(C.coreActionHtml(fam, null, new Set()), /\+ Shoot/, 'nothing assessed: the earlier + Shoot action stays');
+  for (const cat of ['covered', 'hidden', 'review']) assert.match(all({ cat, it: { key: 'k', status: 'weak_demand' } }), /data-opp-add="k"[^>]*>\+ Shoot</, `${cat}: still has + Shoot`);
+  assert.match(all({ cat: 'hidden', it: { key: 'k', status: 'low_stock' } }), /cat2-shoot cat2-shoot-quiet/, 'not recommended: the quieter outline');
+  assert.doesNotMatch(all(needs('x')), /cat2-shoot-quiet/);
+  assert.match(C.coreActionHtml(fam, null, new Set()), /onclick="shootThisWeekForCore\('A1'\)"/, 'no engine result: the existing Shoot Plan form');
+  assert.match(all({ cat: 'hidden', it: { key: 'k', status: 'not_launched' } }), /class="cat2-view"/, 'not launched: cannot be planned, so only View (the server refuses it too)');
 });
 
 test('Priority order: needs creative (High first), needs review, in production, testing, covered; the server flag only before results load', () => {

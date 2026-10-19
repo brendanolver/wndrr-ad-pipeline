@@ -6104,3 +6104,5 @@ button.cat2-prod:focus-visible,.cat2-view:focus-visible,.cat2-shoot:focus-visibl
 .core-shoot-category-toggle{border-bottom:0;}
 .core-shoot-category-body{padding:0;gap:0;background:#fff;border-top:1px solid var(--border);}
 .core-shoot-category-body .cat2-head{background:var(--surface2);}
+.cat2-shoot.cat2-shoot-quiet{background:#fff;color:var(--text);border:1px solid var(--border-strong);}
+.cat2-shoot.cat2-shoot-quiet:hover{background:var(--surface2);}

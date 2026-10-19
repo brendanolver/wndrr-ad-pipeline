@@ -7165,16 +7165,18 @@ function coreFamilySelected(fam, info, selectedCodes) {
   return fam.members.some((m) => selectedCodes.has(m.product_code)) || (!!info && typeof plInThisWeeksPlan === 'function' && plInThisWeeksPlan(info.it));
 }
 
-// Where the engine has a result for the product, "+ Shoot" is the Creative Opportunities add (the colourways ticked in the expanded row go into the Shoot Plan, one product record for the whole
-// family); otherwise it opens the existing Shoot Plan form for the product, as before.
+// Every product can be added to the Shoot Plan by hand. Where the engine has a result for the product, "+ Shoot" is the Creative Opportunities add (the colourways ticked in the expanded row go into the
+// Shoot Plan, one product record for the whole family); black where creative is needed, a quieter outline where the engine does not recommend one (covered, or not recommended: the shoot form
+// still asks before using a colourway that is restricted). Without an engine result it opens the existing Shoot Plan form. The only products without the button are the ones that cannot be planned:
+// not launched / launch not confirmed, and a past week.
 function coreActionHtml(fam, info, selectedCodes) {
   if (coreFamilySelected(fam, info, selectedCodes)) return '<span class="core-shoot-selected-badge">✓ Shooting</span>';
-  const readOnly = typeof plReadOnly === 'function' && plReadOnly();
-  const quiet = readOnly || (info && (info.cat === 'covered' || info.cat === 'hidden'));
-  if (quiet) return `<button type="button" class="cat2-view" data-core-fam="${escapeHtml(fam.id)}" aria-label="View ${escapeHtml(fam.name)}">View</button>`;
-  if (info) return `<button type="button" class="cat2-shoot" data-opp-add="${escapeHtml(info.it.key)}" aria-label="Add ${escapeHtml(fam.name)} to this week's Shoot Plan">+ Shoot</button>`;
-  const primary = fam.members[0];
-  return `<button type="button" class="cat2-shoot" onclick="shootThisWeekForCore('${escapeHtml(primary.product_code)}')" aria-label="Add ${escapeHtml(fam.name)} to this week's Shoot Plan">+ Shoot</button>`;
+  const view = (title) => `<button type="button" class="cat2-view" data-core-fam="${escapeHtml(fam.id)}" aria-label="View ${escapeHtml(fam.name)}"${title ? ` title="${escapeHtml(title)}"` : ''}>View</button>`;
+  if (typeof plReadOnly === 'function' && plReadOnly()) return view('A past week: the Shoot Plan is a record');
+  if (info && typeof PL_BLOCKED !== 'undefined' && PL_BLOCKED.includes(info.it.status)) return view('Not launched, or its launch is not confirmed, so it cannot be planned yet');
+  const label = `aria-label="Add ${escapeHtml(fam.name)} to this week's Shoot Plan"`;
+  if (info) return `<button type="button" class="cat2-shoot${info.cat === 'covered' || info.cat === 'hidden' ? ' cat2-shoot-quiet' : ''}" data-opp-add="${escapeHtml(info.it.key)}" ${label}>+ Shoot</button>`;
+  return `<button type="button" class="cat2-shoot" onclick="shootThisWeekForCore('${escapeHtml(fam.members[0].product_code)}')" ${label}>+ Shoot</button>`;
 }
 
 function coreFamilyColourCount(fam) {
