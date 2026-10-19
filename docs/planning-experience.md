@@ -90,6 +90,20 @@ Read-only display data (`src/lib/lastCreativeDate.js`, attached to the finished 
 
 **Limitations.** Historical ads that do not follow the naming convention have no date. A duplicate that was renamed AND given a new creative id (no "- Copy") is a different creative to the system and keeps its own name date. Shared ads matched to several products date each of them, as for creative coverage.
 
+## Core Product Catalogue (Core page, "Core Catalogue" tab)
+
+The full Core catalogue, separate from the Creative Opportunities recommendation list on the other tab. One row per product family (colourways of one product, same category and name, share a row), five columns:
+
+* **Product**: picture, bold name, category in small grey, and the number of colourways. Click the row to expand it.
+* **Sales (7D)**: units over the last 7 days and the % change against the 7 days before (same Demand Planning sales data; for a family the totals of its colourways are summed first, so the % is exact). Green up, red down, grey when unchanged, new (nothing sold the week before) or unavailable.
+* **Stock**: stock on hand and the weeks of cover from the Demand Planning data. On order and the rest of the inventory are in the expanded detail only.
+* **Creative Status**: one soft badge and one short line, taken from the Core table's own engine result for the product (`PE.coreStatus`, nothing reclassified): Creative Gap / Never Tested (no creative running; Never Tested when the product has never had one), Underperforming Creative and the other engine gap labels, Covered, Creative in Testing, In Production, Needs Review, Not Recommended, Not Assessed (not in the results). Several results for one family: the one that most needs attention is shown.
+* **Action**: black `+ Shoot` where creative is needed (opens the same Shoot Plan flow as before), `✓ Shooting` once selected, a quiet `View` (opens the detail) for covered, testing, in-production and not-recommended products.
+
+Top controls: search (name, category, product code, colour), Priority / By Category, and All Products / Needs Attention / In Production. Needs Attention = the engine says needs creative or needs review; In Production = a concept for it is in the Shoot Plan pipeline. Priority order is the engine's (needs creative with High first, then its score, then needs review, in production, testing, covered); the server flag orders products only while the Planning results are not loaded.
+
+Expanded detail (hidden until opened): sales history (7 days, previous 7 days, this month against the same days last year, weekly rates, the category's last months), inventory (stock, on order, weeks of cover), creative (performance counts, creatives ever made, freshness of the newest creative, last new concept), the colourways with their own `+ Shoot`, View Meta ads, and Plan a new concept. The server adds `prev_7d_units` to each product's cadence (the % formula is unchanged).
+
 ## Plain-English reasons
 
 Built by `PlanningExplain.reasonFor()` from fields the engine returned (`facts`, `gap.type`, `status`, `revival`, `launch_age_days`); never from a product list.

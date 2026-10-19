@@ -40,22 +40,15 @@ test('the catalogue reads the Core table\'s results (status, category, priority,
   const map = fn(pl, 'plCatalogueMap');
   for (const f of ['PE.coverage(', 'PE.categoryOf(', 'PE.coreStatus(']) assert.ok(map.includes(f), f);
   assert.match(map, /it\.codes/, 'keyed by product code (and the item\'s other codes)');
-  const stats = fn(pl, 'plCatalogueStats');
-  assert.match(stats, /info\.cat === 'needs'/); assert.match(stats, /info\.band\.key === 'stale'/); assert.match(stats, /seen\.has\(info\.it\.key\)/, 'one item is counted once');
-  assert.match(fn(pl, 'plCatalogueAttentionHtml'), /pl-status/);
   assert.match(fn(pl, 'plCatalogueFreshnessHtml'), /plAgo\(c\.days\)/, 'date, then how long ago, then the band');
 });
 
-test('category rows and product rows use those results; the older flags are only a fallback while they are not loaded', () => {
+test('the catalogue rows use those results; the older flags are only a fallback while they are not loaded (Core Product Catalogue)', () => {
   const render = fn(app, 'renderCoreShootPlanning');
-  assert.match(render, /plCatalogueMap\(\)/); assert.match(render, /plCatalogueStats\(products, eng\)/);
-  assert.match(render, /i\.cat === 'needs'/, 'the products listed under a category are the ones the Core table lists as needing creative');
-  assert.match(render, /b\.eng\.needs - a\.eng\.needs/, 'categories are ranked by that count');
-  assert.match(render, /p\.flag === 'needs_attention' \|\| p\.flag === 'opportunity'/, 'fallback');
-  const row = fn(app, 'coreProblemProductRowHtml');
-  assert.match(row, /plCatalogueAttentionHtml\(info\)/); assert.match(row, /plCatalogueFreshnessHtml\(info\)/);
-  assert.match(app, /<span>Creative Attention<\/span>\s*<span>Creative Freshness<\/span>\s*<span>This Week<\/span>/, 'the product columns now include Creative Freshness');
-  assert.match(fn(app, 'coreCategoryAttentionHtml'), /High priority/);
+  assert.match(render, /plCatalogueMap\(\)/, 'the Core table\'s own results');
+  assert.match(fn(app, 'coreFamilyPriority'), /p\.flag === 'needs_attention'/, 'the older flag orders products only while the results are not loaded');
+  assert.match(fn(app, 'coreCreativeStatus'), /plCatalogueSupport\(info\)/);
+  assert.match(app, /data-core-fam/);
   assert.match(pl, /renderCoreShootPlanning\(\); \} catch \(e\) \{ console\.error\('core catalogue render failed'/, 're-rendered when the Planning results arrive');
 });
 

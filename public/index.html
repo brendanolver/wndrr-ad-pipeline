@@ -499,29 +499,28 @@
           </div>
           <div id="core-plan" class="core-plan" role="tabpanel" aria-labelledby="core-tab-opportunities"></div>
           <div class="core-catalogue-panel" id="core-view-catalogue" role="tabpanel" aria-labelledby="core-tab-catalogue" hidden>
-          <div class="core-shoot-planning-title">Core Shoot Planning</div>
-          <div class="core-shoot-planning-subtitle">Which Core products should we shoot this week?</div>
-          <div class="core-shoot-category-header">
-            <span></span>
-            <span>Category</span>
-            <span>Last 7D Sales</span>
-            <span class="core-cadence-header"><span class="core-cadence-header-top">LY MTD</span><span class="core-cadence-header-bottom">vs This MTD</span></span>
-            <span title="Products in this category that the Core table lists as needing creative. Awaiting review = not enough information for a confident recommendation.">Creative <span class="core-th-nw">Attention <svg class="core-info" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg></span></span>
-            <span title="How long since each product's newest creative, against the Planning thresholds. Independent of Creative Attention and of performance: an older creative that still performs is not automatically a reason to shoot.">Creative <span class="core-th-nw">Freshness <svg class="core-info" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg></span></span>
-            <span title="Products from this category in this week's Shoot Plan.">This Week's <span class="core-th-nw">Shoot <svg class="core-info" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg></span></span>
+          <div class="cat2-top">
+            <div class="cat2-titles">
+              <h2 class="cat2-title">Core Product Catalogue</h2>
+              <p class="cat2-subtitle">Sales, stock and creative status for every Core product.</p>
+            </div>
+            <div class="cat2-tools">
+              <label class="cat2-search"><svg class="ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input type="search" id="core-cat-search" placeholder="Search products…" autocomplete="off" aria-label="Search products"></label>
+              <div class="core-view-toggle" id="core-view-toggle" role="group" aria-label="Catalogue view">
+                <button type="button" class="core-view-btn" data-view="priority">Priority</button>
+                <button type="button" class="core-view-btn" data-view="category">By Category</button>
+              </div>
+            </div>
+          </div>
+          <div class="cat2-bar">
+            <div class="cat2-filters" id="core-cat-filters" role="group" aria-label="Filter products">
+              <button type="button" class="cat2-filter" data-core-filter="all" aria-pressed="true">All Products <span class="cat2-n"></span></button>
+              <button type="button" class="cat2-filter" data-core-filter="attention" aria-pressed="false">Needs Attention <span class="cat2-n"></span></button>
+              <button type="button" class="cat2-filter" data-core-filter="production" aria-pressed="false">In Production <span class="cat2-n"></span></button>
+            </div>
+            <div class="cat2-meta"><span id="core-cat-count"></span><span id="core-cat-sort">Sort: Priority (High → Low)</span></div>
           </div>
           <div id="core-shoot-planning-list" class="core-shoot-planning-list"></div>
-
-          <button type="button" class="core-view-all-toggle" id="core-view-all-btn">
-            <span class="accordion-arrow">&#9656;</span> View All Core Products
-          </button>
-          <div class="core-all-products-section" id="core-all-products-section" style="display:none;">
-            <div class="core-view-toggle" id="core-view-toggle">
-              <button type="button" class="core-view-btn" data-view="priority">Priority</button>
-              <button type="button" class="core-view-btn" data-view="category">By Category</button>
-            </div>
-            <div id="core-products-list" class="core-products-list"></div>
-          </div>
 
           </div>
         </div>

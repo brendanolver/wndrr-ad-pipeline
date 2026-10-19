@@ -2,6 +2,18 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.6.0",
+      "date": "2026-10-19",
+      "title": "Core Product Catalogue redesign",
+      "changes": [
+        "The Core Catalogue tab is now one clean list with five columns: Product, Sales (7D), Stock, Creative Status and Action",
+        "Colourways of one product are grouped into one row; each row expands to sales history, inventory and on order, creative history and freshness, Meta ads, colourways and planning actions",
+        "Creative Status shows one soft badge and one short line from the existing recommendation results; Action is a black + Shoot, ✓ Shooting, or a quiet View for covered products",
+        "Search, Priority / By Category and All Products / Needs Attention / In Production filters; the old category table and View All Core Products list are replaced",
+        "Sales (7D) % change is exact (the server now also sends the previous 7 days' units); no recommendation or calculation changed"
+      ]
+    },
+    {
       "version": "1.5.9",
       "date": "2026-10-19",
       "title": "Final Core Shoot Planning refinements",

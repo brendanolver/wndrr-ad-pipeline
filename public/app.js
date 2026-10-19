@@ -23,9 +23,8 @@ let state = {
   restrictedModules: [],
   usersAccess: null,
   styles: [], categories: [], board: null, dashboard: null, drops: [], provenWinners: [],
-  coreProducts: [], planningSettings: null, coreView: 'priority', coreAllProductsOpen: false,
-  coreExpandedCategories: new Set(), coreExpandedProducts: new Set(),
-  coreShootExpandedCategories: new Set(),
+  coreProducts: [], planningSettings: null, coreView: 'priority', coreFilter: 'all', coreSearch: '',
+  coreExpandedProducts: new Set(),
   shootPlan: [], coverageImageIndex: new Map(),
   contentCreators: [],
   conceptDevLocations: [],
@@ -6845,143 +6844,6 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
-// ── Planning: Core Creative Testing ──────────────────
-// A weekly decision dashboard: a prominent weekly-target progress card up
-// top, then Priority (default) -- a compact decision table, ~one row per
-// product, so 15-20 Core products can be scanned on one screen -- or By
-// Category (secondary, for browsing). Expand state is tracked here (not
-// just in the DOM) so it survives a full re-render -- e.g. saving a
-// "+ Plan New Concept" job triggers loadAll(), which would otherwise
-// collapse everything the team had just opened.
-//
-// Nothing here recomputes or overrides the server's attention flag/reason
-// or any commercial metric -- state.coreProducts already arrives sorted
-// Red -> Orange -> Green -> Review, and every value rendered below (soh,
-// weeks_cover, on_order, vel7/30/365, days_since_last_new_concept, reason,
-// reason_chips) is read straight from the API response.
-const CORE_ATTENTION_BADGE_CLASS = {
-  needs_attention: 'core-attention-red',
-  opportunity: 'core-attention-amber',
-  healthy: 'core-attention-green',
-  product_review: 'core-attention-review',
-};
-
-// Presentational-only sales-trend read from the same vel7/vel30 fields the
-// server already returns -- its own human-readable thresholds, purely for
-// a quick glance in the compact row. Never feeds back into the attention
-// flag/reason, which are decided entirely server-side.
-function coreTrendInfo(p) {
-  if (!(p.vel30 > 0)) return { label: 'No recent sales', cls: 'core-trend-flat', arrow: '·' };
-  const ratio = p.vel7 / p.vel30;
-  if (ratio < 0.85) return { label: 'Declining', cls: 'core-trend-down', arrow: '▼' };
-  if (ratio > 1.15) return { label: 'Rising', cls: 'core-trend-up', arrow: '▲' };
-  return { label: 'Steady', cls: 'core-trend-flat', arrow: '▬' };
-}
-
-function toggleCoreCategory(cat) {
-  if (state.coreExpandedCategories.has(cat)) state.coreExpandedCategories.delete(cat);
-  else state.coreExpandedCategories.add(cat);
-  renderCoreProducts();
-}
-
-function toggleCoreProduct(productCode) {
-  if (state.coreExpandedProducts.has(productCode)) state.coreExpandedProducts.delete(productCode);
-  else state.coreExpandedProducts.add(productCode);
-  renderCoreProducts();
-}
-
-function setCoreView(view) {
-  state.coreView = view;
-  renderCoreProducts();
-}
-
-function coreColoursTableHtml(product) {
-  return `
-    <table class="core-colours-inner-table">
-      <thead><tr><th>Colour</th><th>SOH</th><th>On Order</th></tr></thead>
-      <tbody>
-        ${product.colours.map((c) => `<tr><td>${escapeHtml(c.style_code)}</td><td>${c.soh != null ? c.soh : '—'}</td><td>${c.on_order != null ? c.on_order : '—'}</td></tr>`).join('')}
-      </tbody>
-    </table>`;
-}
-
-// Supporting metric strip -- SOH / On Order / 7D / 30D / 365D velocity --
-// shown only in the expanded detail (Weeks Cover and Last New Concept
-// already appear in the compact row, so they aren't repeated here).
-function coreMetricRowHtml(p) {
-  const metrics = [
-    ['SOH', p.soh != null ? p.soh : '—'],
-    ['On Order', p.on_order != null ? p.on_order : '—'],
-    ['7D Velocity', `${p.vel7}/wk`],
-    ['30D Velocity', `${p.vel30}/wk`],
-    ['365D Avg', `${p.vel365}/wk`],
-  ];
-  return `
-    <div class="core-metric-row">
-      ${metrics.map(([label, value]) => `<div class="core-metric-col"><div class="core-metric-value">${value}</div><div class="core-metric-label">${label}</div></div>`).join('')}
-    </div>`;
-}
-
-// Expanded detail: SOH/On Order/velocity strip, colourways, and the full
-// reasoning sentences (the compact row above only shows short chips).
-function corePriorityDetailHtml(p) {
-  return `
-    <div class="core-priority-detail">
-      ${coreMetricRowHtml(p)}
-      <div class="core-priority-reasoning"><strong>Why:</strong> ${escapeHtml(p.reason)}</div>
-      ${coreColoursTableHtml(p)}
-    </div>`;
-}
-
-// Compact table row -- Product | Weeks Cover | Sales Trend | Last New
-// Concept | Key Reasons | + Plan -- roughly one row per product so 15-20
-// Core products scan on one screen. Clicking the row expands it in place.
-function corePriorityRowHtml(p, opts = {}) {
-  const isOpen = state.coreExpandedProducts.has(p.product_code);
-  const trend = coreTrendInfo(p);
-  const emoji = p.label.split(' ')[0];
-  const categoryTag = opts.showCategory ? `<span class="core-priority-category-tag">${escapeHtml(p.category)}</span>` : '';
-  const chips = (p.reason_chips || []).map((c) => `<span class="core-reason-chip">${escapeHtml(c)}</span>`).join('');
-  return `
-    <div class="core-priority-row ${isOpen ? 'open' : ''}" data-product-code="${p.product_code}">
-      <div class="core-priority-row-grid" onclick="toggleCoreProduct('${p.product_code}')">
-        <div class="core-priority-col-product">
-          <span class="accordion-arrow">&#9656;</span>
-          <span class="core-priority-emoji">${emoji}</span>
-          <span class="core-product-name">${escapeHtml(p.product_name)}</span>
-          ${categoryTag}
-        </div>
-        <div class="core-priority-col">${p.weeks_cover != null ? `${p.weeks_cover} wks` : '—'}</div>
-        <div class="core-priority-col core-trend ${trend.cls}">${trend.arrow} ${trend.label}</div>
-        <div class="core-priority-col">${p.days_since_last_new_concept != null ? `${p.days_since_last_new_concept}d` : 'Never'}</div>
-        <div class="core-priority-col-chips">${chips}</div>
-        <div class="core-priority-col-action">
-          <button type="button" class="btn btn-primary btn-sm" onclick="event.stopPropagation(); shootThisWeekForCore('${p.product_code}')">+ Shoot</button>
-          <button type="button" class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); planNewConceptForCore('${p.product_code}')">+ Plan</button>
-        </div>
-      </div>
-      ${isOpen ? corePriorityDetailHtml(p) : ''}
-    </div>`;
-}
-
-function corePriorityHeaderHtml() {
-  return `
-    <div class="core-priority-row-grid core-priority-header-grid">
-      <div class="core-priority-col-product">Product</div>
-      <div class="core-priority-col">Weeks Cover</div>
-      <div class="core-priority-col">Sales Trend</div>
-      <div class="core-priority-col">Last New Concept</div>
-      <div class="core-priority-col-chips">Key Reasons</div>
-      <div class="core-priority-col-action"></div>
-    </div>`;
-}
-
-function wireCoreCategoryToggles(container) {
-  container.querySelectorAll('.core-category-toggle').forEach((btn) => {
-    btn.addEventListener('click', () => toggleCoreCategory(btn.dataset.category));
-  });
-}
-
 // Rendered on both Dashboard and Planning -- it's the shared basis for
 // both views, not a Planning-only stat -- so this updates every instance
 // on the page rather than a single hardcoded element.
@@ -7017,109 +6879,12 @@ function renderCoreWeeklyCard() {
   });
 }
 
-function renderCoreViewToggle() {
-  document.querySelectorAll('.core-view-btn').forEach((btn) => {
-    btn.classList.toggle('active', btn.dataset.view === state.coreView);
-  });
-}
-
-function renderCoreProductsPriority() {
-  return corePriorityHeaderHtml() + state.coreProducts.map((p) => corePriorityRowHtml(p, { showCategory: true })).join('');
-}
-
-function renderCoreProductsByCategory() {
-  // Each group keeps the existing urgency order -- state.coreProducts
-  // already arrives sorted Red -> Orange -> Green -> Review from the server.
-  const byCategory = new Map();
-  for (const p of state.coreProducts) {
-    if (!byCategory.has(p.category)) byCategory.set(p.category, []);
-    byCategory.get(p.category).push(p);
-  }
-  const sortedCategories = [...byCategory.keys()].sort();
-
-  return sortedCategories.map((cat) => {
-    const products = byCategory.get(cat);
-    const isOpen = state.coreExpandedCategories.has(cat);
-    return `
-      <div class="core-category-group">
-        <button type="button" class="core-category-toggle ${isOpen ? 'open' : ''}" data-category="${escapeHtml(cat)}">
-          <span class="accordion-arrow">&#9656;</span>
-          <span class="core-category-name">${escapeHtml(cat)}</span>
-          <span class="core-category-count">${products.length}</span>
-        </button>
-        ${isOpen ? `<div class="core-category-body">${corePriorityHeaderHtml()}${products.map((p) => corePriorityRowHtml(p)).join('')}</div>` : ''}
-      </div>`;
-  }).join('');
-}
-
-// Core Shoot Planning (default view): category-first, so a Monday meeting
-// sees which categories need attention before drilling into individual
-// products -- Category -> Problem Products -> Select for Shoot. Collapsed
-// rows show only aggregate counts, never per-product metrics; expanding a
-// category surfaces just its problem products (needs_attention/opportunity)
-// using the same compact row format as before. The full Priority/By
-// Category views (unchanged, every product, full metrics) stay reachable
-// via "View All Core Products".
-const CORE_STALE_DAYS = 14; // mirrors coreProducts.js's STALE_DAYS_OPPORTUNITY -- display aggregate only, doesn't touch the server's own flag decision
-
 // Static "✓ Shooting" badge once a product is already in this week's Shoot
 // Plan -- shared by Core and High Stock rows so both read the same way.
 // selectedCodes is built once per render pass (not per row) by the caller.
 function shootActionHtml(productCode, onclickFn, selectedCodes) {
   if (selectedCodes.has(productCode)) return '<span class="core-shoot-selected-badge">✓ Shooting</span>';
   return `<button type="button" class="btn btn-primary btn-sm" onclick="${onclickFn}('${productCode}')">+ Shoot</button>`;
-}
-
-// Full column header for the product rows below -- the category header
-// above (index.html's .core-shoot-category-header) uses a different, wider
-// grid than .core-shoot-review-row, so its labels don't line up with these
-// rows once a category is expanded. .core-product-row overrides just the
-// shared .core-shoot-review-row/-header grid template (see styles.css) --
-// that class is also used by High Stock's row with a different column
-// count, so the base rule itself is left alone.
-function coreProblemProductsHeaderHtml() {
-  return `
-    <div class="core-shoot-review-header core-product-row">
-      <span>Product</span>
-      <span>Inventory</span>
-      <span>7D Sales</span>
-      <span>MTD vs LY</span>
-      <span>Creative Attention</span>
-      <span>Creative Freshness</span>
-      <span>This Week</span>
-    </div>`;
-}
-
-// buildAttention (coreProducts.js) still includes a "+N Incoming" chip in
-// the shared reason_chips list when On Order is large relative to
-// velocity -- the Priority table keeps showing that chip as-is, but this
-// row now has its own Inventory column, so on-order pressure surfaces
-// there instead (as the quieter "High Incoming" label) rather than
-// duplicating the number in both places.
-function coreHasHighIncoming(p) {
-  return (p.reason_chips || []).some((c) => / Incoming$/.test(c));
-}
-
-// "Never tested" / "31.9 wks cover" (buildAttention's own chip strings,
-// written for the Priority table's running sentence) read as sentence
-// fragments; title-cased into standalone chips they scan as labels instead
-// -- e.g. "Never Tested", "31.9 Wks Cover". Numbers/symbols are untouched
-// since \b\w only matches the first letter of each word.
-function coreTitleCaseChip(text) {
-  return text.replace(/\b\w/g, (ch) => ch.toUpperCase());
-}
-
-function coreInventoryCellHtml(p) {
-  const highIncoming = coreHasHighIncoming(p);
-  return `
-    <div class="core-inv-row"><span class="core-inv-value">${p.soh != null ? p.soh : '—'}</span><span class="core-inv-label">SOH</span></div>
-    <div class="core-inv-row"><span class="core-inv-value">${p.on_order != null ? p.on_order : '—'}</span><span class="core-inv-label">On Order</span></div>
-    ${highIncoming ? '<span class="core-inv-flag">High Incoming</span>' : ''}`;
-}
-
-function coreAttentionChipsHtml(p) {
-  const chips = (p.reason_chips || []).filter((c) => !/ Incoming$/.test(c));
-  return chips.map((c) => `<span class="core-reason-chip">${escapeHtml(coreTitleCaseChip(c))}</span>`).join('');
 }
 
 // Two products with the same name in a category are told apart by their colourway: the colour name(s) from the product data (ApparelMagic colour labels), e.g. "OFFEND BEACH SHORT - BLACK". No colour is
@@ -7148,45 +6913,6 @@ function coreProductThumbHtml(p, info) {
   const url = (info && info.it && info.it.image_url) || ((p.colours || []).find((c) => c.image_url) || {}).image_url || '';
   const none = '<span class="core-prod-thumb-none"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-image"></use></svg></span>';
   return `<span class="core-prod-thumb">${url ? `<img src="${escapeHtml(url)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.remove()">` : none}</span>`;
-}
-
-function coreProblemProductRowHtml(p, selectedCodes, eng) {
-  const info = eng ? eng.get(p.product_code) || null : null;
-  const trend = coreProductTrendInfo(p);
-  // Creative Attention and Creative Freshness are the Core table's own results (status, priority, Active Ads, Latest creative); the older flag / chips only when those are not loaded
-  const attention = eng ? plCatalogueAttentionHtml(info) : coreAttentionChipsHtml(p);
-  const freshness = eng ? plCatalogueFreshnessHtml(info) : '<span class="core-cat-none">&mdash;</span>';
-  return `
-    <div class="core-shoot-review-row core-product-row">
-      <div class="core-shoot-review-col-product">${coreProductThumbHtml(p, info)}<span class="core-shoot-review-name">${escapeHtml(p.product_name)}${coreColourwaySuffixHtml(p)}</span></div>
-      <div class="core-shoot-review-col-inventory">${coreInventoryCellHtml(p)}</div>
-      <div class="core-shoot-review-col-7d">${core7dCellHtml(trend)}</div>
-      <div class="core-shoot-review-col-cadence">${coreCadenceBoxHtml(trend)}</div>
-      <div class="core-shoot-review-col-reasons">${attention}</div>
-      <div class="core-shoot-review-col-fresh">${freshness}</div>
-      <div class="core-shoot-review-col-action">${shootActionHtml(p.product_code, 'shootThisWeekForCore', selectedCodes)}</div>
-    </div>`;
-}
-
-function toggleCoreShootCategory(cat) {
-  if (state.coreShootExpandedCategories.has(cat)) state.coreShootExpandedCategories.delete(cat);
-  else state.coreShootExpandedCategories.add(cat);
-  renderCoreShootPlanning();
-}
-
-// How many of this week's already-selected Shoot Plan items belong to each
-// Core category -- cross-referenced via product_code, since shoot_plan_items
-// doesn't store category itself (a Shoot Plan entry from Upcoming Drops
-// simply won't match any Core product_code here, which is correct).
-function coreShootPlanCountsByCategory() {
-  const productCodeToCategory = new Map(state.coreProducts.map((p) => [p.product_code, p.category]));
-  const counts = new Map();
-  for (const item of state.shootPlan) {
-    const cat = productCodeToCategory.get(item.product_code);
-    if (!cat) continue;
-    counts.set(cat, (counts.get(cat) || 0) + 1);
-  }
-  return counts;
 }
 
 // Category-level "this month to date vs the same days last year" -- ported
@@ -7260,43 +6986,6 @@ function coreCadenceCellHtml(trend) {
     </div>`;
 }
 
-// Same LY-MTD-vs-This-MTD/last-7D shape coreCategoryTrendInfo returns, read
-// from a product's own p.cadence (coreProducts.js, keyed by product_code
-// instead of category) -- lets core7dCellHtml/coreCadenceBoxHtml below run
-// unmodified against either level. No .months here: the per-product row is
-// a compact single line, not the category header's wider strip.
-function coreProductTrendInfo(p) {
-  const c = p.cadence;
-  if (!c || !c.has_data) {
-    return { hasData: false, title: 'No Sales Cadence data for this product' };
-  }
-  const title = `LY MTD: ${c.last_year_units} · This MTD: ${c.this_period_units}`;
-  const pctLabel = c.pct_change == null ? 'New' : `${c.pct_change > 0 ? '+' : ''}${c.pct_change}%`;
-  return {
-    hasData: true,
-    title,
-    boxValue: c.last_year_units,
-    boxPctLabel: pctLabel,
-    boxCls: pctClass(c.pct_change),
-    last7dUnits: c.last_7d_units,
-    last7dPctChange: c.last_7d_pct_change,
-  };
-}
-
-// Just the MTD box portion of coreCadenceCellHtml, with no months strip --
-// a per-product row is one compact line, not the category header's wider
-// glance area.
-function coreCadenceBoxHtml(trend) {
-  if (!trend.hasData) {
-    return `<span class="core-cadence-empty" title="${escapeHtml(trend.title)}">—</span>`;
-  }
-  return `
-    <div class="core-cadence-box core-trend-${trend.boxCls}" title="${escapeHtml(trend.title)}">
-      <span class="core-cadence-box-value">${trend.boxValue}</span>
-      <span class="core-cadence-box-pct">${trend.boxPctLabel}</span>
-    </div>`;
-}
-
 // Click-and-drag horizontal scroll for the Sales Cadence months strip.
 // Delegated once at the document level rather than wired per-element on
 // every render -- Core's category list re-renders on every state change
@@ -7337,105 +7026,258 @@ function coreCadenceBoxHtml(trend) {
   });
 })();
 
-// "How much have we actually sold lately" -- a plain rolling total (today
-// and the 6 days before it), deliberately not coloured/compared like the
-// cadence box/months above -- this column just answers "how much," not
-// "how does that compare."
-function core7dCellHtml(trend) {
-  if (!trend.hasData || trend.last7dUnits == null) return '<span class="core-cadence-empty">—</span>';
-  const pct = trend.last7dPctChange;
-  const cls = pctClass(pct);
-  const arrow = cls === 'up' ? '↑' : cls === 'down' ? '↓' : '→';
-  const trendText = pct == null ? 'New' : `${arrow} ${Math.abs(pct)}% vs last week`;
-  const title = pct == null
-    ? 'No sales in the prior 7 days to compare against'
-    : `This week: ${trend.last7dUnits} units, ${arrow} ${Math.abs(pct)}% vs the prior 7 days`;
-  return `
-    <div class="core-shoot-7d-cell">
-      <div class="core-shoot-7d-row">
-        <span class="core-shoot-7d-value">${trend.last7dUnits}</span>
-        <span class="core-shoot-7d-label">units</span>
-      </div>
-      <span class="core-shoot-7d-trend core-trend-${cls}" title="${escapeHtml(title)}">${trendText}</span>
-    </div>`;
-}
-
-// Category-level Creative Attention / Freshness / This Week's Shoot, as compact badges. Everything comes from the existing results: the Core table's own counts (products needing creative,
-// products awaiting review, products whose latest creative is stale or missing, with the Planning thresholds), and this week's Shoot Plan. Attention and Freshness are independent: a
-// category can be Covered and still hold stale creative. The older flag counts are used only while the Core table's results are not loaded.
-const CORE_BADGE_ICON = {
-  dot: '<i class="core-badge-dot" aria-hidden="true"></i>',
-  check: '<svg class="core-badge-ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="currentColor" stroke="none" opacity=".16"/><path d="M7.5 12.5l3 3 6-6.5"/></svg>',
-  clock: '<svg class="core-badge-ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/></svg>',
-};
-const coreBadge = (tone, icon, text, title) => `<span class="core-badge" data-tone="${tone}"${title ? ` title="${escapeHtml(title)}"` : ''}>${CORE_BADGE_ICON[icon] || ''}${escapeHtml(text)}</span>`;
-const coreCellStack = (badge, sub, subTitle) => `<div class="core-cell-stack">${badge}${sub ? `<span class="core-cell-sub"${subTitle ? ` title="${escapeHtml(subTitle)}"` : ''}>${escapeHtml(sub)}</span>` : ''}</div>`;
 const coreDaysAgo = (d) => (d === 0 ? 'today' : `${d} ${d === 1 ? 'day' : 'days'} ago`);
 
-function coreCategoryAttentionHtml(cat) {
-  if (!cat.eng) return cat.needsAttention ? coreCellStack(coreBadge('red', 'dot', `${cat.needsAttention} need creative`)) : '';
-  const s = cat.eng;
-  if (!s.matched) return '<span class="core-cat-none">Not assessed</span>';
-  const review = s.review ? `${s.review} awaiting review` : '';
-  if (s.needs) return coreCellStack(coreBadge('red', 'dot', `${s.needs} need creative`, s.high ? `${s.high} High priority` : ''), review);
-  if (s.review >= s.matched) return coreCellStack(coreBadge('neutral', 'dot', 'Awaiting review')); // nothing here is assessed yet, so it is not "covered"
-  return coreCellStack(coreBadge('green', 'check', 'Covered'), review);
-}
-// Freshness = how long since each product's NEWEST CREATIVE (the creative date written in its ad name; see lastCreativeDate.js), against the existing Planning bands and thresholds. It is not
-// yet a measure of genuinely NEW CONCEPTS (a new hook on an existing concept is a new creative and counts), so the wording says "creative", never "concept". Amber "N Need Refresh" when any
-// product's latest creative is old or missing; green "Up to Date" only when EVERY product in the category has a freshness verdict and none needs refreshing; otherwise a neutral "Not Assessed"
-// (never "Up to Date" on too little data). Display only: freshness does not feed Creative Attention or any recommendation.
-// At category level the ages are those of the product with the oldest / newest creative, not the whole category.
-function coreCategoryFreshnessHtml(cat) {
-  if (!cat.eng) return cat.stale ? coreCellStack(coreBadge('amber', 'clock', `${cat.stale} Need Refresh`)) : '';
-  const s = cat.eng;
-  if (s.stale) return coreCellStack(coreBadge('amber', 'clock', `${s.stale} Need Refresh`, 'Products whose newest creative is older than the Planning threshold, or that have no creative. Freshness is separate from performance: it does not by itself mean a new shoot is needed.' + (s.assessed < cat.total ? ` ${cat.total - s.assessed} more ${cat.total - s.assessed === 1 ? 'product has' : 'products have'} no reliable creative date yet.` : '')), s.oldestDays !== null ? `Oldest product: ${s.oldestDays} ${s.oldestDays === 1 ? 'day' : 'days'}` : '', 'Days since the newest creative of the product in this category with the oldest creative (not the whole category).');
-  // Coverage first: while some products have no reliable creative date the category cannot be called fresh, so the badge says how many still need assessing.
-  if (s.assessed < cat.total) { const left = cat.total - s.assessed; return coreCellStack(coreBadge('amber', 'clock', `${left} Unassessed`, 'Products in this category with no reliable creative date (no matched creative, or none with a usable date in its ad name), so their freshness cannot be confirmed'), `${s.assessed} of ${cat.total} ${cat.total === 1 ? 'product' : 'products'} assessed`, 'Products with a reliable creative date.'); }
-  // Everything is assessed, and nothing needs refreshing: that is a freshness result (every product's newest creative is inside the Planning threshold), not just completeness.
-  return coreCellStack(coreBadge('green', 'check', 'Up to Date', 'Every product in this category has a reliable creative date and none is past the Planning threshold'), s.latestDays !== null ? `Latest creative: ${coreDaysAgo(s.latestDays)}` : '', 'The newest creative across the products in this category.');
-}
-const coreSelectedHtml = (n) => (n ? `<span class="core-badge" data-tone="green">${CORE_BADGE_ICON.check}${n} Selected</span>` : '<span class="core-dash" aria-label="Nothing selected">&mdash;</span>');
+// ── Core Product Catalogue ───────────────────────────
+// The full Core catalogue (separate from the Creative Opportunities recommendation list): one row per product FAMILY -- the colourways of one product under one row --
+// with five columns: Product | Sales (7D) | Stock | Creative Status | Action. Nothing here is a new rule: sales and stock come from the existing Demand Planning data
+// (state.coreProducts), and the Creative Status is the Core table's own engine result for the product (state.opportunities, via plCatalogueMap), only re-worded for the badge.
+// Expand / filter / search / view state lives in `state` so it survives a re-render (a shoot selection or loadAll() re-renders the list).
+// Presentation only: the server's attention flag and the engine's recommendations are never recalculated or overridden here.
 
-function coreShootCategoryRowHtml(cat, selectedCodes, eng) {
-  const isOpen = state.coreShootExpandedCategories.has(cat.name);
-  const trend = coreCategoryTrendInfo(cat.name);
+function toggleCoreProduct(familyId) {
+  if (state.coreExpandedProducts.has(familyId)) state.coreExpandedProducts.delete(familyId);
+  else state.coreExpandedProducts.add(familyId);
+  renderCoreShootPlanning();
+}
+
+function setCoreView(view) {
+  state.coreView = view === 'category' ? 'category' : 'priority';
+  renderCoreShootPlanning();
+}
+
+function setCoreFilter(filter) {
+  state.coreFilter = ['attention', 'production'].includes(filter) ? filter : 'all';
+  renderCoreShootPlanning();
+}
+
+// Colourways of one product share its name within a category (each has its own product code): they are grouped into one family row.
+let coreFamilyCache = { src: null, n: -1, list: [] };
+function coreFamilies() {
+  const src = state.coreProducts || [];
+  if (coreFamilyCache.src === src && coreFamilyCache.n === src.length) return coreFamilyCache.list;
+  const groups = new Map();
+  src.forEach((p, i) => {
+    const key = `${p.category || ''}|${String(p.product_name || '').trim().toUpperCase()}`;
+    if (!groups.has(key)) groups.set(key, { id: p.product_code, name: p.product_name, category: p.category || '', members: [], order: i });
+    groups.get(key).members.push(p);
+  });
+  coreFamilyCache = { src, n: src.length, list: [...groups.values()] };
+  return coreFamilyCache.list;
+}
+
+const coreNum = (n) => Number(n).toLocaleString('en-AU');
+const coreTitleCase = (s) => String(s || '').toLowerCase().replace(/\b[a-z]/g, (c) => c.toUpperCase());
+
+// Which engine result represents a family: the one that most needs attention (needs creative, then needs review, in production, testing, covered, anything else).
+function coreFamilyInfo(fam, eng) {
+  if (!eng) return null;
+  const rank = (i) => (i.cat === 'needs' ? 0 : i.cat === 'review' ? 1 : i.it.status === 'in_production' ? 2 : i.it.status === 'testing' ? 3 : i.cat === 'covered' ? 4 : 5);
+  const seen = new Set(); let best = null;
+  for (const m of fam.members) {
+    const i = eng.get(m.product_code); if (!i || seen.has(i.it.key)) continue; seen.add(i.it.key);
+    if (!best || rank(i) < rank(best) || (rank(i) === rank(best) && (i.high ? 1 : 0) + (i.it.score || 0) / 1e6 > (best.high ? 1 : 0) + (best.it.score || 0) / 1e6)) best = i;
+  }
+  return best;
+}
+
+// Sales (7D): the family's units over the last 7 days and the change against the 7 days before (both windows from the same sales data, summed over its colourways, so the % is exact).
+// null = no sales data; pct null = nothing sold in the previous 7 days to compare with; pct undefined = cannot be worked out.
+function coreFamilySales(fam) {
+  let cur = 0; let prev = 0; let has = false; let exact = true;
+  for (const p of fam.members) {
+    const c = p.cadence; if (!c || !c.has_data || c.last_7d_units == null) continue;
+    has = true; cur += c.last_7d_units;
+    if (c.prev_7d_units == null) exact = false; else prev += c.prev_7d_units;
+  }
+  if (!has) return null;
+  if (fam.members.length === 1) return { cur, prev: exact ? prev : null, pct: fam.members[0].cadence.last_7d_pct_change };
+  if (!exact) return { cur, prev: null, pct: undefined };
+  return { cur, prev, pct: prev > 0 ? Math.round(((cur - prev) / prev) * 100) : (cur > 0 ? null : 0) };
+}
+
+function coreSalesCellHtml(s) {
+  if (!s) return '<span class="cat2-none" title="No sales data for this product">&mdash;</span>';
+  let tone = 'flat'; let text = '&mdash;'; let title = `${s.cur} units in the last 7 days`;
+  if (s.pct === undefined) { title += '; the previous 7 days are not available, so no change is shown'; }
+  else if (s.pct === null) { text = 'New'; title += '; nothing sold in the previous 7 days to compare against'; }
+  else if (s.pct > 0) { tone = 'up'; text = `&uarr; ${s.pct}%`; }
+  else if (s.pct < 0) { tone = 'down'; text = `&darr; ${Math.abs(s.pct)}%`; }
+  else { text = '&rarr; 0%'; }
+  if (s.pct !== undefined && s.pct !== null) title += `; ${s.prev != null ? `${s.prev} units in the previous 7 days` : 'compared with the previous 7 days'}`;
+  return `<div class="cat2-stack" title="${escapeHtml(title)}"><b class="cat2-num">${coreNum(s.cur)}</b><span class="cat2-delta" data-tone="${tone}">${text}</span></div>`;
+}
+
+// Stock: total stock on hand over the colourways and the weeks of cover the Demand Planning data gives (stock on hand / 30-day weekly sales; for several colourways, the summed stock over the summed rate).
+function coreFamilyStock(fam) {
+  let soh = 0; let sohKnown = false; let onOrder = 0; let onOrderKnown = false; let vel30 = 0;
+  for (const p of fam.members) {
+    if (p.soh != null) { soh += p.soh; sohKnown = true; }
+    if (p.on_order != null) { onOrder += p.on_order; onOrderKnown = true; }
+    vel30 += p.vel30 || 0;
+  }
+  const weeks = fam.members.length === 1 ? fam.members[0].weeks_cover : (sohKnown && vel30 > 0 ? +(soh / vel30).toFixed(1) : null);
+  return { soh: sohKnown ? soh : null, onOrder: onOrderKnown ? onOrder : null, weeks, noSales: !(vel30 > 0) };
+}
+
+function coreStockCellHtml(st) {
+  if (st.soh === null) return '<span class="cat2-none" title="Stock on hand is not available">&mdash;</span>';
+  const sub = st.weeks != null ? `${coreNum(st.weeks)} weeks cover` : (st.noSales ? 'No recent sales' : '');
+  return `<div class="cat2-stack"><b class="cat2-num">${coreNum(st.soh)}</b>${sub ? `<span class="cat2-sub">${escapeHtml(sub)}</span>` : ''}</div>`;
+}
+
+// Creative Status: ONE badge and ONE short line per product, taken from the engine's own result for it (status, tone, wording); only the label is shortened for the badge.
+// Never Tested = the engine says no creative is running and the product has never had one; Creative Gap = no creative is running now.
+function coreCreativeStatus(fam, info) {
+  if (!info) return { label: 'Not Assessed', tone: 'grey', line: 'No creative recommendation yet', title: 'This product is not in the Creative Opportunities results.' };
+  const st = info.st; const it = info.it; const hist = PE.creativeHistory(it);
+  const base = { title: `${st.label}. ${st.text}` };
+  if (info.cat === 'needs') {
+    if (st.label === 'No Active Creative') return { ...base, label: hist && hist.allTime === 0 ? 'Never Tested' : 'Creative Gap', tone: 'red', line: '0 active ads' };
+    return { ...base, label: st.label, tone: st.tone, line: plCatalogueSupport(info) };
+  }
+  if (info.cat === 'review') return { ...base, label: 'Needs Review', tone: 'grey', line: st.text };
+  if (info.cat === 'covered') {
+    if (it.status === 'in_production') return { ...base, label: 'In Production', tone: 'purple', line: st.text };
+    if (it.status === 'testing') return { ...base, label: st.label, tone: 'amber', line: st.text };
+    return { ...base, label: 'Covered', tone: 'green', line: st.text };
+  }
+  return { ...base, label: 'Not Recommended', tone: 'grey', line: st.text };
+}
+
+function coreCreativeCellHtml(cs) {
+  return `<div class="cat2-stack" title="${escapeHtml(cs.title || '')}"><span class="cat2-badge" data-tone="${escapeHtml(cs.tone)}">${escapeHtml(cs.label)}</span><span class="cat2-why">${escapeHtml(cs.line || '')}</span></div>`;
+}
+
+// Needs Attention = the engine says the product needs creative or needs review; In Production = a concept for it is already in the Shoot Plan pipeline.
+const coreNeedsAttention = (info) => !!info && (info.cat === 'needs' || info.cat === 'review');
+const coreInProduction = (info) => !!info && (info.it.status === 'in_production' || PE.productionActivity(info.it).active);
+
+// Priority order (High -> Low): products that need creative first (High priority, then the engine's score), then needs review, in production, testing, covered, everything else; ties keep the server's order.
+function coreFamilyPriority(fam, info) {
+  if (info) {
+    const base = info.cat === 'needs' ? 5000 + (info.high ? 2000 : 0) : info.cat === 'review' ? 4000 : info.it.status === 'in_production' ? 3000 : info.it.status === 'testing' ? 2500 : info.cat === 'covered' ? 2000 : 1000;
+    return base + Math.min(999, Math.round(info.it.score || 0));
+  }
+  return Math.max(...fam.members.map((p) => (p.flag === 'needs_attention' ? 900 : p.flag === 'opportunity' ? 800 : 0)));
+}
+
+function coreActionHtml(fam, info, selectedCodes) {
+  if (fam.members.some((m) => selectedCodes.has(m.product_code))) return '<span class="core-shoot-selected-badge">✓ Shooting</span>';
+  const quiet = info && (info.cat === 'covered' || info.cat === 'hidden');
+  if (quiet) return `<button type="button" class="cat2-view" data-core-fam="${escapeHtml(fam.id)}" aria-label="View ${escapeHtml(fam.name)}">View</button>`;
+  const primary = (info && fam.members.find((m) => m.product_code === info.it.product_code)) || fam.members[0];
+  return `<button type="button" class="cat2-shoot" onclick="shootThisWeekForCore('${escapeHtml(primary.product_code)}')" aria-label="Add ${escapeHtml(fam.name)} to this week's Shoot Plan">+ Shoot</button>`;
+}
+
+function coreFamilyColourCount(fam) {
+  return fam.members.reduce((n, p) => n + (p.colours || []).length, 0);
+}
+
+function coreFamilyDetailHtml(fam, info, selectedCodes, cs, sales, stock) {
+  const sum = (key) => fam.members.reduce((n, p) => n + (p[key] || 0), 0);
+  const cad = fam.members.map((p) => p.cadence).filter((c) => c && c.has_data);
+  const mtd = cad.reduce((a, c) => ({ cur: a.cur + (c.this_period_units || 0), ly: a.ly + (c.last_year_units || 0) }), { cur: 0, ly: 0 });
+  const mtdPct = mtd.ly > 0 ? Math.round(((mtd.cur - mtd.ly) / mtd.ly) * 100) : null;
+  const row = (k, v) => `<div class="cat2-kv"><span>${escapeHtml(k)}</span><b>${v}</b></div>`;
+  const trend = coreCategoryTrendInfo(fam.category);
+  const salesBlock = `<div class="cat2-block"><h4>Sales</h4>
+      ${row('Last 7 days', sales ? `${coreNum(sales.cur)} units` : '&mdash;')}
+      ${row('Previous 7 days', sales && sales.prev != null ? `${coreNum(sales.prev)} units` : '&mdash;')}
+      ${row('This month', cad.length ? `${coreNum(mtd.cur)} units` : '&mdash;')}
+      ${row('Same days last year', cad.length ? `${coreNum(mtd.ly)} units${mtdPct === null ? '' : ` (${mtdPct > 0 ? '+' : ''}${mtdPct}%)`}` : '&mdash;')}
+      ${row('Weekly rate 7D / 30D / 365D', `${sum('vel7').toFixed(1)} / ${sum('vel30').toFixed(1)} / ${sum('vel365').toFixed(1)}`)}
+      ${trend.hasData ? `<div class="cat2-trend"><span class="cat2-trend-h">${escapeHtml(coreTitleCase(fam.category))} category, last months vs last year</span>${coreCadenceCellHtml(trend)}</div>` : ''}
+    </div>`;
+  const incoming = fam.members.some((p) => (p.reason_chips || []).some((c) => / Incoming$/.test(c)));
+  const stockBlock = `<div class="cat2-block"><h4>Inventory</h4>
+      ${row('Stock on hand', stock.soh === null ? '&mdash;' : coreNum(stock.soh))}
+      ${row('On order', stock.onOrder === null ? '&mdash;' : coreNum(stock.onOrder))}
+      ${row('Weeks of cover', stock.weeks != null ? coreNum(stock.weeks) : '&mdash;')}
+      ${incoming ? '<div class="cat2-note">High incoming stock relative to sales</div>' : ''}
+    </div>`;
+  let creative = '';
+  if (info) {
+    const card = PE.creativeCard(info.it);
+    const parts = card.kind === 'active' ? [`${card.performing} performing`, card.underperforming ? `${card.underperforming} underperforming` : '', card.declining ? `${card.declining} declining` : '', card.awaiting ? `${card.awaiting} awaiting data` : ''].filter(Boolean).join(' · ') : card.kind === 'none' ? 'No active creative' : 'Meta creative data unavailable';
+    creative = `${row('Creative performance', escapeHtml(parts))}${card.history ? row('Creatives ever made', coreNum(card.history.allTime)) : ''}<div class="cat2-fresh">${plCatalogueFreshnessHtml(info)}</div>`;
+  }
+  const lastConcept = fam.members.map((p) => p.days_since_last_new_concept).filter((d) => d != null);
+  const creativeBlock = `<div class="cat2-block"><h4>Creative</h4>
+      ${creative || '<div class="cat2-note">Creative results are not loaded.</div>'}
+      ${row('Last new concept', lastConcept.length ? coreDaysAgo(Math.min(...lastConcept)) : 'Never')}
+      ${fam.members[0].reason ? `<div class="cat2-note">${escapeHtml(fam.members[0].reason)}</div>` : ''}
+    </div>`;
+  const colours = fam.members.map((p) => {
+    const sel = selectedCodes.has(p.product_code);
+    const act = sel ? '<span class="core-shoot-selected-badge">✓ Shooting</span>' : `<button type="button" class="cat2-view" onclick="shootThisWeekForCore('${escapeHtml(p.product_code)}')">+ Shoot</button>`;
+    const cl = (p.colours || []).map((c) => `<li>${c.image_url ? `<img src="${escapeHtml(c.image_url)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.remove()">` : '<i></i>'}<span>${escapeHtml(c.colour_label || c.style_code || '')}</span><em>${c.soh != null ? coreNum(c.soh) : '—'} on hand${c.on_order ? ` · ${coreNum(c.on_order)} on order` : ''}</em></li>`).join('');
+    return `<div class="cat2-member"><div class="cat2-member-h"><b>${escapeHtml(p.product_name)}${coreColourwaySuffixHtml(p)}</b>${fam.members.length > 1 ? act : ''}</div><ul>${cl}</ul></div>`;
+  }).join('');
+  const codes = info && (info.it.codes || (info.it.product_code ? [info.it.product_code] : []));
+  const actions = `<div class="cat2-actions">
+      ${info && codes && codes.length ? `<button type="button" class="cat2-link" data-core-meta="${escapeHtml(fam.id)}">View Meta ads &rarr;</button>` : ''}
+      <button type="button" class="cat2-link" onclick="planNewConceptForCore('${escapeHtml(fam.members[0].product_code)}')">Plan a new concept</button>
+      ${fam.members.length === 1 && !selectedCodes.has(fam.members[0].product_code) ? `<button type="button" class="cat2-link" onclick="shootThisWeekForCore('${escapeHtml(fam.members[0].product_code)}')">Add to this week's shoot</button>` : ''}
+    </div>`;
+  return `<div class="cat2-detail" id="cat2-detail-${escapeHtml(fam.id)}">
+    <div class="cat2-detail-grid">${salesBlock}${stockBlock}${creativeBlock}</div>
+    <div class="cat2-block cat2-colours"><h4>Colourways${coreFamilyColourCount(fam) ? ` (${coreFamilyColourCount(fam)})` : ''}</h4><div class="cat2-members">${colours}</div></div>
+    ${actions}
+  </div>`;
+}
+
+function coreFamilyRowHtml(r, selectedCodes) {
+  const { fam, info, cs, sales, stock } = r;
+  const open = state.coreExpandedProducts.has(fam.id);
+  const colourCount = coreFamilyColourCount(fam);
+  const sub = `${escapeHtml(coreTitleCase(fam.category) || 'Uncategorised')}${colourCount > 1 ? ` &middot; ${colourCount} colourways` : ''}`;
+  const suffix = fam.members.length === 1 ? coreColourwaySuffixHtml(fam.members[0]) : '';
   return `
-    <div class="core-shoot-category-group">
-      <button type="button" class="core-shoot-category-toggle ${isOpen ? 'open' : ''}" data-category="${escapeHtml(cat.name)}">
-        <span class="accordion-arrow">&#9656;</span>
-        <span class="core-shoot-category-namecol">
-          <span class="core-shoot-category-name">${escapeHtml(cat.name)}</span>
-          <span class="core-shoot-category-count">${cat.total} product${cat.total === 1 ? '' : 's'}</span>
-        </span>
-        <span class="core-shoot-stat-col">
-          ${core7dCellHtml(trend)}
-        </span>
-        <span class="core-shoot-stat-col core-cadence-col">
-          ${coreCadenceCellHtml(trend)}
-        </span>
-        <span class="core-shoot-stat-col">
-          ${coreCategoryAttentionHtml(cat)}
-        </span>
-        <span class="core-shoot-stat-col">
-          ${coreCategoryFreshnessHtml(cat)}
-        </span>
-        <span class="core-shoot-stat-col">
-          ${coreSelectedHtml(cat.selectedCount)}
-        </span>
-      </button>
-      ${isOpen ? `<div class="core-shoot-category-body">
-        ${cat.problemProducts.length
-          ? coreProblemProductsHeaderHtml() + cat.problemProducts.map((p) => coreProblemProductRowHtml(p, selectedCodes, eng)).join('')
-          : '<div class="attention-empty">No products in this category need creative attention right now.</div>'}
-      </div>` : ''}
+    <div class="cat2-item${open ? ' open' : ''}" data-core-fam="${escapeHtml(fam.id)}">
+      <div class="cat2-row">
+        <button type="button" class="cat2-prod cat2-toggle" aria-expanded="${open}" aria-controls="cat2-detail-${escapeHtml(fam.id)}">
+          <span class="accordion-arrow" aria-hidden="true">&#9656;</span>
+          ${coreProductThumbHtml(fam.members[0], info)}
+          <span class="cat2-prod-text"><b class="cat2-name">${escapeHtml(fam.name)}${suffix}</b><span class="cat2-cat">${sub}</span></span>
+        </button>
+        <div class="cat2-cell cat2-c-sales">${coreSalesCellHtml(sales)}</div>
+        <div class="cat2-cell cat2-c-stock">${coreStockCellHtml(stock)}</div>
+        <div class="cat2-cell cat2-c-status">${coreCreativeCellHtml(cs)}</div>
+        <div class="cat2-cell cat2-c-action">${coreActionHtml(fam, info, selectedCodes)}</div>
+      </div>
+      ${open ? coreFamilyDetailHtml(fam, info, selectedCodes, cs, sales, stock) : ''}
     </div>`;
 }
 
-// Bottom-of-step count for the "X Core products selected · Continue to
-// High Stocks →" footer -- same product_code cross-reference pattern
-// coreShootPlanCountsByCategory() already uses, just totaled for the
-// whole step instead of per-category.
+const CORE_CAT_HEADER = '<div class="cat2-row cat2-head" role="row"><span class="cat2-prod">Product</span><span class="cat2-c-sales">Sales (7D)</span><span class="cat2-c-stock">Stock</span><span class="cat2-c-status">Creative Status</span><span class="cat2-c-action">Action</span></div>';
+
+function coreCatalogueRows(eng) {
+  const q = String(state.coreSearch || '').trim().toLowerCase();
+  const all = coreFamilies().map((fam) => {
+    const info = coreFamilyInfo(fam, eng);
+    return { fam, info, cs: coreCreativeStatus(fam, info), sales: coreFamilySales(fam), stock: coreFamilyStock(fam), prio: coreFamilyPriority(fam, info) };
+  });
+  const matches = (r) => !q || [r.fam.name, r.fam.category, ...r.fam.members.map((p) => p.product_code), ...r.fam.members.flatMap((p) => (p.colours || []).map((c) => `${c.colour_label || ''} ${c.style_code || ''}`))].join(' ').toLowerCase().includes(q);
+  const searched = all.filter(matches);
+  const counts = { all: searched.length, attention: searched.filter((r) => coreNeedsAttention(r.info)).length, production: searched.filter((r) => coreInProduction(r.info)).length };
+  const f = state.coreFilter;
+  const rows = searched.filter((r) => (f === 'attention' ? coreNeedsAttention(r.info) : f === 'production' ? coreInProduction(r.info) : true));
+  rows.sort((a, b) => b.prio - a.prio || a.fam.order - b.fam.order);
+  return { rows, counts };
+}
+
+function renderCoreCatalogueControls(counts, shown) {
+  document.querySelectorAll('.core-view-btn').forEach((btn) => btn.classList.toggle('active', btn.dataset.view === state.coreView));
+  document.querySelectorAll('#core-cat-filters [data-core-filter]').forEach((b) => {
+    const on = b.dataset.coreFilter === state.coreFilter;
+    b.classList.toggle('active', on); b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    const n = b.querySelector('.cat2-n'); if (n) n.textContent = counts[b.dataset.coreFilter] != null ? String(counts[b.dataset.coreFilter]) : '';
+  });
+  const c = document.getElementById('core-cat-count'); if (c) c.textContent = `Showing ${shown} product${shown === 1 ? '' : 's'}`;
+  const s = document.getElementById('core-cat-sort'); if (s) s.textContent = state.coreView === 'category' ? 'Grouped by category' : 'Sort: Priority (High → Low)';
+}
+
 function renderCoreStepFooter() {
   const coreCodes = new Set(state.coreProducts.map((p) => p.product_code));
   const count = state.shootPlan.filter((i) => coreCodes.has(i.product_code)).length;
@@ -7448,60 +7290,28 @@ function renderCoreShootPlanning() {
   renderCoreStepFooter();
   if (typeof plApplyCoreTab === 'function') plApplyCoreTab();
   if (!state.coreProducts.length) {
+    renderCoreCatalogueControls({ all: 0, attention: 0, production: 0 }, 0);
     list.innerHTML = '<div class="attention-empty">No Core products found yet.</div>';
     return;
   }
-
-  const selectedCounts = coreShootPlanCountsByCategory();
   const selectedCodes = new Set(state.shootPlan.map((i) => i.product_code));
-  const byCategory = new Map();
-  for (const p of state.coreProducts) {
-    if (!byCategory.has(p.category)) byCategory.set(p.category, []);
-    byCategory.get(p.category).push(p);
-  }
-
   const eng = typeof plCatalogueMap === 'function' ? plCatalogueMap() : null; // the Core table's own results, when loaded
-  const categories = [...byCategory.entries()].map(([name, products]) => {
-    const stats = eng ? plCatalogueStats(products, eng) : null;
-    const rank = (p) => { const i = eng.get(p.product_code); return i ? (i.high ? 2000 : 0) + (i.it.score || 0) : -1; };
-    return {
-      name,
-      total: products.length,
-      eng: stats,
-      needsAttention: products.filter((p) => p.flag === 'needs_attention').length,
-      opportunity: products.filter((p) => p.flag === 'opportunity').length,
-      stale: products.filter((p) => p.days_since_last_new_concept == null || p.days_since_last_new_concept > CORE_STALE_DAYS).length,
-      selectedCount: selectedCounts.get(name) || 0,
-      problemProducts: eng
-        ? products.filter((p) => { const i = eng.get(p.product_code); return i && i.cat === 'needs'; }).sort((a, b) => rank(b) - rank(a))
-        : products.filter((p) => p.flag === 'needs_attention' || p.flag === 'opportunity'),
-    };
-  });
-
-  // Rank by how much creative attention each category currently needs (the Core table's own count when loaded).
-  categories.sort((a, b) => {
-    if (eng) {
-      if (b.eng.needs !== a.eng.needs) return b.eng.needs - a.eng.needs;
-      if (b.eng.high !== a.eng.high) return b.eng.high - a.eng.high;
-      if (b.eng.stale !== a.eng.stale) return b.eng.stale - a.eng.stale;
-      return a.name.localeCompare(b.name);
-    }
-    if (b.needsAttention !== a.needsAttention) return b.needsAttention - a.needsAttention;
-    if (b.opportunity !== a.opportunity) return b.opportunity - a.opportunity;
-    if (b.stale !== a.stale) return b.stale - a.stale;
-    return a.name.localeCompare(b.name);
-  });
-
-  list.innerHTML = categories.map((cat) => coreShootCategoryRowHtml(cat, selectedCodes, eng)).join('');
-  list.querySelectorAll('.core-shoot-category-toggle').forEach((btn) => {
-    btn.addEventListener('click', () => toggleCoreShootCategory(btn.dataset.category));
-  });
-}
-
-function toggleCoreAllProducts() {
-  state.coreAllProductsOpen = !state.coreAllProductsOpen;
-  document.getElementById('core-all-products-section').style.display = state.coreAllProductsOpen ? '' : 'none';
-  document.getElementById('core-view-all-btn').classList.toggle('open', state.coreAllProductsOpen);
+  const { rows, counts } = coreCatalogueRows(eng);
+  renderCoreCatalogueControls(counts, rows.length);
+  if (!rows.length) { list.innerHTML = '<div class="attention-empty">No products match.</div>'; return; }
+  let body;
+  if (state.coreView === 'category') {
+    const groups = new Map();
+    for (const r of rows) { const k = r.fam.category || 'UNCATEGORISED'; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); }
+    const needs = (g) => g.filter((r) => coreNeedsAttention(r.info)).length;
+    body = [...groups.entries()].sort((a, b) => needs(b[1]) - needs(a[1]) || a[0].localeCompare(b[0])).map(([cat, g]) => {
+      const n = needs(g);
+      return `<div class="cat2-group"><div class="cat2-group-h"><b>${escapeHtml(coreTitleCase(cat))}</b><span>${g.length} product${g.length === 1 ? '' : 's'}${n ? ` &middot; ${n} need${n === 1 ? 's' : ''} attention` : ''}</span></div>${g.map((r) => coreFamilyRowHtml(r, selectedCodes)).join('')}</div>`;
+    }).join('');
+  } else {
+    body = rows.map((r) => coreFamilyRowHtml(r, selectedCodes)).join('');
+  }
+  list.innerHTML = `${CORE_CAT_HEADER}${body}`;
 }
 
 function renderCoreProducts() {
@@ -7509,19 +7319,20 @@ function renderCoreProducts() {
   loadCorePlan(); // no-op while the cached plan is fresh
   renderCoreWeeklyCard();
   renderCoreShootPlanning();
-  renderCoreViewToggle();
-  document.getElementById('core-all-products-section').style.display = state.coreAllProductsOpen ? '' : 'none';
-  document.getElementById('core-view-all-btn').classList.toggle('open', state.coreAllProductsOpen);
+}
 
-  const list = document.getElementById('core-products-list');
-  if (!state.coreProducts.length) {
-    list.innerHTML = '<div class="attention-empty">No Core products found yet.</div>';
+// One delegated handler for the list (the list is re-rendered, the element is not): the product cell and the "View" button open / close a row; "View Meta ads" opens the product's Meta ads.
+function coreCatalogueListClick(e) {
+  const meta = e.target.closest('[data-core-meta]');
+  if (meta) {
+    const fam = coreFamilies().find((f) => f.id === meta.dataset.coreMeta); const info = fam && coreFamilyInfo(fam, plCatalogueMap());
+    if (info) mpOpenProduct({ codes: (info.it.codes || [info.it.product_code]).filter(Boolean), label: info.it.name || fam.name, key: info.it.key, from: 'core-catalogue' });
     return;
   }
-
-  list.innerHTML = state.coreView === 'category' ? renderCoreProductsByCategory() : renderCoreProductsPriority();
-  wireCoreCategoryToggles(list);
+  const t = e.target.closest('.cat2-toggle, .cat2-view[data-core-fam]');
+  if (t) { const item = t.closest('[data-core-fam]'); toggleCoreProduct(t.dataset.coreFam || item.dataset.coreFam); }
 }
+
 
 // ── Planning: High Stocks ─────────────────────────────
 // Platinum/Rocket-tier (per the "demand planning v2" cohort-based sales
@@ -19528,7 +19339,9 @@ document.getElementById('mpm-check-input').addEventListener('keydown', (e) => {
 document.querySelectorAll('.core-view-btn').forEach((btn) => {
   btn.addEventListener('click', () => setCoreView(btn.dataset.view));
 });
-document.getElementById('core-view-all-btn').addEventListener('click', toggleCoreAllProducts);
+document.getElementById('core-shoot-planning-list').addEventListener('click', coreCatalogueListClick);
+document.querySelectorAll('#core-cat-filters [data-core-filter]').forEach((b) => b.addEventListener('click', () => setCoreFilter(b.dataset.coreFilter)));
+document.getElementById('core-cat-search').addEventListener('input', (e) => { state.coreSearch = e.target.value; renderCoreShootPlanning(); });
 
 checkSession();
 

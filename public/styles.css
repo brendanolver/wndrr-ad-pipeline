@@ -901,31 +901,27 @@ main{flex:1;min-width:0;padding:20px 24px;}
    breakpoint tightens the minimums and gap for a narrower window instead
    of overflowing it. The header and the row toggles share this template so
    their columns always line up. */
-.core-shoot-category-header,
-.core-shoot-category-toggle{display:grid;grid-template-columns:16px minmax(150px,1.1fr) minmax(110px,0.85fr) minmax(320px,2.6fr) minmax(140px,0.9fr) minmax(150px,0.9fr) minmax(104px,0.7fr);column-gap:16px;align-items:center;width:100%;}
-@media (max-width:1350px){
-  .core-shoot-category-header,
-  .core-shoot-category-toggle{grid-template-columns:16px minmax(100px,1fr) minmax(90px,0.9fr) minmax(210px,2.2fr) minmax(120px,1fr) minmax(130px,1fr) minmax(96px,0.8fr);column-gap:10px;}
-}
+
+
 /* Each row gets its own divider line (not just the header) and more
    breathing room -- with the widened Sales Cadence column, rows read as
    one dense block without a clear line between categories. The list's
    own gap is dropped in favour of these per-row borders so spacing reads
    as one consistent rhythm rather than a gap AND a line stacking up; the
    last row's border is dropped since the section already ends there. */
-.core-shoot-category-header{padding:0 8px 12px;font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);border-bottom:1px solid var(--border);margin-bottom:4px;}
-.core-shoot-category-toggle{background:none;border:none;border-bottom:1px solid var(--border);padding:20px 8px;font-family:inherit;color:var(--text);cursor:pointer;text-align:left;}
-.core-shoot-category-toggle:hover{background:var(--surface2);}
-.core-shoot-category-group:last-child > .core-shoot-category-toggle{border-bottom:none;}
-.core-shoot-category-toggle.open .accordion-arrow{transform:rotate(90deg);}
-.core-shoot-category-namecol{display:flex;align-items:baseline;gap:8px;min-width:0;}
-.core-shoot-category-name{font-size:16px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.core-shoot-category-count{font-size:13px;color:var(--text-muted);font-weight:600;white-space:nowrap;}
-.core-shoot-stat-col{display:flex;align-items:center;font-size:13px;color:var(--text-secondary);min-width:0;}
-.core-shoot-stat{white-space:nowrap;}
-.core-shoot-stat-count{font-weight:700;color:var(--text);}
-.core-shoot-count-red{color:var(--red);}
-.core-shoot-stat-selected{color:var(--green);font-weight:700;}
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 /* Sales Cadence widget: an "LY MTD -> This MTD" box (ported from demand-v2's
    own Sales Cadence page, same light-green/red boxed-number look) plus a
@@ -933,10 +929,10 @@ main{flex:1;min-width:0;padding:20px 24px;}
    (see CADENCE_MONTHS_BACK in reportPipeline.js). overflow-x:auto/drag-scroll
    stay wired on .core-cadence-months regardless, since a narrower viewport
    (see the 1150px breakpoint) can still make even 3 boxes not all fit. */
-.core-cadence-header{display:flex;flex-direction:column;line-height:1.35;}
-.core-cadence-header-top{color:var(--text);font-weight:800;}
-.core-cadence-header-bottom{font-weight:600;}
-.core-cadence-col{display:flex;align-items:center;gap:10px;min-width:0;}
+
+
+
+
 .core-cadence-empty{color:var(--text-muted);}
 .core-cadence-box{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:5px 14px;border-radius:var(--r);min-width:62px;cursor:default;flex-shrink:0;}
 .core-cadence-box.core-trend-up{background:var(--green-light);}
@@ -961,12 +957,12 @@ main{flex:1;min-width:0;padding:20px 24px;}
    since "up or down vs last week" is a faster-moving, different question).
    Front-loaded as the first data column since it's the fastest "how are we
    doing right now" read. */
-.core-shoot-7d-cell{display:flex;flex-direction:column;gap:3px;}
-.core-shoot-7d-row{display:flex;align-items:baseline;gap:6px;}
-.core-shoot-7d-value{font-weight:700;font-size:15px;color:var(--text);font-variant-numeric:tabular-nums;}
-.core-shoot-7d-label{font-size:12px;color:var(--text-muted);}
-.core-shoot-7d-trend{font-size:12px;font-weight:700;white-space:nowrap;}
-.core-shoot-category-body{display:flex;flex-direction:column;gap:7px;padding:2px 6px 16px 32px;}
+
+
+
+
+
+
 
 /* Fixed px (not auto) so the header and each row -- two/three separate
    grids -- always agree on where columns sit; auto would let each size
@@ -983,19 +979,19 @@ main{flex:1;min-width:0;padding:20px 24px;}
 /* Selected rows get only a hint of tint plus a left accent -- the ✓
    Shooting pill in the action column is still the primary signal, this
    just makes an already-planned row easy to spot while scanning. */
-.core-shoot-review-row.core-product-row.core-row-selected{background:#f4faf6;border-color:#d3ecdf;}
+
 .core-shoot-review-col-product{display:flex;align-items:center;gap:8px;min-width:0;}
-.core-shoot-review-col-7d,.core-shoot-review-col-cadence{display:flex;align-items:center;min-width:0;}
-.core-shoot-review-col-inventory{display:flex;flex-direction:column;gap:2px;min-width:0;}
-.core-inv-row{display:flex;align-items:baseline;gap:5px;}
-.core-inv-value{font-weight:700;font-size:13.5px;color:var(--text);font-variant-numeric:tabular-nums;}
-.core-inv-label{font-size:10.5px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.2px;}
+
+
+
+
+
 /* Amber, not red -- red stays reserved for the needs-attention dot on the
    product name; this is a quieter supporting signal, not a second alarm. */
-.core-inv-flag{margin-top:1px;display:inline-block;width:fit-content;font-size:10px;font-weight:700;color:var(--amber);background:var(--amber-light);border-radius:var(--r-pill);padding:1px 7px;}
+
 .core-shoot-review-name{font-weight:700;font-size:13.5px;}
-.core-shoot-review-col-reasons{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text-secondary);overflow:hidden;}
-.core-product-row .core-shoot-review-col-reasons{flex-wrap:wrap;gap:6px;}
+
+
 
 .high-stock-thumb{width:34px;height:34px;border-radius:var(--r);object-fit:contain;background:var(--surface2);flex-shrink:0;}
 .high-stock-noimg{display:flex;align-items:center;justify-content:center;font-size:15px;opacity:0.4;}
@@ -1070,11 +1066,11 @@ main{flex:1;min-width:0;padding:20px 24px;}
 
 @media (max-width:900px){.high-stock-detail-grid{grid-template-columns:1fr;}}
 
-.core-view-all-toggle{display:flex;align-items:center;gap:6px;width:100%;background:none;border:none;color:var(--accent-text);font-family:inherit;font-size:12.5px;font-weight:600;cursor:pointer;padding:8px 4px;text-align:left;}
-.core-view-all-toggle:hover{text-decoration:underline;}
-.core-view-all-toggle .accordion-arrow{color:var(--accent-text);}
-.core-view-all-toggle.open .accordion-arrow{transform:rotate(90deg);}
-.core-all-products-section{border-top:1px solid var(--border);padding-top:16px;margin-top:6px;}
+
+
+
+
+
 
 /* Priority / By Category view toggle. */
 .core-view-toggle{display:flex;gap:5px;margin-bottom:12px;}
@@ -1082,60 +1078,60 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .core-view-btn:hover{border-color:var(--accent);}
 .core-view-btn.active{background:var(--primary);border-color:var(--primary);color:white;}
 
-.core-products-list{display:flex;flex-direction:column;gap:2px;}
+
 
 /* Category level (By Category view only) -- spacing/divider hierarchy
    instead of a bordered box-within-a-box. */
-.core-category-group{border-bottom:1px solid var(--border);padding-bottom:5px;margin-bottom:5px;}
-.core-category-group:last-child{border-bottom:none;}
-.core-category-toggle{display:flex;align-items:center;gap:8px;width:100%;background:none;border:none;padding:9px 4px;font-family:inherit;font-size:13.5px;font-weight:700;color:var(--text);cursor:pointer;text-align:left;}
-.core-category-toggle:hover{color:var(--accent-text);}
-.core-category-toggle.open .accordion-arrow{transform:rotate(90deg);}
-.core-category-name{text-transform:uppercase;letter-spacing:0.3px;}
-.core-category-count{font-weight:400;color:var(--text-muted);}
-.core-category-body{display:flex;flex-direction:column;padding-left:20px;}
 
-.core-attention-badge{display:inline-block;padding:3px 9px;border-radius:var(--r-pill);font-size:12px;font-weight:700;}
-.core-attention-red{background:var(--red-light);color:var(--red);}
-.core-attention-amber{background:var(--amber-light);color:var(--amber);}
-.core-attention-green{background:var(--green-light);color:var(--green);}
-.core-attention-review{background:var(--surface2);color:var(--text-secondary);}
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 /* Priority compact decision table -- ~one row per product so 15-20 Core
    products scan on one screen. Column-aligned via CSS grid (same grid on
    the header row and every product row) rather than individual cards. */
-.core-products-list{overflow-x:auto;}
-.core-priority-row-grid{display:grid;grid-template-columns:2.2fr 0.9fr 1fr 1fr 2fr 1.6fr;gap:12px;align-items:center;min-width:760px;padding:9px 6px;}
-.core-priority-header-grid{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-muted);border-bottom:1px solid var(--border);padding-bottom:6px;margin-bottom:2px;}
-.core-priority-row{border-bottom:1px solid var(--border);}
-.core-priority-row:last-child{border-bottom:none;}
-.core-priority-row > .core-priority-row-grid{cursor:pointer;}
-.core-priority-row > .core-priority-row-grid:hover{background:var(--surface2);}
-.core-priority-row.open .accordion-arrow{transform:rotate(90deg);}
-.core-priority-col-product{display:flex;align-items:center;gap:7px;min-width:0;}
-.core-priority-emoji{font-size:13px;flex-shrink:0;}
-.core-product-name{font-weight:700;font-size:13.5px;}
-.core-priority-category-tag{font-size:10.5px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.2px;}
-.core-priority-col{font-size:13px;font-weight:600;color:var(--text-secondary);white-space:nowrap;}
-.core-priority-col-chips{display:flex;flex-wrap:wrap;gap:5px;}
-.core-reason-chip{display:inline-block;background:var(--surface2);border:1px solid var(--border);color:var(--text-secondary);font-size:11px;font-weight:600;padding:2px 8px;border-radius:var(--r-pill);white-space:nowrap;}
-.core-priority-col-action{text-align:right;display:flex;gap:6px;justify-content:flex-end;}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 .core-trend-down{color:var(--red);}
 .core-trend-up{color:var(--green);}
 .core-trend-flat{color:var(--text-muted);}
 
 /* Expanded detail -- SOH/On Order/velocity strip, colourways, and the
    full reasoning sentences (the compact row above only shows chips). */
-.core-priority-detail{padding:3px 4px 14px 28px;}
-.core-metric-row{display:grid;grid-template-columns:repeat(5,1fr);background:var(--surface2);border-radius:var(--r);padding:8px 0;margin:5px 0 12px;}
-.core-metric-col{text-align:center;padding:0 4px;border-right:1px solid var(--border);}
-.core-metric-col:last-child{border-right:none;}
-.core-metric-value{font-size:13px;font-weight:700;color:var(--text-secondary);white-space:nowrap;}
-.core-metric-label{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.2px;color:var(--text-muted);margin-top:3px;white-space:nowrap;}
-.core-priority-reasoning{font-size:13px;color:var(--text-secondary);margin-bottom:11px;}
-.core-colours-inner-table{width:100%;border-collapse:collapse;font-size:13px;}
-.core-colours-inner-table th{text-align:left;color:var(--text-muted);font-weight:600;padding:5px 7px;border-bottom:1px solid var(--border);}
-.core-colours-inner-table td{padding:5px 7px;border-bottom:1px solid var(--border);}
+
+
+
+
+
+
+
+
+
+
 
 /* Planning Step 5 -- This Week's Shoot Plan: a Monday handoff, not a
    dashboard. Compact top summary (+ the Apparel Magic CSV as a small
@@ -5814,7 +5810,7 @@ body{background:var(--bg);color:var(--text);}
 .core-cat-attn{display:flex;flex-direction:column;gap:4px;min-width:0;}
 .core-cat-attn-top{display:flex;align-items:center;flex-wrap:wrap;gap:8px;}
 .core-cat-why{font-size:12px;line-height:1.35;color:var(--text-secondary);}
-.core-cat-ads{font-size:11.5px;font-weight:600;color:var(--text-muted);}
+
 .core-cat-fresh{display:flex;flex-direction:column;gap:2px;align-items:flex-start;}
 .core-cat-date{font-size:13.5px;font-weight:600;white-space:nowrap;}
 .core-cat-date.none{font-weight:500;color:var(--text-muted);}
@@ -5824,11 +5820,11 @@ body{background:var(--bg);color:var(--text);}
 .core-fresh-chip[data-band="aging"]{background:#fff3df;color:#9a5b00;}
 .core-fresh-chip[data-band="stale"]{background:#fdeceb;color:#b42318;}
 .core-cat-none{font-size:12.5px;color:var(--text-muted);}
-.core-cat-ok{color:#1a7f4b;}
-.core-shoot-sub{display:block;font-size:11.5px;color:var(--text-muted);margin-top:2px;}
-.core-shoot-count-amber{color:#9a5b00;font-weight:700;}
+
+
+
 @media (max-width:1150px){.core-shoot-review-header.core-product-row,.core-shoot-review-row.core-product-row{grid-template-columns:minmax(90px,1fr) 80px 74px 104px minmax(125px,1.5fr) minmax(92px,1fr) 80px;gap:8px;}.core-product-row > *{min-width:0;}.core-cat-date{white-space:normal;}}
-.core-stat-stack{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0;}
+
 
 /* v1.4.5 AI Copy Assistant: Copy Type selector, References used, library check report */
 .as-ct{display:flex;flex-direction:column;align-items:stretch;text-align:left;gap:6px;padding:8px 10px;background:var(--surface);border:1px solid var(--border);border-radius:10px;}
@@ -5870,22 +5866,22 @@ body{background:var(--bg);color:var(--text);}
 .pl-cm .pl-cm-hist{display:block;margin-top:8px;min-height:0;font-size:11.5px;color:#8b92a5;font-weight:400;}
 
 /* Core Shoot Planning: compact status badges for Creative Attention, Creative Freshness and This Week's Shoot */
-.core-badge{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:700;line-height:1.3;padding:4px 12px 4px 9px;border-radius:9px;white-space:nowrap;}
-.core-badge-dot{width:9px;height:9px;border-radius:50%;background:currentColor;flex:0 0 9px;}
-.core-badge-ic{flex:0 0 14px;}
-.core-badge[data-tone="red"]{background:#fdeceb;color:#c62828;}
-.core-badge[data-tone="amber"]{background:#fff3df;color:#9a5b00;}
-.core-badge[data-tone="green"]{background:#e8f5ee;color:#1a7f4b;}
-.core-badge[data-tone="neutral"]{background:#eef0f4;color:#4a5068;}
-.core-cell-stack{display:flex;flex-direction:column;align-items:flex-start;gap:5px;min-width:0;}
-.core-cell-sub{font-size:11.5px;font-weight:400;color:var(--text-muted);padding-left:2px;line-height:1.35;}
-.core-dash{color:var(--border-strong);font-size:16px;line-height:1;}
-.core-info{vertical-align:-2px;margin-left:3px;color:var(--text-muted);opacity:.8;}
-.core-th-nw{white-space:nowrap;}
+
+
+
+
+
+
+
+
+
+
+
+
 
 /* Core Shoot Planning: the last-year MTD tile carries its month label (OCT 25) and the tiles in a category row share one height and one top edge */
-.core-cadence-col{align-items:stretch;}
-.core-cadence-col > .core-cadence-box{margin:2px 0 4px;justify-content:center;}
+
+
 .core-cadence-months{align-items:stretch;}
 .core-cadence-box-label{font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.2px;white-space:nowrap;margin-top:2px;}
 
@@ -5895,7 +5891,7 @@ body{background:var(--bg);color:var(--text);}
 .core-shoot-review-row.core-product-row{grid-template-columns:minmax(190px,1.3fr) 112px 118px 100px minmax(220px,1.8fr) minmax(150px,1fr) 104px;gap:18px;}
 .core-shoot-review-header.core-product-row{align-items:end;padding-bottom:8px;}
 .core-shoot-review-row.core-product-row{padding:8px 14px;background:#fff;border:1px solid var(--border);border-radius:12px;}
-.core-shoot-review-row.core-product-row.core-row-selected{background:#fff;border-color:var(--border);}
+
 .core-shoot-review-col-product{gap:12px;}
 .core-prod-thumb{width:46px;height:46px;flex:0 0 46px;border-radius:9px;border:1px solid var(--border);background:#fff;overflow:hidden;display:inline-flex;align-items:center;justify-content:center;}
 .core-prod-thumb img{width:100%;height:100%;object-fit:contain;display:block;}
@@ -5903,7 +5899,7 @@ body{background:var(--bg);color:var(--text);}
 .core-prod-thumb-none .ic{width:18px;height:18px;}
 .core-shoot-review-name{font-weight:700;font-size:13.5px;text-transform:uppercase;letter-spacing:.01em;line-height:1.25;min-width:0;overflow-wrap:anywhere;}
 .core-shoot-review-col-product .dot{flex:0 0 auto;}
-.core-inv-label{text-transform:none;letter-spacing:0;font-size:12px;}
+
 .core-cat-attn{gap:5px;}
 .core-cat-why{font-size:12px;color:var(--text-muted);}
 .core-cat-fresh{gap:3px;}
@@ -5926,3 +5922,90 @@ body{background:var(--bg);color:var(--text);}
 
 /* Core Shoot Planning product rows: colourway beside a repeated product name */
 .core-prod-colour{font-weight:600;color:var(--text-secondary);white-space:nowrap;}
+
+/* ── Core Product Catalogue: five columns (Product | Sales (7D) | Stock | Creative Status | Action) ── */
+.cat2-top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:14px;}
+.cat2-title{margin:0;font-size:20px;font-weight:700;color:var(--text);letter-spacing:-.01em;}
+.cat2-subtitle{margin:3px 0 0;font-size:13px;color:var(--text-muted);}
+.cat2-tools{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.cat2-tools .core-view-toggle{margin-bottom:0;}
+.cat2-search{display:flex;align-items:center;gap:7px;height:34px;padding:0 11px;min-width:230px;border:1px solid var(--border);border-radius:var(--r);background:#fff;color:var(--text-muted);}
+.cat2-search:focus-within{border-color:var(--accent);box-shadow:var(--focus-ring);}
+.cat2-search input{flex:1;min-width:0;border:0;outline:0;background:none;font:inherit;font-size:13px;color:var(--text);}
+.cat2-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding-bottom:12px;}
+.cat2-filters{display:flex;gap:6px;flex-wrap:wrap;}
+.cat2-filter{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--border);border-radius:var(--r-pill);background:#fff;font:inherit;font-size:12.5px;font-weight:600;color:var(--text-secondary);cursor:pointer;}
+.cat2-filter:hover{border-color:var(--accent);}
+.cat2-filter.active{background:var(--primary);border-color:var(--primary);color:#fff;}
+.cat2-n{font-weight:600;font-size:11.5px;opacity:.7;}
+.cat2-n:empty{display:none;}
+.cat2-meta{display:flex;gap:14px;font-size:12.5px;color:var(--text-muted);}
+
+#core-shoot-planning-list{background:#fff;border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;}
+#core-shoot-planning-list .attention-empty{border:0;border-radius:0;background:none;}
+.cat2-row{display:grid;grid-template-columns:minmax(240px,2.3fr) 104px 128px minmax(220px,2fr) 112px;align-items:center;gap:16px;padding:10px 16px;}
+.cat2-head{padding:9px 16px;background:var(--surface2);border-bottom:1px solid var(--border);font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);}
+.cat2-head .cat2-prod{padding-left:0;}
+.cat2-item{border-bottom:1px solid var(--border);}
+.cat2-item:last-child{border-bottom:0;}
+.cat2-item:hover > .cat2-row{background:var(--surface2);}
+.cat2-prod{display:flex;align-items:center;gap:11px;min-width:0;}
+button.cat2-prod{border:0;background:none;padding:0;font:inherit;text-align:left;cursor:pointer;color:inherit;}
+button.cat2-prod:focus-visible,.cat2-view:focus-visible,.cat2-shoot:focus-visible,.cat2-link:focus-visible{outline:0;box-shadow:var(--focus-ring);border-radius:var(--r);}
+.cat2-prod .accordion-arrow{flex:0 0 auto;color:var(--text-muted);font-size:12px;transition:transform .15s;}
+.cat2-item.open .cat2-prod .accordion-arrow{transform:rotate(90deg);}
+.cat2-prod .core-prod-thumb{width:40px;height:40px;flex-basis:40px;border-radius:8px;}
+.cat2-prod-text{display:flex;flex-direction:column;gap:2px;min-width:0;}
+.cat2-name{font-size:14px;font-weight:700;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.cat2-cat{font-size:12px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.cat2-stack{display:flex;flex-direction:column;gap:2px;min-width:0;}
+.cat2-num{font-size:15px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;}
+.cat2-sub{font-size:12px;color:var(--text-muted);}
+.cat2-delta{font-size:12px;font-weight:600;color:var(--text-muted);}
+.cat2-delta[data-tone="up"]{color:#15803d;}
+.cat2-delta[data-tone="down"]{color:#dc2626;}
+.cat2-none{color:var(--text-muted);}
+.cat2-badge{align-self:flex-start;display:inline-block;padding:2px 9px;border-radius:var(--r-pill);font-size:12px;font-weight:600;white-space:nowrap;background:#eef0f5;color:#4a5068;}
+.cat2-badge[data-tone="red"]{background:#fdecec;color:#b42318;}
+.cat2-badge[data-tone="amber"]{background:#fdf3dc;color:#9a6700;}
+.cat2-badge[data-tone="green"]{background:#e6f5ec;color:#15803d;}
+.cat2-badge[data-tone="purple"]{background:var(--accent-soft);color:var(--accent-text);}
+.cat2-why{font-size:12px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.cat2-c-action{display:flex;justify-content:flex-end;}
+.cat2-head .cat2-c-action{justify-content:flex-end;}
+.cat2-shoot{height:30px;padding:0 14px;border:0;border-radius:var(--r);background:#111;color:#fff;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap;}
+.cat2-shoot:hover{background:#2a2a2a;}
+.cat2-view{height:28px;padding:0 12px;border:1px solid transparent;border-radius:var(--r);background:none;font:inherit;font-size:12.5px;font-weight:600;color:var(--text-muted);cursor:pointer;white-space:nowrap;}
+.cat2-view:hover{color:var(--text);border-color:var(--border);background:#fff;}
+.cat2-group-h{display:flex;align-items:baseline;gap:10px;padding:10px 16px;background:var(--surface2);border-bottom:1px solid var(--border);}
+.cat2-group-h b{font-size:13px;color:var(--text);}
+.cat2-group-h span{font-size:12px;color:var(--text-muted);}
+.cat2-group + .cat2-group > .cat2-group-h{border-top:1px solid var(--border);}
+
+.cat2-detail{padding:4px 16px 16px 67px;background:var(--surface2);border-top:1px solid var(--border);}
+.cat2-detail-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px;padding-top:12px;}
+.cat2-block h4{margin:0 0 6px;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);}
+.cat2-kv{display:flex;justify-content:space-between;gap:10px;padding:3px 0;font-size:12.5px;color:var(--text-secondary);}
+.cat2-kv b{font-weight:600;color:var(--text);text-align:right;}
+.cat2-note{margin-top:6px;font-size:12px;color:var(--text-muted);}
+.cat2-fresh{margin-top:6px;}
+.cat2-trend{margin-top:8px;}
+.cat2-trend-h{display:block;margin-bottom:5px;font-size:11.5px;color:var(--text-muted);}
+.cat2-colours{margin-top:14px;}
+.cat2-members{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px;}
+.cat2-member-h{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;font-size:12.5px;}
+.cat2-member ul{list-style:none;margin:0;padding:0;}
+.cat2-member li{display:flex;align-items:center;gap:8px;padding:3px 0;font-size:12.5px;color:var(--text-secondary);}
+.cat2-member li img,.cat2-member li i{width:26px;height:26px;flex:0 0 26px;border-radius:5px;border:1px solid var(--border);object-fit:contain;background:#fff;}
+.cat2-member li span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.cat2-member li em{font-style:normal;color:var(--text-muted);font-size:12px;white-space:nowrap;}
+.cat2-actions{display:flex;gap:16px;flex-wrap:wrap;margin-top:14px;padding-top:12px;border-top:1px solid var(--border);}
+.cat2-link{border:0;background:none;padding:0;font:inherit;font-size:12.5px;font-weight:600;color:var(--accent-text);cursor:pointer;}
+.cat2-link:hover{text-decoration:underline;}
+@media (max-width:1100px){
+  .cat2-row{grid-template-columns:minmax(200px,2fr) 88px 108px minmax(160px,1.6fr) 96px;gap:12px;}
+  .cat2-detail{padding-left:16px;}
+  .cat2-detail-grid{grid-template-columns:1fr;gap:14px;}
+}
+.cat2-trend{max-width:230px;}
+.cat2-trend .core-cadence-box{padding:6px 10px;}

@@ -474,10 +474,11 @@ async function buildProductSalesCadenceUncached() {
       last_year_units: Math.round(lastYear),
       pct_change: lastYear > 0 ? Math.round(((thisPeriod - lastYear) / lastYear) * 100) : (thisPeriod > 0 ? null : 0),
       last_7d_units: Math.round(last7d),
+      prev_7d_units: Math.round(prev7d), // the 7 days before those: lets a product family's % change be computed exactly from its members' totals
       last_7d_pct_change: prev7d > 0 ? Math.round(((last7d - prev7d) / prev7d) * 100) : (last7d > 0 ? null : 0),
     });
   }
-  return products; // Map<product_code, { this_period_units, last_year_units, pct_change, last_7d_units, last_7d_pct_change }>
+  return products; // Map<product_code, { this_period_units, last_year_units, pct_change, last_7d_units, prev_7d_units, last_7d_pct_change }>
 }
 
 async function getProductSalesCadence() {

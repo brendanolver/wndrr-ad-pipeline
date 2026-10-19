@@ -244,21 +244,6 @@ function plCatalogueMap() {
   }
   return m;
 }
-// the two category-level numbers: how many products need creative attention (and how many of those are High priority), and how many have stale (or no) creative
-function plCatalogueStats(products, map) {
-  // assessed = products that have a freshness verdict (recent / ageing / stale / no creative); latestDays / oldestDays = the newest and the oldest "latest creative" age among those with a reliable date
-  const seen = new Set(); const out = { matched: 0, needs: 0, high: 0, review: 0, stale: 0, assessed: 0, latestDays: null, oldestDays: null };
-  for (const p of products) {
-    const info = map.get(p.product_code); if (!info || seen.has(info.it.key)) continue; seen.add(info.it.key);
-    out.matched += 1;
-    if (info.cat === 'needs') { out.needs += 1; if (info.high) out.high += 1; } else if (info.cat === 'review') out.review += 1;
-    if (info.band && info.band.key === 'stale') out.stale += 1;
-    if (info.band) out.assessed += 1;
-    const d = info.cov && info.cov.latestKnown && info.cov.days !== null && info.cov.days !== undefined ? info.cov.days : null;
-    if (d !== null) { out.latestDays = out.latestDays === null ? d : Math.min(out.latestDays, d); out.oldestDays = out.oldestDays === null ? d : Math.max(out.oldestDays, d); }
-  }
-  return out;
-}
 // One short supporting sentence under the status, built from the engine's own counts (facts.performing of facts.unique_creatives), so the number of active ads is not repeated elsewhere.
 function plCatalogueSupport(info) {
   const st = info.st; const f = info.it.facts || {};
@@ -266,11 +251,6 @@ function plCatalogueSupport(info) {
   const total = f.unique_creatives;
   if (st.label === 'Underperforming Creative' && total !== null && total !== undefined && total > 0 && f.active_ads !== null && f.active_ads !== undefined) return `${plNum(f.performing || 0)} of ${plNum(total)} active ads performing`;
   return st.text;
-}
-function plCatalogueAttentionHtml(info) {
-  if (!info) return '<span class="core-cat-none">Not assessed</span>';
-  const st = info.st; const pr = info.it.actionable && info.it.priority ? `<span class="opp-priority" data-priority="${plEsc(info.it.priority)}">${plEsc(info.it.priority)}</span>` : '';
-  return `<div class="core-cat-attn"><div class="core-cat-attn-top"><span class="pl-status" data-tone="${plEsc(st.tone)}"><i aria-hidden="true"></i>${plEsc(st.label)}</span>${pr}</div><span class="core-cat-why">${plEsc(plCatalogueSupport(info))}</span></div>`;
 }
 // Freshness: how long ago the product's newest creative is (primary), a colour-coded band from the existing Planning thresholds, and the creative date underneath. The date is the creative date
 // written in the ad name (see lastCreativeDate.js), not a Meta delivery date, and it is not limited to genuinely new concepts, so it is described as the newest creative.

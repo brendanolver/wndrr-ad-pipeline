@@ -13,7 +13,7 @@ const fnSrc = (src, name) => { const i = src.indexOf(`function ${name}(`); retur
 const plEsc = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const plNum = (v) => Number(v || 0).toLocaleString('en-AU');
 const plAgo = (d) => (d === null || d === undefined ? '' : d === 0 ? 'today' : `${d} ${d === 1 ? 'day' : 'days'} ago`);
-const { support, attention, freshness } = new Function('plEsc', 'plNum', 'plAgo', `${fnSrc(pl, 'plCatalogueSupport')}${fnSrc(pl, 'plCatalogueAttentionHtml')}${fnSrc(pl, 'plCatalogueFreshnessHtml')}; return { support: plCatalogueSupport, attention: plCatalogueAttentionHtml, freshness: plCatalogueFreshnessHtml };`)(plEsc, plNum, plAgo);
+const { support, freshness } = new Function('plEsc', 'plNum', 'plAgo', `${fnSrc(pl, 'plCatalogueSupport')}${fnSrc(pl, 'plCatalogueFreshnessHtml')}; return { support: plCatalogueSupport, freshness: plCatalogueFreshnessHtml };`)(plEsc, plNum, plAgo);
 const text = (h) => h.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 const item = (o = {}) => ({ it: { actionable: true, priority: 'High', facts: { unique_creatives: 2, performing: 0, active_ads: 2, demand_level: 'strong' }, ...(o.it || {}) }, st: { tone: 'red', label: 'Underperforming Creative', text: 'None of 2 creatives are performing.', ...(o.st || {}) }, cov: { known: true, latest: '30 Sep 2026', latestKnown: true, days: 19, title: 'x', ...(o.cov || {}) }, band: o.band === undefined ? { key: 'fresh', label: 'Recent' } : o.band });
 
@@ -22,11 +22,6 @@ test('attention: status and priority on one line, one supporting sentence built 
   assert.equal(support(item({ it: { facts: { unique_creatives: 4, performing: 2, active_ads: 4 } }, st: { text: 'Only 2 of 4 creatives performing.' } })), '2 of 4 active ads performing');
   assert.equal(support(item({ st: { label: 'No Active Creative', text: 'Strong sales, but no ads currently running.' } })), 'Strong sales · 0 active ads');
   assert.equal(support(item({ st: { label: 'Low Creative Coverage', text: 'Depends on a single creative. Opportunity to test more.' } })), 'Depends on a single creative. Opportunity to test more.', 'other statuses keep the engine\'s own sentence');
-  const html = attention(item());
-  assert.match(html, /core-cat-attn-top"><span class="pl-status"[^>]*>[\s\S]*Underperforming Creative[\s\S]*opp-priority" data-priority="High"/, 'badge and priority share the first line');
-  assert.equal(text(html), 'Underperforming Creative High 0 of 2 active ads performing');
-  assert.doesNotMatch(html, /core-cat-ads|Active Ad/, 'the number of active ads is not repeated underneath');
-  assert.match(attention(null), /Not assessed/);
 });
 
 test('freshness: age first with the band, the creative date underneath; unknown and missing states are grey / explicit', () => {
@@ -41,24 +36,16 @@ test('freshness: age first with the band, the creative date underneath; unknown 
   assert.doesNotMatch(fnSrc(pl, 'plCatalogueFreshnessHtml').replace(/\/\/.*$/gm, ''), /new concept"|Last new concept/);
 });
 
-test('product rows: a real picture next to every name, no tinted selected row, header names all seven columns', () => {
+test('catalogue rows: a real picture next to every name; the row is not tinted', () => {
   const thumb = fnSrc(app, 'coreProductThumbHtml');
   assert.match(thumb, /info\.it\.image_url/); assert.match(thumb, /p\.colours/); assert.match(thumb, /#i-image/, 'the icon only when no picture exists');
-  const row = fnSrc(app, 'coreProblemProductRowHtml');
-  assert.match(row, /<div class="core-shoot-review-col-product">\$\{coreProductThumbHtml\(p, info\)\}<span class="core-shoot-review-name">/, 'picture, then the name');
-  assert.doesNotMatch(row, /dot dot-r|badge/, 'no red dot beside the product name: Creative Attention already says it');
-  assert.match(row, /coreColourwaySuffixHtml\(p\)/);
-  assert.doesNotMatch(row, /core-row-selected/, 'a selected product is not a coloured row');
-  assert.match(row, /shootActionHtml\(p\.product_code, 'shootThisWeekForCore', selectedCodes\)/, 'the Shoot / Shooting indicator is unchanged');
-  const head = fnSrc(app, 'coreProblemProductsHeaderHtml');
-  for (const h of ['Product', 'Inventory', '7D Sales', 'MTD vs LY', 'Creative Attention', 'Creative Freshness', 'This Week']) assert.ok(head.includes(`<span>${h}</span>`), h);
-  const tail = css.slice(css.indexOf('Core Shoot Planning: the expanded product rows'));
-  assert.match(tail, /\.core-prod-thumb\{width:46px;height:46px/); assert.match(tail, /\.core-shoot-review-row\.core-product-row\.core-row-selected\{background:#fff/);
-  assert.match(tail, /@media \(max-width:1350px\)/); assert.match(tail, /@media \(max-width:1150px\)/, 'stays usable on smaller screens');
+  const row = fnSrc(app, 'coreFamilyRowHtml');
+  assert.match(row, /coreProductThumbHtml\(fam\.members\[0\], info\)/); assert.match(row, /coreColourwaySuffixHtml/);
+  assert.doesNotMatch(row, /background|core-row-selected/, 'a selected product is not a coloured row');
 });
 
 test('the existing calculations are untouched: status, priority and the freshness bands come from the same helpers', () => {
-  const att = fnSrc(pl, 'plCatalogueAttentionHtml'); assert.match(att, /info\.st/); assert.match(att, /info\.it\.priority/);
+  assert.match(fnSrc(pl, 'plCatalogueSupport'), /info\.st/);
   assert.match(fnSrc(pl, 'plCatalogueMap'), /PE\.coreStatus/); assert.match(fnSrc(pl, 'plCatalogueMap'), /plFreshBand\(cov, cfg\)/);
   assert.equal(typeof E.coreStatus, 'function');
 });

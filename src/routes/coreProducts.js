@@ -245,7 +245,7 @@ async function computeCoreProducts() {
     const cadenceRow = productCadence.get(productCode);
     const cadence = cadenceRow
       ? { has_data: true, ...cadenceRow }
-      : { has_data: false, this_period_units: null, last_year_units: null, pct_change: null, last_7d_units: null, last_7d_pct_change: null };
+      : { has_data: false, this_period_units: null, last_year_units: null, pct_change: null, last_7d_units: null, prev_7d_units: null, last_7d_pct_change: null };
 
     return {
       product_code: productCode,
