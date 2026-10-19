@@ -2,6 +2,15 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.5.7",
+      "date": "2026-10-19",
+      "title": "Last-year MTD tile label",
+      "changes": [
+        "The last-year MTD tile in Core Shoot Planning now shows its month (for example OCT 25)",
+        "The tile and the month tiles share one height and top edge"
+      ]
+    },
+    {
       "version": "1.5.6",
       "date": "2026-10-19",
       "title": "Creative Freshness wording",

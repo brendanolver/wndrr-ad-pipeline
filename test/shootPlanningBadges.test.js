@@ -75,3 +75,15 @@ test('wording never claims "new concept": freshness is the age of the newest cre
   assert.match(band, /label: 'Needs refresh'/, 'the product-level chip says Needs refresh as well');
   assert.doesNotMatch(band, /label: 'Stale'/);
 });
+
+test('the last-year MTD tile is labelled with the month a year back, taken from the server month label; tiles share one height', () => {
+  const src = app.slice(app.indexOf('function coreLastYearLabel'), app.indexOf('function coreCadenceCellHtml'));
+  const label = new Function(`${src}; return coreLastYearLabel;`)();
+  assert.equal(label({ months: [{ label: 'OCT 26' }, { label: 'SEP 26' }] }), 'OCT 25');
+  assert.equal(label({ months: [{ label: 'Jan 26' }] }), 'JAN 25');
+  assert.equal(label({ months: [{ label: 'DEC 00' }] }), 'DEC 99');
+  assert.equal(label({ months: [] }), '', 'nothing is shown (or invented) without a month label');
+  assert.equal(label({ months: [{ label: 'October' }] }), '');
+  assert.match(app, /core-cadence-box-label">\$\{escapeHtml\(lyLabel\)\}/);
+  assert.match(css, /\.core-cadence-col\{align-items:stretch;\}/); assert.match(css, /\.core-cadence-months\{align-items:stretch;\}/);
+});

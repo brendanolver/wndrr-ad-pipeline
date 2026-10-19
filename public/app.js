@@ -7207,14 +7207,23 @@ function coreCategoryTrendInfo(categoryName) {
   };
 }
 
+// The first tile is LAST year's units for the same days of the month (its % is this year against it), so it is labelled with that month a year back: the current month's own label
+// (months[0], e.g. "OCT 26") with the year taken back one ("OCT 25"). Derived from the label the server already sends; nothing is shown if the label is not in that form.
+function coreLastYearLabel(trend) {
+  const m = /^([A-Za-z]{3,})\s+(\d{2})$/.exec(String(((trend.months || [])[0] || {}).label || '').trim());
+  return m ? `${m[1].toUpperCase()} ${String((Number(m[2]) + 99) % 100).padStart(2, '0')}` : '';
+}
+
 function coreCadenceCellHtml(trend) {
   if (!trend.hasData) {
     return `<span class="core-cadence-empty" title="${escapeHtml(trend.title)}">—</span>`;
   }
+  const lyLabel = coreLastYearLabel(trend);
   return `
     <div class="core-cadence-box core-trend-${trend.boxCls}" title="${escapeHtml(trend.title)}">
       <span class="core-cadence-box-value">${trend.boxValue}</span>
       <span class="core-cadence-box-pct">${trend.boxPctLabel}</span>
+      ${lyLabel ? `<span class="core-cadence-box-label">${escapeHtml(lyLabel)}</span>` : ''}
     </div>
     <div class="core-cadence-months">
       ${trend.months.map((m) => `
