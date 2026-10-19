@@ -278,6 +278,20 @@
     return { allTime: Math.max(all, onActive), earlier: Math.max(0, all - onActive) };
   }
 
+  // The Creative Performance card (expanded Core product). Every number is the engine's own count of the creatives on the product's ACTIVE ads, each already classified against its own
+  // funnel's approved benchmark (creativeRecency): performing (meets it), underperforming (enough delivery and over the approved limit), declining (was performing, clearly worse than it was),
+  // and everything else = awaiting data (still testing, insufficient delivery, no approved benchmark for its funnel, not delivering). A creative without an applicable approved benchmark is
+  // therefore NEVER underperforming. The parts always add up to `total`. kind: unknown (Meta creative data unavailable) | none (no creative on an active ad) | active.
+  function creativeCard(item) {
+    const x = f(item); const total = num(x.unique_creatives); const history = creativeHistory(item);
+    if (total === null || num(x.active_ads) === null) return { kind: 'unknown', history: null };
+    if (total === 0) return { kind: 'none', total: 0, history };
+    const performing = Math.min(total, num(x.performing) || 0);
+    const underperforming = Math.min(total - performing, num(x.weak) || 0);
+    const declining = Math.min(total - performing - underperforming, num(x.declining) || 0);
+    return { kind: 'active', total, performing, underperforming, declining, awaiting: total - performing - underperforming - declining, history };
+  }
+
   function creativeStatus(item, cfg = {}) {
     const x = f(item); const cat = categoryOf(item);
     const min = num(cfg.min_performing_creatives) || 3;
@@ -492,5 +506,5 @@
   };
   const typeLabelOf = (item) => (item.mode === 'momentum' || item.opportunity_type === 'protect_momentum' ? 'Protect Momentum' : TYPE_LABEL[(item.gap && item.gap.type) || item.opportunity_type] || null);
 
-  return { creativeHistory, creativeStatus, coverage, coreStatus, whyShoot, salesTrend, lastCreative, creativeDate, liveAds, CATEGORY, CATEGORY_ORDER, STATUS_CATEGORY, categoryOf, isVisible, longDate, startedPhrase, conditionsSummary, stockRestriction, sellingClause, creativeClause, reasonFor, whyWithNumbers, recommendationFor, directionFor, keyFacts, stockWarning, productionActivity, summaryCounts, momentumItemsFor, weeklySummary, TYPE_LABEL, typeLabelOf };
+  return { creativeCard, creativeHistory, creativeStatus, coverage, coreStatus, whyShoot, salesTrend, lastCreative, creativeDate, liveAds, CATEGORY, CATEGORY_ORDER, STATUS_CATEGORY, categoryOf, isVisible, longDate, startedPhrase, conditionsSummary, stockRestriction, sellingClause, creativeClause, reasonFor, whyWithNumbers, recommendationFor, directionFor, keyFacts, stockWarning, productionActivity, summaryCounts, momentumItemsFor, weeklySummary, TYPE_LABEL, typeLabelOf };
 }));

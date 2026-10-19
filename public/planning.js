@@ -311,20 +311,27 @@ function plCoreColourCards(it) {
 // three metric cards: Sales 30D with its 7-day trend, Stock on hand with weeks of cover, Active / effective creatives
 function plCoreMetrics(it) {
   const f = it.facts || {};
-  const total = f.active_ads === null || f.active_ads === undefined || f.unique_creatives === null || f.unique_creatives === undefined ? null : f.unique_creatives;
-  const perf = f.performing || 0; const others = total === null ? 0 : Math.max(0, total - perf);
   const cover = f.cover_weeks !== null && f.cover_weeks !== undefined ? `${f.cover_weeks} weeks of cover` : '';
-  // Creative Performance card: "1 of 9" = active creatives performing, then what is not performing, then how many earlier creatives the product has had (display only; the figures are the engine's)
-  const notPerf = total === null || total === 0 ? '' : others === 0 ? 'All performing' : `${plNum(others)} not performing${(f.testing || f.unrated) ? ' yet' : ''}`;
-  const eff = total === null ? ['&ndash;', 'Creative data unavailable'] : [`${plNum(perf)} of ${plNum(total)}`, total === 0 ? 'No creative running' : notPerf];
-  const bad = total !== null && others > 0 && (f.weak || 0) > 0; // red only when creatives are judged over the approved limit; testing / unrated ones are never called failing
-  const hist = PE.creativeHistory(it);
+  // Creative Performance card (display only; the counts are the engine's, see PE.creativeCard). Headline = effective active creatives of all active creatives. With no active creative the
+  // headline says so instead of "0 of 0". Only the non-zero categories are listed: underperforming (subtle red, confirmed over the approved limit) and awaiting data (muted grey: still
+  // testing, not enough delivery, no approved benchmark yet). A creative with no approved benchmark is never counted as underperforming.
+  const cc = PE.creativeCard(it);
+  const part = (n, text, cls) => `<span class="${cls}">${plNum(n)} ${text}</span>`;
+  let eff; let effLabel; let effSub = ''; let effCls = '';
+  if (cc.kind === 'unknown') { eff = '&ndash;'; effLabel = 'Creative data unavailable'; }
+  else if (cc.kind === 'none') { eff = 'No Active Creative'; effCls = 'pl-cm-none'; effLabel = 'No ads currently running for this product'; }
+  else {
+    eff = `${plNum(cc.performing)} of ${plNum(cc.total)}`; effLabel = 'Active creatives performing';
+    const bits = [cc.underperforming ? part(cc.underperforming, 'underperforming', 'pl-cm-bad') : '', cc.declining ? part(cc.declining, 'declining', 'pl-cm-wait') : '', cc.awaiting ? part(cc.awaiting, 'awaiting data', 'pl-cm-wait') : ''].filter(Boolean);
+    effSub = bits.length ? bits.join(' &middot; ') : 'All performing';
+  }
+  const hist = cc.history;
   const histLine = hist ? `<small class="pl-cm-hist" title="Unique creatives matched to this product (any status, a creative run in several campaigns counts once) that are not on an active ad now. Only ads in the synced Meta data that are matched to this product are counted.">${hist.earlier > 0 ? `${plNum(hist.earlier)} previous ${hist.earlier === 1 ? 'creative' : 'creatives'} tested` : 'No previous creatives tested'}</small>` : '';
-  const card = (icon, tone, value, label, sub, extra = '', { head = '', subCls = '' } = {}) => `<div class="pl-cm">${head ? `<span class="pl-cm-h">${head}</span>` : ''}<span class="pl-cm-ic" data-tone="${tone}">${icon}</span><b>${value}</b><span class="pl-cm-l">${label}</span><small${subCls ? ` class="${subCls}"` : ''}>${sub}</small>${extra}</div>`;
+  const card = (icon, tone, value, label, sub, extra = '', { head = '', valCls = '' } = {}) => `<div class="pl-cm">${head ? `<span class="pl-cm-h">${head}</span>` : ''}<span class="pl-cm-ic" data-tone="${tone}">${icon}</span><b${valCls ? ` class="${valCls}"` : ''}>${value}</b><span class="pl-cm-l">${label}</span>${sub ? `<small>${sub}</small>` : ''}${extra}</div>`;
   return `<div class="pl-cx-metrics">
     ${card(PL_ICON.chart, 'green', f.units30 === null || f.units30 === undefined ? '&ndash;' : plNum(f.units30), 'Sales (30D)', plTrendHtml(it, true))}
     ${card(PL_ICON.cube, 'purple', f.stock_units === null || f.stock_units === undefined ? '&ndash;' : plNum(f.stock_units), 'Stock on hand', plEsc(cover))}
-    ${card(PL_ICON.video, 'purple', eff[0], 'Active creatives performing', plEsc(eff[1]), histLine, { head: 'Creative Performance', subCls: bad ? 'pl-cm-bad' : '' })}
+    ${card(PL_ICON.video, 'purple', eff, effLabel, effSub, histLine, { head: 'Creative Performance', valCls: effCls })}
   </div>`;
 }
 function plHasMetaAds(it) { const f = it.facts || {}; return (f.live_creatives || 0) > 0 || (f.active_ads || 0) > 0 || !!(it.last_creative && it.last_creative.creatives_total > 0); }

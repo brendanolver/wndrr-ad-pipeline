@@ -5865,4 +5865,6 @@ body{background:var(--bg);color:var(--text);}
 
 .pl-cm .pl-cm-h{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px;padding-right:44px;}
 .pl-cm .pl-cm-bad{color:#b42318;font-weight:600;}
+.pl-cm .pl-cm-wait{color:var(--text-muted);}
+.pl-cm b.pl-cm-none{font-size:22px;line-height:1.3;padding-right:44px;}
 .pl-cm .pl-cm-hist{display:block;margin-top:8px;min-height:0;color:var(--text-secondary);font-weight:400;}

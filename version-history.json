@@ -2,6 +2,16 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.5.3",
+      "date": "2026-10-19",
+      "title": "Creative Performance card display logic",
+      "changes": [
+        "No active creative now reads No Active Creative / No ads currently running for this product, never 0 of 0",
+        "With active creatives the card lists only non-zero categories: underperforming (subtle red) and awaiting data (muted grey), using the engine's existing per-creative classification",
+        "Creatives without an approved benchmark, still testing or with too little delivery are awaiting data, never underperforming"
+      ]
+    },
+    {
       "version": "1.5.2",
       "date": "2026-10-19",
       "title": "Clearer Creative Performance card",
