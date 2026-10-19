@@ -2,6 +2,16 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.6.2",
+      "date": "2026-10-20",
+      "title": "Core Catalogue: category top level restored",
+      "changes": [
+        "The Core Catalogue opens on the category view again: one row per category with last 7 days' sales, last year vs this year month-to-date, how many products need creative, creative freshness and what is selected this week",
+        "Opening a category lists its products as the new five-column rows, which still expand to the full product view",
+        "Priority remains as a flat list; search and the filters open the categories that have matches"
+      ]
+    },
+    {
       "version": "1.6.1",
       "date": "2026-10-20",
       "title": "Core Catalogue expanded product view",

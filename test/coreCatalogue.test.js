@@ -103,7 +103,7 @@ test('Priority order: needs creative (High first), needs review, in production, 
 test('markup: heading, search, Priority / By Category, three simple filters; five columns; no Key Reasons', () => {
   const panel = html.slice(html.indexOf('id="core-view-catalogue"'), html.indexOf('id="planning-step-high-stocks"'));
   assert.match(panel, /Core Product Catalogue/); assert.match(panel, /placeholder="Search products…"/);
-  assert.match(panel, /data-view="priority">Priority[\s\S]*data-view="category">By Category/);
+  assert.match(panel, /data-view="category">By Category[\s\S]*data-view="priority">Priority/);
   for (const f of ['all', 'attention', 'production']) assert.match(panel, new RegExp(`data-core-filter="${f}"`));
   assert.match(panel, /All Products[\s\S]*Needs Attention[\s\S]*In Production/); assert.match(panel, /Showing|core-cat-count/);
   assert.doesNotMatch(panel, /View All Core Products|Core Shoot Planning|Key Reasons/);
@@ -146,4 +146,14 @@ test('expanded product: the Creative Opportunities components, a banner only whe
 test('Creative Performance card is one shared implementation for the Core table and the catalogue', () => {
   assert.match(fnSrc(pl, 'plCoreMetrics'), /plCreativeCardHtml\(it\)/);
   assert.match(fnSrc(app, 'coreFamilyDetailHtml'), /plCreativeCardHtml\(it, lead\)/);
+});
+
+test('By Category is the default: category rows with the category numbers, the products (five columns) under each', () => {
+  assert.match(app, /coreView: 'category'/);
+  const render = fnSrc(app, 'renderCoreShootPlanning');
+  assert.match(render, /plCatalogueStats\(products, eng\)/); assert.match(render, /b\.eng\.needs - a\.eng\.needs/, 'categories ranked by how many need creative');
+  assert.match(render, /searching \|\| state\.coreShootExpandedCategories\.has\(cat\.name\)/, 'a search or filter opens the categories with matches');
+  const row = fnSrc(app, 'coreShootCategoryRowHtml');
+  for (const f of ['core7dCellHtml(trend)', 'coreCadenceCellHtml(trend)', 'coreCategoryAttentionHtml(cat)', 'coreCategoryFreshnessHtml(cat)', 'coreSelectedHtml(cat.selectedCount)', 'coreFamilyRowHtml(r, selectedCodes)']) assert.ok(row.includes(f), f);
+  assert.match(fnSrc(app, 'coreCatalogueListClick'), /core-shoot-category-toggle[\s\S]*toggleCoreShootCategory/);
 });

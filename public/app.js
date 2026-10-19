@@ -23,8 +23,8 @@ let state = {
   restrictedModules: [],
   usersAccess: null,
   styles: [], categories: [], board: null, dashboard: null, drops: [], provenWinners: [],
-  coreProducts: [], planningSettings: null, coreView: 'priority', coreFilter: 'all', coreSearch: '',
-  coreExpandedProducts: new Set(), coreMoreOpen: new Set(),
+  coreProducts: [], planningSettings: null, coreView: 'category', coreFilter: 'all', coreSearch: '',
+  coreExpandedProducts: new Set(), coreShootExpandedCategories: new Set(), coreMoreOpen: new Set(),
   shootPlan: [], coverageImageIndex: new Map(),
   contentCreators: [],
   conceptDevLocations: [],
@@ -7026,7 +7026,6 @@ function coreCadenceCellHtml(trend) {
   });
 })();
 
-const coreDaysAgo = (d) => (d === 0 ? 'today' : `${d} ${d === 1 ? 'day' : 'days'} ago`);
 
 // ── Core Product Catalogue ───────────────────────────
 // The full Core catalogue (separate from the Creative Opportunities recommendation list): one row per product FAMILY -- the colourways of one product under one row --
@@ -7042,7 +7041,7 @@ function toggleCoreProduct(familyId) {
 }
 
 function setCoreView(view) {
-  state.coreView = view === 'category' ? 'category' : 'priority';
+  state.coreView = view === 'priority' ? 'priority' : 'category';
   renderCoreShootPlanning();
 }
 
@@ -7281,6 +7280,132 @@ function coreFamilyRowHtml(r, selectedCodes) {
     </div>`;
 }
 
+// Category-level Creative Attention / Freshness / This Week's Shoot, as compact badges. Everything comes from the existing results: the Core table's own counts (products needing creative,
+// products awaiting review, products whose latest creative is stale or missing, with the Planning thresholds), and this week's Shoot Plan. Attention and Freshness are independent: a
+// category can be Covered and still hold stale creative. The older flag counts are used only while the Core table's results are not loaded.
+const CORE_BADGE_ICON = {
+  dot: '<i class="core-badge-dot" aria-hidden="true"></i>',
+  check: '<svg class="core-badge-ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="currentColor" stroke="none" opacity=".16"/><path d="M7.5 12.5l3 3 6-6.5"/></svg>',
+  clock: '<svg class="core-badge-ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/></svg>',
+};
+const coreBadge = (tone, icon, text, title) => `<span class="core-badge" data-tone="${tone}"${title ? ` title="${escapeHtml(title)}"` : ''}>${CORE_BADGE_ICON[icon] || ''}${escapeHtml(text)}</span>`;
+const coreCellStack = (badge, sub, subTitle) => `<div class="core-cell-stack">${badge}${sub ? `<span class="core-cell-sub"${subTitle ? ` title="${escapeHtml(subTitle)}"` : ''}>${escapeHtml(sub)}</span>` : ''}</div>`;
+const coreDaysAgo = (d) => (d === 0 ? 'today' : `${d} ${d === 1 ? 'day' : 'days'} ago`);
+
+function coreCategoryAttentionHtml(cat) {
+  if (!cat.eng) return cat.needsAttention ? coreCellStack(coreBadge('red', 'dot', `${cat.needsAttention} need creative`)) : '';
+  const s = cat.eng;
+  if (!s.matched) return '<span class="core-cat-none">Not assessed</span>';
+  const review = s.review ? `${s.review} awaiting review` : '';
+  if (s.needs) return coreCellStack(coreBadge('red', 'dot', `${s.needs} need creative`, s.high ? `${s.high} High priority` : ''), review);
+  if (s.review >= s.matched) return coreCellStack(coreBadge('neutral', 'dot', 'Awaiting review')); // nothing here is assessed yet, so it is not "covered"
+  return coreCellStack(coreBadge('green', 'check', 'Covered'), review);
+}
+// Freshness = how long since each product's NEWEST CREATIVE (the creative date written in its ad name; see lastCreativeDate.js), against the existing Planning bands and thresholds. It is not
+// yet a measure of genuinely NEW CONCEPTS (a new hook on an existing concept is a new creative and counts), so the wording says "creative", never "concept". Amber "N Need Refresh" when any
+// product's latest creative is old or missing; green "Up to Date" only when EVERY product in the category has a freshness verdict and none needs refreshing; otherwise a neutral "Not Assessed"
+// (never "Up to Date" on too little data). Display only: freshness does not feed Creative Attention or any recommendation.
+// At category level the ages are those of the product with the oldest / newest creative, not the whole category.
+function coreCategoryFreshnessHtml(cat) {
+  if (!cat.eng) return cat.stale ? coreCellStack(coreBadge('amber', 'clock', `${cat.stale} Need Refresh`)) : '';
+  const s = cat.eng;
+  if (s.stale) return coreCellStack(coreBadge('amber', 'clock', `${s.stale} Need Refresh`, 'Products whose newest creative is older than the Planning threshold, or that have no creative. Freshness is separate from performance: it does not by itself mean a new shoot is needed.' + (s.assessed < cat.total ? ` ${cat.total - s.assessed} more ${cat.total - s.assessed === 1 ? 'product has' : 'products have'} no reliable creative date yet.` : '')), s.oldestDays !== null ? `Oldest product: ${s.oldestDays} ${s.oldestDays === 1 ? 'day' : 'days'}` : '', 'Days since the newest creative of the product in this category with the oldest creative (not the whole category).');
+  // Coverage first: while some products have no reliable creative date the category cannot be called fresh, so the badge says how many still need assessing.
+  if (s.assessed < cat.total) { const left = cat.total - s.assessed; return coreCellStack(coreBadge('amber', 'clock', `${left} Unassessed`, 'Products in this category with no reliable creative date (no matched creative, or none with a usable date in its ad name), so their freshness cannot be confirmed'), `${s.assessed} of ${cat.total} ${cat.total === 1 ? 'product' : 'products'} assessed`, 'Products with a reliable creative date.'); }
+  // Everything is assessed, and nothing needs refreshing: that is a freshness result (every product's newest creative is inside the Planning threshold), not just completeness.
+  return coreCellStack(coreBadge('green', 'check', 'Up to Date', 'Every product in this category has a reliable creative date and none is past the Planning threshold'), s.latestDays !== null ? `Latest creative: ${coreDaysAgo(s.latestDays)}` : '', 'The newest creative across the products in this category.');
+}
+const coreSelectedHtml = (n) => (n ? `<span class="core-badge" data-tone="green">${CORE_BADGE_ICON.check}${n} Selected</span>` : '<span class="core-dash" aria-label="Nothing selected">&mdash;</span>');
+
+// "How much have we actually sold lately" -- a plain rolling total (today
+// and the 6 days before it), deliberately not coloured/compared like the
+// cadence box/months above -- this column just answers "how much," not
+// "how does that compare."
+function core7dCellHtml(trend) {
+  if (!trend.hasData || trend.last7dUnits == null) return '<span class="core-cadence-empty">—</span>';
+  const pct = trend.last7dPctChange;
+  const cls = pctClass(pct);
+  const arrow = cls === 'up' ? '↑' : cls === 'down' ? '↓' : '→';
+  const trendText = pct == null ? 'New' : `${arrow} ${Math.abs(pct)}% vs last week`;
+  const title = pct == null
+    ? 'No sales in the prior 7 days to compare against'
+    : `This week: ${trend.last7dUnits} units, ${arrow} ${Math.abs(pct)}% vs the prior 7 days`;
+  return `
+    <div class="core-shoot-7d-cell">
+      <div class="core-shoot-7d-row">
+        <span class="core-shoot-7d-value">${trend.last7dUnits}</span>
+        <span class="core-shoot-7d-label">units</span>
+      </div>
+      <span class="core-shoot-7d-trend core-trend-${cls}" title="${escapeHtml(title)}">${trendText}</span>
+    </div>`;
+}
+
+// How many of this week's already-selected Shoot Plan items belong to each
+// Core category -- cross-referenced via product_code, since shoot_plan_items
+// doesn't store category itself (a Shoot Plan entry from Upcoming Drops
+// simply won't match any Core product_code here, which is correct).
+function coreShootPlanCountsByCategory() {
+  const productCodeToCategory = new Map(state.coreProducts.map((p) => [p.product_code, p.category]));
+  const counts = new Map();
+  for (const item of state.shootPlan) {
+    const cat = productCodeToCategory.get(item.product_code);
+    if (!cat) continue;
+    counts.set(cat, (counts.get(cat) || 0) + 1);
+  }
+  return counts;
+}
+
+
+// Category row: the category's own numbers (7-day sales, last year's month-to-date against this year's, how many products need creative, how many have old creative, what is selected this week),
+// then the products of the category as the five-column rows below it. A category with a search / filter active lists only the matching products.
+function coreShootCategoryRowHtml(cat, selectedCodes, rows, open) {
+  const trend = coreCategoryTrendInfo(cat.name);
+  return `
+    <div class="core-shoot-category-group">
+      <button type="button" class="core-shoot-category-toggle ${open ? 'open' : ''}" data-category="${escapeHtml(cat.name)}" aria-expanded="${open}">
+        <span class="accordion-arrow">&#9656;</span>
+        <span class="core-shoot-category-namecol">
+          <span class="core-shoot-category-name">${escapeHtml(coreTitleCase(cat.name))}</span>
+          <span class="core-shoot-category-count">${cat.total} product${cat.total === 1 ? '' : 's'}</span>
+        </span>
+        <span class="core-shoot-stat-col">
+          ${core7dCellHtml(trend)}
+        </span>
+        <span class="core-shoot-stat-col core-cadence-col">
+          ${coreCadenceCellHtml(trend)}
+        </span>
+        <span class="core-shoot-stat-col">
+          ${coreCategoryAttentionHtml(cat)}
+        </span>
+        <span class="core-shoot-stat-col">
+          ${coreCategoryFreshnessHtml(cat)}
+        </span>
+        <span class="core-shoot-stat-col">
+          ${coreSelectedHtml(cat.selectedCount)}
+        </span>
+      </button>
+      ${open ? `<div class="core-shoot-category-body">${rows.length ? CORE_CAT_HEADER + rows.map((r) => coreFamilyRowHtml(r, selectedCodes)).join('') : '<div class="attention-empty">No products in this category match.</div>'}</div>` : ''}
+    </div>`;
+}
+
+const CORE_STALE_DAYS = 14; // mirrors coreProducts.js's STALE_DAYS_OPPORTUNITY -- a display count only (used while the Planning results are not loaded); the server's own flag is not touched
+const CORE_INFO_ICON = '<svg class="core-info" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>';
+const CORE_CATEGORY_HEADER = `<div class="core-shoot-category-header">
+    <span></span>
+    <span>Category</span>
+    <span>Last 7D Sales</span>
+    <span class="core-cadence-header"><span class="core-cadence-header-top">LY MTD</span><span class="core-cadence-header-bottom">vs This MTD</span></span>
+    <span title="Products in this category that the Core table lists as needing creative. Awaiting review = not enough information for a confident recommendation.">Creative <span class="core-th-nw">Attention ${CORE_INFO_ICON}</span></span>
+    <span title="How long since each product's newest creative, against the Planning thresholds. Independent of Creative Attention and of performance: an older creative that still performs is not automatically a reason to shoot.">Creative <span class="core-th-nw">Freshness ${CORE_INFO_ICON}</span></span>
+    <span title="Products from this category in this week's Shoot Plan.">This Week's <span class="core-th-nw">Shoot ${CORE_INFO_ICON}</span></span>
+  </div>`;
+
+function toggleCoreShootCategory(cat) {
+  if (state.coreShootExpandedCategories.has(cat)) state.coreShootExpandedCategories.delete(cat);
+  else state.coreShootExpandedCategories.add(cat);
+  renderCoreShootPlanning();
+}
+
 const CORE_CAT_HEADER = '<div class="cat2-row cat2-head" role="row"><span class="cat2-prod">Product</span><span class="cat2-c-sales">Sales (7D)</span><span class="cat2-c-stock">Stock</span><span class="cat2-c-status">Creative Status</span><span class="cat2-c-action">Action</span></div>';
 
 function coreCatalogueRows(eng) {
@@ -7306,7 +7431,7 @@ function renderCoreCatalogueControls(counts, shown) {
     const n = b.querySelector('.cat2-n'); if (n) n.textContent = counts[b.dataset.coreFilter] != null ? String(counts[b.dataset.coreFilter]) : '';
   });
   const c = document.getElementById('core-cat-count'); if (c) c.textContent = `Showing ${shown} product${shown === 1 ? '' : 's'}`;
-  const s = document.getElementById('core-cat-sort'); if (s) s.textContent = state.coreView === 'category' ? 'Grouped by category' : 'Sort: Priority (High → Low)';
+  const s = document.getElementById('core-cat-sort'); if (s) s.textContent = state.coreView === 'category' ? 'Sort: Most need creative first' : 'Sort: Priority (High → Low)';
 }
 
 function renderCoreStepFooter() {
@@ -7332,17 +7457,39 @@ function renderCoreShootPlanning() {
   if (!rows.length) { list.innerHTML = '<div class="attention-empty">No products match.</div>'; return; }
   let body;
   if (state.coreView === 'category') {
-    const groups = new Map();
-    for (const r of rows) { const k = r.fam.category || 'UNCATEGORISED'; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); }
-    const needs = (g) => g.filter((r) => coreNeedsAttention(r.info)).length;
-    body = [...groups.entries()].sort((a, b) => needs(b[1]) - needs(a[1]) || a[0].localeCompare(b[0])).map(([cat, g]) => {
-      const n = needs(g);
-      return `<div class="cat2-group"><div class="cat2-group-h"><b>${escapeHtml(coreTitleCase(cat))}</b><span>${g.length} product${g.length === 1 ? '' : 's'}${n ? ` &middot; ${n} need${n === 1 ? 's' : ''} attention` : ''}</span></div>${g.map((r) => coreFamilyRowHtml(r, selectedCodes)).join('')}</div>`;
-    }).join('');
-  } else {
-    body = rows.map((r) => coreFamilyRowHtml(r, selectedCodes)).join('');
+    // Category top level: the category numbers are over ALL the category's products; the list under an opened category holds the products that match the search / filter.
+    const rowsBy = new Map();
+    for (const r of rows) { const k = r.fam.category || 'UNCATEGORISED'; if (!rowsBy.has(k)) rowsBy.set(k, []); rowsBy.get(k).push(r); }
+    const allBy = new Map();
+    for (const p of state.coreProducts) { const k = p.category || 'UNCATEGORISED'; if (!allBy.has(k)) allBy.set(k, []); allBy.get(k).push(p); }
+    const selectedCounts = coreShootPlanCountsByCategory();
+    const searching = !!String(state.coreSearch || '').trim() || state.coreFilter !== 'all';
+    const categories = [...rowsBy.keys()].map((name) => {
+      const products = allBy.get(name) || [];
+      return {
+        name, total: products.length, rows: rowsBy.get(name),
+        eng: eng ? plCatalogueStats(products, eng) : null,
+        needsAttention: products.filter((p) => p.flag === 'needs_attention').length,
+        stale: products.filter((p) => p.days_since_last_new_concept == null || p.days_since_last_new_concept > CORE_STALE_DAYS).length,
+        selectedCount: selectedCounts.get(name) || 0,
+      };
+    });
+    // Ranked by how much creative attention each category currently needs (the Core table's own count when loaded).
+    categories.sort((a, b) => {
+      if (eng) {
+        if (b.eng.needs !== a.eng.needs) return b.eng.needs - a.eng.needs;
+        if (b.eng.high !== a.eng.high) return b.eng.high - a.eng.high;
+        if (b.eng.stale !== a.eng.stale) return b.eng.stale - a.eng.stale;
+        return a.name.localeCompare(b.name);
+      }
+      if (b.needsAttention !== a.needsAttention) return b.needsAttention - a.needsAttention;
+      if (b.stale !== a.stale) return b.stale - a.stale;
+      return a.name.localeCompare(b.name);
+    });
+    list.innerHTML = CORE_CATEGORY_HEADER + categories.map((cat) => coreShootCategoryRowHtml(cat, selectedCodes, cat.rows, searching || state.coreShootExpandedCategories.has(cat.name))).join('');
+    return;
   }
-  list.innerHTML = `${CORE_CAT_HEADER}${body}`;
+  list.innerHTML = `${CORE_CAT_HEADER}${rows.map((r) => coreFamilyRowHtml(r, selectedCodes)).join('')}`;
 }
 
 function renderCoreProducts() {
@@ -7354,6 +7501,8 @@ function renderCoreProducts() {
 
 // One delegated handler for the list (the list is re-rendered, the element is not): the product cell and the "View" button open / close a row; "View Meta ads" opens the product's Meta ads.
 function coreCatalogueListClick(e) {
+  const cat = e.target.closest('.core-shoot-category-toggle');
+  if (cat) { toggleCoreShootCategory(cat.dataset.category); return; }
   const t = e.target.closest('.cat2-toggle, .cat2-view[data-core-fam]');
   if (t) { const item = t.closest('[data-core-fam]'); toggleCoreProduct(t.dataset.coreFam || item.dataset.coreFam); }
 }
