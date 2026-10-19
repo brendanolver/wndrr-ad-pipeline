@@ -5862,3 +5862,5 @@ body{background:var(--bg);color:var(--text);}
 .as-prov-tag-anthropic{border-color:#e9c9b5;background:#fbf1ea;color:#8a4a22;}
 .as-prov-tag-openai{border-color:#b9dccb;background:#edf8f2;color:#1f6b46;}
 .as-ai-revised{border-style:dashed;}
+
+.pl-cm .pl-cm-hist{display:block;margin-top:2px;min-height:0;color:var(--text-secondary);font-weight:600;}

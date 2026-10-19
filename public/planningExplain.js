@@ -269,6 +269,15 @@
     return { known: false, long: null, note: c && c.original_date_reason ? (DATE_REASON[c.original_date_reason] || null) : null };
   }
 
+  // How many unique creatives this product has had before the ones on its active ads now. All-time = every unique creative matched to the product (any delivery status, a creative
+  // duplicated across campaigns counts once, Dynamic Product Ads left out: last_creative.creatives_total); earlier = all-time minus those on active ads (facts.unique_creatives).
+  // Display only: null when either figure is unknown, and nothing here feeds a classification.
+  function creativeHistory(item) {
+    const all = item && item.last_creative ? num(item.last_creative.creatives_total) : null; const onActive = num(f(item).unique_creatives);
+    if (all === null || onActive === null || num(f(item).active_ads) === null) return null;
+    return { allTime: Math.max(all, onActive), earlier: Math.max(0, all - onActive) };
+  }
+
   function creativeStatus(item, cfg = {}) {
     const x = f(item); const cat = categoryOf(item);
     const min = num(cfg.min_performing_creatives) || 3;
@@ -483,5 +492,5 @@
   };
   const typeLabelOf = (item) => (item.mode === 'momentum' || item.opportunity_type === 'protect_momentum' ? 'Protect Momentum' : TYPE_LABEL[(item.gap && item.gap.type) || item.opportunity_type] || null);
 
-  return { creativeStatus, coverage, coreStatus, whyShoot, salesTrend, lastCreative, creativeDate, liveAds, CATEGORY, CATEGORY_ORDER, STATUS_CATEGORY, categoryOf, isVisible, longDate, startedPhrase, conditionsSummary, stockRestriction, sellingClause, creativeClause, reasonFor, whyWithNumbers, recommendationFor, directionFor, keyFacts, stockWarning, productionActivity, summaryCounts, momentumItemsFor, weeklySummary, TYPE_LABEL, typeLabelOf };
+  return { creativeHistory, creativeStatus, coverage, coreStatus, whyShoot, salesTrend, lastCreative, creativeDate, liveAds, CATEGORY, CATEGORY_ORDER, STATUS_CATEGORY, categoryOf, isVisible, longDate, startedPhrase, conditionsSummary, stockRestriction, sellingClause, creativeClause, reasonFor, whyWithNumbers, recommendationFor, directionFor, keyFacts, stockWarning, productionActivity, summaryCounts, momentumItemsFor, weeklySummary, TYPE_LABEL, typeLabelOf };
 }));

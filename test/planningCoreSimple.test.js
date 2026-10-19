@@ -65,7 +65,7 @@ test('page shape: Core and High Stocks share the short table and expanded view; 
   assert.match(pl, /coverage-card-imgrow pl-cx-img/, 'the main picture is the Upcoming Drops picture panel'); assert.match(pl, /drop-card-product-tile pl-cc-tile/, 'colourway thumbnails are the Upcoming Drops tile');
   assert.match(pl, /#i-image/, 'the same image icon fallback');
   const metrics = fn('plCoreMetrics', 'function plHasMetaAds');
-  assert.equal((metrics.match(/\bcard\(/g) || []).length, 3, 'three metric cards'); assert.match(metrics, /Sales \(30D\)/); assert.match(metrics, /Stock on hand/); assert.match(metrics, /Active \/ effective creatives/);
+  assert.equal((metrics.match(/\bcard\(/g) || []).length, 3, 'three metric cards'); assert.match(metrics, /Sales \(30D\)/); assert.match(metrics, /Stock on hand/); assert.match(metrics, /On active ads \/ effective/); assert.match(metrics, /PE\.creativeHistory\(it\)/);
   assert.match(pl, /return plCoreTableHtml\(mode, items, cat\)/, 'Core and High Stocks render the same table');
   assert.match(pl, /plPageHtml\('high', tierNote\)/);
   for (const gone of ['function plTableHtml', 'function plDetailHtml', 'function plMetricsCell', 'function plLiveAdsHtml']) assert.ok(!pl.includes(gone), `${gone} was the old High Stocks layout and is gone`);
@@ -93,4 +93,14 @@ test('creative coverage: the loader counts each unique creative once across camp
   const stub = { query: async (sql) => (/last-creative-origins/.test(sql) ? { rows: [] } : { rows }) };
   const out = await lc.loadLastCreativeDates([{ key: 'W26AA001', codes: ['W26AA001', 'W26AA001BLK'] }], { db: stub, today: '2026-10-14' });
   assert.equal(out.byFamily.get('W26AA001').creatives_total, 4, '1 + 1 (with its copies) + 2 different executions');
+});
+
+test('creative history: earlier = all-time unique creatives minus those on active ads; unknown stays unknown', () => {
+  const it = (all, onActive, active = 2) => ({ facts: { unique_creatives: onActive, active_ads: active }, last_creative: all === undefined ? undefined : { creatives_total: all } });
+  assert.deepEqual(E.creativeHistory(it(11, 2)), { allTime: 11, earlier: 9 });
+  assert.deepEqual(E.creativeHistory(it(2, 2)), { allTime: 2, earlier: 0 }, 'no history');
+  assert.deepEqual(E.creativeHistory(it(1, 2)), { allTime: 2, earlier: 0 }, 'never negative: the larger figure is the all-time count');
+  assert.equal(E.creativeHistory(it(undefined, 2)), null, 'creative dates not loaded');
+  assert.equal(E.creativeHistory(it(5, 2, null)), null, 'Meta creative data unavailable');
+  assert.equal(E.creativeHistory({}), null);
 });

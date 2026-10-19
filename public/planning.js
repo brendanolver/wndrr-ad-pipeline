@@ -315,11 +315,13 @@ function plCoreMetrics(it) {
   const perf = f.performing || 0; const others = total === null ? 0 : Math.max(0, total - perf);
   const cover = f.cover_weeks !== null && f.cover_weeks !== undefined ? `${f.cover_weeks} weeks of cover` : '';
   const eff = total === null ? ['&ndash;', 'Creative data unavailable'] : [`${plNum(total)} / ${plNum(perf)}`, total === 0 ? 'No creative running' : others === 0 ? 'All performing' : `${plNum(others)} not performing${(f.testing || f.unrated) ? ' yet' : ''}`];
-  const card = (icon, tone, value, label, sub) => `<div class="pl-cm"><span class="pl-cm-ic" data-tone="${tone}">${icon}</span><b>${value}</b><span class="pl-cm-l">${label}</span><small>${sub}</small></div>`;
+  const hist = PE.creativeHistory(it);
+  const histLine = hist && hist.earlier > 0 ? `<small class="pl-cm-hist" title="Unique creatives matched to this product that are not on an active ad now. A creative run in several campaigns counts once.">${plNum(hist.earlier)} earlier ${hist.earlier === 1 ? 'creative' : 'creatives'} &middot; ${plNum(hist.allTime)} all time</small>` : '';
+  const card = (icon, tone, value, label, sub, extra = '') => `<div class="pl-cm"><span class="pl-cm-ic" data-tone="${tone}">${icon}</span><b>${value}</b><span class="pl-cm-l">${label}</span><small>${sub}</small>${extra}</div>`;
   return `<div class="pl-cx-metrics">
     ${card(PL_ICON.chart, 'green', f.units30 === null || f.units30 === undefined ? '&ndash;' : plNum(f.units30), 'Sales (30D)', plTrendHtml(it, true))}
     ${card(PL_ICON.cube, 'purple', f.stock_units === null || f.stock_units === undefined ? '&ndash;' : plNum(f.stock_units), 'Stock on hand', plEsc(cover))}
-    ${card(PL_ICON.video, 'purple', eff[0], 'Active / effective creatives', plEsc(eff[1]))}
+    ${card(PL_ICON.video, 'purple', eff[0], 'On active ads / effective', plEsc(eff[1]), histLine)}
   </div>`;
 }
 function plHasMetaAds(it) { const f = it.facts || {}; return (f.live_creatives || 0) > 0 || (f.active_ads || 0) > 0 || !!(it.last_creative && it.last_creative.creatives_total > 0); }
