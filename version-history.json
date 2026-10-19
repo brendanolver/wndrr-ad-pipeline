@@ -2,6 +2,18 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.4.7",
+      "date": "2026-10-19",
+      "title": "Core Planning redesign",
+      "changes": [
+        "Compact Shoot Plan strip replaces the large banner",
+        "Creative Opportunities table: no rank column, Creative Coverage (active / effective / latest), Creative Gap badge, subtle Priority",
+        "One shared product detail (Overview, Creative Performance, Shoot Readiness) for Creative Opportunities, High Stocks and the Core Catalogue",
+        "Core Catalogue: simpler category rows, monthly sales inside the expanded category, same product table, selection stays in sync with Opportunities",
+        "Presentation only: engine, scoring, benchmarks and Shoot Plan logic unchanged"
+      ]
+    },
+    {
       "version": "1.4.6",
       "date": "2026-10-19",
       "title": "AI Copy Assistant: Claude and OpenAI side by side",

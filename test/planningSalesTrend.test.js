@@ -56,10 +56,11 @@ test('wiring: the trend sits under Sales 30D; rows stay white; colour only for t
   const pl = fs.readFileSync(path.join(root, 'public', 'planning.js'), 'utf8');
   const css = fs.readFileSync(path.join(root, 'public', 'styles.css'), 'utf8');
   const cell = pl.slice(pl.indexOf('function plCoreSalesCell'), pl.indexOf('function plCoreCoverageCell'));
-  assert.ok(cell.indexOf('Sales 30D') > -1 && cell.indexOf('Sales 30D') < cell.indexOf('plTrendHtml(it, false)'), 'the trend comes after the Sales 30D figure and label');
+  assert.ok(cell.indexOf('units30') > -1 && cell.indexOf('units30') < cell.indexOf('plTrendHtml(it, false)'), 'the trend comes after the 30-day units figure');
+  assert.match(pl.slice(pl.indexOf('function plCoreHeadHtml'), pl.indexOf('function plCoreRowHtml')), /Sales \(30D\)', 'pt-w-sales', 'u30', '[^']*7 days with the 7 days before/, 'the comparison period is explained in a tooltip on the column');
   assert.match(css, /\.pl-trend\[data-trend="up"\]\{color:#15803d/); assert.match(css, /\.pl-trend\[data-trend="down"\]\{color:#c62828/);
   assert.match(css, /\.pl-table-core tbody tr\.pt-row td,\.pl-table-core tbody tr\.pt-row\.open td\{background:var\(--surface\)/, 'rows (open or closed) are white');
   assert.doesNotMatch(css.slice(css.indexOf('.pl-table-core{')), /\.pl-table-core[^{]*tr[^{]*\{[^}]*border-left/, 'no coloured left borders on rows');
-  const table = pl.slice(pl.indexOf('function plCoreTableHtml'), pl.indexOf('const PL_CORE_TITLE'));
+  const table = pl.slice(pl.indexOf('function plCoreRowHtml'), pl.indexOf('const PL_CORE_TITLE'));
   assert.doesNotMatch(table, /data-priority|border-left/, 'rows carry no priority colouring');
 });

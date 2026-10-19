@@ -7052,15 +7052,8 @@ function renderCoreProductsByCategory() {
   }).join('');
 }
 
-// Core Shoot Planning (default view): category-first, so a Monday meeting
-// sees which categories need attention before drilling into individual
-// products -- Category -> Problem Products -> Select for Shoot. Collapsed
-// rows show only aggregate counts, never per-product metrics; expanding a
-// category surfaces just its problem products (needs_attention/opportunity)
-// using the same compact row format as before. The full Priority/By
-// Category views (unchanged, every product, full metrics) stay reachable
-// via "View All Core Products".
-const CORE_STALE_DAYS = 14; // mirrors coreProducts.js's STALE_DAYS_OPPORTUNITY -- display aggregate only, doesn't touch the server's own flag decision
+// Core Catalogue (the second Core tab): category rows, then each category's products. Rendered by plCatalogueHtml (planning.js) from the same product rows and expanded detail
+// as Creative Opportunities. The full Priority / By Category lists stay reachable via "View All Core Products".
 
 // Static "✓ Shooting" badge once a product is already in this week's Shoot
 // Plan -- shared by Core and High Stock rows so both read the same way.
@@ -7068,36 +7061,6 @@ const CORE_STALE_DAYS = 14; // mirrors coreProducts.js's STALE_DAYS_OPPORTUNITY 
 function shootActionHtml(productCode, onclickFn, selectedCodes) {
   if (selectedCodes.has(productCode)) return '<span class="core-shoot-selected-badge">✓ Shooting</span>';
   return `<button type="button" class="btn btn-primary btn-sm" onclick="${onclickFn}('${productCode}')">+ Shoot</button>`;
-}
-
-// Full column header for the product rows below -- the category header
-// above (index.html's .core-shoot-category-header) uses a different, wider
-// grid than .core-shoot-review-row, so its labels don't line up with these
-// rows once a category is expanded. .core-product-row overrides just the
-// shared .core-shoot-review-row/-header grid template (see styles.css) --
-// that class is also used by High Stock's row with a different column
-// count, so the base rule itself is left alone.
-function coreProblemProductsHeaderHtml() {
-  return `
-    <div class="core-shoot-review-header core-product-row">
-      <span></span>
-      <span>Inventory</span>
-      <span>7D Sales</span>
-      <span>MTD vs LY</span>
-      <span>Creative Attention</span>
-      <span>Creative Freshness</span>
-      <span>This Week</span>
-    </div>`;
-}
-
-// buildAttention (coreProducts.js) still includes a "+N Incoming" chip in
-// the shared reason_chips list when On Order is large relative to
-// velocity -- the Priority table keeps showing that chip as-is, but this
-// row now has its own Inventory column, so on-order pressure surfaces
-// there instead (as the quieter "High Incoming" label) rather than
-// duplicating the number in both places.
-function coreHasHighIncoming(p) {
-  return (p.reason_chips || []).some((c) => / Incoming$/.test(c));
 }
 
 // "Never tested" / "31.9 wks cover" (buildAttention's own chip strings,
@@ -7109,58 +7072,9 @@ function coreTitleCaseChip(text) {
   return text.replace(/\b\w/g, (ch) => ch.toUpperCase());
 }
 
-function coreInventoryCellHtml(p) {
-  const highIncoming = coreHasHighIncoming(p);
-  return `
-    <div class="core-inv-row"><span class="core-inv-value">${p.soh != null ? p.soh : '—'}</span><span class="core-inv-label">SOH</span></div>
-    <div class="core-inv-row"><span class="core-inv-value">${p.on_order != null ? p.on_order : '—'}</span><span class="core-inv-label">On Order</span></div>
-    ${highIncoming ? '<span class="core-inv-flag">High Incoming</span>' : ''}`;
-}
-
 function coreAttentionChipsHtml(p) {
   const chips = (p.reason_chips || []).filter((c) => !/ Incoming$/.test(c));
   return chips.map((c) => `<span class="core-reason-chip">${escapeHtml(coreTitleCaseChip(c))}</span>`).join('');
-}
-
-function coreProblemProductRowHtml(p, selectedCodes, eng) {
-  const info = eng ? eng.get(p.product_code) || null : null;
-  const badge = eng ? (info && info.cat === 'needs' ? '<span class="dot dot-r" aria-hidden="true"></span>' : '') : (p.flag === 'needs_attention' ? '<span class="dot dot-r" aria-hidden="true"></span>' : p.flag === 'opportunity' ? '<span class="dot dot-o" aria-hidden="true"></span>' : '');
-  const isSelected = selectedCodes.has(p.product_code);
-  const trend = coreProductTrendInfo(p);
-  // Creative Attention and Creative Freshness are the Core table's own results (status, priority, Active Ads, Latest creative); the older flag / chips only when those are not loaded
-  const attention = eng ? plCatalogueAttentionHtml(info) : coreAttentionChipsHtml(p);
-  const freshness = eng ? plCatalogueFreshnessHtml(info) : '<span class="core-cat-none">&mdash;</span>';
-  return `
-    <div class="core-shoot-review-row core-product-row${isSelected ? ' core-row-selected' : ''}">
-      <div class="core-shoot-review-col-product">${badge ? badge + ' ' : ''}<span class="core-shoot-review-name">${escapeHtml(p.product_name)}</span></div>
-      <div class="core-shoot-review-col-inventory">${coreInventoryCellHtml(p)}</div>
-      <div class="core-shoot-review-col-7d">${core7dCellHtml(trend)}</div>
-      <div class="core-shoot-review-col-cadence">${coreCadenceBoxHtml(trend)}</div>
-      <div class="core-shoot-review-col-reasons">${attention}</div>
-      <div class="core-shoot-review-col-fresh">${freshness}</div>
-      <div class="core-shoot-review-col-action">${shootActionHtml(p.product_code, 'shootThisWeekForCore', selectedCodes)}</div>
-    </div>`;
-}
-
-function toggleCoreShootCategory(cat) {
-  if (state.coreShootExpandedCategories.has(cat)) state.coreShootExpandedCategories.delete(cat);
-  else state.coreShootExpandedCategories.add(cat);
-  renderCoreShootPlanning();
-}
-
-// How many of this week's already-selected Shoot Plan items belong to each
-// Core category -- cross-referenced via product_code, since shoot_plan_items
-// doesn't store category itself (a Shoot Plan entry from Upcoming Drops
-// simply won't match any Core product_code here, which is correct).
-function coreShootPlanCountsByCategory() {
-  const productCodeToCategory = new Map(state.coreProducts.map((p) => [p.product_code, p.category]));
-  const counts = new Map();
-  for (const item of state.shootPlan) {
-    const cat = productCodeToCategory.get(item.product_code);
-    if (!cat) continue;
-    counts.set(cat, (counts.get(cat) || 0) + 1);
-  }
-  return counts;
 }
 
 // Category-level "this month to date vs the same days last year" -- ported
@@ -7207,29 +7121,9 @@ function coreCategoryTrendInfo(categoryName) {
   };
 }
 
-function coreCadenceCellHtml(trend) {
-  if (!trend.hasData) {
-    return `<span class="core-cadence-empty" title="${escapeHtml(trend.title)}">—</span>`;
-  }
-  return `
-    <div class="core-cadence-box core-trend-${trend.boxCls}" title="${escapeHtml(trend.title)}">
-      <span class="core-cadence-box-value">${trend.boxValue}</span>
-      <span class="core-cadence-box-pct">${trend.boxPctLabel}</span>
-    </div>
-    <div class="core-cadence-months">
-      ${trend.months.map((m) => `
-        <div class="core-cadence-month" title="${escapeHtml(m.title)}">
-          <span class="core-cadence-month-value core-trend-${m.cls}">${m.value}</span>
-          <span class="core-cadence-month-label">${escapeHtml(m.label)}</span>
-        </div>`).join('')}
-    </div>`;
-}
-
 // Same LY-MTD-vs-This-MTD/last-7D shape coreCategoryTrendInfo returns, read
 // from a product's own p.cadence (coreProducts.js, keyed by product_code
-// instead of category) -- lets core7dCellHtml/coreCadenceBoxHtml below run
-// unmodified against either level. No .months here: the per-product row is
-// a compact single line, not the category header's wider strip.
+// instead of category). No .months here: a product is a single line.
 function coreProductTrendInfo(p) {
   const c = p.cadence;
   if (!c || !c.has_data) {
@@ -7248,134 +7142,6 @@ function coreProductTrendInfo(p) {
   };
 }
 
-// Just the MTD box portion of coreCadenceCellHtml, with no months strip --
-// a per-product row is one compact line, not the category header's wider
-// glance area.
-function coreCadenceBoxHtml(trend) {
-  if (!trend.hasData) {
-    return `<span class="core-cadence-empty" title="${escapeHtml(trend.title)}">—</span>`;
-  }
-  return `
-    <div class="core-cadence-box core-trend-${trend.boxCls}" title="${escapeHtml(trend.title)}">
-      <span class="core-cadence-box-value">${trend.boxValue}</span>
-      <span class="core-cadence-box-pct">${trend.boxPctLabel}</span>
-    </div>`;
-}
-
-// Click-and-drag horizontal scroll for the Sales Cadence months strip.
-// Delegated once at the document level rather than wired per-element on
-// every render -- Core's category list re-renders on every state change
-// (a toggle, a shoot-plan edit, a full loadAll), and a listener attached
-// per .core-cadence-months element on each render would leak a new
-// mousemove/mouseup pair every time without ever being removed.
-(function setupCadenceDragScroll() {
-  let dragEl = null;
-  let startX = 0;
-  let startScrollLeft = 0;
-  let dragged = false;
-
-  document.addEventListener('mousedown', (e) => {
-    const el = e.target.closest('.core-cadence-months');
-    if (!el) return;
-    dragEl = el;
-    dragged = false;
-    startX = e.pageX;
-    startScrollLeft = el.scrollLeft;
-    el.classList.add('dragging');
-  });
-
-  document.addEventListener('mousemove', (e) => {
-    if (!dragEl) return;
-    const dx = e.pageX - startX;
-    if (Math.abs(dx) > 4) dragged = true;
-    dragEl.scrollLeft = startScrollLeft - dx;
-  });
-
-  document.addEventListener('mouseup', () => {
-    if (!dragEl) return;
-    dragEl.classList.remove('dragging');
-    // A real drag (not just a click) shouldn't also toggle the category
-    // row open/closed when the mouse happens to release back inside the
-    // same <button> -- swallow exactly the next click there.
-    if (dragged) dragEl.addEventListener('click', (e) => e.stopPropagation(), { once: true });
-    dragEl = null;
-  });
-})();
-
-// "How much have we actually sold lately" -- a plain rolling total (today
-// and the 6 days before it), deliberately not coloured/compared like the
-// cadence box/months above -- this column just answers "how much," not
-// "how does that compare."
-function core7dCellHtml(trend) {
-  if (!trend.hasData || trend.last7dUnits == null) return '<span class="core-cadence-empty">—</span>';
-  const pct = trend.last7dPctChange;
-  const cls = pctClass(pct);
-  const arrow = cls === 'up' ? '↑' : cls === 'down' ? '↓' : '→';
-  const trendText = pct == null ? 'New' : `${arrow} ${Math.abs(pct)}% vs last week`;
-  const title = pct == null
-    ? 'No sales in the prior 7 days to compare against'
-    : `This week: ${trend.last7dUnits} units, ${arrow} ${Math.abs(pct)}% vs the prior 7 days`;
-  return `
-    <div class="core-shoot-7d-cell">
-      <div class="core-shoot-7d-row">
-        <span class="core-shoot-7d-value">${trend.last7dUnits}</span>
-        <span class="core-shoot-7d-label">units</span>
-      </div>
-      <span class="core-shoot-7d-trend core-trend-${cls}" title="${escapeHtml(title)}">${trendText}</span>
-    </div>`;
-}
-
-// Category-level Creative Attention / Freshness: the Core table's own counts (products needing creative, High priority among them, products needing review, products whose latest
-// creative is stale or missing); the older flag counts only while those results are not loaded.
-function coreCategoryAttentionHtml(cat) {
-  if (!cat.eng) return cat.needsAttention ? `<span class="core-shoot-stat"><span class="dot dot-r" aria-hidden="true"></span> <span class="core-shoot-stat-count core-shoot-count-red">${cat.needsAttention}</span> needing attention</span>` : '';
-  const s = cat.eng;
-  if (!s.matched) return '<span class="core-cat-none">Not assessed</span>';
-  if (!s.needs && !s.review) return '<span class="core-shoot-stat core-cat-ok">&#10003; None needing attention</span>';
-  return `<div class="core-stat-stack">${s.needs ? `<span class="core-shoot-stat"><span class="dot dot-r" aria-hidden="true"></span> <span class="core-shoot-stat-count core-shoot-count-red">${s.needs}</span> needing attention</span>` : ''}${s.high ? `<span class="core-shoot-sub">${s.high} High priority</span>` : ''}${s.review ? `<span class="core-shoot-sub">${s.review} need${s.review === 1 ? 's' : ''} review</span>` : ''}</div>`;
-}
-function coreCategoryFreshnessHtml(cat) {
-  if (!cat.eng) return cat.stale ? `<span class="core-shoot-stat">${cat.stale} stale/untested</span>` : '';
-  const s = cat.eng;
-  if (!s.matched) return '<span class="core-cat-none">&mdash;</span>';
-  return s.stale ? `<div class="core-stat-stack"><span class="core-shoot-stat"><span class="core-shoot-stat-count core-shoot-count-amber">${s.stale}</span> stale</span><span class="core-shoot-sub">latest creative old or none</span></div>` : '<span class="core-shoot-stat core-cat-ok">&#10003; None stale</span>';
-}
-
-function coreShootCategoryRowHtml(cat, selectedCodes, eng) {
-  const isOpen = state.coreShootExpandedCategories.has(cat.name);
-  const trend = coreCategoryTrendInfo(cat.name);
-  return `
-    <div class="core-shoot-category-group">
-      <button type="button" class="core-shoot-category-toggle ${isOpen ? 'open' : ''}" data-category="${escapeHtml(cat.name)}">
-        <span class="accordion-arrow">&#9656;</span>
-        <span class="core-shoot-category-namecol">
-          <span class="core-shoot-category-name">${escapeHtml(cat.name)}</span>
-          <span class="core-shoot-category-count">${cat.total} product${cat.total === 1 ? '' : 's'}</span>
-        </span>
-        <span class="core-shoot-stat-col">
-          ${core7dCellHtml(trend)}
-        </span>
-        <span class="core-shoot-stat-col core-cadence-col">
-          ${coreCadenceCellHtml(trend)}
-        </span>
-        <span class="core-shoot-stat-col">
-          ${coreCategoryAttentionHtml(cat)}
-        </span>
-        <span class="core-shoot-stat-col">
-          ${coreCategoryFreshnessHtml(cat)}
-        </span>
-        <span class="core-shoot-stat-col">
-          ${cat.selectedCount ? `<span class="core-shoot-stat core-shoot-stat-selected">✓ ${cat.selectedCount} selected this week</span>` : ''}
-        </span>
-      </button>
-      ${isOpen ? `<div class="core-shoot-category-body">
-        ${cat.problemProducts.length
-          ? coreProblemProductsHeaderHtml() + cat.problemProducts.map((p) => coreProblemProductRowHtml(p, selectedCodes, eng)).join('')
-          : '<div class="attention-empty">No products in this category need creative attention right now.</div>'}
-      </div>` : ''}
-    </div>`;
-}
-
 // Bottom-of-step count for the "X Core products selected · Continue to
 // High Stocks →" footer -- same product_code cross-reference pattern
 // coreShootPlanCountsByCategory() already uses, just totaled for the
@@ -7391,55 +7157,14 @@ function renderCoreShootPlanning() {
   const list = document.getElementById('core-shoot-planning-list');
   renderCoreStepFooter();
   if (typeof plApplyCoreTab === 'function') plApplyCoreTab();
+  const sub = document.getElementById('core-catalogue-subtitle');
+  if (sub) sub.textContent = state.coreProducts.length ? `Explore all ${state.coreProducts.length} Core products by category.` : 'Explore the Core range by category.';
   if (!state.coreProducts.length) {
     list.innerHTML = '<div class="attention-empty">No Core products found yet.</div>';
     return;
   }
-
-  const selectedCounts = coreShootPlanCountsByCategory();
-  const selectedCodes = new Set(state.shootPlan.map((i) => i.product_code));
-  const byCategory = new Map();
-  for (const p of state.coreProducts) {
-    if (!byCategory.has(p.category)) byCategory.set(p.category, []);
-    byCategory.get(p.category).push(p);
-  }
-
-  const eng = typeof plCatalogueMap === 'function' ? plCatalogueMap() : null; // the Core table's own results, when loaded
-  const categories = [...byCategory.entries()].map(([name, products]) => {
-    const stats = eng ? plCatalogueStats(products, eng) : null;
-    const rank = (p) => { const i = eng.get(p.product_code); return i ? (i.high ? 2000 : 0) + (i.it.score || 0) : -1; };
-    return {
-      name,
-      total: products.length,
-      eng: stats,
-      needsAttention: products.filter((p) => p.flag === 'needs_attention').length,
-      opportunity: products.filter((p) => p.flag === 'opportunity').length,
-      stale: products.filter((p) => p.days_since_last_new_concept == null || p.days_since_last_new_concept > CORE_STALE_DAYS).length,
-      selectedCount: selectedCounts.get(name) || 0,
-      problemProducts: eng
-        ? products.filter((p) => { const i = eng.get(p.product_code); return i && i.cat === 'needs'; }).sort((a, b) => rank(b) - rank(a))
-        : products.filter((p) => p.flag === 'needs_attention' || p.flag === 'opportunity'),
-    };
-  });
-
-  // Rank by how much creative attention each category currently needs (the Core table's own count when loaded).
-  categories.sort((a, b) => {
-    if (eng) {
-      if (b.eng.needs !== a.eng.needs) return b.eng.needs - a.eng.needs;
-      if (b.eng.high !== a.eng.high) return b.eng.high - a.eng.high;
-      if (b.eng.stale !== a.eng.stale) return b.eng.stale - a.eng.stale;
-      return a.name.localeCompare(b.name);
-    }
-    if (b.needsAttention !== a.needsAttention) return b.needsAttention - a.needsAttention;
-    if (b.opportunity !== a.opportunity) return b.opportunity - a.opportunity;
-    if (b.stale !== a.stale) return b.stale - a.stale;
-    return a.name.localeCompare(b.name);
-  });
-
-  list.innerHTML = categories.map((cat) => coreShootCategoryRowHtml(cat, selectedCodes, eng)).join('');
-  list.querySelectorAll('.core-shoot-category-toggle').forEach((btn) => {
-    btn.addEventListener('click', () => toggleCoreShootCategory(btn.dataset.category));
-  });
+  // the redesigned catalogue (category summary rows, then the same product rows and expanded detail as Creative Opportunities) lives with the rest of Planning in planning.js
+  list.innerHTML = plCatalogueHtml();
 }
 
 function toggleCoreAllProducts() {
