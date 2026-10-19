@@ -24,7 +24,7 @@ let state = {
   usersAccess: null,
   styles: [], categories: [], board: null, dashboard: null, drops: [], provenWinners: [],
   coreProducts: [], planningSettings: null, coreView: 'priority', coreFilter: 'all', coreSearch: '',
-  coreExpandedProducts: new Set(),
+  coreExpandedProducts: new Set(), coreMoreOpen: new Set(),
   shootPlan: [], coverageImageIndex: new Map(),
   contentCreators: [],
   conceptDevLocations: [],
@@ -7162,11 +7162,19 @@ function coreFamilyPriority(fam, info) {
   return Math.max(...fam.members.map((p) => (p.flag === 'needs_attention' ? 900 : p.flag === 'opportunity' ? 800 : 0)));
 }
 
+function coreFamilySelected(fam, info, selectedCodes) {
+  return fam.members.some((m) => selectedCodes.has(m.product_code)) || (!!info && typeof plInThisWeeksPlan === 'function' && plInThisWeeksPlan(info.it));
+}
+
+// Where the engine has a result for the product, "+ Shoot" is the Creative Opportunities add (the colourways ticked in the expanded row go into the Shoot Plan, one product record for the whole
+// family); otherwise it opens the existing Shoot Plan form for the product, as before.
 function coreActionHtml(fam, info, selectedCodes) {
-  if (fam.members.some((m) => selectedCodes.has(m.product_code))) return '<span class="core-shoot-selected-badge">✓ Shooting</span>';
-  const quiet = info && (info.cat === 'covered' || info.cat === 'hidden');
+  if (coreFamilySelected(fam, info, selectedCodes)) return '<span class="core-shoot-selected-badge">✓ Shooting</span>';
+  const readOnly = typeof plReadOnly === 'function' && plReadOnly();
+  const quiet = readOnly || (info && (info.cat === 'covered' || info.cat === 'hidden'));
   if (quiet) return `<button type="button" class="cat2-view" data-core-fam="${escapeHtml(fam.id)}" aria-label="View ${escapeHtml(fam.name)}">View</button>`;
-  const primary = (info && fam.members.find((m) => m.product_code === info.it.product_code)) || fam.members[0];
+  if (info) return `<button type="button" class="cat2-shoot" data-opp-add="${escapeHtml(info.it.key)}" aria-label="Add ${escapeHtml(fam.name)} to this week's Shoot Plan">+ Shoot</button>`;
+  const primary = fam.members[0];
   return `<button type="button" class="cat2-shoot" onclick="shootThisWeekForCore('${escapeHtml(primary.product_code)}')" aria-label="Add ${escapeHtml(fam.name)} to this week's Shoot Plan">+ Shoot</button>`;
 }
 
@@ -7174,22 +7182,25 @@ function coreFamilyColourCount(fam) {
   return fam.members.reduce((n, p) => n + (p.colours || []).length, 0);
 }
 
-function coreFamilyDetailHtml(fam, info, selectedCodes, cs, sales, stock) {
+// Expanded product: the Creative Opportunities components (picture and colourway thumbnails, recommendation banner, metric cards, selectable colourway cards, View Meta Ads), with the
+// catalogue's own Sales (7D) and Inventory numbers. Anything less important sits in the collapsed "More details". Nothing is recalculated: sales and stock are the Demand Planning data,
+// the banner and the Creative Performance card are the engine's result for the product.
+function coreFamilyMoreHtml(fam, info, sales, stock) {
   const sum = (key) => fam.members.reduce((n, p) => n + (p[key] || 0), 0);
   const cad = fam.members.map((p) => p.cadence).filter((c) => c && c.has_data);
   const mtd = cad.reduce((a, c) => ({ cur: a.cur + (c.this_period_units || 0), ly: a.ly + (c.last_year_units || 0) }), { cur: 0, ly: 0 });
   const mtdPct = mtd.ly > 0 ? Math.round(((mtd.cur - mtd.ly) / mtd.ly) * 100) : null;
   const row = (k, v) => `<div class="cat2-kv"><span>${escapeHtml(k)}</span><b>${v}</b></div>`;
   const trend = coreCategoryTrendInfo(fam.category);
+  const incoming = fam.members.some((p) => (p.reason_chips || []).some((c) => / Incoming$/.test(c)));
+  const lastConcept = fam.members.map((p) => p.days_since_last_new_concept).filter((d) => d != null);
   const salesBlock = `<div class="cat2-block"><h4>Sales</h4>
-      ${row('Last 7 days', sales ? `${coreNum(sales.cur)} units` : '&mdash;')}
       ${row('Previous 7 days', sales && sales.prev != null ? `${coreNum(sales.prev)} units` : '&mdash;')}
       ${row('This month', cad.length ? `${coreNum(mtd.cur)} units` : '&mdash;')}
       ${row('Same days last year', cad.length ? `${coreNum(mtd.ly)} units${mtdPct === null ? '' : ` (${mtdPct > 0 ? '+' : ''}${mtdPct}%)`}` : '&mdash;')}
       ${row('Weekly rate 7D / 30D / 365D', `${sum('vel7').toFixed(1)} / ${sum('vel30').toFixed(1)} / ${sum('vel365').toFixed(1)}`)}
-      ${trend.hasData ? `<div class="cat2-trend"><span class="cat2-trend-h">${escapeHtml(coreTitleCase(fam.category))} category, last months vs last year</span>${coreCadenceCellHtml(trend)}</div>` : ''}
+      ${trend.hasData ? `<div class="cat2-trend"><span class="cat2-trend-h">${escapeHtml(coreTitleCase(fam.category))} category, monthly sales vs last year</span>${coreCadenceCellHtml(trend)}</div>` : ''}
     </div>`;
-  const incoming = fam.members.some((p) => (p.reason_chips || []).some((c) => / Incoming$/.test(c)));
   const stockBlock = `<div class="cat2-block"><h4>Inventory</h4>
       ${row('Stock on hand', stock.soh === null ? '&mdash;' : coreNum(stock.soh))}
       ${row('On order', stock.onOrder === null ? '&mdash;' : coreNum(stock.onOrder))}
@@ -7199,32 +7210,52 @@ function coreFamilyDetailHtml(fam, info, selectedCodes, cs, sales, stock) {
   let creative = '';
   if (info) {
     const card = PE.creativeCard(info.it);
-    const parts = card.kind === 'active' ? [`${card.performing} performing`, card.underperforming ? `${card.underperforming} underperforming` : '', card.declining ? `${card.declining} declining` : '', card.awaiting ? `${card.awaiting} awaiting data` : ''].filter(Boolean).join(' · ') : card.kind === 'none' ? 'No active creative' : 'Meta creative data unavailable';
-    creative = `${row('Creative performance', escapeHtml(parts))}${card.history ? row('Creatives ever made', coreNum(card.history.allTime)) : ''}<div class="cat2-fresh">${plCatalogueFreshnessHtml(info)}</div>`;
+    creative = `${card.history ? row('Creatives ever made', coreNum(card.history.allTime)) : ''}${card.history ? row('Earlier creatives (not active now)', coreNum(card.history.earlier)) : ''}<div class="cat2-fresh">${plCatalogueFreshnessHtml(info)}</div>`;
   }
-  const lastConcept = fam.members.map((p) => p.days_since_last_new_concept).filter((d) => d != null);
-  const creativeBlock = `<div class="cat2-block"><h4>Creative</h4>
-      ${creative || '<div class="cat2-note">Creative results are not loaded.</div>'}
+  const creativeBlock = `<div class="cat2-block"><h4>Creative history</h4>
+      ${creative}
       ${row('Last new concept', lastConcept.length ? coreDaysAgo(Math.min(...lastConcept)) : 'Never')}
       ${fam.members[0].reason ? `<div class="cat2-note">${escapeHtml(fam.members[0].reason)}</div>` : ''}
-    </div>`;
-  const colours = fam.members.map((p) => {
-    const sel = selectedCodes.has(p.product_code);
-    const act = sel ? '<span class="core-shoot-selected-badge">✓ Shooting</span>' : `<button type="button" class="cat2-view" onclick="shootThisWeekForCore('${escapeHtml(p.product_code)}')">+ Shoot</button>`;
-    const cl = (p.colours || []).map((c) => `<li>${c.image_url ? `<img src="${escapeHtml(c.image_url)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.remove()">` : '<i></i>'}<span>${escapeHtml(c.colour_label || c.style_code || '')}</span><em>${c.soh != null ? coreNum(c.soh) : '—'} on hand${c.on_order ? ` · ${coreNum(c.on_order)} on order` : ''}</em></li>`).join('');
-    return `<div class="cat2-member"><div class="cat2-member-h"><b>${escapeHtml(p.product_name)}${coreColourwaySuffixHtml(p)}</b>${fam.members.length > 1 ? act : ''}</div><ul>${cl}</ul></div>`;
-  }).join('');
-  const codes = info && (info.it.codes || (info.it.product_code ? [info.it.product_code] : []));
-  const actions = `<div class="cat2-actions">
-      ${info && codes && codes.length ? `<button type="button" class="cat2-link" data-core-meta="${escapeHtml(fam.id)}">View Meta ads &rarr;</button>` : ''}
       <button type="button" class="cat2-link" onclick="planNewConceptForCore('${escapeHtml(fam.members[0].product_code)}')">Plan a new concept</button>
-      ${fam.members.length === 1 && !selectedCodes.has(fam.members[0].product_code) ? `<button type="button" class="cat2-link" onclick="shootThisWeekForCore('${escapeHtml(fam.members[0].product_code)}')">Add to this week's shoot</button>` : ''}
     </div>`;
-  return `<div class="cat2-detail" id="cat2-detail-${escapeHtml(fam.id)}">
-    <div class="cat2-detail-grid">${salesBlock}${stockBlock}${creativeBlock}</div>
-    <div class="cat2-block cat2-colours"><h4>Colourways${coreFamilyColourCount(fam) ? ` (${coreFamilyColourCount(fam)})` : ''}</h4><div class="cat2-members">${colours}</div></div>
-    ${actions}
-  </div>`;
+  return `<div class="cat2-more-body">${salesBlock}${stockBlock}${creativeBlock}</div>`;
+}
+
+function coreFamilyDetailHtml(fam, info, selectedCodes, cs, sales, stock) {
+  const it = info ? info.it : null; const cfg = typeof plCfg === 'function' ? plCfg() : {};
+  const colours = fam.members.flatMap((p) => p.colours || []);
+  const imageUrl = (it && it.image_url) || (colours.find((c) => c.image_url) || {}).image_url || '';
+  const pic = `<div class="pl-cx-pic">${plMainImg(imageUrl)}${plCoreThumbs(it || { image_url: imageUrl, colourways: colours })}</div>`;
+  const banner = info && info.cat === 'needs'
+    ? `<div class="pl-cx-why" data-tone="${escapeHtml(cs.tone)}"><span class="pl-cx-why-ic">${PL_ICON.target}</span><div><span class="pl-status" data-tone="${escapeHtml(cs.tone)}"><i aria-hidden="true"></i>${escapeHtml(cs.label)}</span><p>${escapeHtml(PE.whyShoot(it, cfg))}</p></div></div>`
+    : '';
+  const unit = (t) => `<span class="cat2-unit">${t}</span>`;
+  const delta = sales && sales.pct !== undefined && sales.pct !== null
+    ? `<span class="cat2-delta" data-tone="${sales.pct > 0 ? 'up' : sales.pct < 0 ? 'down' : 'flat'}">${sales.pct > 0 ? '&uarr; ' : sales.pct < 0 ? '&darr; ' : '&rarr; '}${Math.abs(sales.pct)}% vs previous 7 days</span>`
+    : `<span class="cat2-delta" data-tone="flat">${sales && sales.pct === null ? 'New: nothing sold the previous 7 days' : '&mdash;'}</span>`;
+  const units30 = it && it.facts && it.facts.units30 != null ? it.facts.units30 : Math.round(fam.members.reduce((n, p) => n + (p.vel30 || 0), 0) * 30 / 7);
+  const weeks = stock.weeks != null ? `${coreNum(stock.weeks)} weeks cover` : (stock.noSales ? 'No recent sales' : '');
+  const lastConcept = fam.members.map((p) => p.days_since_last_new_concept).filter((d) => d != null);
+  const lead = lastConcept.length ? `<small>Last new concept: ${escapeHtml(coreDaysAgo(Math.min(...lastConcept)))}</small>` : '<small>Last new concept: never</small>';
+  const salesCard = plMetricCard(PL_ICON.chart, 'green', sales ? `${coreNum(sales.cur)} ${unit('units')}` : '&ndash;', delta, `${coreNum(units30)} units in 30 days`, '', { head: 'Sales' });
+  const stockCard = plMetricCard(PL_ICON.cube, 'purple', stock.soh === null ? '&ndash;' : `${coreNum(stock.soh)} ${unit('SOH')}`, stock.onOrder === null ? '' : `${coreNum(stock.onOrder)} on order`, weeks, '', { head: 'Inventory' });
+  const creativeCard = it ? plCreativeCardHtml(it, lead) : plMetricCard(PL_ICON.video, 'purple', '&ndash;', 'Creative results are not loaded', '', lead, { head: 'Creative Performance' });
+  let cws;
+  if (it) cws = plCoreColourCards(it);
+  else cws = `<section class="pl-cx-cws"><div class="pl-cx-cws-h"><h5>Colourways</h5><span class="pl-cx-count">${colours.length} colourway${colours.length === 1 ? '' : 's'}</span></div><ul class="pl-cc-grid">${colours.map((c) => `<li class="pl-cc ok">${plTileImg(c.image_url)}<span class="pl-cc-body"><b>${escapeHtml(c.colour_label || c.style_code || '')}</b><span class="pl-cc-stock">${c.soh != null ? `${coreNum(c.soh)} units` : '—'}</span></span></li>`).join('')}</ul></section>`;
+  const meta = it && plHasMetaAds(it) ? `<button type="button" class="btn btn-sm pl-metalink" data-opp-meta="${escapeHtml(it.key)}">View Meta Ads &rarr;</button>` : '';
+  const open = state.coreMoreOpen.has(fam.id);
+  return `<div class="cat2-detail" id="cat2-detail-${escapeHtml(fam.id)}"><div class="pl-cx cat2-x">
+    <div class="pl-cx-top">
+      ${pic}
+      <div class="pl-cx-main">
+        ${banner}
+        <div class="pl-cx-metrics">${salesCard}${stockCard}${creativeCard}</div>
+        ${cws}
+      </div>
+    </div>
+    <div class="cat2-foot"><details class="cat2-more" data-core-more="${escapeHtml(fam.id)}"${open ? ' open' : ''}><summary>More details</summary>${coreFamilyMoreHtml(fam, info, sales, stock)}</details>${meta}</div>
+  </div></div>`;
 }
 
 function coreFamilyRowHtml(r, selectedCodes) {
@@ -7323,12 +7354,6 @@ function renderCoreProducts() {
 
 // One delegated handler for the list (the list is re-rendered, the element is not): the product cell and the "View" button open / close a row; "View Meta ads" opens the product's Meta ads.
 function coreCatalogueListClick(e) {
-  const meta = e.target.closest('[data-core-meta]');
-  if (meta) {
-    const fam = coreFamilies().find((f) => f.id === meta.dataset.coreMeta); const info = fam && coreFamilyInfo(fam, plCatalogueMap());
-    if (info) mpOpenProduct({ codes: (info.it.codes || [info.it.product_code]).filter(Boolean), label: info.it.name || fam.name, key: info.it.key, from: 'core-catalogue' });
-    return;
-  }
   const t = e.target.closest('.cat2-toggle, .cat2-view[data-core-fam]');
   if (t) { const item = t.closest('[data-core-fam]'); toggleCoreProduct(t.dataset.coreFam || item.dataset.coreFam); }
 }
@@ -19341,6 +19366,7 @@ document.querySelectorAll('.core-view-btn').forEach((btn) => {
 });
 document.getElementById('core-shoot-planning-list').addEventListener('click', coreCatalogueListClick);
 document.querySelectorAll('#core-cat-filters [data-core-filter]').forEach((b) => b.addEventListener('click', () => setCoreFilter(b.dataset.coreFilter)));
+document.getElementById('core-shoot-planning-list').addEventListener('toggle', (e) => { const d = e.target; if (d && d.dataset && d.dataset.coreMore) { if (d.open) state.coreMoreOpen.add(d.dataset.coreMore); else state.coreMoreOpen.delete(d.dataset.coreMore); } }, true);
 document.getElementById('core-cat-search').addEventListener('input', (e) => { state.coreSearch = e.target.value; renderCoreShootPlanning(); });
 
 checkSession();

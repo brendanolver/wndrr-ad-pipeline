@@ -53,7 +53,7 @@ test('card: previous creatives = all-time unique creatives not on an active ad; 
 });
 
 test('card wording and colours (display only)', () => {
-  const m = fn('plCoreMetrics').replace(/^\s*\/\/.*$/gm, '');
+  const m = fn('plCreativeCardHtml').replace(/^\s*\/\/.*$/gm, '');
   assert.match(m, /No Active Creative/); assert.match(m, /No ads currently running for this product/);
   assert.doesNotMatch(m, /0 of 0/, 'no "0 of 0" figure'); assert.match(m, /cc\.kind === 'none'/);
   assert.match(m, /`\$\{plNum\(cc\.performing\)\} of \$\{plNum\(cc\.total\)\}`/, 'headline: effective active creatives of all active creatives');

@@ -11,7 +11,7 @@ const read = (...p) => fs.readFileSync(path.join(__dirname, '..', ...p), 'utf8')
 const app = read('public', 'app.js'); const pl = read('public', 'planning.js'); const html = read('public', 'index.html'); const css = read('public', 'styles.css');
 const fnSrc = (src, name) => { const i = src.indexOf(`function ${name}(`); return src.slice(i, src.indexOf('\n}\n', i) + 2); };
 const escapeHtml = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-const names = ['coreFamilies', 'coreFamilySales', 'coreSalesCellHtml', 'coreFamilyStock', 'coreStockCellHtml', 'coreCreativeStatus', 'coreFamilyPriority', 'coreFamilyInfo', 'coreActionHtml'];
+const names = ['coreFamilies', 'coreFamilySales', 'coreSalesCellHtml', 'coreFamilyStock', 'coreStockCellHtml', 'coreCreativeStatus', 'coreFamilyPriority', 'coreFamilyInfo', 'coreFamilySelected', 'coreActionHtml'];
 const state = { coreProducts: [] };
 const plCatalogueSupport = new Function('plNum', `${fnSrc(pl, 'plCatalogueSupport')}; return plCatalogueSupport;`)((v) => Number(v || 0).toLocaleString('en-AU'));
 const C = new Function('state', 'escapeHtml', 'PE', 'plCatalogueSupport', `
@@ -84,7 +84,8 @@ test('Creative Status: one badge and one short line, from the engine\'s own resu
 
 test('Action: + Shoot where creative is needed, ✓ Shooting once selected, a quiet View for covered products', () => {
   const fam = { id: 'A1', name: 'Offend Tee', members: [prod('A1')] };
-  assert.match(C.coreActionHtml(fam, needs('x'), new Set()), /class="cat2-shoot"[^>]*onclick="shootThisWeekForCore\('A1'\)"[^>]*>\+ Shoot</);
+  assert.match(C.coreActionHtml(fam, needs('x'), new Set()), /class="cat2-shoot"[^>]*data-opp-add="k"[^>]*>\+ Shoot</, 'engine result: the Creative Opportunities add, which carries the ticked colourways');
+  assert.match(C.coreActionHtml(fam, null, new Set()), /onclick="shootThisWeekForCore\('A1'\)"/, 'no engine result: the existing Shoot Plan form');
   assert.match(C.coreActionHtml(fam, needs('x'), new Set(['A1'])), /✓ Shooting/); assert.doesNotMatch(C.coreActionHtml(fam, needs('x'), new Set(['A1'])), /\+ Shoot/);
   const cov = C.coreActionHtml(fam, { cat: 'covered', it: {} }, new Set()); assert.match(cov, /class="cat2-view"/); assert.doesNotMatch(cov, /\+ Shoot|\+ Plan/);
   assert.match(C.coreActionHtml(fam, null, new Set()), /\+ Shoot/, 'nothing assessed: the earlier + Shoot action stays');
@@ -129,4 +130,20 @@ test('styling: white rows with soft dividers, a black + Shoot, soft badge tones,
   assert.match(css, /\.cat2-shoot\{[^}]*background:#111/); assert.match(css, /\.cat2-badge\[data-tone="red"\]/); assert.match(css, /\.cat2-delta\[data-tone="up"\]\{color:#15803d/);
   assert.match(css, /\.cat2-item\{border-bottom:1px solid var\(--border\)/);
   assert.doesNotMatch(css.slice(css.indexOf('Core Product Catalogue: five columns')), /\.cat2-item\.open\{[^}]*background/);
+});
+
+test('expanded product: the Creative Opportunities components, a banner only when attention is needed, collapsed More details', () => {
+  const d = fnSrc(app, 'coreFamilyDetailHtml');
+  for (const c of ['plMainImg(', 'plCoreThumbs(', 'plMetricCard(', 'plCreativeCardHtml(', 'plCoreColourCards(it)', 'plHasMetaAds(it)', 'data-opp-meta=']) assert.ok(d.includes(c), `reuses ${c}`);
+  assert.match(d, /info && info\.cat === 'needs'\s*\?[\s\S]*PE\.whyShoot\(it, cfg\)[\s\S]*:\s*''/, 'the recommendation banner is only for products the engine says need creative, with the engine\'s own sentence');
+  assert.match(d, /<details class="cat2-more"[^>]*>(?!.*\bopen\b)/, 'More details is a collapsed disclosure');
+  assert.match(d, /head: 'Sales'/); assert.match(d, /head: 'Inventory'/); assert.match(d, /vs previous 7 days/); assert.match(d, /units in 30 days/);
+  const more = fnSrc(app, 'coreFamilyMoreHtml');
+  for (const k of ['Previous 7 days', 'Weekly rate 7D / 30D / 365D', 'monthly sales vs last year', 'Same days last year', 'Creatives ever made', 'Weeks of cover', 'On order']) assert.ok(more.includes(k), k);
+  assert.match(pl, /plRenderCore, plRenderHighStocks, renderCoreShootPlanning/, 'a Shoot Plan change refreshes the catalogue too');
+});
+
+test('Creative Performance card is one shared implementation for the Core table and the catalogue', () => {
+  assert.match(fnSrc(pl, 'plCoreMetrics'), /plCreativeCardHtml\(it\)/);
+  assert.match(fnSrc(app, 'coreFamilyDetailHtml'), /plCreativeCardHtml\(it, lead\)/);
 });

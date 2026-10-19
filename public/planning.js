@@ -303,13 +303,12 @@ function plCoreColourCards(it) {
   };
   return `<section class="pl-cx-cws"><div class="pl-cx-cws-h"><h5>Available colourways</h5><span class="pl-cx-count">${viableN} of ${cws.length} can be shot now &middot; <span data-opp-count="${plEsc(it.key)}">${picked.size} selected</span></span></div><ul class="pl-cc-grid">${cws.map(card).join('')}</ul></section>`;
 }
-// three metric cards: Sales 30D with its 7-day trend, Stock on hand with weeks of cover, Active / effective creatives
-function plCoreMetrics(it) {
-  const f = it.facts || {};
-  const cover = f.cover_weeks !== null && f.cover_weeks !== undefined ? `${f.cover_weeks} weeks of cover` : '';
-  // Creative Performance card (display only; the counts are the engine's, see PE.creativeCard). Headline = effective active creatives of all active creatives. With no active creative the
-  // headline says so instead of "0 of 0". Only the non-zero categories are listed: underperforming (subtle red, confirmed over the approved limit) and awaiting data (muted grey: still
-  // testing, not enough delivery, no approved benchmark yet). A creative with no approved benchmark is never counted as underperforming.
+// one metric card (shared by the Core table's expanded row and the Core Catalogue's expanded row)
+const plMetricCard = (icon, tone, value, label, sub, extra = '', { head = '', valCls = '' } = {}) => `<div class="pl-cm">${head ? `<span class="pl-cm-h">${head}</span>` : ''}<span class="pl-cm-ic" data-tone="${tone}">${icon}</span><b${valCls ? ` class="${valCls}"` : ''}>${value}</b><span class="pl-cm-l">${label}</span>${sub ? `<small>${sub}</small>` : ''}${extra}</div>`;
+// Creative Performance card (display only; the counts are the engine's, see PE.creativeCard). Headline = effective active creatives of all active creatives. With no active creative the
+// headline says so instead of "0 of 0". Only the non-zero categories are listed: underperforming (subtle red, confirmed over the approved limit) and awaiting data (muted grey: still
+// testing, not enough delivery, no approved benchmark yet). A creative with no approved benchmark is never counted as underperforming. `lead` is an optional line above the subtle history line.
+function plCreativeCardHtml(it, lead = '') {
   const cc = PE.creativeCard(it);
   const part = (n, text, cls) => `<span class="${cls}">${plNum(n)} ${text}</span>`;
   let eff; let effLabel; let effSub = ''; let effCls = '';
@@ -322,11 +321,16 @@ function plCoreMetrics(it) {
   }
   const hist = cc.history;
   const histLine = hist ? `<small class="pl-cm-hist" title="Unique creatives matched to this product (any status, a creative run in several campaigns counts once) that are not on an active ad now. Only ads in the synced Meta data that are matched to this product are counted.">${hist.earlier > 0 ? `${plNum(hist.earlier)} past ${hist.earlier === 1 ? 'creative' : 'creatives'}` : 'No past creatives'}</small>` : '';
-  const card = (icon, tone, value, label, sub, extra = '', { head = '', valCls = '' } = {}) => `<div class="pl-cm">${head ? `<span class="pl-cm-h">${head}</span>` : ''}<span class="pl-cm-ic" data-tone="${tone}">${icon}</span><b${valCls ? ` class="${valCls}"` : ''}>${value}</b><span class="pl-cm-l">${label}</span>${sub ? `<small>${sub}</small>` : ''}${extra}</div>`;
+  return plMetricCard(PL_ICON.video, 'purple', eff, effLabel, effSub, `${lead}${histLine}`, { head: 'Creative Performance', valCls: effCls });
+}
+// three metric cards: Sales 30D with its 7-day trend, Stock on hand with weeks of cover, Active / effective creatives
+function plCoreMetrics(it) {
+  const f = it.facts || {};
+  const cover = f.cover_weeks !== null && f.cover_weeks !== undefined ? `${f.cover_weeks} weeks of cover` : '';
   return `<div class="pl-cx-metrics">
-    ${card(PL_ICON.chart, 'green', f.units30 === null || f.units30 === undefined ? '&ndash;' : plNum(f.units30), 'Sales (30D)', plTrendHtml(it, true))}
-    ${card(PL_ICON.cube, 'purple', f.stock_units === null || f.stock_units === undefined ? '&ndash;' : plNum(f.stock_units), 'Stock on hand', plEsc(cover))}
-    ${card(PL_ICON.video, 'purple', eff, effLabel, effSub, histLine, { head: 'Creative Performance', valCls: effCls })}
+    ${plMetricCard(PL_ICON.chart, 'green', f.units30 === null || f.units30 === undefined ? '&ndash;' : plNum(f.units30), 'Sales (30D)', plTrendHtml(it, true))}
+    ${plMetricCard(PL_ICON.cube, 'purple', f.stock_units === null || f.stock_units === undefined ? '&ndash;' : plNum(f.stock_units), 'Stock on hand', plEsc(cover))}
+    ${plCreativeCardHtml(it)}
   </div>`;
 }
 function plHasMetaAds(it) { const f = it.facts || {}; return (f.live_creatives || 0) > 0 || (f.active_ads || 0) > 0 || !!(it.last_creative && it.last_creative.creatives_total > 0); }
@@ -666,7 +670,7 @@ async function plRefreshSelection() {
   const [items, progress] = await Promise.all([api(`/shoot-plan?week_start=${w}`), apiAllowedOr(`/shoot-plan/progress?week_start=${w}`, null)]);
   state.shootPlan = items;
   if (progress) state.conceptProgress = progress;
-  for (const fn of [plRenderCore, plRenderHighStocks, renderProductionHeader, renderShootPlanStep, renderPlanningShootSummary, plSyncChrome]) { try { fn(); } catch (e) { console.error('selection refresh failed', e); } }
+  for (const fn of [plRenderCore, plRenderHighStocks, renderCoreShootPlanning, renderProductionHeader, renderShootPlanStep, renderPlanningShootSummary, plSyncChrome]) { try { fn(); } catch (e) { console.error('selection refresh failed', e); } }
   try { if (state.insights && state.insights.data && state.planningStep === 'creative-insights') plRenderInsights(); } catch (e) { /* insights optional */ }
 }
 async function plQuickAdd(key, extra = {}) {

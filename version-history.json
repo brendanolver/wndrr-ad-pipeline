@@ -2,6 +2,17 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.6.1",
+      "date": "2026-10-20",
+      "title": "Core Catalogue expanded product view",
+      "changes": [
+        "Expanding a Core Catalogue product now shows the Creative Opportunities layout: large picture with colourway thumbnails, a recommendation banner only for products that need creative, and Sales (7D), Inventory and Creative Performance cards",
+        "Selectable colourway cards (ready to shoot, out of stock, sizes) reuse the Creative Opportunities selection: ticked colourways go into the Shoot Plan as one product record",
+        "Less important information (previous 7 days, monthly and yearly comparisons, velocity, creative history) moved into a collapsed More details, with a View Meta Ads link",
+        "No calculation or recommendation changed; the Creative Performance card is now one shared component"
+      ]
+    },
+    {
       "version": "1.6.0",
       "date": "2026-10-19",
       "title": "Core Product Catalogue redesign",
