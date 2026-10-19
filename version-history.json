@@ -2,6 +2,17 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.5.5",
+      "date": "2026-10-19",
+      "title": "Core Shoot Planning badges",
+      "changes": [
+        "Creative Attention shows a red N need creative or green Covered badge, with awaiting review as muted text underneath",
+        "Creative Freshness shows amber N stale (with Oldest: N days ago) or green Up to date (with Latest: N days ago); neutral Not assessed when there is not enough data",
+        "This Week's Shoot shows a green N Selected badge or a grey dash",
+        "Display only: existing counts, thresholds and Shoot Plan data are unchanged"
+      ]
+    },
+    {
       "version": "1.5.4",
       "date": "2026-10-19",
       "title": "Subtler past creatives line",

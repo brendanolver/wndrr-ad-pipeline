@@ -246,12 +246,16 @@ function plCatalogueMap() {
 }
 // the two category-level numbers: how many products need creative attention (and how many of those are High priority), and how many have stale (or no) creative
 function plCatalogueStats(products, map) {
-  const seen = new Set(); const out = { matched: 0, needs: 0, high: 0, review: 0, stale: 0 };
+  // assessed = products that have a freshness verdict (recent / ageing / stale / no creative); latestDays / oldestDays = the newest and the oldest "latest creative" age among those with a reliable date
+  const seen = new Set(); const out = { matched: 0, needs: 0, high: 0, review: 0, stale: 0, assessed: 0, latestDays: null, oldestDays: null };
   for (const p of products) {
     const info = map.get(p.product_code); if (!info || seen.has(info.it.key)) continue; seen.add(info.it.key);
     out.matched += 1;
     if (info.cat === 'needs') { out.needs += 1; if (info.high) out.high += 1; } else if (info.cat === 'review') out.review += 1;
     if (info.band && info.band.key === 'stale') out.stale += 1;
+    if (info.band) out.assessed += 1;
+    const d = info.cov && info.cov.latestKnown && info.cov.days !== null && info.cov.days !== undefined ? info.cov.days : null;
+    if (d !== null) { out.latestDays = out.latestDays === null ? d : Math.min(out.latestDays, d); out.oldestDays = out.oldestDays === null ? d : Math.max(out.oldestDays, d); }
   }
   return out;
 }

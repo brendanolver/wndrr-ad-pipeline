@@ -7325,21 +7325,38 @@ function core7dCellHtml(trend) {
     </div>`;
 }
 
-// Category-level Creative Attention / Freshness: the Core table's own counts (products needing creative, High priority among them, products needing review, products whose latest
-// creative is stale or missing); the older flag counts only while those results are not loaded.
+// Category-level Creative Attention / Freshness / This Week's Shoot, as compact badges. Everything comes from the existing results: the Core table's own counts (products needing creative,
+// products awaiting review, products whose latest creative is stale or missing, with the Planning thresholds), and this week's Shoot Plan. Attention and Freshness are independent: a
+// category can be Covered and still hold stale creative. The older flag counts are used only while the Core table's results are not loaded.
+const CORE_BADGE_ICON = {
+  dot: '<i class="core-badge-dot" aria-hidden="true"></i>',
+  check: '<svg class="core-badge-ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="currentColor" stroke="none" opacity=".16"/><path d="M7.5 12.5l3 3 6-6.5"/></svg>',
+  clock: '<svg class="core-badge-ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/></svg>',
+};
+const coreBadge = (tone, icon, text, title) => `<span class="core-badge" data-tone="${tone}"${title ? ` title="${escapeHtml(title)}"` : ''}>${CORE_BADGE_ICON[icon] || ''}${escapeHtml(text)}</span>`;
+const coreCellStack = (badge, sub) => `<div class="core-cell-stack">${badge}${sub ? `<span class="core-cell-sub">${escapeHtml(sub)}</span>` : ''}</div>`;
+const coreDaysAgo = (d) => (d === 0 ? 'today' : `${d} ${d === 1 ? 'day' : 'days'} ago`);
+
 function coreCategoryAttentionHtml(cat) {
-  if (!cat.eng) return cat.needsAttention ? `<span class="core-shoot-stat"><span class="dot dot-r" aria-hidden="true"></span> <span class="core-shoot-stat-count core-shoot-count-red">${cat.needsAttention}</span> needing attention</span>` : '';
+  if (!cat.eng) return cat.needsAttention ? coreCellStack(coreBadge('red', 'dot', `${cat.needsAttention} need creative`)) : '';
   const s = cat.eng;
   if (!s.matched) return '<span class="core-cat-none">Not assessed</span>';
-  if (!s.needs && !s.review) return '<span class="core-shoot-stat core-cat-ok">&#10003; None needing attention</span>';
-  return `<div class="core-stat-stack">${s.needs ? `<span class="core-shoot-stat"><span class="dot dot-r" aria-hidden="true"></span> <span class="core-shoot-stat-count core-shoot-count-red">${s.needs}</span> needing attention</span>` : ''}${s.high ? `<span class="core-shoot-sub">${s.high} High priority</span>` : ''}${s.review ? `<span class="core-shoot-sub">${s.review} need${s.review === 1 ? 's' : ''} review</span>` : ''}</div>`;
+  const review = s.review ? `${s.review} awaiting review` : '';
+  if (s.needs) return coreCellStack(coreBadge('red', 'dot', `${s.needs} need creative`, s.high ? `${s.high} High priority` : ''), review);
+  if (s.review >= s.matched) return coreCellStack(coreBadge('neutral', 'dot', 'Awaiting review')); // nothing here is assessed yet, so it is not "covered"
+  return coreCellStack(coreBadge('green', 'check', 'Covered'), review);
 }
+// Freshness: amber when any product's latest creative is stale or missing (the existing bands and thresholds); green "Up to date" only when EVERY product in the category has a freshness
+// verdict and none is stale; otherwise a neutral "Not assessed" (never "Up to date" on too little data).
 function coreCategoryFreshnessHtml(cat) {
-  if (!cat.eng) return cat.stale ? `<span class="core-shoot-stat">${cat.stale} stale/untested</span>` : '';
+  if (!cat.eng) return cat.stale ? coreCellStack(coreBadge('amber', 'clock', `${cat.stale} stale`)) : '';
   const s = cat.eng;
   if (!s.matched) return '<span class="core-cat-none">&mdash;</span>';
-  return s.stale ? `<div class="core-stat-stack"><span class="core-shoot-stat"><span class="core-shoot-stat-count core-shoot-count-amber">${s.stale}</span> stale</span><span class="core-shoot-sub">latest creative old or none</span></div>` : '<span class="core-shoot-stat core-cat-ok">&#10003; None stale</span>';
+  if (s.stale) return coreCellStack(coreBadge('amber', 'clock', `${s.stale} stale`, 'Products whose latest creative is old, or that have none (Planning settings set the thresholds)'), s.oldestDays !== null ? `Oldest: ${coreDaysAgo(s.oldestDays)}` : '');
+  if (cat.total > 0 && s.assessed === cat.total) return coreCellStack(coreBadge('green', 'check', 'Up to date'), s.latestDays !== null ? `Latest: ${coreDaysAgo(s.latestDays)}` : '');
+  return coreCellStack(coreBadge('neutral', 'clock', 'Not assessed', 'Not every product in this category has a reliable creative date, so freshness cannot be confirmed'), s.assessed ? `${s.assessed} of ${cat.total} assessed` : '');
 }
+const coreSelectedHtml = (n) => (n ? `<span class="core-badge" data-tone="green">${CORE_BADGE_ICON.check}${n} Selected</span>` : '<span class="core-dash" aria-label="Nothing selected">&mdash;</span>');
 
 function coreShootCategoryRowHtml(cat, selectedCodes, eng) {
   const isOpen = state.coreShootExpandedCategories.has(cat.name);
@@ -7365,7 +7382,7 @@ function coreShootCategoryRowHtml(cat, selectedCodes, eng) {
           ${coreCategoryFreshnessHtml(cat)}
         </span>
         <span class="core-shoot-stat-col">
-          ${cat.selectedCount ? `<span class="core-shoot-stat core-shoot-stat-selected">✓ ${cat.selectedCount} selected this week</span>` : ''}
+          ${coreSelectedHtml(cat.selectedCount)}
         </span>
       </button>
       ${isOpen ? `<div class="core-shoot-category-body">
