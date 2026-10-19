@@ -89,9 +89,7 @@ function plTrayThumb(i) {
   // each thumbnail carries its own remove control (visible on hover / keyboard focus, always visible on touch screens); it uses the Shoot Plan's normal removal, so a product
   // whose concepts have work on them stays in the plan and the dialog says why (removeShootPlanItem)
   const nm = plEsc(i.product_name || 'this product');
-  const cws = (i.styles || []).length; const cn = plConceptsFor(i.id).length;
-  const info = [cws ? plPlural(cws, 'colourway') : '', cn ? plPlural(cn, 'concept') : ''].filter(Boolean).join(' · ');
-  return `<span class="pl-tray-item"><span class="pl-tray-th" title="${nm}" data-pl-tray-item="${i.id}">${UX.garmentImgHtml({ url: img, front: i.front_image_url, category: i.category || i.product_name })}<span class="pl-tray-th-none" aria-hidden="true">${PL_NOIMG}</span><button type="button" class="pl-tray-x" data-pl-tray-remove="${i.id}" aria-label="Remove ${nm} from this week's Shoot Plan" title="Remove from plan"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></span><span class="pl-tray-cap" title="${nm}"><b>${nm}</b>${info ? `<small>${plEsc(info)}</small>` : ''}</span></span>`;
+  return `<span class="pl-tray-item"><span class="pl-tray-th" title="${nm}" data-pl-tray-item="${i.id}">${UX.garmentImgHtml({ url: img, front: i.front_image_url, category: i.category || i.product_name })}<span class="pl-tray-th-none" aria-hidden="true">${PL_NOIMG}</span><button type="button" class="pl-tray-x" data-pl-tray-remove="${i.id}" aria-label="Remove ${nm} from this week's Shoot Plan" title="Remove from plan"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></span><small class="pl-tray-cap" title="${nm}">${nm}</small></span>`;
 }
 function renderProductionHeader() {
   const el = document.getElementById('planning-production-header');
@@ -192,35 +190,38 @@ function plCoreProductCell(it) {
   const notCore = it.mode === 'momentum' && !it.is_core ? '<small class="pt-class">Not Core: recent launch</small>' : '';
   const prod = PE.productionActivity(it, PL_STAGE_LABEL);
   const inProd = prod.active ? `<small class="pt-prod" title="${plEsc(prod.text)}">In production</small>` : '';
-  return `<td class="pt-product"><div class="pt-pwrap"><span class="pt-thumb">${plThumb(it.image_url) || `<span class="pt-thumb-none">${PL_NOIMG}</span>`}</span><span class="pt-name"><b>${plEsc(it.name)}</b><small>${plEsc(it.category || '')}</small>${notCore}${inProd}</span></div></td>`;
+  return `<td class="pt-product"><div class="pt-pwrap"><span class="pt-thumb">${plThumb(it.image_url) || `<span class="pt-thumb-none">${PL_NOIMG}</span>`}</span><span class="pt-name"><b>${plEsc(it.name)}</b><small>${plEsc(it.category || '')}</small>${plCoreActiveAdsLine(it)}${notCore}${inProd}</span></div></td>`;
 }
 // the trend is shown the same way in the row and in the panel: colour only for rising / falling
 function plTrendHtml(it, long) {
   const tr = PE.salesTrend(it);
   const k = tr.kind === 'up' || tr.kind === 'down' || tr.pct === 0;
-  return `<span class="pl-trend" data-trend="${tr.kind}" title="${plEsc(tr.title)}">${tr.arrow ? `<i aria-hidden="true">${tr.arrow}</i> ` : ''}${plEsc(tr.text)}${k ? ` <span class="pl-trend-k">${long ? 'vs previous 7 days' : 'vs prior 7D'}</span>` : ''}</span>`;
+  return `<span class="pl-trend" data-trend="${tr.kind}" title="${plEsc(tr.title)}">${tr.arrow ? `<i aria-hidden="true">${tr.arrow}</i> ` : ''}${plEsc(tr.text)}${k ? ` <span class="pl-trend-k">${long ? 'vs previous 7 days' : '7D'}</span>` : ''}</span>`;
 }
 function plCoreSalesCell(it) {
   const f = it.facts || {};
   const partial = f.demand_basis === 'since_launch' && f.days_on_sale ? ` <em>${f.days_on_sale}d on sale</em>` : '';
-  return `<td class="pt-num pt-sales" title="${plEsc(((it.demand && it.demand.evidence) || []).join(' '))}"><b>${f.units30 === null || f.units30 === undefined ? plNone : plNum(f.units30)}</b>${f.units30 === null || f.units30 === undefined ? '' : ' <small class="pt-unit">units</small>'}${partial}${plTrendHtml(it, false)}</td>`;
+  return `<td class="pt-num pt-sales" title="${plEsc(((it.demand && it.demand.evidence) || []).join(' '))}"><b>${f.units30 === null || f.units30 === undefined ? plNone : plNum(f.units30)}</b><small>Sales 30D${partial}</small>${plTrendHtml(it, false)}</td>`;
 }
 function plCoreStockCell(it) {
   const f = it.facts || {}; const warn = PE.stockWarning(it);
   const cover = f.cover_weeks !== null && f.cover_weeks !== undefined ? `<small>${plEsc(f.cover_weeks)} weeks</small>` : '';
-  return `<td class="pt-num pt-stock" title="${plEsc(it.stock && it.stock.notes ? it.stock.notes.join(' ') : 'Available sellable stock, and weeks of cover at the current sales pace')}"><b>${f.stock_units === null || f.stock_units === undefined ? plNone : plNum(f.stock_units)}</b>${cover}${warn ? `<small class="pt-warn">${plEsc(warn)}</small>` : ''}</td>`;
+  return `<td class="pt-num pt-stock" title="${plEsc(it.stock && it.stock.notes ? it.stock.notes.join(' ') : 'Available sellable stock')}"><b>${f.stock_units === null || f.stock_units === undefined ? plNone : plNum(f.stock_units)}</b><small>In stock</small>${cover}${warn ? `<small class="pt-warn">${plEsc(warn)}</small>` : ''}</td>`;
 }
 // "Latest creative" column: the newest creative date written in the ad names (bold) and how long ago that was. Active Ads now sit under the product name (plCoreActiveAdsLine).
 const plAgo = (d) => (d === null || d === undefined ? '' : d === 0 ? 'today' : `${d} ${d === 1 ? 'day' : 'days'} ago`);
 function plCoreCoverageCell(it) {
-  const c = PE.coverage(it, ((state.opportunities || {}).today || '').slice(0, 4)); const cc = PE.creativeCounts(it);
-  if (!cc.known && (!c.known || c.latest === null)) return `<td class="pt-num pt-cov" title="${plEsc(c.title)}"><b>${plNone}</b></td>`;
-  const n = (v) => (v === null || v === undefined ? '&ndash;' : plNum(v));
-  const counts = `<b class="pt-cov-n">${n(cc.active)} Active <span class="pt-cov-dot" aria-hidden="true">&middot;</span> ${n(cc.effective)} Effective</b>`;
+  const c = PE.coverage(it, ((state.opportunities || {}).today || '').slice(0, 4));
+  if (!c.known || c.latest === null) return `<td class="pt-num pt-cov" title="${plEsc(c.title)}"><b>${plNone}</b></td>`;
   const warn = c.uncertain ? ' <em class="pt-warn" aria-label="A creative without a valid date may be newer">?</em>' : '';
-  const latest = c.latest === null ? '' : `<small class="pt-cov-latest">Latest: ${plEsc(c.latest)}${c.latestKnown && c.days !== null ? ` (${plEsc(plAgo(c.days))})` : ''}${warn}</small>`;
-  const extra = [cc.testing ? `${plNum(cc.testing)} testing` : '', cc.unrated ? `${plNum(cc.unrated)} unrated` : '', cc.underperforming ? `${plNum(cc.underperforming)} underperforming` : ''].filter(Boolean).join(', ');
-  return `<td class="pt-num pt-cov" title="${plEsc(`${c.title}${extra ? ` Also: ${extra}.` : ''} Effective = performing against the approved benchmark for its funnel; testing and unrated creatives are not counted as underperforming.`)}">${counts}${latest}</td>`;
+  const age = c.latestKnown && c.days !== null ? `<small>${plEsc(plAgo(c.days))}${warn}</small>` : (warn ? `<small>${warn}</small>` : '');
+  return `<td class="pt-num pt-cov" title="${plEsc(c.title)}"><b class="pt-cov-d${c.latestKnown ? '' : ' none'}">${plEsc(c.latest)}</b>${age}</td>`;
+}
+// "N Active Ads" under the product name
+function plCoreActiveAdsLine(it) {
+  const c = PE.coverage(it, ((state.opportunities || {}).today || '').slice(0, 4));
+  if (!c.known) return '';
+  return `<small class="pt-active" title="${plEsc(c.title)}">${c.activeKnown ? plNum(c.active) : plNone} Active ${c.activeKnown && c.active === 1 ? 'Ad' : 'Ads'}</small>`;
 }
 // ── "Browse the full Core catalogue": the SAME engine results as the Core table above, per product and per category ───────────────────────────────────────────────────────────────
 // Attention = the table's own status / category (needs creative | covered | needs review) and priority; Freshness = the table's "Latest creative" date, banded with the engine's own
@@ -254,101 +255,22 @@ function plCatalogueStats(products, map) {
   }
   return out;
 }
-// ── Core Catalogue: every Core product by category. The category row says how the category is selling and how much attention it needs; opening it shows its products in the SAME
-// table, row and expanded detail as Creative Opportunities (plCoreRowHtml / plProductPanelHtml), so a number can never differ between the two pages and Add to Shoot Plan
-// reads the one selection (state.shootPlan) either way. Nothing here classifies a product: attention is the engine's own category (needs creative | covered | needs review).
-state.catLimit = {};
-const PL_CAT_ROWS = 8;
-function plToggleCategory(name) {
-  const set = state.coreShootExpandedCategories; if (!set) return;
-  if (set.has(name)) set.delete(name); else set.add(name);
-  renderCoreShootPlanning();
+function plCatalogueAttentionHtml(info) {
+  if (!info) return '<span class="core-cat-none">Not assessed</span>';
+  const st = info.st; const pr = info.it.actionable && info.it.priority ? `<span class="opp-priority" data-priority="${plEsc(info.it.priority)}">${plEsc(info.it.priority)}</span>` : '';
+  const ads = info.cov.activeKnown ? `<small class="core-cat-ads">${plNum(info.cov.active)} Active ${info.cov.active === 1 ? 'Ad' : 'Ads'}</small>` : '';
+  return `<div class="core-cat-attn"><div class="core-cat-attn-top"><span class="pl-status" data-tone="${plEsc(st.tone)}"><i aria-hidden="true"></i>${plEsc(st.label)}</span>${pr}</div><span class="core-cat-why">${plEsc(st.text)}</span>${ads}</div>`;
 }
-function plSelectedByCategory() {
-  const catOf = new Map((state.coreProducts || []).map((p) => [p.product_code, p.category])); const out = new Map();
-  for (const i of plSelected()) { const c = catOf.get(i.product_code); if (c) out.set(c, (out.get(c) || 0) + 1); }
-  return out;
-}
-function plCatAttentionHtml(stats) {
-  if (!stats) return '<span class="pl-cat-mute">Not assessed</span>';
-  if (!stats.matched) return '<span class="pl-cat-mute">Not assessed</span>';
-  if (!stats.needs && !stats.review) return '<span class="pl-cat-ok">&#10003; All covered</span>';
-  return `${stats.needs ? `<span class="pl-cat-attn"><i data-tone="red" aria-hidden="true"></i>${stats.needs} ${stats.needs === 1 ? 'needs' : 'need'} attention</span>` : ''}${stats.review ? `<span class="pl-cat-attn pl-cat-sub"><i data-tone="grey" aria-hidden="true"></i>${stats.review} ${stats.review === 1 ? 'needs' : 'need'} review</span>` : ''}`;
-}
-function plCatTrendHtml(trend) {
-  if (!trend.hasData || trend.last7dUnits === null || trend.last7dUnits === undefined) return { units: plNone, trend: plNone };
-  const pct = trend.last7dPctChange; const kind = pct === null || pct === undefined ? 'new' : pct > 0 ? 'up' : pct < 0 ? 'down' : 'flat';
-  const tip = pct === null || pct === undefined ? 'No sales in the prior 7 days to compare against' : `${trend.last7dUnits} units in the last 7 days, ${pct > 0 ? '+' : ''}${pct}% against the 7 days before`;
-  return {
-    units: `<b>${plNum(trend.last7dUnits)}</b> <small>units</small>`,
-    trend: `<span class="pl-trend" data-trend="${kind}" title="${plEsc(tip)}">${kind === 'up' ? '<i aria-hidden="true">&uarr;</i> ' : kind === 'down' ? '<i aria-hidden="true">&darr;</i> ' : ''}${pct === null || pct === undefined ? 'New' : `${Math.abs(pct)}%`}${kind === 'new' ? '' : ' <span class="pl-trend-k">vs last week</span>'}</span>`,
-  };
-}
-function plCatMtdHtml(trend) {
-  if (!trend.hasData) return plNone;
-  const pct = trend.boxPctLabel === 'New' ? null : Number(String(trend.boxPctLabel).replace('%', ''));
-  return `<span title="${plEsc(trend.title)}">${plPctHtml(Number.isFinite(pct) ? pct : null)}</span>`;
-}
-function plCatMonthsHtml(name, trend) {
-  if (!trend.hasData || !(trend.months || []).length) return '';
-  const open = state.oppEvidence[`cat:${name}`] ? ' open' : '';
-  return `<details class="pl-cat-months" data-opp-evidence="cat:${plEsc(name)}"${open}><summary>Monthly sales</summary><div class="pl-cat-month-grid">${trend.months.map((m) => `<div title="${plEsc(m.title)}"><b class="core-trend-${m.cls}">${plNum(m.value)}</b><span>${plEsc(m.label)}</span></div>`).join('')}</div></details>`;
-}
-// products the engine did not assess (its results are not loaded, or the product is not in them): the plain catalogue row, still selectable by hand
-function plCatFallbackRow(p, selectedCodes) {
-  const inPlan = selectedCodes.has(p.product_code);
-  const trend = typeof coreProductTrendInfo === 'function' ? coreProductTrendInfo(p) : { hasData: false };
-  const chips = typeof coreAttentionChipsHtml === 'function' ? coreAttentionChipsHtml(p) : '';
-  const act = plReadOnly() ? '' : inPlan ? `<button type="button" class="btn btn-sm pl-act pl-act-planned" aria-pressed="true" disabled>${PL_ICON.check} Added</button>` : `<button type="button" class="btn btn-sm pl-act pl-act-soft" onclick="shootThisWeekForCore('${plEsc(p.product_code)}')" aria-label="Add ${plEsc(p.product_name)} to the Shoot Plan">Add to Shoot</button>`;
-  return `<tr class="pt-row pt-quiet" data-category="unassessed"><td class="pt-product"><div class="pt-pwrap"><span class="pt-thumb"><span class="pt-thumb-none">${PL_NOIMG}</span></span><span class="pt-name"><b>${plEsc(p.product_name)}</b><small>${plEsc(p.category || '')}</small></span></div></td>
-    <td class="pt-num pt-sales">${trend.hasData && trend.last7dUnits != null ? `<b>${plNum(trend.last7dUnits)}</b> <small class="pt-unit">units 7D</small>` : plNone}</td>
-    <td class="pt-num pt-stock"><b>${p.soh != null ? plNum(p.soh) : plNone}</b>${p.weeks_cover != null ? `<small>${plEsc(p.weeks_cover)} weeks</small>` : ''}</td>
-    <td class="pt-num pt-cov"><b>${plNone}</b></td>
-    <td class="pt-status"><span class="pl-status" data-tone="neutral"><i aria-hidden="true"></i>Not assessed</span><span class="pt-why-text">${chips || 'Creative results are not loaded for this product.'}</span></td>
-    <td class="pt-act"><div class="pl-actions">${act}</div></td></tr>`;
-}
-function plCatProductsHtml(name, products, eng, selectedCodes) {
-  const seen = new Set(); const rows = [];
-  for (const p of products) {
-    const info = eng ? eng.get(p.product_code) : null;
-    if (info) { if (seen.has(info.it.key)) continue; seen.add(info.it.key); rows.push({ info, rank: (info.high ? 2000 : 0) + (info.cat === 'needs' ? 1000 : 0) + (info.it.score || 0), name: info.it.name }); }
-    else rows.push({ p, rank: -1, name: p.product_name });
-  }
-  rows.sort((a, b) => b.rank - a.rank || String(a.name).localeCompare(String(b.name)));
-  const limit = state.catLimit[name] || PL_CAT_ROWS;
-  const body = rows.slice(0, limit).map((r) => (r.info ? plCoreRowHtml(r.info.it, 'cat', r.info.cat, { prio: false, quiet: r.info.cat !== 'needs' }) : plCatFallbackRow(r.p, selectedCodes))).join('');
-  const more = rows.length > limit ? `<div class="pt-more"><button type="button" class="link-btn" data-cat-more="${plEsc(name)}">View all ${rows.length} ${plEsc(String(name).toLowerCase())} &rarr;</button></div>` : '';
-  return `<div class="pt-wrap"><table class="pt-table pl-table pl-table-core pt-cat">${plCoreHeadHtml('cat', 'catalogue', { sortable: false, prio: false })}<tbody>${body}</tbody></table></div>${more}`;
-}
-function plCatalogueHtml() {
-  const products = state.coreProducts || [];
-  const eng = plCatalogueMap(); const selectedCodes = new Set(plSelected().map((i) => i.product_code)); const selCounts = plSelectedByCategory();
-  const byCat = new Map();
-  for (const p of products) { if (!byCat.has(p.category)) byCat.set(p.category, []); byCat.get(p.category).push(p); }
-  const cats = [...byCat.entries()].map(([name, list]) => ({ name, list, stats: eng ? plCatalogueStats(list, eng) : null }));
-  cats.sort((a, b) => {
-    if (eng) { const x = a.stats; const y = b.stats; if (y.needs !== x.needs) return y.needs - x.needs; if (y.high !== x.high) return y.high - x.high; }
-    return a.name.localeCompare(b.name);
-  });
-  const head = `<div class="pl-cat-headrow" role="row"><span></span><span>Category</span><span>7D Sales</span><span>Sales Trend</span><span title="Month to date against the same days last year">MTD vs LY</span><span>Creative Attention</span><span>Selected This Week</span></div>`;
-  const open = state.coreShootExpandedCategories || new Set();
-  return head + cats.map((c) => {
-    const isOpen = open.has(c.name); const trend = typeof coreCategoryTrendInfo === 'function' ? coreCategoryTrendInfo(c.name) : { hasData: false };
-    const t = plCatTrendHtml(trend); const sel = selCounts.get(c.name) || 0;
-    return `<div class="pl-cat${isOpen ? ' open' : ''}" data-cat="${plEsc(c.name)}">
-      <button type="button" class="pl-cat-row" data-cat-toggle="${plEsc(c.name)}" aria-expanded="${isOpen}">
-        <span class="pl-cat-chev" aria-hidden="true">${PL_ICON.chev}</span>
-        <span class="pl-cat-name"><b>${plEsc(c.name)}</b><small>${plPlural(c.list.length, 'product')}</small></span>
-        <span class="pl-cat-c">${t.units}</span><span class="pl-cat-c">${t.trend}</span><span class="pl-cat-c">${plCatMtdHtml(trend)}</span>
-        <span class="pl-cat-c pl-cat-attn-c">${plCatAttentionHtml(c.stats)}</span>
-        <span class="pl-cat-c pl-cat-sel${sel ? ' on' : ''}">${sel ? `${PL_ICON.check} ${sel} selected` : '0 selected'}</span>
-      </button>
-      ${isOpen ? `<div class="pl-cat-body">${plCatMonthsHtml(c.name, trend)}${plCatProductsHtml(c.name, c.list, eng, selectedCodes)}</div>` : ''}
-    </div>`;
-  }).join('');
+function plCatalogueFreshnessHtml(info) {
+  if (!info || !info.cov.known || info.cov.latest === null) return '<span class="core-cat-none">&mdash;</span>';
+  const c = info.cov; const b = info.band;
+  const date = `<b class="core-cat-date${c.latestKnown ? '' : ' none'}">${plEsc(c.latest)}</b>`;
+  const age = c.latestKnown && c.days !== null && c.days !== undefined ? `<small>${plEsc(plAgo(c.days))}</small>` : '';
+  const chip = b ? `<span class="core-fresh-chip" data-band="${b.key}">${plEsc(b.label)}</span>` : '';
+  return `<div class="core-cat-fresh" title="${plEsc(c.title)}">${date}${age}${chip}</div>`;
 }
 function plCoreStatusCell(it) {
-  const st = PE.coreGap(it, plCfg());
+  const st = PE.coreStatus(it, plCfg());
   const type = PE.categoryOf(it) === 'needs' ? PE.typeLabelOf(it) : null;
   const tag = type === 'Protect Momentum' || type === 'Revive momentum' ? `<small class="pt-why-tag">${plEsc(type)}</small>` : '';
   return `<td class="pt-status"><span class="pl-status" data-tone="${plEsc(st.tone)}"><i aria-hidden="true"></i>${plEsc(st.label)}</span><span class="pt-why-text">${plEsc(st.text)}</span>${tag}</td>`;
@@ -356,14 +278,8 @@ function plCoreStatusCell(it) {
 // ONE add button, the same in the row and in the panel: purple for products that need creative, a quieter outline for the others (Core never pushes a shoot on a covered product).
 // One click adds the product to this week's Shoot Plan (plQuickAdd); once it is in the plan the button says "Added" and does nothing (more concepts are added from the Shoot Plan tile).
 function plCoreAddBtn(it, cls = '') {
-  if (plReadOnly()) return '';
-  const k = plEsc(it.key); const inPlan = plInThisWeeksPlan(it);
-  if (PL_BLOCKED.includes(it.status)) {
-    // not recommendable (launch not confirmed, unavailable ...), but a person can still plan a Core product by hand: the existing form asks before anything restricted is included
-    if (inPlan || !it.product_code || !((state.opportunities || {}).core || { items: [] }).items.some((i) => i.key === it.key)) return inPlan ? `<button type="button" class="btn btn-sm pl-act pl-act-planned ${cls}" data-opp-added="${k}" aria-pressed="true" title="Already in this week's Shoot Plan" aria-label="${plEsc(it.name)} has been added to the Shoot Plan">${PL_ICON.check} Added</button>` : '';
-    return `<button type="button" class="btn btn-sm pl-act pl-act-soft ${cls}" onclick="shootThisWeekForCore('${plEsc(it.product_code)}')" title="Not on this week's list: opens the Shoot This Week form, which checks stock and launch first" aria-label="Add ${plEsc(it.name)} to the Shoot Plan">Add to Shoot</button>`;
-  }
-  const needs = PE.categoryOf(it) === 'needs';
+  if (plReadOnly() || PL_BLOCKED.includes(it.status)) return '';
+  const needs = PE.categoryOf(it) === 'needs'; const inPlan = plInThisWeeksPlan(it); const k = plEsc(it.key);
   if (inPlan) return `<button type="button" class="btn btn-sm pl-act pl-act-planned ${cls}" data-opp-added="${k}" aria-pressed="true" title="Already in this week's Shoot Plan" aria-label="${plEsc(it.name)} has been added to the Shoot Plan">${PL_ICON.check} Added</button>`;
   return `<button type="button" class="btn btn-sm pl-act ${needs ? 'pl-act-add' : 'pl-act-soft'} ${cls}" data-opp-add="${k}" title="Add this product to this week's Shoot Plan" aria-label="Add ${plEsc(it.name)} to the Shoot Plan">Add to Shoot</button>`;
 }
@@ -374,6 +290,7 @@ function plCoreActionCell(it, mode) {
 // The product pictures reuse the Upcoming Drops components: the same ApparelMagic catalogue image URL, shown whole on the surface-grey panel (coverage-card-imgrow, contain) for the main picture
 // and cropped to fill (drop-card-product-tile, cover) for the colourway thumbnails, with the same image icon when a style has no picture.
 const PL_NOIMG = '<svg class=ic aria-hidden=true focusable=false><use href=#i-image></use></svg>';
+const plMainImg = (url) => `<div class="coverage-card-imgrow pl-cx-img">${url ? `<img src="${plEsc(url)}" alt="">` : `<span class="coverage-card-noimg">${PL_NOIMG}</span>`}</div>`;
 const plTileImg = (url) => `<span class="drop-card-product-tile pl-cc-tile">${url ? `<img src="${plEsc(url)}" alt="">` : `<span class="drop-card-product-noimg">${PL_NOIMG}</span>`}</span>`;
 // colourway cards: a tick, the Drops-style thumbnail, name (else SKU), units, size availability and whether it can be shot. A colourway that can be shot is ticked by default; one that cannot says why and
 // cannot be ticked here (the Shoot Plan modal asks before a restricted one is included).
@@ -391,6 +308,20 @@ function plCoreColourCards(it) {
   };
   return `<section class="pl-cx-cws"><div class="pl-cx-cws-h"><h5>Available colourways</h5><span class="pl-cx-count">${viableN} of ${cws.length} can be shot now &middot; <span data-opp-count="${plEsc(it.key)}">${picked.size} selected</span></span></div><ul class="pl-cc-grid">${cws.map(card).join('')}</ul></section>`;
 }
+// three metric cards: Sales 30D with its 7-day trend, Stock on hand with weeks of cover, Active / effective creatives
+function plCoreMetrics(it) {
+  const f = it.facts || {};
+  const total = f.active_ads === null || f.active_ads === undefined || f.unique_creatives === null || f.unique_creatives === undefined ? null : f.unique_creatives;
+  const perf = f.performing || 0; const others = total === null ? 0 : Math.max(0, total - perf);
+  const cover = f.cover_weeks !== null && f.cover_weeks !== undefined ? `${f.cover_weeks} weeks of cover` : '';
+  const eff = total === null ? ['&ndash;', 'Creative data unavailable'] : [`${plNum(total)} / ${plNum(perf)}`, total === 0 ? 'No creative running' : others === 0 ? 'All performing' : `${plNum(others)} not performing${(f.testing || f.unrated) ? ' yet' : ''}`];
+  const card = (icon, tone, value, label, sub) => `<div class="pl-cm"><span class="pl-cm-ic" data-tone="${tone}">${icon}</span><b>${value}</b><span class="pl-cm-l">${label}</span><small>${sub}</small></div>`;
+  return `<div class="pl-cx-metrics">
+    ${card(PL_ICON.chart, 'green', f.units30 === null || f.units30 === undefined ? '&ndash;' : plNum(f.units30), 'Sales (30D)', plTrendHtml(it, true))}
+    ${card(PL_ICON.cube, 'purple', f.stock_units === null || f.stock_units === undefined ? '&ndash;' : plNum(f.stock_units), 'Stock on hand', plEsc(cover))}
+    ${card(PL_ICON.video, 'purple', eff[0], 'Active / effective creatives', plEsc(eff[1]))}
+  </div>`;
+}
 function plHasMetaAds(it) { const f = it.facts || {}; return (f.live_creatives || 0) > 0 || (f.active_ads || 0) > 0 || !!(it.last_creative && it.last_creative.creatives_total > 0); }
 // View Meta Ads: one button. It opens Meta Performance with the Ad Performance table scoped to this product through the product-to-ad matching (the family's style codes), every funnel and
 // status, each Meta ad as its own row (mpOpenProduct in app.js). Shown only when the product has matched ads.
@@ -400,114 +331,44 @@ function plViewMetaAds(key) {
   mpOpenProduct({ codes, label: it.name, key: it.key, from: state.planningStep || 'core' });
 }
 const plMetaBtn = (it) => (plHasMetaAds(it) ? `<div class="pl-cx-foot"><button type="button" class="btn btn-sm pl-metalink" data-opp-meta="${plEsc(it.key)}">View Meta Ads &rarr;</button></div>` : '');
+// colourway pictures under the main one (click to look at one)
+function plCoreThumbs(it) {
+  const seen = new Set([it.image_url]);
+  const list = (it.colourways || []).filter((c) => c.image_url && !seen.has(c.image_url) && seen.add(c.image_url)).slice(0, 6);
+  const all = it.image_url ? [{ image_url: it.image_url, colour_label: 'Main' }, ...list] : list;
+  if (all.length < 2) return '';
+  return `<span class="pl-cx-thumbs">${all.map((c) => `<button type="button" class="pl-cx-th" data-opp-swap="${plEsc(c.image_url)}" title="${plEsc(c.colour_label || c.style_code || '')}"><img src="${plEsc(c.image_url)}" alt=""></button>`).join('')}</span>`;
+}
 // The expanded product, following the mockup: picture, name / priority / action, one-sentence reason, three metric cards, colourways, then one collapsed View Meta Ads. The engine's evidence,
 // scoring and rules stay in the backend (and in High Stocks).
-// ═══ ONE product detail, used by Creative Opportunities AND the Core Catalogue ═══════════════════════════════════════════════════════════════════════════════════════════════════
-// Main row = what is happening; this panel = why, and whether we are ready. Three sections (tabs, as in the design): Overview (Sales & Inventory, with a creative summary),
-// Creative Performance, Shoot Readiness. Every figure is a field the engine already returned for the product (facts, creatives, colourways, pipeline); nothing is recalculated here.
-state.oppTab = {};
-const plPxTab = (key) => (['overview', 'creative', 'shoot'].includes(state.oppTab[key]) ? state.oppTab[key] : 'overview');
-const PL_PX_TABS = [['overview', 'Overview'], ['creative', 'Creative Performance'], ['shoot', 'Shoot Readiness']];
-const plN = (v, suffix = '') => (v === null || v === undefined ? plNone : `${plNum(v)}${suffix}`);
-// the Core catalogue products (ApparelMagic / Sales Cadence) that belong to this family: month-to-date vs last year and the latest new concept come from there
-function plCoreProductsFor(it) {
-  const codes = new Set([it.product_code, ...(it.codes || [])].filter(Boolean));
-  return (state.coreProducts || []).filter((p) => codes.has(p.product_code));
-}
-function plFamilyMtd(it) {
-  const rows = plCoreProductsFor(it).map((p) => p.cadence).filter((c) => c && c.has_data);
-  if (!rows.length) return null;
-  const ty = rows.reduce((n, c) => n + (Number(c.this_period_units) || 0), 0); const ly = rows.reduce((n, c) => n + (Number(c.last_year_units) || 0), 0);
-  return { ty, ly, pct: ly > 0 ? Math.round(((ty - ly) / ly) * 100) : null };
-}
-const plPctHtml = (pct) => (pct === null || pct === undefined ? '<span class="pl-pct" data-pct="new">New</span>' : `<span class="pl-pct" data-pct="${pct > 0 ? 'up' : pct < 0 ? 'down' : 'flat'}">${pct > 0 ? '+' : ''}${pct}%</span>`);
-function plSalesInventoryHtml(it) {
-  const f = it.facts || {}; const mtd = plFamilyMtd(it);
-  const cover = f.cover_weeks !== null && f.cover_weeks !== undefined ? `${plEsc(f.cover_weeks)} weeks` : plNone;
-  const season = f.season ? `<p class="pl-px-note">Season: ${plEsc(f.season)}${f.days_on_sale ? ` &middot; on sale ${plPlural(f.days_on_sale, 'day')}` : ''}.</p>` : (f.days_on_sale ? `<p class="pl-px-note">On sale ${plPlural(f.days_on_sale, 'day')}.</p>` : '');
-  return `<section class="pl-px-card"><h5>Sales Performance</h5><p class="pl-px-sub">Sales and trends for this product.</p>
-      <div class="pl-px-kv"><div><span>Last 7 days</span><b>${plN(f.units7)}</b></div><div><span>Last 30 days</span><b>${plN(f.units30)}</b></div><div><span>Trend</span><b>${plTrendHtml(it, true)}</b></div><div><span>MTD vs LY</span><b${mtd ? ` title="${plEsc(`${plNum(mtd.ty)} units this month to date against ${plNum(mtd.ly)} for the same days last year`)}"` : ''}>${mtd ? plPctHtml(mtd.pct) : plNone}</b></div></div>${season}</section>
-    <section class="pl-px-card"><h5>Inventory</h5><p class="pl-px-sub">Current stock and incoming inventory.</p>
-      <div class="pl-px-kv"><div><span>Stock on hand</span><b>${plN(f.stock_units, ' units')}</b></div><div><span>On order</span><b>${plN(f.on_order, ' units')}</b></div><div><span>Weeks of cover</span><b>${cover}</b></div></div></section>`;
-}
-function plCreativeCountsHtml(it) {
-  const cc = PE.creativeCounts(it);
-  if (!cc.known) return `<p class="pl-px-note">Creative data is unavailable for this product, so nothing is assessed.</p>`;
-  const box = (n, label, tone, tip) => `<div class="pl-px-count" data-tone="${tone}" title="${plEsc(tip)}"><b>${n === null || n === undefined ? plNone : plNum(n)}</b><span>${label}</span></div>`;
-  return `<div class="pl-px-counts">${box(cc.active, 'Active', 'neutral', 'Different creatives delivering on Meta now. One creative running in several campaigns counts once.')}${box(cc.effective, 'Effective', 'green', 'Performing against the approved benchmark for its own funnel.')}${box(cc.underperforming, 'Underperforming', 'red', 'Judged over the approved limit, with enough delivery to judge.')}${box(cc.testing, 'Testing', 'neutral', 'Recently launched or not yet enough delivery: not judged.')}${box(cc.unrated, 'Unrated', 'neutral', 'No approved benchmark for its funnel: not judged, and never counted as underperforming.')}</div>`;
-}
-function plCreativeSummaryCardHtml(it) {
-  return `<section class="pl-px-card"><h5>Creative Performance</h5><p class="pl-px-sub">Active creatives and benchmark results.</p>${plCreativeCountsHtml(it)}<div class="pl-px-foot"><button type="button" class="link-btn" data-px-tab="${plEsc(it.key)}|creative">Creative details &rarr;</button></div></section>`;
-}
-function plFunnelTableHtml(it) {
-  const rows = PE.funnelBreakdown(it);
-  if (!rows.length) return '';
-  const unrated = (it.facts || {}).unrated_funnels || [];
-  const note = unrated.length ? `No approved ${unrated.map(plFn).join(' / ')} benchmark: those creatives are shown as Unrated, never as underperforming.` : 'Each funnel is judged against its own approved benchmark.';
-  return `<table class="pl-px-funnels"><thead><tr><th>Funnel</th><th>Creatives</th><th>Effective</th><th>Underperforming</th><th>Testing</th><th>Unrated</th></tr></thead><tbody>${rows.map((r) => `<tr><td><b>${plEsc(plFn(r.funnel))}</b></td><td>${r.total}</td><td>${r.effective || plNone}</td><td>${r.underperforming || plNone}</td><td>${r.testing || plNone}</td><td>${r.unrated || plNone}</td></tr>`).join('')}</tbody></table><p class="pl-px-note">${plEsc(note)}</p>`;
-}
-function plCreativePaneHtml(it) {
-  const c = PE.coverage(it, ((state.opportunities || {}).today || '').slice(0, 4));
-  const prods = plCoreProductsFor(it).map((p) => p.days_since_last_new_concept).filter((d) => d !== null && d !== undefined);
-  const concept = prods.length ? `${plPlural(Math.min(...prods), 'day')} ago` : (plCoreProductsFor(it).length ? 'Never' : null);
-  const latest = c.latest === null ? plNone : `${plEsc(c.latest)}${c.latestKnown && c.days !== null ? ` <small>(${plEsc(plAgo(c.days))})</small>` : ''}`;
-  return `${plCreativeCountsHtml(it)}
-    <div class="pl-px-kv pl-px-kv-row"><div><span>Latest creative</span><b>${latest}</b></div>${concept ? `<div><span>Latest new concept</span><b>${plEsc(concept)}</b></div>` : ''}</div>
-    ${plFunnelTableHtml(it)}
-    <div class="pl-px-foot">${plHasMetaAds(it) ? `<button type="button" class="btn btn-sm pl-metalink" data-opp-meta="${plEsc(it.key)}">View Meta ads &rarr;</button>` : '<span class="pl-px-note">No matched Meta ads to show.</span>'}</div>`;
-}
-function plShootPaneHtml(it) {
-  const prod = PE.productionActivity(it, PL_STAGE_LABEL);
-  const blocked = PL_BLOCKED.includes(it.status); const addBtn = plCoreAddBtn(it);
-  const dup = prod.active ? `<div class="pl-px-warn" role="note"><b>Already in production.</b> ${plEsc(prod.text)} Check before planning more work on this product.</div>` : `<p class="pl-px-note">${plEsc(prod.text)}</p>`;
-  return `${dup}${plCoreColourCards(it) || '<p class="pl-px-note">No colourways are linked to this product yet.</p>'}
-    <div class="pl-px-foot">${addBtn}${plReadOnly() || blocked ? '' : `<button type="button" class="link-btn pl-more-opts" data-opp-plan="${plEsc(it.key)}" title="Open the full Shoot This Week form: colourways, sizes, concept type, how many concepts">${plInThisWeeksPlan(it) ? 'Add another concept…' : 'More options…'}</button>`}${blocked && !addBtn ? '<span class="hint">This product cannot be planned yet.</span>' : ''}${plReadOnly() ? '<span class="hint">Past weeks are read-only.</span>' : ''}</div>`;
-}
-// the evidence behind the recommendation stays one click further down
-function plEvidenceHtml(it) {
-  const key = plEsc(it.key); const open = state.oppEvidence[it.key] ? ' open' : '';
-  const facts = PE.keyFacts(it).map(([k, v]) => `<li><span>${plEsc(k)}</span><b>${plEsc(v)}</b></li>`).join('');
-  const parts = (it.score_parts || []).filter((x) => x.points).map((x) => `<li><span>${plEsc(x.label)}</span><b>${x.points > 0 ? '+' : ''}${plEsc(x.points)}</b></li>`).join('');
-  const gates = (it.eligibility || []).map((g) => `<li class="${g.ok ? 'ok' : 'no'}"><span>${plEsc(g.text || g.key)}</span><b>${g.ok ? 'Yes' : 'No'}</b></li>`).join('');
-  return `<details class="pl-evidence" data-opp-evidence="${key}"${open}><summary>View detailed evidence</summary><div class="pl-evidence-body">
-    <div><h6>Key facts</h6><ul class="pl-ev-list">${facts}</ul></div>
-    ${parts || (it.caps || []).length ? `<div><h6>Priority score${it.score !== undefined && it.score !== null ? ` (${plEsc(it.score)} of 100)` : ''}</h6><ul class="pl-ev-list">${parts}${(it.caps || []).map((c) => `<li class="no"><span>${plEsc(c)}</span><b></b></li>`).join('')}</ul></div>` : ''}
-    ${gates ? `<div><h6>Eligibility rules</h6><ul class="pl-ev-list">${gates}</ul></div>` : ''}</div></details>`;
-}
-function plProductPanelHtml(it) {
-  const cfg = plCfg(); const cat = PE.categoryOf(it); const tab = plPxTab(it.key); const key = plEsc(it.key);
-  const heading = cat === 'needs' ? 'Why shoot this product?' : cat === 'review' ? 'Why this needs review' : 'Why no new creative is needed';
-  const tabs = PL_PX_TABS.map(([id, label]) => `<button type="button" role="tab" class="pl-px-tab${id === tab ? ' active' : ''}" id="px-${key}-${id}" data-px-tab="${key}|${id}" aria-selected="${id === tab}" aria-controls="px-${key}-${id}-pane">${label}</button>`).join('');
-  const pane = (id, html) => `<div class="pl-px-pane pl-px-${id}" id="px-${key}-${id}-pane" role="tabpanel" aria-labelledby="px-${key}-${id}" data-px-pane="${id}"${id === tab ? '' : ' hidden'}>${html}</div>`;
-  return `<div class="pl-px" data-px="${key}">
-    <p class="pl-px-why"><b>${heading}</b> ${plEsc(PE.whyShoot(it, cfg))}</p>
-    <div class="pl-px-tabs" role="tablist" aria-label="Product detail">${tabs}</div>
-    ${pane('overview', `<div class="pl-px-cards">${plSalesInventoryHtml(it)}${plCreativeSummaryCardHtml(it)}</div>`)}
-    ${pane('creative', plCreativePaneHtml(it))}
-    ${pane('shoot', plShootPaneHtml(it))}
-    ${plEvidenceHtml(it)}
-  </div>`;
-}
-
 function plCoreDetailHtml(it, mode, ncols) {
-  return `<tr class="pt-detail-row"><td colspan="${ncols}">${plProductPanelHtml(it)}</td></tr>`;
-}
-// The table shell and the row are shared: Creative Opportunities (mode core | high) and the Core Catalogue (mode cat) draw exactly the same columns and the same row.
-// Columns: Product | Sales (30D) | Stock | Creative Coverage | Creative Gap | Priority | Action. (The Priority column only appears where the page ranks: the Needs creative list.)
-function plCoreHeadHtml(mode, cat, { sortable = true, prio = false } = {}) {
-  const sort = state.oppSort[mode];
-  const th = (label, cls, key, tip) => { const def = sortable && key && PL_SORTS[key] && (!PL_SORTS[key].only || PL_SORTS[key].only === cat) ? key : null; const on = def && sort && sort.key === def; return `<th class="${cls}${def ? ' pt-sortable' : ''}${on ? ' sorted' : ''}"${tip ? ` title="${plEsc(tip)}"` : ''}${def ? ` data-opp-sort="${mode}:${def}" role="button" tabindex="0" aria-sort="${on ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}"` : ''}>${plEsc(label)}${on ? (sort.dir === 'asc' ? ' &uarr;' : ' &darr;') : ''}</th>`; };
-  return `<thead><tr>${th('Product', 'pt-w-product', 'product')}${th('Sales (30D)', 'pt-w-sales', 'u30', 'Units sold in the last 30 days. The arrow compares the last 7 days with the 7 days before them.')}${th('Stock', 'pt-w-stockc', 'stock', 'Sellable stock on hand and the weeks it lasts at the current sales pace.')}${th('Creative Coverage', 'pt-w-cov', null, 'Active = different creatives delivering on Meta now. Effective = performing against the approved benchmark for their funnel. Latest = newest creative date.')}${th(prio ? 'Creative Gap' : 'Creative Status', 'pt-w-gap', null)}${prio ? th('Priority', 'pt-w-prio', 'priority') : ''}${th('Action', 'pt-w-act', null)}</tr></thead>`;
-}
-function plCoreRowHtml(it, mode, cat, { prio = false, quiet = false } = {}) {
-  const id = `${mode}:${it.key}`; const open = !!state.oppOpen[id];
-  return `<tr class="pt-row${open ? ' open' : ''}${quiet ? ' pt-quiet' : ''}" data-opp-row="${id}" data-status="${plEsc(it.status)}" data-category="${plEsc(cat)}" tabindex="0" aria-expanded="${open}">${plCoreProductCell(it)}${plCoreSalesCell(it)}${plCoreStockCell(it)}${plCoreCoverageCell(it)}${plCoreStatusCell(it)}${prio ? plPrioCell(it) : ''}${plCoreActionCell(it, mode)}</tr>${open ? plCoreDetailHtml(it, mode, prio ? 7 : 6) : ''}`;
+  const cfg = plCfg(); const st = PE.coreStatus(it, cfg); const cat = PE.categoryOf(it);
+  const prio = it.actionable && it.priority ? `<span class="opp-priority" data-priority="${plEsc(it.priority)}" title="${plEsc(plPrioTitle(it))}">${plEsc(it.priority)} priority</span>` : '';
+  const heading = cat === 'needs' ? 'Why shoot this product?' : cat === 'review' ? 'Why this needs review' : 'Why no new creative is needed';
+  return `<tr class="pt-detail-row"><td colspan="${ncols}"><div class="pl-cx">
+    <div class="pl-cx-top">
+      <div class="pl-cx-pic">${plMainImg(it.image_url)}${plCoreThumbs(it)}</div>
+      <div class="pl-cx-main">
+        <div class="pl-cx-head"><div class="pl-cx-id"><h4>${plEsc(it.name)}</h4>${prio}<span class="pl-x-cat">${plEsc(it.category || '')}</span></div><span class="pl-cx-add">${plCoreAddBtn(it)}${plReadOnly() || PL_BLOCKED.includes(it.status) ? '' : `<button type="button" class="link-btn pl-more-opts" data-opp-plan="${plEsc(it.key)}" title="Open the full Shoot This Week form: colourways, sizes, concept type, how many concepts">${plInThisWeeksPlan(it) ? 'Add another concept\u2026' : 'More options\u2026'}</button>`}${PL_BLOCKED.includes(it.status) ? '<span class="hint">This product cannot be planned yet.</span>' : ''}${plReadOnly() ? '<span class="hint">Past weeks are read-only.</span>' : ''}</span></div>
+        <div class="pl-cx-why" data-tone="${plEsc(st.tone)}"><span class="pl-cx-why-ic">${PL_ICON.target}</span><div><b>${heading}</b><p>${plEsc(PE.whyShoot(it, cfg))}</p></div></div>
+        ${plCoreMetrics(it)}
+        ${plCoreColourCards(it)}
+      </div>
+    </div>
+    ${plMetaBtn(it)}
+  </div></td></tr>`;
 }
 function plCoreTableHtml(mode, items, cat) {
-  const needs = cat === 'needs';
+  const sort = state.oppSort[mode];
+  const th = (label, cls, key) => { const def = key && PL_SORTS[key] && (!PL_SORTS[key].only || PL_SORTS[key].only === cat) ? key : null; const on = def && sort && sort.key === def; return `<th class="${cls}${def ? ' pt-sortable' : ''}${on ? ' sorted' : ''}"${def ? ` data-opp-sort="${mode}:${def}" role="button" tabindex="0" aria-sort="${on ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}"` : ''}>${plEsc(label)}${on ? (sort.dir === 'asc' ? ' &uarr;' : ' &darr;') : ''}</th>`; };
+  const needs = cat === 'needs'; const ncols = needs ? 8 : 6;
+  const head = `${needs ? '<th class="pt-w-rank">#</th>' : ''}${th('Product', 'pt-w-product', 'product')}${th('Sales (30D)', 'pt-w-sales', 'u30')}${th('Stock', 'pt-w-stockc', 'stock')}${th('Latest creative', 'pt-w-cov', null)}${th(needs ? 'Creative gap' : 'Creative status', 'pt-w-gap', null)}${needs ? th('Priority', 'pt-w-prio', 'priority') : ''}${th('Action', 'pt-w-act', null)}`;
   const limit = state.oppLimit[mode] || PL_PAGE;
-  const body = items.slice(0, limit).map((it) => plCoreRowHtml(it, mode, cat, { prio: needs, quiet: !needs })).join('');
-  return `<div class="pt-wrap"><table class="pt-table pl-table pl-table-core pt-${plEsc(mode)}">${plCoreHeadHtml(mode, cat, { prio: needs })}<tbody>${body}</tbody></table></div>${items.length > limit ? `<div class="pt-more"><button type="button" class="btn btn-ghost btn-sm" data-opp-more="${mode}">Show ${Math.min(PL_PAGE, items.length - limit)} more</button></div>` : ''}`;
+  const body = items.slice(0, limit).map((it, n) => {
+    const open = !!state.oppOpen[`${mode}:${it.key}`];
+    return `<tr class="pt-row${open ? ' open' : ''}${needs ? '' : ' pt-quiet'}" data-opp-row="${mode}:${plEsc(it.key)}" data-status="${plEsc(it.status)}" data-category="${plEsc(cat)}" tabindex="0" aria-expanded="${open}">${needs ? `<td class="pt-rank">${n + 1}</td>` : ''}${plCoreProductCell(it)}${plCoreSalesCell(it)}${plCoreStockCell(it)}${plCoreCoverageCell(it)}${plCoreStatusCell(it)}${needs ? plPrioCell(it) : ''}${plCoreActionCell(it, mode)}</tr>${open ? plCoreDetailHtml(it, mode, ncols) : ''}`;
+  }).join('');
+  return `<div class="pt-wrap"><table class="pt-table pl-table pl-table-core pt-${plEsc(mode)}"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>${items.length > limit ? `<div class="pt-more"><button type="button" class="btn btn-ghost btn-sm" data-opp-more="${mode}">Show ${Math.min(PL_PAGE, items.length - limit)} more</button></div>` : ''}`;
 }
 const PL_CORE_TITLE = {
   core: {
@@ -530,7 +391,7 @@ function plCoreCardHtml(mode) {
   const typeList = [...types].sort();
   const tabs = PE.CATEGORY_ORDER.map((k) => `<button type="button" role="tab" class="pl-cat${k === cur ? ' active' : ''}" data-cat="${k}" data-opp-view="${mode}:${k}" aria-selected="${k === cur}">${plEsc(PE.CATEGORY[k].tab.replace('Covered / monitoring', 'Covered & monitoring'))} <b>${counts[k]}</b></button>`).join('');
   const nBy = (p) => items.filter((i) => i.actionable && i.priority === p).length;
-  const pills = cur === 'needs' ? `${['High', 'Medium', 'Low'].filter((p) => nBy(p) > 0).map((p) => `<span class="pl-sumpill"><i data-priority="${p}" aria-hidden="true"></i>${nBy(p)} ${p}</span>`).join('')}<span class="pl-sumcount">${plPlural(items.length, 'product')}</span><span class="pl-sumpill pl-sumsel" title="Products on this list that are in this week's Shoot Plan">${PL_ICON.check} ${items.filter(plInThisWeeksPlan).length} selected for shooting</span>` : `<span class="pl-sumcount">${plPlural(items.length, 'product')}</span>`;
+  const pills = cur === 'needs' ? `${['High', 'Medium', 'Low'].filter((p) => nBy(p) > 0).map((p) => `<span class="pl-sumpill"><i data-priority="${p}" aria-hidden="true"></i>${nBy(p)} ${p}</span>`).join('')}<span class="pl-sumcount">${plPlural(items.length, 'product')}</span>` : `<span class="pl-sumcount">${plPlural(items.length, 'product')}</span>`;
   const [title, subtitle] = PL_CORE_TITLE[mode][cur];
   const clear = fl.priority || fl.type || state.oppSort[mode] || state.oppQuery[mode];
   const sorts = plSortsFor(cur).filter(([key]) => key !== 'live');
@@ -691,16 +552,7 @@ async function plConfirmLaunch(code, name) {
 
 
 // ── interactions ─────────────────────────────────────────────────────────────────────
-function plSelectProductTab(btn) {
-  const [key, tab] = btn.dataset.pxTab.split('|'); if (!key || !tab) return;
-  state.oppTab[key] = tab;
-  // every open copy of this product's panel (Opportunities and Catalogue) follows
-  document.querySelectorAll(`.pl-px[data-px="${CSS.escape(key)}"]`).forEach((px) => {
-    px.querySelectorAll('[role="tab"]').forEach((b) => { const on = b.dataset.pxTab === `${key}|${tab}`; b.classList.toggle('active', on); b.setAttribute('aria-selected', on ? 'true' : 'false'); });
-    px.querySelectorAll('[data-px-pane]').forEach((pane) => { pane.hidden = pane.dataset.pxPane !== tab; });
-  });
-}
-const plRerender = (mode) => { if (mode === 'core') plRenderCore(); else if (mode === 'cat') { if (typeof renderCoreShootPlanning === 'function') renderCoreShootPlanning(); } else plRenderHighStocks(); };
+const plRerender = (mode) => { if (mode === 'core') plRenderCore(); else plRenderHighStocks(); };
 const plFindItem = (key) => { const o = state.opportunities; return o && o.available ? [...o.core.items, ...o.high_stocks.items, ...((o.momentum && o.momentum.items) || [])].find((i) => i.key === key) : null; };
 document.addEventListener('click', (ev) => {
   // the row "..." menu: one open at a time, closed by any other click
@@ -714,12 +566,8 @@ document.addEventListener('click', (ev) => {
   if (ev.target.closest('[data-opp-refresh]')) { plLoadOpportunities(true); return; }
   const plan = ev.target.closest('[data-opp-plan]');
   if (plan) { plPlan(plan.dataset.oppPlan, plan.dataset.oppColour || null, plan.dataset.oppColour ? {} : { styleCodes: plPickedFor(plan.dataset.oppPlan) }); return; }
-  const pxTab = ev.target.closest('[data-px-tab]');
-  if (pxTab) { plSelectProductTab(pxTab); return; }
-  const catTog = ev.target.closest('[data-cat-toggle]');
-  if (catTog) { plToggleCategory(catTog.dataset.catToggle); return; }
-  const catMore = ev.target.closest('[data-cat-more]');
-  if (catMore) { const c = catMore.dataset.catMore; state.catLimit[c] = (state.catLimit[c] || PL_CAT_ROWS) + PL_CAT_ROWS; renderCoreShootPlanning(); return; }
+  const swap = ev.target.closest('[data-opp-swap]');
+  if (swap) { const box = swap.closest('.pl-cx') && swap.closest('.pl-cx').querySelector('.pl-cx-img'); if (box) box.innerHTML = `<img src="${plEsc(swap.dataset.oppSwap)}" alt="">`; return; }
   const meta = ev.target.closest('[data-opp-meta]');
   if (meta) { plViewMetaAds(meta.dataset.oppMeta); return; }
   const quick = ev.target.closest('[data-opp-add]');
@@ -811,7 +659,7 @@ async function plRefreshSelection() {
   const [items, progress] = await Promise.all([api(`/shoot-plan?week_start=${w}`), apiAllowedOr(`/shoot-plan/progress?week_start=${w}`, null)]);
   state.shootPlan = items;
   if (progress) state.conceptProgress = progress;
-  for (const fn of [plRenderCore, plRenderHighStocks, () => { if (typeof renderCoreShootPlanning === 'function') renderCoreShootPlanning(); }, renderProductionHeader, renderShootPlanStep, renderPlanningShootSummary, plSyncChrome]) { try { fn(); } catch (e) { console.error('selection refresh failed', e); } }
+  for (const fn of [plRenderCore, plRenderHighStocks, renderProductionHeader, renderShootPlanStep, renderPlanningShootSummary, plSyncChrome]) { try { fn(); } catch (e) { console.error('selection refresh failed', e); } }
   try { if (state.insights && state.insights.data && state.planningStep === 'creative-insights') plRenderInsights(); } catch (e) { /* insights optional */ }
 }
 async function plQuickAdd(key, extra = {}) {

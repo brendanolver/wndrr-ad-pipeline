@@ -173,12 +173,12 @@ test('wiring: the Creative coverage column shows the latest creative date; the e
   const root = path.join(__dirname, '..');
   const pl = fs.readFileSync(path.join(root, 'public', 'planning.js'), 'utf8');
   const cov = pl.slice(pl.indexOf('function plCoreCoverageCell'), pl.indexOf('function plCoreStatusCell'));
-  assert.match(cov, /pt-cov-latest/); assert.match(cov, /plAgo\(c\.days\)/, 'Latest: the date, then how long ago');
-  assert.match(cov, /Active[\s\S]*Effective/, 'Creative Coverage: N Active, N Effective');
+  assert.match(cov, /pt-cov-d/); assert.match(cov, /plAgo\(c\.days\)/, 'Latest creative: the date, then how long ago');
   const prod = pl.slice(pl.indexOf('function plCoreProductCell'), pl.indexOf('// the trend is shown the same way'));
-  assert.doesNotMatch(prod, /plCoreActiveAdsLine/, 'the active count moved from under the product name into Creative Coverage');
-  const table = pl.slice(pl.indexOf('function plCoreHeadHtml'), pl.indexOf('const PL_CORE_TITLE'));
-  for (const h of ["th('Product'", "th('Sales (30D)'", "th('Stock'", "th('Creative Coverage'", "'Creative Gap'", "th('Priority'", "th('Action'"]) assert.ok(table.includes(h), `column ${h}`);
+  assert.match(prod, /plCoreActiveAdsLine\(it\)/, 'N Active Ads sits under the product name');
+  assert.match(pl.slice(pl.indexOf('function plCoreActiveAdsLine'), pl.indexOf('function plCoreStatusCell')), /Active \$\{c\.activeKnown && c\.active === 1 \? 'Ad' : 'Ads'\}/);
+  const table = pl.slice(pl.indexOf('function plCoreTableHtml'), pl.indexOf('const PL_CORE_TITLE'));
+  for (const h of ["th('Product'", "th('Sales (30D)'", "th('Stock'", "th('Latest creative'", "'Creative gap'", "th('Priority'", "th('Action'"]) assert.ok(table.includes(h), `column ${h}`);
   for (const f of ['planningOpportunities.js', 'planningPrimary.js', 'creativeRecency.js', 'planningDemand.js']) assert.doesNotMatch(fs.readFileSync(path.join(root, 'src', 'lib', f), 'utf8'), /last_creative|lastCreative/, `${f} does not read the date`);
   const ld = fs.readFileSync(path.join(root, 'src', 'lib', 'planningOpportunitiesLoader.js'), 'utf8');
   const run = ld.slice(ld.indexOf('const runMode'), ld.indexOf('const coreEvals'));

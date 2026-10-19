@@ -2,6 +2,15 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.4.8",
+      "date": "2026-10-19",
+      "title": "Revert Core Planning redesign",
+      "changes": [
+        "Creative Opportunities, the Core Catalogue and the Shoot Plan strip are back to their v1.4.6 layout",
+        "The redesign (v1.4.7) is removed; engine, scoring, benchmarks and data are unchanged"
+      ]
+    },
+    {
       "version": "1.4.7",
       "date": "2026-10-19",
       "title": "Core Planning redesign",

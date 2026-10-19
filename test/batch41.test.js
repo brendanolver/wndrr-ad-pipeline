@@ -42,22 +42,20 @@ test('the catalogue reads the Core table\'s results (status, category, priority,
   assert.match(map, /it\.codes/, 'keyed by product code (and the item\'s other codes)');
   const stats = fn(pl, 'plCatalogueStats');
   assert.match(stats, /info\.cat === 'needs'/); assert.match(stats, /info\.band\.key === 'stale'/); assert.match(stats, /seen\.has\(info\.it\.key\)/, 'one item is counted once');
-  // Core Catalogue redesign (v1.4.7): the category row's attention is the engine's own needs / review counts (never a freshness verdict)
-  const attn = fn(pl, 'plCatAttentionHtml');
-  assert.match(attn, /stats\.needs/); assert.match(attn, /stats\.review/); assert.match(attn, /All covered/); assert.match(attn, /Not assessed/);
-  assert.doesNotMatch(attn, /stale|band|days/, 'a stale creative is not turned into an urgent product');
+  assert.match(fn(pl, 'plCatalogueAttentionHtml'), /pl-status/);
+  assert.match(fn(pl, 'plCatalogueFreshnessHtml'), /plAgo\(c\.days\)/, 'date, then how long ago, then the band');
 });
 
 test('category rows and product rows use those results; the older flags are only a fallback while they are not loaded', () => {
   const render = fn(app, 'renderCoreShootPlanning');
-  assert.match(render, /plCatalogueHtml\(\)/, 'the catalogue is drawn by planning.js, beside the table it shares its rows with');
-  const cat = fn(pl, 'plCatalogueHtml');
-  assert.match(cat, /plCatalogueMap\(\)/); assert.match(cat, /plCatalogueStats\(list, eng\)/);
-  assert.match(cat, /y\.needs !== x\.needs/, 'categories are ranked by how many products need creative');
-  const prods = fn(pl, 'plCatProductsHtml');
-  assert.match(prods, /plCoreRowHtml\(r\.info\.it, 'cat'/, 'a category lists its products with the SAME row as Creative Opportunities');
-  assert.match(prods, /plCatFallbackRow\(r\.p, selectedCodes\)/, 'a product with no engine result is still listed (and selectable)');
-  assert.match(fn(pl, 'plCatFallbackRow'), /shootThisWeekForCore/, 'by hand, through the existing Shoot This Week form');
+  assert.match(render, /plCatalogueMap\(\)/); assert.match(render, /plCatalogueStats\(products, eng\)/);
+  assert.match(render, /i\.cat === 'needs'/, 'the products listed under a category are the ones the Core table lists as needing creative');
+  assert.match(render, /b\.eng\.needs - a\.eng\.needs/, 'categories are ranked by that count');
+  assert.match(render, /p\.flag === 'needs_attention' \|\| p\.flag === 'opportunity'/, 'fallback');
+  const row = fn(app, 'coreProblemProductRowHtml');
+  assert.match(row, /plCatalogueAttentionHtml\(info\)/); assert.match(row, /plCatalogueFreshnessHtml\(info\)/);
+  assert.match(app, /<span>Creative Attention<\/span>\s*<span>Creative Freshness<\/span>\s*<span>This Week<\/span>/, 'the product columns now include Creative Freshness');
+  assert.match(fn(app, 'coreCategoryAttentionHtml'), /High priority/);
   assert.match(pl, /renderCoreShootPlanning\(\); \} catch \(e\) \{ console\.error\('core catalogue render failed'/, 're-rendered when the Planning results arrive');
 });
 

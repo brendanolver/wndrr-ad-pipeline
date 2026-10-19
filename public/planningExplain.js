@@ -476,43 +476,6 @@
     return { loaded: !!progress, planned, target, remaining, carried, products: productsSelected || 0 };
   }
 
-  // ── Core Planning redesign: the creative picture of ONE product, in the words the table and the product detail share ──────────────────────────────────────────────────────────
-  // Every number is a field the engine already produced (facts.live_creatives, performing, weak, testing, unrated, newest creative date). Nothing is recalculated and nothing is
-  // classified here: an unrated or still-testing creative is counted on its own and is NEVER folded into "underperforming". `known` is false when Meta creative data is unavailable.
-  function creativeCounts(item) {
-    const x = f(item); const lv = liveAds(item);
-    const assessable = num(x.active_ads) !== null;
-    const n = (v) => (assessable ? (num(v) || 0) : null);
-    return {
-      known: lv.known || assessable,
-      active: lv.known ? lv.count : null,
-      effective: n(x.performing), underperforming: n(x.weak), testing: n(x.testing), unrated: n(x.unrated),
-      notDelivering: lv.known ? lv.stalled : null,
-    };
-  }
-  // Creative Gap badge: the engine's own Core status with the labels and tones the Planning table uses. Testing / monitoring is neutral (it is not a problem), adequate coverage is green.
-  const GAP_RENAME = { 'Creative in Testing': 'Testing / Monitoring', 'Performing Well': 'Adequate Coverage', 'Adequately Covered': 'Adequate Coverage', 'Creative Needed': 'Creative Needed' };
-  function coreGap(item, cfg = {}) {
-    const st = coreStatus(item, cfg);
-    const label = GAP_RENAME[st.label] || st.label;
-    const tone = label === 'Testing / Monitoring' || label === 'In Production' ? 'neutral' : st.tone === 'grey' ? 'neutral' : st.tone;
-    return { label, tone, text: st.text };
-  }
-  // Per-funnel picture of the creatives the engine assessed. Each creative is judged against ITS OWN funnel's approved benchmark (the engine decided that); a funnel with no approved
-  // benchmark shows its creatives as Unrated. Rows are funnels exactly as Meta Performance reports them (TOF / TOM / MOF / mixed / unknown).
-  const CONDITION_BUCKET = { performing: 'effective', underperforming: 'underperforming', fatigued: 'underperforming', new: 'testing', insufficient_delivery: 'testing', missing_benchmark: 'unrated', not_delivering: 'notDelivering' };
-  function funnelBreakdown(item) {
-    const rows = new Map();
-    for (const c of (item && item.creatives) || []) {
-      const bucket = CONDITION_BUCKET[c.condition]; if (!bucket) continue;
-      const key = c.funnel || 'unknown';
-      if (!rows.has(key)) rows.set(key, { funnel: key, total: 0, effective: 0, underperforming: 0, testing: 0, unrated: 0, notDelivering: 0 });
-      const r = rows.get(key); r.total += 1; r[bucket] += 1;
-    }
-    const order = { TOF: 0, TOM: 1, MOF: 2 };
-    return [...rows.values()].sort((a, b) => (order[a.funnel] === undefined ? 9 : order[a.funnel]) - (order[b.funnel] === undefined ? 9 : order[b.funnel]) || a.funnel.localeCompare(b.funnel));
-  }
-
   // Everything the Opportunity filter offers, derived from the loaded items (never a fixed list of products)
   const TYPE_LABEL = {
     confirmed_gap: 'No active creative', creative_gap: 'No active creative', underperforming: 'Underperforming creative', fatigue: 'Creative fatigue', concentration: 'Creative concentration',
@@ -520,5 +483,5 @@
   };
   const typeLabelOf = (item) => (item.mode === 'momentum' || item.opportunity_type === 'protect_momentum' ? 'Protect Momentum' : TYPE_LABEL[(item.gap && item.gap.type) || item.opportunity_type] || null);
 
-  return { creativeCounts, coreGap, funnelBreakdown, creativeStatus, coverage, coreStatus, whyShoot, salesTrend, lastCreative, creativeDate, liveAds, CATEGORY, CATEGORY_ORDER, STATUS_CATEGORY, categoryOf, isVisible, longDate, startedPhrase, conditionsSummary, stockRestriction, sellingClause, creativeClause, reasonFor, whyWithNumbers, recommendationFor, directionFor, keyFacts, stockWarning, productionActivity, summaryCounts, momentumItemsFor, weeklySummary, TYPE_LABEL, typeLabelOf };
+  return { creativeStatus, coverage, coreStatus, whyShoot, salesTrend, lastCreative, creativeDate, liveAds, CATEGORY, CATEGORY_ORDER, STATUS_CATEGORY, categoryOf, isVisible, longDate, startedPhrase, conditionsSummary, stockRestriction, sellingClause, creativeClause, reasonFor, whyWithNumbers, recommendationFor, directionFor, keyFacts, stockWarning, productionActivity, summaryCounts, momentumItemsFor, weeklySummary, TYPE_LABEL, typeLabelOf };
 }));

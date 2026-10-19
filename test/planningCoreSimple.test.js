@@ -51,38 +51,24 @@ test('days since last creative is whole days from the name date to today (displa
   assert.equal(E.lastCreative({ last_creative: { last_creative_uploaded_date: '2026-09-18', days_since: 26 } }).days, 26);
 });
 
-test('page shape: Core, High Stocks and the Core Catalogue share ONE table row and ONE expanded product detail; View Meta ads is one button', () => {
+test('page shape: Core and High Stocks share the short table and expanded view; View Meta Ads is one button', () => {
   const root = path.join(__dirname, '..');
   const pl = fs.readFileSync(path.join(root, 'public', 'planning.js'), 'utf8'); const css = fs.readFileSync(path.join(root, 'public', 'styles.css'), 'utf8');
   const fn = (name, next) => pl.slice(pl.indexOf(`function ${name}`), pl.indexOf(next, pl.indexOf(`function ${name}`)));
-  // the expanded row is just a wrapper around the shared panel
-  const row = fn('plCoreDetailHtml', 'function plCoreHeadHtml');
-  assert.match(row, /plProductPanelHtml\(it\)/); assert.doesNotMatch(row, /plCoreMetrics|plMainImg/, 'no second detail layout');
-  const panel = fn('plProductPanelHtml', 'function plCoreDetailHtml');
-  for (const part of ['plSalesInventoryHtml(it)', 'plCreativeSummaryCardHtml(it)', 'plCreativePaneHtml(it)', 'plShootPaneHtml(it)', 'plEvidenceHtml(it)']) assert.ok(panel.includes(part), part);
-  assert.match(panel, /Overview|PL_PX_TABS/); assert.match(pl, /\['overview', 'Overview'\], \['creative', 'Creative Performance'\], \['shoot', 'Shoot Readiness'\]/, 'the three sections');
-  // section A: sales and inventory
-  const si = fn('plSalesInventoryHtml', 'function plCreativeCountsHtml');
-  for (const label of ['Last 7 days', 'Last 30 days', 'Trend', 'MTD vs LY', 'Stock on hand', 'On order', 'Weeks of cover']) assert.ok(si.includes(label), label);
-  // section B: creative performance, each funnel on its own benchmark
-  const counts = fn('plCreativeCountsHtml', 'function plCreativeSummaryCardHtml');
-  for (const label of ['Active', 'Effective', 'Underperforming', 'Testing', 'Unrated']) assert.ok(counts.includes(`'${label}'`), label);
-  assert.match(fn('plFunnelTableHtml', 'function plCreativePaneHtml'), /No approved .* benchmark: those creatives are shown as Unrated, never as underperforming/);
-  assert.match(pl, /View Meta ads &rarr;/); assert.doesNotMatch(pl, /plCoreAdsHtml|pl-ads-table|pl-cx-ads/, 'no embedded Meta ads table in Planning');
+  const core = fn('plCoreDetailHtml', 'function plCoreTableHtml');
+  assert.doesNotMatch(core, /<details|plLiveAdsHtml|plEvidenceParts|keyFacts|whyWithNumbers|conditionsSummary|score_parts|Eligibility|Additional details|Recent live ads/, 'the expanded view has no accordions and none of the technical evidence');
+  assert.match(core, /plMainImg\(it\.image_url\)/); assert.match(core, /plCoreMetrics\(it\)/); assert.match(core, /plCoreColourCards\(it\)/); assert.match(core, /plCoreAddBtn\(it\)/); assert.match(core, /plMetaBtn\(it\)/);
+  assert.equal((core.match(/plCoreAddBtn\(it\)/g) || []).length, 1, 'exactly one primary action in the expanded view');
+  assert.match(pl, /View Meta Ads &rarr;/); assert.doesNotMatch(pl, /plCoreAdsHtml|pl-ads-table|pl-cx-ads/, 'no embedded Meta ads table in Planning');
   assert.match(pl, /mpOpenProduct\(\{ codes, label: it\.name, key: it\.key, from: state\.planningStep/, 'it opens Meta Performance scoped to the product');
-  // section C: shoot readiness: colourways, production activity, one Add action
-  const shoot = fn('plShootPaneHtml', 'function plEvidenceHtml');
-  assert.match(shoot, /plCoreColourCards\(it\)/); assert.match(shoot, /Already in production/); assert.match(shoot, /plCoreAddBtn\(it\)/);
-  assert.equal((shoot.match(/plCoreAddBtn\(it\)/g) || []).length, 1, 'exactly one primary action');
-  assert.match(pl, /drop-card-product-tile pl-cc-tile/, 'colourway thumbnails are the Upcoming Drops tile'); assert.match(pl, /#i-image/, 'the same image icon fallback');
-  // the detailed evidence stays one click down
-  assert.match(fn('plEvidenceHtml', 'function plProductPanelHtml'), /<details class="pl-evidence"[\s\S]*View detailed evidence/);
-  // one row builder for every page
+  assert.match(pl, /coverage-card-imgrow pl-cx-img/, 'the main picture is the Upcoming Drops picture panel'); assert.match(pl, /drop-card-product-tile pl-cc-tile/, 'colourway thumbnails are the Upcoming Drops tile');
+  assert.match(pl, /#i-image/, 'the same image icon fallback');
+  const metrics = fn('plCoreMetrics', 'function plHasMetaAds');
+  assert.equal((metrics.match(/\bcard\(/g) || []).length, 3, 'three metric cards'); assert.match(metrics, /Sales \(30D\)/); assert.match(metrics, /Stock on hand/); assert.match(metrics, /Active \/ effective creatives/);
   assert.match(pl, /return plCoreTableHtml\(mode, items, cat\)/, 'Core and High Stocks render the same table');
-  assert.match(pl, /plCoreRowHtml\(r\.info\.it, 'cat'/, 'the Core Catalogue renders the same row');
   assert.match(pl, /plPageHtml\('high', tierNote\)/);
-  for (const gone of ['function plTableHtml', 'function plDetailHtml', 'function plMetricsCell', 'function plLiveAdsHtml', 'function plCoreMetrics', 'const plMainImg']) assert.ok(!pl.includes(gone), `${gone} was an older layout and is gone`);
-  assert.match(css, /\.pl-px-tab\.active\{/); assert.match(css, /\.pl-px-cards\{display:grid/);
+  for (const gone of ['function plTableHtml', 'function plDetailHtml', 'function plMetricsCell', 'function plLiveAdsHtml']) assert.ok(!pl.includes(gone), `${gone} was the old High Stocks layout and is gone`);
+  assert.match(css, /\.coverage-card-imgrow\{[^}]*height:170px/); assert.match(css, /\.pl-cx-img\{height:200px/);
 });
 
 test('creative coverage: Active Ads and the latest NAME date; Unknown / None are told apart; never a delivery date', () => {

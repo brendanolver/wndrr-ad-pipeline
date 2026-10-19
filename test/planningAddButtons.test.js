@@ -17,10 +17,9 @@ const cov = (n) => ({ known: true, active_ads: n, possible: 0, unresolved: 0, un
 const v = (k, s, o = {}) => ({ ...cr(k, s, { age: o.age === undefined ? 120 : o.age }), first_delivery: day(o.age === undefined ? 120 : o.age), first_delivery_truncated: false, last_delivery: day(1), ...o });
 
 test('add: the Action column (+ Add) is in every category; Priority only in Needs creative', () => {
-  const table = pl.slice(pl.indexOf('function plCoreHeadHtml'), pl.indexOf('const PL_CORE_TITLE'));
+  const table = pl.slice(pl.indexOf('function plCoreTableHtml'), pl.indexOf('const PL_CORE_TITLE'));
   assert.match(table, /const needs = cat === 'needs'/);
-  assert.doesNotMatch(table, /pt-w-rank/, 'the ranking number column is gone');
-  assert.match(table, /th\('Product'[\s\S]*th\('Sales \(30D\)'[\s\S]*th\('Stock'[\s\S]*th\('Creative Coverage'[\s\S]*'Creative Gap'[\s\S]*prio \? th\('Priority'[\s\S]*th\('Action'/, 'Product | Sales (30D) | Stock | Creative Coverage | Creative Gap | Priority (Needs only) | Action');
+  assert.match(table, /needs \? '<th class="pt-w-rank">#<\/th>' : ''[\s\S]*th\('Product'[\s\S]*th\('Sales \(30D\)'[\s\S]*th\('Stock'[\s\S]*th\('Latest creative'[\s\S]*'Creative gap'[\s\S]*needs \? th\('Priority'[\s\S]*th\('Action'/, '# | Product | Sales (30D) | Stock | Latest creative | Creative gap | Priority (Needs only) | Action');
   assert.match(pl, /priority: \{[^}]*only: 'needs'/, 'the Priority sort is offered only in Needs creative');
   const act = pl.slice(pl.indexOf('function plCoreAddBtn'), pl.indexOf('// colourway cards'));
   assert.match(act, /needs \? 'pl-act-add' : 'pl-act-soft'[\s\S]*data-opp-add/, 'Needs: the purple + Add; Covered / Needs review: the same add as a quiet outline button');
