@@ -19430,9 +19430,6 @@ function mpmStatusBadge(m) {
 }
 
 function metaProductMappingRowHtml(m) {
-  const familyOptions = state.metaProductFamilies
-    .map((f) => `<option value="${escapeHtml(f.product_code)}">${escapeHtml(f.product_name)}</option>`)
-    .join('');
   return `
     <div class="mpm-row">
       <div class="mpm-row-main">
@@ -19442,11 +19439,12 @@ function metaProductMappingRowHtml(m) {
       </div>
       ${!m.product_code ? `
         <div class="mpm-resolve-row">
-          <select id="mpm-resolve-${m.id}">
-            <option value="">— select internal product family —</option>
-            ${familyOptions}
-          </select>
-          <button type="button" class="btn btn-primary btn-sm" onclick="resolveMetaProductMapping(${m.id})">Map</button>
+          <div class="mpm-search" data-mpm-id="${m.id}">
+            <input type="text" class="mpm-search-input" id="mpm-resolve-${m.id}" placeholder="Search products: type a name or code" autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="mpm-results-${m.id}" aria-label="Search for the internal product family">
+            <input type="hidden" id="mpm-code-${m.id}" value="">
+            <ul class="mpm-results" id="mpm-results-${m.id}" role="listbox" hidden></ul>
+          </div>
+          <button type="button" class="btn btn-primary btn-sm" id="mpm-map-${m.id}" onclick="resolveMetaProductMapping(${m.id})" disabled>Map</button>
         </div>` : ''}
     </div>`;
 }
@@ -19495,9 +19493,9 @@ async function checkMetaProductMapping() {
 }
 
 async function resolveMetaProductMapping(id) {
-  const sel = document.getElementById(`mpm-resolve-${id}`);
-  const productCode = sel.value;
-  if (!productCode) return toast('Select which internal product family this maps to', true);
+  const code = document.getElementById(`mpm-code-${id}`);
+  const productCode = code ? code.value : '';
+  if (!productCode) return toast('Search for, and pick, the internal product family this maps to', true);
   const family = state.metaProductFamilies.find((f) => f.product_code === productCode);
   try {
     await api(`/meta-product-mappings/${id}`, {
@@ -19523,6 +19521,93 @@ async function deleteMetaProductMapping(id) {
     toast(e.message, true);
   }
 }
+
+
+// Searchable product picker for an unmapped Meta combination: type any part of a product name or code and pick from the matching results (instead of scrolling a long dropdown). Every word typed
+// must appear in the product's name or code; with nothing typed it suggests the families that best match the Meta product name. The chosen family's code is what "Map" saves, exactly as before.
+const mpmNorm = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9/]+/g, ' ').trim();
+function mpmMatches(query, limit) {
+  const tokens = mpmNorm(query).split(' ').filter(Boolean);
+  if (!tokens.length) return { tokens, list: [], total: 0 };
+  const scored = [];
+  for (const f of state.metaProductFamilies || []) {
+    const name = mpmNorm(f.product_name); const code = mpmNorm(f.product_code);
+    if (!tokens.every((t) => name.includes(t) || code.includes(t))) continue;
+    // better: the whole phrase, a name that starts with the first word, then shorter names
+    const phrase = tokens.join(' ');
+    const rank = (name === phrase ? 0 : name.startsWith(phrase) ? 1 : name.includes(phrase) ? 2 : name.startsWith(tokens[0]) ? 3 : 4);
+    scored.push({ f, rank, len: name.length });
+  }
+  scored.sort((a, b) => a.rank - b.rank || a.len - b.len || String(a.f.product_name).localeCompare(String(b.f.product_name)));
+  return { tokens, list: scored.slice(0, limit).map((x) => x.f), total: scored.length };
+}
+// With nothing typed: the families sharing the most words with the Meta ad's product text (any word, not all), best first.
+function mpmSuggest(metaText, limit) {
+  const tokens = [...new Set(mpmNorm(metaText).split(' ').filter((t) => t.length >= 3))];
+  const scored = [];
+  for (const f of state.metaProductFamilies || []) {
+    const name = mpmNorm(f.product_name); const hit = tokens.filter((t) => name.split(' ').includes(t)).length;
+    if (hit) scored.push({ f, hit, len: name.length });
+  }
+  scored.sort((a, b) => b.hit - a.hit || a.len - b.len || String(a.f.product_name).localeCompare(String(b.f.product_name)));
+  return { tokens: [], list: scored.slice(0, limit).map((x) => x.f), total: scored.length };
+}
+function mpmHighlight(text, tokens) {
+  const raw = String(text || ''); if (!tokens.length) return escapeHtml(raw);
+  const spans = []; const lower = raw.toLowerCase();
+  tokens.forEach((t) => { let i = lower.indexOf(t); while (i !== -1) { spans.push([i, i + t.length]); i = lower.indexOf(t, i + t.length); } });
+  spans.sort((a, b) => a[0] - b[0]);
+  const merged = []; spans.forEach((sp) => { const last = merged[merged.length - 1]; if (last && sp[0] <= last[1]) last[1] = Math.max(last[1], sp[1]); else merged.push([...sp]); });
+  let out = ''; let pos = 0; merged.forEach(([a, b]) => { out += `${escapeHtml(raw.slice(pos, a))}<mark>${escapeHtml(raw.slice(a, b))}</mark>`; pos = b; });
+  return out + escapeHtml(raw.slice(pos));
+}
+function mpmRowOf(el) { const box = el.closest('.mpm-search'); return box ? { box, id: box.dataset.mpmId, input: box.querySelector('.mpm-search-input'), code: box.querySelector('input[type="hidden"]'), results: box.querySelector('.mpm-results') } : null; }
+function mpmClose(r) { if (!r) return; r.results.hidden = true; r.input.setAttribute('aria-expanded', 'false'); r.results.querySelectorAll('.active').forEach((o) => o.classList.remove('active')); r.input.removeAttribute('aria-activedescendant'); }
+function mpmOpen(r) {
+  const typed = r.input.value.trim();
+  const mapping = state.metaProductMappings.find((m) => String(m.id) === String(r.id));
+  const suggest = !typed && mapping ? mpmSuggest(`${mapping.meta_product} ${mapping.meta_product_type}`, 6) : null;
+  const res = suggest || mpmMatches(typed, 8);
+  let html = '';
+  if (!typed && !(suggest && suggest.list.length)) { r.results.innerHTML = '<li class="mpm-hint" role="presentation">Start typing a product name or code</li>'; }
+  else if (!res.list.length) { r.results.innerHTML = `<li class="mpm-hint" role="presentation">No product matches &ldquo;${escapeHtml(typed)}&rdquo;</li>`; }
+  else {
+    html = `${suggest ? '<li class="mpm-hint" role="presentation">Suggested matches</li>' : ''}${res.list.map((f, i) => `<li class="mpm-opt" role="option" id="mpm-opt-${r.id}-${i}" data-code="${escapeHtml(f.product_code)}"><span class="mpm-opt-name">${mpmHighlight(f.product_name, res.tokens)}</span><small>${mpmHighlight(f.product_code, res.tokens)}</small></li>`).join('')}${res.total > res.list.length ? `<li class="mpm-hint" role="presentation">${res.total - res.list.length} more: keep typing to narrow it down</li>` : ''}`;
+    r.results.innerHTML = html;
+  }
+  r.results.hidden = false; r.input.setAttribute('aria-expanded', 'true');
+}
+function mpmChoose(r, li) {
+  const code = li.dataset.code; const family = state.metaProductFamilies.find((f) => f.product_code === code);
+  r.code.value = code; r.input.value = family ? family.product_name : code; r.input.classList.add('chosen');
+  const btn = document.getElementById(`mpm-map-${r.id}`); if (btn) btn.disabled = false;
+  mpmClose(r);
+}
+function mpmMove(r, dir) {
+  const opts = [...r.results.querySelectorAll('.mpm-opt')]; if (!opts.length) return;
+  let i = opts.findIndex((o) => o.classList.contains('active'));
+  opts.forEach((o) => o.classList.remove('active'));
+  i = i === -1 ? (dir > 0 ? 0 : opts.length - 1) : (i + dir + opts.length) % opts.length;
+  opts[i].classList.add('active'); opts[i].scrollIntoView({ block: 'nearest' }); r.input.setAttribute('aria-activedescendant', opts[i].id);
+}
+(function wireMpmSearch() {
+  const list = document.getElementById('mpm-list');
+  list.addEventListener('input', (e) => {
+    const r = e.target.classList && e.target.classList.contains('mpm-search-input') ? mpmRowOf(e.target) : null; if (!r) return;
+    r.code.value = ''; r.input.classList.remove('chosen'); const btn = document.getElementById(`mpm-map-${r.id}`); if (btn) btn.disabled = true; // typing again clears the previous pick
+    mpmOpen(r);
+  });
+  list.addEventListener('focusin', (e) => { const r = e.target.classList && e.target.classList.contains('mpm-search-input') ? mpmRowOf(e.target) : null; if (r && !r.code.value) mpmOpen(r); });
+  list.addEventListener('keydown', (e) => {
+    const r = e.target.classList && e.target.classList.contains('mpm-search-input') ? mpmRowOf(e.target) : null; if (!r) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); if (r.results.hidden) mpmOpen(r); mpmMove(r, e.key === 'ArrowDown' ? 1 : -1); }
+    else if (e.key === 'Enter') { e.preventDefault(); const active = r.results.querySelector('.mpm-opt.active') || (r.results.hidden ? null : r.results.querySelector('.mpm-opt')); if (active && !r.results.hidden) mpmChoose(r, active); else if (r.code.value) resolveMetaProductMapping(Number(r.id)); }
+    else if (e.key === 'Escape') mpmClose(r);
+  });
+  // mousedown (not click) so the pick lands before the input loses focus
+  list.addEventListener('mousedown', (e) => { const li = e.target.closest('.mpm-opt'); if (!li) return; e.preventDefault(); const r = mpmRowOf(li); if (r) mpmChoose(r, li); });
+  list.addEventListener('focusout', (e) => { const r = e.target.classList && e.target.classList.contains('mpm-search-input') ? mpmRowOf(e.target) : null; if (r) setTimeout(() => mpmClose(r), 120); });
+})();
 
 document.getElementById('mpm-check-btn').addEventListener('click', checkMetaProductMapping);
 document.getElementById('mpm-check-input').addEventListener('keydown', (e) => {

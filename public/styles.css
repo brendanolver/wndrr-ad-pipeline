@@ -6233,3 +6233,18 @@ button.cat2-prod:focus-visible,.cat2-view:focus-visible,.cat2-shoot:focus-visibl
 .settings-meta-toggle-btn{border:0;background:none;padding:6px 16px;border-radius:var(--r-pill);font:inherit;font-size:12.5px;font-weight:600;color:var(--text-secondary);cursor:pointer;}
 .settings-meta-toggle-btn:hover{color:var(--text);}
 .settings-meta-toggle-btn.active{background:#fff;color:var(--accent-text);box-shadow:var(--shadow-xs);}
+
+/* Meta Mapping: searchable product picker (type, then pick from the results) */
+.mpm-search{position:relative;flex:1;min-width:0;}
+.mpm-search-input{width:100%;font-family:inherit;font-size:13.5px;padding:9px 12px 9px 34px;border:1px solid var(--border-strong);border-radius:var(--r);background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%237c829a' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E") 11px 50% no-repeat;}
+.mpm-search-input:focus{outline:0;border-color:var(--accent);box-shadow:var(--focus-ring);}
+.mpm-search-input.chosen{border-color:#22a35a;background-color:#f3faf6;font-weight:600;}
+.mpm-results{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:30;margin:0;padding:4px;list-style:none;background:#fff;border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);max-height:300px;overflow-y:auto;}
+.mpm-results[hidden]{display:none;}
+.mpm-opt{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:8px 10px;border-radius:7px;cursor:pointer;font-size:13.5px;color:var(--text);}
+.mpm-opt small{font-size:11.5px;color:var(--text-muted);white-space:nowrap;}
+.mpm-opt:hover,.mpm-opt.active{background:var(--accent-softer);}
+.mpm-opt mark{background:#fdf3dc;color:inherit;border-radius:3px;padding:0 1px;}
+.mpm-hint{padding:7px 10px;font-size:12px;color:var(--text-muted);}
+.mpm-resolve-row .btn[disabled]{opacity:.45;cursor:not-allowed;}
+.mpm-search .mpm-search-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%237c829a' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:11px 50%;padding-left:34px;}

@@ -2,6 +2,15 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.7.0",
+      "date": "2026-10-20",
+      "title": "Meta Mapping: search for the product",
+      "changes": [
+        "Each unmapped Meta combination now has a search box instead of the long product dropdown: type any part of a product name or code and pick from the matching, highlighted results",
+        "With nothing typed it suggests the products closest to the Meta product name; arrow keys and Enter work, and Map saves the chosen product exactly as before"
+      ]
+    },
+    {
       "version": "1.6.9",
       "date": "2026-10-20",
       "title": "Settings: one Meta section",
