@@ -6279,8 +6279,10 @@ button.cat2-prod:focus-visible,.cat2-view:focus-visible,.cat2-shoot:focus-visibl
 .dpv-playbook-link:hover{text-decoration:underline;}
 .dpv-row{display:grid;grid-template-columns:34px minmax(220px,2fr) minmax(160px,1fr) 170px 64px 64px 88px 90px;gap:16px;align-items:center;padding:11px 18px;background:#fff;border-bottom:1px solid var(--border);}
 .dpv-row-head{border:1px solid var(--border);border-bottom:1px solid var(--border);border-radius:var(--r-lg) var(--r-lg) 0 0;padding:10px 18px;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);}
-.dpv-list{border:1px solid var(--border);border-top:0;border-radius:0 0 var(--r-lg) var(--r-lg);overflow:hidden;margin-bottom:14px;background:#fff;}
-.dpv-list .dpv-row:last-child{border-bottom:0;}
+.dpv-list{border:1px solid var(--border);border-top:0;border-radius:0 0 var(--r-lg) var(--r-lg);margin-bottom:14px;background:#fff;}
+.dpv-list .dpv-row:last-child{border-bottom:0;border-radius:0 0 var(--r-lg) var(--r-lg);}
+/* the table must not clip the options menu (no overflow: hidden), so the last row's menu opens upward and can never run off the bottom */
+.dpv-list .dpv-row:last-child .dpv-menu-pop{top:auto;bottom:calc(100% + 4px);}
 .dpv-list .attention-empty{border:0;border-radius:0;}
 .dpv-c-rank{color:var(--text-muted);font-size:13px;}
 .dpv-c-concept{display:flex;align-items:center;gap:11px;min-width:0;}

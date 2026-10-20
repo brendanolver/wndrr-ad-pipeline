@@ -2,6 +2,14 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.7.8",
+      "date": "2026-10-20",
+      "title": "Upcoming Drops product page: options menu no longer cut off",
+      "changes": [
+        "The ··· menu on the last concept row (for example a newly added concept) is no longer clipped by the table"
+      ]
+    },
+    {
       "version": "1.7.7",
       "date": "2026-10-20",
       "title": "Drop page: completed product cards turn light green",

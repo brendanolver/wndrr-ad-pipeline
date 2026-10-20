@@ -168,3 +168,10 @@ test('Drop page product cards: a card whose coverage is complete (the green COVE
   assert.match(css, /\.coverage-card-complete\{background:#f1faf4;border-color:#bfe3cd;\}/);
   assert.match(css, /\.coverage-card-complete \.coverage-card-imgrow\{background:#e1f2e8;\}/);
 });
+
+test('the concept table does not clip the options menu: no overflow:hidden on the list, rounded corners on the last row instead, and the last row menu opens upward', () => {
+  const list = css.match(/\.dpv-list\{[^}]*\}/)[0];
+  assert.ok(!/overflow/.test(list), 'a clipping list hides the menu of the last row');
+  assert.match(css, /\.dpv-list \.dpv-row:last-child\{border-bottom:0;border-radius:0 0 var\(--r-lg\) var\(--r-lg\);\}/);
+  assert.match(css, /\.dpv-list \.dpv-row:last-child \.dpv-menu-pop\{top:auto;bottom:calc\(100% \+ 4px\);\}/);
+});
