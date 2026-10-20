@@ -1687,6 +1687,20 @@
         <button class="btn btn-primary btn-sm" id="pw-add-btn">+ Add Proven Winner</button>
 
         <div class="planning-section-header">
+          <h2>Required Concepts by Stock</h2>
+          <span class="admin-note">How many concepts each Upcoming Drop product needs, based on its stock. The figure used is the product's busiest colourway: Stock on Hand + On Order together.</span>
+        </div>
+        <div id="crt-editor" class="crt-editor"></div>
+        <div class="crt-actions">
+          <button class="btn btn-ghost btn-sm" id="crt-add-btn" type="button">+ Add range</button>
+          <button class="btn btn-ghost btn-sm" id="crt-defaults-btn" type="button">Reset to standard</button>
+          <span class="crt-spacer"></span>
+          <button class="btn btn-ghost btn-sm" id="crt-discard-btn" type="button" disabled>Discard changes</button>
+          <button class="btn btn-primary btn-sm" id="crt-save-btn" type="button" disabled>Save</button>
+        </div>
+        <div class="hint" id="crt-hint">Saving applies to every Upcoming Drop straight away. Concepts already planned are never removed; a product that now needs more gets the extra Required Concepts the next time it is opened.</div>
+
+        <div class="planning-section-header">
           <h2>Creative Resources</h2>
           <span class="admin-note">Research/inspiration links shown in the Concept Development Creative Toolkit -- add, rename, reorder, disable or delete as needed.</span>
         </div>

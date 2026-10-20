@@ -185,3 +185,11 @@ On the Drop page, a product card whose creative coverage is complete (the green 
 ## Upcoming Drops: removing a manually added concept
 
 A concept added with `+ Add New Concept` has a small trash button beside its `···` menu (the Creative Playbook's concepts have none: they are fixed). After a confirmation it is removed from the drop and ARCHIVED through the concept lifecycle (`archive`): it leaves every active queue and count, its history stays and it can be restored; nothing is deleted. A concept already Uploaded to Meta (or matched to a live Meta ad) is protected and stays. Archived and killed concepts no longer appear under Other Creative Concepts or in the Link existing list.
+
+## Settings: Required Concepts by Stock
+
+Settings > Creative Playbook, below Proven Winners. It edits the stock ranges (`creative_target_rules`) that decide how many Required Concepts an Upcoming Drop product needs. The stock figure is the product's busiest colourway's Stock on Hand + On Order combined (`lib/coverage.js`, unchanged). The standard ranges are the existing seed (1-100: 4, 101-200: 6, 201-400: 8, 401+: 10), so nothing changes until someone edits them; `Reset to standard` restores them (still needs Save).
+
+* Only the END of each range and its number are typed; each range starts one above the previous end, the first starts at 1 and the last is "and above". `+ Add range`, the remove button, `Discard changes` and `Save` (enabled only when something changed and it is valid).
+* The server validates the whole set (`validateCreativeTargetRules`: no gap, no overlap, first at 1, last open-ended, whole numbers, required 0-50, at most 12 ranges) and swaps it in one transaction (`PUT /api/creative-target-rules`); a refused set changes nothing. A gap would otherwise silently take the lowest range's number, which is why gaps are refused.
+* Saving applies to every Upcoming Drop straight away. Concepts already planned are never removed; a product that now needs more gets extra Required Concepts the next time it is opened. Core and High Stocks recommendations do not use these ranges.

@@ -2,6 +2,15 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.8.1",
+      "date": "2026-10-21",
+      "title": "Creative Playbook: set Required Concepts by stock",
+      "changes": [
+        "New Required Concepts by Stock editor under Proven Winners: stock ranges (SOH + On Order of the busiest colourway) and how many concepts each needs",
+        "Ranges are validated as a whole (no gaps or overlaps) and saved together; the standard ranges are unchanged until edited"
+      ]
+    },
+    {
       "version": "1.8.0",
       "date": "2026-10-21",
       "title": "Settings: Users tab first",

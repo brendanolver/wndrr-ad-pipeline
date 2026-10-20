@@ -455,6 +455,7 @@ function switchSettingsPanel(name) {
   if (name === 'users') loadUsersAccessPanel();
   // Meta Sync only ever READS stored status on open -- it never starts a
   // sync by itself; that only happens from the explicit button below.
+  if (name === 'creative-playbook') loadCreativeTargetEditor();
   if (name === 'meta-sync') loadMetaSyncPanel();
   if (name === 'meta-benchmarks') loadMetaBenchmarksPanel();
   if (name === 'planning') loadPriorityOverrides();
@@ -20083,3 +20084,77 @@ document.addEventListener('paste', (e) => {
 
 // Settings opens on Planning, so its sections are regrouped into cards at load (the other pages when first opened).
 uxCardifySettings('planning');
+
+
+// ── Settings > Creative Playbook > Required Concepts by Stock ─────────────────────────────────────────────────────────────────────────
+// Edits the stock ranges that decide how many Required Concepts an Upcoming Drop product needs (creative_target_rules; the figure is the product's busiest colourway's SOH + On Order, see lib/coverage.js).
+// The ranges always follow on from each other: the first starts at 1, each starts one above the previous end, the last is "and above". So only the END of each range and its number are typed; the starts follow.
+const CRT_STANDARD = [{ max: 100, req: 4 }, { max: 200, req: 6 }, { max: 400, req: 8 }, { max: null, req: 10 }];
+let crtRows = []; let crtSaved = '[]';
+const crtFrom = (i) => (i === 0 ? 1 : (Number(crtRows[i - 1].max) || 0) + 1);
+const crtToApi = () => crtRows.map((r, i) => ({ soh_min: crtFrom(i), soh_max: i === crtRows.length - 1 ? null : Number(r.max), required_creatives: Number(r.req) }));
+function crtFromApi(rules) { return [...rules].sort((a, b) => a.soh_min - b.soh_min).map((r) => ({ max: r.soh_max, req: r.required_creatives })); }
+function crtProblem() {
+  for (let i = 0; i < crtRows.length; i += 1) {
+    const r = crtRows[i]; const last = i === crtRows.length - 1;
+    if (!(Number.isInteger(Number(r.req)) && r.req !== '' && Number(r.req) >= 0 && Number(r.req) <= 50)) return { row: i, field: 'req', msg: 'Required concepts must be a whole number from 0 to 50.' };
+    if (!last && !(r.max !== '' && r.max !== null && Number.isInteger(Number(r.max)) && Number(r.max) >= crtFrom(i))) return { row: i, field: 'max', msg: `A range cannot end before it starts (it starts at ${crtFrom(i)}).` };
+  }
+  return null;
+}
+function crtDirty() { return JSON.stringify(crtRows.map((r) => [r.max === null ? null : Number(r.max), Number(r.req)])) !== crtSaved; }
+function renderCreativeTargetEditor() {
+  const el = document.getElementById('crt-editor'); if (!el) return;
+  const bad = crtProblem();
+  el.innerHTML = `<div class="crt-row crt-head"><span>Stock (SOH + On Order)</span><span>Required concepts</span><span></span></div>${crtRows.map((r, i) => {
+    const last = i === crtRows.length - 1;
+    const to = last ? '<span class="crt-open">and above</span>' : `<input type="number" min="${crtFrom(i)}" step="1" class="crt-in${bad && bad.row === i && bad.field === 'max' ? ' invalid' : ''}" data-crt-max="${i}" value="${r.max === null ? '' : escapeHtml(String(r.max))}" aria-label="Range ${i + 1} ends at">`;
+    return `<div class="crt-row"><span class="crt-range"><b>${crtFrom(i)}</b><i>to</i>${to}</span><span><input type="number" min="0" max="50" step="1" class="crt-in crt-req${bad && bad.row === i && bad.field === 'req' ? ' invalid' : ''}" data-crt-req="${i}" value="${escapeHtml(String(r.req))}" aria-label="Range ${i + 1} required concepts"></span><span>${crtRows.length > 1 ? `<button type="button" class="crt-del" data-crt-del="${i}" title="Remove this range" aria-label="Remove range ${i + 1}">&times;</button>` : ''}</span></div>`;
+  }).join('')}`;
+  el.querySelectorAll('[data-crt-max]').forEach((inp) => inp.addEventListener('input', () => { crtRows[Number(inp.dataset.crtMax)].max = inp.value === '' ? '' : Number(inp.value); crtRefreshState(); }));
+  el.querySelectorAll('[data-crt-req]').forEach((inp) => inp.addEventListener('input', () => { crtRows[Number(inp.dataset.crtReq)].req = inp.value === '' ? '' : Number(inp.value); crtRefreshState(); }));
+  el.querySelectorAll('[data-crt-del]').forEach((b) => b.addEventListener('click', () => {
+    const i = Number(b.dataset.crtDel); crtRows.splice(i, 1);
+    if (crtRows.length) crtRows[crtRows.length - 1].max = null; // the last range is always "and above"
+    renderCreativeTargetEditor();
+  }));
+  crtRefreshState();
+}
+// updates only the From labels, the invalid marks and the buttons, so typing in a box never loses focus
+function crtRefreshState() {
+  const el = document.getElementById('crt-editor'); if (!el) return;
+  el.querySelectorAll('.crt-range b').forEach((b, i) => { b.textContent = crtFrom(i); });
+  el.querySelectorAll('[data-crt-max]').forEach((inp) => { inp.min = crtFrom(Number(inp.dataset.crtMax)); });
+  const bad = crtProblem();
+  el.querySelectorAll('.crt-in').forEach((inp) => inp.classList.remove('invalid'));
+  if (bad) { const t = el.querySelector(`[data-crt-${bad.field}="${bad.row}"]`); if (t) t.classList.add('invalid'); }
+  const dirty = crtDirty();
+  document.getElementById('crt-save-btn').disabled = !dirty || !!bad;
+  document.getElementById('crt-discard-btn').disabled = !dirty;
+}
+async function loadCreativeTargetEditor() {
+  try {
+    const rules = await api('/creative-target-rules');
+    crtRows = crtFromApi(rules); crtSaved = JSON.stringify(crtRows.map((r) => [r.max, r.req]));
+    renderCreativeTargetEditor();
+  } catch (e) { toast(e.message, true); }
+}
+async function saveCreativeTargetRules() {
+  const bad = crtProblem(); if (bad) return toast(bad.msg, true);
+  const btn = document.getElementById('crt-save-btn'); btn.disabled = true;
+  try {
+    const rules = await api('/creative-target-rules', { method: 'PUT', body: JSON.stringify({ rules: crtToApi() }) });
+    crtRows = crtFromApi(rules); crtSaved = JSON.stringify(crtRows.map((r) => [r.max, r.req]));
+    renderCreativeTargetEditor();
+    toast('Required concepts saved. Upcoming Drops now use these ranges.');
+    if (typeof refreshDropsRow === 'function') refreshDropsRow();
+  } catch (e) { toast(e.message, true); crtRefreshState(); }
+}
+document.getElementById('crt-add-btn').addEventListener('click', () => {
+  const last = crtRows[crtRows.length - 1];
+  if (last) { last.max = crtFrom(crtRows.length - 1) + 99; crtRows.push({ max: null, req: Math.min(50, (Number(last.req) || 0) + 2) }); } else crtRows.push({ max: null, req: 4 });
+  renderCreativeTargetEditor();
+});
+document.getElementById('crt-defaults-btn').addEventListener('click', () => { crtRows = CRT_STANDARD.map((r) => ({ ...r })); renderCreativeTargetEditor(); });
+document.getElementById('crt-discard-btn').addEventListener('click', loadCreativeTargetEditor);
+document.getElementById('crt-save-btn').addEventListener('click', saveCreativeTargetRules);
