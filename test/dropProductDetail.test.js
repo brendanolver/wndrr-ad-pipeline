@@ -175,3 +175,19 @@ test('the concept table does not clip the options menu: no overflow:hidden on th
   assert.match(css, /\.dpv-list \.dpv-row:last-child\{border-bottom:0;border-radius:0 0 var\(--r-lg\) var\(--r-lg\);\}/);
   assert.match(css, /\.dpv-list \.dpv-row:last-child \.dpv-menu-pop\{top:auto;bottom:calc\(100% \+ 4px\);\}/);
 });
+
+test('Remove: only a manually added concept has a Remove button; the server archives it (history kept) and refuses Playbook and published concepts', () => {
+  const rows = app.slice(app.indexOf('function renderRequiredConcepts('), app.indexOf("document.getElementById('product-plan-playbook-link')"));
+  assert.match(rows, /const canRemove = s\.source === 'new' && !complete;/, 'never a Playbook (proven) concept, never one already Uploaded to Meta');
+  assert.match(rows, /\$\{primary\}\$\{menu\}\$\{removeBtn\}/);
+  const del = app.slice(app.indexOf('async function deleteConceptSlot('), app.indexOf('function showAddNewConceptForm()'));
+  assert.match(del, /confirmDialog\(msg, \{ okLabel: 'Remove' \}\)/); assert.match(del, /history is kept and it can be restored/); assert.match(del, /method: 'DELETE'/);
+  assert.match(del, /catch \(e\) \{\s*toast\(e\.message, true\);/, 'a refusal is shown, never a false success');
+  const route = read('src', 'routes', 'dropProductPlans.js');
+  const fn = route.slice(route.indexOf("router.delete('/:id/slots/:slotId'"), route.indexOf('// Link an EXISTING creative asset'));
+  assert.match(fn, /row\.source !== 'new'[\s\S]*409/); assert.match(fn, /info\.protected/);
+  assert.match(fn, /applyAction\(row\.fulfilled_by_asset_id, 'archive'/); assert.ok(!/DELETE FROM creative_assets/.test(fn), 'the production record is archived, never deleted');
+  assert.ok(fn.indexOf("'archive'") < fn.indexOf('DELETE FROM drop_product_plan_slots'), 'archive first (idempotent), then the slot, so a retry can finish the job');
+  assert.match(app, /filter\(\(a\) => !a\.archived_at && a\.concept_dev_status !== 'killed'\)/, 'an archived concept leaves Other Creative Concepts and the Link existing list');
+  assert.match(css, /\.dpv-del\{/);
+});

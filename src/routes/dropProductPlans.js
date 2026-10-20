@@ -382,6 +382,9 @@ router.post('/:id/slots', async (req, res, next) => {
   }
 });
 
+// Removing a concept from a drop. Only a manually added (New/Test) concept can go; the Creative Playbook's concepts are fixed. A manual concept has its own production record, so it is ARCHIVED through the
+// same lifecycle every other stage uses (it leaves every active queue and count, its history stays and it can be restored; nothing is deleted), and then it leaves the drop. A concept that has been published
+// to Meta, or whose ad setup is matched to a live Meta ad, is protected by that lifecycle and stays.
 router.delete('/:id/slots/:slotId', async (req, res, next) => {
   try {
     const slot = await pool.query(
@@ -391,16 +394,21 @@ router.delete('/:id/slots/:slotId', async (req, res, next) => {
     if (!slot.rows.length) return res.status(404).json({ error: 'Slot not found' });
     const row = slot.rows[0];
     if (row.source !== 'new') {
-      return res.status(409).json({ error: 'Only manually-added New/Test concept slots can be removed' });
+      return res.status(409).json({ error: 'Concepts from the Creative Playbook are fixed and cannot be removed here; only a manually added concept can.' });
     }
     if (row.fulfilled_by_asset_id) {
-      return res.status(409).json({ error: 'Unlink the fulfilling creative asset before removing this slot' });
+      const lifecycle = require('../lib/conceptLifecycle');
+      const info = await lifecycle.describe(row.fulfilled_by_asset_id, req.user);
+      if (info && info.protected) return res.status(409).json({ error: `${info.protected_reason} It stays on this drop.` });
+      // archive first (idempotent), then drop the slot: if anything fails in between, trying again finishes the job instead of leaving a live orphan
+      await lifecycle.applyAction(row.fulfilled_by_asset_id, 'archive', req.user, { reason: 'Removed from an Upcoming Drop' });
     }
 
     await pool.query('DELETE FROM drop_product_plan_slots WHERE id = $1', [req.params.slotId]);
     const data = await fetchPlanWithSlots(req.params.id);
     res.json(data);
   } catch (err) {
+    if (err && Number.isInteger(err.status) && err.status >= 400 && err.status < 500) return res.status(err.status).json({ error: err.message }); // a LifecycleError carries its own status
     next(err);
   }
 });

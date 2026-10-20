@@ -6073,7 +6073,8 @@ async function loadProductView(dropId, productCode) {
     };
 
     const styleIds = group.styles.map((s) => s.style_id).join(',');
-    const assets = await api(`/creative-assets?style_ids=${styleIds}`);
+    // an archived or killed concept (for example one removed from this drop) has left every active list
+    const assets = (await api(`/creative-assets?style_ids=${styleIds}`)).filter((a) => !a.archived_at && a.concept_dev_status !== 'killed');
     state.currentProductAssets = assets;
     // Every asset already linked to a Required Concept slot has its own row
     // there -- this section is only for whatever's left (a legacy asset
@@ -6269,9 +6270,11 @@ function renderRequiredConcepts(data) {
             ${eligibleAssets.map((a) => `<option value="${a.id}">${escapeHtml(a.style_code)} — ${escapeHtml(a.concept_name)}</option>`).join('')}
           </select>
         </label>` : '';
-    const removeOption = !fulfilled && s.source === 'new' ? `<button type="button" class="dpv-menu-item dpv-menu-danger" onclick="deleteConceptSlot(${s.id})">Remove concept</button>` : '';
-    const menu = editingOption || linkOption || removeOption ? `
-      <details class="dpv-menu"><summary class="btn btn-ghost btn-sm" aria-label="More options">&middot;&middot;&middot;</summary><div class="dpv-menu-pop">${editingOption}${linkOption}${removeOption}</div></details>` : '';
+    const menu = editingOption || linkOption ? `
+      <details class="dpv-menu"><summary class="btn btn-ghost btn-sm" aria-label="More options">&middot;&middot;&middot;</summary><div class="dpv-menu-pop">${editingOption}${linkOption}</div></details>` : '';
+    // A manually added concept (never one from the Creative Playbook, which is fixed) can be removed; one already Uploaded to Meta stays.
+    const canRemove = s.source === 'new' && !complete;
+    const removeBtn = canRemove ? `<button type="button" class="dpv-del" onclick="deleteConceptSlot(${s.id})" title="Remove this concept" aria-label="Remove ${escapeHtml(s.concept_name)}"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg></button>` : '';
     // A slot's asset is created automatically with the slot, so a normal row has no primary button (no Edit; Assigned To, the milestones and the Playbook carry everything); "+ Create Asset" only appears for a slot that somehow has no asset.
     const primary = fulfilled
       ? ''
@@ -6283,7 +6286,7 @@ function renderRequiredConcepts(data) {
       <span class="dpv-c-ref">${dropReferenceHtml(s)}</span>
       <span class="dpv-c-assign">${assigneeControl}</span>
       ${dropMilestonesHtml(s)}
-      <span class="dpv-c-act">${primary}${menu}</span>
+      <span class="dpv-c-act">${primary}${menu}${removeBtn}</span>
     </div>`;
   }).join('');
 
@@ -6388,10 +6391,16 @@ async function editConceptAsset(assetId) {
 }
 
 async function deleteConceptSlot(slotId) {
-  if (!(await confirmDialog('Remove this concept slot? This only works for manually-added New/Test slots with no linked asset.'))) return;
+  const slot = currentProductPlan && (currentProductPlan.slots || []).find((x) => x.id === slotId);
+  const started = slot && slot.asset_id && STATUSES.indexOf(slot.asset_status) >= STATUSES.indexOf('filming');
+  const name = slot ? slot.concept_name : 'this concept';
+  const msg = `Remove "${name}" from this drop?\n\nIt leaves the drop and every production queue. Its history is kept and it can be restored later; nothing is deleted.${started ? '\n\nIt has already been filmed or edited, so that work stays on record.' : ''}`;
+  if (!(await confirmDialog(msg, { okLabel: 'Remove' }))) return;
   try {
     await api(`/drop-product-plans/${currentProductPlan.plan.id}/slots/${slotId}`, { method: 'DELETE' });
-    loadProductView(state.currentDropId, state.currentProduct.product_code);
+    toast(`"${name}" removed`);
+    await loadProductView(state.currentDropId, state.currentProduct.product_code);
+    refreshDropsRow();
   } catch (e) {
     toast(e.message, true);
   }

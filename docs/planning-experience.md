@@ -181,3 +181,7 @@ Each product tile on an Upcoming Drops card shows the product's WHOLE picture (f
 ## Upcoming Drops: complete product cards
 
 On the Drop page, a product card whose creative coverage is complete (the green status that reads COVERAGE COMPLETE; never a product with no stock figure) is tinted a light green: the card, its picture area, the progress track and the border. Incomplete cards and the `+ Shoot This Week` button are unchanged. Styling only (`coverage-card-complete`).
+
+## Upcoming Drops: removing a manually added concept
+
+A concept added with `+ Add New Concept` has a small trash button beside its `···` menu (the Creative Playbook's concepts have none: they are fixed). After a confirmation it is removed from the drop and ARCHIVED through the concept lifecycle (`archive`): it leaves every active queue and count, its history stays and it can be restored; nothing is deleted. A concept already Uploaded to Meta (or matched to a live Meta ad) is protected and stays. Archived and killed concepts no longer appear under Other Creative Concepts or in the Link existing list.
