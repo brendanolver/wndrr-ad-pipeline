@@ -2323,6 +2323,15 @@
         </label>
       </div>
       <div class="hint">Used automatically when creating a Creative Asset for this concept from the Planning page — no need to re-pick them each time.</div>
+      <div class="field-row">
+        <label>Default assigned to
+          <select id="pw-assignee"></select>
+        </label>
+        <label>Reference link <span class="hint">(optional)</span>
+          <input type="url" id="pw-reference" placeholder="https://… reference video or example" autocomplete="off">
+        </label>
+      </div>
+      <div class="hint">Shown on every Upcoming Drop that uses this concept. The person fills any Upcoming Drop concept that has no one assigned (and follows later changes made here); a hand-picked Assigned To is never changed.</div>
       <label id="pw-position-row">Insert at position <span class="hint">(optional — default: bottom of the list)</span>
         <input type="number" id="pw-position" min="1">
       </label>
@@ -4173,21 +4182,6 @@
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('lifecycle-modal')">Cancel</button>
       <button class="btn btn-primary" id="lifecycle-confirm-btn" onclick="confirmLifecycleAction()">Confirm</button>
-    </div>
-  </div>
-</div>
-
-<div id="dpv-ref-modal" class="modal-backdrop">
-  <div class="modal confirm-modal">
-    <div class="modal-body">
-      <h3 style="margin:0 0 6px;font-size:16px;">Add reference</h3>
-      <p class="hint" id="dpv-ref-hint" style="margin:0 0 10px;"></p>
-      <input type="url" id="dpv-ref-link" placeholder="https://… link to the reference video or example" autocomplete="off" style="width:100%;">
-      <p class="hint" style="margin:8px 0 0;">Saved once on the Creative Playbook concept (as a Reference Library entry), so every drop that uses this concept shows the same reference.</p>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" id="dpv-ref-cancel">Cancel</button>
-      <button class="btn btn-primary" id="dpv-ref-save">Save reference</button>
     </div>
   </div>
 </div>

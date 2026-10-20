@@ -315,6 +315,9 @@ router.patch('/:id/assignee', async (req, res, next) => {
       [nextAssignee, nextEditingOwner, req.params.id]
     );
 
+    // A hand-picked Assigned To on a Drop concept stops following the Creative Playbook person (see applyPlaybookAssignee).
+    if (hasAssignee) await client.query('UPDATE drop_product_plan_slots SET assignee_from_playbook = false WHERE fulfilled_by_asset_id = $1', [req.params.id]);
+
     let responseRow = result.rows[0];
     // A manually started ("ad-hoc") concept has one owner: changing its Assigned To in the editor also changes the owner its plan entry shows, but only while the entry holds just
     // this one live concept (several concepts may have different assignees). Nothing else on the concept or the entry is touched.

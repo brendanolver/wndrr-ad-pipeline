@@ -5,7 +5,6 @@ const { buildCoverage } = require('../lib/coverage');
 const { deriveProductCode } = require('../lib/apparelmagic');
 const { insertCreativeAsset } = require('../lib/assets');
 const { FORMATS } = require('../lib/statuses');
-const preview = require('../lib/referencePreview');
 
 const router = express.Router();
 
@@ -75,33 +74,6 @@ router.get('/reference-thumb/:referenceId(\\d+)', async (req, res, next) => {
     res.set({ 'Content-Type': img.mime_type, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, max-age=86400', 'Content-Security-Policy': "default-src 'none'; sandbox" });
     res.send(img.data);
   } catch (err) { next(err); }
-});
-
-// "Add Reference" on a Required Concept: the reference belongs to the concept's Creative Playbook entry (the Proven Winner), so it is saved ONCE as a Reference Library record that the Proven Winner links
-// to, and every drop / product using that Playbook concept shows the same one. A slot with no Playbook entry (a manually added concept) has nowhere to keep a reference. An existing reference is never replaced here.
-router.post('/:id(\\d+)/slots/:slotId(\\d+)/reference', async (req, res, next) => {
-  const client = await pool.connect();
-  try {
-    const link = String((req.body && req.body.link) || '').trim();
-    if (!preview.publicUrl(link)) return res.status(400).json({ error: 'Enter a full web link (https://...) to the reference video or example' });
-    await client.query('BEGIN');
-    const slot = (await client.query(
-      `SELECT s.id, s.proven_winner_id, pw.name AS winner_name, pw.reference_id FROM drop_product_plan_slots s LEFT JOIN proven_winners pw ON pw.id = s.proven_winner_id
-        WHERE s.id = $1 AND s.plan_id = $2 FOR UPDATE OF s`, [req.params.slotId, req.params.id])).rows[0];
-    if (!slot) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Concept not found' }); }
-    if (!slot.proven_winner_id) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'This concept is not from the Creative Playbook, so it has no Playbook reference to add to' }); }
-    if (slot.reference_id) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'This Playbook concept already has a reference' }); }
-    const inserted = await client.query(
-      `INSERT INTO reference_library (link, comment, idea_type, added_by, added_by_user_id) VALUES ($1, $2, 'bau', $3, $4) RETURNING id`,
-      [link, `${slot.winner_name} (Creative Playbook reference)`, req.user.name, req.user.id]);
-    await client.query('UPDATE proven_winners SET reference_id = $1, updated_at = now() WHERE id = $2', [inserted.rows[0].id, slot.proven_winner_id]);
-    await client.query('COMMIT');
-    await preview.requestPreview(pool, inserted.rows[0].id, link).catch(() => {}); // the picture is fetched in the background after the save
-    res.status(201).json({ reference_id: inserted.rows[0].id, reference_link: link });
-  } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
-    next(err);
-  } finally { client.release(); }
 });
 
 router.get('/', async (req, res, next) => {
@@ -197,6 +169,7 @@ async function generateOrTopUpPlan(dropId, productCode) {
           asset.id,
           slotResult.rows[0].id,
         ]);
+        await applyPlaybookAssignee(client, pw.id, { slotId: slotResult.rows[0].id });
         await applyDropAssignmentDefaults(client, asset.id);
         nextRank += 1;
       }
@@ -281,6 +254,32 @@ async function ensureDropProductionLinkage(client, { assetId, styleId, styleCode
      ON CONFLICT (creative_asset_id) DO NOTHING`,
     [assetId, itemId]
   );
+}
+
+// The Creative Playbook entry's "Default assigned to" flows to its Drop concepts (Settings > Creative Playbook is where it is set). It only ever fills a concept that has NO one assigned, or one that was itself
+// filled from the Playbook (assignee_from_playbook) so a later change of the Playbook person follows it. A hand-picked Assigned To is never replaced, and only concepts not yet in production (before Filming) are
+// touched, so nothing already shot or edited is re-queued. Choosing the person is what queues a Drop concept for Shooting, so this goes through the same ensureDropProductionLinkage as the dropdown.
+// Clearing the Playbook person changes nothing. `slotId` limits it to one just-created concept.
+const PRE_PRODUCTION_STATUSES = ['not_started', 'awaiting_proven_concept', 'awaiting_concept_development', 'concept_script'];
+async function applyPlaybookAssignee(client, provenWinnerId, { slotId = null } = {}) {
+  const pw = (await client.query('SELECT default_assignee FROM proven_winners WHERE id = $1', [provenWinnerId])).rows[0];
+  const person = pw && pw.default_assignee;
+  if (!person) return 0;
+  const rows = (await client.query(
+    `SELECT s.id AS slot_id, s.assignee_from_playbook, ca.id AS asset_id, ca.concept_assignee, ca.style_id, ca.shoot_plan_item_id, st.style_code, st.drop_id
+       FROM drop_product_plan_slots s
+       JOIN creative_assets ca ON ca.id = s.fulfilled_by_asset_id
+       LEFT JOIN styles st ON st.id = ca.style_id
+      WHERE s.proven_winner_id = $1 AND ($2::int IS NULL OR s.id = $2)
+        AND ca.archived_at IS NULL AND ca.concept_dev_status <> 'killed' AND ca.status = ANY($3::text[])
+        AND (ca.concept_assignee IS NULL OR (s.assignee_from_playbook AND ca.concept_assignee <> $4))
+      FOR UPDATE OF ca`, [provenWinnerId, slotId, PRE_PRODUCTION_STATUSES, person])).rows;
+  for (const r of rows) {
+    await client.query('UPDATE creative_assets SET concept_assignee = $1, updated_at = now() WHERE id = $2', [person, r.asset_id]);
+    await client.query('UPDATE drop_product_plan_slots SET assignee_from_playbook = true WHERE id = $1', [r.slot_id]);
+    if (r.drop_id) await ensureDropProductionLinkage(client, { assetId: r.asset_id, styleId: r.style_id, styleCode: r.style_code, shootPlanItemId: r.shoot_plan_item_id, filmingPerson: person });
+  }
+  return rows.length;
 }
 
 // Default people for a NEW Required Concept (Settings > Shoot Prep). Only fills what is empty on a concept that was just created, so a manual choice is never
@@ -476,4 +475,4 @@ router.delete('/:id/slots/:slotId/fulfill', async (req, res, next) => {
   }
 });
 
-module.exports = { router, generateOrTopUpPlan, ensureDropProductionLinkage, applyDropAssignmentDefaults };
+module.exports = { router, generateOrTopUpPlan, ensureDropProductionLinkage, applyDropAssignmentDefaults, applyPlaybookAssignee };

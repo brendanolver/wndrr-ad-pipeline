@@ -1,6 +1,6 @@
 {
   "name": "wndrr-ad-pipeline",
-  "version": "1.7.2",
+  "version": "1.7.3",
   "description": "WNDRR Meta Ads Creative Pipeline tracker (Phase 1: creative pipeline Kanban board)",
   "private": true,
   "main": "src/server.js",

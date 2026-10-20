@@ -2,6 +2,16 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.7.3",
+      "date": "2026-10-20",
+      "title": "Upcoming Drops: Playbook-driven Reference and Assigned To, no Edit button",
+      "changes": [
+        "Creative Playbook entries get a Reference link and a Default assigned to",
+        "Upcoming Drop concepts show the Playbook reference and take the Playbook person when unassigned; hand-picked assignments are never changed",
+        "Edit button and the drop-page Add reference removed"
+      ]
+    },
+    {
       "version": "1.7.2",
       "date": "2026-10-20",
       "title": "Upcoming Drops: simpler imagery and Filmed / Edited / Uploaded checkboxes",

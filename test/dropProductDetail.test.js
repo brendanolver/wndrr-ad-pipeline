@@ -59,14 +59,13 @@ test('three checkboxes per row: ticked ones are marked, the rest are neutral, a 
   assert.equal((none.match(/disabled/g) || []).length, 3); assert.ok(!/dpv-ms done/.test(none));
 });
 
-test('reference: linked content opens in a new tab (video gets a play mark), none yet = quiet Add reference, manual concept = dash', () => {
+test('reference: linked content opens in a new tab (video gets a play mark), nothing set in the Playbook = a dash (no Add reference on the drop page)', () => {
   const video = dropReferenceHtml({ reference_link: 'https://example.com/v', reference_id: 4, reference_has_thumb: true, reference_thumb_version: 2, default_format: 'video' });
   assert.match(video, /href="https:\/\/example.com\/v" target="_blank" rel="noopener noreferrer"/); assert.match(video, /dpv-ref-play/); assert.match(video, /View video/);
   assert.match(video, /\/api\/drop-product-plans\/reference-thumb\/4\?v=2/);
   const still = dropReferenceHtml({ reference_link: 'https://example.com/i', reference_id: 5, default_format: 'static' });
   assert.match(still, /View example/); assert.ok(!/dpv-ref-play/.test(still));
-  assert.match(dropReferenceHtml({ id: 9, proven_winner_id: 3 }), /\+ Add reference/);
-  assert.ok(!/Add reference/.test(dropReferenceHtml({ id: 9 })));
+  for (const none of [{ id: 9, proven_winner_id: 3 }, { id: 9 }]) assert.ok(!/Add reference|<button/.test(dropReferenceHtml(none)) && /&mdash;/.test(dropReferenceHtml(none)));
 });
 
 test('page markup: header + chips + progress, five-column table, collapsed Other Creative Concepts with a count', () => {
@@ -92,14 +91,42 @@ test('no stage timeline, deliverables counter or status text; save goes through 
   assert.match(rows, /PROVEN/); assert.ok(!rows.includes('dpv-thumb'), 'no repeated product thumbnail in each concept row');
 });
 
-test('reference is a link to the Reference Library record from the Creative Playbook entry, never a duplicate; additive schema + guarded routes', () => {
+test('reference is a link to the Reference Library record from the Creative Playbook entry, never a duplicate; additive schema; read-only on the drop page', () => {
   assert.match(schema, /ALTER TABLE proven_winners ADD COLUMN IF NOT EXISTS reference_id INTEGER REFERENCES reference_library\(id\) ON DELETE SET NULL;/);
   assert.match(route, /LEFT JOIN proven_winners pw[\s\S]*LEFT JOIN reference_library rl/);
-  assert.match(route, /router\.get\('\/reference-thumb\/:referenceId/); assert.match(route, /router\.post\('\/:id\(\\\\d\+\)\/slots\/:slotId\(\\\\d\+\)\/reference'/);
-  assert.match(route, /409/, 'a Playbook entry that already has a reference is not overwritten');
+  assert.match(route, /router\.get\('\/reference-thumb\/:referenceId/);
+  assert.ok(!/\/reference'/.test(route) && !app.includes('openDropReferenceModal') && !html.includes('dpv-ref-modal'), 'the reference is set in Settings > Creative Playbook, not on the drop page');
   assert.match(route, /ca\.final_approval_status AS asset_final_approval[\s\S]*ss\.status AS shoot_status/, 'stage data is read from the existing pipeline');
-  const refRoute = route.slice(route.indexOf("slots/:slotId(\\\\d+)/reference'"));
-  assert.ok(!/INSERT INTO drop_product_plan_slots|UPDATE drop_product_plan_slots/.test(refRoute.slice(0, refRoute.indexOf('\nrouter.', 10) > 0 ? refRoute.indexOf('\nrouter.', 10) : undefined)), 'adding a reference does not touch how concepts are assigned to drops');
+});
+
+test('no Edit button on a concept row; Assigned To, the milestones, the menu and the Playbook link remain', () => {
+  const rows = app.slice(app.indexOf('function renderRequiredConcepts('), app.indexOf("document.getElementById('product-plan-playbook-link')"));
+  assert.ok(!rows.includes('editConceptAsset') && !/>Edit</.test(rows), 'no Edit button');
+  for (const kept of ['dpv-assign', 'dropMilestonesHtml', 'dpv-menu', 'Create Asset']) assert.ok(rows.includes(kept), kept);
+});
+
+test('Settings > Creative Playbook: each entry has a Reference link and a Default assigned to, saved by the existing routes', () => {
+  const modal = html.slice(html.indexOf('id="pw-modal"'), html.indexOf('id="pw-modal"') + 4200);
+  assert.match(modal, /id="pw-assignee"/); assert.match(modal, /id="pw-reference" placeholder/);
+  const save = app.slice(app.indexOf('async function savePw()'), app.indexOf('async function deletePw()'));
+  assert.match(save, /default_assignee, reference_link/); assert.match(save, /assignee_applied/);
+  assert.match(schema, /ALTER TABLE proven_winners ADD COLUMN IF NOT EXISTS default_assignee VARCHAR\(20\);/);
+  assert.match(schema, /ALTER TABLE drop_product_plan_slots ADD COLUMN IF NOT EXISTS assignee_from_playbook BOOLEAN NOT NULL DEFAULT false;/);
+  const pw = read('src', 'routes', 'provenWinners.js');
+  assert.match(pw, /CONCEPT_ASSIGNEES\.includes\(body\.default_assignee\)/); assert.match(pw, /preview\.publicUrl\(String\(body\.reference_link\)/);
+  assert.match(pw, /LEFT JOIN reference_library rl ON rl\.id = pw\.reference_id/, 'the Playbook list returns the reference link');
+  assert.match(pw, /applyPlaybookAssignee\(client, Number\(req\.params\.id\)\)/);
+});
+
+test('Playbook person flow: only unassigned (or Playbook-filled) concepts before filming, never a hand pick; a hand pick stops it following', () => {
+  const fn = route.slice(route.indexOf('async function applyPlaybookAssignee('), route.indexOf('// Default people for a NEW Required Concept'));
+  assert.match(fn, /ca\.concept_assignee IS NULL OR \(s\.assignee_from_playbook AND ca\.concept_assignee <> \$4\)/);
+  assert.match(fn, /ca\.status = ANY\(\$3::text\[\]\)/); assert.match(route, /PRE_PRODUCTION_STATUSES = \['not_started', 'awaiting_proven_concept', 'awaiting_concept_development', 'concept_script'\]/);
+  assert.match(fn, /ca\.archived_at IS NULL AND ca\.concept_dev_status <> 'killed'/);
+  assert.match(fn, /ensureDropProductionLinkage\(client/, 'same Shooting hand-off as picking the person by hand');
+  assert.match(fn, /if \(!person\) return 0;/, 'clearing the Playbook person changes nothing');
+  assert.match(route, /applyPlaybookAssignee\(client, pw\.id, \{ slotId: slotResult\.rows\[0\]\.id \}\);\s*await applyDropAssignmentDefaults/, 'new concepts take the Playbook person before the general default');
+  assert.match(read('src', 'routes', 'creativeAssets.js'), /UPDATE drop_product_plan_slots SET assignee_from_playbook = false WHERE fulfilled_by_asset_id/);
 });
 
 test('styling: the stage colours and PROVEN badge exist and no blue accent is introduced', () => {

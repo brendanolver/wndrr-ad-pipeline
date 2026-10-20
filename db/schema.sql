@@ -1188,6 +1188,10 @@ CREATE TABLE IF NOT EXISTS reference_library_images (
 -- Creative Playbook references (additive): a Proven Winner links to ONE Reference Library record (its example / video), so every drop and product using that Playbook concept shows the same reference
 -- and nothing is copied. Nullable; SET NULL if the library record is ever deleted. Nothing existing changes.
 ALTER TABLE proven_winners ADD COLUMN IF NOT EXISTS reference_id INTEGER REFERENCES reference_library(id) ON DELETE SET NULL;
+-- The person a Creative Playbook concept is assigned to by default on Upcoming Drops (Settings > Creative Playbook). Validated against the roster in the route, like concept_assignee.
+ALTER TABLE proven_winners ADD COLUMN IF NOT EXISTS default_assignee VARCHAR(20);
+-- true only while a Drop concept's Assigned To was filled from its Playbook entry (never set by a hand pick), so a later change of the Playbook person can follow it without ever touching a hand-picked assignment.
+ALTER TABLE drop_product_plan_slots ADD COLUMN IF NOT EXISTS assignee_from_playbook BOOLEAN NOT NULL DEFAULT false;
 
 -- ---------------------------------------------------------------------------
 -- Users & Auth foundation: real per-user accounts, replacing the single

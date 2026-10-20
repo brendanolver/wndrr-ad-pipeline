@@ -6197,7 +6197,7 @@ async function toggleDropMilestone(input) {
   }
   if (changed.length) toast(`${ms.label} ${checked ? 'ticked' : 'unticked'}; ${changed.join(' and ')} ${checked ? 'also marked done' : 'also cleared'}.`);
 }
-// The Creative Playbook entry's reference: a thumbnail (a play mark for a video) and View video / View example, linked to the original Reference Library record; none yet = a quiet Add reference.
+// The Creative Playbook entry's reference: a thumbnail (a play mark for a video) and View video / View example, linked to the original Reference Library record; none set in the Playbook = a dash.
 function dropReferenceHtml(s) {
   if (s.reference_link) {
     const isVideo = (s.asset_format || s.default_format) === 'video';
@@ -6205,7 +6205,7 @@ function dropReferenceHtml(s) {
     const thumb = s.reference_has_thumb ? `<img src="/api/drop-product-plans/reference-thumb/${s.reference_id}?v=${s.reference_thumb_version || 0}" alt="" loading="lazy" decoding="async">` : '<span class="dpv-ref-none"><svg class=ic aria-hidden=true focusable=false><use href=#i-image></use></svg></span>';
     return `<a class="dpv-ref" href="${escapeHtml(s.reference_link)}" target="_blank" rel="noopener noreferrer" title="Open the reference"><span class="dpv-ref-thumb">${thumb}${isVideo ? `<span class="dpv-ref-play">${play}</span>` : ''}</span><span class="dpv-ref-btn">${isVideo ? `${play} View video` : 'View example'}</span></a>`;
   }
-  if (s.proven_winner_id) return `<button type="button" class="dpv-addref" onclick="openDropReferenceModal(${s.id})">+ Add reference</button>`;
+  // The reference is set once on the concept's Creative Playbook entry (Settings); a concept without one simply shows nothing here.
   return '<span class="pw-slot-control-empty">&mdash;</span>';
 }
 
@@ -6270,9 +6270,9 @@ function renderRequiredConcepts(data) {
     const removeOption = !fulfilled && s.source === 'new' ? `<button type="button" class="dpv-menu-item dpv-menu-danger" onclick="deleteConceptSlot(${s.id})">Remove concept</button>` : '';
     const menu = editingOption || linkOption || removeOption ? `
       <details class="dpv-menu"><summary class="btn btn-ghost btn-sm" aria-label="More options">&middot;&middot;&middot;</summary><div class="dpv-menu-pop">${editingOption}${linkOption}${removeOption}</div></details>` : '';
-    // A slot's asset is created automatically with the slot, so the normal path is just Edit; "+ Create Asset" only appears for a slot that somehow has no asset.
+    // A slot's asset is created automatically with the slot, so a normal row has no primary button (no Edit; Assigned To, the milestones and the Playbook carry everything); "+ Create Asset" only appears for a slot that somehow has no asset.
     const primary = fulfilled
-      ? `<button type="button" class="btn btn-ghost btn-sm dpv-edit" onclick="editConceptAsset(${s.asset_id})">Edit</button>`
+      ? ''
       : `<button type="button" class="btn btn-ghost btn-sm dpv-edit" onclick="fulfillWithNewAsset(${s.id}, '${escapeHtml(s.concept_name).replace(/'/g, "\\'")}', '${s.source}', '${s.default_format || ''}', '${s.default_classification || ''}')">+ Create Asset</button>`;
     return `
     <div class="dpv-row${complete ? ' dpv-row-complete' : ''}">
@@ -6305,28 +6305,6 @@ function renderRequiredConcepts(data) {
   });
 }
 
-// "Add reference" on a Required Concept: the link is saved once on the concept's Creative Playbook entry (see POST /drop-product-plans/:id/slots/:slotId/reference).
-let dropRefSlotId = null;
-function openDropReferenceModal(slotId) {
-  const slot = currentProductPlan && (currentProductPlan.slots || []).find((x) => x.id === slotId); if (!slot) return;
-  dropRefSlotId = slotId;
-  document.getElementById('dpv-ref-hint').textContent = `For ${slot.concept_name}.`;
-  document.getElementById('dpv-ref-link').value = '';
-  openModal('dpv-ref-modal'); document.getElementById('dpv-ref-link').focus();
-}
-async function saveDropReference() {
-  const link = document.getElementById('dpv-ref-link').value.trim();
-  if (!link) return toast('Paste the link to the reference video or example', true);
-  try {
-    await api(`/drop-product-plans/${currentProductPlan.plan.id}/slots/${dropRefSlotId}/reference`, { method: 'POST', body: JSON.stringify({ link }) });
-    closeModal('dpv-ref-modal'); toast('Reference saved to the Creative Playbook concept');
-    const data = await loadProductPlan(state.currentDropId, state.currentProduct.product_code);
-    renderRequiredConcepts(data);
-  } catch (e) { toast(e.message, true); }
-}
-document.getElementById('dpv-ref-save').addEventListener('click', saveDropReference);
-document.getElementById('dpv-ref-cancel').addEventListener('click', () => closeModal('dpv-ref-modal'));
-document.getElementById('dpv-ref-link').addEventListener('keydown', (e) => { if (e.key === 'Enter') saveDropReference(); });
 document.getElementById('product-plan-playbook-link').addEventListener('click', (e) => { e.preventDefault(); const tab = document.querySelector('.tab-btn[data-tab="settings"]'); if (tab) tab.click(); switchSettingsPanel('creative-playbook'); });
 
 async function updateConceptEditingOwner(assetId, editingOwner) {
@@ -19212,6 +19190,10 @@ function openPwModal(id) {
   document.getElementById('pw-description').value = (pw && pw.description) || '';
   document.getElementById('pw-format').value = pw ? pw.default_format : 'video';
   document.getElementById('pw-classification').value = pw ? pw.default_classification : 'tested_proven';
+  const as = document.getElementById('pw-assignee');
+  as.innerHTML = `<option value="">No one</option>${dropRosterWith(pw && pw.default_assignee).map((n) => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('')}`;
+  as.value = (pw && pw.default_assignee) || '';
+  document.getElementById('pw-reference').value = (pw && pw.reference_link) || '';
   document.getElementById('pw-position-row').style.display = pw ? 'none' : 'flex';
   document.getElementById('pw-position').value = '';
   document.getElementById('pw-active-row').style.display = pw ? 'flex' : 'none';
@@ -19231,14 +19213,18 @@ async function savePw() {
   const description = document.getElementById('pw-description').value || null;
   const default_format = document.getElementById('pw-format').value;
   const default_classification = document.getElementById('pw-classification').value;
+  const default_assignee = document.getElementById('pw-assignee').value || null;
+  const reference_link = document.getElementById('pw-reference').value.trim() || null;
   if (!name.trim()) return toast('Concept name is required', true);
 
   try {
+    let applied = 0;
     if (id) {
-      await api(`/proven-winners/${id}`, {
+      const saved = await api(`/proven-winners/${id}`, {
         method: 'PUT',
-        body: JSON.stringify({ name, description, default_format, default_classification }),
+        body: JSON.stringify({ name, description, default_format, default_classification, default_assignee, reference_link }),
       });
+      applied = saved.assignee_applied || 0;
       await api(`/proven-winners/${id}/active`, {
         method: 'PATCH',
         body: JSON.stringify({ active: document.getElementById('pw-active').checked }),
@@ -19248,13 +19234,13 @@ async function savePw() {
       await api('/proven-winners', {
         method: 'POST',
         body: JSON.stringify({
-          name, description, default_format, default_classification,
+          name, description, default_format, default_classification, default_assignee, reference_link,
           position: position ? Number(position) : undefined,
         }),
       });
     }
     closeModal('pw-modal');
-    toast('Proven Winner saved');
+    toast(applied ? `Proven Winner saved; ${default_assignee} assigned to ${applied} Upcoming Drop concept${applied === 1 ? '' : 's'}` : 'Proven Winner saved');
     refreshProvenWinners();
   } catch (e) {
     toast(e.message, true);
