@@ -285,6 +285,11 @@ function plCoreStatusCell(it) {
   const tag = type === 'Protect Momentum' || type === 'Revive momentum' ? `<small class="pt-why-tag">${plEsc(type)}</small>` : '';
   return `<td class="pt-status"><span class="pl-status" data-tone="${plEsc(st.tone)}"><i aria-hidden="true"></i>${plEsc(st.label)}</span><span class="pt-why-text">${plEsc(st.text)}</span>${tag}</td>`;
 }
+// "Why Not Recommended" cell (Other High Stock Products): only the engine's own short sentence; the repeated "Not Recommended" badge is left out because the column heading already says it
+function plCoreWhyCell(it) {
+  const st = PE.coreStatus(it, plCfg());
+  return `<td class="pt-status"><span class="pt-why-text">${plEsc(st.text)}</span></td>`;
+}
 // ONE add button, the same in the row and in the panel: purple for products that need creative, a quieter outline for the others (Core never pushes a shoot on a covered product).
 // One click adds the product to this week's Shoot Plan (plQuickAdd); once it is in the plan the button says "Added" and does nothing (more concepts are added from the Shoot Plan tile).
 function plCoreAddBtn(it, cls = '') {
@@ -384,15 +389,15 @@ function plCoreDetailHtml(it, mode, ncols) {
     ${plMetaBtn(it)}
   </div></td></tr>`;
 }
-function plCoreTableHtml(mode, items, cat, { fixed = false } = {}) {
+function plCoreTableHtml(mode, items, cat, { fixed = false, why = false } = {}) {
   const sort = state.oppSort[mode];
   const th = (label, cls, key) => { const def = !fixed && key && PL_SORTS[key] && (!PL_SORTS[key].only || PL_SORTS[key].only === cat) ? key : null; const on = def && sort && sort.key === def; return `<th class="${cls}${def ? ' pt-sortable' : ''}${on ? ' sorted' : ''}"${def ? ` data-opp-sort="${mode}:${def}" role="button" tabindex="0" aria-sort="${on ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}"` : ''}>${plEsc(label)}${on ? (sort.dir === 'asc' ? ' &uarr;' : ' &darr;') : ''}</th>`; };
   const needs = cat === 'needs'; const ncols = needs ? 8 : 6;
-  const head = `${needs ? '<th class="pt-w-rank">#</th>' : ''}${th('Product', 'pt-w-product', 'product')}${th('Sales (30D)', 'pt-w-sales', 'u30')}${th('Stock', 'pt-w-stockc', 'stock')}${th('Latest creative', 'pt-w-cov', null)}${th(needs ? 'Creative gap' : 'Creative status', 'pt-w-gap', null)}${needs ? th('Priority', 'pt-w-prio', 'priority') : ''}${th('Action', 'pt-w-act', null)}`;
+  const head = `${needs ? '<th class="pt-w-rank">#</th>' : ''}${th('Product', 'pt-w-product', 'product')}${th('Sales (30D)', 'pt-w-sales', 'u30')}${th('Stock', 'pt-w-stockc', 'stock')}${th('Latest creative', 'pt-w-cov', null)}${th(needs ? 'Creative gap' : why ? 'Why Not Recommended' : 'Creative status', 'pt-w-gap', null)}${needs ? th('Priority', 'pt-w-prio', 'priority') : ''}${th('Action', 'pt-w-act', null)}`;
   const limit = state.oppLimit[mode] || PL_PAGE;
   const body = items.slice(0, limit).map((it, n) => {
     const open = !!state.oppOpen[`${mode}:${it.key}`];
-    return `<tr class="pt-row${open ? ' open' : ''}${needs ? '' : ' pt-quiet'}" data-opp-row="${mode}:${plEsc(it.key)}" data-status="${plEsc(it.status)}" data-category="${plEsc(cat)}" tabindex="0" aria-expanded="${open}">${needs ? `<td class="pt-rank">${n + 1}</td>` : ''}${plCoreProductCell(it)}${plCoreSalesCell(it)}${plCoreStockCell(it)}${plCoreCoverageCell(it)}${plCoreStatusCell(it)}${needs ? plPrioCell(it) : ''}${plCoreActionCell(it, mode)}</tr>${open ? plCoreDetailHtml(it, mode, ncols) : ''}`;
+    return `<tr class="pt-row${open ? ' open' : ''}${needs ? '' : ' pt-quiet'}" data-opp-row="${mode}:${plEsc(it.key)}" data-status="${plEsc(it.status)}" data-category="${plEsc(cat)}" tabindex="0" aria-expanded="${open}">${needs ? `<td class="pt-rank">${n + 1}</td>` : ''}${plCoreProductCell(it)}${plCoreSalesCell(it)}${plCoreStockCell(it)}${plCoreCoverageCell(it)}${why ? plCoreWhyCell(it) : plCoreStatusCell(it)}${needs ? plPrioCell(it) : ''}${plCoreActionCell(it, mode)}</tr>${open ? plCoreDetailHtml(it, mode, ncols) : ''}`;
   }).join('');
   return `<div class="pt-wrap"><table class="pt-table pl-table pl-table-core pt-${plEsc(mode)}"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>${items.length > limit ? `<div class="pt-more"><button type="button" class="btn btn-ghost btn-sm" data-opp-more="${mode}">Show ${Math.min(PL_PAGE, items.length - limit)} more</button></div>` : ''}`;
 }
@@ -533,7 +538,7 @@ function plRenderCore() {
 }
 
 
-// High Stocks, "Almost qualifying": Platinum / Rocket products with enough stock that the engine did NOT recommend because of ONE rule (sales too low, stock runway, out of season, not enough
+// High Stocks, "Other High Stock Products" (a collapsed accordion under the recommendations): Platinum / Rocket products with enough stock that the engine did NOT recommend because of ONE rule (sales too low, stock runway, out of season, not enough
 // selling history yet), closest to selling first, listed under the recommendations until the page shows PL_HS_TARGET products in all. They are NOT recommendations: each row says which rule it
 // missed (the engine's own status and sentence), and can still be added by hand like any product. Nothing about how the engine scores or classifies changes; these are items it already returns.
 const PL_NEAR_MISS = ['weak_demand', 'low_stock', 'out_of_season', 'too_new'];
@@ -549,10 +554,11 @@ function plNearMisses() {
 }
 function plNearMissHtml() {
   const items = plNearMisses(); if (!items.length) return '';
-  return `<div class="pl-core-card pl-nearmiss" data-opp-nearmiss="high">
-    <div class="pl-core-head"><div class="pl-core-title"><h3>Almost qualifying</h3><p>Platinum / Rocket products with plenty of stock that narrowly missed a High Stocks rule, closest to selling first. These are not recommendations: each says which rule it missed.</p><div class="pl-core-pills"><span class="pl-sumcount">${plPlural(items.length, 'product')}</span></div></div></div>
-    ${plCoreTableHtml('high', items, 'covered', { fixed: true })}
-  </div>`;
+  const open = !!state.oppOtherOpen;
+  return `<details class="pl-other" data-opp-other="high"${open ? ' open' : ''}>
+    <summary><span class="pl-other-chev" aria-hidden="true"></span><b>Other High Stock Products (${items.length})</b><span class="pl-other-help">Products with elevated stock that don't currently meet the creative recommendation criteria.</span></summary>
+    ${open ? plCoreTableHtml('high', items, 'covered', { fixed: true, why: true }) : ''}
+  </details>`;
 }
 function plRenderHighStocks() {
   const host = document.getElementById('high-stock-list');
@@ -1260,6 +1266,7 @@ async function plInsightAdd(itemKey, conceptLabel) {
   await plQuickAdd(itemKey, { concept: conceptLabel, reason: s ? s.reason : null });
 }
 document.addEventListener('toggle', (ev) => {
+  const o = ev.target; if (o && o.dataset && o.dataset.oppOther) { if (!!state.oppOtherOpen !== o.open) { state.oppOtherOpen = o.open; plRenderHighStocks(); } return; }
   const d = ev.target; if (!d || !d.dataset || !d.dataset.insEv) return;
   const st = plInsState(); if (!!st.evOpen[d.dataset.insEv] === d.open) return; st.evOpen[d.dataset.insEv] = d.open; plRenderInsights();
 }, true);

@@ -2,6 +2,16 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.6.6",
+      "date": "2026-10-20",
+      "title": "High Stocks: Other High Stock Products accordion",
+      "changes": [
+        "The Almost qualifying section is now Other High Stock Products (N): a compact accordion, collapsed by default, with a short helper line",
+        "When opened it shows the existing product table with the Creative Status column renamed Why Not Recommended, only the engine's short explanation (no repeated Not Recommended badge), and Add to Shoot kept as a secondary action",
+        "UI only: no recommendation, threshold, sorting or action changed"
+      ]
+    },
+    {
       "version": "1.6.5",
       "date": "2026-10-20",
       "title": "Creative Insights redesign",

@@ -6204,3 +6204,15 @@ button.cat2-prod:focus-visible,.cat2-view:focus-visible,.cat2-shoot:focus-visibl
 .ins2-filters .mp-search-box{width:260px;flex:0 0 260px;}
 .ins2-filters .pl-f{flex:0 0 auto;}
 .ins2-filters .pl-f select{min-width:200px;width:auto;}
+
+/* High Stocks: "Other High Stock Products", a compact collapsed accordion under the recommendations */
+.pl-other{margin-top:12px;background:#fff;border:1px solid var(--border);border-radius:var(--r-lg);}
+.pl-other > summary{list-style:none;cursor:pointer;display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 12px;padding:11px 16px;}
+.pl-other > summary::-webkit-details-marker{display:none;}
+.pl-other > summary:hover{background:var(--surface2);border-radius:var(--r-lg);}
+.pl-other-chev{align-self:center;width:8px;height:8px;border-right:2px solid var(--text-muted);border-bottom:2px solid var(--text-muted);transform:rotate(-45deg);transition:transform .15s;flex:0 0 8px;margin-right:2px;}
+.pl-other[open] > summary .pl-other-chev{transform:rotate(45deg);}
+.pl-other > summary b{font-size:14px;font-weight:700;color:var(--text);}
+.pl-other-help{font-size:12.5px;color:var(--text-muted);}
+.pl-other[open] > summary{border-bottom:1px solid var(--border);border-radius:var(--r-lg) var(--r-lg) 0 0;}
+.pl-other .pt-wrap{border:0;border-radius:0 0 var(--r-lg) var(--r-lg);}

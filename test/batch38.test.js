@@ -92,7 +92,7 @@ test('creative coverage date: missing or impossible dates show a placeholder, ne
 test('Core and High Stocks share ONE coverage cell, so one formatting change covers both', () => {
   const cell = pl.slice(pl.indexOf('function plCoreCoverageCell'), pl.indexOf('function plCoreStatusCell'));
   assert.match(cell, /PE\.coverage\(it,/); assert.match(cell, /pt-cov-d/); assert.match(cell, /plAgo\(c\.days\)/, 'the date, then how long ago');
-  assert.match(pl, /plCoreTableHtml\(mode, items, cat\)/); assert.match(pl, /plCoreCoverageCell\(it\)\}\$\{plCoreStatusCell\(it\)/);
+  assert.match(pl, /plCoreTableHtml\(mode, items, cat\)/); assert.match(pl, /plCoreCoverageCell\(it\)\}\$\{why \? plCoreWhyCell\(it\) : plCoreStatusCell\(it\)\}/, 'the status cell, or only the engine sentence in Other High Stock Products');
   assert.doesNotMatch(pl, /toLocaleDateString|\.getFullYear\(\)/, 'no second date formatter in the Planning page');
 });
 test('the long form (tooltips, expanded view) still reads "D Month YYYY"', () => {

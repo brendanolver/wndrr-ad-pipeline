@@ -30,11 +30,17 @@ test('search applies, and an unavailable result gives nothing', () => {
   m.state.opportunities.available = false; assert.deepEqual(m.run(), []);
 });
 
-test('wiring: rendered under the High Stocks list as a fixed-order table with the shared rows and Add to Shoot; the engine files are untouched', () => {
+test('wiring: a collapsed accordion "Other High Stock Products (N)" with helper text, the shared table with "Why Not Recommended" and no repeated badge; the engine files are untouched', () => {
   assert.match(pl, /plPageHtml\('high', tierNote\) \+ plNearMissHtml\(\)/);
   const html = fnSrc('plNearMissHtml');
-  assert.match(html, /Almost qualifying/); assert.match(html, /not recommendations/); assert.match(html, /plCoreTableHtml\('high', items, 'covered', \{ fixed: true \}\)/);
-  assert.match(fnSrc('plCoreTableHtml'), /!fixed && key && PL_SORTS\[key\]/, 'no sortable headers in the fixed table');
+  assert.match(html, /<details class="pl-other" data-opp-other="high"\$\{open \? ' open' : ''\}>/, 'collapsed unless the person opened it');
+  assert.match(html, /Other High Stock Products \(\$\{items\.length\}\)/); assert.match(html, /Products with elevated stock that don't currently meet the creative recommendation criteria\./);
+  assert.match(html, /plCoreTableHtml\('high', items, 'covered', \{ fixed: true, why: true \}\)/, 'the existing product table');
+  assert.doesNotMatch(pl, /Almost qualifying/);
+  const t = fnSrc('plCoreTableHtml');
+  assert.match(t, /why \? 'Why Not Recommended' : 'Creative status'/); assert.match(t, /why \? plCoreWhyCell\(it\) : plCoreStatusCell\(it\)/); assert.match(t, /!fixed && key && PL_SORTS\[key\]/, 'no sortable headers in the fixed table');
+  const cell = fnSrc('plCoreWhyCell'); assert.doesNotMatch(cell, /pl-status|st\.label/, 'no Not Recommended badge: only the engine\'s sentence'); assert.match(cell, /st\.text/);
+  assert.match(pl, /state\.oppOtherOpen = o\.open/, 'the open state survives a re-render');
   assert.doesNotMatch(pl.slice(pl.indexOf('const PL_NEAR_MISS'), pl.indexOf('function plRenderHighStocks')), /fetch\(|api\(|score\s*[+*]/, 'no new data source or scoring');
   const loader = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'planningOpportunitiesLoader.js'), 'utf8');
   assert.doesNotMatch(loader, /near_miss|NEAR_MISS/, 'the engine is not changed');

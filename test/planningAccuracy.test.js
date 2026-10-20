@@ -244,7 +244,7 @@ test('page: three categories only, Needs creative by default, no "Not recommende
   const pl = pub('planning.js'); const ex = pub('planningExplain.js');
   const body = (name) => (pl.match(new RegExp(`function ${name}\\([^)]*\\) \\{[\\s\\S]*?\\n\\}`)) || [''])[0];
   for (const fn of ['plRenderCore', 'plRenderHighStocks']) { assert.ok(body(fn).length > 50, fn); assert.doesNotMatch(body(fn), /plNotesHtml|plLaunchReviewHtml/, `${fn} renders neither the data rules nor the launch checks`); }
-  assert.match(pl, /host\.innerHTML = plPageHtml\('core'\);/); assert.match(pl, /host\.innerHTML = plPageHtml\('high', tierNote\) \+ plNearMissHtml\(\);/, 'High Stocks adds the separate "Almost qualifying" section (test/highStocksNearMiss.test.js) under the three categories');
+  assert.match(pl, /host\.innerHTML = plPageHtml\('core'\);/); assert.match(pl, /host\.innerHTML = plPageHtml\('high', tierNote\) \+ plNearMissHtml\(\);/, 'High Stocks adds the separate collapsed "Other High Stock Products" section (test/highStocksNearMiss.test.js) under the three categories');
   assert.match(pl, /state\.oppView = \{ core: 'needs', high: 'needs' \}/);
   assert.doesNotMatch(ex, /not_recommended|Not recommended/); assert.doesNotMatch(pl, /Not recommended|not_recommended/);
   // the launch checks and data notes now live in Settings > Planning
