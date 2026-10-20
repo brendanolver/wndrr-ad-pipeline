@@ -5,6 +5,7 @@ const { buildCoverage } = require('../lib/coverage');
 const { deriveProductCode } = require('../lib/apparelmagic');
 const { insertCreativeAsset } = require('../lib/assets');
 const { FORMATS } = require('../lib/statuses');
+const preview = require('../lib/referencePreview');
 
 const router = express.Router();
 
@@ -40,19 +41,68 @@ async function computeProductTarget(dropId, productCode) {
 async function fetchPlanWithSlots(planId) {
   const planResult = await pool.query('SELECT * FROM drop_product_plans WHERE id = $1', [planId]);
   if (!planResult.rows.length) return null;
+  // Display fields for the Production table: where the concept is in the existing pipeline (Shooting schedule, Editing, Final Approval), and the Creative Playbook entry's reference (a Reference
+  // Library record the Proven Winner links to: never copied onto the slot). Read-only: nothing here changes how a slot, its asset or its status is created or moved.
   const slotsResult = await pool.query(
     `SELECT s.*, ca.id AS asset_id, ca.concept_name AS asset_concept_name, ca.status AS asset_status,
             ca.concept_classification AS asset_classification, ca.format AS asset_format,
             ca.concept_assignee AS asset_concept_assignee, ca.editing_owner AS asset_editing_owner,
-            sty.style_code AS asset_style_code
+            ca.final_approval_status AS asset_final_approval, ca.editing_started_at AS asset_editing_started_at, ca.editing_submitted_at AS asset_editing_submitted_at,
+            sty.style_code AS asset_style_code,
+            ss.status AS shoot_status, ss.scheduled_day AS shoot_day, to_char(ss.scheduled_week_start, 'YYYY-MM-DD') AS shoot_week_start,
+            pw.reference_id AS reference_id, rl.link AS reference_link,
+            EXISTS (SELECT 1 FROM reference_library_images i WHERE i.reference_id = rl.id) AS reference_has_thumb, COALESCE(rl.thumb_version, 0) AS reference_thumb_version
      FROM drop_product_plan_slots s
      LEFT JOIN creative_assets ca ON ca.id = s.fulfilled_by_asset_id
      LEFT JOIN styles sty ON sty.id = ca.style_id
+     LEFT JOIN shoot_schedule ss ON ss.creative_asset_id = ca.id
+     LEFT JOIN proven_winners pw ON pw.id = s.proven_winner_id
+     LEFT JOIN reference_library rl ON rl.id = pw.reference_id
      WHERE s.plan_id = $1 ORDER BY s.slot_rank ASC`,
     [planId]
   );
   return { plan: planResult.rows[0], slots: slotsResult.rows };
 }
+
+// The Creative Playbook entry's reference thumbnail, served to Upcoming Drops (which may not have the Reference Library module). Only a reference that a Proven Winner links to can be read here.
+router.get('/reference-thumb/:referenceId(\\d+)', async (req, res, next) => {
+  try {
+    const img = (await pool.query(
+      `SELECT i.mime_type, i.data FROM reference_library_images i
+        WHERE i.reference_id = $1 AND EXISTS (SELECT 1 FROM proven_winners pw WHERE pw.reference_id = i.reference_id)
+        ORDER BY (i.kind = 'cover') DESC LIMIT 1`, [Number(req.params.referenceId)])).rows[0];
+    if (!img) return res.status(404).json({ error: 'No preview' });
+    res.set({ 'Content-Type': img.mime_type, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, max-age=86400', 'Content-Security-Policy': "default-src 'none'; sandbox" });
+    res.send(img.data);
+  } catch (err) { next(err); }
+});
+
+// "Add Reference" on a Required Concept: the reference belongs to the concept's Creative Playbook entry (the Proven Winner), so it is saved ONCE as a Reference Library record that the Proven Winner links
+// to, and every drop / product using that Playbook concept shows the same one. A slot with no Playbook entry (a manually added concept) has nowhere to keep a reference. An existing reference is never replaced here.
+router.post('/:id(\\d+)/slots/:slotId(\\d+)/reference', async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const link = String((req.body && req.body.link) || '').trim();
+    if (!preview.publicUrl(link)) return res.status(400).json({ error: 'Enter a full web link (https://...) to the reference video or example' });
+    await client.query('BEGIN');
+    const slot = (await client.query(
+      `SELECT s.id, s.proven_winner_id, pw.name AS winner_name, pw.reference_id FROM drop_product_plan_slots s LEFT JOIN proven_winners pw ON pw.id = s.proven_winner_id
+        WHERE s.id = $1 AND s.plan_id = $2 FOR UPDATE OF s`, [req.params.slotId, req.params.id])).rows[0];
+    if (!slot) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Concept not found' }); }
+    if (!slot.proven_winner_id) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'This concept is not from the Creative Playbook, so it has no Playbook reference to add to' }); }
+    if (slot.reference_id) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'This Playbook concept already has a reference' }); }
+    const inserted = await client.query(
+      `INSERT INTO reference_library (link, comment, idea_type, added_by, added_by_user_id) VALUES ($1, $2, 'bau', $3, $4) RETURNING id`,
+      [link, `${slot.winner_name} (Creative Playbook reference)`, req.user.name, req.user.id]);
+    await client.query('UPDATE proven_winners SET reference_id = $1, updated_at = now() WHERE id = $2', [inserted.rows[0].id, slot.proven_winner_id]);
+    await client.query('COMMIT');
+    await preview.requestPreview(pool, inserted.rows[0].id, link).catch(() => {}); // the picture is fetched in the background after the save
+    res.status(201).json({ reference_id: inserted.rows[0].id, reference_link: link });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    next(err);
+  } finally { client.release(); }
+});
 
 router.get('/', async (req, res, next) => {
   try {

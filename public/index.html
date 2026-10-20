@@ -605,37 +605,37 @@
 
       <div id="planning-product-view" style="display:none;">
         <button class="back-link" id="product-view-back">&larr; Back to Drop</button>
-        <div class="product-view-header">
+        <!-- Product header: picture(s), name / code / colourway count, the creative progress summary (planned, completed, live on Meta, and a slim bar), and the colourway inventory. The ids are the ones
+             loadProductView() has always filled. -->
+        <div class="dpv-head">
           <div id="product-view-images" class="product-view-images"></div>
-          <div>
+          <div class="dpv-head-main">
             <h2 id="product-view-name">Product</h2>
-            <div class="admin-note" id="product-view-code"></div>
+            <div class="dpv-code" id="product-view-code"></div>
+            <div class="dpv-chips" id="product-view-chips"></div>
+            <div id="product-view-overview" class="product-view-overview"></div>
+          </div>
+          <div class="dpv-head-side">
+            <div id="product-view-colours" class="product-view-colours"></div>
+            <button class="btn btn-primary" id="product-view-plan-btn">+ Plan Creative</button>
           </div>
         </div>
-        <div id="product-view-colours" class="product-view-colours"></div>
-        <div id="product-view-overview" class="product-view-overview"></div>
-        <button class="btn btn-primary" id="product-view-plan-btn">+ Plan Creative</button>
 
-        <div class="planning-section-header">
-          <h2>Required Concepts</h2>
+        <div class="dpv-prod-head">
+          <h2>Creative Production <span class="dpv-count" id="product-plan-count"></span></h2>
           <span class="admin-note" id="product-plan-shortfall-note"></span>
+          <a href="#" class="dpv-playbook-link" id="product-plan-playbook-link">View Creative Playbook &rarr;</a>
         </div>
-        <!-- Reuses .pw-slot-row's exact grid template (see styles.css) so the
-             header always lines up with the rows beneath it, even if that
-             template's column widths change later -- one definition, not two
-             copies to keep in sync. Hidden whenever the rows themselves
-             aren't shown (no target yet / zero slots), toggled in
-             renderRequiredConcepts. -->
-        <div id="product-plan-slots-header" class="pw-slot-row pw-slot-header-row" style="display:none;">
-          <span class="pw-slot-rank"></span>
-          <span class="pw-slot-name">Concept</span>
-          <span class="pw-slot-col-badge"></span>
-          <span class="pw-slot-col-assignee">Assigned To</span>
-          <span class="pw-slot-col-editing">Editing</span>
-          <span class="pw-slot-col-progress">Progress</span>
-          <span class="pw-slot-col-actions">Action</span>
+        <!-- The compact production table (Concept | Reference | Assigned To | Production Status | Action). Its column template is shared by the header and the rows (.dpv-row) so they always line up. -->
+        <div id="product-plan-slots-header" class="dpv-row dpv-row-head" style="display:none;">
+          <span class="dpv-c-rank">#</span>
+          <span class="dpv-c-concept">Concept</span>
+          <span class="dpv-c-ref">Reference</span>
+          <span class="dpv-c-assign">Assigned To</span>
+          <span class="dpv-c-status">Production Status</span>
+          <span class="dpv-c-act">Action</span>
         </div>
-        <div id="product-plan-slots" class="pw-slot-list"></div>
+        <div id="product-plan-slots" class="dpv-list"></div>
         <div class="field-row">
           <button class="btn btn-ghost btn-sm" id="product-plan-add-new-btn">+ Add New Concept</button>
         </div>
@@ -671,13 +671,10 @@
              existed, or one whose slot was later removed. Hidden entirely
              when there's nothing outside Required Concepts to show, so a
              concept never appears twice on this page (see A7). -->
-        <div id="product-view-other-concepts-section" style="display:none;">
-          <div class="planning-section-header">
-            <h2>Other Concepts</h2>
-            <div class="hint">Not part of this product's Required Concepts.</div>
-          </div>
+        <details id="product-view-other-concepts-section" class="dpv-other" style="display:none;">
+          <summary><span class="dpv-other-chev" aria-hidden="true"></span><b>Other Creative Concepts</b> <span class="dpv-count" id="product-view-other-count"></span><span class="dpv-other-help">Additional concept ideas that could be tested for this product (not required for launch).</span></summary>
           <div id="product-view-concepts" class="jobs-grid"></div>
-        </div>
+        </details>
       </div>
     </section>
 
@@ -4174,6 +4171,21 @@
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('lifecycle-modal')">Cancel</button>
       <button class="btn btn-primary" id="lifecycle-confirm-btn" onclick="confirmLifecycleAction()">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<div id="dpv-ref-modal" class="modal-backdrop">
+  <div class="modal confirm-modal">
+    <div class="modal-body">
+      <h3 style="margin:0 0 6px;font-size:16px;">Add reference</h3>
+      <p class="hint" id="dpv-ref-hint" style="margin:0 0 10px;"></p>
+      <input type="url" id="dpv-ref-link" placeholder="https://… link to the reference video or example" autocomplete="off" style="width:100%;">
+      <p class="hint" style="margin:8px 0 0;">Saved once on the Creative Playbook concept (as a Reference Library entry), so every drop that uses this concept shows the same reference.</p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" id="dpv-ref-cancel">Cancel</button>
+      <button class="btn btn-primary" id="dpv-ref-save">Save reference</button>
     </div>
   </div>
 </div>

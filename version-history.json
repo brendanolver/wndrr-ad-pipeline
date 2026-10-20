@@ -2,6 +2,18 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.7.1",
+      "date": "2026-10-20",
+      "title": "Upcoming Drops product detail redesign",
+      "changes": [
+        "Product header with progress chips and a slim completed-vs-required bar",
+        "Compact Concept | Reference | Assigned To | Production Status | Action table replaces the large concept rows and stacked checkboxes",
+        "Production stage read from the existing Shooting, Editing, Final Approval and Meta upload data",
+        "Reference from the Creative Playbook entry, with View video / View example and Add reference",
+        "Other Creative Concepts collapsed with a count"
+      ]
+    },
+    {
       "version": "1.7.0",
       "date": "2026-10-20",
       "title": "Meta Mapping: search for the product",

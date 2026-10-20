@@ -5996,18 +5996,42 @@ const ASSET_STATUS_COLORS = {
 // Upcoming Drops product page (Batch 39): the big preview shows each colourway's WHOLE picture (front and back where the picture holds both), never cropped; a missing
 // picture keeps a neutral placeholder. Each colourway card shows ONE complete, centred front view (the shared garment helper).
 function renderProductViewImages(group) {
-  document.getElementById('product-view-images').innerHTML = group.images.length
-    ? group.images.slice(0, 4).map((url) => `<span class="gt-big">${UX.productImgFullHtml({ url, alt: group.product_name })}<span class="gt-ph" aria-hidden="true"><svg class=ic focusable=false><use href=#i-image></use></svg></span></span>`).join('')
-    : '<span class="gt-big gt-big-none"><span class="gt-ph" aria-hidden="true"><svg class=ic focusable=false><use href=#i-image></use></svg></span></span>';
+  const bigs = group.images.slice(0, 2);
+  document.getElementById('product-view-images').innerHTML = (bigs.length
+    ? bigs.map((url) => `<span class="gt-big">${UX.productImgFullHtml({ url, alt: group.product_name })}<span class="gt-ph" aria-hidden="true"><svg class=ic focusable=false><use href=#i-image></use></svg></span></span>`).join('')
+    : '<span class="gt-big gt-big-none"><span class="gt-ph" aria-hidden="true"><svg class=ic focusable=false><use href=#i-image></use></svg></span></span>')
+    + `<span class="dpv-thumbs">${group.styles.slice(0, 4).map((s) => `<span class="gt-box gt-box-48" title="${escapeHtml(s.style_code)}">${UX.garmentImgHtml({ url: s.image_url, category: group.product_name })}<span class="gt-ph" aria-hidden="true"><svg class=ic focusable=false><use href=#i-image></use></svg></span></span>`).join('')}</span>`;
 
-  document.getElementById('product-view-colours').innerHTML = group.styles.map((s) => `
+  // the colourway inventory card: one line per colourway (code, stock on hand, on order)
+  document.getElementById('product-view-colours').innerHTML = `<div class="dpv-colours-h"><span>Colourways</span><b>${group.styles.length}</b></div><div class="dpv-colours-list">${group.styles.map((s) => `
       <div class="product-view-colour-card">
         <span class="gt-box gt-box-48">${UX.garmentImgHtml({ url: s.image_url, category: group.product_name })}<span class="gt-ph" aria-hidden="true"><svg class=ic focusable=false><use href=#i-image></use></svg></span></span>
         <div>
-          <div class="product-view-colour-code">${s.style_code}</div>
+          <div class="product-view-colour-code">${escapeHtml(s.style_code)}</div>
           <div class="product-view-colour-stats">${colourStatsLine(s)}</div>
         </div>
-      </div>`).join('');
+      </div>`).join('')}</div>`;
+}
+
+// Header summary: how many concepts are planned, how many creatives are completed (the product's own coverage count, unchanged) and how many are live on Meta, with a slim bar of completed against the
+// required target. Same numbers the Drop page and Planning already show; nothing is recalculated here.
+function renderProductSummary() {
+  const group = state.currentProduct; if (!group) return;
+  const planned = currentProductPlan && Array.isArray(currentProductPlan.slots) ? currentProductPlan.slots.length : null;
+  const chip = (icon, text, tone) => `<span class="dpv-chip" data-tone="${tone}">${icon}${text}</span>`;
+  const star = '<svg class="ic" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9L12 3z"/></svg>';
+  const clock = '<svg class="ic" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
+  const live = '<svg class="ic" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8.5c-2.8 0-4.4 2.2-6 3.5s-3.2 3.5-6 3.5a3.5 3.5 0 1 1 0-7c2.8 0 4.4 2.2 6 3.5s3.2 3.5 6 3.5a3.5 3.5 0 1 0 0-7z"/></svg>';
+  document.getElementById('product-view-chips').innerHTML = [
+    planned !== null ? chip(star, `${planned} concept${planned === 1 ? '' : 's'} planned`, 'amber') : '',
+    group.soh !== null ? chip(clock, `${group.current_coverage} creative${group.current_coverage === 1 ? '' : 's'} completed`, 'grey') : '',
+    group.live_meta_ads !== null ? chip(live, `${group.live_meta_ads} live on Meta`, 'grey') : '',
+  ].join('');
+  const pct = group.creative_target ? Math.min(100, Math.round((group.current_coverage / group.creative_target) * 100)) : 0;
+  document.getElementById('product-view-overview').innerHTML = group.soh !== null
+    ? `<div class="dpv-progress"><span class="coverage-progress-track"><span class="coverage-progress-fill ${group.status}" style="width:${pct}%;"></span></span><b>${pct}%</b></div>
+       <div class="dpv-progress-text">${group.current_coverage} of ${group.creative_target} required creatives completed for this drop</div>`
+    : '<div class="coverage-card-unavailable">Stock unavailable</div>';
 }
 
 async function loadProductView(dropId, productCode) {
@@ -6030,17 +6054,10 @@ async function loadProductView(dropId, productCode) {
     state.currentProduct = group;
 
     document.getElementById('product-view-name').textContent = group.product_name;
-    document.getElementById('product-view-code').textContent = `${group.product_code} · ${group.styles.length} colour${group.styles.length === 1 ? '' : 's'}`;
+    document.getElementById('product-view-code').textContent = `${group.product_code} · ${group.styles.length} colourway${group.styles.length === 1 ? '' : 's'}`;
     renderProductViewImages(group);
 
-    const pct = group.creative_target ? Math.min(100, Math.round((group.current_coverage / group.creative_target) * 100)) : 0;
-    const liveMetaLine = group.live_meta_ads !== null ? `<div class="coverage-card-live-meta"><svg class=ic aria-hidden=true focusable=false><use href=#i-signal></use></svg> ${group.live_meta_ads} live on Meta</div>` : '';
-    document.getElementById('product-view-overview').innerHTML = group.soh !== null ? `
-      <div class="coverage-card-ratio">${group.current_coverage} / ${group.creative_target} creatives</div>
-      <div class="coverage-progress-track"><div class="coverage-progress-fill ${group.status}" style="width:${pct}%;"></div></div>
-      <div class="coverage-card-gap ${group.status}">${coverageGapLabel(group)}</div>
-      ${liveMetaLine}
-    ` : `<div class="coverage-card-unavailable">Stock unavailable</div>${liveMetaLine}`;
+    renderProductSummary();
 
     const planBtn = document.getElementById('product-view-plan-btn');
     planBtn.style.display = group.creative_gap > 0 || group.creative_gap === null ? 'inline-block' : 'none';
@@ -6074,9 +6091,9 @@ async function loadProductView(dropId, productCode) {
 function renderProductConcepts(assets) {
   const section = document.getElementById('product-view-other-concepts-section');
   const grid = document.getElementById('product-view-concepts');
-  // Nothing outside Required Concepts for this product -- hide the whole
-  // section rather than show an empty/misleading state (see A7).
+  // Concepts that exist for this product but are not one of its Required Concepts: shown in a collapsed section (nothing is generated here). Hidden when there are none.
   section.style.display = assets.length ? '' : 'none';
+  document.getElementById('product-view-other-count').textContent = assets.length ? String(assets.length) : '';
   if (!assets.length) {
     grid.innerHTML = '';
     return;
@@ -6128,26 +6145,83 @@ async function loadProductPlan(dropId, productCode) {
   }
 }
 
+// Production status of a Required Concept, read from the canonical asset status the existing pipeline already moves forward (Shooting -> filming, Editing -> editing, Final Approval -> qc, Meta upload ->
+// uploaded_live): Planned -> Shooting -> Editing -> Final Approval -> Live. Nothing here is stored or changed; the page only reads it.
+// the assignee roster, plus whoever is already assigned (a person no longer on the roster is still shown, never silently dropped)
+const dropRosterWith = (current) => { const roster = conceptAssignees(); return current && !roster.includes(current) ? [current, ...roster] : roster; };
+const DROP_STAGES = [['planned', 'Planned'], ['shooting', 'Shooting'], ['editing', 'Editing'], ['final', 'Final Approval'], ['live', 'Live']];
+const DROP_STAGE_OF_STATUS = { filming: 'shooting', editing: 'editing', qc: 'final', uploaded_live: 'live' };
+const dropStageKey = (slot) => (slot && slot.asset_id ? DROP_STAGE_OF_STATUS[slot.asset_status] || 'planned' : null);
+const DROP_DAYS = { monday: 0, tuesday: 1, wednesday: 2, thursday: 3, friday: 4 };
+function dropShootDate(slot) {
+  if (!slot.shoot_week_start || !(slot.shoot_day in DROP_DAYS)) return null;
+  const [y, m, d] = slot.shoot_week_start.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + DROP_DAYS[slot.shoot_day]));
+}
+function dropShootDateLabel(slot) {
+  const dt = dropShootDate(slot); if (!dt) return '';
+  const part = (o) => dt.toLocaleDateString('en-AU', { ...o, timeZone: 'UTC' });
+  return `${part({ weekday: 'short' })} ${part({ day: 'numeric' })} ${part({ month: 'short' })}`;
+}
+// One short line under the stages, only from data the pipeline already holds (shoot schedule, editing owner, final approval state); nothing is shown when there is nothing useful to say.
+function dropStatusLine(slot, key) {
+  const day = dropShootDateLabel(slot);
+  if (key === 'planned') return day ? `Scheduled for ${day}` : `Not started${slot.asset_concept_assignee ? '' : ' · No one assigned'}`;
+  if (key === 'shooting') {
+    if (slot.shoot_status === 'shot') return 'Shot · waiting for editing';
+    const dt = dropShootDate(slot); if (!dt) return 'Filming';
+    const now = new Date(); const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+    return dt.getTime() > today ? `Scheduled for ${day}` : dt.getTime() === today ? 'Filming · On set today' : `Filming · was scheduled for ${day}`;
+  }
+  if (key === 'editing') return slot.asset_editing_owner ? `Editing · Assigned to ${slot.asset_editing_owner}` : 'Editing · No editor assigned';
+  if (key === 'final') return slot.asset_final_approval === 'changes_required' ? 'In final approval · Changes requested' : 'In final approval · Ready for review';
+  if (key === 'live') return 'Approved · Uploaded to Meta';
+  return '';
+}
+function dropStepperHtml(slot) {
+  const key = dropStageKey(slot);
+  if (!key) return '<span class="pw-slot-progress-empty">No asset yet</span>';
+  const at = DROP_STAGES.findIndex(([k]) => k === key);
+  const check = '<svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg>';
+  const steps = DROP_STAGES.map(([k, label], i) => `<span class="dpv-step ${i < at ? 'done' : i === at ? 'current' : 'todo'}" data-stage="${k}"${i === at ? ' aria-current="step"' : ''}><i aria-hidden="true">${i < at || (i === at && k === 'live') ? check : ''}</i><em>${label}</em></span>`).join('');
+  return `<div class="dpv-stepper" role="group" aria-label="Production status: ${DROP_STAGES[at][1]}">${steps}</div><div class="dpv-line" data-stage="${key}">${escapeHtml(dropStatusLine(slot, key))}</div>`;
+}
+// The Creative Playbook entry's reference: a thumbnail (a play mark for a video) and View video / View example, linked to the original Reference Library record; none yet = a quiet Add reference.
+function dropReferenceHtml(s) {
+  if (s.reference_link) {
+    const isVideo = (s.asset_format || s.default_format) === 'video';
+    const play = '<svg viewBox="0 0 24 24" width="11" height="11" aria-hidden="true"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg>';
+    const thumb = s.reference_has_thumb ? `<img src="/api/drop-product-plans/reference-thumb/${s.reference_id}?v=${s.reference_thumb_version || 0}" alt="" loading="lazy" decoding="async">` : '<span class="dpv-ref-none"><svg class=ic aria-hidden=true focusable=false><use href=#i-image></use></svg></span>';
+    return `<a class="dpv-ref" href="${escapeHtml(s.reference_link)}" target="_blank" rel="noopener noreferrer" title="Open the reference"><span class="dpv-ref-thumb">${thumb}${isVideo ? `<span class="dpv-ref-play">${play}</span>` : ''}</span><span class="dpv-ref-btn">${isVideo ? `${play} View video` : 'View example'}</span></a>`;
+  }
+  if (s.proven_winner_id) return `<button type="button" class="dpv-addref" onclick="openDropReferenceModal(${s.id})">+ Add reference</button>`;
+  return '<span class="pw-slot-control-empty">&mdash;</span>';
+}
+
 function renderRequiredConcepts(data) {
   const list = document.getElementById('product-plan-slots');
   const header = document.getElementById('product-plan-slots-header');
   const note = document.getElementById('product-plan-shortfall-note');
   const addBtn = document.getElementById('product-plan-add-new-btn');
+  const count = document.getElementById('product-plan-count');
+  renderProductSummary();
 
   if (data.target == null) {
     list.innerHTML = '<div class="attention-empty">Stock unavailable — Required Concepts can\'t be generated until SOH is known.</div>';
     header.style.display = 'none';
     note.textContent = '';
+    count.textContent = '';
     addBtn.style.display = 'none';
     return;
   }
 
-  note.textContent = `${data.slots.length} / ${data.target} Concepts Assigned`
-    + (data.shortfall > 0 ? ` · ${data.shortfall} Additional Concept${data.shortfall === 1 ? '' : 's'} Required` : '');
+  count.textContent = `${data.slots.length} concept${data.slots.length === 1 ? '' : 's'}`;
+  note.textContent = data.shortfall > 0 ? `${data.slots.length} / ${data.target} Concepts Assigned · ${data.shortfall} Additional Concept${data.shortfall === 1 ? '' : 's'} Required` : '';
   addBtn.style.display = 'inline-block';
 
   const linkedAssetIds = new Set(data.slots.filter((s) => s.asset_id).map((s) => s.asset_id));
   const eligibleAssets = (state.currentProductAssets || []).filter((a) => !linkedAssetIds.has(a.id));
+  const group = state.currentProduct || { styles: [], images: [] };
 
   if (!data.slots.length) {
     list.innerHTML = '<div class="attention-empty">No required concepts yet.</div>';
@@ -6158,59 +6232,48 @@ function renderRequiredConcepts(data) {
 
   list.innerHTML = data.slots.map((s) => {
     const fulfilled = !!s.asset_id;
-    // "Proven" (sourced from a Proven Winner) is the only sourcing badge
-    // shown here -- a manually-added slot (source === 'new') gets no badge
-    // rather than the old "New/Test" label, which read as the New/
-    // Experimental classification language Upcoming Drops planning
-    // deliberately never surfaces (see A2 -- this is a tested/proven-concept
-    // workflow, not a trial one; the underlying `source` column is untouched,
-    // still used below for the Remove action).
-    const sourceBadge = s.source === 'proven' ? '<span class="badge badge-tested_proven">Proven</span>' : '';
-    const progress = fulfilled ? conceptProgressChecksHtml(s.asset_id, s.asset_status, s.asset_format) : '<span class="pw-slot-progress-empty">—</span>';
+    // "Proven" (sourced from a Proven Winner) is the only sourcing badge shown (a manually added concept gets none); the underlying `source` column is untouched.
+    const sourceBadge = s.source === 'proven' ? '<span class="dpv-proven">PROVEN</span>' : '';
+    const style = fulfilled ? group.styles.find((x) => x.style_code === s.asset_style_code) : null;
+    const img = (style && style.image_url) || (group.images && group.images[0]) || '';
+    const thumb = `<span class="dpv-thumb">${img ? `<img src="${escapeHtml(img)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}</span>`;
     const complete = fulfilled && s.asset_status === 'uploaded_live';
-    // Only a fulfilled slot has an asset row to attach a person to -- an
-    // open/unfulfilled slot has nowhere to persist Assigned To/Editing yet.
-    // Empty (rather than omitted) placeholders in both cases keep every
-    // row on the same grid -- see A5.
+    // Only a fulfilled slot has an asset row to attach a person to; an open slot has nowhere to keep Assigned To yet.
     const assigneeControl = fulfilled ? `
-        <select class="pw-slot-assignee-select" data-asset-id="${s.asset_id}" title="Assigned To">
+        <select class="pw-slot-assignee-select dpv-assign" data-asset-id="${s.asset_id}" title="Assigned To">
           <option value=""${!s.asset_concept_assignee ? ' selected' : ''}>Unassigned</option>
-          ${conceptAssignees().map((name) => `<option value="${name}"${s.asset_concept_assignee === name ? ' selected' : ''}>${name}</option>`).join('')}
-        </select>
-      ` : '<span class="pw-slot-control-empty">—</span>';
-    const editingControl = fulfilled ? `
-        <select class="pw-slot-editing-select" data-asset-id="${s.asset_id}" title="Editing">
-          <option value=""${!s.asset_editing_owner ? ' selected' : ''}>Unassigned</option>
-          ${conceptAssignees().map((name) => `<option value="${name}"${s.asset_editing_owner === name ? ' selected' : ''}>${name}</option>`).join('')}
-        </select>
-      ` : '<span class="pw-slot-control-empty">—</span>';
-    // A slot's asset is created automatically the moment the slot exists
-    // (Settings already decided the concept name/format/classification),
-    // so the normal path is just editing it -- style/target date, or
-    // moving it through the pipeline. "+ Create Asset" only resurfaces as a
-    // fallback for a slot that somehow has no asset (e.g. its asset was
-    // deleted, or a slot generated before this behavior shipped).
-    const actions = fulfilled ? `
-        <button type="button" class="btn btn-ghost btn-sm" onclick="editConceptAsset(${s.asset_id})">Edit</button>
-      ` : `
-        <button type="button" class="btn btn-ghost btn-sm" onclick="fulfillWithNewAsset(${s.id}, '${escapeHtml(s.concept_name).replace(/'/g, "\\'")}', '${s.source}', '${s.default_format || ''}', '${s.default_classification || ''}')">+ Create Asset</button>
-        ${eligibleAssets.length ? `
-          <select class="pw-slot-link-select" data-slot-id="${s.id}">
-            <option value="">Link existing…</option>
-            ${eligibleAssets.map((a) => `<option value="${a.id}">${a.style_code} — ${escapeHtml(a.concept_name)}</option>`).join('')}
+          ${dropRosterWith(s.asset_concept_assignee).map((name) => `<option value="${escapeHtml(name)}"${s.asset_concept_assignee === name ? ' selected' : ''}>${escapeHtml(name)}</option>`).join('')}
+        </select>` : '<span class="pw-slot-control-empty">&mdash;</span>';
+    // The editing owner is still settable (it is the person the Editing page lists), now inside the options menu to keep the row compact.
+    const editingOption = fulfilled ? `
+        <label class="dpv-menu-field">Editing owner
+          <select class="pw-slot-editing-select" data-asset-id="${s.asset_id}">
+            <option value=""${!s.asset_editing_owner ? ' selected' : ''}>Unassigned</option>
+            ${dropRosterWith(s.asset_editing_owner).map((name) => `<option value="${escapeHtml(name)}"${s.asset_editing_owner === name ? ' selected' : ''}>${escapeHtml(name)}</option>`).join('')}
           </select>
-        ` : ''}
-        ${s.source === 'new' ? `<button type="button" class="btn btn-ghost btn-sm" onclick="deleteConceptSlot(${s.id})">Remove</button>` : ''}
-      `;
+        </label>` : '';
+    const linkOption = !fulfilled && eligibleAssets.length ? `
+        <label class="dpv-menu-field">Link existing
+          <select class="pw-slot-link-select" data-slot-id="${s.id}">
+            <option value="">Choose…</option>
+            ${eligibleAssets.map((a) => `<option value="${a.id}">${escapeHtml(a.style_code)} — ${escapeHtml(a.concept_name)}</option>`).join('')}
+          </select>
+        </label>` : '';
+    const removeOption = !fulfilled && s.source === 'new' ? `<button type="button" class="dpv-menu-item dpv-menu-danger" onclick="deleteConceptSlot(${s.id})">Remove concept</button>` : '';
+    const menu = editingOption || linkOption || removeOption ? `
+      <details class="dpv-menu"><summary class="btn btn-ghost btn-sm" aria-label="More options">&middot;&middot;&middot;</summary><div class="dpv-menu-pop">${editingOption}${linkOption}${removeOption}</div></details>` : '';
+    // A slot's asset is created automatically with the slot, so the normal path is just Edit; "+ Create Asset" only appears for a slot that somehow has no asset.
+    const primary = fulfilled
+      ? `<button type="button" class="btn btn-ghost btn-sm dpv-edit" onclick="editConceptAsset(${s.asset_id})">Edit</button>`
+      : `<button type="button" class="btn btn-ghost btn-sm dpv-edit" onclick="fulfillWithNewAsset(${s.id}, '${escapeHtml(s.concept_name).replace(/'/g, "\\'")}', '${s.source}', '${s.default_format || ''}', '${s.default_classification || ''}')">+ Create Asset</button>`;
     return `
-    <div class="pw-slot-row${complete ? ' pw-slot-row-complete' : ''}">
-      <span class="pw-slot-rank">${s.slot_rank}</span>
-      <span class="pw-slot-name">${escapeHtml(s.concept_name)}</span>
-      <span class="pw-slot-col-badge">${sourceBadge}</span>
-      <span class="pw-slot-col-assignee">${assigneeControl}</span>
-      <span class="pw-slot-col-editing">${editingControl}</span>
-      <span class="pw-slot-col-progress">${progress}</span>
-      <span class="pw-slot-col-actions">${actions}</span>
+    <div class="dpv-row${complete ? ' dpv-row-complete' : ''}">
+      <span class="dpv-c-rank">${s.slot_rank}</span>
+      <span class="dpv-c-concept">${thumb}<span class="dpv-name" title="${escapeHtml(s.concept_name)}">${escapeHtml(s.concept_name)}</span>${sourceBadge}</span>
+      <span class="dpv-c-ref">${dropReferenceHtml(s)}</span>
+      <span class="dpv-c-assign">${assigneeControl}</span>
+      <span class="dpv-c-status">${dropStepperHtml(s)}</span>
+      <span class="dpv-c-act">${primary}${menu}</span>
     </div>`;
   }).join('');
 
@@ -6228,90 +6291,31 @@ function renderRequiredConcepts(data) {
   list.querySelectorAll('.pw-slot-editing-select').forEach((sel) => {
     sel.addEventListener('change', () => updateConceptEditingOwner(Number(sel.dataset.assetId), sel.value || null));
   });
-
-  list.querySelectorAll('.pw-slot-progress-check').forEach((cb) => {
-    cb.addEventListener('change', () => toggleConceptProgressStage(Number(cb.dataset.assetId), cb.dataset.stage, cb.checked));
-  });
 }
 
-// Filmed / Edited / Uploaded to Meta -- three compact checkpoints along the
-// concept's own canonical `status` (STATUSES), not three independent
-// booleans: Drop concepts never flow through Concept Development/Tuesday
-// Review/Shooting/Editing the way Core/Promotion ones do (no
-// shoot_plan_item_id, no shoot_schedule row -- see conceptDevelopment.js),
-// so `status` is the only production-progress state that exists for one,
-// and this is a more granular version of the same direct status toggle
-// toggleConceptDone already used (a single "mark done" checkbox). Each
-// check reads "has status reached at least this point": Filmed/Shot once
-// status is filming or later, Edited once it's passed editing into qc or
-// later (qc is real WIP the existing pipeline tracks -- collapsing it into
-// "Edited: done, not yet uploaded" rather than adding a 4th check keeps
-// this a clean 3-way read of the same 8-stage enum Board already uses).
-// key/atLeast/revertTo (the canonical status mapping) are format-agnostic
-// and untouched -- only the first stage's user-facing label changes with
-// the concept's own `format` (already on creative_assets/FORMATS, not a
-// new field): "Shot" reads correctly for a static/photo concept the same
-// way "Filmed" does for video. `label` is the fallback for `format` values
-// this app doesn't otherwise expect -- FORMATS is a strict ['video',
-// 'static'] enum enforced at the API, so in practice every real asset row
-// hits one of the two branches below and this default is unreachable.
-const CONCEPT_PROGRESS_STAGES = [
-  { key: 'filmed', label: 'Filmed', atLeast: 'filming', revertTo: 'concept_script' },
-  { key: 'edited', label: 'Edited', atLeast: 'qc', revertTo: 'filming' },
-  { key: 'uploaded', label: 'Uploaded to Meta', atLeast: 'uploaded_live', revertTo: 'qc' },
-];
-
-function conceptProgressStageLabel(stage, format) {
-  if (stage.key === 'filmed') return format === 'static' ? 'Shot' : 'Filmed';
-  return stage.label;
+// "Add reference" on a Required Concept: the link is saved once on the concept's Creative Playbook entry (see POST /drop-product-plans/:id/slots/:slotId/reference).
+let dropRefSlotId = null;
+function openDropReferenceModal(slotId) {
+  const slot = currentProductPlan && (currentProductPlan.slots || []).find((x) => x.id === slotId); if (!slot) return;
+  dropRefSlotId = slotId;
+  document.getElementById('dpv-ref-hint').textContent = `For ${slot.concept_name}.`;
+  document.getElementById('dpv-ref-link').value = '';
+  openModal('dpv-ref-modal'); document.getElementById('dpv-ref-link').focus();
 }
-
-function conceptProgressChecksHtml(assetId, status, format) {
-  const currentIndex = STATUSES.indexOf(status);
-  return CONCEPT_PROGRESS_STAGES.map((stage) => {
-    const checked = currentIndex >= STATUSES.indexOf(stage.atLeast);
-    const label = conceptProgressStageLabel(stage, format);
-    return `
-      <label class="pw-slot-progress-item" title="${label}">
-        <input type="checkbox" class="pw-slot-progress-check" data-asset-id="${assetId}" data-stage="${stage.key}" ${checked ? 'checked' : ''}>
-        <span>${label}</span>
-      </label>`;
-  }).join('');
-}
-
-// Reuses the exact same PATCH /creative-assets/:id/status endpoint
-// toggleConceptDone (Board's own drag-and-drop) already writes to, so Board
-// and this row always agree on where a concept actually sits.
-// Unlike updateConceptAssignee/updateConceptEditingOwner (which only ever
-// touch Required Concepts rows, since who's assigned never changes how
-// many creatives are covered), a status change here CAN move the product's
-// own coverage count -- current_coverage only counts 'uploaded_live'
-// assets (see coverage.js), so completing/un-completing a concept changes
-// the exact number the product summary ("0/10 creatives", "10 more
-// required") is built from. loadProductPlan()+renderRequiredConcepts()
-// alone never touched that summary at all (#product-view-overview), which
-// is why a fully-completed concept used to visually dim/strike through
-// while the product summary above it silently stayed at 0/10 (see A3).
-// loadProductView() already re-fetches the drop and recomputes that
-// summary from the same current_coverage/creative_target the rest of the
-// app reads (Planning's Drops row, the Drop detail page) -- reusing it
-// here is the same "one canonical refresh path" saveAsset/deleteAsset
-// already rely on via refreshProductViewIfOpen(), not a second counter.
-async function toggleConceptProgressStage(assetId, stageKey, checked) {
-  const stage = CONCEPT_PROGRESS_STAGES.find((s) => s.key === stageKey);
-  if (!stage) return;
-  const nextStatus = checked ? stage.atLeast : stage.revertTo;
+async function saveDropReference() {
+  const link = document.getElementById('dpv-ref-link').value.trim();
+  if (!link) return toast('Paste the link to the reference video or example', true);
   try {
-    await api(`/creative-assets/${assetId}/status`, {
-      method: 'PATCH',
-      body: JSON.stringify({ status: nextStatus }),
-    });
-    await loadProductView(state.currentDropId, state.currentProduct.product_code);
-    refreshDropsRow();
-  } catch (e) {
-    toast(e.message, true);
-  }
+    await api(`/drop-product-plans/${currentProductPlan.plan.id}/slots/${dropRefSlotId}/reference`, { method: 'POST', body: JSON.stringify({ link }) });
+    closeModal('dpv-ref-modal'); toast('Reference saved to the Creative Playbook concept');
+    const data = await loadProductPlan(state.currentDropId, state.currentProduct.product_code);
+    renderRequiredConcepts(data);
+  } catch (e) { toast(e.message, true); }
 }
+document.getElementById('dpv-ref-save').addEventListener('click', saveDropReference);
+document.getElementById('dpv-ref-cancel').addEventListener('click', () => closeModal('dpv-ref-modal'));
+document.getElementById('dpv-ref-link').addEventListener('keydown', (e) => { if (e.key === 'Enter') saveDropReference(); });
+document.getElementById('product-plan-playbook-link').addEventListener('click', (e) => { e.preventDefault(); const tab = document.querySelector('.tab-btn[data-tab="settings"]'); if (tab) tab.click(); switchSettingsPanel('creative-playbook'); });
 
 async function updateConceptEditingOwner(assetId, editingOwner) {
   try {
@@ -13552,9 +13556,7 @@ function uxDateChipHtml(text) {
     : '<span class="ux-datechip ux-datechip-none">Not scheduled</span>';
 }
 
-// "Shot" for a static/photo concept, "Filmed" for video -- same format-aware
-// labelling convention Upcoming Drops' own progress checkboxes already use
-// (see conceptProgressStageLabel), reused here rather than a second mapping.
+// "Shot" for a static/photo concept, "Filmed" for video.
 function shootingProductionLabel(format) {
   return format === 'static' ? 'Shot' : 'Filmed';
 }

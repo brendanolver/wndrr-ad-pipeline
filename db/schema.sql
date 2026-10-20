@@ -1185,6 +1185,10 @@ CREATE TABLE IF NOT EXISTS reference_library_images (
   PRIMARY KEY (reference_id, kind)
 );
 
+-- Creative Playbook references (additive): a Proven Winner links to ONE Reference Library record (its example / video), so every drop and product using that Playbook concept shows the same reference
+-- and nothing is copied. Nullable; SET NULL if the library record is ever deleted. Nothing existing changes.
+ALTER TABLE proven_winners ADD COLUMN IF NOT EXISTS reference_id INTEGER REFERENCES reference_library(id) ON DELETE SET NULL;
+
 -- ---------------------------------------------------------------------------
 -- Users & Auth foundation: real per-user accounts, replacing the single
 -- shared APP_PASSWORD gate (see src/auth.js), plus role-based permissions --

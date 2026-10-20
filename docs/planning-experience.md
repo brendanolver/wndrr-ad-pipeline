@@ -163,3 +163,12 @@ Findings (no benchmark value, setting or Meta Performance behaviour was changed)
 ## Tests
 
 `test/planningExperience.test.js` (wording and status grouping against real engine output, page wiring, favicon / title, Meta Performance wiring untouched) plus the existing 568. The browser journey and database checks are described in the Batch 28 report; they use route interception for `/api/opportunities` (real engine output) and the isolated local QA database for the write test.
+
+## Upcoming Drops: Product Detail
+
+* **Header**: product name, code and colourway count, the two product pictures with the colourway thumbnails and inventory, `+ Plan Creative`, three chips (concepts planned, creatives completed, live on Meta) and a slim bar of completed creatives against the product's existing required target. These are the numbers the Drop page already shows; nothing is recalculated.
+* **Creative Production table**: one line per planned concept, `Concept | Reference | Assigned To | Production Status | Action`. A concept from the Creative Playbook carries a quiet green PROVEN badge; descriptive text is not shown in the row.
+* **Reference**: the Creative Playbook entry's reference, linked rather than copied (`proven_winners.reference_id` points at the existing Reference Library record). A thumbnail (play mark for a video) and View video / View example open the original link in a new tab. A Playbook concept with no reference shows a quiet `+ Add reference`, which creates the Reference Library record and links it to the Playbook entry, so every drop using that concept shows it. Manually added concepts show a dash.
+* **Production Status**: Planned -> Shooting -> Editing -> Final Approval -> Live, read from the asset's canonical status (kept in step by the Shooting, Editing and Final Approval pages), plus one short line (shoot day from the Shoot Plan, editing owner, final approval state). There is no separate tracking and no per-stage checkbox; existing records keep their stage.
+* **Action**: `Edit`, and a `···` menu holding the editing-owner dropdown, Link existing asset and Remove.
+* **Other Creative Concepts**: the product's existing additional concepts, collapsed with a count; nothing is generated and the concept assignment to drops is unchanged.
