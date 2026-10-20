@@ -12,7 +12,7 @@ test('one Meta tab replaces Meta Mapping, Meta Sync and Meta Performance in the 
   assert.match(nav, /id="settings-meta-tab-btn" data-settings-panel="meta">Meta<\/button>/);
   for (const gone of ['data-settings-panel="meta-mapping"', 'data-settings-panel="meta-sync"', 'data-settings-panel="meta-benchmarks"']) assert.ok(!nav.includes(gone), `${gone} is no longer a section tab`);
   const labels = [...nav.matchAll(/data-settings-panel="[^"]+"[^>]*>([^<]+)</g)].map((m) => m[1]);
-  assert.deepEqual(labels, ['Planning', 'Shoot Prep', 'Creative Playbook', 'Meta', 'Users', 'Creative Classification', 'Copy Library']);
+  assert.deepEqual(labels, ['Users', 'Planning', 'Shoot Prep', 'Creative Playbook', 'Meta', 'Creative Classification', 'Copy Library']);
 });
 
 test('the three toggles, admin-only ones hidden until the role check shows them; the panels and ids are unchanged', () => {

@@ -2,6 +2,14 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.8.0",
+      "date": "2026-10-21",
+      "title": "Settings: Users tab first",
+      "changes": [
+        "The Users tab is now the first tab in Settings (admins only, as before)"
+      ]
+    },
+    {
       "version": "1.7.9",
       "date": "2026-10-21",
       "title": "Upcoming Drops: remove a manually added concept",
