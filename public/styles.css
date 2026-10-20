@@ -6342,3 +6342,8 @@ button.cat2-prod:focus-visible,.cat2-view:focus-visible,.cat2-shoot:focus-visibl
 .drop-card-products{justify-content:flex-start;}
 .drop-card-product-tile{align-items:stretch;text-align:left;}
 .drop-card-product-name,.drop-card-product-code,.drop-card-product-more{text-align:left;}
+
+/* Drop page product cards: a product whose creative coverage is complete is tinted green (the card, its picture area and border). */
+.coverage-card-complete{background:#f1faf4;border-color:#bfe3cd;}
+.coverage-card-complete .coverage-card-imgrow{background:#e1f2e8;}
+.coverage-card-complete .coverage-progress-track{background:#d3ebdc;}

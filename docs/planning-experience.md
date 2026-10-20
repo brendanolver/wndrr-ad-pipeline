@@ -177,3 +177,7 @@ Findings (no benchmark value, setting or Meta Performance behaviour was changed)
 ## Upcoming Drops: card pictures
 
 Each product tile on an Upcoming Drops card shows the product's WHOLE picture (front and back where the picture holds both) contained on a light grey 2:1 tile, with the name and code left-aligned underneath. The picture is not cropped or measured, so it cannot come out cut off or off-centre (`dpc-img`, `UX.productImgFullHtml`). The picture proxy behind the other thumbnails (`/api/product-image`) now retries a failed ApparelMagic lookup after 15 seconds instead of refusing every picture for 10 minutes, and a failed measurement in the browser is retried twice before it is given up for the visit.
+
+## Upcoming Drops: complete product cards
+
+On the Drop page, a product card whose creative coverage is complete (the green status that reads COVERAGE COMPLETE; never a product with no stock figure) is tinted a light green: the card, its picture area, the progress track and the border. Incomplete cards and the `+ Shoot This Week` button are unchanged. Styling only (`coverage-card-complete`).

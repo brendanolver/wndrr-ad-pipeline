@@ -161,3 +161,10 @@ test('the header progress bar is a real block element (an inline span ignores it
   const tog = app.slice(app.indexOf('async function toggleDropMilestone('), app.indexOf('// The Creative Playbook entry'));
   assert.match(tog, /await loadProductView\(state\.currentDropId/, 'the drop (and so the coverage count and bar) is re-read after every saved tick');
 });
+
+test('Drop page product cards: a card whose coverage is complete (the green COVERAGE COMPLETE status) is tinted green; others are not', () => {
+  assert.match(app, /class="coverage-card\$\{c\.soh !== null && c\.status === 'green' \? ' coverage-card-complete' : ''\}"/);
+  assert.match(app, /if \(c\.status === 'green'\) return 'COVERAGE COMPLETE';/, 'same condition as the label');
+  assert.match(css, /\.coverage-card-complete\{background:#f1faf4;border-color:#bfe3cd;\}/);
+  assert.match(css, /\.coverage-card-complete \.coverage-card-imgrow\{background:#e1f2e8;\}/);
+});

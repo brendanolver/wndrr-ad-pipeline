@@ -5947,8 +5947,9 @@ function renderCoverageGrid(coverage) {
       return `<div>${label} · ${colourStatsLine(s)}</div>`;
     }).join('');
 
+    // A card whose coverage is complete (the same green status that reads COVERAGE COMPLETE) is tinted green.
     return `
-    <div class="coverage-card" data-product-code="${c.product_code}">
+    <div class="coverage-card${c.soh !== null && c.status === 'green' ? ' coverage-card-complete' : ''}" data-product-code="${c.product_code}">
       <div class="coverage-card-imgrow">${images}</div>
       <div class="coverage-card-body">
         <div class="coverage-card-name">${escapeHtml(c.product_name)}</div>
