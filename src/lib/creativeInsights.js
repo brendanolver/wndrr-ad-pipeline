@@ -106,6 +106,7 @@ function buildCreatives({ rows, products = [], conceptNames = new Map(), rules, 
     const start = recency.startOf({ first_delivery: g.first_day, first_delivery_truncated: !!(g.first_day && horizon && g.first_day <= horizon), created: g.created });
     out.push({
       ...verdict, key: g.key, name: (g.ads[0] && g.ads[0].name) || null, ads: g.ads.length, ad_ids: g.ads.slice(0, 3).map((a) => a.id),
+      ad_list: g.ads.slice(0, 12).map((a) => ({ id: a.id, name: a.name || null, status: a.status || null })), // display only: the original Meta ad names / ids / status shown in the detailed evidence
       media: g.media || null, format: g.media ? (MEDIA_LABEL[g.media] || g.media) : null, created: g.created, first_delivery: g.first_day || null, last_delivery: g.last_day || null,
       started: start.date, products: codes, product_names: codes.map((c) => nameOf.get(c) || c),
       concept_key: concept ? concept.key : null, concept_label: concept ? concept.label : null, concept_legacy: concept ? concept.legacy : false, concept_conflict: ranked.length > 1,
@@ -209,6 +210,7 @@ function analyseConcepts({ creatives, rules, coded, cfg, today, categoryOf = () 
         key: c.key, name: c.name, format: c.format, funnel: c.funnel_results && c.funnel_results.length > 1 ? c.funnel_results.map((f) => f.funnel).join(' / ') : (c.funnel_results && c.funnel_results[0] ? c.funnel_results[0].funnel : null),
         funnel_results: (c.funnel_results || []).map((f) => ({ funnel: f.funnel, state: f.state, spend: Math.round(num(f.spend)), purchases: f.purchases, cpa: f.cpa === null || f.cpa === undefined ? null : r1(f.cpa) })),
         state: c.state, spend: Math.round(num(c.spend)), purchases: c.purchases, ads: c.ads, live_status: c.live_status, last_delivery: c.last_delivery, started: c.started, products: c.product_names,
+        ad_ids: c.ad_ids || [], ad_list: c.ad_list || [],
       })),
     });
   });

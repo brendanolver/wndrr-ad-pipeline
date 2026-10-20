@@ -506,5 +506,69 @@
   };
   const typeLabelOf = (item) => (item.mode === 'momentum' || item.opportunity_type === 'protect_momentum' ? 'Protect Momentum' : TYPE_LABEL[(item.gap && item.gap.type) || item.opportunity_type] || null);
 
-  return { creativeCard, creativeHistory, creativeStatus, coverage, coreStatus, whyShoot, salesTrend, lastCreative, creativeDate, liveAds, CATEGORY, CATEGORY_ORDER, STATUS_CATEGORY, categoryOf, isVisible, longDate, startedPhrase, conditionsSummary, stockRestriction, sellingClause, creativeClause, reasonFor, whyWithNumbers, recommendationFor, directionFor, keyFacts, stockWarning, productionActivity, summaryCounts, momentumItemsFor, weeklySummary, TYPE_LABEL, typeLabelOf };
+
+  // ── Creative Insights (display wording only: every number comes from the concept record the insights engine returns; nothing is rated or recalculated here) ──────────────────────────────
+  const INSIGHT_STATUS = { established: 'Established Winner', promising: 'Promising Test', mixed: 'Mixed Performance', weak: 'Underperforming', insufficient: 'Insufficient Evidence' };
+  const INSIGHT_TONE = { established: 'green', promising: 'amber', mixed: 'grey', weak: 'red', insufficient: 'grey' };
+  const dollars = (v) => (v === null || v === undefined || !Number.isFinite(Number(v)) ? null : `$${Math.round(Number(v)).toLocaleString('en-AU')}`);
+  const FUNNEL_ORDER = ['TOM', 'TOF', 'MOF'];
+  const funnelsWithData = (c) => ((c && c.funnels) || []).filter((f) => (num(f.creatives) || 0) > 0)
+    .sort((a, b) => { const ia = FUNNEL_ORDER.indexOf(a.funnel); const ib = FUNNEL_ORDER.indexOf(b.funnel); return (ia < 0 ? 9 : ia) - (ib < 0 ? 9 : ib); });
+  // The funnel whose CPA the table shows under the status: a benchmarked funnel with rated creatives first (the most creatives wins), else the funnel with the most spend. Never a blend of funnels.
+  function insightKeyFunnel(c) {
+    const fs = ((c && c.funnels) || []).filter((f) => num(f.cpa) !== null);
+    const rated = fs.filter((f) => f.benchmarked && (f.performing + f.underperforming) > 0).sort((a, b) => b.creatives - a.creatives)[0];
+    const pick = rated || fs.slice().sort((a, b) => (num(b.spend) || 0) - (num(a.spend) || 0))[0];
+    return pick ? { funnel: pick.funnel, cpa: pick.cpa, benchmarked: !!pick.benchmarked } : null;
+  }
+  // One card per funnel that has data. Colour comes ONLY from the approved-benchmark verdict the engine already gave the funnel; a funnel without an approved benchmark is grey and "not assessed".
+  function insightFunnelCards(c) {
+    return funnelsWithData(c).map((f) => {
+      const limit = f.benchmarked ? f.approved_cpa_limit : null;
+      const rated = (f.performing || 0) + (f.underperforming || 0);
+      let tone = 'grey'; let bench;
+      if (!f.benchmarked) bench = 'No approved benchmark: not assessed';
+      else if (!rated || !f.status) bench = `Approved CPA limit ${dollars(limit) || 'set'}: not enough delivery to rate`;
+      else { tone = INSIGHT_TONE[f.status] || 'grey'; bench = `Approved CPA limit ${dollars(limit) || 'set'}: ${INSIGHT_STATUS[f.status] || f.status}`; }
+      return { funnel: f.funnel, cpa: dollars(f.cpa), purchases: num(f.purchases) || 0, spend: dollars(f.spend), creatives: f.creatives, performing: f.benchmarked ? f.performing : null, rated: f.benchmarked ? rated : null, benchmarked: !!f.benchmarked, tone, bench };
+    });
+  }
+  // "Why is this concept performing this way?": at most two short sentences built from the concept's own funnel results and its evidence requirements.
+  function insightWhy(c) {
+    if (!c) return '';
+    const fs = funnelsWithData(c);
+    const rated = fs.filter((f) => f.benchmarked && (f.performing + f.underperforming) > 0);
+    const noBench = fs.filter((f) => !f.benchmarked);
+    const cr = (n, f) => `${n} ${f} ${n === 1 ? 'creative' : 'creatives'}`; const be = (n) => (n === 1 ? 'is' : 'are');
+    const lim = (f) => (f.approved_cpa_limit ? `the approved ${dollars(f.approved_cpa_limit)} benchmark` : 'the approved benchmark');
+    let s1;
+    if (rated.length) {
+      s1 = `${rated.map((f) => {
+        const allPerf = f.performing === f.creatives && !f.underperforming; const cpa = dollars(f.cpa);
+        if (allPerf) return `${cr(f.performing, f.funnel)} ${be(f.performing)} performing${cpa ? ` at a ${cpa} CPA` : ''} against ${lim(f)}`;
+        const parts = [f.performing ? `${f.performing} performing` : '', f.underperforming ? `${f.underperforming} over the approved ${dollars(f.approved_cpa_limit) || ''} CPA limit`.replace('  ', ' ') : ''].filter(Boolean).join(' and ');
+        return `${f.funnel}: ${parts}${cpa ? ` (funnel CPA ${cpa})` : ''}`;
+      }).join(', and ')}.`;
+    } else s1 = 'No creative has been rated against an approved benchmark yet.';
+    const req = (fs.find((f) => f.benchmarked && f.requirements && f.status === c.status) || fs.find((f) => f.benchmarked && f.requirements) || {}).requirements;
+    const unmet = req ? [['creatives', (r) => `${r.have} of ${r.need} performing creatives`], ['products', (r) => `${r.have} of ${r.need} performing products`], ['spend', (r) => `${dollars(r.have)} of ${dollars(r.need)} spend`], ['purchases', (r) => `${r.have} of ${r.need} purchases`]].find(([k]) => req[k] && !req[k].ok) : null;
+    const clause = { established: 'it meets the approved evidence requirements', promising: `broader evidence is still limited${unmet ? ` (${unmet[1](req[unmet[0]])})` : ''}`, mixed: 'results are mixed, with as many creatives over the limit as performing', weak: 'no creative is performing', insufficient: 'there is too little delivery to rate it' }[c.status] || '';
+    let s2 = '';
+    if (noBench.length) {
+      const names = noBench.map((f) => f.funnel); const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
+      s2 = `${list} performance cannot yet be assessed against an approved benchmark${clause ? `, and ${clause}` : ''}.`;
+    } else if (clause) s2 = `${clause.charAt(0).toUpperCase()}${clause.slice(1)}.`;
+    return [s1, s2].filter(Boolean).join(' ');
+  }
+  // A readable creative name from a Meta ad name: the last meaningful segment of the usual #ID_WEEK_DATE_..._Title layout, shortened. The full original name always stays available in the detail.
+  function shortCreativeName(name, max = 46) {
+    const raw = String(name || '').trim(); if (!raw) return 'Unnamed creative';
+    const segs = raw.split('_').map((x) => x.trim()).filter(Boolean);
+    let pick = raw;
+    if (segs.length > 1) { const last = segs[segs.length - 1]; pick = /[A-Za-z]{3,}/.test(last) ? last : (segs.slice().reverse().find((x) => /[A-Za-z]{3,}/.test(x)) || raw); }
+    pick = pick.replace(/^#?\d+\s*[-_]?\s*/, '').trim() || pick;
+    return pick.length > max ? `${pick.slice(0, max - 1).trimEnd()}…` : pick;
+  }
+
+  return { INSIGHT_STATUS, INSIGHT_TONE, insightKeyFunnel, insightFunnelCards, insightWhy, shortCreativeName, creativeCard, creativeHistory, creativeStatus, coverage, coreStatus, whyShoot, salesTrend, lastCreative, creativeDate, liveAds, CATEGORY, CATEGORY_ORDER, STATUS_CATEGORY, categoryOf, isVisible, longDate, startedPhrase, conditionsSummary, stockRestriction, sellingClause, creativeClause, reasonFor, whyWithNumbers, recommendationFor, directionFor, keyFacts, stockWarning, productionActivity, summaryCounts, momentumItemsFor, weeklySummary, TYPE_LABEL, typeLabelOf };
 }));

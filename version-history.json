@@ -2,6 +2,17 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.6.5",
+      "date": "2026-10-20",
+      "title": "Creative Insights redesign",
+      "changes": [
+        "Creative Insights now opens with three summary cards (Established Winners, Promising Concepts, Concepts Analysed), a spend-coverage indicator, and the benchmark explanation moved into a How concepts are rated info section",
+        "A compact four-column concept table: Concept, Tested, Performance (colour badge with the relevant funnel CPA) and Next opportunity; the performance filter and search are unchanged",
+        "The expanded concept shows a short data-generated explanation, TOM / TOF / MOF performance cards for the funnels that have data, Products tested and Where to test next with + Shoot",
+        "All technical detail (funnel breakdown, benchmark criteria, Met / Not met, individual creatives with Meta links, ad names and IDs) is in a collapsed Detailed Performance & Creative Evidence section; no rating, threshold or recommendation changed"
+      ]
+    },
+    {
       "version": "1.6.4",
       "date": "2026-10-20",
       "title": "High Stocks: Almost qualifying section",

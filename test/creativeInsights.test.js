@@ -131,3 +131,12 @@ test('insights: requirements are the existing Creative Opportunities evidence ru
   assert.equal(s.requirements.creatives.need, opCfg.CONCEPT.min_creatives); assert.equal(s.requirements.products.need, opCfg.CONCEPT.test_min_products);
   assert.equal(s.requirements.spend.need, opCfg.CONCEPT.min_spend); assert.equal(s.requirements.purchases.need, opCfg.CONCEPT.min_purchases);
 });
+
+test('insights: the original Meta ad names, ids and status ride along on each creative for the detailed evidence (display data only)', () => {
+  const ads = [ad({ id: 'ad-a', name: '#101_26-WK39_20-09_OFFEND_UGC_MOF_Founder Story - Hook 1', products: ['P1'] }), ad({ id: 'ad-a2', name: '#101_26-WK39_20-09_OFFEND_UGC_MOF_Founder Story - Hook 1 - Copy', creative: 'cr-a', products: ['P1'] })];
+  const c = concept(analyse(build(ads)));
+  const cr = c.creatives[0];
+  assert.ok(Array.isArray(cr.ad_list) && cr.ad_list.length >= 1);
+  assert.ok(cr.ad_list.every((a) => a.id && 'name' in a && 'status' in a)); assert.ok(cr.ad_ids.length >= 1);
+  assert.equal(c.status, concept(analyse(build(ads.map((a) => ({ row: { ...a.row }, products: a.products }))))).status, 'the rating does not depend on the added fields');
+});

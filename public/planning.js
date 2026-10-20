@@ -1107,8 +1107,8 @@ document.addEventListener('click', (ev) => {
 // CREATIVE INSIGHTS (Batch 30): which creative concepts work across products, and which products could test them.
 // Data: GET /api/opportunities/insights (this application's own database; no Meta call). Verdicts come only from the approved benchmarks; TOF / TOM show numbers without a verdict.
 // ══════════════════════════════════════════════════════════════════════════════════════════════
-const PL_INS_STATUS = { established: 'Established winner', promising: 'Promising test', mixed: 'Mixed performance', weak: 'Underperforming', insufficient: 'Insufficient evidence' };
-function plInsState() { if (!state.insights) state.insights = { loading: false, error: null, data: null, query: '', status: '', open: {} }; return state.insights; }
+const PL_INS_STATUS = PE.INSIGHT_STATUS; // Established Winner / Promising Test / Mixed Performance / Underperforming / Insufficient Evidence
+function plInsState() { if (!state.insights) state.insights = { loading: false, error: null, data: null, query: '', status: '', open: {}, evOpen: {} }; if (!state.insights.evOpen) state.insights.evOpen = {}; return state.insights; }
 async function plLoadInsights(force = false) {
   const host = document.getElementById('creative-insights');
   if (!host) return;
@@ -1120,30 +1120,105 @@ async function plLoadInsights(force = false) {
   st.loading = false; plRenderInsights();
 }
 const plInsMoney = (v) => (v === null || v === undefined ? plNone : `$${plNum(Math.round(v))}`);
-function plInsRequirementsHtml(c) {
-  const f = (c.funnels || []).filter((x) => x.benchmarked && x.requirements).sort((a, b) => (b.performing + b.underperforming) - (a.performing + a.underperforming))[0];
-  if (!f) return '';
-  const r = f.requirements; const li = (ok, text) => `<li class="${ok ? 'ok' : 'no'}"><b>${ok ? 'Met' : 'Not met'}</b> ${plEsc(text)}</li>`;
-  return `<ul class="pt-elig">${li(r.creatives.ok, `${r.creatives.need}+ unique creatives performing in ${f.funnel} (${r.creatives.have})`)}${li(r.products.ok, `Performing on ${r.products.need}+ products (${r.products.have})`)}${li(r.spend.ok, `$${plNum(r.spend.need)}+ spent (${plInsMoney(r.spend.have)})`)}${li(r.purchases.ok, `${r.purchases.need}+ purchases (${plNum(r.purchases.have)})`)}${li(r.consistent.ok, `More performing than underperforming creatives (${r.consistent.have})`)}${li(r.dominance.ok, `No single product carries ${r.dominance.limit_pct}% or more of the performing purchases (top: ${r.dominance.top_pct}%)`)}</ul>`;
+// ── the expanded concept: a performance summary, the funnel cards, the products tested, where to test next, then ONE collapsed section holding all the technical evidence ──────────────────
+const plInsBadge = (status) => `<span class="ins2-badge" data-tone="${plEsc(PE.INSIGHT_TONE[status] || 'grey')}">${plEsc(PE.INSIGHT_STATUS[status] || status)}</span>`;
+function plInsFunnelCardsHtml(c) {
+  const cards = PE.insightFunnelCards(c);
+  if (!cards.length) return '';
+  return `<div class="ins2-funnels">${cards.map((f) => `<div class="ins2-fcard" data-tone="${f.tone}"><span class="ins2-fcard-h">${plEsc(f.funnel)} Performance</span>
+      <div class="ins2-fcard-main"><b>${f.cpa ? plEsc(f.cpa) : '&ndash;'}</b><span>CPA</span></div>
+      <dl><div><dt>Purchases</dt><dd>${plNum(f.purchases)}</dd></div>${f.benchmarked ? `<div><dt>Performing creatives</dt><dd>${plNum(f.performing)} of ${plNum(f.rated)} rated</dd></div>` : ''}</dl>
+      <span class="ins2-fcard-b"><i aria-hidden="true"></i>${plEsc(f.bench)}</span></div>`).join('')}</div>`;
 }
-function plInsDetailHtml(c, d) {
-  const req = d.requirements || {};
-  const evidence = plList(c.evidence || []);
-  const funnels = `<table class="pt-mini"><thead><tr><th>Funnel</th><th class="num">Creatives</th><th class="num">Performing</th><th class="num">Over limit</th><th class="num">Spend</th><th class="num">Purchases</th><th class="num">CPA</th><th>Verdict</th></tr></thead><tbody>${(c.funnels || []).map((f) => `<tr><td>${plEsc(plFn(f.funnel))}</td><td class="num">${f.creatives}</td><td class="num">${f.benchmarked ? f.performing : plNone}</td><td class="num">${f.benchmarked ? f.underperforming : plNone}</td><td class="num">${plInsMoney(f.spend)}</td><td class="num">${plNum(f.purchases)}</td><td class="num">${plInsMoney(f.cpa)}</td><td>${f.benchmarked ? plEsc(PL_INS_STATUS[f.status] || 'No creative judged yet') : 'No approved benchmark'}</td></tr>`).join('')}</tbody></table>`;
-  const prods = `<table class="pt-mini"><thead><tr><th>Product</th><th class="num">Creatives</th><th class="num">Spend</th><th class="num">Purchases</th></tr></thead><tbody>${(c.products || []).slice(0, 12).map((p) => `<tr><td>${plEsc(p.name || p.code)}</td><td class="num">${p.creatives}</td><td class="num">${plInsMoney(p.spend)}</td><td class="num">${plNum(p.purchases)}</td></tr>`).join('')}</tbody></table>${(c.products || []).length > 12 ? `<p class="hint">${c.products.length - 12} more not shown.</p>` : ''}`;
-  const cre = `<table class="pt-mini pl-live-table"><thead><tr><th>Creative</th><th>Format</th><th>Funnel</th><th>Delivery</th><th>Performance</th></tr></thead><tbody>${(c.creatives || []).slice(0, 12).map((x) => `<tr class="${x.live_status === 'delivering' ? 'pl-live-on' : 'pl-live-off'}"><td>${plEsc(x.name || 'Unnamed creative')}<small>${plEsc((x.products || []).slice(0, 3).join(', '))}</small></td><td>${plEsc(x.format || 'Unknown')}</td><td>${plEsc(String(x.funnel || 'unknown').split(' / ').map(plFn).join(' / '))}</td><td>${plEsc({ delivering: 'Delivering', starting: 'Just launched', stalled: 'Not delivering', no_delivery: 'No delivery recorded', unknown: 'Unknown' }[x.live_status] || '')}${x.last_delivery ? `<small>last delivery ${plEsc(PE.longDate(x.last_delivery))}</small>` : ''}</td><td>${(x.funnel_results || []).map((f) => `<small style="display:block">${plEsc(plFn(f.funnel))}: ${plEsc(plStateWord(f.state))}, ${plInsMoney(f.spend)}${f.cpa ? `, CPA ${plInsMoney(f.cpa)}` : ''}</small>`).join('')}</td></tr>`).join('')}</tbody></table>${(c.creatives || []).length > 12 ? `<p class="hint">${c.creatives.length - 12} more not shown.</p>` : ''}`;
-  const sg = c.suggestions || [];
-  const ro = plReadOnly();
-  const sugg = sg.length
-    ? `<ul class="pl-ins-sugg">${sg.map((s) => `<li class="pl-ins-s"><span class="pt-thumb">${s.image_url ? `<img src="${plEsc(s.image_url)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}</span><span class="pl-ins-s-body"><b>${plEsc(s.product_name)}</b><small>${plEsc(s.category || '')}${s.planning_status === 'act' ? ' · needs creative' : ' · covered'}</small><span class="pl-ins-s-why">${plEsc(s.reason)}</span>${s.caveat ? `<small class="pl-ins-caveat">${plEsc(s.caveat)}</small>` : ''}</span>${ro ? '' : `<button type="button" class="btn btn-ghost btn-sm pl-add-btn" data-ins-add="${plEsc(s.item_key)}" data-ins-concept="${plEsc(s.concept_label)}" aria-label="Add ${plEsc(c.label)} for ${plEsc(s.product_name)} to the Shoot Plan">+ Add</button>`}</li>`).join('')}</ul>${c.suggestions_total > sg.length ? `<p class="hint">${c.suggestions_total - sg.length} more suitable products not shown.</p>` : ''}`
-    : `<p class="hint">${['established', 'promising'].includes(c.status) ? 'No product currently qualifies: every suitable product has already tested this concept, has it in production, or is held back by stock, demand or season.' : 'Products are only suggested for an established winner or a promising test.'}</p>`;
-  return `<tr class="pt-detail-row"><td colspan="5"><div class="pl-detail pl-ins-detail">
-    <section class="pl-d-sec pl-d-reco"><h5>Why ${plEsc(PL_INS_STATUS[c.status] || c.status)}</h5>${evidence || '<p class="pl-d-text">No creative of this concept has been judged yet.</p>'}${plInsRequirementsHtml(c)}</section>
-    <section class="pl-d-sec"><h5>By funnel</h5>${funnels}<p class="hint">Each funnel is judged on its own. CPA is never averaged across funnels, and a creative that ran in two funnels is one creative judged in each.</p></section>
-    <section class="pl-d-sec"><h5>Products tested</h5>${prods}</section>
-    <section class="pl-d-sec pl-live"><h5>Creatives</h5>${cre}</section>
-    <section class="pl-d-sec pl-live pl-ins-suggest"><h5>Suitable products to test <span class="pl-cw-count">${c.suggestions_total || 0}</span></h5>${sugg}</section>
+// products tested: CPA only where the concept ran in ONE funnel (the product figures pool every funnel's spend, and CPAs from different funnels are never combined)
+function plInsProductsHtml(c) {
+  const prods = c.products || []; if (!prods.length) return '';
+  const single = PE.insightFunnelCards(c).length === 1;
+  const benchFunnels = new Set((c.funnels || []).filter((f) => f.benchmarked).map((f) => f.funnel));
+  const perfBy = new Map(); // product name -> creatives performing in an approved-benchmark funnel
+  (c.creatives || []).forEach((x) => { if ((x.funnel_results || []).some((f) => f.state === 'performing' && benchFunnels.has(f.funnel))) (x.products || []).forEach((n) => perfBy.set(n, (perfBy.get(n) || 0) + 1)); });
+  const shown = prods.slice(0, 10);
+  return `<section class="ins2-sec"><h5>Products tested</h5><table class="ins2-mini"><thead><tr><th>Product</th><th class="num">Creatives</th><th class="num">Spend</th><th class="num">Purchases</th><th class="num">CPA</th></tr></thead><tbody>${shown.map((p) => {
+    const nm = p.name || p.code; const perf = perfBy.get(nm) || 0;
+    return `<tr><td><b>${plEsc(nm)}</b>${perf ? ` <span class="ins2-chip" data-tone="green" title="Creatives of this product performing against an approved benchmark">${perf} performing</span>` : ''}</td><td class="num">${plNum(p.creatives)}</td><td class="num">${plInsMoney(p.spend)}</td><td class="num">${plNum(Math.round(p.purchases))}</td><td class="num">${single && p.purchases > 0 ? plInsMoney(p.spend / p.purchases) : '<span class="pt-na" title="This concept ran in several funnels: CPAs from different funnels are never combined">&ndash;</span>'}</td></tr>`;
+  }).join('')}</tbody></table><p class="ins2-note">${prods.length > shown.length ? `${prods.length - shown.length} more products not shown. ` : ''}Where one creative features several products its spend is split equally between them.</p></section>`;
+}
+// where to test next: the engine's own suggestions (suitability, stock, demand and season already checked); this only presents them
+function plInsSuggestionsHtml(c) {
+  const sg = c.suggestions || []; const ro = plReadOnly();
+  const caveat = c.status === 'promising' ? '<p class="ins2-note">A promising test is a limited sample, not yet a proven winner: it is only suggested for similar (same-category) products.</p>' : '';
+  if (!sg.length) return `<section class="ins2-sec"><h5>Where to test next</h5><p class="ins2-empty">No suitable products identified yet.</p><p class="ins2-note">${['established', 'promising'].includes(c.status) ? 'Every suitable product has already tested this concept, has it in production, or is held back by stock, demand or season.' : 'Products are only suggested for an Established Winner or a Promising Test.'}</p></section>`;
+  const rows = sg.map((x) => {
+    const it = plFindItem(x.item_key); const inPlan = !!it && plInThisWeeksPlan(it);
+    const why = x.suitability === 'same_category' ? `Worked on other ${String(x.category || 'similar').toLowerCase()} products` : 'Worked across several product categories';
+    const stock = `${plNum(x.stock_units)} in stock${x.units30 ? ` · ${plNum(x.units30)} sold in 30 days` : ''}`;
+    const act = inPlan ? '<span class="core-shoot-selected-badge">&#10003; Shooting</span>' : ro ? '' : `<button type="button" class="cat2-shoot" data-ins-add="${plEsc(x.item_key)}" data-ins-concept="${plEsc(x.concept_label)}" aria-label="Add ${plEsc(c.label)} for ${plEsc(x.product_name)} to the Shoot Plan">+ Shoot</button>`;
+    return `<li class="ins2-s"><span class="pt-thumb">${x.image_url ? `<img src="${plEsc(x.image_url)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.remove()">` : `<span class="pt-thumb-none">${PL_NOIMG}</span>`}</span>
+      <span class="ins2-s-body"><b>${plEsc(x.product_name)}</b><small>${plEsc(x.category || '')}</small><span class="ins2-s-why" title="${plEsc(x.reason)}">${plEsc(why)}</span>${x.caveat ? `<small class="ins2-caveat">${plEsc(x.caveat)}</small>` : ''}</span>
+      <span class="ins2-s-meta"><span class="ins2-chip" data-tone="${x.planning_status === 'act' ? 'amber' : 'grey'}">${x.planning_status === 'act' ? 'Creative gap' : 'Covered'}</span><small>${plEsc(stock)}</small>${inPlan ? '<small class="ins2-inplan">In this week\'s Shoot Plan</small>' : ''}</span>
+      <span class="ins2-s-act">${act}</span></li>`;
+  }).join('');
+  return `<section class="ins2-sec"><h5>Where to test next <span class="ins2-count">${plNum(c.suggestions_total || sg.length)}</span></h5><ul class="ins2-sugg">${rows}</ul>${(c.suggestions_total || 0) > sg.length ? `<p class="ins2-note">${(c.suggestions_total || 0) - sg.length} more suitable products not shown.</p>` : ''}${caveat}</section>`;
+}
+// the evidence rules for a benchmarked funnel: every Met / Not met line (the engine's own requirement results)
+function plInsRequirementsHtml(f) {
+  const r = f.requirements; if (!r) return '';
+  const li = (ok, text) => `<li class="${ok ? 'ok' : 'no'}"><b>${ok ? 'Met' : 'Not met'}</b> ${plEsc(text)}</li>`;
+  return `<div class="ins2-req"><h6>${plEsc(f.funnel)}: ${plEsc(PE.INSIGHT_STATUS[f.status] || 'Not yet rated')}</h6><ul class="pt-elig">${li(r.creatives.ok, `${r.creatives.need}+ unique creatives performing in ${f.funnel} (${r.creatives.have})`)}${li(r.products.ok, `Performing on ${r.products.need}+ products (${r.products.have})`)}${li(r.spend.ok, `$${plNum(r.spend.need)}+ spent (${plInsMoney(r.spend.have)})`)}${li(r.purchases.ok, `${r.purchases.need}+ purchases (${plNum(r.purchases.have)})`)}${li(r.consistent.ok, `More performing than underperforming creatives (${r.consistent.have})`)}${li(r.dominance.ok, `No single product carries ${r.dominance.limit_pct}% or more of the performing purchases (top: ${r.dominance.top_pct}%)`)}</ul></div>`;
+}
+const PL_INS_LIVE = { delivering: 'Delivering', starting: 'Just launched', stalled: 'Not delivering', no_delivery: 'No delivery recorded', unknown: 'Unknown' };
+function plInsCreativesHtml(c) {
+  const list = (c.creatives || []).slice(0, 12);
+  if (!list.length) return '<p class="ins2-note">No creative of this concept has been judged yet.</p>';
+  const items = list.map((x) => {
+    const id = (x.ad_ids && x.ad_ids[0]) || (x.ad_list && x.ad_list[0] && x.ad_list[0].id) || '';
+    const fr = (x.funnel_results || []).map((f) => `<span class="ins2-cr-f"><b>${plEsc(plFn(f.funnel))}</b> ${plInsMoney(f.spend)} · ${plNum(f.purchases)} purchases${f.cpa !== null && f.cpa !== undefined ? ` · CPA ${plInsMoney(f.cpa)}` : ''}${['performing', 'underperforming', 'declining'].includes(f.state) ? ` <em data-state="${plEsc(f.state)}">${plEsc(f.state)}</em>` : ''}</span>`).join('');
+    const ads = (x.ad_list && x.ad_list.length ? x.ad_list : (x.ad_ids || []).map((i) => ({ id: i })));
+    return `<li class="ins2-cr">${id ? ccThumbHtml(id) : '<span class="cc-thumb"><span class="cc-thumb-ph"></span></span>'}
+      <div class="ins2-cr-body"><b title="${plEsc(x.name || '')}">${plEsc(PE.shortCreativeName(x.name))}</b><small>${plEsc((x.products || []).slice(0, 3).join(', ') || 'No product')} · ${plEsc(x.format || 'Unknown format')} · ${plEsc(String(x.funnel || 'unknown').split(' / ').map(plFn).join(' / '))}</small>
+        <small>${plEsc(PL_INS_LIVE[x.live_status] || '')}${x.last_delivery ? ` · last delivery ${plEsc(PE.longDate(x.last_delivery))}` : ''}${x.ads > 1 ? ` · ${plNum(x.ads)} ads, counted once` : ''}</small>
+        <details class="ins2-cr-ids"><summary>Meta ad name &amp; ID${ads.length > 1 ? 's' : ''}</summary><div><code>${plEsc(x.name || 'Unnamed')}</code>${ads.map((a) => `<small>${plEsc(a.id)}${a.status ? ` · ${plEsc(a.status)}` : ''}${a.name && a.name !== x.name ? ` · ${plEsc(a.name)}` : ''}</small>`).join('')}</div></details></div>
+      <div class="ins2-cr-nums">${fr}${id ? `<button type="button" class="ins2-link" data-cc-open="${plEsc(id)}">View in Meta &rarr;</button>` : ''}</div></li>`;
+  }).join('');
+  return `<ul class="ins2-crs">${items}</ul>${(c.creatives || []).length > list.length ? `<p class="ins2-note">${c.creatives.length - list.length} more creatives not shown.</p>` : ''}`;
+}
+function plInsEvidenceHtml(c) {
+  const bf = (c.funnels || []).filter((f) => f.benchmarked && f.requirements);
+  const funnels = `<table class="ins2-mini"><thead><tr><th>Funnel</th><th class="num">Creatives</th><th class="num">Performing</th><th class="num">Over limit</th><th class="num">Spend</th><th class="num">Purchases</th><th class="num">CPA</th><th>Verdict</th></tr></thead><tbody>${(c.funnels || []).map((f) => `<tr><td>${plEsc(plFn(f.funnel))}</td><td class="num">${f.creatives}</td><td class="num">${f.benchmarked ? f.performing : plNone}</td><td class="num">${f.benchmarked ? f.underperforming : plNone}</td><td class="num">${plInsMoney(f.spend)}</td><td class="num">${plNum(f.purchases)}</td><td class="num">${plInsMoney(f.cpa)}</td><td>${f.benchmarked ? plEsc(PE.INSIGHT_STATUS[f.status] || 'No creative judged yet') : 'No approved benchmark'}</td></tr>`).join('')}</tbody></table><p class="ins2-note">Each funnel is judged on its own. CPA is never averaged across funnels, and a creative that ran in two funnels is one creative judged in each.</p>`;
+  const conf = [c.concept_conflicts ? `${plPlural(c.concept_conflicts, 'creative')} with ads classified under different concepts (the spend-weighted majority is used)` : '', c.legacy ? 'A free-text (legacy) concept label, not a concept type from the vocabulary' : '', c.top_product_share_pct ? `${c.top_product_share_pct}% of the spend is on the top product` : ''].filter(Boolean);
+  return `<div class="ins2-ev">
+    <div class="ins2-ev-sec"><h6>Full funnel breakdown</h6>${funnels}</div>
+    <div class="ins2-ev-sec"><h6>Benchmark criteria and evaluation</h6>${bf.length ? bf.map(plInsRequirementsHtml).join('') : '<p class="ins2-note">No funnel of this concept has an approved benchmark, so no requirement is evaluated.</p>'}</div>
+    <div class="ins2-ev-sec"><h6>Evidence and matching</h6>${plList([...(c.evidence || []), ...conf]) || '<p class="ins2-note">No further evidence notes.</p>'}</div>
+    <div class="ins2-ev-sec"><h6>Individual creatives</h6>${plInsCreativesHtml(c)}</div>
+  </div>`;
+}
+function plInsDetailHtml(c) {
+  const open = !!plInsState().evOpen[c.key];
+  return `<tr class="pt-detail-row"><td colspan="4"><div class="ins2-x">
+    <section class="ins2-top"><div class="ins2-top-h"><h4>${plEsc(c.label)}</h4>${plInsBadge(c.status)}<span class="ins2-top-n">${plPlural(c.products_tested, 'product')} tested &middot; ${plPlural(c.unique_creatives, 'unique creative')}</span></div>
+      <p class="ins2-why"><b>Why is this concept performing this way?</b> ${plEsc(PE.insightWhy(c))}</p></section>
+    ${plInsFunnelCardsHtml(c)}
+    ${plInsProductsHtml(c)}
+    ${plInsSuggestionsHtml(c)}
+    <details class="ins2-evidence" data-ins-ev="${plEsc(c.key)}"${open ? ' open' : ''}><summary>Detailed Performance &amp; Creative Evidence</summary>${open ? plInsEvidenceHtml(c) : ''}</details>
   </div></td></tr>`;
+}
+function plInsInfoHtml(d) {
+  const req = d.requirements || {};
+  const bench = (d.funnels || []).map((f) => `<li><b>${plEsc(f.funnel)}</b> ${f.benchmarked ? `CPA limit ${plInsMoney(f.approved_cpa_limit)}` : 'no approved benchmark, so no verdict is given'}</li>`).join('');
+  return `<details class="ins2-info"><summary aria-label="How concepts are rated"><svg class="core-info" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg> How concepts are rated</summary>
+    <div class="ins2-info-pop">
+      <p>Judged against the approved benchmarks only. Each funnel is judged on its own; duplicated ads count once; nothing here is a Meta sync.</p>
+      <ul class="ins2-info-b">${bench}</ul>
+      <ul class="pl-how">
+        <li><b>Established Winner.</b> In a benchmarked funnel: ${req.min_creatives}+ unique creatives performing, on ${req.min_products}+ products (each with $${plNum(req.min_product_spend)}+ of spend), $${plNum(req.min_spend)}+ spent, ${req.min_purchases}+ purchases, more performing than underperforming creatives, and no single product carrying ${req.dominance_pct}% or more of the performing purchases.</li>
+        <li><b>Promising Test.</b> At least one creative performing and more performing than underperforming, but below those requirements. Suggested only for similar (same-category) products.</li>
+        <li><b>Mixed Performance.</b> Performing and underperforming creatives both present, the underperforming as many or more.</li>
+        <li><b>Underperforming.</b> No creative performing and at least two over the approved CPA limit.</li>
+        <li><b>Insufficient Evidence.</b> Nothing could be rated: too little delivery, or the funnel has no approved benchmark.</li>
+        <li>A suggested product has passed Planning's own stock, colourway, size, demand and season checks, has not tested the concept, and has it neither planned nor in production.</li></ul>
+    </div></details>`;
 }
 function plRenderInsights() {
   const host = document.getElementById('creative-insights');
@@ -1154,40 +1229,40 @@ function plRenderInsights() {
   if (!d) { host.innerHTML = ''; return; }
   if (!d.available) { host.innerHTML = `<div class="opp-tier-note" role="note">${plEsc(d.reason || 'Creative Insights are not available yet.')}</div>`; return; }
   const q = st.query.trim().toLowerCase();
-  const list = (d.concepts || []).filter((c) => (!st.status || c.status === st.status) && (!q || String(c.label).toLowerCase().includes(q)));
+  const all = d.concepts || [];
+  const list = all.filter((c) => (!st.status || c.status === st.status) && (!q || String(c.label).toLowerCase().includes(q)));
   const cov = d.coverage || {};
-  const bench = (d.funnels || []).map((f) => `${f.funnel} ${f.benchmarked ? `CPA (approved limit ${plInsMoney(f.approved_cpa_limit)})` : 'no approved benchmark'}`).join(' · ');
-  const counts = {}; (d.concepts || []).forEach((c) => { counts[c.status] = (counts[c.status] || 0) + 1; });
-  const req = d.requirements || {};
-  const head = `<div class="pl-section-head"><h3 class="pl-section-title">Creative Insights</h3><span class="pl-section-sub">Which creative concepts are working across products, and where to test them next. Analysed from ${plPlural(cov.creatives || 0, 'unique creative')} over the last ${d.window ? d.window.days : 90} days.</span></div>
-    <div class="pl-summary"><span class="pl-sum-lead"><b>${counts.established || 0}</b> established ${(counts.established || 0) === 1 ? 'winner' : 'winners'}</span><span class="pl-sum-sep">&middot;</span><span>${counts.promising || 0} promising</span><span class="pl-sum-sep">&middot;</span><span>${(d.concepts || []).length} concepts</span>${cov.classified_spend_pct !== null && cov.classified_spend_pct !== undefined ? `<span class="pt-flag" title="Concepts come only from the Ad Matching classifications a person confirmed. Creative with no concept recorded (${plPlural(cov.unclassified_creatives || 0, 'creative')}) is not part of any concept below.">${cov.classified_spend_pct}% of spend has a concept recorded</span>` : ''}<span class="pl-sum-actions"><button type="button" class="btn btn-ghost btn-sm" data-ins-refresh title="Recalculate from the stored Meta data">Refresh</button></span></div>
-    <p class="hint pl-ins-note">Judged against the approved benchmarks only: ${plEsc(bench)}. TOF and TOM creative is shown with its numbers but never called good or bad. Duplicated ads count once. Nothing here is a Meta sync.</p>`;
-  const tabs = `<div class="mp-table-toolbar pl-filters"><div class="pl-fields">
-      <label class="pl-f"><span>Performance</span><select data-ins-status><option value="">All</option>${Object.keys(PL_INS_STATUS).map((k) => `<option value="${k}"${st.status === k ? ' selected' : ''}>${PL_INS_STATUS[k]} (${counts[k] || 0})</option>`).join('')}</select></label>
-      <input type="search" class="opp-search mp-search-box" data-ins-search placeholder="Search concepts" value="${plEsc(st.query)}" aria-label="Search concepts"></div></div>`;
+  const counts = {}; all.forEach((c) => { counts[c.status] = (counts[c.status] || 0) + 1; }); // the cards count the concept records themselves, so they always reconcile with the table
+  const metric = (n, label, tone, sub) => `<div class="ins2-metric" data-tone="${tone}"><b>${plNum(n)}</b><span>${label}</span>${sub ? `<small>${sub}</small>` : ''}</div>`;
+  const pct = cov.classified_spend_pct;
+  const head = `<div class="ins2-head"><div><h3 class="pl-section-title">Creative Insights</h3><span class="pl-section-sub">Which creative concepts are working, how confident we are, and where to test them next.</span></div>
+      <div class="ins2-head-actions">${plInsInfoHtml(d)}<button type="button" class="btn btn-ghost btn-sm" data-ins-refresh title="Recalculate from the stored Meta data">Refresh</button></div></div>
+    <div class="ins2-metrics">${metric(counts.established || 0, 'Established Winners', 'green', 'Meet the approved winner criteria')}${metric(counts.promising || 0, 'Promising Concepts', 'amber', 'Positive early performance, not yet winners')}${metric(all.length, 'Concepts Analysed', 'grey', `From ${plPlural(cov.creatives || 0, 'unique creative')}, last ${d.window ? d.window.days : 90} days`)}</div>
+    ${pct !== null && pct !== undefined ? `<div class="ins2-cover" title="Concepts come only from the Ad Matching classifications a person confirmed. Creative with no concept recorded (${plPlural(cov.unclassified_creatives || 0, 'creative')}) is not part of any concept below."><span class="ins2-cover-bar" aria-hidden="true"><i style="width:${Math.max(0, Math.min(100, pct))}%"></i></span><span class="ins2-cover-t">${pct}% of Meta spend has a concept assigned</span></div>` : ''}`;
+  const tabs = `<div class="ins2-filters"><label class="pl-f"><span>Performance</span><select data-ins-status><option value="">All</option>${Object.keys(PL_INS_STATUS).map((k) => `<option value="${k}"${st.status === k ? ' selected' : ''}>${PL_INS_STATUS[k]} (${counts[k] || 0})</option>`).join('')}</select></label>
+      <input type="search" class="opp-search mp-search-box" data-ins-search placeholder="Search concepts" value="${plEsc(st.query)}" aria-label="Search concepts"></div>`;
   const rows = list.map((c) => {
     const open = !!st.open[c.key];
-    const best = (c.funnels || []).filter((f) => f.benchmarked && f.performing + f.underperforming > 0).sort((a, b) => b.creatives - a.creatives)[0];
-    const sub = best && best.cpa ? `${best.funnel} CPA ${plInsMoney(best.cpa)}` : '';
-    const opp = c.suggestions_total ? `<b>${c.suggestions_total}</b> suitable ${c.suggestions_total === 1 ? 'product' : 'products'} to test` : plNone;
-    return `<tr class="pt-row${open ? ' open' : ''}${['established', 'promising'].includes(c.status) ? '' : ' pt-quiet'}" data-ins-row="${plEsc(c.key)}" tabindex="0" aria-expanded="${open}"><td class="pt-product"><div class="pt-pwrap"><span class="pt-chev" aria-hidden="true"></span><span class="pt-name"><b>${plEsc(c.label)}</b>${c.legacy ? '<small class="pt-class">Free-text label</small>' : ''}</span></div></td><td class="pt-num"><b>${c.products_tested}</b></td><td class="pt-num"><b>${c.unique_creatives}</b></td><td><span class="pl-ins-st" data-status="${plEsc(c.status)}">${plEsc(PL_INS_STATUS[c.status] || c.status)}</span>${sub ? `<small class="pl-ins-sub">${plEsc(sub)}</small>` : ''}</td><td class="pl-ins-opp">${opp}</td></tr>${open ? plInsDetailHtml(c, d) : ''}`;
+    const kf = PE.insightKeyFunnel(c);
+    const sub = kf ? `<small class="ins2-cpa"><b>${plEsc(kf.funnel)}</b> CPA ${plInsMoney(kf.cpa)}${kf.benchmarked ? '' : ' <em>no benchmark</em>'}</small>` : '';
+    const opp = c.suggestions_total ? `<b>${plNum(c.suggestions_total)}</b> suitable ${c.suggestions_total === 1 ? 'product' : 'products'}` : (['established', 'promising'].includes(c.status) ? '<span class="ins2-none">No matches yet</span>' : plNone);
+    const second = c.legacy ? 'Free-text label' : (c.live_creatives ? `${plNum(c.live_creatives)} delivering now` : '');
+    return `<tr class="pt-row${open ? ' open' : ''}" data-ins-row="${plEsc(c.key)}" tabindex="0" aria-expanded="${open}"><td class="pt-product"><div class="pt-pwrap"><span class="pt-chev" aria-hidden="true"></span><span class="pt-name"><b>${plEsc(c.label)}</b>${second ? `<small>${plEsc(second)}</small>` : ''}</span></div></td><td class="ins2-tested">${plPlural(c.products_tested, 'product')} &middot; ${plPlural(c.unique_creatives, 'creative')}</td><td>${plInsBadge(c.status)}${sub}</td><td class="ins2-opp">${opp}</td></tr>${open ? plInsDetailHtml(c) : ''}`;
   }).join('');
-  const table = list.length ? `<div class="pt-wrap"><table class="pt-table pl-table pl-ins-table"><thead><tr><th class="pt-w-ins-c">Concept</th><th class="pt-w-num">Products tested</th><th class="pt-w-num">Unique creatives</th><th class="pt-w-ins-p">Performance</th><th class="pt-w-ins-o">Opportunity</th></tr></thead><tbody>${rows}</tbody></table></div>`
-    : `<p class="hint">${(d.concepts || []).length ? 'No concept matches this filter.' : 'No creative concepts to analyse yet: concepts come from Ad Matching classifications, and none has been confirmed with delivery in this period.'}</p>`;
-  const foot = `<details class="co-how"><summary>How a concept is rated</summary><ul class="pl-how">
-      <li><b>Established winner.</b> In a benchmarked funnel: ${req.min_creatives}+ unique creatives performing, on ${req.min_products}+ products (each with $${plNum(req.min_product_spend)}+ of spend), $${plNum(req.min_spend)}+ spent, ${req.min_purchases}+ purchases, more performing than underperforming creatives, and no single product carrying ${req.dominance_pct}% or more of the performing purchases.</li>
-      <li><b>Promising test.</b> At least one creative performing and more performing than underperforming, but below those requirements. Suggested only for similar (same-category) products.</li>
-      <li><b>Mixed performance.</b> Performing and underperforming creatives both present, the underperforming as many or more.</li>
-      <li><b>Underperforming.</b> No creative performing and at least two over the approved CPA limit.</li>
-      <li><b>Insufficient evidence.</b> Nothing could be rated: too little delivery, or the funnel has no approved benchmark.</li>
-      <li>A suggested product has passed Planning's own stock, colourway, size, demand and season checks, has not tested the concept, and has it neither planned nor in production. These are the Creative Opportunities evidence rules; they are provisional starting points.</li></ul></details>`;
-  host.innerHTML = `${head}${tabs}${table}${foot}`;
+  const table = list.length ? `<div class="pt-wrap"><table class="pt-table pl-table ins2-table"><thead><tr><th class="pt-w-ins-c">Concept</th><th class="pt-w-ins-t">Tested</th><th class="pt-w-ins-p">Performance</th><th class="pt-w-ins-o">Next opportunity</th></tr></thead><tbody>${rows}</tbody></table></div>`
+    : `<p class="hint">${all.length ? 'No concept matches this filter.' : 'No creative concepts to analyse yet: concepts come from Ad Matching classifications, and none has been confirmed with delivery in this period.'}</p>`;
+  host.innerHTML = `${head}${tabs}${table}`;
+  if (typeof ccHydrateThumbs === 'function') ccHydrateThumbs(host);
 }
 async function plInsightAdd(itemKey, conceptLabel) {
   const d = plInsState().data; const c = d && (d.concepts || []).find((x) => x.label === conceptLabel);
   const s = c && (c.suggestions || []).find((x) => x.item_key === itemKey);
   await plQuickAdd(itemKey, { concept: conceptLabel, reason: s ? s.reason : null });
 }
+document.addEventListener('toggle', (ev) => {
+  const d = ev.target; if (!d || !d.dataset || !d.dataset.insEv) return;
+  const st = plInsState(); if (!!st.evOpen[d.dataset.insEv] === d.open) return; st.evOpen[d.dataset.insEv] = d.open; plRenderInsights();
+}, true);
 document.addEventListener('change', (ev) => { const f = ev.target.closest && ev.target.closest('[data-ins-status]'); if (f) { plInsState().status = f.value; plRenderInsights(); } });
 document.addEventListener('input', (ev) => {
   const s = ev.target.closest && ev.target.closest('[data-ins-search]'); if (!s) return;
