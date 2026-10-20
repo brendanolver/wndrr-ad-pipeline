@@ -155,6 +155,6 @@ test('large preview: the whole picture, contained; missing url gives nothing', (
 });
 test('Upcoming Drops: compact tiles use the garment helper, the product header shows whole pictures', () => {
   assert.match(app, /gt-box-wide">\$\{UX\.garmentImgHtml\(\{ url: p\.image_url, category: p\.product_name \}\)/);
-  assert.match(app, /gt-box-48">\$\{UX\.garmentImgHtml\(\{ url: s\.image_url,/);
+  assert.ok(!/gt-box-48">\$\{UX\.garmentImgHtml\(\{ url: s\.image_url,/.test(app.slice(app.indexOf('function renderProductViewImages('), app.indexOf('function renderProductSummary('))), 'the product header and colourway panel carry no repeated thumbnails');
   assert.match(app, /gt-big">\$\{UX\.productImgFullHtml\(\{ url, alt: group\.product_name \}\)/);
 });

@@ -5996,16 +5996,15 @@ const ASSET_STATUS_COLORS = {
 // Upcoming Drops product page (Batch 39): the big preview shows each colourway's WHOLE picture (front and back where the picture holds both), never cropped; a missing
 // picture keeps a neutral placeholder. Each colourway card shows ONE complete, centred front view (the shared garment helper).
 function renderProductViewImages(group) {
+  // ONE combined picture: the colourways side by side in a single frame (no repeated thumbnails beside it).
   const bigs = group.images.slice(0, 2);
-  document.getElementById('product-view-images').innerHTML = (bigs.length
+  document.getElementById('product-view-images').innerHTML = `<span class="dpv-combo">${bigs.length
     ? bigs.map((url) => `<span class="gt-big">${UX.productImgFullHtml({ url, alt: group.product_name })}<span class="gt-ph" aria-hidden="true"><svg class=ic focusable=false><use href=#i-image></use></svg></span></span>`).join('')
-    : '<span class="gt-big gt-big-none"><span class="gt-ph" aria-hidden="true"><svg class=ic focusable=false><use href=#i-image></use></svg></span></span>')
-    + `<span class="dpv-thumbs">${group.styles.slice(0, 4).map((s) => `<span class="gt-box gt-box-48" title="${escapeHtml(s.style_code)}">${UX.garmentImgHtml({ url: s.image_url, category: group.product_name })}<span class="gt-ph" aria-hidden="true"><svg class=ic focusable=false><use href=#i-image></use></svg></span></span>`).join('')}</span>`;
+    : '<span class="gt-big gt-big-none"><span class="gt-ph" aria-hidden="true"><svg class=ic focusable=false><use href=#i-image></use></svg></span></span>'}</span>`;
 
-  // the colourway inventory card: one line per colourway (code, stock on hand, on order)
+  // the colourway inventory card: one text line per colourway (code, stock on hand, on order), no pictures
   document.getElementById('product-view-colours').innerHTML = `<div class="dpv-colours-h"><span>Colourways</span><b>${group.styles.length}</b></div><div class="dpv-colours-list">${group.styles.map((s) => `
       <div class="product-view-colour-card">
-        <span class="gt-box gt-box-48">${UX.garmentImgHtml({ url: s.image_url, category: group.product_name })}<span class="gt-ph" aria-hidden="true"><svg class=ic focusable=false><use href=#i-image></use></svg></span></span>
         <div>
           <div class="product-view-colour-code">${escapeHtml(s.style_code)}</div>
           <div class="product-view-colour-stats">${colourStatsLine(s)}</div>
@@ -6149,42 +6148,54 @@ async function loadProductPlan(dropId, productCode) {
 // uploaded_live): Planned -> Shooting -> Editing -> Final Approval -> Live. Nothing here is stored or changed; the page only reads it.
 // the assignee roster, plus whoever is already assigned (a person no longer on the roster is still shown, never silently dropped)
 const dropRosterWith = (current) => { const roster = conceptAssignees(); return current && !roster.includes(current) ? [current, ...roster] : roster; };
-const DROP_STAGES = [['planned', 'Planned'], ['shooting', 'Shooting'], ['editing', 'Editing'], ['final', 'Final Approval'], ['live', 'Live']];
-const DROP_STAGE_OF_STATUS = { filming: 'shooting', editing: 'editing', qc: 'final', uploaded_live: 'live' };
-const dropStageKey = (slot) => (slot && slot.asset_id ? DROP_STAGE_OF_STATUS[slot.asset_status] || 'planned' : null);
-const DROP_DAYS = { monday: 0, tuesday: 1, wednesday: 2, thursday: 3, friday: 4 };
-function dropShootDate(slot) {
-  if (!slot.shoot_week_start || !(slot.shoot_day in DROP_DAYS)) return null;
-  const [y, m, d] = slot.shoot_week_start.split('-').map(Number);
-  return new Date(Date.UTC(y, m - 1, d + DROP_DAYS[slot.shoot_day]));
+// The three milestones the team ticks on an Upcoming Drop. They are NOT a second tracker: each one reads and writes the concept's existing asset status (the same value Shooting, Editing, Final Approval and the Board use), so a tick here is the same record change everywhere else.
+// "Uploaded to Meta" is the asset's uploaded status; it does not mean the ad is live (the Live on Meta count still comes from actual Meta data).
+const DROP_MILESTONES = [
+  { key: 'filmed', label: 'Filmed', atLeast: 'filming', revertTo: 'concept_script' },
+  { key: 'edited', label: 'Edited', atLeast: 'qc', revertTo: 'filming' },
+  { key: 'uploaded', label: 'Uploaded to Meta', atLeast: 'uploaded_live', revertTo: 'qc' },
+];
+const dropMilestoneDone = (status, ms) => STATUSES.indexOf(status) >= STATUSES.indexOf(ms.atLeast);
+// A status is a single line of progress, so a milestone cannot be done without the ones before it: ticking a later one also shows the earlier ones as done, and unticking one also clears the later ones. Returns the OTHER milestones whose state changes so the page can say so.
+function dropMilestoneChange(status, ms, checked) {
+  const next = checked ? ms.atLeast : ms.revertTo;
+  const changed = DROP_MILESTONES.filter((m) => m !== ms && dropMilestoneDone(status, m) !== dropMilestoneDone(next, m)).map((m) => m.label);
+  return { next, changed };
 }
-function dropShootDateLabel(slot) {
-  const dt = dropShootDate(slot); if (!dt) return '';
-  const part = (o) => dt.toLocaleDateString('en-AU', { ...o, timeZone: 'UTC' });
-  return `${part({ weekday: 'short' })} ${part({ day: 'numeric' })} ${part({ month: 'short' })}`;
+function dropMilestonesHtml(s) {
+  const check = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg>';
+  return DROP_MILESTONES.map((m) => {
+    const has = !!s.asset_id;
+    const done = has && dropMilestoneDone(s.asset_status, m);
+    return `<span class="dpv-c-ms"><label class="dpv-ms${done ? ' done' : ''}" title="${has ? m.label : 'Create the asset first'}"><input type="checkbox" data-asset-id="${has ? s.asset_id : ''}" data-ms="${m.key}" aria-label="${m.label}: ${escapeHtml(s.concept_name)}"${done ? ' checked' : ''}${has ? '' : ' disabled'}><span class="dpv-ms-box">${check}</span></label></span>`;
+  }).join('');
 }
-// One short line under the stages, only from data the pipeline already holds (shoot schedule, editing owner, final approval state); nothing is shown when there is nothing useful to say.
-function dropStatusLine(slot, key) {
-  const day = dropShootDateLabel(slot);
-  if (key === 'planned') return day ? `Scheduled for ${day}` : `Not started${slot.asset_concept_assignee ? '' : ' · No one assigned'}`;
-  if (key === 'shooting') {
-    if (slot.shoot_status === 'shot') return 'Shot · waiting for editing';
-    const dt = dropShootDate(slot); if (!dt) return 'Filming';
-    const now = new Date(); const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
-    return dt.getTime() > today ? `Scheduled for ${day}` : dt.getTime() === today ? 'Filming · On set today' : `Filming · was scheduled for ${day}`;
+// Saves on click through the same status endpoint the Board uses. The box only changes to the saved value: while saving it is locked, and if the save fails it goes back and the error is shown (never a "saved" look for something that was not).
+async function toggleDropMilestone(input) {
+  const assetId = Number(input.dataset.assetId);
+  const ms = DROP_MILESTONES.find((m) => m.key === input.dataset.ms);
+  const checked = input.checked;
+  const slot = currentProductPlan && (currentProductPlan.slots || []).find((x) => x.asset_id === assetId);
+  if (!ms || !slot) { input.checked = !checked; return; }
+  const { next, changed } = dropMilestoneChange(slot.asset_status, ms, checked);
+  const row = input.closest('.dpv-row');
+  const inputs = row ? [...row.querySelectorAll('.dpv-ms input')] : [input];
+  inputs.forEach((i) => { i.disabled = true; i.closest('.dpv-ms').classList.add('saving'); });
+  try {
+    await api(`/creative-assets/${assetId}/status`, { method: 'PATCH', body: JSON.stringify({ status: next }) });
+  } catch (e) {
+    input.checked = !checked;
+    inputs.forEach((i) => { i.disabled = false; i.closest('.dpv-ms').classList.remove('saving'); });
+    toast(`Could not save "${ms.label}": ${e.message}`, true);
+    return;
   }
-  if (key === 'editing') return slot.asset_editing_owner ? `Editing · Assigned to ${slot.asset_editing_owner}` : 'Editing · No editor assigned';
-  if (key === 'final') return slot.asset_final_approval === 'changes_required' ? 'In final approval · Changes requested' : 'In final approval · Ready for review';
-  if (key === 'live') return 'Approved · Uploaded to Meta';
-  return '';
-}
-function dropStepperHtml(slot) {
-  const key = dropStageKey(slot);
-  if (!key) return '<span class="pw-slot-progress-empty">No asset yet</span>';
-  const at = DROP_STAGES.findIndex(([k]) => k === key);
-  const check = '<svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg>';
-  const steps = DROP_STAGES.map(([k, label], i) => `<span class="dpv-step ${i < at ? 'done' : i === at ? 'current' : 'todo'}" data-stage="${k}"${i === at ? ' aria-current="step"' : ''}><i aria-hidden="true">${i < at || (i === at && k === 'live') ? check : ''}</i><em>${label}</em></span>`).join('');
-  return `<div class="dpv-stepper" role="group" aria-label="Production status: ${DROP_STAGES[at][1]}">${steps}</div><div class="dpv-line" data-stage="${key}">${escapeHtml(dropStatusLine(slot, key))}</div>`;
+  try {
+    await loadProductView(state.currentDropId, state.currentProduct.product_code);
+    refreshDropsRow();
+  } catch (e) {
+    toast(`Saved, but the page could not refresh: ${e.message}`, true);
+  }
+  if (changed.length) toast(`${ms.label} ${checked ? 'ticked' : 'unticked'}; ${changed.join(' and ')} ${checked ? 'also marked done' : 'also cleared'}.`);
 }
 // The Creative Playbook entry's reference: a thumbnail (a play mark for a video) and View video / View example, linked to the original Reference Library record; none yet = a quiet Add reference.
 function dropReferenceHtml(s) {
@@ -6234,9 +6245,6 @@ function renderRequiredConcepts(data) {
     const fulfilled = !!s.asset_id;
     // "Proven" (sourced from a Proven Winner) is the only sourcing badge shown (a manually added concept gets none); the underlying `source` column is untouched.
     const sourceBadge = s.source === 'proven' ? '<span class="dpv-proven">PROVEN</span>' : '';
-    const style = fulfilled ? group.styles.find((x) => x.style_code === s.asset_style_code) : null;
-    const img = (style && style.image_url) || (group.images && group.images[0]) || '';
-    const thumb = `<span class="dpv-thumb">${img ? `<img src="${escapeHtml(img)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}</span>`;
     const complete = fulfilled && s.asset_status === 'uploaded_live';
     // Only a fulfilled slot has an asset row to attach a person to; an open slot has nowhere to keep Assigned To yet.
     const assigneeControl = fulfilled ? `
@@ -6269,10 +6277,10 @@ function renderRequiredConcepts(data) {
     return `
     <div class="dpv-row${complete ? ' dpv-row-complete' : ''}">
       <span class="dpv-c-rank">${s.slot_rank}</span>
-      <span class="dpv-c-concept">${thumb}<span class="dpv-name" title="${escapeHtml(s.concept_name)}">${escapeHtml(s.concept_name)}</span>${sourceBadge}</span>
+      <span class="dpv-c-concept"><span class="dpv-name" title="${escapeHtml(s.concept_name)}">${escapeHtml(s.concept_name)}</span>${sourceBadge}</span>
       <span class="dpv-c-ref">${dropReferenceHtml(s)}</span>
       <span class="dpv-c-assign">${assigneeControl}</span>
-      <span class="dpv-c-status">${dropStepperHtml(s)}</span>
+      ${dropMilestonesHtml(s)}
       <span class="dpv-c-act">${primary}${menu}</span>
     </div>`;
   }).join('');
@@ -6282,6 +6290,10 @@ function renderRequiredConcepts(data) {
       if (!sel.value) return;
       linkExistingAsset(Number(sel.dataset.slotId), Number(sel.value));
     });
+  });
+
+  list.querySelectorAll('.dpv-ms input').forEach((cb) => {
+    cb.addEventListener('change', () => toggleDropMilestone(cb));
   });
 
   list.querySelectorAll('.pw-slot-assignee-select').forEach((sel) => {

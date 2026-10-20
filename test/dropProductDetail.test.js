@@ -17,38 +17,46 @@ const schema = read('db', 'schema.sql');
 const route = read('src', 'routes', 'dropProductPlans.js');
 
 // Pull the real helpers out of app.js (no DOM needed) so the behaviour under test is the shipped code.
-const block = app.slice(app.indexOf('const DROP_STAGES ='), app.indexOf('function renderRequiredConcepts('));
-const ctx = { escapeHtml: (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;') };
+const block = app.slice(app.indexOf('const DROP_MILESTONES ='), app.indexOf('// Saves on click through the same status endpoint'));
+const refBlock = app.slice(app.indexOf('function dropReferenceHtml('), app.indexOf('function renderRequiredConcepts('));
+const ctx = { escapeHtml: (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'), STATUSES: ['not_started', 'awaiting_proven_concept', 'awaiting_concept_development', 'concept_script', 'filming', 'editing', 'qc', 'uploaded_live'] };
 vm.createContext(ctx);
-vm.runInContext(`${block}; this.api = { dropStageKey, dropStatusLine, dropStepperHtml, dropReferenceHtml, dropShootDateLabel };`, ctx);
-const { dropStageKey, dropStatusLine, dropStepperHtml, dropReferenceHtml, dropShootDateLabel } = ctx.api;
+vm.runInContext(`${block}\n${refBlock}; this.api = { DROP_MILESTONES, dropMilestoneDone, dropMilestoneChange, dropMilestonesHtml, dropReferenceHtml };`, ctx);
+const { DROP_MILESTONES, dropMilestoneDone, dropMilestoneChange, dropMilestonesHtml, dropReferenceHtml } = ctx.api;
+const [FILMED, EDITED, UPLOADED] = DROP_MILESTONES;
+// the helpers run in a vm context, so compare by value (arrays from another realm are never reference-equal)
+const eq = (a, b, m) => assert.equal(JSON.stringify(a), JSON.stringify(b), m);
 
-test('production stage comes from the existing asset status: no asset = none, anything pre-filming = Planned', () => {
-  assert.equal(dropStageKey({ asset_id: null }), null);
-  for (const [status, stage] of [['not_started', 'planned'], ['concept_script', 'planned'], ['filming', 'shooting'], ['editing', 'editing'], ['qc', 'final'], ['uploaded_live', 'live']]) {
-    assert.equal(dropStageKey({ asset_id: 1, asset_status: status }), stage, status);
-  }
+test('the three milestones read the existing asset status: Filmed = filming or later, Edited = QC or later, Uploaded = uploaded', () => {
+  eq(DROP_MILESTONES.map((m) => m.label), ['Filmed', 'Edited', 'Uploaded to Meta']);
+  const done = (status) => DROP_MILESTONES.map((m) => dropMilestoneDone(status, m));
+  eq(done('not_started'), [false, false, false]);
+  eq(done('concept_script'), [false, false, false]);
+  eq(done('filming'), [true, false, false]);
+  eq(done('editing'), [true, false, false], 'still being edited is not yet Edited');
+  eq(done('qc'), [true, true, false]);
+  eq(done('uploaded_live'), [true, true, true]);
 });
 
-test('stepper: earlier stages are ticked, the current one is marked, later ones are plain; no "deliverables" counter', () => {
-  const out = dropStepperHtml({ asset_id: 1, asset_status: 'editing', asset_editing_owner: 'Sam' });
-  assert.match(out, /data-stage="planned"/); assert.match(out, /dpv-step done" data-stage="planned"/); assert.match(out, /dpv-step done" data-stage="shooting"/);
-  assert.match(out, /dpv-step current" data-stage="editing" aria-current="step"/); assert.match(out, /dpv-step todo" data-stage="final"/); assert.match(out, /dpv-step todo" data-stage="live"/);
-  assert.match(out, /Editing · Assigned to Sam/);
-  assert.ok(!/deliverable/i.test(out));
-  assert.match(dropStepperHtml({ asset_id: null }), /No asset yet/);
+test('ticking and unticking write a canonical status; changes to the other milestones are reported', () => {
+  eq(dropMilestoneChange('concept_script', FILMED, true), { next: 'filming', changed: [] });
+  eq(dropMilestoneChange('filming', FILMED, false), { next: 'concept_script', changed: [] }, 'a mistaken Filmed tick can be undone');
+  eq(dropMilestoneChange('filming', EDITED, true), { next: 'qc', changed: [] });
+  eq(dropMilestoneChange('qc', EDITED, false), { next: 'filming', changed: [] });
+  eq(dropMilestoneChange('qc', UPLOADED, true), { next: 'uploaded_live', changed: [] });
+  eq(dropMilestoneChange('uploaded_live', UPLOADED, false), { next: 'qc', changed: [] }, 'untick Uploaded keeps Filmed and Edited');
+  eq(dropMilestoneChange('filming', UPLOADED, true), { next: 'uploaded_live', changed: ['Edited'] }, 'a later milestone cannot be done without the earlier ones');
+  eq(dropMilestoneChange('uploaded_live', FILMED, false), { next: 'concept_script', changed: ['Edited', 'Uploaded to Meta'] });
 });
 
-test('status line is one short contextual line from schedule / editing owner / final approval', () => {
-  assert.equal(dropShootDateLabel({ shoot_week_start: '2026-10-19', shoot_day: 'wednesday' }), 'Wed 21 Oct');
-  assert.equal(dropStatusLine({ shoot_week_start: '2026-10-19', shoot_day: 'wednesday' }, 'planned'), 'Scheduled for Wed 21 Oct');
-  assert.equal(dropStatusLine({}, 'planned'), 'Not started · No one assigned');
-  assert.equal(dropStatusLine({ asset_concept_assignee: 'Sam' }, 'planned'), 'Not started');
-  assert.equal(dropStatusLine({ shoot_status: 'shot' }, 'shooting'), 'Shot · waiting for editing');
-  assert.equal(dropStatusLine({}, 'editing'), 'Editing · No editor assigned');
-  assert.equal(dropStatusLine({ asset_final_approval: 'changes_required' }, 'final'), 'In final approval · Changes requested');
-  assert.equal(dropStatusLine({}, 'final'), 'In final approval · Ready for review');
-  assert.equal(dropStatusLine({}, 'live'), 'Approved · Uploaded to Meta');
+test('three checkboxes per row: ticked ones are marked, the rest are neutral, a concept with no asset is disabled', () => {
+  const html = dropMilestonesHtml({ asset_id: 7, asset_status: 'qc', concept_name: 'Flat <lay>' });
+  const boxes = [...html.matchAll(/<input type="checkbox" data-asset-id="7" data-ms="(\w+)"[^>]*?(checked)?[^>]*>/g)];
+  eq(boxes.map((m) => m[1]), ['filmed', 'edited', 'uploaded']);
+  assert.equal((html.match(/dpv-ms done/g) || []).length, 2); assert.equal((html.match(/ checked/g) || []).length, 2);
+  assert.ok(html.includes('aria-label="Filmed: Flat &lt;lay&gt;"'));
+  const none = dropMilestonesHtml({ asset_id: null, concept_name: 'x' });
+  assert.equal((none.match(/disabled/g) || []).length, 3); assert.ok(!/dpv-ms done/.test(none));
 });
 
 test('reference: linked content opens in a new tab (video gets a play mark), none yet = quiet Add reference, manual concept = dash', () => {
@@ -64,7 +72,7 @@ test('reference: linked content opens in a new tab (video gets a play mark), non
 test('page markup: header + chips + progress, five-column table, collapsed Other Creative Concepts with a count', () => {
   for (const id of ['product-view-name', 'product-view-code', 'product-view-chips', 'product-view-colours', 'product-view-plan-btn', 'product-plan-slots-header', 'product-plan-slots', 'product-view-other-count', 'product-view-concepts']) assert.ok(html.includes(`id="${id}"`), id);
   const head = html.slice(html.indexOf('id="product-plan-slots-header"'), html.indexOf('id="product-plan-slots"'));
-  assert.deepEqual([...head.matchAll(/<span[^>]*>([^<]*)<\/span>/g)].map((m) => m[1]).filter((t) => t && t !== '#'), ['Concept', 'Reference', 'Assigned To', 'Production Status', 'Action']);
+  eq([...head.matchAll(/<span[^>]*>([^<]*)<\/span>/g)].map((m) => m[1]).filter((t) => t && t !== '#'), ['Concept', 'Reference', 'Assigned To', 'Filmed', 'Edited', 'Uploaded to Meta', 'Action']);
   assert.match(html, /<details id="product-view-other-concepts-section" class="dpv-other"[^>]*>/); assert.ok(!/<details id="product-view-other-concepts-section"[^>]*\bopen\b/.test(html), 'collapsed by default (no open attribute)');
   assert.match(html, /Other Creative Concepts/);
   const sum = app.slice(app.indexOf('function renderProductSummary()'), app.indexOf('function renderProductSummary()') + 2400);
@@ -72,11 +80,16 @@ test('page markup: header + chips + progress, five-column table, collapsed Other
   assert.match(sum, /required creatives completed for this drop/, 'progress is completed against the existing target');
 });
 
-test('the per-stage checkboxes and "deliverables" counter are gone; the existing assignment, editing-owner, link and remove actions are kept', () => {
-  for (const gone of ['conceptProgressChecksHtml', 'toggleConceptProgressStage', 'CONCEPT_PROGRESS_STAGES', 'deliverables']) assert.ok(!app.includes(gone), gone);
+test('no stage timeline, deliverables counter or status text; save goes through the shared status endpoint; the existing assignment, editing-owner, link and remove actions are kept', () => {
+  for (const gone of ['dropStepperHtml', 'dropStatusLine', 'DROP_STAGES', 'dpv-stepper', 'deliverables']) assert.ok(!app.includes(gone) && !css.includes(gone), gone);
+  const tog = app.slice(app.indexOf('async function toggleDropMilestone('), app.indexOf('// The Creative Playbook entry'));
+  assert.match(tog, /api\(`\/creative-assets\/\$\{assetId\}\/status`, \{ method: 'PATCH'/, 'the same endpoint the Board writes to, so every page agrees');
+  assert.match(tog, /input\.checked = !checked;[\s\S]*toast\(`Could not save/, 'a failed save puts the box back and says so');
+  assert.match(tog, /await api\([\s\S]*\} catch \(e\) \{[\s\S]*return;[\s\S]*loadProductView\(/, 'the page only refreshes as saved after the save succeeded');
+  assert.match(tog, /disabled = true/, 'locked while saving');
   const rows = app.slice(app.indexOf('function renderRequiredConcepts('), app.indexOf('function openDropReferenceModal'));
-  for (const kept of ['updateConceptAssignee', 'pw-slot-editing-select', 'dpv-menu', 'dropStepperHtml', 'dropReferenceHtml']) assert.ok(rows.includes(kept), kept);
-  assert.match(rows, /PROVEN/);
+  for (const kept of ['updateConceptAssignee', 'pw-slot-editing-select', 'dpv-menu', 'dropMilestonesHtml', 'dropReferenceHtml']) assert.ok(rows.includes(kept), kept);
+  assert.match(rows, /PROVEN/); assert.ok(!rows.includes('dpv-thumb'), 'no repeated product thumbnail in each concept row');
 });
 
 test('reference is a link to the Reference Library record from the Creative Playbook entry, never a duplicate; additive schema + guarded routes', () => {
@@ -91,5 +104,18 @@ test('reference is a link to the Reference Library record from the Creative Play
 
 test('styling: the stage colours and PROVEN badge exist and no blue accent is introduced', () => {
   const dpv = css.slice(css.indexOf('.dpv-head'));
-  for (const sel of ['.dpv-row', '.dpv-step.current', '.dpv-proven', '.dpv-other']) assert.ok(dpv.includes(sel), sel);
+  for (const sel of ['.dpv-row', '.dpv-ms.done', '.dpv-proven', '.dpv-other']) assert.ok(dpv.includes(sel), sel);
+});
+
+test('imagery: one combined product picture, no thumbnails beside it or in the colourway panel; inventory text kept', () => {
+  const img = app.slice(app.indexOf('function renderProductViewImages('), app.indexOf('function renderProductSummary('));
+  assert.match(img, /dpv-combo/); assert.ok(!/dpv-thumbs|gt-box-48/.test(img));
+  assert.match(img, /product-view-colour-code[\s\S]*colourStatsLine\(s\)/, 'SKU, stock on hand and on order are still shown');
+  assert.match(css, /\.dpv-combo\{/);
+});
+
+test('Uploaded to Meta is separate from Live on Meta, which still comes from the Meta count', () => {
+  const sum = app.slice(app.indexOf('function renderProductSummary()'), app.indexOf('function renderProductSummary()') + 2400);
+  assert.match(sum, /group\.live_meta_ads[\s\S]*live on Meta/);
+  assert.match(app, /Uploaded to Meta" is the asset's uploaded status; it does not mean the ad is live/);
 });

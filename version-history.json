@@ -2,6 +2,16 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.7.2",
+      "date": "2026-10-20",
+      "title": "Upcoming Drops: simpler imagery and Filmed / Edited / Uploaded checkboxes",
+      "changes": [
+        "One combined product image; no repeated thumbnails in the header, colourway panel or concept rows",
+        "Production Status timeline replaced by Filmed, Edited and Uploaded to Meta checkboxes that save on click",
+        "Checkboxes read and write the existing asset status, so Shooting, Editing, Final Approval and the Board stay consistent"
+      ]
+    },
+    {
       "version": "1.7.1",
       "date": "2026-10-20",
       "title": "Upcoming Drops product detail redesign",
