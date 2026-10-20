@@ -10,24 +10,27 @@ const express = require('express');
 const MAX_BYTES = 8 * 1024 * 1024;
 const TIMEOUT_MS = 8000;
 const KNOWN_TTL_MS = 10 * 60 * 1000;
+const FAILED_TTL_MS = 15 * 1000; // a failed ApparelMagic lookup is only remembered briefly, so one hiccup (e.g. right after a restart) cannot refuse every picture for 10 minutes
 
 function createRouter(deps = {}) {
   const router = express.Router();
   const fetchImpl = deps.fetchImpl || ((...a) => fetch(...a));
-  let knownCache = { at: 0, urls: null };
+  let knownCache = { at: 0, urls: null, ttl: KNOWN_TTL_MS };
 
   // every image URL the application itself holds from ApparelMagic (cached for a few minutes)
   async function amUrls() {
-    if (knownCache.urls && Date.now() - knownCache.at < KNOWN_TTL_MS) return knownCache.urls;
+    if (knownCache.urls && Date.now() - knownCache.at < knownCache.ttl) return knownCache.urls;
     const urls = new Set();
+    let failed = false;
     try {
       const am = deps.amData ? await deps.amData() : await require('../lib/planningData').fetchAmData();
       if (am && am.amDetails) for (const d of am.amDetails.values()) {
         if (d.imageUrl) urls.add(d.imageUrl);
         for (const i of d.images || []) if (i && i.url) urls.add(i.url);
       }
-    } catch (e) { /* AM unavailable: only Shoot Plan pictures are known */ }
-    knownCache = { at: Date.now(), urls };
+    } catch (e) { failed = true; /* AM unavailable: only Shoot Plan pictures are known, and the lookup is retried shortly */ }
+    if (!failed && urls.size === 0) failed = true; // an empty list is treated like a failure, not remembered for long
+    knownCache = { at: Date.now(), urls, ttl: failed ? FAILED_TTL_MS : KNOWN_TTL_MS };
     return urls;
   }
   async function isKnown(url) {

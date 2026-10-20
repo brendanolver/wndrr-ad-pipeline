@@ -5619,6 +5619,7 @@ function dropCardProductsHtml(products) {
   }
   const shown = products.slice(0, DROP_CARD_MAX_PRODUCTS);
   const extra = products.length - shown.length;
+  // The picture is shown WHOLE (front and back where the picture holds both) on a light grey tile, never cropped or measured, so it cannot come out cut off or off-centre.
   // 2-column visual grid (image + name + code per tile) rather than the
   // old cramped single-column text list -- each product's name gets its
   // own line-clamped block instead of being squeezed onto one truncated
@@ -5626,7 +5627,7 @@ function dropCardProductsHtml(products) {
   // colourway-collapsed upstream by GET /drops), never per colourway.
   const tiles = shown.map((p) => `
     <div class="drop-card-product-tile">
-      <span class="gt-box gt-box-wide">${UX.garmentImgHtml({ url: p.image_url, category: p.product_name })}<span class="gt-ph" aria-hidden="true"><svg class=ic focusable=false><use href=#i-image></use></svg></span></span>
+      <span class="dpc-img">${UX.productImgFullHtml({ url: p.image_url, alt: p.product_name })}<span class="gt-ph" aria-hidden="true"><svg class=ic focusable=false><use href=#i-image></use></svg></span></span>
       <span class="drop-card-product-name">${escapeHtml(p.product_name)}</span>
       <span class="drop-card-product-code">${escapeHtml(p.product_code)}</span>
     </div>`).join('');

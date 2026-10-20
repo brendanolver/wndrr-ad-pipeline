@@ -306,6 +306,7 @@
   }
   const gtCache = new Map(); // `${url}|${pair}` -> measured box in picture pixels | false (could not be measured)
   const gtPending = new Set();
+  const gtTries = new Map(); // key -> failed measurements so far
   function gtKey(url, pair) { return `${url}|${pair ? 1 : 0}`; }
   function gtStored(key) { try { const v = sessionStorage.getItem('gt2:' + key); return v ? JSON.parse(v) : undefined; } catch (e) { return undefined; } }
   function gtStore(key, v) { try { sessionStorage.setItem('gt2:' + key, JSON.stringify(v)); } catch (e) { /* storage unavailable: just measured again next time */ } }
@@ -331,7 +332,12 @@
       gtCache.set(key, result); gtPending.delete(key); if (result) gtStore(key, result);
       document.querySelectorAll('img.gt-img').forEach((i) => { if (i.getAttribute('data-gt-key') === key) garmentFit(i); });
     };
-    probe.onerror = () => { gtCache.set(key, false); gtPending.delete(key); };
+    // a failed measurement (the picture proxy was briefly unavailable) is retried twice, later, instead of being final for the whole visit
+    probe.onerror = () => {
+      gtPending.delete(key); const n = (gtTries.get(key) || 0) + 1; gtTries.set(key, n);
+      if (n < 3 && typeof setTimeout === 'function') setTimeout(() => { if (img && img.isConnected !== false) garmentFit(img); }, 15000 * n);
+      else gtCache.set(key, false);
+    };
     probe.src = GT_PROXY + encodeURIComponent(url);
   }
   function garmentFit(img) {

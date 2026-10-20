@@ -2,6 +2,15 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.7.5",
+      "date": "2026-10-20",
+      "title": "Upcoming Drops cards: whole pictures on grey tiles; picture proxy recovers after a hiccup",
+      "changes": [
+        "Drop card product pictures show the whole front and back view on a light grey tile, left-aligned names",
+        "A failed ApparelMagic lookup in the picture proxy is retried after 15 seconds, and a failed measurement is retried in the browser"
+      ]
+    },
+    {
       "version": "1.7.4",
       "date": "2026-10-20",
       "title": "Upcoming Drops: completed concept rows turn green",

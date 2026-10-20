@@ -64,7 +64,7 @@ test('Planning tray: every thumbnail has a keyboard- and touch-reachable remove 
 });
 
 test('one garment helper for the tray, the tiles and Upcoming Drops', () => {
-  assert.match(pl, /UX\.garmentImgHtml\(/); assert.match(app, /UX\.garmentImgHtml\(\{ url: p\.image_url/);
+  assert.match(pl, /UX\.garmentImgHtml\(/); assert.match(app, /UX\.garmentImgHtml\(\{ url: img, front: item\.front_image_url/);
   assert.match(app, /function renderProductViewImages/); assert.match(app, /UX\.productImgFullHtml\(/);
   assert.match(css, /\.gt-big img\.gt-full\{[^}]*object-fit:contain|\.gt-full\{[^}]*object-fit:contain/);
 });

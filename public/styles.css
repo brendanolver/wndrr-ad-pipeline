@@ -6333,3 +6333,12 @@ button.cat2-prod:focus-visible,.cat2-view:focus-visible,.cat2-shoot:focus-visibl
 .dpv-row-complete .dpv-c-rank{color:#15803d;font-weight:700;}
 .dpv-row-complete .dpv-ms .dpv-ms-box{background:#22a35a;border-color:#22a35a;color:#fff;}
 .dpv-row-complete .dpv-assign{border-color:#cfe7d8;}
+
+/* Upcoming Drops cards: the whole product picture (front and back) on a light grey tile, with the name and code left-aligned underneath. */
+.dpc-img{position:relative;display:flex;align-items:center;justify-content:center;width:100%;aspect-ratio:2 / 1;box-sizing:border-box;padding:4px;border-radius:6px;background:#e8e9eb;overflow:hidden;}
+.dpc-img img.gt-full{display:block;max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;position:relative;z-index:1;}
+.dpc-img .gt-ph{position:absolute;inset:0;align-items:center;justify-content:center;}
+.dpc-img img.gt-full + .gt-ph{display:none;}
+.drop-card-products{justify-content:flex-start;}
+.drop-card-product-tile{align-items:stretch;text-align:left;}
+.drop-card-product-name,.drop-card-product-code,.drop-card-product-more{text-align:left;}
