@@ -6216,3 +6216,13 @@ button.cat2-prod:focus-visible,.cat2-view:focus-visible,.cat2-shoot:focus-visibl
 .pl-other-help{font-size:12.5px;color:var(--text-muted);}
 .pl-other[open] > summary{border-bottom:1px solid var(--border);border-radius:var(--r-lg) var(--r-lg) 0 0;}
 .pl-other .pt-wrap{border:0;border-radius:0 0 var(--r-lg) var(--r-lg);}
+
+/* Other High Stock Products: larger and easier to notice (the heading, a clear Show / Hide control and a firmer border) */
+.pl-other{margin-top:18px;border-color:var(--border-strong);box-shadow:var(--shadow-xs);}
+.pl-other > summary{padding:18px 22px;gap:6px 14px;align-items:center;}
+.pl-other > summary b{font-size:17px;}
+.pl-other-help{font-size:13.5px;color:var(--text-secondary);flex:1 1 240px;}
+.pl-other-chev{width:10px;height:10px;flex-basis:10px;margin-right:4px;border-color:var(--text-secondary);}
+.pl-other > summary::after{content:'Show products';margin-left:auto;font-size:13px;font-weight:600;color:var(--accent-text);border:1px solid var(--accent-border);background:var(--accent-softer);border-radius:var(--r-pill);padding:5px 14px;white-space:nowrap;}
+.pl-other[open] > summary::after{content:'Hide';}
+.pl-other > summary:hover::after{background:var(--accent-soft);}
