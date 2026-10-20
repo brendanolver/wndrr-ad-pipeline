@@ -431,8 +431,22 @@ document.querySelectorAll('[data-pl-nav]').forEach((b) => b.addEventListener('cl
 // Settings sub-nav: the same switch-a-panel pattern as the top-level tabs
 // above, just nested one level -- Settings had grown to 8 sections on one
 // long scroll, so they're grouped into 4 themed panels instead.
+// "Meta" is ONE Settings section with three views (Meta Performance, the default for admins; Meta Sync; Meta Mapping), switched with the toggles under the section tabs. Each view is still its
+// own panel with its own loader, so nothing about what they show or save changed. Meta Sync and Meta Performance are admin-only; Meta Mapping is open to everyone, so a non-admin only sees that one.
+const SETTINGS_META_VIEWS = ['meta-benchmarks', 'meta-sync', 'meta-mapping'];
+function settingsMetaDefaultView() {
+  const admin = state.currentUser && state.currentUser.role === 'admin';
+  const last = state.settingsMetaView;
+  if (last && (admin || last === 'meta-mapping')) return last;
+  return admin ? 'meta-benchmarks' : 'meta-mapping';
+}
 function switchSettingsPanel(name) {
-  document.querySelectorAll('.settings-subnav-btn').forEach((b) => b.classList.toggle('active', b.dataset.settingsPanel === name));
+  if (name === 'meta') name = settingsMetaDefaultView();
+  const inMeta = SETTINGS_META_VIEWS.includes(name);
+  if (inMeta) state.settingsMetaView = name;
+  document.querySelectorAll('.settings-subnav-btn').forEach((b) => b.classList.toggle('active', b.dataset.settingsPanel === (inMeta ? 'meta' : name)));
+  const toggle = document.getElementById('settings-meta-toggle');
+  if (toggle) { toggle.hidden = !inMeta; toggle.querySelectorAll('[data-meta-sub]').forEach((b) => { const on = b.dataset.metaSub === name; b.classList.toggle('active', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); }); }
   document.querySelectorAll('.settings-panel').forEach((p) => p.classList.toggle('active', p.id === `settings-panel-${name}`));
   // Round 11: admin-only User Access panel -- loaded lazily on first visit
   // (same reasoning as every other Settings panel: nothing here is needed
@@ -451,6 +465,9 @@ function switchSettingsPanel(name) {
 
 document.querySelectorAll('.settings-subnav-btn').forEach((btn) => {
   btn.addEventListener('click', () => switchSettingsPanel(btn.dataset.settingsPanel));
+});
+document.querySelectorAll('#settings-meta-toggle [data-meta-sub]').forEach((btn) => {
+  btn.addEventListener('click', () => switchSettingsPanel(btn.dataset.metaSub));
 });
 
 

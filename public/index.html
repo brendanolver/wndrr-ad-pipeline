@@ -1506,12 +1506,16 @@
         <button type="button" class="settings-subnav-btn active" data-settings-panel="planning">Planning</button>
         <button type="button" class="settings-subnav-btn" data-settings-panel="shoot-prep">Shoot Prep</button>
         <button type="button" class="settings-subnav-btn" data-settings-panel="creative-playbook">Creative Playbook</button>
-        <button type="button" class="settings-subnav-btn" data-settings-panel="meta-mapping">Meta Mapping</button>
+        <button type="button" class="settings-subnav-btn" id="settings-meta-tab-btn" data-settings-panel="meta">Meta</button>
         <button type="button" class="settings-subnav-btn" id="settings-users-tab-btn" data-settings-panel="users" style="display:none;">Users</button>
-        <button type="button" class="settings-subnav-btn" id="settings-meta-sync-tab-btn" data-settings-panel="meta-sync" style="display:none;">Meta Sync</button>
-        <button type="button" class="settings-subnav-btn" id="settings-meta-benchmarks-tab-btn" data-settings-panel="meta-benchmarks" style="display:none;">Meta Performance</button>
         <button type="button" class="settings-subnav-btn" id="settings-classification-tab-btn" data-settings-panel="classification" style="display:none;">Creative Classification</button>
         <button type="button" class="settings-subnav-btn" id="settings-copy-library-tab-btn" data-settings-panel="copy-library" style="display:none;">Copy Library</button>
+      </div>
+      <!-- One "Meta" section: Meta Performance (the default), Meta Sync and Meta Mapping are three views of it, switched with these toggles. The panels below keep their own ids and loaders. -->
+      <div class="settings-meta-toggle" id="settings-meta-toggle" role="group" aria-label="Meta settings" hidden>
+        <button type="button" class="settings-meta-toggle-btn" id="settings-meta-benchmarks-tab-btn" data-meta-sub="meta-benchmarks" style="display:none;">Meta Performance</button>
+        <button type="button" class="settings-meta-toggle-btn" id="settings-meta-sync-tab-btn" data-meta-sub="meta-sync" style="display:none;">Meta Sync</button>
+        <button type="button" class="settings-meta-toggle-btn" id="settings-meta-mapping-tab-btn" data-meta-sub="meta-mapping">Meta Mapping</button>
       </div>
 
       <div class="settings-panel active" id="settings-panel-planning">
