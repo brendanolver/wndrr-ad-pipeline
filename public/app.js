@@ -6029,7 +6029,7 @@ function renderProductSummary() {
   ].join('');
   const pct = group.creative_target ? Math.min(100, Math.round((group.current_coverage / group.creative_target) * 100)) : 0;
   document.getElementById('product-view-overview').innerHTML = group.soh !== null
-    ? `<div class="dpv-progress"><span class="coverage-progress-track"><span class="coverage-progress-fill ${group.status}" style="width:${pct}%;"></span></span><b>${pct}%</b></div>
+    ? `<div class="dpv-progress"><div class="coverage-progress-track"><div class="coverage-progress-fill ${group.status}" style="width:${pct}%;"></div></div><b>${pct}%</b></div>
        <div class="dpv-progress-text">${group.current_coverage} of ${group.creative_target} required creatives completed for this drop</div>`
     : '<div class="coverage-card-unavailable">Stock unavailable</div>';
 }

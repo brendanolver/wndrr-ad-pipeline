@@ -153,3 +153,11 @@ test('a concept with all three milestones ticked is styled as complete (green ro
   assert.match(css, /\.dpv-row-complete\{background:#f1faf4;box-shadow:inset 3px 0 0 #22a35a;\}/);
   assert.match(css, /\.dpv-row-complete \.dpv-ms \.dpv-ms-box\{background:#22a35a;/);
 });
+
+test('the header progress bar is a real block element (an inline span ignores its width, so the fill never showed) and is re-rendered from the refreshed coverage after a tick', () => {
+  const sum = app.slice(app.indexOf('function renderProductSummary()'), app.indexOf('function renderProductSummary()') + 3000);
+  assert.match(sum, /<div class="coverage-progress-track"><div class="coverage-progress-fill \$\{group\.status\}" style="width:\$\{pct\}%;"><\/div><\/div>/);
+  assert.ok(!/<span class="coverage-progress-(track|fill)/.test(sum));
+  const tog = app.slice(app.indexOf('async function toggleDropMilestone('), app.indexOf('// The Creative Playbook entry'));
+  assert.match(tog, /await loadProductView\(state\.currentDropId/, 'the drop (and so the coverage count and bar) is re-read after every saved tick');
+});
