@@ -6328,3 +6328,8 @@ button.cat2-prod:focus-visible,.cat2-view:focus-visible,.cat2-shoot:focus-visibl
 .dpv-ms input:disabled + .dpv-ms-box{background:#f6f7fa;border-color:#e4e6ee;}
 .dpv-ms.saving .dpv-ms-box{opacity:.55;animation:dpv-ms-pulse .9s ease-in-out infinite;}
 @keyframes dpv-ms-pulse{50%{opacity:.25;}}
+/* A concept with Filmed, Edited and Uploaded to Meta all ticked reads as finished: green-tinted row, a green edge and solid green ticks. */
+.dpv-row-complete{background:#f1faf4;box-shadow:inset 3px 0 0 #22a35a;}
+.dpv-row-complete .dpv-c-rank{color:#15803d;font-weight:700;}
+.dpv-row-complete .dpv-ms .dpv-ms-box{background:#22a35a;border-color:#22a35a;color:#fff;}
+.dpv-row-complete .dpv-assign{border-color:#cfe7d8;}

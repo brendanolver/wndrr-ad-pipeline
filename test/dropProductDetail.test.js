@@ -146,3 +146,10 @@ test('Uploaded to Meta is separate from Live on Meta, which still comes from the
   assert.match(sum, /group\.live_meta_ads[\s\S]*live on Meta/);
   assert.match(app, /Uploaded to Meta" is the asset's uploaded status; it does not mean the ad is live/);
 });
+
+test('a concept with all three milestones ticked is styled as complete (green row and solid ticks)', () => {
+  assert.match(app, /const complete = fulfilled && s\.asset_status === 'uploaded_live';/, 'complete = Filmed + Edited + Uploaded, the same status the third box reads');
+  assert.match(app, /dpv-row\$\{complete \? ' dpv-row-complete' : ''\}/);
+  assert.match(css, /\.dpv-row-complete\{background:#f1faf4;box-shadow:inset 3px 0 0 #22a35a;\}/);
+  assert.match(css, /\.dpv-row-complete \.dpv-ms \.dpv-ms-box\{background:#22a35a;/);
+});

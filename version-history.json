@@ -2,6 +2,14 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.7.4",
+      "date": "2026-10-20",
+      "title": "Upcoming Drops: completed concept rows turn green",
+      "changes": [
+        "A concept with Filmed, Edited and Uploaded to Meta all ticked gets a green-tinted row with a green edge and solid green ticks"
+      ]
+    },
+    {
       "version": "1.7.3",
       "date": "2026-10-20",
       "title": "Upcoming Drops: Playbook-driven Reference and Assigned To, no Edit button",
