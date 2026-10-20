@@ -49,6 +49,7 @@ const pool = new Pool({
 // Round 12 -- individual passwords are set afterward, per person, via
 // Settings -> Users -> Reset Password (PATCH /users/:id/password), which
 // only ever runs on an explicit admin action, never at boot.
+// Angus, Jake and Ronit were removed from the team (v1.6.8): they are no longer seeded, and the one-time change at the end of schema.sql deactivates the existing accounts.
 const SEED_USERS = [
   { name: 'Brendan', email: 'brendan@kohindustries.com', role: 'admin' },
   { name: 'Max', email: 'max@kohindustries.com', role: 'admin' },
@@ -56,10 +57,7 @@ const SEED_USERS = [
   { name: 'Sheridan', email: 'sheridan@kohindustries.com', role: 'lead' },
   { name: 'Mark', email: 'mark@kohindustries.com', role: 'member', restrictedModules: ['planning', 'board', 'admin'] },
   { name: 'Lucy', email: 'lucy@kohindustries.com', role: 'admin' },
-  { name: 'Angus', email: 'angus@kohindustries.com', role: 'lead' },
-  { name: 'Jake', email: 'jake@kohindustries.com', role: 'lead' },
   { name: 'Tllestio', email: 'tllestio@kohindustries.com', role: 'member', restrictedModules: ['planning', 'board', 'admin'] },
-  { name: 'Ronit', email: 'ronit@kohindustries.com', role: 'member', restrictedModules: ['planning', 'board', 'admin'] },
 ];
 
 async function seedUsersAndBackfill() {
@@ -116,10 +114,30 @@ async function seedUsersAndBackfill() {
   `);
 }
 
+// One-time account removal (v1.6.8): Angus, Jake and Ronit are no longer part of the team. Their accounts are DEACTIVATED, never deleted, so every record that refers to them (who created or
+// owned what) keeps its history: they can no longer log in (auth only accepts active users) and they drop out of every user list and the Module Access matrix. The marker row makes this
+// fire exactly once, so if an admin ever re-activates one of them by hand a later deploy will not undo that. They are also removed from SEED_USERS above so a new environment does not
+// create them. Reversible with: UPDATE users SET active = true WHERE email = '...'.
+const ONE_TIME_CHANGES_SQL = `
+CREATE TABLE IF NOT EXISTS app_one_time_changes (
+  change_key TEXT PRIMARY KEY,
+  applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM app_one_time_changes WHERE change_key = 'deactivate-users-angus-jake-ronit') THEN
+    UPDATE users SET active = false, updated_at = now()
+     WHERE email IN ('angus@kohindustries.com', 'jake@kohindustries.com', 'ronit@kohindustries.com') AND active = true;
+    INSERT INTO app_one_time_changes (change_key) VALUES ('deactivate-users-angus-jake-ronit');
+  END IF;
+END $$;
+`;
+
 async function runMigrations() {
   const schema = fs.readFileSync(path.join(__dirname, '..', 'db', 'schema.sql'), 'utf8');
   await pool.query(schema);
   await seedUsersAndBackfill();
+  await pool.query(ONE_TIME_CHANGES_SQL);
 
   if (process.env.SEED_EXAMPLE_DATA === 'true') {
     const seed = fs.readFileSync(path.join(__dirname, '..', 'db', 'seed.sql'), 'utf8');

@@ -2,6 +2,15 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.6.8",
+      "date": "2026-10-20",
+      "title": "Remove Angus, Jake and Ronit",
+      "changes": [
+        "Angus, Jake and Ronit are deactivated once on deploy (not deleted, so their history is kept): they can no longer log in and drop out of the user lists and Module Access",
+        "They are no longer part of the built-in seed list; a later manual re-activation is never undone"
+      ]
+    },
+    {
       "version": "1.6.7",
       "date": "2026-10-20",
       "title": "High Stocks: Other products header more noticeable",
