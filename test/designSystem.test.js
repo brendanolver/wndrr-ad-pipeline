@@ -60,14 +60,14 @@ test('Planning wiring (Batch 14): Core -> High Stocks -> Shoot Plan, no Weekly P
   assert.doesNotMatch(html, /data-step="weekly"/); assert.doesNotMatch(html, /id="weekly-plan"/); assert.doesNotMatch(html, /weekly-plan\.js/);
   // Batch 28: the sections are chosen from the sidebar (Planning sub-menu), not from numbered in-page buttons
   assert.doesNotMatch(html, /planning-step-btn/); assert.doesNotMatch(html, /data-step="core">1 Core/);
-  for (const sec of ['core', 'high-stocks', 'creative-insights', 'shoot-plan']) assert.ok(html.includes(`data-pl-nav="${sec}"`), `sidebar sub-menu entry for ${sec}`);
+  for (const sec of ['core', 'high-stocks', 'shoot-plan']) assert.ok(html.includes(`data-pl-nav="${sec}"`), `sidebar sub-menu entry for ${sec}`);
   assert.ok(html.includes('id="sidebar-planning-subnav"'));
   assert.doesNotMatch(html, /data-pl-nav="(momentum|protect|revival)/, 'Protect Momentum is not a sidebar page');
   for (const id of ['planning-production-header', 'core-plan', 'high-stock-list', 'shoot-plan-grouped', 'shoot-plan-videos', 'shoot-plan-recommendation', 'pl-adapt-modal', 'season-immediate-days-input', 'season-secondary-days-input', 'wpc-groups', 'lo-list', 'weekly-target-input']) {
     assert.ok(html.includes(`id="${id}"`), `#${id} exists`);
   }
   assert.ok(!html.includes('weekly-video-target-input'), 'the 25-video target field is gone from Settings');
-  assert.match(app, /const PLANNING_STEPS = \['core', 'high-stocks', 'creative-insights', 'shoot-plan'\]/);
+  assert.match(app, /const PLANNING_STEPS = \['core', 'high-stocks', 'shoot-plan'\]/);
   assert.match(app, /wpPrepareShootModal\(preset\)/); assert.match(app, /wpShootPayloadExtras\(shootPlanModalContext\)/);
   assert.match(app, /plRenderCore\(\)/); assert.match(app, /plRenderHighStocks\(\)/); assert.match(app, /plLoadOpportunities/);
   assert.match(wp, /fields = \{ concepts: n \}/, 'the modal sends a concept count, not a video target');

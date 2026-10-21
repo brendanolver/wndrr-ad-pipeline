@@ -75,7 +75,6 @@
       <div class="sidebar-subnav" id="sidebar-planning-subnav" style="display:none;" role="group" aria-label="Planning sections">
         <button type="button" class="sidebar-sub-pl" data-pl-nav="core">Core</button>
         <button type="button" class="sidebar-sub-pl" data-pl-nav="high-stocks">High Stocks</button>
-        <button type="button" class="sidebar-sub-pl" data-pl-nav="creative-insights">Creative Insights</button>
         <button type="button" class="sidebar-sub-pl" data-pl-nav="shoot-plan">Shoot Plan</button>
       </div>
 
@@ -474,7 +473,6 @@
         <div class="pl-topnav" id="planning-topnav" role="tablist" aria-label="Planning sections">
           <button type="button" class="pl-topnav-btn" data-pl-nav="core" role="tab">Core</button>
           <button type="button" class="pl-topnav-btn" data-pl-nav="high-stocks" role="tab">High Stocks</button>
-          <button type="button" class="pl-topnav-btn" data-pl-nav="creative-insights" role="tab">Creative Insights</button>
           <button type="button" class="pl-topnav-btn" data-pl-nav="shoot-plan" role="tab">Shoot Plan</button>
         </div>
         <!-- The primary action of the Shoot Plan page: top right, level with the tabs. Shown only on that page. -->
@@ -489,7 +487,7 @@
         </div>
         </div>
 
-        <!-- Shoot Plan selection tray (Core / High Stocks / Creative Insights): the products chosen for this week, directly under the tabs, sticky while scrolling; hidden when nothing is selected. -->
+        <!-- Shoot Plan selection tray (Core / High Stocks): the products chosen for this week, directly under the tabs, sticky while scrolling; hidden when nothing is selected. -->
         <div id="planning-production-header" class="pl-tray-host" aria-live="polite" hidden></div>
 
         <div class="planning-step-panel active" data-step="core" id="planning-step-core">
@@ -527,10 +525,6 @@
 
         <div class="planning-step-panel" data-step="high-stocks" id="planning-step-high-stocks">
           <div id="high-stock-list" class="core-shoot-planning-list"></div>
-        </div>
-
-        <div class="planning-step-panel" data-step="creative-insights" id="planning-step-creative-insights">
-          <div id="creative-insights" class="creative-insights"></div>
         </div>
 
         <div class="planning-step-panel" data-step="shoot-plan" id="planning-step-shoot-plan">

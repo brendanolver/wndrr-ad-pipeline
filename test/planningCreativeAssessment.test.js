@@ -143,8 +143,8 @@ test('ui: Priority exists only in Needs creative and + Add in all three; Priorit
   const cov = pl.slice(pl.indexOf('function plCoreActiveAdsLine'), pl.indexOf('function plCoreStatusCell'));
   assert.doesNotMatch(cov, /Meta ad|running as/, 'Active Ads is the number and its label, nothing else');
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
-  for (const sec of ['core', 'high-stocks', 'creative-insights', 'shoot-plan']) assert.equal((html.match(new RegExp(`data-pl-nav="${sec}"`, 'g')) || []).length, 2, `${sec} is in both the top navigation and the sidebar`);
+  for (const sec of ['core', 'high-stocks', 'shoot-plan']) assert.equal((html.match(new RegExp(`data-pl-nav="${sec}"`, 'g')) || []).length, 2, `${sec} is in both the top navigation and the sidebar`);
   const app = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
-  assert.match(app, /const PLANNING_STEPS = \['core', 'high-stocks', 'creative-insights', 'shoot-plan'\]/);
+  assert.match(app, /const PLANNING_STEPS = \['core', 'high-stocks', 'shoot-plan'\]/);
   assert.doesNotMatch(pl, /Plan this colourway/);
 });

@@ -106,7 +106,9 @@ Top controls: search (name, category, product code, colour), Priority / By Categ
 
 Expanded product (hidden until opened) reuses the Creative Opportunities components: the product picture with colourway thumbnails; a recommendation banner (the engine's status and sentence) only for products the engine says need creative; three cards (Sales: 7-day units, the % against the previous 7 days, 30-day units; Inventory: stock on hand, on order, weeks of cover; Creative Performance: performing of active creatives, underperforming, last new concept, past creatives in subtle grey); the selectable colourway cards (ready to shoot / out of stock, sizes, tick boxes; ticked colourways go into the Shoot Plan as ONE product record through `+ Shoot`, like Creative Opportunities); and a collapsed **More details** (previous 7 days, this month vs last year, weekly rates, the category's monthly history, inventory metrics, creative history and freshness, last new concept, Plan a new concept) with a View Meta Ads link. Products with no engine result still expand (picture, the cards, a plain colourway list) and keep the earlier `+ Shoot` form. The server adds `prev_7d_units` to each product's cadence (the % formula is unchanged).
 
-## Creative Insights (Planning > Creative Insights)
+## Creative Insights (page removed in v1.8.6)
+
+> **Removed from the app (v1.8.6):** the Creative Insights page (Planning tab, sidebar entry, `#planning/creative-insights`) no longer exists. Planning is Core, High Stocks and Shoot Plan. The engine (`src/lib/creativeInsights.js`) and `GET /api/opportunities/insights` are left in place, unused by the UI, so nothing is lost if the page returns. The description below is kept as a record of how the page worked.
 
 A creative decision tool over the existing insights engine (`src/lib/creativeInsights.js`: unique creatives, concept matching from the confirmed Ad Matching classifications, approved-benchmark verdicts per funnel, product suitability). Nothing about how a concept is rated or suggested changed; the page only presents it.
 

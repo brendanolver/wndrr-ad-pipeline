@@ -2,6 +2,15 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.8.6",
+      "date": "2026-10-21",
+      "title": "Planning: Creative Insights removed",
+      "changes": [
+        "The Creative Insights tab, sidebar entry and page are gone from Planning; Planning is now Core, High Stocks and Shoot Plan",
+        "The underlying insights data and engine are untouched, and no recommendation calculation changed"
+      ]
+    },
+    {
       "version": "1.8.5",
       "date": "2026-10-21",
       "title": "Shoot Plan: clearer wording",

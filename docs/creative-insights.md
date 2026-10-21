@@ -1,6 +1,6 @@
 # Creative Insights and shoot planning (Batch 30)
 
-Planning answers: **what should we shoot this week, for which product, with which concept, and why.** Sections: Core, High Stocks, **Creative Insights**, Shoot Plan (top navigation and sidebar, `#planning/creative-insights`).
+Planning answers: **what should we shoot this week, for which product, with which concept, and why.** Sections: Core, High Stocks, Shoot Plan (top navigation and sidebar).
 
 ## Audit: what already existed and what was reused
 
@@ -32,6 +32,8 @@ Planning answers: **what should we shoot this week, for which product, with whic
 * **Weak demand** (Accent Mesh Short shape: 202 units, 16 units in about 21 days on sale): the 16 units were scaled to a 30-day estimate (about 23) which passed the 20-unit "steady" line. A part-period of sales now qualifies like a launch does (strong demand or Platinum / Rocket), controlled by the existing `launch_requires_strong_demand` setting. No product is excluded by name.
 
 ## Creative Insights page
+
+> **Removed from the app (v1.8.6):** the Creative Insights page (Planning tab, sidebar entry, `#planning/creative-insights`) no longer exists. Planning is Core, High Stocks and Shoot Plan. The engine (`src/lib/creativeInsights.js`) and `GET /api/opportunities/insights` are left in place, unused by the UI, so nothing is lost if the page returns. The description below is kept as a record of how the page worked.
 
 Table: Concept | Products tested | Unique creatives | Performance | Opportunity. Expanded: why this rating (evidence and requirements met / not met), by funnel (never averaged), products tested, the unique creatives, and suitable products to test with a **+ Add** button.
 

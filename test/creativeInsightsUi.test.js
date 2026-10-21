@@ -1,6 +1,5 @@
 'use strict';
-// Creative Insights redesign: the wording and colours come from the concept records the insights engine returns (no rating, count or threshold is recalculated), and the page keeps every
-// piece of technical evidence behind one collapsed section.
+// Creative Insights wording and colours (shared helpers in public/planningExplain.js). The Creative Insights PAGE was removed from Planning; the engine and these helpers remain, see the last test.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
@@ -56,33 +55,12 @@ test('short creative names: the readable title of the Meta ad name; the full nam
   assert.equal(PE.shortCreativeName(null), 'Unnamed creative');
 });
 
-test('page: summary cards count the concept records; four-part expanded view; every technical item sits in the collapsed evidence section', () => {
-  const render = fn('plRenderInsights');
-  assert.match(render, /counts\[c\.status\]|counts\[c\.status\] = /); assert.match(render, /all\.length, 'Concepts Analysed'/); assert.match(render, /Established Winners[\s\S]*Promising Concepts/);
-  assert.match(render, /% of Meta spend has a concept assigned/);
-  assert.doesNotMatch(render, /Judged against the approved benchmarks only/, 'the long benchmark note is not on the main page');
-  assert.match(fn('plInsInfoHtml'), /Judged against the approved benchmarks only/);
-  const detail = fn('plInsDetailHtml');
-  assert.ok(detail.indexOf('Why is this concept performing this way?') < detail.indexOf('plInsFunnelCardsHtml(c)') && detail.indexOf('plInsFunnelCardsHtml(c)') < detail.indexOf('plInsProductsHtml(c)') && detail.indexOf('plInsProductsHtml(c)') < detail.indexOf('plInsSuggestionsHtml(c)') && detail.indexOf('plInsSuggestionsHtml(c)') < detail.indexOf('Detailed Performance &amp; Creative Evidence'), 'summary, funnel cards, products, where to test next, then the evidence');
-  assert.doesNotMatch(detail, /Met<|Not met|requirements|plInsCreativesHtml/, 'no checklist or creative list in the main part of the view');
-  const ev = fn('plInsEvidenceHtml');
-  for (const k of ['Full funnel breakdown', 'Benchmark criteria and evaluation', 'Evidence and matching', 'Individual creatives', 'plInsRequirementsHtml', 'plInsCreativesHtml']) assert.ok(ev.includes(k), k);
-  assert.match(fn('plInsRequirementsHtml'), /Met<\/b>|'Not met'/);
-  const cr = fn('plInsCreativesHtml'); for (const k of ['ccThumbHtml(id)', 'PE.shortCreativeName(x.name)', 'data-cc-open', 'Meta ad name &amp; ID', 'ad_list']) assert.ok(cr.includes(k), k);
-});
-
-test('where to test next: the engine\'s own suggestions, the existing Shoot Plan add, no new suitability rule', () => {
-  const s = fn('plInsSuggestionsHtml');
-  assert.match(s, /No suitable products identified yet\./); assert.match(s, /data-ins-add=/); assert.match(s, /plInThisWeeksPlan\(it\)/); assert.match(s, /not yet a proven winner/);
-  assert.match(pl, /plQuickAdd\(itemKey, \{ concept: conceptLabel/, 'the add is still plQuickAdd with the concept, as before');
-  assert.doesNotMatch(s, /stock_units\s*[<>]|units30\s*[<>]|planning_status\s*===\s*'(?!act)/, 'no suitability or stock rule is applied in the page');
-});
-
-test('products tested: CPA only when the concept ran in one funnel (CPAs from different funnels are never combined)', () => {
-  const p = fn('plInsProductsHtml'); assert.match(p, /single = PE\.insightFunnelCards\(c\)\.length === 1/); assert.match(p, /single && p\.purchases > 0/);
-});
-
-test('styling: white cards, soft tones, no full-row backgrounds', () => {
-  assert.match(css, /\.ins2-badge\[data-tone="green"\]/); assert.match(css, /\.ins2-badge\[data-tone="amber"\]/); assert.match(css, /\.ins2-badge\[data-tone="red"\]/);
-  assert.doesNotMatch(css.slice(css.indexOf('Creative Insights: summary cards')), /\.ins2-table tr[^{]*\{[^}]*background/);
+test('the Creative Insights page is gone from Planning (tab, sidebar entry, panel, script and styles); the engine route stays', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  assert.ok(!/creative-insights/.test(html), 'no tab, sidebar entry or panel');
+  assert.match(app, /const PLANNING_STEPS = \['core', 'high-stocks', 'shoot-plan'\]/);
+  assert.ok(!/plRenderInsights|plLoadInsights|plInsightAdd|data-ins-/.test(pl + app), 'no page code');
+  assert.ok(!/\.ins2-/.test(css), 'no page styles');
+  assert.match(fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'opportunities.js'), 'utf8'), /router\.get\('\/insights'/, 'the data route is untouched');
 });
