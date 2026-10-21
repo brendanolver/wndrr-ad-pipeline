@@ -342,10 +342,15 @@ router.put('/:id/samples', async (req, res, next) => {
       if (r.in_office !== undefined && typeof r.in_office !== 'boolean') return res.status(400).json({ error: 'in_office must be true or false' });
       samples.push({ style_id: styleId, size, in_office: r.in_office === true, colour_label: r.colour_label ? String(r.colour_label).slice(0, 120) : null });
     }
+    // Optional: who shoots the product (the same field as the card's "Assigned to"), saved in the same transaction as the samples.
+    const hasCreator = Object.prototype.hasOwnProperty.call(req.body, 'creator');
+    const creator = hasCreator ? String(req.body.creator == null ? '' : req.body.creator).trim() : null;
+    if (hasCreator && (!creator || creator.length > 255)) return res.status(400).json({ error: 'The shoot owner is required' });
     await client.query('BEGIN');
     const item = (await client.query("SELECT id, (week_start < date_trunc('week', now())::date) AS past FROM shoot_plan_items WHERE id = $1 FOR UPDATE", [id])).rows[0];
     if (!item) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Shoot plan item not found' }); }
     if (item.past) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'A past week is a read-only record.' }); }
+    if (hasCreator) await client.query('UPDATE shoot_plan_items SET creator = $2 WHERE id = $1', [id, creator]);
     await client.query('DELETE FROM shoot_plan_item_styles WHERE shoot_plan_item_id = $1 AND NOT (style_id = ANY($2::int[]))', [id, samples.map((x) => x.style_id)]);
     for (const x of samples) {
       await client.query(
@@ -356,7 +361,7 @@ router.put('/:id/samples', async (req, res, next) => {
     const allIn = samples.every((x) => x.in_office);
     await client.query('UPDATE shoot_plan_items SET stock_status = $2 WHERE id = $1', [id, allIn ? 'in_office' : 'needs_to_be_brought_in']);
     await client.query('COMMIT'); bust();
-    res.json({ id, samples: samples.length, in_office: samples.filter((x) => x.in_office).length, to_request: samples.filter((x) => !x.in_office).length });
+    res.json({ id, creator: hasCreator ? creator : undefined, samples: samples.length, in_office: samples.filter((x) => x.in_office).length, to_request: samples.filter((x) => !x.in_office).length });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     if (err.code === '23503') return res.status(400).json({ error: 'A style_id does not reference a real style' });

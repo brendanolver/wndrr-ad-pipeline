@@ -2,6 +2,15 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.8.9",
+      "date": "2026-10-21",
+      "title": "Select samples: Assigned to dropdown",
+      "changes": [
+        "The Select samples dialog has an Assigned to dropdown (preset to the current owner); choosing another person re-applies their sizes from Shoot Prep > Content Creators to sizes not set by hand",
+        "Save Samples saves the owner and the samples together"
+      ]
+    },
+    {
       "version": "1.8.8",
       "date": "2026-10-21",
       "title": "Core tab renamed: All Core Products",

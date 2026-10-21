@@ -9675,16 +9675,23 @@ function shootPlanStats(items) {
 }
 // Stock for one size of a colourway, when ApparelMagic exposes stock by size (size_stock = { S: 12, M: 0 }); undefined when it does not.
 const shootPlanSizeQty = (c, size) => (c && c.size_stock && size ? c.size_stock[String(size).toUpperCase()] : undefined);
-// The size a newly ticked sample starts on: Small (S) when that size has stock (or stock by size is unknown), otherwise the first size that does; `fallback` is the existing per-garment default for sizing systems with no S.
-function shootPlanDefaultSize(c, fallback) {
+// The size a newly ticked sample starts on: the assigned person's own size when set and in stock; otherwise Small (S) when that size has stock (or stock by size is unknown), otherwise the first size that does; `fallback` is the existing per-garment default for sizing systems with no S.
+function shootPlanDefaultSize(c, fallback, preferred) {
   const sizes = (c && c.sizes) || [];
   const s = sizes.find((x) => String(x).toUpperCase() === 'S');
   const has = (x) => { const q = shootPlanSizeQty(c, x); return q === undefined || q > 0; };
+  const pref = preferred ? sizes.find((x) => String(x).toLowerCase() === String(preferred).toLowerCase()) : null;
+  if (pref && has(pref)) return pref; // the person's own size (Settings > Shoot Prep > Content Creators), when this colourway has it in stock
   if (s && has(s)) return s;
   const firstWithStock = c && c.size_stock ? sizes.find((x) => has(x)) : null;
   if (firstWithStock) return firstWithStock;
   const f = typeof fallback === 'function' ? fallback() : '';
   return f || s || sizes[0] || '';
+}
+// A content creator's own size for a garment shape (the Settings > Shoot Prep > Content Creators record: top, bottom (alpha) or bottom (waist)); '' when none is set.
+function shootPlanCreatorSize(creator, garment, sizingSystem) {
+  if (!creator || !garment) return '';
+  return String((garment === 'top' ? creator.default_top_size : sizingSystem === 'waist' ? creator.default_bottom_waist_size : creator.default_bottom_alpha_size) || '');
 }
 // The footer of the dialog: ticked rows only.
 function shootPlanSamplesSummary(rows) {
@@ -9856,15 +9863,29 @@ async function openShootPlanSamplesModal(id) {
   const list = colours ? colours.map((c) => ({ ...c })) : (item.styles || []).map((s) => ({ ...s, viable: true }));
   for (const s of item.styles || []) if (!list.some((c) => c.style_id === s.style_id)) list.push({ ...s, viable: true }); // a colourway already in the plan is never dropped from the list
   const fallbackFor = (c) => () => (garment ? defaultSizeForColourway(garment, c.sizing_system, c.sizes) : '');
+  const owners = (state.contentCreators || []).map((c) => c.name);
+  const owner = item.creator || (owners[0] || '');
+  const creatorSize = (name, c) => shootPlanCreatorSize((state.contentCreators || []).find((x) => x.name === name), garment, c.sizing_system);
   const rows = list.map((c) => {
     const cur = have.get(c.style_id);
     const out = (c.soh !== undefined && c.soh !== null && Number(c.soh) <= 0) || c.viable === false;
-    return { ...c, label: c.colour_label || c.style_code, checked: !!cur, saved: !!cur, out, size: cur && cur.size ? cur.size : shootPlanDefaultSize(c, fallbackFor(c)), inOffice: !!(cur && cur.in_office) };
+    return { ...c, label: c.colour_label || c.style_code, checked: !!cur, saved: !!cur, out, size: cur && cur.size ? cur.size : shootPlanDefaultSize(c, fallbackFor(c), creatorSize(owner, c)), inOffice: !!(cur && cur.in_office) };
   });
-  shootPlanSamplesCtx = { id, item, rows };
+  shootPlanSamplesCtx = { id, item, rows, owner, creatorSize, fallbackFor };
+  const sel = document.getElementById('shoot-plan-samples-owner');
+  const ownerList = owner && !owners.includes(owner) ? [owner, ...owners] : owners; // a person no longer on the list is still shown, never silently dropped
+  sel.innerHTML = ownerList.map((n) => `<option value="${escapeHtml(n)}"${n === owner ? ' selected' : ''}>${escapeHtml(n)}</option>`).join('');
+  sel.onchange = () => shootPlanSamplesOwnerChanged(sel.value);
   document.getElementById('shoot-plan-samples-title').textContent = `Select samples — ${item.product_name || 'Product'}`;
   shootPlanSamplesRender();
   openModal('shoot-plan-samples-modal');
+}
+// Choosing a different person re-applies THEIR sizes (Settings > Shoot Prep > Content Creators, else the shared Default Shoot Sizes / S) to every size you have not set by hand in this dialog.
+function shootPlanSamplesOwnerChanged(name) {
+  const ctx = shootPlanSamplesCtx; if (!ctx) return;
+  ctx.owner = name;
+  for (const r of ctx.rows) if (!r.touched) r.size = shootPlanDefaultSize(r, ctx.fallbackFor(r), ctx.creatorSize(name, r)) || r.size;
+  shootPlanSamplesRender();
 }
 function shootPlanSamplesRender() {
   const ctx = shootPlanSamplesCtx; if (!ctx) return;
@@ -9880,7 +9901,7 @@ function shootPlanSamplesRender() {
   }).join('');
   const root = document.getElementById('shoot-plan-samples-edit');
   root.querySelectorAll('[data-sp4-pick]').forEach((cb) => cb.addEventListener('change', () => { const r = ctx.rows[Number(cb.dataset.sp4Pick)]; r.checked = cb.checked; shootPlanSamplesRender(); }));
-  root.querySelectorAll('[data-sp4-size]').forEach((el) => el.addEventListener('change', () => { ctx.rows[Number(el.dataset.sp4Size)].size = el.value.trim(); }));
+  root.querySelectorAll('[data-sp4-size]').forEach((el) => el.addEventListener('change', () => { const r = ctx.rows[Number(el.dataset.sp4Size)]; r.size = el.value.trim(); r.touched = true; }));
   root.querySelectorAll('[data-sp4-office]').forEach((cb) => cb.addEventListener('change', () => { ctx.rows[Number(cb.dataset.sp4Office)].inOffice = cb.checked; shootPlanSamplesCounts(); }));
   shootPlanSamplesCounts();
 }
@@ -9901,7 +9922,7 @@ async function saveShootPlanSamples() {
   }
   const btn = document.getElementById('shoot-plan-samples-save'); btn.disabled = true;
   try {
-    await api(`/shoot-plan/${ctx.id}/samples`, { method: 'PUT', body: JSON.stringify({ samples: picked.map((r) => ({ style_id: r.style_id, size: String(r.size || '').trim() || null, in_office: !!r.inOffice, colour_label: r.colour_label || null })) }) });
+    await api(`/shoot-plan/${ctx.id}/samples`, { method: 'PUT', body: JSON.stringify({ ...(ctx.owner && ctx.owner !== ctx.item.creator ? { creator: ctx.owner } : {}), samples: picked.map((r) => ({ style_id: r.style_id, size: String(r.size || '').trim() || null, in_office: !!r.inOffice, colour_label: r.colour_label || null })) }) });
     closeModal('shoot-plan-samples-modal');
     toast('Samples saved');
     shootPlanSamplesCtx = null;
