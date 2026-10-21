@@ -11,8 +11,8 @@ const app = read('public', 'app.js'); const html = read('public', 'index.html');
 // the pure helpers, straight from the shipped file
 const block = app.slice(app.indexOf('// <shoot-plan-pure>'), app.indexOf('// </shoot-plan-pure>'));
 const ctx = {}; vm.createContext(ctx);
-vm.runInContext(`${block}; this.api = { shootPlanPlural, shootPlanSamples, shootPlanToRequest, shootPlanStats, shootPlanReadiness, shootPlanDefaultSize, shootPlanSizeQty, shootPlanSamplesSummary, shootPlanCreatorSize };`, ctx);
-const { shootPlanSamples, shootPlanToRequest, shootPlanStats, shootPlanReadiness, shootPlanDefaultSize, shootPlanSamplesSummary, shootPlanCreatorSize } = ctx.api;
+vm.runInContext(`${block}; this.api = { shootPlanPlural, shootPlanSamples, shootPlanToRequest, shootPlanStats, shootPlanReadiness, shootPlanDefaultSize, shootPlanSizeQty, shootPlanSamplesSummary, shootPlanCreatorSize, shootPlanOwnerSize };`, ctx);
+const { shootPlanSamples, shootPlanToRequest, shootPlanStats, shootPlanReadiness, shootPlanDefaultSize, shootPlanSamplesSummary, shootPlanCreatorSize, shootPlanOwnerSize } = ctx.api;
 const j = (v) => JSON.parse(JSON.stringify(v)); // values built inside the vm are from another realm
 const style = (code, size = 'M', label = code, in_office = false) => ({ style_id: 1, style_code: code, size, colour_label: label, in_office });
 const item = (o = {}) => ({ id: 1, product_code: 'P1', stock_status: 'needs_to_be_brought_in', creator: 'Mark', styles: [style('A'), style('B')], ...o });
@@ -36,6 +36,16 @@ test('dialog: the assigned person\'s own size is used when set and in stock, els
   assert.equal(shootPlanDefaultSize(c({ size_stock: { XS: 1, S: 5, M: 1, L: 0 } }), () => 'M', 'L'), 'S', 'their size is out of stock: the usual default');
   assert.equal(shootPlanDefaultSize(c({}), () => 'M', 'XXL'), 'S', 'a size the colourway does not have is ignored');
   assert.equal(shootPlanDefaultSize(c({}), () => 'M', ''), 'S', 'no person size: S as before');
+});
+
+test('dialog: choosing a person whose size is out of stock (or not offered) leaves the size as it was and says why; it never silently switches to S', () => {
+  const c = (o) => ({ sizes: ['XS', 'S', 'M', 'L'], ...o });
+  let r = j(shootPlanOwnerSize(c({}), 'S', 'M', 'Max', () => 'S')); assert.deepEqual(r, { size: 'M', note: '' });
+  r = j(shootPlanOwnerSize(c({ size_stock: { XS: 1, S: 4, M: 0, L: 2 } }), 'S', 'M', 'Max', () => 'S')); assert.deepEqual(r, { size: 'S', note: "Max's size (M) is out of stock" });
+  r = j(shootPlanOwnerSize(c({ sizes: ['S', 'L'] }), 'L', 'M', 'Max', () => 'S')); assert.deepEqual(r, { size: 'L', note: "Max's size (M) isn't available for this colourway" });
+  r = j(shootPlanOwnerSize(c({}), 'L', '', 'Max', () => 'S')); assert.deepEqual(r, { size: 'S', note: '' }, 'no size set for the person: the usual default, no warning');
+  r = j(shootPlanOwnerSize({ sizes: [] }, '', 'M', 'Max', () => 'S')); assert.deepEqual(r, { size: 'M', note: '' }, 'free-text size: nothing to check');
+  assert.match(app, /<small class=\"sp4-warn\">\$\{escapeHtml\(r\.note\)\}<\/small>/, 'the note shows under the colourway');
 });
 
 test('dialog: Assigned to dropdown (defaults to the current owner); changing it re-applies their sizes to sizes not set by hand; saved with the samples in one request', () => {

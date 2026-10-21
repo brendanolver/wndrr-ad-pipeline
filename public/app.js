@@ -9688,6 +9688,18 @@ function shootPlanDefaultSize(c, fallback, preferred) {
   const f = typeof fallback === 'function' ? fallback() : '';
   return f || s || sizes[0] || '';
 }
+// What choosing a person does to one sample's size: their size when this colourway offers it in stock; otherwise the size is LEFT as it was and a note says why (never a silent switch to S).
+// With no size set for the person the usual default applies. Returns { size, note }.
+function shootPlanOwnerSize(c, current, preferred, person, fallback) {
+  if (!preferred) return { size: shootPlanDefaultSize(c, fallback) || current, note: '' };
+  const sizes = (c && c.sizes) || [];
+  if (!sizes.length) return { size: preferred, note: '' }; // free-text size: nothing to check against
+  const match = sizes.find((x) => String(x).toLowerCase() === String(preferred).toLowerCase());
+  if (!match) return { size: current, note: `${person}'s size (${preferred}) isn't available for this colourway` };
+  const q = shootPlanSizeQty(c, match);
+  if (q !== undefined && q <= 0) return { size: current, note: `${person}'s size (${preferred}) is out of stock` };
+  return { size: match, note: '' };
+}
 // A content creator's own size for a garment shape (the Settings > Shoot Prep > Content Creators record: top, bottom (alpha) or bottom (waist)); '' when none is set.
 function shootPlanCreatorSize(creator, garment, sizingSystem) {
   if (!creator || !garment) return '';
@@ -9884,7 +9896,7 @@ async function openShootPlanSamplesModal(id) {
 function shootPlanSamplesOwnerChanged(name) {
   const ctx = shootPlanSamplesCtx; if (!ctx) return;
   ctx.owner = name;
-  for (const r of ctx.rows) if (!r.touched) r.size = shootPlanDefaultSize(r, ctx.fallbackFor(r), ctx.creatorSize(name, r)) || r.size;
+  for (const r of ctx.rows) if (!r.touched) { const o = shootPlanOwnerSize(r, r.size, ctx.creatorSize(name, r), name, ctx.fallbackFor(r)); r.size = o.size; r.note = o.note; }
   shootPlanSamplesRender();
 }
 function shootPlanSamplesRender() {
@@ -9896,12 +9908,12 @@ function shootPlanSamplesRender() {
     const opts = sizes.length ? sizes.map((sz) => { const q = shootPlanSizeQty(r, sz); const none = q !== undefined && q <= 0 && sz !== r.size; return `<option value="${escapeHtml(sz)}"${sz === r.size ? ' selected' : ''}${none ? ' disabled' : ''}>${escapeHtml(sz)}${q !== undefined && q <= 0 ? ' — out' : ''}</option>`; }).join('') : '';
     const sizeCtl = sizes.length ? `<select class="sp4-size" data-sp4-size="${i}"${locked ? ' disabled' : ''} aria-label="Size for ${escapeHtml(r.label)}">${opts}</select>` : `<input type="text" class="sp4-size" data-sp4-size="${i}" value="${escapeHtml(r.size || '')}" placeholder="Size"${locked ? ' disabled' : ''} aria-label="Size for ${escapeHtml(r.label)}">`;
     return `<div class="sp4-row${blocked ? ' is-out' : ''}${locked ? ' is-off' : ''}"><label class="sp4-pick"><input type="checkbox" data-sp4-pick="${i}"${r.checked ? ' checked' : ''}${blocked ? ' disabled' : ''} aria-label="Shoot ${escapeHtml(r.label)}"></label>
-      <div class="sp4-name"><span class="sp4-thumb">${r.image_url ? `<img src="${escapeHtml(r.image_url)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}</span><span class="sp4-txt"><b>${escapeHtml(r.label)}</b><small>${stock}</small></span></div>
+      <div class="sp4-name"><span class="sp4-thumb">${r.image_url ? `<img src="${escapeHtml(r.image_url)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}</span><span class="sp4-txt"><b>${escapeHtml(r.label)}</b><small>${stock}</small>${r.checked && r.note ? `<small class="sp4-warn">${escapeHtml(r.note)}</small>` : ''}</span></div>
       ${sizeCtl}<label class="sp4-office"><input type="checkbox" data-sp4-office="${i}"${r.inOffice ? ' checked' : ''}${locked ? ' disabled' : ''} aria-label="${escapeHtml(r.label)}: already in office"></label></div>`;
   }).join('');
   const root = document.getElementById('shoot-plan-samples-edit');
   root.querySelectorAll('[data-sp4-pick]').forEach((cb) => cb.addEventListener('change', () => { const r = ctx.rows[Number(cb.dataset.sp4Pick)]; r.checked = cb.checked; shootPlanSamplesRender(); }));
-  root.querySelectorAll('[data-sp4-size]').forEach((el) => el.addEventListener('change', () => { const r = ctx.rows[Number(el.dataset.sp4Size)]; r.size = el.value.trim(); r.touched = true; }));
+  root.querySelectorAll('[data-sp4-size]').forEach((el) => el.addEventListener('change', () => { const r = ctx.rows[Number(el.dataset.sp4Size)]; r.size = el.value.trim(); r.touched = true; r.note = ''; const w = el.closest('.sp4-row').querySelector('.sp4-warn'); if (w) w.remove(); }));
   root.querySelectorAll('[data-sp4-office]').forEach((cb) => cb.addEventListener('change', () => { ctx.rows[Number(cb.dataset.sp4Office)].inOffice = cb.checked; shootPlanSamplesCounts(); }));
   shootPlanSamplesCounts();
 }

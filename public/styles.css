@@ -6333,6 +6333,7 @@ button.cat2-prod:focus-visible,.cat2-view:focus-visible,.cat2-shoot:focus-visibl
 .sp4-txt{display:flex;flex-direction:column;min-width:0;}
 .sp4-txt b{font-size:14.5px;font-weight:600;overflow-wrap:anywhere;}
 .sp4-txt small{font-size:12.5px;color:var(--text-muted);}
+.sp4-txt small.sp4-warn{color:#b45309;font-weight:500;}
 .sp4-out{display:inline-flex;align-items:center;gap:6px;color:var(--text-secondary);}
 .sp4-out i{width:7px;height:7px;border-radius:50%;background:#d97706;display:inline-block;}
 .sp4-row.is-out .sp4-txt b,.sp4-row.is-out .sp4-thumb{opacity:.55;}
