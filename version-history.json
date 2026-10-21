@@ -2,6 +2,16 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.8.5",
+      "date": "2026-10-21",
+      "title": "Shoot Plan: clearer wording",
+      "changes": [
+        "Summary bar now reads Products to Shoot, Samples Needed, Warehouse Requests and Shoot Assignments",
+        "Cards say Assigned to, N samples needed, Manage Samples and Shoot Notes; Ready to Shoot only when samples are available or already in the office, otherwise a stock warning",
+        "Warehouse Pick List and Export CSV replace the ApparelMagic wording; new page subtitle"
+      ]
+    },
+    {
       "version": "1.8.4",
       "date": "2026-10-21",
       "title": "Select samples: clearer warehouse vs office",

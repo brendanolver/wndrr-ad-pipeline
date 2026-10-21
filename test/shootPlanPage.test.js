@@ -36,16 +36,17 @@ test('dialog: size defaults to S when it has stock, never to an out-of-stock siz
   assert.deepEqual(j(shootPlanSamplesSummary([{ checked: true, inOffice: false }, { checked: true, inOffice: true }, { checked: false, inOffice: true }, { checked: true, inOffice: false }])), { samples: 3, toRequest: 2, inOffice: 1 });
 });
 
-test('sample readiness: stock available (green), N samples needed (amber: no stock or no size), not confirmed (grey); never claims a sample has been picked', () => {
+test('sample readiness: Ready to Shoot (green: stock available or in office), a stock warning (amber: out of stock or no size), not confirmed (grey); never claims a sample has been picked', () => {
   const full = opp([{ style_code: 'A', soh: 12, viable: true }, { style_code: 'B', soh: 5, viable: true }]);
-  let r = shootPlanReadiness(item(), full); assert.equal(r.tone, 'green'); assert.equal(r.text, 'Stock available'); assert.match(r.title, /does not confirm the samples have been picked/);
+  let r = shootPlanReadiness(item(), full); assert.equal(r.tone, 'green'); assert.equal(r.text, 'Ready to Shoot'); assert.match(r.title, /does not confirm the samples have been picked/);
   r = shootPlanReadiness(item(), opp([{ style_code: 'A', soh: 12, viable: true }, { style_code: 'B', soh: 0, viable: false, restriction: 'No stock available.' }]));
-  assert.equal(r.tone, 'amber'); assert.equal(r.text, '1 sample needed'); assert.match(r.title, /B: No stock available/);
-  r = shootPlanReadiness(item({ styles: [style('A', null), style('B', '')] }), full); assert.equal(r.text, '2 samples needed'); assert.match(r.title, /size not chosen/);
+  assert.equal(r.tone, 'amber'); assert.equal(r.text, '1 out of stock'); assert.match(r.title, /B: No stock available/);
+  r = shootPlanReadiness(item({ styles: [style('A', null), style('B', '')] }), full); assert.equal(r.text, 'Size needed'); assert.match(r.title, /size not chosen/);
+  r = shootPlanReadiness(item({ styles: [style('A', ''), style('B')] }), opp([{ style_code: 'A', soh: 4, viable: true }, { style_code: 'B', soh: 0, viable: false }])); assert.equal(r.text, 'Check stock and sizes');
   r = shootPlanReadiness(item(), null); assert.equal(r.tone, 'grey'); assert.equal(r.text, 'Availability not confirmed');
   r = shootPlanReadiness(item(), opp([{ style_code: 'A', soh: 3, viable: true }])); assert.equal(r.tone, 'grey', 'one colourway cannot be checked');
-  r = shootPlanReadiness(item({ styles: [style('A', 'M', 'A', true), style('B', 'M', 'B', true)] }), null); assert.equal(r.tone, 'green'); assert.equal(r.text, 'Samples in office');
-  r = shootPlanReadiness(item({ styles: [style('A', 'M', 'A', true), style('B')] }), opp([{ style_code: 'B', soh: 5, viable: true }])); assert.equal(r.text, 'Stock available', 'in-office samples are not checked against stock');
+  r = shootPlanReadiness(item({ styles: [style('A', 'M', 'A', true), style('B', 'M', 'B', true)] }), null); assert.equal(r.tone, 'green'); assert.equal(r.text, 'Ready to Shoot');
+  r = shootPlanReadiness(item({ styles: [style('A', 'M', 'A', true), style('B')] }), opp([{ style_code: 'B', soh: 5, viable: true }])); assert.equal(r.text, 'Ready to Shoot', 'in-office samples are not checked against stock');
   r = shootPlanReadiness(item({ styles: [] }), full); assert.equal(r.tone, 'grey'); assert.equal(r.text, 'No colourways selected');
 });
 
@@ -68,9 +69,9 @@ test('header: Confirm Shoot Plan; once confirmed a compact line with the date an
   assert.ok(!/concept/i.test(warn), 'warnings are about colourways, sizes and stock only');
 });
 
-test('summary bar + CSV: ApparelMagic Sample Pick List in the same bar, same export and fields', () => {
-  assert.match(app, /ApparelMagic Sample Pick List/); assert.match(app, /Export selected products and colourways for the warehouse\./); assert.match(app, /Download CSV &darr;/);
-  assert.match(app, /Products selected[\s\S]*Samples selected[\s\S]*To request from warehouse[\s\S]*Shoot assignments/);
+test('summary bar + CSV: Warehouse Pick List in the same bar, same export and fields', () => {
+  assert.match(app, /Warehouse Pick List/); assert.match(app, /Samples to send from the warehouse to the office\./); assert.match(app, /Export CSV &darr;/); assert.ok(!/ApparelMagic Sample Pick List/.test(app));
+  assert.match(app, /Products to Shoot[\s\S]*Samples Needed[\s\S]*Warehouse Requests[\s\S]*Shoot Assignments/);
   assert.match(app, /const headers = \['customer_po', 'customer_name', 'sku_alt', 'qty', 'date_due', 'date', 'unit_price', 'date_start'\];/);
   assert.match(app, /onclick="downloadApparelMagicCsv\(\)"\$\{st\.toRequest \? '' : ' disabled'\}/);
 });
@@ -78,7 +79,7 @@ test('summary bar + CSV: ApparelMagic Sample Pick List in the same bar, same exp
 test('cards: owner dropdown from the existing creators, colourway editor on the existing routes, notes collapsed, subtle X (plan only)', () => {
   assert.match(app, /\(state\.contentCreators \|\| \[\]\)\.map\(\(c\) => c\.name\)/);
   assert.match(app, /<details class="sp3-notes" data-sp-notes="\$\{item\.id\}"\$\{shootPlanNotesOpen\.has\(item\.id\) \? ' open' : ''\}>/, 'collapsed unless the person opened it');
-  assert.match(app, /Shoot notes \(optional\)/); assert.match(app, /maxlength="1000"/);
+  assert.match(app, /<span>Shoot Notes<\/span>/); assert.match(app, /<span class="sp3-label">Assigned to<\/span>/); assert.match(app, /maxlength="1000"/);
   const open = app.slice(app.indexOf('async function openShootPlanSamplesModal('), app.indexOf('function shootPlanSamplesRender('));
   assert.match(open, /\/opportunities\/prepare-shoot/, 'the same colourway list and stock rules Planning uses');
   assert.match(open, /inOffice: !!\(cur && cur\.in_office\)/, 'a saved In office state is kept, never replaced by the default (unticked)');
@@ -88,7 +89,7 @@ test('cards: owner dropdown from the existing creators, colourway editor on the 
   assert.match(save, /`\/shoot-plan\/\$\{ctx\.id\}\/samples`, \{ method: 'PUT'/, 'one request on Save samples; nothing is written before that');
   assert.ok(!/api\(/.test(app.slice(app.indexOf('function shootPlanSamplesRender('), app.indexOf('async function saveShootPlanSamples('))), 'ticking, sizing and In office only change the dialog until Save');
   assert.match(save, /out of stock/, 'size-level stock is validated on save');
-  assert.match(app, /\$\{shootPlanPlural\(cw, 'colourway'\)\} <i>&middot;<\/i> \$\{shootPlanPlural\(samples, 'sample'\)\}[\s\S]{0,200}Edit &rarr;/, 'one line: 4 colourways · 4 samples — Edit');
+  assert.match(app, /\$\{shootPlanPlural\(cw, 'colourway'\)\} <i>&middot;<\/i> \$\{shootPlanPlural\(samples, 'sample'\)\} needed[\s\S]{0,200}Manage Samples &rarr;/, 'one line: 4 colourways · 4 samples needed — Manage Samples');
   assert.match(app, /removeShootPlanItem\(\$\{item\.id\}\)/, 'X uses the existing removal (plan only, product untouched)');
   assert.match(css, /\.sp3-grid\{display:grid;grid-template-columns:repeat\(4,minmax\(0,1fr\)\);gap:16px;/); assert.match(css, /@media \(max-width:680px\)\{\.sp3-grid\{grid-template-columns:minmax\(0,1fr\)/);
 });

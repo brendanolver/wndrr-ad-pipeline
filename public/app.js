@@ -9697,21 +9697,22 @@ function shootPlanReadiness(item, opp) {
   const styles = item.styles || [];
   if (!styles.length) return { tone: 'grey', text: 'No colourways selected', title: 'Choose at least one colourway to shoot.' };
   const asked = styles.filter((s) => !s.in_office);
-  if (!asked.length) return { tone: 'green', text: 'Samples in office', title: 'Every selected sample is marked as already in the office.' };
+  if (!asked.length) return { tone: 'green', text: 'Ready to Shoot', title: 'Every selected sample is marked as already in the office.' };
   const cws = opp && Array.isArray(opp.colourways) ? opp.colourways : null;
-  const problems = []; let unknown = 0;
+  const problems = []; let unknown = 0; let outOfStock = 0;
   for (const st of asked) {
     const label = st.colour_label || st.style_code;
     const cw = cws ? cws.find((c) => c.style_code === st.style_code) : null;
     const noSize = !String(st.size || '').trim();
     if (!cw) unknown += 1;
     const noStock = cw && (cw.viable === false || (cw.soh !== undefined && cw.soh !== null && Number(cw.soh) <= 0));
+    if (noStock) outOfStock += 1;
     if (noStock) problems.push(`${label}: ${cw.restriction ? String(cw.restriction).replace(/\.\s*$/, '') : 'no stock available'}`);
     else if (noSize) problems.push(`${label}: size not chosen`);
   }
-  if (problems.length) return { tone: 'amber', text: `${shootPlanPlural(problems.length, 'sample')} needed`, title: problems.join('. ') + '.' };
+  if (problems.length) return { tone: 'amber', text: outOfStock === problems.length ? `${outOfStock} out of stock` : outOfStock ? 'Check stock and sizes' : 'Size needed', title: problems.join('. ') + '.' };
   if (unknown) return { tone: 'grey', text: 'Availability not confirmed', title: 'Stock for this product is not available to check right now.' };
-  return { tone: 'green', text: 'Stock available', title: 'Stock is available for every sample to request. This does not confirm the samples have been picked or have arrived.' };
+  return { tone: 'green', text: 'Ready to Shoot', title: 'Stock is available for every sample to request. This does not confirm the samples have been picked or have arrived.' };
 }
 // </shoot-plan-pure>
 
@@ -9755,13 +9756,13 @@ function shootPlanTileHtml(item, locked) {
       </div>
     </div>
     <div class="sp3-rows">
-      <div class="sp3-row"><span class="sp3-label">Shoot owner</span>${locked
+      <div class="sp3-row"><span class="sp3-label">Assigned to</span>${locked
         ? `<span class="sp3-val">${escapeHtml(item.creator || 'Not set')}</span>`
-        : `<select class="sp3-owner" data-sp-owner="${item.id}" aria-label="Shoot owner for ${name}">${ownerList.map((n) => `<option value="${escapeHtml(n)}"${n === item.creator ? ' selected' : ''}>${escapeHtml(n)}</option>`).join('')}</select>`}</div>
-      <div class="sp3-row sp3-row-samples"><span class="sp3-val">${shootPlanPlural(cw, 'colourway')} <i>&middot;</i> ${shootPlanPlural(samples, 'sample')}</span>${locked ? '' : `<button type="button" class="sp3-link" data-sp-colours="${item.id}" onclick="openShootPlanSamplesModal(${item.id})">Edit &rarr;</button>`}</div>
+        : `<select class="sp3-owner" data-sp-owner="${item.id}" aria-label="Assigned to for ${name}">${ownerList.map((n) => `<option value="${escapeHtml(n)}"${n === item.creator ? ' selected' : ''}>${escapeHtml(n)}</option>`).join('')}</select>`}</div>
+      <div class="sp3-row sp3-row-samples"><span class="sp3-val">${shootPlanPlural(cw, 'colourway')} <i>&middot;</i> ${shootPlanPlural(samples, 'sample')} needed</span>${locked ? '' : `<button type="button" class="sp3-link" data-sp-colours="${item.id}" onclick="openShootPlanSamplesModal(${item.id})">Manage Samples &rarr;</button>`}</div>
     </div>
     <details class="sp3-notes" data-sp-notes="${item.id}"${shootPlanNotesOpen.has(item.id) ? ' open' : ''}>
-      <summary><svg class="sp3-chev" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg><span>Shoot notes (optional)</span>${notes ? '<b class="sp3-has" title="Has notes">&bull;</b>' : ''}</summary>
+      <summary><svg class="sp3-chev" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg><span>Shoot Notes</span>${notes ? '<b class="sp3-has" title="Has notes">&bull;</b>' : ''}</summary>
       <textarea class="sp3-notes-in" data-sp-notes-in="${item.id}" rows="3" maxlength="1000" placeholder="e.g. samples to arrive Tuesday, size M only, shoot at Studio B"${locked ? ' readonly' : ''}>${escapeHtml(notes)}</textarea>
       <div class="sp3-notes-state" data-sp-notes-state="${item.id}" aria-live="polite"></div>
     </details>
@@ -9781,10 +9782,10 @@ function shootPlanGridHtml() {
 function shootPlanSummaryHtml() {
   const st = shootPlanStats(shootPlanSelected());
   const stat = (n, label) => `<div class="sp3-stat"><b>${n}</b><span>${label}</span></div>`;
-  return `${stat(st.products, 'Products selected')}${stat(st.samples, 'Samples selected')}${stat(st.toRequest, 'To request from warehouse')}${stat(st.assigned, 'Shoot assignments')}
+  return `${stat(st.products, 'Products to Shoot')}${stat(st.samples, 'Samples Needed')}${stat(st.toRequest, 'Warehouse Requests')}${stat(st.assigned, 'Shoot Assignments')}
     <div class="sp3-csv"><span class="sp3-csv-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></svg></span>
-      <div class="sp3-csv-t"><b>ApparelMagic Sample Pick List</b><span>Export selected products and colourways for the warehouse.</span></div>
-      <button type="button" class="sp3-csv-btn" id="shoot-plan-csv-btn" onclick="downloadApparelMagicCsv()"${st.toRequest ? '' : ' disabled'}>Download CSV &darr;</button></div>`;
+      <div class="sp3-csv-t"><b>Warehouse Pick List</b><span>Samples to send from the warehouse to the office.</span></div>
+      <button type="button" class="sp3-csv-btn" id="shoot-plan-csv-btn" onclick="downloadApparelMagicCsv()"${st.toRequest ? '' : ' disabled'}>Export CSV &darr;</button></div>`;
 }
 
 // The persistent list under Core / High Stocks is gone (Batch 28); since Batch 37 the sticky selection tray (planning.js) shows the week's selection on every Planning tab.
@@ -9820,7 +9821,7 @@ async function updateShootPlanOwner(id, creator) {
   try {
     const saved = await api(`/shoot-plan/${id}`, { method: 'PATCH', body: JSON.stringify({ creator }) });
     item.creator = saved.creator;
-    toast(`Shoot owner set to ${saved.creator}`);
+    toast(`Assigned to ${saved.creator}`);
   } catch (e) { toast(e.message, true); }
   renderShootPlanStep();
 }
@@ -9886,7 +9887,7 @@ function shootPlanSamplesRender() {
 function shootPlanSamplesCounts() {
   const ctx = shootPlanSamplesCtx; if (!ctx) return;
   const sm = shootPlanSamplesSummary(ctx.rows);
-  document.getElementById('shoot-plan-samples-request').textContent = `Warehouse to send: ${shootPlanPlural(sm.toRequest, 'sample')}`;
+  document.getElementById('shoot-plan-samples-request').textContent = `Warehouse Requests: ${shootPlanPlural(sm.toRequest, 'sample')}`;
   document.getElementById('shoot-plan-samples-office').textContent = `${sm.inOffice} already in office`;
 }
 async function saveShootPlanSamples() {
@@ -9966,8 +9967,8 @@ function openShootPlanConfirm() {
   const go = document.getElementById('shoot-plan-confirm-go');
   const st = shootPlanStats(items);
   const warns = shootPlanConfirmWarnings(items);
-  const rows = items.map((i) => `<li class="spc-row"><span class="spc-name">${escapeHtml(i.product_name || 'No product')}</span><span class="spc-concepts">${escapeHtml(i.creator || 'No owner')} &middot; ${shootPlanPlural((i.styles || []).length, 'colourway')} &middot; ${shootPlanToRequest(i)} to request${i.shoot_notes ? ' &middot; has notes' : ''}</span></li>`).join('');
-  body.innerHTML = `<div class="spc-sum"><b>${st.products}</b> product${st.products === 1 ? '' : 's'} &middot; <b>${st.samples}</b> sample${st.samples === 1 ? '' : 's'} selected &middot; <b>${st.toRequest}</b> to request from warehouse &middot; <b>${st.assigned}</b> shoot assignment${st.assigned === 1 ? '' : 's'}</div>
+  const rows = items.map((i) => `<li class="spc-row"><span class="spc-name">${escapeHtml(i.product_name || 'No product')}</span><span class="spc-concepts">${escapeHtml(i.creator || 'No owner')} &middot; ${shootPlanPlural((i.styles || []).length, 'colourway')} &middot; ${shootPlanPlural(shootPlanToRequest(i), 'warehouse request')}${i.shoot_notes ? ' &middot; has notes' : ''}</span></li>`).join('');
+  body.innerHTML = `<div class="spc-sum"><b>${st.products}</b> product${st.products === 1 ? '' : 's'} &middot; <b>${st.samples}</b> sample${st.samples === 1 ? '' : 's'} needed &middot; <b>${st.toRequest}</b> warehouse request${st.toRequest === 1 ? '' : 's'} &middot; <b>${st.assigned}</b> shoot assignment${st.assigned === 1 ? '' : 's'}</div>
     ${items.length ? `<ul class="spc-list">${rows}</ul>` : '<div class="spc-block">Add at least one product to the Shoot Plan first.</div>'}
     ${warns.length ? `<div class="spc-flag">${warns.map(escapeHtml).join('<br>')}<br>You can still confirm the plan.</div>` : ''}
     <p class="spc-effect">Confirming locks in this week's products, colourways, sample sizes, shoot owners and notes. Use Edit plan afterwards to change anything.</p>`;

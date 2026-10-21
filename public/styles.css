@@ -6424,6 +6424,9 @@ button.cat2-prod:focus-visible,.cat2-view:focus-visible,.cat2-shoot:focus-visibl
 .sp3-notes-in[readonly]{background:var(--surface2);}
 .sp3-notes-state{font-size:12px;color:var(--text-muted);min-height:16px;margin-top:2px;}
 .sp3-row-samples .sp3-val i{margin:0 2px;}
+.sp3-row-samples{flex-wrap:wrap;row-gap:2px;}
+.sp3-row-samples .sp3-val{white-space:nowrap;font-size:14px;}
+.sp3-row-samples .sp3-link{white-space:nowrap;font-size:14px;}
 /* Select samples dialog: wide, header and footer fixed, the colourway list scrolls */
 .sp4-modal{width:min(760px,calc(100vw - 24px));max-width:none;max-height:calc(100vh - 32px);display:flex;flex-direction:column;padding:0;overflow:hidden;}
 .sp4-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:20px 24px 14px;border-bottom:1px solid var(--border);}
