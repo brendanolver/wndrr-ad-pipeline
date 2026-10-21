@@ -105,7 +105,7 @@ test('Priority order: needs creative (High first), needs review, in production, 
 
 test('markup: heading, search, Priority / By Category, three simple filters; five columns; no Key Reasons', () => {
   const panel = html.slice(html.indexOf('id="core-view-catalogue"'), html.indexOf('id="planning-step-high-stocks"'));
-  assert.match(panel, /Core Product Catalogue/); assert.match(panel, /placeholder="Search products…"/);
+  assert.match(panel, /All Core Products/); assert.match(panel, /placeholder="Search products…"/);
   assert.match(panel, /data-view="category">By Category[\s\S]*data-view="priority">Priority/);
   for (const f of ['all', 'attention', 'production']) assert.match(panel, new RegExp(`data-core-filter="${f}"`));
   assert.match(panel, /All Products[\s\S]*Needs Attention[\s\S]*In Production/); assert.match(panel, /Showing|core-cat-count/);

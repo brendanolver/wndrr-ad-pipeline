@@ -2,6 +2,14 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.8.8",
+      "date": "2026-10-21",
+      "title": "Core tab renamed: All Core Products",
+      "changes": [
+        "Planning > Core second tab is now All Core Products (was Core Catalogue), with its heading and docs updated; counts, filters and sorting are unchanged"
+      ]
+    },
+    {
       "version": "1.8.7",
       "date": "2026-10-21",
       "title": "Core opens on Creative Opportunities",

@@ -52,7 +52,7 @@ test('the catalogue rows use those results; the older flags are only a fallback 
   assert.match(pl, /renderCoreShootPlanning\(\); \} catch \(e\) \{ console\.error\('core catalogue render failed'/, 're-rendered when the Planning results arrive');
 });
 
-test('the Core page has ONE tab bar (Creative Opportunities | Core Catalogue); only the selected view shows (v1.4.2)', () => {
+test('the Core page has ONE tab bar (Creative Opportunities | All Core Products); only the selected view shows (v1.4.2)', () => {
   assert.match(html, /<div class="core-tabs" id="core-tabs" role="tablist"/);
   assert.match(html, /data-core-tab="opportunities"[\s\S]*data-core-tab="catalogue"/);
   assert.match(html, /<div id="core-plan" class="core-plan" role="tabpanel"/);

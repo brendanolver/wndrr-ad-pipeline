@@ -90,7 +90,7 @@ Read-only display data (`src/lib/lastCreativeDate.js`, attached to the finished 
 
 **Limitations.** Historical ads that do not follow the naming convention have no date. A duplicate that was renamed AND given a new creative id (no "- Copy") is a different creative to the system and keeps its own name date. Shared ads matched to several products date each of them, as for creative coverage.
 
-## Core Product Catalogue (Core page, "Core Catalogue" tab)
+## All Core Products (Core page, "All Core Products" tab; formerly "Core Catalogue")
 
 The full Core catalogue, separate from the Creative Opportunities recommendation list on the other tab. One row per product family (colourways of one product, same category and name, share a row), five columns:
 

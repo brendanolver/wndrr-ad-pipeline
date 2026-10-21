@@ -323,7 +323,7 @@ function plCoreColourCards(it) {
   };
   return `<section class="pl-cx-cws"><div class="pl-cx-cws-h"><h5>Available colourways</h5><span class="pl-cx-count">${viableN} of ${cws.length} can be shot now &middot; <span data-opp-count="${plEsc(it.key)}">${picked.size} selected</span></span></div><ul class="pl-cc-grid">${cws.map(card).join('')}</ul></section>`;
 }
-// one metric card (shared by the Core table's expanded row and the Core Catalogue's expanded row)
+// one metric card (shared by the Core table's expanded row and the All Core Products expanded row)
 const plMetricCard = (icon, tone, value, label, sub, extra = '', { head = '', valCls = '' } = {}) => `<div class="pl-cm">${head ? `<span class="pl-cm-h">${head}</span>` : ''}<span class="pl-cm-ic" data-tone="${tone}">${icon}</span><b${valCls ? ` class="${valCls}"` : ''}>${value}</b><span class="pl-cm-l">${label}</span>${sub ? `<small>${sub}</small>` : ''}${extra}</div>`;
 // Creative Performance card (display only; the counts are the engine's, see PE.creativeCard). Headline = effective active creatives of all active creatives. With no active creative the
 // headline says so instead of "0 of 0". Only the non-zero categories are listed: underperforming (subtle red, confirmed over the approved limit) and awaiting data (muted grey: still
@@ -499,7 +499,7 @@ function plUnavailableHtml() {
 function plPageHtml(mode, extra = '') {
   return `<div class="opp-panel pl-page pl-core" data-opp-panel="${mode}">${extra}${plSummaryHtml(mode, { slim: true })}${plCoreCardHtml(mode)}</div>`;
 }
-// ── Core page: one tab bar, not two stacked sections: "Creative Opportunities" (the recommendations table) | "Core Catalogue" (every category and product) ────────────────────────────────
+// ── Core page: one tab bar, not two stacked sections: "Creative Opportunities" (the recommendations table) | "All Core Products" (every category and product) ────────────────────────────────
 // Only the selected view shows. Core always OPENS on Creative Opportunities (going to Core from anywhere resets it); a choice made on the page stays until you leave it. The counts come from the same results the views show.
 const PL_CORE_TABS = ['opportunities', 'catalogue'];
 function plCoreTab() { return state.coreTab && PL_CORE_TABS.includes(state.coreTab) ? state.coreTab : 'opportunities'; }
