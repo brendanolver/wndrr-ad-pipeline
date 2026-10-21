@@ -2,6 +2,16 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.8.3",
+      "date": "2026-10-21",
+      "title": "Shoot Plan: Select samples",
+      "changes": [
+        "Selected Colourways is now a Select samples dialog: real colourway names, stock, size and an In office? tick for each sample, with live warehouse / in-office counts and Save samples",
+        "Only samples not marked in office go to the warehouse CSV and the Samples to request figure; in-office samples still count as selected",
+        "Shoot Plan cards show one line: N colourways · N samples, with Edit"
+      ]
+    },
+    {
       "version": "1.8.2",
       "date": "2026-10-21",
       "title": "Shoot Plan: simple product cards, summary bar and Confirm Shoot Plan",

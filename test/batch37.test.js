@@ -123,7 +123,7 @@ test('Add to Shoot: one click through the existing endpoint; duplicates and read
 
 test('Shoot Plan page: only selected products, product cards, primary action top right, confirmation dialog, empty state', () => {
   assert.match(app, /const shootPlanSelected = \(\) => \(state\.shootPlan \|\| \[\]\)\.filter\(\(i\) => !i\.auto_linked\)/);
-  for (const frag of ['sp3-tile', 'sp3-name', 'sp3-facts', 'sp3-owner', 'data-sp-remove', 'Shoot notes (optional)', 'Selected colourways', 'Samples required', 'Shoot owner']) assert.ok(app.includes(frag), frag);
+  for (const frag of ['sp3-tile', 'sp3-name', 'sp3-facts', 'sp3-owner', 'data-sp-remove', 'Shoot notes (optional)', 'sp3-row-samples', 'Samples selected', 'To request from warehouse', 'Shoot owner']) assert.ok(app.includes(frag), frag);
   assert.match(app, /No products added to this week's shoot plan yet\./); assert.match(app, /Browse Creative Opportunities &rarr;/);
   assert.match(html, /class="pl-navrow-action" id="shoot-plan-actions"/); assert.match(html, /onclick="openShootPlanConfirm\(\)">Confirm Shoot Plan &rarr;/);
   assert.match(html, /id="shoot-plan-confirm-modal"/);

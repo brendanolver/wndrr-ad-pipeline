@@ -4144,20 +4144,23 @@
   </div>
 </div>
 
-<!-- Shoot Plan > Selected colourways > Edit: tick or untick the product's colourways and set each sample size. Uses the existing add / remove / size routes. -->
-<div id="shoot-plan-colours-modal" class="modal-backdrop">
-  <div class="modal">
-    <div class="modal-header">
-      <h3 id="shoot-plan-colours-title">Selected colourways</h3>
-      <button class="modal-close" onclick="closeModal('shoot-plan-colours-modal')">&times;</button>
+<!-- Shoot Plan > Select samples: tick the colourways to shoot, pick each size and tick what is already in the office. Nothing is saved until Save samples; closing discards. -->
+<div id="shoot-plan-samples-modal" class="modal-backdrop">
+  <div class="modal sp4-modal" role="dialog" aria-modal="true" aria-labelledby="shoot-plan-samples-title">
+    <div class="sp4-head">
+      <div>
+        <h3 id="shoot-plan-samples-title">Select samples</h3>
+        <p class="sp4-sub">Choose which colourways to shoot, the size needed and whether the sample is already in the office.</p>
+      </div>
+      <button class="modal-close" onclick="closeModal('shoot-plan-samples-modal')" aria-label="Close">&times;</button>
     </div>
-    <div class="modal-body">
-      <div id="shoot-plan-colours-note" class="hint" style="margin-bottom:8px;"></div>
-      <div id="shoot-plan-colours-edit"></div>
+    <div class="sp4-body">
+      <div class="sp4-cols" aria-hidden="true"><span></span><span>Colourway</span><span>Size</span><span>In office?</span></div>
+      <div id="shoot-plan-samples-edit" class="sp4-rows"></div>
     </div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('shoot-plan-colours-modal')">Cancel</button>
-      <button class="btn btn-primary" id="shoot-plan-colours-save" onclick="saveShootPlanColours()">Save</button>
+    <div class="sp4-foot">
+      <div class="sp4-counts" aria-live="polite"><b id="shoot-plan-samples-request">0 samples to request from warehouse</b><span id="shoot-plan-samples-office">0 already in office</span></div>
+      <button class="btn btn-primary" id="shoot-plan-samples-save" onclick="saveShootPlanSamples()">Save samples</button>
     </div>
   </div>
 </div>

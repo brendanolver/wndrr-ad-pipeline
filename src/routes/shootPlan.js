@@ -69,7 +69,7 @@ router.get('/', async (req, res, next) => {
 
     const stylesResult = items.length
       ? await pool.query(
-          `SELECT spis.shoot_plan_item_id, s.id AS style_id, s.style_code, spis.size, spis.colour_label
+          `SELECT spis.shoot_plan_item_id, s.id AS style_id, s.style_code, spis.size, spis.colour_label, spis.in_office
            FROM shoot_plan_item_styles spis
            JOIN styles s ON s.id = spis.style_id
            WHERE spis.shoot_plan_item_id = ANY($1::int[])`,
@@ -82,6 +82,7 @@ router.get('/', async (req, res, next) => {
     // this degrades to an empty list (free-text fallback) when AM isn't
     // configured or a style isn't resolvable, same as everywhere else.
     const am = await fetchAmData();
+    const itemsById = new Map(items.map((i) => [i.id, i]));
     const stylesByItem = new Map();
     // A separate FRONT picture, only when ApparelMagic holds one that is labelled as the front (and a different one as the back). WNDRR's normal catalogue picture is a single
     // front-and-back composite, which the screens crop to one view (UX.garmentFit); an individual front picture needs no cropping.
@@ -99,6 +100,8 @@ router.get('/', async (req, res, next) => {
         style_code: row.style_code,
         size: row.size,
         colour_label: row.colour_label,
+        // true when this sample is already in the office; an entry marked in_office as a whole counts for every colourway
+        in_office: !!row.in_office || (itemsById.get(row.shoot_plan_item_id) || {}).stock_status === 'in_office',
         sizes: sizing.sizes,
         sizing_system: sizing.system,
       });
@@ -296,8 +299,8 @@ router.post('/', async (req, res, next) => {
 
     for (const c of trimmedColourways) {
       await client.query(
-        `INSERT INTO shoot_plan_item_styles (shoot_plan_item_id, style_id, size, colour_label) VALUES ($1, $2, $3, $4)`,
-        [item.id, Number(c.style_id), c.size && String(c.size).trim() ? String(c.size).trim() : null, c.colour_label || null]
+        `INSERT INTO shoot_plan_item_styles (shoot_plan_item_id, style_id, size, colour_label, in_office) VALUES ($1, $2, $3, $4, $5)`,
+        [item.id, Number(c.style_id), c.size && String(c.size).trim() ? String(c.size).trim() : null, c.colour_label || null, item.stock_status === 'in_office']
       );
     }
 
@@ -316,6 +319,49 @@ router.post('/', async (req, res, next) => {
   } finally {
     client.release();
   }
+});
+
+// Select samples (Shoot Plan > Selected colourways > Edit): saves the product's whole sample selection in ONE transaction, so closing the dialog never leaves it half-saved. Each sample is a colourway with the
+// size to pull and whether it is already in the office. Colourways not sent are removed from the plan entry only (nothing else is touched). The entry's own stock_status follows: every sample in the office =
+// in_office, otherwise needs_to_be_brought_in. Past weeks are a read-only record.
+router.put('/:id/samples', async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid item id' });
+    const list = req.body && req.body.samples;
+    if (!Array.isArray(list) || !list.length) return res.status(400).json({ error: 'Select at least one colourway' });
+    const seen = new Set(); const samples = [];
+    for (const r of list) {
+      const styleId = Number(r && r.style_id);
+      if (!Number.isInteger(styleId)) return res.status(400).json({ error: 'Every sample needs a valid style_id' });
+      if (seen.has(styleId)) return res.status(400).json({ error: 'A colourway can only be listed once' });
+      seen.add(styleId);
+      const size = r.size == null || String(r.size).trim() === '' ? null : String(r.size).trim();
+      if (size && size.length > 20) return res.status(400).json({ error: 'A size can be up to 20 characters' });
+      if (r.in_office !== undefined && typeof r.in_office !== 'boolean') return res.status(400).json({ error: 'in_office must be true or false' });
+      samples.push({ style_id: styleId, size, in_office: r.in_office === true, colour_label: r.colour_label ? String(r.colour_label).slice(0, 120) : null });
+    }
+    await client.query('BEGIN');
+    const item = (await client.query("SELECT id, (week_start < date_trunc('week', now())::date) AS past FROM shoot_plan_items WHERE id = $1 FOR UPDATE", [id])).rows[0];
+    if (!item) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Shoot plan item not found' }); }
+    if (item.past) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'A past week is a read-only record.' }); }
+    await client.query('DELETE FROM shoot_plan_item_styles WHERE shoot_plan_item_id = $1 AND NOT (style_id = ANY($2::int[]))', [id, samples.map((x) => x.style_id)]);
+    for (const x of samples) {
+      await client.query(
+        `INSERT INTO shoot_plan_item_styles (shoot_plan_item_id, style_id, size, colour_label, in_office) VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (shoot_plan_item_id, style_id) DO UPDATE SET size = EXCLUDED.size, in_office = EXCLUDED.in_office, colour_label = COALESCE(EXCLUDED.colour_label, shoot_plan_item_styles.colour_label)`,
+        [id, x.style_id, x.size, x.colour_label, x.in_office]);
+    }
+    const allIn = samples.every((x) => x.in_office);
+    await client.query('UPDATE shoot_plan_items SET stock_status = $2 WHERE id = $1', [id, allIn ? 'in_office' : 'needs_to_be_brought_in']);
+    await client.query('COMMIT'); bust();
+    res.json({ id, samples: samples.length, in_office: samples.filter((x) => x.in_office).length, to_request: samples.filter((x) => !x.in_office).length });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    if (err.code === '23503') return res.status(400).json({ error: 'A style_id does not reference a real style' });
+    next(err);
+  } finally { client.release(); }
 });
 
 // Lets a colourway's pull-list size be corrected in place (e.g. after a

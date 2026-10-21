@@ -102,7 +102,10 @@ router.post('/prepare-shoot', async (req, res, next) => {
     const idBy = new Map(rows.rows.map((r) => [r.style_code, r.id]));
     const colours = usable.filter((c) => idBy.has(c.style_code)).map((c) => {
       const sizing = apparelmagic.resolveStyleSizing(am.amDetails, am.amSizeRanges, c.style_code);
-      return { style_id: idBy.get(c.style_code), style_code: c.style_code, colour_label: c.colour_label, image_url: c.image_url, soh: c.soh, viable: c.viable !== false, restriction: c.restriction || null, sizes: sizing.sizes, sizing_system: sizing.system };
+      // stock per size when ApparelMagic exposes it (style -> size -> units); null when it does not, in which case only the colourway total is known
+      const bySize = am.amStock && am.amStock.sizes && am.amStock.sizes.get ? am.amStock.sizes.get(c.style_code) : null;
+      const size_stock = bySize && bySize.size ? Object.fromEntries([...bySize.entries()].map(([k, v]) => [String(k).toUpperCase(), Number(v) || 0])) : null;
+      return { style_id: idBy.get(c.style_code), style_code: c.style_code, colour_label: c.colour_label, image_url: c.image_url, soh: c.soh, viable: c.viable !== false, restriction: c.restriction || null, sizes: sizing.sizes, sizing_system: sizing.system, size_stock };
     });
     // what already exists for this product this week, so the modal can say so instead of creating a duplicate
     res.json({

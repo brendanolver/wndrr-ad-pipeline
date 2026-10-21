@@ -9660,26 +9660,47 @@ const shootPlanSelected = () => (state.shootPlan || []).filter((i) => !i.auto_li
 
 // <shoot-plan-pure>
 const shootPlanPlural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
-// Samples required for a product = one per selected colourway (SKU + size) that has to be brought in from the warehouse; a sample already in the office needs no pull. Same rows the ApparelMagic CSV lists.
-const shootPlanSamples = (item) => (item && item.stock_status === 'needs_to_be_brought_in' ? (item.styles || []).length : 0);
-// The three numbers in the summary bar. Products = unique products this week; Samples = the pull-list rows; Assignments = products with a shoot owner.
+// A sample is one selected colourway (SKU + size). It is either to be requested from the warehouse or already in the office; both count towards the shoot, only the first goes on the warehouse pick list.
+const shootPlanSamples = (item) => ((item && item.styles) || []).length;
+const shootPlanToRequest = (item) => ((item && item.styles) || []).filter((s) => !s.in_office).length;
+// The numbers in the summary bar. Products = unique products this week; Samples = every selected sample; To request = the ones not in the office (the pull-list rows); Assignments = products with a shoot owner.
 function shootPlanStats(items) {
   const codes = new Set(items.filter((i) => i.product_code).map((i) => i.product_code));
   return {
     products: codes.size,
     samples: items.reduce((n, i) => n + shootPlanSamples(i), 0),
+    toRequest: items.reduce((n, i) => n + shootPlanToRequest(i), 0),
     assigned: items.filter((i) => i.product_code && String(i.creator || '').trim()).length,
   };
 }
-// Sample readiness, from stock the app already holds. It never claims a sample has been picked or has arrived: for a product that is still to be brought in it says whether STOCK is available for every selected
-// colourway, and a sample marked "in the office" is the team's own record. Tones: green (fine), amber (N colourways still need a sample: no stock, or no size chosen), grey (cannot be confirmed).
+// Stock for one size of a colourway, when ApparelMagic exposes stock by size (size_stock = { S: 12, M: 0 }); undefined when it does not.
+const shootPlanSizeQty = (c, size) => (c && c.size_stock && size ? c.size_stock[String(size).toUpperCase()] : undefined);
+// The size a newly ticked sample starts on: Small (S) when that size has stock (or stock by size is unknown), otherwise the first size that does; `fallback` is the existing per-garment default for sizing systems with no S.
+function shootPlanDefaultSize(c, fallback) {
+  const sizes = (c && c.sizes) || [];
+  const s = sizes.find((x) => String(x).toUpperCase() === 'S');
+  const has = (x) => { const q = shootPlanSizeQty(c, x); return q === undefined || q > 0; };
+  if (s && has(s)) return s;
+  const firstWithStock = c && c.size_stock ? sizes.find((x) => has(x)) : null;
+  if (firstWithStock) return firstWithStock;
+  const f = typeof fallback === 'function' ? fallback() : '';
+  return f || s || sizes[0] || '';
+}
+// The footer of the dialog: ticked rows only.
+function shootPlanSamplesSummary(rows) {
+  const picked = rows.filter((r) => r.checked);
+  return { samples: picked.length, toRequest: picked.filter((r) => !r.inOffice).length, inOffice: picked.filter((r) => r.inOffice).length };
+}
+// Sample readiness, from stock the app already holds. It never claims a sample has been picked or has arrived: for samples still to be requested it says whether STOCK is available for every selected colourway, and a
+// sample marked "in the office" is the team's own record. Tones: green (fine), amber (N colourways still need a sample: no stock, or no size chosen), grey (cannot be confirmed).
 function shootPlanReadiness(item, opp) {
   const styles = item.styles || [];
-  if (item.stock_status === 'in_office') return { tone: 'green', text: 'Samples in office', title: 'Marked as already in the office when this product was added to the plan.' };
   if (!styles.length) return { tone: 'grey', text: 'No colourways selected', title: 'Choose at least one colourway to shoot.' };
+  const asked = styles.filter((s) => !s.in_office);
+  if (!asked.length) return { tone: 'green', text: 'Samples in office', title: 'Every selected sample is marked as already in the office.' };
   const cws = opp && Array.isArray(opp.colourways) ? opp.colourways : null;
   const problems = []; let unknown = 0;
-  for (const st of styles) {
+  for (const st of asked) {
     const label = st.colour_label || st.style_code;
     const cw = cws ? cws.find((c) => c.style_code === st.style_code) : null;
     const noSize = !String(st.size || '').trim();
@@ -9690,7 +9711,7 @@ function shootPlanReadiness(item, opp) {
   }
   if (problems.length) return { tone: 'amber', text: `${shootPlanPlural(problems.length, 'sample')} needed`, title: problems.join('. ') + '.' };
   if (unknown) return { tone: 'grey', text: 'Availability not confirmed', title: 'Stock for this product is not available to check right now.' };
-  return { tone: 'green', text: 'Stock available', title: 'Stock is available for every selected colourway. This does not confirm the samples have been picked or have arrived.' };
+  return { tone: 'green', text: 'Stock available', title: 'Stock is available for every sample to request. This does not confirm the samples have been picked or have arrived.' };
 }
 // </shoot-plan-pure>
 
@@ -9737,8 +9758,7 @@ function shootPlanTileHtml(item, locked) {
       <div class="sp3-row"><span class="sp3-label">Shoot owner</span>${locked
         ? `<span class="sp3-val">${escapeHtml(item.creator || 'Not set')}</span>`
         : `<select class="sp3-owner" data-sp-owner="${item.id}" aria-label="Shoot owner for ${name}">${ownerList.map((n) => `<option value="${escapeHtml(n)}"${n === item.creator ? ' selected' : ''}>${escapeHtml(n)}</option>`).join('')}</select>`}</div>
-      <div class="sp3-row"><span class="sp3-label">Selected colourways</span><span class="sp3-val">${cw}${locked ? '' : ` <i>&middot;</i> <button type="button" class="sp3-link" data-sp-colours="${item.id}" onclick="openShootPlanColoursModal(${item.id})">Edit</button>`}</span></div>
-      <div class="sp3-row"><span class="sp3-label">Samples required</span><span class="sp3-val" title="${item.stock_status === 'in_office' ? 'The sample is already in the office, so nothing is pulled.' : ''}">${samples}</span></div>
+      <div class="sp3-row sp3-row-samples"><span class="sp3-val">${shootPlanPlural(cw, 'colourway')} <i>&middot;</i> ${shootPlanPlural(samples, 'sample')}</span>${locked ? '' : `<button type="button" class="sp3-link" data-sp-colours="${item.id}" onclick="openShootPlanSamplesModal(${item.id})">Edit &rarr;</button>`}</div>
     </div>
     <details class="sp3-notes" data-sp-notes="${item.id}"${shootPlanNotesOpen.has(item.id) ? ' open' : ''}>
       <summary><svg class="sp3-chev" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg><span>Shoot notes (optional)</span>${notes ? '<b class="sp3-has" title="Has notes">&bull;</b>' : ''}</summary>
@@ -9761,10 +9781,10 @@ function shootPlanGridHtml() {
 function shootPlanSummaryHtml() {
   const st = shootPlanStats(shootPlanSelected());
   const stat = (n, label) => `<div class="sp3-stat"><b>${n}</b><span>${label}</span></div>`;
-  return `${stat(st.products, 'Products selected')}${stat(st.samples, 'Samples required')}${stat(st.assigned, 'Shoot assignments')}
+  return `${stat(st.products, 'Products selected')}${stat(st.samples, 'Samples selected')}${stat(st.toRequest, 'To request from warehouse')}${stat(st.assigned, 'Shoot assignments')}
     <div class="sp3-csv"><span class="sp3-csv-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></svg></span>
       <div class="sp3-csv-t"><b>ApparelMagic Sample Pick List</b><span>Export selected products and colourways for the warehouse.</span></div>
-      <button type="button" class="sp3-csv-btn" id="shoot-plan-csv-btn" onclick="downloadApparelMagicCsv()"${st.samples ? '' : ' disabled'}>Download CSV &darr;</button></div>`;
+      <button type="button" class="sp3-csv-btn" id="shoot-plan-csv-btn" onclick="downloadApparelMagicCsv()"${st.toRequest ? '' : ' disabled'}>Download CSV &darr;</button></div>`;
 }
 
 // The persistent list under Core / High Stocks is gone (Batch 28); since Batch 37 the sticky selection tray (planning.js) shows the week's selection on every Planning tab.
@@ -9772,11 +9792,10 @@ function renderPlanningShootPlanSummary() {
   if (typeof renderProductionHeader === 'function') renderProductionHeader();
 }
 
-// Colourway+size rows across every "Bring from Warehouse" selection -- the raw material for both the Samples Required stat and the AM CSV.
+// Colourway+size rows for the warehouse pick list: every selected sample that is NOT marked as already in the office (those still count towards the shoot, they just are not transferred).
 function shootPlanWarehouseRows() {
-  return state.shootPlan
-    .filter((i) => i.stock_status === 'needs_to_be_brought_in')
-    .flatMap((i) => i.styles.map((s) => ({ product_name: i.product_name, style_code: s.style_code, colour: s.colour_label, size: s.size })));
+  return (state.shootPlan || [])
+    .flatMap((i) => (i.styles || []).filter((s) => !s.in_office).map((s) => ({ product_name: i.product_name, style_code: s.style_code, colour: s.colour_label, size: s.size })));
 }
 
 function renderShootPlanStep() {
@@ -9821,10 +9840,11 @@ async function saveShootPlanNotes(id, text) {
   }
 }
 
-// Selected colourways > Edit: tick or untick the product's colourways and choose each sample size. The colourway list and the stock rules are the ones Planning already uses (a colourway that cannot be shot is
-// listed but never ticked for you); saving uses the existing add / remove / size routes. Sizes only matter for a product being brought in from the warehouse.
-let shootPlanColoursCtx = null;
-async function openShootPlanColoursModal(id) {
+// Select samples (Selected colourways > Edit). One row per colourway of the product: tick it, pick the size, and tick "In office?" when the sample is already physically there (unticked = request it from the warehouse).
+// The colourway list and stock rules are the ones Planning already uses (a colourway with no stock is listed but never ticked for you); stock by size is used when ApparelMagic exposes it. Nothing is saved until
+// Save samples (one request); closing the dialog discards the changes. A colourway already in the plan keeps its saved size and In office state and is never reset to the default.
+let shootPlanSamplesCtx = null;
+async function openShootPlanSamplesModal(id) {
   const item = (state.shootPlan || []).find((i) => i.id === id); if (!item || shootPlanLocked()) return;
   let colours = null; let garment = null;
   const opp = shootPlanOpp(item);
@@ -9834,46 +9854,59 @@ async function openShootPlanColoursModal(id) {
   const have = new Map((item.styles || []).map((s) => [s.style_id, s]));
   const list = colours ? colours.map((c) => ({ ...c })) : (item.styles || []).map((s) => ({ ...s, viable: true }));
   for (const s of item.styles || []) if (!list.some((c) => c.style_id === s.style_id)) list.push({ ...s, viable: true }); // a colourway already in the plan is never dropped from the list
-  shootPlanColoursCtx = { id, item, list, garment, bring: item.stock_status === 'needs_to_be_brought_in' };
-  document.getElementById('shoot-plan-colours-title').textContent = `Selected colourways — ${item.product_name || 'Product'}`;
-  document.getElementById('shoot-plan-colours-note').textContent = colours ? 'Tick the colourways to shoot. Colourways without stock are listed but not ticked for you.' : 'Stock for this product could not be loaded, so only the colourways already in the plan are listed.';
-  document.getElementById('shoot-plan-colours-edit').innerHTML = list.map((c) => {
-    const cur = have.get(c.style_id); const checked = !!cur;
-    const stock = c.soh !== undefined && c.soh !== null ? (Number(c.soh) > 0 ? `${c.soh} available` : 'No stock') : '';
-    const restricted = c.viable === false;
-    const sizeVal = cur ? cur.size : '';
-    const sizeCtl = !shootPlanColoursCtx.bring ? '' : (c.sizes && c.sizes.length
-      ? `<select class="sp3-size" data-sp-size="${c.style_id}"><option value="">Size</option>${c.sizes.map((sz) => `<option value="${escapeHtml(sz)}"${sz === sizeVal ? ' selected' : ''}>${escapeHtml(sz)}</option>`).join('')}</select>`
-      : `<input type="text" class="sp3-size" data-sp-size="${c.style_id}" value="${escapeHtml(sizeVal || '')}" placeholder="Size">`);
-    return `<div class="sp3-crow${restricted ? ' restricted' : ''}"><label class="checkbox-label"><input type="checkbox" data-sp-style="${c.style_id}"${checked ? ' checked' : ''}><span class="sp3-cname">${escapeHtml(c.colour_label || c.style_code)}<small>${escapeHtml(c.style_code)}${restricted && c.restriction ? ` &middot; ${escapeHtml(String(c.restriction).replace(/\.\s*$/, ''))}` : (stock ? ` &middot; ${escapeHtml(stock)}` : '')}</small></span></label>${sizeCtl}</div>`;
-  }).join('');
-  // ticking a colourway fills its size from the same default the Shoot This Week form uses
-  document.querySelectorAll('#shoot-plan-colours-edit [data-sp-style]').forEach((cb) => cb.addEventListener('change', () => {
-    const sz = document.querySelector(`#shoot-plan-colours-edit [data-sp-size="${cb.dataset.spStyle}"]`);
-    if (cb.checked && sz && !sz.value) { const c = shootPlanColoursCtx.list.find((x) => String(x.style_id) === cb.dataset.spStyle); const d = c && shootPlanColoursCtx.garment ? defaultSizeForColourway(shootPlanColoursCtx.garment, c.sizing_system, c.sizes) : ''; if (d) sz.value = d; }
-  }));
-  openModal('shoot-plan-colours-modal');
+  const fallbackFor = (c) => () => (garment ? defaultSizeForColourway(garment, c.sizing_system, c.sizes) : '');
+  const rows = list.map((c) => {
+    const cur = have.get(c.style_id);
+    const out = (c.soh !== undefined && c.soh !== null && Number(c.soh) <= 0) || c.viable === false;
+    return { ...c, label: c.colour_label || c.style_code, checked: !!cur, saved: !!cur, out, size: cur && cur.size ? cur.size : shootPlanDefaultSize(c, fallbackFor(c)), inOffice: !!(cur && cur.in_office) };
+  });
+  shootPlanSamplesCtx = { id, item, rows };
+  document.getElementById('shoot-plan-samples-title').textContent = `Select samples — ${item.product_name || 'Product'}`;
+  shootPlanSamplesRender();
+  openModal('shoot-plan-samples-modal');
 }
-async function saveShootPlanColours() {
-  const ctx = shootPlanColoursCtx; if (!ctx) return;
-  const picked = [...document.querySelectorAll('#shoot-plan-colours-edit [data-sp-style]')].filter((cb) => cb.checked).map((cb) => Number(cb.dataset.spStyle));
+function shootPlanSamplesRender() {
+  const ctx = shootPlanSamplesCtx; if (!ctx) return;
+  document.getElementById('shoot-plan-samples-edit').innerHTML = ctx.rows.map((r, i) => {
+    const stock = r.out ? `<span class="sp4-out"><i aria-hidden="true"></i>${escapeHtml(r.soh !== undefined && r.soh !== null && Number(r.soh) <= 0 ? 'Out of stock' : String(r.restriction || 'Out of stock').replace(/\.\s*$/, ''))}</span>` : (r.soh !== undefined && r.soh !== null ? `${escapeHtml(String(r.soh))} available` : '');
+    const locked = !r.checked; const blocked = r.out && !r.saved; // an out-of-stock colourway cannot be newly ticked; one already in the plan can be unticked
+    const sizes = r.sizes || [];
+    const opts = sizes.length ? sizes.map((sz) => { const q = shootPlanSizeQty(r, sz); const none = q !== undefined && q <= 0 && sz !== r.size; return `<option value="${escapeHtml(sz)}"${sz === r.size ? ' selected' : ''}${none ? ' disabled' : ''}>${escapeHtml(sz)}${q !== undefined && q <= 0 ? ' — out' : ''}</option>`; }).join('') : '';
+    const sizeCtl = sizes.length ? `<select class="sp4-size" data-sp4-size="${i}"${locked ? ' disabled' : ''} aria-label="Size for ${escapeHtml(r.label)}">${opts}</select>` : `<input type="text" class="sp4-size" data-sp4-size="${i}" value="${escapeHtml(r.size || '')}" placeholder="Size"${locked ? ' disabled' : ''} aria-label="Size for ${escapeHtml(r.label)}">`;
+    return `<div class="sp4-row${blocked ? ' is-out' : ''}${locked ? ' is-off' : ''}"><label class="sp4-pick"><input type="checkbox" data-sp4-pick="${i}"${r.checked ? ' checked' : ''}${blocked ? ' disabled' : ''} aria-label="Shoot ${escapeHtml(r.label)}"></label>
+      <div class="sp4-name"><span class="sp4-thumb">${r.image_url ? `<img src="${escapeHtml(r.image_url)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}</span><span class="sp4-txt"><b>${escapeHtml(r.label)}</b><small>${stock}</small></span></div>
+      ${sizeCtl}<label class="sp4-office"><input type="checkbox" data-sp4-office="${i}"${r.inOffice ? ' checked' : ''}${locked ? ' disabled' : ''} aria-label="${escapeHtml(r.label)} is already in the office"></label></div>`;
+  }).join('');
+  const root = document.getElementById('shoot-plan-samples-edit');
+  root.querySelectorAll('[data-sp4-pick]').forEach((cb) => cb.addEventListener('change', () => { const r = ctx.rows[Number(cb.dataset.sp4Pick)]; r.checked = cb.checked; shootPlanSamplesRender(); }));
+  root.querySelectorAll('[data-sp4-size]').forEach((el) => el.addEventListener('change', () => { ctx.rows[Number(el.dataset.sp4Size)].size = el.value.trim(); }));
+  root.querySelectorAll('[data-sp4-office]').forEach((cb) => cb.addEventListener('change', () => { ctx.rows[Number(cb.dataset.sp4Office)].inOffice = cb.checked; shootPlanSamplesCounts(); }));
+  shootPlanSamplesCounts();
+}
+function shootPlanSamplesCounts() {
+  const ctx = shootPlanSamplesCtx; if (!ctx) return;
+  const sm = shootPlanSamplesSummary(ctx.rows);
+  document.getElementById('shoot-plan-samples-request').textContent = `${shootPlanPlural(sm.toRequest, 'sample')} to request from warehouse`;
+  document.getElementById('shoot-plan-samples-office').textContent = `${sm.inOffice} already in office`;
+}
+async function saveShootPlanSamples() {
+  const ctx = shootPlanSamplesCtx; if (!ctx) return;
+  const picked = ctx.rows.filter((r) => r.checked);
   if (!picked.length) return toast('Select at least one colourway to shoot', true);
-  const sizeOf = (sid) => { const el = document.querySelector(`#shoot-plan-colours-edit [data-sp-size="${sid}"]`); return el ? String(el.value || '').trim() : null; };
-  const had = new Map((ctx.item.styles || []).map((s) => [s.style_id, s]));
-  const btn = document.getElementById('shoot-plan-colours-save'); btn.disabled = true;
+  for (const r of picked) {
+    if (r.inOffice) continue; // a sample already in the office is not pulled, so its size is not checked
+    if (!String(r.size || '').trim()) return toast(`Choose a size for ${r.label}`, true);
+    const q = shootPlanSizeQty(r, r.size); if (q !== undefined && q <= 0) return toast(`${r.label}: size ${r.size} is out of stock. Choose another size`, true);
+  }
+  const btn = document.getElementById('shoot-plan-samples-save'); btn.disabled = true;
   try {
-    for (const sid of had.keys()) if (!picked.includes(sid)) await api(`/shoot-plan/${ctx.id}/styles/${sid}`, { method: 'DELETE' });
-    for (const sid of picked) {
-      const c = ctx.list.find((x) => x.style_id === sid); const size = ctx.bring ? sizeOf(sid) : null;
-      if (!had.has(sid)) await api(`/shoot-plan/${ctx.id}/styles`, { method: 'POST', body: JSON.stringify({ style_id: sid, size: size || null, colour_label: (c && c.colour_label) || null }) });
-      else if (ctx.bring && size !== String(had.get(sid).size || '')) await api(`/shoot-plan/${ctx.id}/styles/${sid}`, { method: 'PATCH', body: JSON.stringify({ size }) });
-    }
-    closeModal('shoot-plan-colours-modal');
-    toast('Colourways updated');
+    await api(`/shoot-plan/${ctx.id}/samples`, { method: 'PUT', body: JSON.stringify({ samples: picked.map((r) => ({ style_id: r.style_id, size: String(r.size || '').trim() || null, in_office: !!r.inOffice, colour_label: r.colour_label || null })) }) });
+    closeModal('shoot-plan-samples-modal');
+    toast('Samples saved');
+    shootPlanSamplesCtx = null;
     if (typeof plRefreshSelection === 'function') await plRefreshSelection(); else await loadAll();
   } catch (e) {
     toast(e.message, true);
-    if (typeof plRefreshSelection === 'function') plRefreshSelection().catch(() => {});
   } finally { btn.disabled = false; }
 }
 
@@ -9918,10 +9951,8 @@ function shootPlanConfirmWarnings(items) {
   const w = [];
   for (const i of items) {
     const name = i.product_name || 'A product';
-    if (i.stock_status === 'needs_to_be_brought_in') {
-      const noSize = (i.styles || []).filter((s) => !String(s.size || '').trim()).length;
-      if (noSize) w.push(`${name}: ${shootPlanPlural(noSize, 'colourway')} still need a sample size.`);
-    }
+    const noSize = (i.styles || []).filter((s) => !s.in_office && !String(s.size || '').trim()).length;
+    if (noSize) w.push(`${name}: ${shootPlanPlural(noSize, 'colourway')} still need a sample size.`);
     if (i.product_code && !(i.styles || []).length) w.push(`${name}: no colourways selected.`);
     const r = shootPlanReadiness(i, shootPlanOpp(i));
     if (r.tone === 'amber' && !/size not chosen$/.test(r.title.replace(/\.$/, ''))) w.push(`${name}: ${r.title}`);
@@ -9935,8 +9966,8 @@ function openShootPlanConfirm() {
   const go = document.getElementById('shoot-plan-confirm-go');
   const st = shootPlanStats(items);
   const warns = shootPlanConfirmWarnings(items);
-  const rows = items.map((i) => `<li class="spc-row"><span class="spc-name">${escapeHtml(i.product_name || 'No product')}</span><span class="spc-concepts">${escapeHtml(i.creator || 'No owner')} &middot; ${shootPlanPlural((i.styles || []).length, 'colourway')} &middot; ${shootPlanPlural(shootPlanSamples(i), 'sample')}${i.shoot_notes ? ' &middot; has notes' : ''}</span></li>`).join('');
-  body.innerHTML = `<div class="spc-sum"><b>${st.products}</b> product${st.products === 1 ? '' : 's'} &middot; <b>${st.samples}</b> sample${st.samples === 1 ? '' : 's'} required &middot; <b>${st.assigned}</b> shoot assignment${st.assigned === 1 ? '' : 's'}</div>
+  const rows = items.map((i) => `<li class="spc-row"><span class="spc-name">${escapeHtml(i.product_name || 'No product')}</span><span class="spc-concepts">${escapeHtml(i.creator || 'No owner')} &middot; ${shootPlanPlural((i.styles || []).length, 'colourway')} &middot; ${shootPlanToRequest(i)} to request${i.shoot_notes ? ' &middot; has notes' : ''}</span></li>`).join('');
+  body.innerHTML = `<div class="spc-sum"><b>${st.products}</b> product${st.products === 1 ? '' : 's'} &middot; <b>${st.samples}</b> sample${st.samples === 1 ? '' : 's'} selected &middot; <b>${st.toRequest}</b> to request from warehouse &middot; <b>${st.assigned}</b> shoot assignment${st.assigned === 1 ? '' : 's'}</div>
     ${items.length ? `<ul class="spc-list">${rows}</ul>` : '<div class="spc-block">Add at least one product to the Shoot Plan first.</div>'}
     ${warns.length ? `<div class="spc-flag">${warns.map(escapeHtml).join('<br>')}<br>You can still confirm the plan.</div>` : ''}
     <p class="spc-effect">Confirming locks in this week's products, colourways, sample sizes, shoot owners and notes. Use Edit plan afterwards to change anything.</p>`;

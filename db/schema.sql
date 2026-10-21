@@ -371,6 +371,8 @@ CREATE TABLE IF NOT EXISTS shoot_plan_item_styles (
 -- Physical sample size to pull for this colourway -- nullable since older
 -- rows (and any AM account where sizing can't be resolved) predate this.
 ALTER TABLE shoot_plan_item_styles ADD COLUMN IF NOT EXISTS size VARCHAR(20);
+-- Per-sample "already in the office" (true = no warehouse transfer needed; false = request it from the warehouse). A product whose whole plan entry was marked in_office (shoot_plan_items.stock_status) counts as in the office for every colourway.
+ALTER TABLE shoot_plan_item_styles ADD COLUMN IF NOT EXISTS in_office BOOLEAN NOT NULL DEFAULT false;
 
 -- New pre-concept-development hold state, entered automatically when
 -- Monday Planning confirms a product needs shooting -- distinct from the
