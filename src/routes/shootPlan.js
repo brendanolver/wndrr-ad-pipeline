@@ -111,6 +111,7 @@ router.get('/', async (req, res, next) => {
       stock_status: i.stock_status,
       creator: i.creator,
       quick_note: i.initial_idea,
+      shoot_notes: i.shoot_notes || null,
       created_at: i.created_at,
       week_start: i.week_start,
       asset_id: i.asset_id,
@@ -386,6 +387,34 @@ router.delete('/:itemId/styles/:styleId', async (req, res, next) => {
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Shoot plan colourway not found' });
     res.status(204).send();
+  } catch (err) {
+    next(err);
+  }
+});
+
+// The two fields the Shoot Plan page edits in place on a product card: who shoots it and the short shoot notes. Only what is sent changes. Past weeks are a read-only record.
+const SHOOT_NOTES_MAX = 1000;
+router.patch('/:id', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid item id' });
+    const body = req.body || {};
+    const hasCreator = Object.prototype.hasOwnProperty.call(body, 'creator');
+    const hasNotes = Object.prototype.hasOwnProperty.call(body, 'shoot_notes');
+    if (!hasCreator && !hasNotes) return res.status(400).json({ error: 'Send creator and/or shoot_notes' });
+    const creator = hasCreator ? String(body.creator == null ? '' : body.creator).trim() : null;
+    if (hasCreator && (!creator || creator.length > 255)) return res.status(400).json({ error: 'The shoot owner is required' });
+    const notes = hasNotes ? (body.shoot_notes == null ? '' : String(body.shoot_notes)).trim() : null;
+    if (hasNotes && notes.length > SHOOT_NOTES_MAX) return res.status(400).json({ error: `Shoot notes can be up to ${SHOOT_NOTES_MAX} characters` });
+    const cur = (await pool.query("SELECT (week_start < date_trunc('week', now())::date) AS past FROM shoot_plan_items WHERE id = $1", [id])).rows[0];
+    if (!cur) return res.status(404).json({ error: 'Shoot plan item not found' });
+    if (cur.past) return res.status(409).json({ error: 'A past week is a read-only record.' });
+    const result = await pool.query(
+      `UPDATE shoot_plan_items SET creator = CASE WHEN $2 THEN $3 ELSE creator END, shoot_notes = CASE WHEN $4 THEN NULLIF($5, '') ELSE shoot_notes END WHERE id = $1 RETURNING id, creator, shoot_notes`,
+      [id, hasCreator, creator, hasNotes, notes]
+    );
+    bust();
+    res.json(result.rows[0]);
   } catch (err) {
     next(err);
   }

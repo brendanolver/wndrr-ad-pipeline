@@ -68,7 +68,7 @@ test('Planning wiring (Batch 14): Core -> High Stocks -> Shoot Plan, no Weekly P
   }
   assert.ok(!html.includes('weekly-video-target-input'), 'the 25-video target field is gone from Settings');
   assert.match(app, /const PLANNING_STEPS = \['core', 'high-stocks', 'creative-insights', 'shoot-plan'\]/);
-  assert.match(app, /wpPrepareShootModal\(preset\)/); assert.match(app, /wpShootPayloadExtras\(shootPlanModalContext\)/); assert.match(app, /wpShootPlanVideosHtml\(item, readOnly\)/);
+  assert.match(app, /wpPrepareShootModal\(preset\)/); assert.match(app, /wpShootPayloadExtras\(shootPlanModalContext\)/);
   assert.match(app, /plRenderCore\(\)/); assert.match(app, /plRenderHighStocks\(\)/); assert.match(app, /plLoadOpportunities/);
   assert.match(wp, /fields = \{ concepts: n \}/, 'the modal sends a concept count, not a video target');
   assert.doesNotMatch(wp, /weekly_video_target|recommended_videos|video_mix/, 'no weekly video allocation remains in the Planning UI');

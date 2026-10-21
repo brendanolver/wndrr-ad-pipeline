@@ -480,11 +480,11 @@
         <!-- The primary action of the Shoot Plan page: top right, level with the tabs. Shown only on that page. -->
         <div class="pl-navrow-action" id="shoot-plan-actions" hidden>
           <div id="shoot-plan-confirm-cta">
-            <button type="button" class="btn btn-primary shoot-plan-cta-btn" id="shoot-plan-confirm-btn" onclick="openShootPlanConfirm()">Confirm &amp; Send Shoot Plan &rarr;</button>
+            <button type="button" class="btn btn-primary shoot-plan-cta-btn" id="shoot-plan-confirm-btn" onclick="openShootPlanConfirm()">Confirm Shoot Plan &rarr;</button>
           </div>
           <div id="shoot-plan-confirmed-state" class="shoot-plan-confirmed-row" hidden>
-            <span class="shoot-plan-confirmed-status"><span class="shoot-plan-confirmed-tick">&#10003;</span> Sent to Concept Development &middot; <span id="shoot-plan-confirmed-timestamp"></span></span>
-            <button type="button" class="btn btn-ghost btn-sm" onclick="openConceptDevForPlanWeek()">Open Concept Development &rarr;</button>
+            <span class="shoot-plan-confirmed-status"><span class="shoot-plan-confirmed-tick">&#10003;</span> Shoot Plan confirmed &middot; <span id="shoot-plan-confirmed-timestamp"></span></span>
+            <button type="button" class="btn btn-ghost btn-sm" id="shoot-plan-edit-btn" onclick="toggleShootPlanEditing()">Edit plan</button>
           </div>
         </div>
         </div>
@@ -536,16 +536,12 @@
         <div class="planning-step-panel" data-step="shoot-plan" id="planning-step-shoot-plan">
           <div class="pl-section-head">
             <h3 class="pl-section-title">Shoot Plan</h3>
-            <span class="pl-section-sub">Products and concepts selected for this week's shoot.</span>
+            <span class="pl-section-sub">Products selected for this week's shoot.</span>
           </div>
+
+          <div id="shoot-plan-summary" class="sp3-summary" aria-live="polite"></div>
 
           <div id="shoot-plan-grouped"></div>
-
-          <div class="sp2-csv" id="shoot-plan-csv-row" hidden>
-            <button type="button" class="shoot-plan-csv-link" id="shoot-plan-csv-btn" onclick="downloadApparelMagicCsv()">
-              <span id="shoot-plan-samples-required-count">0 samples required</span> &middot; Download Apparel Magic CSV &darr;
-            </button>
-          </div>
         </div>
       </div>
 
@@ -4148,36 +4144,35 @@
   </div>
 </div>
 
-<!-- One "Edit Sizes" action per Shoot Plan product card -- lists every
-     selected colourway with an editable size field, rather than editing
-     a size inline on its chip. -->
-<div id="shoot-plan-edit-sizes-modal" class="modal-backdrop">
+<!-- Shoot Plan > Selected colourways > Edit: tick or untick the product's colourways and set each sample size. Uses the existing add / remove / size routes. -->
+<div id="shoot-plan-colours-modal" class="modal-backdrop">
   <div class="modal">
     <div class="modal-header">
-      <h3 id="shoot-plan-edit-sizes-title">Edit Sizes</h3>
-      <button class="modal-close" onclick="closeModal('shoot-plan-edit-sizes-modal')">&times;</button>
+      <h3 id="shoot-plan-colours-title">Selected colourways</h3>
+      <button class="modal-close" onclick="closeModal('shoot-plan-colours-modal')">&times;</button>
     </div>
     <div class="modal-body">
-      <div id="shoot-plan-edit-sizes-list"></div>
+      <div id="shoot-plan-colours-note" class="hint" style="margin-bottom:8px;"></div>
+      <div id="shoot-plan-colours-edit"></div>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('shoot-plan-edit-sizes-modal')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveShootPlanEditSizes()">Save</button>
+      <button class="btn btn-ghost" onclick="closeModal('shoot-plan-colours-modal')">Cancel</button>
+      <button class="btn btn-primary" id="shoot-plan-colours-save" onclick="saveShootPlanColours()">Save</button>
     </div>
   </div>
 </div>
 
-<!-- Confirm & Send Shoot Plan: what will be handed to Concept Development, anything worth knowing first, and what it does not do (it never submits a concept for Tuesday Review). -->
+<!-- Confirm Shoot Plan: this week's products, colourways, sizes, owners and notes, and anything worth a look first. -->
 <div id="shoot-plan-confirm-modal" class="modal-backdrop">
   <div class="modal spc-modal">
     <div class="modal-header">
-      <h3>Confirm &amp; Send Shoot Plan</h3>
+      <h3>Confirm Shoot Plan</h3>
       <button class="modal-close" onclick="closeModal('shoot-plan-confirm-modal')">&times;</button>
     </div>
     <div class="modal-body" id="shoot-plan-confirm-body"></div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('shoot-plan-confirm-modal')">Cancel</button>
-      <button class="btn btn-primary" id="shoot-plan-confirm-go" onclick="confirmWeeklyShootPlan()">Confirm &amp; Send</button>
+      <button class="btn btn-primary" id="shoot-plan-confirm-go" onclick="confirmWeeklyShootPlan()">Confirm Shoot Plan</button>
     </div>
   </div>
 </div>

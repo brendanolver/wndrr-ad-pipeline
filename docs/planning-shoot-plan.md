@@ -1,10 +1,10 @@
-# Planning: selection tray, Shoot Plan and Confirm & Send (v1.3.1)
+# Planning: selection tray, Shoot Plan and Confirm Shoot Plan
 
 Engine calculations, recommendation algorithms, product eligibility, stock and the Shooting / Editing / Final Approval workflows are unchanged. This is the product-selection and hand-off workflow only.
 
 ## The flow
 
-Planning (Core / High Stocks / Creative Insights) -> **Add to Shoot** -> the **selection tray** -> **Shoot Plan** (compact tiles) -> **Confirm & Send Shoot Plan** -> concepts are completed in Concept Development -> only concepts submitted with Ready for Review reach Tuesday Review.
+Planning (Core / High Stocks / Creative Insights) -> **Add to Shoot** -> the **selection tray** -> **Shoot Plan** (one card per product) -> **Confirm Shoot Plan**. Concept Development is a separate workflow: it lists the products of a confirmed week and is not part of this page. Concepts are completed there; only concepts submitted with Ready for Review reach Tuesday Review.
 
 ## What a "selection" is
 
@@ -20,11 +20,18 @@ Directly under the Planning tabs, sticky while scrolling, on Core / High Stocks 
 
 ## Shoot Plan page
 
-Title, one-line description, the existing week selector and, top right, **Confirm & Send Shoot Plan**. One tile per product: thumbnail, name, colourways, concepts (first two names, "+N more" / "Manage concepts" opens the existing concept list with stage and "Adapt"), owner, source label, Open concept, + Concept, Remove from plan. A stock warning appears only when the existing assessment has one. The Apparel Magic CSV link remains a quiet utility under the tiles when samples are required. Empty state: "No products added to this week's shoot plan yet." with a link back to Core.
+A simple operational hand-off: which products are shot this week, who shoots them and which samples the warehouse pulls. Nothing on the page develops, reviews or approves a concept (no concept counts, names, Manage / Open concept or + Concept; existing concept records and their links to products are untouched).
 
-## Confirm & Send
+* **Header**: the Planning tabs and week selector, and top right **Confirm Shoot Plan** (once confirmed: "Shoot Plan confirmed · date" with **Edit plan**).
+* **Summary bar** under the heading, all live from the week's records (`shootPlanStats`): *Products selected* (unique products), *Samples required* (one per selected colourway/SKU of a product being brought from the warehouse; a sample already in the office needs no pull) and *Shoot assignments* (products with a shoot owner). The **ApparelMagic Sample Pick List** is in the same bar (`Download CSV`, the same export and fields as before).
+* **Cards** (four across on desktop, then 3 / 2 / 1): one image, name, colourway count and source (Core, High Stocks, ...), a **sample readiness** line, then *Shoot owner* (dropdown of the existing content creators, saved straight away to the Shoot Plan record), *Selected colourways* with **Edit**, *Samples required*, and **Shoot notes (optional)** (collapsed by default, saved to `shoot_plan_items.shoot_notes`; not a concept field). A subtle **X** removes the product from this week's plan only (the existing removal, below).
+* **Selected colourways > Edit** lists every colourway of the product with its stock (the same list and stock rules Planning uses, `POST /api/opportunities/prepare-shoot`), ticks the ones in the plan, never ticks an out-of-stock colourway for you, and sets each sample size (a size only matters for a product being brought in). Saving uses the existing add / remove / size routes, and the card, the samples and the summary update at once.
+* **Sample readiness** uses stock the app already holds and never claims a sample has been picked or has arrived: *Stock available* (green) when every selected colourway has stock, *N sample(s) needed* (amber) when a colourway has no stock or no size, *Availability not confirmed* (grey) when stock cannot be checked, and *Samples in office* (green) when the product was added as already in the office.
+* **Locked once confirmed**: a confirmed plan shows its owners, counts and notes read-only until **Edit plan** (then **Done**). Past weeks are always read-only.
 
-`GET /api/weekly-shoot-plan-confirmation/preview?week_start=` (read-only) lists the products and concepts and anything worth knowing (no concept yet, no colourways, missing sample sizes). The dialog shows it and says plainly that nothing is submitted for Tuesday Review. `POST /api/weekly-shoot-plan-confirmation` stays idempotent (first confirmation is kept; the concepts already exist and are reused, so nothing is duplicated) and now refuses an empty plan. It never touches `concept_dev_status`. After sending, anything added later reaches Concept Development without a second confirmation.
+## Confirm Shoot Plan
+
+The dialog lists the products (owner, colourways, samples) and anything worth a look (colourways without a sample size, no colourways selected, no stock) and says plainly that confirming locks in the week's products, colourways, sample sizes, owners and notes. No concept is needed. It uses the existing `POST /api/weekly-shoot-plan-confirmation` (the first confirmation time is kept; a second click changes nothing), so everything that relies on a confirmed week is unchanged. `GET .../preview` is no longer used by the page.
 
 ## Removing a product
 
@@ -36,7 +43,7 @@ Title, one-line description, the existing week selector and, top right, **Confir
 
 ## Schema
 
-`shoot_plan_items.auto_linked BOOLEAN NOT NULL DEFAULT false` (additive, idempotent; no existing row is rewritten).
+`shoot_plan_items.auto_linked BOOLEAN NOT NULL DEFAULT false` and `shoot_plan_items.shoot_notes TEXT` (both additive, idempotent; no existing row is rewritten). `PATCH /api/shoot-plan/:id` saves `creator` and/or `shoot_notes` (owner required, notes up to 1000 characters, past weeks read-only).
 
 ## Thumbnails: one garment view (v1.3.3)
 

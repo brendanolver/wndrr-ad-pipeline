@@ -443,6 +443,8 @@ UPDATE content_creators SET default_bottom_alpha_size = 'S' WHERE default_bottom
 -- ---------------------------------------------------------------------------
 ALTER TABLE shoot_plan_items ADD COLUMN IF NOT EXISTS source VARCHAR(20) CHECK (source IN ('core', 'high_stock', 'drop', 'promotion'));
 ALTER TABLE shoot_plan_items ADD COLUMN IF NOT EXISTS image_url TEXT;
+-- Short logistical notes for the week's shoot (samples, sizes, locations, special arrangements), typed on the Shoot Plan page. NOT a concept field: Concept Development never reads it (initial_idea is the concept note).
+ALTER TABLE shoot_plan_items ADD COLUMN IF NOT EXISTS shoot_notes TEXT;
 ALTER TABLE shoot_plan_item_styles ADD COLUMN IF NOT EXISTS colour_label VARCHAR(255);
 
 -- Promotions: no ApparelMagic/SOH-driven target the way Core/High Stocks/

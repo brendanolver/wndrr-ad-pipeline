@@ -43,7 +43,7 @@ test('add: manual planning never silently bypasses a stock restriction', () => {
   assert.match(app, /if \(checked && el\.dataset\.restricted\) return;/, 'Select All never ticks a restricted colourway');
   assert.match(app, /checkbox\.dataset\.restricted && !checkbox\.dataset\.override/, 'a restricted colourway that was not explicitly confirmed blocks the save');
   assert.match(app, /return c\.viable !== false;/, 'preselection skips restricted colourways');
-  assert.match(app, /plShootPlanWarning\(item\)/, 'the existing stock and sizing warnings on the Shoot Plan stay');
+  assert.match(app, /cw\.viable === false/, 'the stock restriction still shows on the Shoot Plan card, as the sample readiness'); assert.match(app, /size not chosen/, 'and a missing size');
 });
 test('add: the same existing workflow: concept chooser, many colourways, an extra concept goes onto the existing record', () => {
   assert.match(app, /payload\.concept_type = conceptSel\.value/); assert.match(app, /payload\.additional = true/);

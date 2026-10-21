@@ -273,7 +273,7 @@ test('shoot plan: planned work is warned about, never changed (the warning reads
   const pl = pub('planning.js'); const app = pub('app.js');
   const fn = pl.slice(pl.indexOf('function plShootPlanWarning'));
   assert.doesNotMatch(fn.slice(0, fn.indexOf('\n}\n')), /api\(|fetch\(|method:/);
-  assert.match(app, /plShootPlanWarning\(item\)/); assert.match(app, /shootPlanColourPreselected\(preset, c\)/);
+  assert.match(app, /shootPlanReadiness\(item, shootPlanOpp\(item\)\)/, 'the Shoot Plan card reads the same stock facts (viable / restriction) and shows them as the sample readiness'); assert.match(app, /shootPlanColourPreselected\(preset, c\)/);
   // every other caller of the modal passes no colourway data and keeps the old behaviour (all ticked)
   assert.match(app, /return c\.viable !== false;/);
 });

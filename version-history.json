@@ -2,6 +2,16 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.8.2",
+      "date": "2026-10-21",
+      "title": "Shoot Plan: simple product cards, summary bar and Confirm Shoot Plan",
+      "changes": [
+        "Concept development removed from Planning > Shoot Plan; product cards with owner dropdown, colourway editor, samples required, shoot notes and a subtle remove",
+        "Summary bar: products selected, samples required, shoot assignments and the ApparelMagic pick list",
+        "Sample readiness from existing stock (never claims samples are picked); confirmed plans are locked until Edit plan"
+      ]
+    },
+    {
       "version": "1.8.1",
       "date": "2026-10-21",
       "title": "Creative Playbook: set Required Concepts by stock",

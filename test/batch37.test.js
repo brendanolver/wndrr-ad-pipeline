@@ -121,19 +121,17 @@ test('Add to Shoot: one click through the existing endpoint; duplicates and read
   assert.match(pl, /data-opp-added/); assert.match(pl, /Add to Shoot</);
 });
 
-test('Shoot Plan page: only selected products, compact tiles, primary action top right, confirmation dialog, empty state', () => {
+test('Shoot Plan page: only selected products, product cards, primary action top right, confirmation dialog, empty state', () => {
   assert.match(app, /const shootPlanSelected = \(\) => \(state\.shootPlan \|\| \[\]\)\.filter\(\(i\) => !i\.auto_linked\)/);
-  for (const frag of ['sp2-tile', 'sp2-name', 'sp2-facts', 'sp2-owner', 'data-sp-open', 'data-sp-remove', 'Owner not set', 'No concepts yet']) assert.ok(app.includes(frag), frag);
+  for (const frag of ['sp3-tile', 'sp3-name', 'sp3-facts', 'sp3-owner', 'data-sp-remove', 'Shoot notes (optional)', 'Selected colourways', 'Samples required', 'Shoot owner']) assert.ok(app.includes(frag), frag);
   assert.match(app, /No products added to this week's shoot plan yet\./); assert.match(app, /Browse Creative Opportunities &rarr;/);
-  assert.match(html, /class="pl-navrow-action" id="shoot-plan-actions"/); assert.match(html, /onclick="openShootPlanConfirm\(\)">Confirm &amp; Send Shoot Plan &rarr;/);
+  assert.match(html, /class="pl-navrow-action" id="shoot-plan-actions"/); assert.match(html, /onclick="openShootPlanConfirm\(\)">Confirm Shoot Plan &rarr;/);
   assert.match(html, /id="shoot-plan-confirm-modal"/);
-  assert.match(html, /Products and concepts selected for this week's shoot\./);
+  assert.match(html, /Products selected for this week's shoot\./);
   assert.doesNotMatch(html, /shoot-plan-progress|shoot-plan-summary-stats/, 'the progress panel and counters are gone');
-  assert.match(app, /weekly-shoot-plan-confirmation\/preview/);
   assert.match(app, /if \(shootPlanConfirmBusy\) return;/, 'a double click does nothing');
   assert.match(app, /\/shoot-plan\/\$\{id\}\/removal/); assert.match(app, /Remove from plan/);
-  assert.match(app, /openConceptDevProductStandalone\(itemId\)|openConceptDevProductStandalone/, 'Open concept works before the plan is sent');
-  assert.match(css, /\.sp2-grid\{display:grid;grid-template-columns:repeat\(auto-fill,minmax\(260px,1fr\)\)/);
+  assert.match(css, /\.sp3-grid\{display:grid;grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/);
 });
 
 test('Shoot Plan: nothing populates it automatically (no render path reads Upcoming Drops, Core, High Stocks or Insights lists)', () => {
