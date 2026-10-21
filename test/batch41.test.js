@@ -61,7 +61,7 @@ test('the Core page has ONE tab bar (Creative Opportunities | Core Catalogue); o
   const apply = fn(pl, 'plApplyCoreTab');
   assert.match(apply, /aria-selected/); assert.match(apply, /opp\.hidden = tab !== 'opportunities'/); assert.match(apply, /cat\.hidden = tab !== 'catalogue'/);
   assert.match(apply, /o\.core\.actionable/, 'the Opportunities count is the table\'s own "needs creative" total');
-  assert.match(pl, /sessionStorage\.setItem\('wndrr\.coreTab'/); assert.match(pl, /ArrowRight/); assert.match(pl, /ev\.key === 'Home'/);
+  assert.ok(!/wndrr\.coreTab|sessionStorage/.test(fn(pl, 'plCoreTab') + fn(pl, 'plSetCoreTab')), 'the tab is not remembered between visits: Core always opens on Creative Opportunities'); assert.match(app, /if \(key === 'core' && \(!fromHash \|\| state\.planningStep !== 'core'\)\) state\.coreTab = 'opportunities';/); assert.match(pl, /ArrowRight/); assert.match(pl, /ev\.key === 'Home'/);
   assert.match(pl, /host\.innerHTML = plPageHtml\('core'\);\n  plApplyCoreTab\(\);/, 're-applied whenever the Core table re-renders');
   assert.match(css, /\.core-tab\.active\{[^}]*border-bottom-color/); assert.match(css, /\.core-plan\[hidden\],\.core-catalogue-panel\[hidden\]\{display:none;\}/);
 });

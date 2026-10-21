@@ -5205,6 +5205,7 @@ const PLANNING_STEPS = ['core', 'high-stocks', 'shoot-plan'];
 // #planning/high-stocks, #planning/shoot-plan) so Back/Forward and links work. A full page refresh still lands on the Dashboard (app-wide rule, see showApp).
 function setPlanningStep(key, { fromHash = false } = {}) {
   if (!PLANNING_STEPS.includes(key)) key = 'core';
+  if (key === 'core' && (!fromHash || state.planningStep !== 'core')) state.coreTab = 'opportunities'; // Core always opens on Creative Opportunities
   state.planningStep = key;
   document.querySelectorAll('.planning-step-panel').forEach((panel) => panel.classList.toggle('active', panel.dataset.step === key));
   // The weekly strip is the Core / High Stocks summary; the Shoot Plan section carries the full production progress itself.
@@ -5213,6 +5214,7 @@ function setPlanningStep(key, { fromHash = false } = {}) {
   const actions = document.getElementById('shoot-plan-actions');
   if (actions) actions.hidden = key !== 'shoot-plan';
   if (!fromHash && document.getElementById('tab-planning').classList.contains('active') && window.location.hash !== `#planning/${key}`) window.location.hash = `#planning/${key}`;
+  if (key === 'core' && typeof plApplyCoreTab === 'function') plApplyCoreTab();
   if (typeof plSyncChrome === 'function') plSyncChrome();
 }
 

@@ -82,7 +82,7 @@ The "Browse the full Core catalogue" panel (Core Shoot Planning) no longer uses 
 * **Creative Freshness** (category row): how many products have a stale (or no) latest creative. **Product row**: the Core table's "Latest creative" date, how long ago, and a band. Bands use the engine's own windows from the Planning settings: Recent (under `recent_creative_days`, default 30), Ageing, Stale (`stale_creative_days`, default 90 or more), and "No creative" when nothing is on record. Creatives without a reliable date show "Unknown" and no band.
 * Products the Core table has not assessed show "Not assessed". If the Planning results are not loaded, the panel falls back to the older flags until they arrive, and re-renders when they do.
 
-From v1.4.2 the Core page has one tab bar, **Creative Opportunities | Core Catalogue**, instead of two stacked sections; only the selected view shows. Each tab carries a count (products needing creative | products in the catalogue). The choice is kept for the browser session, and the tabs work with the arrow, Home and End keys.
+From v1.4.2 the Core page has one tab bar, **Creative Opportunities | Core Catalogue**, instead of two stacked sections; only the selected view shows. Each tab carries a count (products needing creative | products in the catalogue). Core always opens on Creative Opportunities (from v1.8.7 the choice is no longer remembered between visits; a tab you pick stays until you leave Core), and the tabs work with the arrow, Home and End keys.
 
 ## Creative coverage dates (v1.3.3)
 

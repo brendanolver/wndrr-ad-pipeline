@@ -500,9 +500,9 @@ function plPageHtml(mode, extra = '') {
   return `<div class="opp-panel pl-page pl-core" data-opp-panel="${mode}">${extra}${plSummaryHtml(mode, { slim: true })}${plCoreCardHtml(mode)}</div>`;
 }
 // ── Core page: one tab bar, not two stacked sections: "Creative Opportunities" (the recommendations table) | "Core Catalogue" (every category and product) ────────────────────────────────
-// Only the selected view shows. The choice is kept for the session; the counts come from the same results the views show.
+// Only the selected view shows. Core always OPENS on Creative Opportunities (going to Core from anywhere resets it); a choice made on the page stays until you leave it. The counts come from the same results the views show.
 const PL_CORE_TABS = ['opportunities', 'catalogue'];
-function plCoreTab() { try { const v = sessionStorage.getItem('wndrr.coreTab'); if (PL_CORE_TABS.includes(v)) return v; } catch (e) { /* storage unavailable: the default is fine */ } return state.coreTab && PL_CORE_TABS.includes(state.coreTab) ? state.coreTab : 'opportunities'; }
+function plCoreTab() { return state.coreTab && PL_CORE_TABS.includes(state.coreTab) ? state.coreTab : 'opportunities'; }
 function plApplyCoreTab() {
   const tab = plCoreTab(); state.coreTab = tab;
   document.querySelectorAll('#core-tabs .core-tab').forEach((b) => { const on = b.dataset.coreTab === tab; b.classList.toggle('active', on); b.setAttribute('aria-selected', on ? 'true' : 'false'); b.tabIndex = on ? 0 : -1; });
@@ -515,7 +515,6 @@ function plApplyCoreTab() {
 }
 function plSetCoreTab(tab, focus) {
   if (!PL_CORE_TABS.includes(tab)) return;
-  try { sessionStorage.setItem('wndrr.coreTab', tab); } catch (e) { /* kept for this page view only */ }
   state.coreTab = tab; plApplyCoreTab();
   if (focus) { const b = document.getElementById(`core-tab-${tab}`); if (b) b.focus(); }
 }
