@@ -2,6 +2,15 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.8.4",
+      "date": "2026-10-21",
+      "title": "Select samples: clearer warehouse vs office",
+      "changes": [
+        "Select samples thumbnails are 52px and show the whole garment (no cropping)",
+        "Column is now ALREADY IN OFFICE, the description reads \"Select samples for the shoot. Tick if already in office.\", and the footer shows Warehouse to send: X samples with Y already in office below"
+      ]
+    },
+    {
       "version": "1.8.3",
       "date": "2026-10-21",
       "title": "Shoot Plan: Select samples",

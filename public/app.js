@@ -9875,7 +9875,7 @@ function shootPlanSamplesRender() {
     const sizeCtl = sizes.length ? `<select class="sp4-size" data-sp4-size="${i}"${locked ? ' disabled' : ''} aria-label="Size for ${escapeHtml(r.label)}">${opts}</select>` : `<input type="text" class="sp4-size" data-sp4-size="${i}" value="${escapeHtml(r.size || '')}" placeholder="Size"${locked ? ' disabled' : ''} aria-label="Size for ${escapeHtml(r.label)}">`;
     return `<div class="sp4-row${blocked ? ' is-out' : ''}${locked ? ' is-off' : ''}"><label class="sp4-pick"><input type="checkbox" data-sp4-pick="${i}"${r.checked ? ' checked' : ''}${blocked ? ' disabled' : ''} aria-label="Shoot ${escapeHtml(r.label)}"></label>
       <div class="sp4-name"><span class="sp4-thumb">${r.image_url ? `<img src="${escapeHtml(r.image_url)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}</span><span class="sp4-txt"><b>${escapeHtml(r.label)}</b><small>${stock}</small></span></div>
-      ${sizeCtl}<label class="sp4-office"><input type="checkbox" data-sp4-office="${i}"${r.inOffice ? ' checked' : ''}${locked ? ' disabled' : ''} aria-label="${escapeHtml(r.label)} is already in the office"></label></div>`;
+      ${sizeCtl}<label class="sp4-office"><input type="checkbox" data-sp4-office="${i}"${r.inOffice ? ' checked' : ''}${locked ? ' disabled' : ''} aria-label="${escapeHtml(r.label)}: already in office"></label></div>`;
   }).join('');
   const root = document.getElementById('shoot-plan-samples-edit');
   root.querySelectorAll('[data-sp4-pick]').forEach((cb) => cb.addEventListener('change', () => { const r = ctx.rows[Number(cb.dataset.sp4Pick)]; r.checked = cb.checked; shootPlanSamplesRender(); }));
@@ -9886,7 +9886,7 @@ function shootPlanSamplesRender() {
 function shootPlanSamplesCounts() {
   const ctx = shootPlanSamplesCtx; if (!ctx) return;
   const sm = shootPlanSamplesSummary(ctx.rows);
-  document.getElementById('shoot-plan-samples-request').textContent = `${shootPlanPlural(sm.toRequest, 'sample')} to request from warehouse`;
+  document.getElementById('shoot-plan-samples-request').textContent = `Warehouse to send: ${shootPlanPlural(sm.toRequest, 'sample')}`;
   document.getElementById('shoot-plan-samples-office').textContent = `${sm.inOffice} already in office`;
 }
 async function saveShootPlanSamples() {
