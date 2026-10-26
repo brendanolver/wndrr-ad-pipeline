@@ -4616,6 +4616,8 @@ function metaBackfillHalves(since, until) {
   const n = metaBackfillDays(since, until); if (n < 2) return null;
   return metaBackfillSplit(since, until, Math.ceil(n / 2));
 }
+// Rows per Meta page: 500 normally; Meta's own remedy for "reduce the amount of data" is a smaller page, so a single day that is still refused is retried at 100, then 25.
+const metaBackfillNextPageLimit = (n) => (n > 100 ? 100 : n > 25 ? 25 : null);
 const metaBackfillTooMuch = (msg) => /reduce the amount of data/i.test(String(msg || ''));
 // Meta's generic "Service temporarily unavailable" (code 2, e.g. subcode 1504044): it is also how Meta answers a request that is too heavy, so a big chunk is retried in smaller pieces; a single day that still fails is real downtime.
 const metaBackfillBusy = (msg) => /temporarily unavailable|\bcode 2[,)]|subcode 1504044/i.test(String(msg || ''));
@@ -4631,7 +4633,7 @@ async function metaBackfillRun() {
   if (!ok) return;
   metaBackfillRunning = true; metaBackfillStop = false; setMetaSyncBusy(true);
   metaBackfillEl('meta-backfill-run-btn').disabled = true; metaBackfillEl('meta-backfill-check-btn').disabled = true; metaBackfillEl('meta-backfill-stop-btn').hidden = false;
-  const log = []; let failed = null; let doneDays = 0; let maxDays = 30; let note = '';
+  const log = []; let failed = null; let doneDays = 0; let maxDays = 30; let note = ''; let pageLimit = 500; let streak = 0; let ceiling = 30;
   const queue = plan.chunks.map((c) => ({ since: c.since, until: c.until, days: c.days }));
   while (queue.length) {
     if (metaBackfillStop) { log.push('Stopped. Everything pulled so far is stored; run it again to carry on.'); break; }
@@ -4641,22 +4643,34 @@ async function metaBackfillRun() {
     metaBackfillPrint([note, ...log.slice(-12), `Pulling ${label} (${metaBackfillDaysText(c.days)}) … ${doneDays} of ${total} days done`]);
     let errText = null;
     try {
-      const r = await api('/meta-sync/backfill', { method: 'POST', body: JSON.stringify({ since: c.since, until: c.until }) });
+      const r = await api('/meta-sync/backfill', { method: 'POST', body: JSON.stringify(pageLimit < 500 ? { since: c.since, until: c.until, page_limit: pageLimit } : { since: c.since, until: c.until }) });
       const res = (r.chunks && r.chunks[0]) || {};
       if (!r.completed || res.ok === false) errText = res.rate_limited ? 'Meta rate limit reached. Existing data is safe. Try again later.' : (res.error || 'The chunk did not finish');
-      else { doneDays += c.days; log.push(`Done: ${label} (${res.daily_rows_seen || 0} daily rows).`); }
+      else {
+        doneDays += c.days; streak += 1; log.push(`Done: ${label} (${res.daily_rows_seen || 0} daily rows).`);
+        if (streak >= 6 && maxDays < ceiling) { maxDays = Math.min(ceiling, maxDays * 2); streak = 0; } // a run of successes: try bigger pieces again, but never a size Meta has already refused
+      }
     } catch (e) { errText = e.status === 429 ? 'Meta rate limit reached. Existing data is safe. Try again later.' : e.message; }
     if (!errText) continue;
+    streak = 0;
     const busy = metaBackfillBusy(errText);
     const halves = metaBackfillTooMuch(errText) || busy ? metaBackfillHalves(c.since, c.until) : null;
     if (halves) {
-      maxDays = halves[0].days; queue.unshift(...halves);
+      ceiling = Math.min(ceiling, c.days - 1); maxDays = halves[0].days; queue.unshift(...halves);
       note = `Meta turned down a larger chunk (too much data at once, or briefly unavailable), so the rest is being pulled in smaller pieces (${metaBackfillDaysText(maxDays)} at a time).`;
       log.push(`${label} was refused by Meta at that size; splitting it.`);
       if (busy) await new Promise((r) => setTimeout(r, 2000)); // a short breather before asking again
       continue;
     }
-    failed = metaBackfillTooMuch(errText) ? `Meta refuses even a single day (${label}) as too much data.` : busy ? `Meta says its service is temporarily unavailable, even for a single day (${label}). Try again later.` : errText;
+    const smaller = (metaBackfillTooMuch(errText) || busy) ? metaBackfillNextPageLimit(pageLimit) : null;
+    if (smaller) { // one day and still refused: ask for fewer rows per page
+      pageLimit = smaller; queue.unshift(c);
+      note = `Meta turned down even a single day, so it is now asking for smaller pages (${pageLimit} rows at a time).`;
+      log.push(`${label} was refused by Meta; retrying with smaller pages.`);
+      await new Promise((r) => setTimeout(r, 3000));
+      continue;
+    }
+    failed = metaBackfillTooMuch(errText) ? `Meta refuses even a single day (${label}) as too much data, even with small pages.` : busy ? `Meta says its service is temporarily unavailable, even for a single day (${label}). Try again later.` : errText;
     log.push(`${label} failed: ${failed}`); break;
   }
   const finished = !failed && !metaBackfillStop && !queue.length;

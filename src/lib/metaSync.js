@@ -376,7 +376,8 @@ async function lookupMissingAds(ids, deps = {}) {
   return out;
 }
 
-async function fetchAndUpsertInsights(since, until, currency) {
+// pageLimit: rows per Meta page (default 500). A smaller page is Meta's own remedy for "Please reduce the amount of data you're asking for"; it changes how the same rows are fetched, never which rows.
+async function fetchAndUpsertInsights(since, until, currency, pageLimit = 500) {
   let rowsSeen = 0;
   let inserted = 0;
   let updated = 0;
@@ -388,7 +389,7 @@ async function fetchAndUpsertInsights(since, until, currency) {
     time_range: JSON.stringify({ since, until }),
     fields: INSIGHTS_FIELDS,
     action_attribution_windows: JSON.stringify(getAttributionWindows()),
-    limit: '500',
+    limit: String(pageLimit),
   }, async (rows) => {
     const valid = rows.filter((r) => r.ad_id && r.date_start);
     await ensureIdentitiesForPage([...new Set(valid.map((r) => r.ad_id))], needLookup, counters);
@@ -473,7 +474,7 @@ function describeCompleteness(lookup) {
 // It does NOT list or upsert the account's ad inventory, so the
 // ~29.7k existing meta_ads rows are never touched here (names/statuses of
 // ads that have no new Insights only refresh via refreshInventory).
-async function runSyncUnguarded({ since, until, runType = 'default', userId = null }) {
+async function runSyncUnguarded({ since, until, runType = 'default', userId = null, pageLimit = 500 }) {
   if (!configured()) {
     throw new Error('Meta Ads is not configured (META_AD_ACCOUNT_ID / META_ACCESS_TOKEN missing)');
   }
@@ -483,7 +484,7 @@ async function runSyncUnguarded({ since, until, runType = 'default', userId = nu
   try {
     const accountInfo = await fetchAccountSettings();
     await upsertAccountSettings(accountInfo);
-    const insights = await fetchAndUpsertInsights(since, until, accountInfo.currency);
+    const insights = await fetchAndUpsertInsights(since, until, accountInfo.currency, pageLimit);
     const lookup = await lookupMissingAds(insights.needLookup);
     const completeness = describeCompleteness(lookup);
     // Campaign NAMES (one read-only paged call) -- best effort: a failure here never fails the performance sync.
@@ -614,12 +615,12 @@ function chunkRange(sinceStr, untilStr, chunkDays) {
 // never duplicates a row. Stops at the first chunk that fails rather than
 // continuing past an error -- re-calling with the remaining range is the
 // safe way to resume.
-async function runBackfill({ since, until, userId }) {
+async function runBackfill({ since, until, userId, pageLimit = 500 }) {
   const chunks = chunkRange(since, until, BACKFILL_CHUNK_DAYS);
   const results = [];
   for (const chunk of chunks) {
     try {
-      const result = await runSync({ since: chunk.since, until: chunk.until, runType: 'backfill', userId });
+      const result = await runSync({ since: chunk.since, until: chunk.until, runType: 'backfill', userId, pageLimit });
       results.push({ ...chunk, ok: true, ...result });
     } catch (err) {
       results.push({ ...chunk, ok: false, error: err.safe ? err.message : String(err.message || err).replace(/https?:\/\/\S+/g, '[url removed]').slice(0, 300), rate_limited: !!err.rateLimited });

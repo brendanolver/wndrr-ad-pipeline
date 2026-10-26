@@ -123,8 +123,14 @@ router.post('/backfill', requireAdmin, async (req, res, next) => {
     if (!since || !DATE_RE.test(since)) return res.status(400).json({ error: 'since (YYYY-MM-DD) is required' });
     if (!until || !DATE_RE.test(until)) return res.status(400).json({ error: 'until (YYYY-MM-DD) is required' });
     if (since > until) return res.status(400).json({ error: 'since must be on or before until' });
+    // Optional: rows per Meta page (default 500). The Settings backfill lowers it when Meta says a request is too much data.
+    let pageLimit = 500;
+    if (req.body.page_limit !== undefined) {
+      pageLimit = Number(req.body.page_limit);
+      if (!Number.isInteger(pageLimit) || pageLimit < 10 || pageLimit > 500) return res.status(400).json({ error: 'page_limit must be a whole number from 10 to 500' });
+    }
 
-    const result = await metaSync.runBackfill({ since, until, userId: req.user.id });
+    const result = await metaSync.runBackfill({ since, until, userId: req.user.id, pageLimit });
     res.status(result.completed ? 200 : 207).json(result);
   } catch (err) {
     sendMetaError(res, err);

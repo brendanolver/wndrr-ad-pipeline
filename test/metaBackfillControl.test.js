@@ -22,7 +22,7 @@ test('the Settings control: dates, check, confirm first, one chunk per request, 
   const run = app.slice(app.indexOf('async function metaBackfillRun()'), app.indexOf("metaBackfillEl('meta-backfill-check-btn').addEventListener"));
   assert.match(run, /await confirmDialog\(/, 'asks before pulling anything');
   assert.ok(run.indexOf('confirmDialog(') < run.indexOf("api('/meta-sync/backfill'"), 'the confirm comes first');
-  assert.match(run, /api\('\/meta-sync\/backfill', \{ method: 'POST', body: JSON\.stringify\(\{ since: c\.since, until: c\.until \}\) \}\)/, 'one chunk per request');
+  assert.match(run, /api\('\/meta-sync\/backfill', \{ method: 'POST', body: JSON\.stringify\(pageLimit < 500 \? \{ since: c\.since, until: c\.until, page_limit: pageLimit \} : \{ since: c\.since, until: c\.until \}\) \}\)/, 'one chunk per request');
   assert.match(run, /if \(metaBackfillStop\)/); assert.match(run, /break;[\s\S]*Stopped at the first problem/, 'stops at the first failure');
   assert.match(run, /if \(!r\.completed \|\| res\.ok === false\)/);
   assert.equal((app.match(/api\('\/meta-sync\/backfill'/g) || []).length, 1, 'only this control calls the backfill route');
@@ -41,8 +41,8 @@ test('Reach for a range Meta will not calculate: a plain message, and no automat
 const vm = require('vm');
 const block = app.slice(app.indexOf('// <backfill-pure>'), app.indexOf('// </backfill-pure>'));
 const ctx = {}; vm.createContext(ctx);
-vm.runInContext(`${block}; this.api = { metaBackfillDays, metaBackfillSplit, metaBackfillHalves, metaBackfillTooMuch, metaBackfillBusy };`, ctx);
-const { metaBackfillDays, metaBackfillSplit, metaBackfillHalves, metaBackfillTooMuch, metaBackfillBusy } = ctx.api;
+vm.runInContext(`${block}; this.api = { metaBackfillDays, metaBackfillSplit, metaBackfillHalves, metaBackfillTooMuch, metaBackfillBusy, metaBackfillNextPageLimit };`, ctx);
+const { metaBackfillDays, metaBackfillSplit, metaBackfillHalves, metaBackfillTooMuch, metaBackfillBusy, metaBackfillNextPageLimit } = ctx.api;
 const J = (v) => JSON.parse(JSON.stringify(v)); // values built inside the vm are from another realm
 
 test('splitting: whole days, inclusive, no gaps or overlaps, in order', () => {
@@ -78,4 +78,16 @@ test('the run halves on that message, keeps the size that worked, and still stop
   assert.match(run, /if \(c\.days > maxDays\)/, 'later chunks start at the size that worked');
   assert.match(run, /Meta refuses even a single day/);
   assert.match(run, /failed = metaBackfillTooMuch\(errText\) \?[\s\S]*?break;/);
+});
+
+test('a single day Meta still refuses is retried with smaller pages (500 -> 100 -> 25) before the run gives up; the page size reaches the Meta request', () => {
+  assert.equal(metaBackfillNextPageLimit(500), 100); assert.equal(metaBackfillNextPageLimit(100), 25); assert.equal(metaBackfillNextPageLimit(25), null);
+  const run = app.slice(app.indexOf('async function metaBackfillRun()'), app.indexOf("metaBackfillEl('meta-backfill-check-btn').addEventListener"));
+  assert.match(run, /page_limit: pageLimit/); assert.match(run, /queue\.unshift\(c\)/, 'the same day is tried again'); assert.match(run, /even with small pages/);
+  assert.match(run, /streak >= 6 && maxDays < ceiling/, 'after a run of successes the piece size grows back, but never to a size Meta has refused');
+  assert.match(run, /ceiling = Math\.min\(ceiling, c\.days - 1\)/);
+  const sync = read('src/lib/metaSync.js'); const rt = read('src/routes/metaSync.js');
+  assert.match(sync, /limit: String\(pageLimit\)/); assert.match(sync, /pageLimit = 500/);
+  assert.match(rt, /page_limit must be a whole number from 10 to 500/); assert.match(rt, /runBackfill\(\{ since, until, userId: req\.user\.id, pageLimit \}\)/);
+  assert.ok(!/limit: '500'/.test(sync.slice(sync.indexOf('async function fetchAndUpsertInsights'), sync.indexOf('async function fetchAndUpsertInsights') + 900)), 'no hard-coded page size left in the insights pull');
 });

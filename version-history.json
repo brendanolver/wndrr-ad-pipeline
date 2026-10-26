@@ -2,6 +2,15 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.9.4",
+      "date": "2026-10-26",
+      "title": "Backfill history: smaller pages for days Meta refuses, grow piece size back",
+      "changes": [
+        "A single day Meta refuses is retried with smaller pages (100 then 25 rows) before the run stops",
+        "After a run of successful pieces the backfill tries bigger pieces again, never a size Meta already refused"
+      ]
+    },
+    {
       "version": "1.9.3",
       "date": "2026-10-26",
       "title": "Backfill history: retry Meta's 'temporarily unavailable' in smaller pieces",
