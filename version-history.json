@@ -2,6 +2,14 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.9.2",
+      "date": "2026-10-26",
+      "title": "Backfill history: split chunks Meta says are too much data",
+      "changes": [
+        "A 30-day backfill chunk that Meta refuses as too much data is now split into smaller pieces automatically, keeping the size that works for the rest of the run"
+      ]
+    },
+    {
       "version": "1.9.1",
       "date": "2026-10-26",
       "title": "Meta: backfill history control, clearer long-range Reach message",

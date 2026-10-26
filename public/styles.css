@@ -2386,7 +2386,7 @@ main{flex:1;min-width:0;padding:20px 24px;}
 .meta-backfill-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px;}
 .meta-backfill-row label{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text-secondary);}
 .meta-backfill-row input[type=date]{padding:6px 8px;border:1px solid var(--border-strong);border-radius:var(--r);font:inherit;font-size:13px;}
-.meta-backfill-progress{font-size:13px;color:var(--text-secondary);display:flex;flex-direction:column;gap:2px;}
+.meta-backfill-progress{font-size:13px;color:var(--text-secondary);display:flex;flex-direction:column;gap:2px;max-height:260px;overflow-y:auto;}
 .meta-backfill-progress.ok{color:#15803d;}
 .meta-backfill-progress.err{color:#b91c1c;}
 .meta-sync-maintenance{margin-top:14px;padding-top:12px;border-top:1px dashed var(--border);display:flex;align-items:flex-start;gap:10px;}

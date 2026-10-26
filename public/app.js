@@ -4582,6 +4582,7 @@ function metaBackfillDefaults() {
   metaBackfillEl('meta-backfill-since').value = day(new Date(now.getTime() - 365 * 86400000));
 }
 function metaBackfillPrint(lines, kind) {
+  lines = lines.filter(Boolean);
   const el = metaBackfillEl('meta-backfill-progress');
   el.className = `meta-backfill-progress${kind ? ` ${kind}` : ''}`;
   el.innerHTML = lines.map((l) => `<div>${escapeHtml(l)}</div>`).join('');
@@ -4591,15 +4592,32 @@ async function metaBackfillPlan() {
   if (!since || !until) throw new Error('Choose both dates');
   return api(`/meta-sync/backfill-plan?since=${encodeURIComponent(since)}&until=${encodeURIComponent(until)}`);
 }
-const metaBackfillDays = (n) => `${n} day${n === 1 ? '' : 's'}`;
+const metaBackfillDaysText = (n) => `${n} day${n === 1 ? '' : 's'}`;
 async function metaBackfillCheck() {
   if (metaBackfillRunning) return;
   try {
     const plan = await metaBackfillPlan();
     if (!plan.chunks.length) return metaBackfillPrint([`Nothing to pull: every day from ${formatDate(plan.since)} to ${formatDate(plan.until)} is already synced.`], 'ok');
-    metaBackfillPrint([`${metaBackfillDays(plan.missing_days + plan.partial_days)} of ${plan.total_days} still to pull, in ${plan.chunks.length} chunk${plan.chunks.length === 1 ? '' : 's'}.`, ...(plan.configured ? [] : ['Meta is not configured in this environment, so nothing can be pulled here.'])]);
+    metaBackfillPrint([`${metaBackfillDaysText(plan.missing_days + plan.partial_days)} of ${plan.total_days} still to pull, in ${plan.chunks.length} chunk${plan.chunks.length === 1 ? '' : 's'}.`, ...(plan.configured ? [] : ['Meta is not configured in this environment, so nothing can be pulled here.'])]);
   } catch (e) { metaBackfillPrint([e.message], 'err'); }
 }
+// <backfill-pure>
+// Date arithmetic for the backfill pieces (UTC, whole days, inclusive). A chunk Meta refuses as "too much data" is halved until a size works.
+const mbDayMs = 86400000;
+const mbParse = (ymd) => Date.parse(`${ymd}T00:00:00Z`);
+const mbFmt = (t) => new Date(t).toISOString().slice(0, 10);
+const metaBackfillDays = (since, until) => Math.round((mbParse(until) - mbParse(since)) / mbDayMs) + 1;
+function metaBackfillSplit(since, until, maxDays) {
+  const out = []; let t = mbParse(since); const end = mbParse(until);
+  while (t <= end) { const e = Math.min(end, t + (maxDays - 1) * mbDayMs); out.push({ since: mbFmt(t), until: mbFmt(e), days: Math.round((e - t) / mbDayMs) + 1 }); t = e + mbDayMs; }
+  return out;
+}
+function metaBackfillHalves(since, until) {
+  const n = metaBackfillDays(since, until); if (n < 2) return null;
+  return metaBackfillSplit(since, until, Math.ceil(n / 2));
+}
+const metaBackfillTooMuch = (msg) => /reduce the amount of data/i.test(String(msg || ''));
+// </backfill-pure>
 async function metaBackfillRun() {
   if (metaBackfillRunning || metaSyncRunning) return;
   let plan;
@@ -4607,29 +4625,35 @@ async function metaBackfillRun() {
   if (!plan.configured) return metaBackfillPrint(['Meta is not configured in this environment, so nothing can be pulled here.'], 'err');
   if (!plan.chunks.length) return metaBackfillPrint([`Nothing to pull: every day from ${formatDate(plan.since)} to ${formatDate(plan.until)} is already synced.`], 'ok');
   const total = plan.missing_days + plan.partial_days;
-  const ok = await confirmDialog(`Pull ${metaBackfillDays(total)} of history (${formatDate(plan.since)} to ${formatDate(plan.until)}) from Meta in ${plan.chunks.length} chunk${plan.chunks.length === 1 ? '' : 's'}? This only reads from Meta and stores the daily figures; nothing in Meta is changed. It can take several minutes (roughly one to two per chunk) and uses your Meta request allowance. You can stop at any point and resume later.`, { okLabel: 'Start backfill' });
+  const ok = await confirmDialog(`Pull ${metaBackfillDaysText(total)} of history (${formatDate(plan.since)} to ${formatDate(plan.until)}) from Meta in about ${plan.chunks.length} chunk${plan.chunks.length === 1 ? '' : 's'}? This only reads from Meta and stores the daily figures; nothing in Meta is changed. It can take several minutes (roughly one to two per chunk) and uses your Meta request allowance. If Meta says a chunk is too much data, it is split into smaller pieces automatically. You can stop at any point and resume later.`, { okLabel: 'Start backfill' });
   if (!ok) return;
   metaBackfillRunning = true; metaBackfillStop = false; setMetaSyncBusy(true);
   metaBackfillEl('meta-backfill-run-btn').disabled = true; metaBackfillEl('meta-backfill-check-btn').disabled = true; metaBackfillEl('meta-backfill-stop-btn').hidden = false;
-  const log = []; let failed = null; let done = 0;
-  for (let i = 0; i < plan.chunks.length; i++) {
+  const log = []; let failed = null; let doneDays = 0; let maxDays = 30; let note = '';
+  const queue = plan.chunks.map((c) => ({ since: c.since, until: c.until, days: c.days }));
+  while (queue.length) {
     if (metaBackfillStop) { log.push('Stopped. Everything pulled so far is stored; run it again to carry on.'); break; }
-    const c = plan.chunks[i];
-    metaBackfillPrint([...log, `Chunk ${i + 1} of ${plan.chunks.length}: ${formatDate(c.since)} – ${formatDate(c.until)} …`]);
+    let c = queue.shift();
+    if (c.days > maxDays) { const parts = metaBackfillSplit(c.since, c.until, maxDays); c = parts.shift(); queue.unshift(...parts); } // a size that worked is kept for the rest of the run
+    const label = `${formatDate(c.since)} – ${formatDate(c.until)}`;
+    metaBackfillPrint([note, ...log.slice(-12), `Pulling ${label} (${metaBackfillDaysText(c.days)}) … ${doneDays} of ${total} days done`]);
+    let errText = null;
     try {
       const r = await api('/meta-sync/backfill', { method: 'POST', body: JSON.stringify({ since: c.since, until: c.until }) });
       const res = (r.chunks && r.chunks[0]) || {};
-      if (!r.completed || res.ok === false) { failed = res.rate_limited ? 'Meta rate limit reached. Existing data is safe. Try again later.' : (res.error || 'The chunk did not finish'); log.push(`Chunk ${i + 1} (${formatDate(c.since)} – ${formatDate(c.until)}) failed: ${failed}`); break; }
-      done += 1; log.push(`Chunk ${i + 1} of ${plan.chunks.length} done: ${formatDate(c.since)} – ${formatDate(c.until)} (${res.daily_rows_seen || 0} daily rows).`);
-    } catch (e) {
-      failed = e.status === 429 ? 'Meta rate limit reached. Existing data is safe. Try again later.' : e.message;
-      log.push(`Chunk ${i + 1} (${formatDate(c.since)} – ${formatDate(c.until)}) failed: ${failed}`); break;
-    }
+      if (!r.completed || res.ok === false) errText = res.rate_limited ? 'Meta rate limit reached. Existing data is safe. Try again later.' : (res.error || 'The chunk did not finish');
+      else { doneDays += c.days; log.push(`Done: ${label} (${res.daily_rows_seen || 0} daily rows).`); }
+    } catch (e) { errText = e.status === 429 ? 'Meta rate limit reached. Existing data is safe. Try again later.' : e.message; }
+    if (!errText) continue;
+    const halves = metaBackfillTooMuch(errText) ? metaBackfillHalves(c.since, c.until) : null;
+    if (halves) { maxDays = halves[0].days; queue.unshift(...halves); note = `Meta said a chunk was too much data at once, so the rest is being pulled in smaller pieces (${metaBackfillDaysText(maxDays)} at a time).`; log.push(`${label} was too much data for Meta at once; splitting it.`); continue; }
+    failed = metaBackfillTooMuch(errText) ? `Meta refuses even a single day (${label}) as too much data.` : errText;
+    log.push(`${label} failed: ${failed}`); break;
   }
-  const finished = !failed && !metaBackfillStop && done === plan.chunks.length;
-  if (finished) log.push(`Finished: ${plan.chunks.length} chunk${plan.chunks.length === 1 ? '' : 's'} pulled.`);
-  else if (failed) log.push(`Stopped at the first problem. ${done} chunk${done === 1 ? '' : 's'} saved; run it again to carry on with the rest.`);
-  metaBackfillPrint(log, finished ? 'ok' : (failed ? 'err' : ''));
+  const finished = !failed && !metaBackfillStop && !queue.length;
+  if (finished) log.push(`Finished: ${metaBackfillDaysText(doneDays)} pulled.`);
+  else if (failed) log.push(`Stopped at the first problem. ${metaBackfillDaysText(doneDays)} saved; run it again to carry on with the rest.`);
+  metaBackfillPrint([note, ...log.slice(-14)], finished ? 'ok' : (failed ? 'err' : ''));
   metaBackfillRunning = false; setMetaSyncBusy(false);
   metaBackfillEl('meta-backfill-run-btn').disabled = false; metaBackfillEl('meta-backfill-check-btn').disabled = false; metaBackfillEl('meta-backfill-stop-btn').hidden = true; metaBackfillEl('meta-backfill-stop-btn').disabled = false;
   loadMetaSyncPanel();
