@@ -1836,6 +1836,19 @@
             <button type="button" class="btn btn-ghost btn-sm" id="meta-inventory-refresh-btn">Refresh Ad Inventory</button>
             <span class="meta-sync-hint">Refreshes Meta ad names/statuses and discovers new historical ad records. Not required for normal daily performance syncing.</span>
           </div>
+          <!-- Older days: the automatic sync only covers the last few days, so a year of history is pulled here, on purpose, one 30-day chunk at a time (read-only; safe to stop and resume). -->
+          <div class="meta-sync-maintenance meta-backfill" id="meta-backfill">
+            <div class="meta-backfill-title">Backfill history</div>
+            <span class="meta-sync-hint">Fills in older days the automatic sync does not cover (it only keeps the last few days up to date). It only reads from Meta and stores the daily figures, one 30-day chunk at a time, only for days not yet synced. You can stop at any point and carry on later.</span>
+            <div class="meta-backfill-row">
+              <label>From <input type="date" id="meta-backfill-since"></label>
+              <label>To <input type="date" id="meta-backfill-until"></label>
+              <button type="button" class="btn btn-ghost btn-sm" id="meta-backfill-check-btn">Check what is missing</button>
+              <button type="button" class="btn btn-primary btn-sm" id="meta-backfill-run-btn">Backfill history</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="meta-backfill-stop-btn" hidden>Stop after this chunk</button>
+            </div>
+            <div class="meta-backfill-progress" id="meta-backfill-progress" aria-live="polite"></div>
+          </div>
         </div>
       </div>
 

@@ -103,7 +103,7 @@ async function getFreshness(range, { now = Date.now(), db = pool } = {}, deps = 
     campaigns: { fetched_at: camp.at ? camp.at.toISOString() : null, count: camp.count, stale: campStale, ttl_minutes: Math.round(CAMPAIGN_TTL_MS / MIN) },
     refreshing: running,
     is_refreshing: running.sync || running.reach || running.campaigns,
-    needs_refresh: { additive: additive.stale && !!additive.window, reach: reach.state !== 'loading' && (reach.state !== 'ready' || !reachFresh), campaigns: campStale },
+    needs_refresh: { additive: additive.stale && !!additive.window, reach: reach.state !== 'loading' && !(reach.state === 'failed' && reach.last_error && reach.last_error.code === 'range_too_long') && (reach.state !== 'ready' || !reachFresh), campaigns: campStale },
     attempt_keys: { sync: key('sync'), reach: key('reach') },
   };
 }

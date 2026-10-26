@@ -801,6 +801,8 @@ module.exports = {
   refreshInventory,
   defaultWindow,
   runBackfill,
+  chunkRange,
+  BACKFILL_CHUNK_DAYS,
   getSyncStatus,
   rederiveConversions,
   conversionAliasTotals,

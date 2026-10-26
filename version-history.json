@@ -2,6 +2,15 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.9.1",
+      "date": "2026-10-26",
+      "title": "Meta: backfill history control, clearer long-range Reach message",
+      "changes": [
+        "Settings > Meta Sync has a Backfill history control: check what is missing, then pull older days one 30-day chunk at a time, with stop and resume",
+        "Reach and Frequency on a range too long for Meta now says so plainly and stops retrying automatically"
+      ]
+    },
+    {
       "version": "1.9.0",
       "date": "2026-10-22",
       "title": "Select samples: warn when a person's size is unavailable",

@@ -11,6 +11,7 @@ const { requireAdmin } = require('../lib/permissions');
 const metaAds = require('../lib/metaAds');
 const metaSync = require('../lib/metaSync');
 const adMatching = require('../lib/metaAdMatching');
+const perf = require('../lib/metaPerformance');
 
 const router = express.Router();
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -128,6 +129,30 @@ router.post('/backfill', requireAdmin, async (req, res, next) => {
   } catch (err) {
     sendMetaError(res, err);
   }
+});
+
+// What a history backfill would still have to pull, read from the stored sync history only (NO Meta call): the days of since..until that no complete sync covers
+// (never synced, or last synced before the day ended), split into the same 30-day chunks runBackfill uses. The Settings page sends them to POST /backfill one chunk
+// at a time, so a long history never rides on one long web request and a stop or a failure leaves everything before it stored. Today is left to the automatic sync.
+const MAX_PLAN_DAYS = 800;
+router.get('/backfill-plan', requireAdmin, async (req, res, next) => {
+  try {
+    const { since } = req.query;
+    if (!since || !DATE_RE.test(since)) return res.status(400).json({ error: 'since (YYYY-MM-DD) is required' });
+    if (req.query.until && !DATE_RE.test(req.query.until)) return res.status(400).json({ error: 'until must be YYYY-MM-DD' });
+    const yesterday = perf.addDays(perf.ymdInZone(new Date(), perf.REPORTING_TIMEZONE), -1);
+    const until = req.query.until && req.query.until < yesterday ? req.query.until : yesterday;
+    if (since > until) return res.status(400).json({ error: 'since must be on or before until (and before today)' });
+    if (perf.listDates(since, until).length > MAX_PLAN_DAYS) return res.status(400).json({ error: `Choose at most ${MAX_PLAN_DAYS} days` });
+    const cov = await perf.getCoverage({ since, until }, new Date());
+    const ranges = [...cov.missing_ranges, ...cov.partial_ranges].sort((a, b) => (a.since < b.since ? -1 : 1));
+    const chunks = ranges.flatMap((r) => metaSync.chunkRange(r.since, r.until, metaSync.BACKFILL_CHUNK_DAYS))
+      .map((c) => ({ ...c, days: perf.listDates(c.since, c.until).length }));
+    res.json({
+      since, until, total_days: cov.total_days, missing_days: cov.missing_days, partial_days: cov.partial_days,
+      chunks, configured: metaAds.configured(),
+    });
+  } catch (err) { next(err); }
 });
 
 // Production-QA reconciliation aid: every purchase / add-to-cart alias Meta

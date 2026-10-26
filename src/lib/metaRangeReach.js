@@ -120,8 +120,10 @@ async function runPull(pullId, range, today, deps = {}) {
     }
   } catch (err) {
     const safe = err && err.safe;
-    const code = err && err.rateLimited ? 'rate_limited' : safe ? 'meta_error' : 'error';
-    const message = safe ? err.message : (err && /pagination/.test(err.message) ? err.message : 'The Meta request failed. Existing data is safe; try again later.');
+    // Meta will not work out unique Reach over a very long range ("Please reduce the amount of data you're asking for"): say so plainly instead of showing Meta's raw error.
+    const tooLong = !!(safe && !err.rateLimited && (/reduce the amount of data/i.test(err.message) || (err.metaCode === 1 && err.status >= 500)));
+    const code = err && err.rateLimited ? 'rate_limited' : tooLong ? 'range_too_long' : safe ? 'meta_error' : 'error';
+    const message = tooLong ? "Meta won't calculate unique Reach for a range this long. Choose a shorter range." : safe ? err.message : (err && /pagination/.test(err.message) ? err.message : 'The Meta request failed. Existing data is safe; try again later.');
     await pool.query(
       "UPDATE meta_reach_pulls SET state = 'failed', finished_at = now(), error_code = $2, error_message = $3, retry_after_seconds = $4 WHERE id = $1",
       [pullId, code, String(message).slice(0, 300), (err && err.retryAfterSeconds) || null]

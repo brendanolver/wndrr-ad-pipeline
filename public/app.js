@@ -4464,10 +4464,12 @@ function setMetaSyncBusy(busy, runLabel) {
   runBtn.disabled = busy;
   invBtn.disabled = busy;
   runBtn.textContent = runLabel || 'Run 3-Day Sync';
+  const bf = document.getElementById('meta-backfill-run-btn'); if (bf && !metaBackfillRunning) bf.disabled = busy;
   invBtn.textContent = 'Refresh Ad Inventory';
 }
 
 async function loadMetaSyncPanel() {
+  if (typeof metaBackfillDefaults === 'function') metaBackfillDefaults();
   try {
     const status = await api('/meta-sync/status');
     const last = status.last_successful_run || null;
@@ -4566,6 +4568,75 @@ async function refreshMetaInventory() {
     loadMetaSyncPanel();
   }
 }
+// ── Backfill history ──────────────────────────────────────────────────────
+// Reads GET /api/meta-sync/backfill-plan (stored sync history only; no Meta call) to learn which days still need pulling, then, only after a confirm, sends the
+// chunks one by one to POST /api/meta-sync/backfill (each a single 30-day, read-only pull). It stops at the first failure or rate limit, or when asked; every chunk that
+// finished stays stored, and running it again carries on with what is still missing.
+let metaBackfillRunning = false; let metaBackfillStop = false;
+const metaBackfillEl = (id) => document.getElementById(id);
+function metaBackfillDefaults() {
+  if (metaBackfillEl('meta-backfill-since').value) return;
+  const day = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  const now = new Date();
+  metaBackfillEl('meta-backfill-until').value = day(new Date(now.getTime() - 86400000));
+  metaBackfillEl('meta-backfill-since').value = day(new Date(now.getTime() - 365 * 86400000));
+}
+function metaBackfillPrint(lines, kind) {
+  const el = metaBackfillEl('meta-backfill-progress');
+  el.className = `meta-backfill-progress${kind ? ` ${kind}` : ''}`;
+  el.innerHTML = lines.map((l) => `<div>${escapeHtml(l)}</div>`).join('');
+}
+async function metaBackfillPlan() {
+  const since = metaBackfillEl('meta-backfill-since').value; const until = metaBackfillEl('meta-backfill-until').value;
+  if (!since || !until) throw new Error('Choose both dates');
+  return api(`/meta-sync/backfill-plan?since=${encodeURIComponent(since)}&until=${encodeURIComponent(until)}`);
+}
+const metaBackfillDays = (n) => `${n} day${n === 1 ? '' : 's'}`;
+async function metaBackfillCheck() {
+  if (metaBackfillRunning) return;
+  try {
+    const plan = await metaBackfillPlan();
+    if (!plan.chunks.length) return metaBackfillPrint([`Nothing to pull: every day from ${formatDate(plan.since)} to ${formatDate(plan.until)} is already synced.`], 'ok');
+    metaBackfillPrint([`${metaBackfillDays(plan.missing_days + plan.partial_days)} of ${plan.total_days} still to pull, in ${plan.chunks.length} chunk${plan.chunks.length === 1 ? '' : 's'}.`, ...(plan.configured ? [] : ['Meta is not configured in this environment, so nothing can be pulled here.'])]);
+  } catch (e) { metaBackfillPrint([e.message], 'err'); }
+}
+async function metaBackfillRun() {
+  if (metaBackfillRunning || metaSyncRunning) return;
+  let plan;
+  try { plan = await metaBackfillPlan(); } catch (e) { return metaBackfillPrint([e.message], 'err'); }
+  if (!plan.configured) return metaBackfillPrint(['Meta is not configured in this environment, so nothing can be pulled here.'], 'err');
+  if (!plan.chunks.length) return metaBackfillPrint([`Nothing to pull: every day from ${formatDate(plan.since)} to ${formatDate(plan.until)} is already synced.`], 'ok');
+  const total = plan.missing_days + plan.partial_days;
+  const ok = await confirmDialog(`Pull ${metaBackfillDays(total)} of history (${formatDate(plan.since)} to ${formatDate(plan.until)}) from Meta in ${plan.chunks.length} chunk${plan.chunks.length === 1 ? '' : 's'}? This only reads from Meta and stores the daily figures; nothing in Meta is changed. It can take several minutes (roughly one to two per chunk) and uses your Meta request allowance. You can stop at any point and resume later.`, { okLabel: 'Start backfill' });
+  if (!ok) return;
+  metaBackfillRunning = true; metaBackfillStop = false; setMetaSyncBusy(true);
+  metaBackfillEl('meta-backfill-run-btn').disabled = true; metaBackfillEl('meta-backfill-check-btn').disabled = true; metaBackfillEl('meta-backfill-stop-btn').hidden = false;
+  const log = []; let failed = null; let done = 0;
+  for (let i = 0; i < plan.chunks.length; i++) {
+    if (metaBackfillStop) { log.push('Stopped. Everything pulled so far is stored; run it again to carry on.'); break; }
+    const c = plan.chunks[i];
+    metaBackfillPrint([...log, `Chunk ${i + 1} of ${plan.chunks.length}: ${formatDate(c.since)} – ${formatDate(c.until)} …`]);
+    try {
+      const r = await api('/meta-sync/backfill', { method: 'POST', body: JSON.stringify({ since: c.since, until: c.until }) });
+      const res = (r.chunks && r.chunks[0]) || {};
+      if (!r.completed || res.ok === false) { failed = res.rate_limited ? 'Meta rate limit reached. Existing data is safe. Try again later.' : (res.error || 'The chunk did not finish'); log.push(`Chunk ${i + 1} (${formatDate(c.since)} – ${formatDate(c.until)}) failed: ${failed}`); break; }
+      done += 1; log.push(`Chunk ${i + 1} of ${plan.chunks.length} done: ${formatDate(c.since)} – ${formatDate(c.until)} (${res.daily_rows_seen || 0} daily rows).`);
+    } catch (e) {
+      failed = e.status === 429 ? 'Meta rate limit reached. Existing data is safe. Try again later.' : e.message;
+      log.push(`Chunk ${i + 1} (${formatDate(c.since)} – ${formatDate(c.until)}) failed: ${failed}`); break;
+    }
+  }
+  const finished = !failed && !metaBackfillStop && done === plan.chunks.length;
+  if (finished) log.push(`Finished: ${plan.chunks.length} chunk${plan.chunks.length === 1 ? '' : 's'} pulled.`);
+  else if (failed) log.push(`Stopped at the first problem. ${done} chunk${done === 1 ? '' : 's'} saved; run it again to carry on with the rest.`);
+  metaBackfillPrint(log, finished ? 'ok' : (failed ? 'err' : ''));
+  metaBackfillRunning = false; setMetaSyncBusy(false);
+  metaBackfillEl('meta-backfill-run-btn').disabled = false; metaBackfillEl('meta-backfill-check-btn').disabled = false; metaBackfillEl('meta-backfill-stop-btn').hidden = true; metaBackfillEl('meta-backfill-stop-btn').disabled = false;
+  loadMetaSyncPanel();
+}
+metaBackfillEl('meta-backfill-check-btn').addEventListener('click', metaBackfillCheck);
+metaBackfillEl('meta-backfill-run-btn').addEventListener('click', metaBackfillRun);
+metaBackfillEl('meta-backfill-stop-btn').addEventListener('click', () => { metaBackfillStop = true; metaBackfillEl('meta-backfill-stop-btn').disabled = true; });
 document.getElementById('meta-sync-run-btn').addEventListener('click', runMetaSync);
 document.getElementById('meta-inventory-refresh-btn').addEventListener('click', refreshMetaInventory);
 
