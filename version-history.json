@@ -2,6 +2,14 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.9.3",
+      "date": "2026-10-26",
+      "title": "Backfill history: retry Meta's 'temporarily unavailable' in smaller pieces",
+      "changes": [
+        "A backfill chunk that Meta answers with 'Service temporarily unavailable' is now split into smaller pieces and retried; if a single day still fails the run stops with a clear message"
+      ]
+    },
+    {
       "version": "1.9.2",
       "date": "2026-10-26",
       "title": "Backfill history: split chunks Meta says are too much data",

@@ -41,8 +41,8 @@ test('Reach for a range Meta will not calculate: a plain message, and no automat
 const vm = require('vm');
 const block = app.slice(app.indexOf('// <backfill-pure>'), app.indexOf('// </backfill-pure>'));
 const ctx = {}; vm.createContext(ctx);
-vm.runInContext(`${block}; this.api = { metaBackfillDays, metaBackfillSplit, metaBackfillHalves, metaBackfillTooMuch };`, ctx);
-const { metaBackfillDays, metaBackfillSplit, metaBackfillHalves, metaBackfillTooMuch } = ctx.api;
+vm.runInContext(`${block}; this.api = { metaBackfillDays, metaBackfillSplit, metaBackfillHalves, metaBackfillTooMuch, metaBackfillBusy };`, ctx);
+const { metaBackfillDays, metaBackfillSplit, metaBackfillHalves, metaBackfillTooMuch, metaBackfillBusy } = ctx.api;
 const J = (v) => JSON.parse(JSON.stringify(v)); // values built inside the vm are from another realm
 
 test('splitting: whole days, inclusive, no gaps or overlaps, in order', () => {
@@ -62,9 +62,18 @@ test('halving: 30 -> 15 + 15, 7 -> 4 + 3, 1 day cannot be halved; only Meta\'s "
   assert.ok(!metaBackfillTooMuch('Meta rate limit reached. Existing data is safe. Try again later.') && !metaBackfillTooMuch('') && !metaBackfillTooMuch(null));
 });
 
+test('"Service temporarily unavailable" (code 2, subcode 1504044) is also retried in smaller pieces; rate limits and other errors are not', () => {
+  assert.ok(metaBackfillBusy('Meta request failed (Meta HTTP 400, code 2, subcode 1504044): Service temporarily unavailable'));
+  assert.ok(metaBackfillBusy('Meta request failed (Meta HTTP 400, code 2): An unexpected error has occurred'));
+  assert.ok(!metaBackfillBusy('Meta rate limit reached. Existing data is safe. Try again later.'));
+  assert.ok(!metaBackfillBusy('Meta request failed (Meta HTTP 400, code 200): Permissions error') && !metaBackfillBusy('Meta request failed (Meta HTTP 400, code 100): Invalid parameter'));
+  assert.ok(!metaBackfillBusy('') && !metaBackfillBusy(null));
+});
+
 test('the run halves on that message, keeps the size that worked, and still stops on any other failure or at a single day', () => {
   const run = app.slice(app.indexOf('async function metaBackfillRun()'), app.indexOf("metaBackfillEl('meta-backfill-check-btn').addEventListener"));
-  assert.match(run, /metaBackfillTooMuch\(errText\) \? metaBackfillHalves\(c\.since, c\.until\) : null/);
+  assert.match(run, /metaBackfillTooMuch\(errText\) \|\| busy \? metaBackfillHalves\(c\.since, c\.until\) : null/);
+  assert.match(run, /temporarily unavailable, even for a single day/, 'a single day that still fails is real downtime and stops the run');
   assert.match(run, /maxDays = halves\[0\]\.days; queue\.unshift\(\.\.\.halves\)/);
   assert.match(run, /if \(c\.days > maxDays\)/, 'later chunks start at the size that worked');
   assert.match(run, /Meta refuses even a single day/);

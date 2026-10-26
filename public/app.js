@@ -4617,6 +4617,8 @@ function metaBackfillHalves(since, until) {
   return metaBackfillSplit(since, until, Math.ceil(n / 2));
 }
 const metaBackfillTooMuch = (msg) => /reduce the amount of data/i.test(String(msg || ''));
+// Meta's generic "Service temporarily unavailable" (code 2, e.g. subcode 1504044): it is also how Meta answers a request that is too heavy, so a big chunk is retried in smaller pieces; a single day that still fails is real downtime.
+const metaBackfillBusy = (msg) => /temporarily unavailable|\bcode 2[,)]|subcode 1504044/i.test(String(msg || ''));
 // </backfill-pure>
 async function metaBackfillRun() {
   if (metaBackfillRunning || metaSyncRunning) return;
@@ -4645,9 +4647,16 @@ async function metaBackfillRun() {
       else { doneDays += c.days; log.push(`Done: ${label} (${res.daily_rows_seen || 0} daily rows).`); }
     } catch (e) { errText = e.status === 429 ? 'Meta rate limit reached. Existing data is safe. Try again later.' : e.message; }
     if (!errText) continue;
-    const halves = metaBackfillTooMuch(errText) ? metaBackfillHalves(c.since, c.until) : null;
-    if (halves) { maxDays = halves[0].days; queue.unshift(...halves); note = `Meta said a chunk was too much data at once, so the rest is being pulled in smaller pieces (${metaBackfillDaysText(maxDays)} at a time).`; log.push(`${label} was too much data for Meta at once; splitting it.`); continue; }
-    failed = metaBackfillTooMuch(errText) ? `Meta refuses even a single day (${label}) as too much data.` : errText;
+    const busy = metaBackfillBusy(errText);
+    const halves = metaBackfillTooMuch(errText) || busy ? metaBackfillHalves(c.since, c.until) : null;
+    if (halves) {
+      maxDays = halves[0].days; queue.unshift(...halves);
+      note = `Meta turned down a larger chunk (too much data at once, or briefly unavailable), so the rest is being pulled in smaller pieces (${metaBackfillDaysText(maxDays)} at a time).`;
+      log.push(`${label} was refused by Meta at that size; splitting it.`);
+      if (busy) await new Promise((r) => setTimeout(r, 2000)); // a short breather before asking again
+      continue;
+    }
+    failed = metaBackfillTooMuch(errText) ? `Meta refuses even a single day (${label}) as too much data.` : busy ? `Meta says its service is temporarily unavailable, even for a single day (${label}). Try again later.` : errText;
     log.push(`${label} failed: ${failed}`); break;
   }
   const finished = !failed && !metaBackfillStop && !queue.length;
