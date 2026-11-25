@@ -31,9 +31,16 @@ function makeRouter(deps = {}) {
       const dueDate = req.query.due_date || null;
       if (!wo.validWeek(weekStart)) return res.status(400).json({ error: 'week_start must be YYYY-MM-DD' });
       if (dueDate && !wo.validDate(dueDate)) return res.status(400).json({ error: 'due_date must be YYYY-MM-DD' });
-      const items = await wo.weekItems(db, weekStart);
-      const answer = await call('review', { weekStart, items, dueDate });
-      res.json({ ...answer, configured: !answer.notConfigured, samples: items.length, week_passed: await weekHasPassed(weekStart) });
+      const rows = await wo.weekRows(db, weekStart);
+      const answer = await call('review', { weekStart, items: rows.map(wo.toItem), dueDate });
+      // The page's list: one row per sample with its colour and the sizes it can be changed to (catalogue data the Shoot Plan already loads, cached).
+      let samples = null;
+      if (answer.ok && answer.review) {
+        let am = null;
+        try { am = deps.am || (await require('../lib/planningData').fetchAmData()); } catch (e) { am = null; }
+        samples = wo.markToOrder(rows.map((r) => wo.toSample(r, am)), answer.review.toOrder);
+      }
+      res.json({ ...answer, configured: !answer.notConfigured, samples, sample_count: rows.length, week_passed: await weekHasPassed(weekStart) });
     } catch (err) {
       if (err instanceof wo.TuesdayUnreachable) return res.json({ ok: false, configured: true, error: `${err.message}, so the warehouse order can't be shown right now. Try again in a minute.` });
       next(err);

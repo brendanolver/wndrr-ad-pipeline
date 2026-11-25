@@ -9,6 +9,10 @@ Planning > Shoot Plan has a **Send to Warehouse** panel under the summary bar.
 * It lists every selected colourway that is **not** marked "already in the office", one piece each. These are the same rows as the Warehouse Pick List CSV.
 * Staff pick a **needed by** date. It defaults to the next working day, and it can't be in the past.
 * The panel shows the **Customer PO** the order will carry, e.g. `AD SHOOT 28/11/26`, and a fresh stock look for each sample.
+* **Check the sizes** (v1.9.6): every sample is listed with its product, colour name (from ApparelMagic when the plan has no colour label) and style code, and has its own size picker.
+  * The sizes start as the Shoot Plan filled them in, from the "Assigned to" person's saved sizes.
+  * Sizes with no warehouse stock are greyed out.
+  * Changing one saves it straight to the Shoot Plan sample (the same record Manage Samples edits), so the plan, the CSV and the order agree. Tuesday then checks stock for the new size.
 * **Send N samples to warehouse** asks once more ("Send 6 samples to the warehouse, needed by Fri 28 Nov?"). Then it creates ONE ApparelMagic order under the **WNDRR SHOOT STOCK** customer.
 * Once sent, the panel shows the ApparelMagic order number, PO, sample count, date and who sent it.
 * Samples added to the plan after an order are offered as the week's next order, with `#2`, `#3` and so on on the PO. Samples taken off the plan after ordering are not un-ordered: cancel or change those in ApparelMagic.

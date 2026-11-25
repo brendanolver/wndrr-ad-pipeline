@@ -10211,9 +10211,46 @@ function whBlockers(d) {
   }
   return out;
 }
+// The SKU key Tuesday matches on: style code then size, upper case, no spaces.
+const whSku = (code, size) => `${String(code || '').trim().toUpperCase()}${String(size || '').trim().toUpperCase()}`.replace(/\s+/g, '');
+// The size options for one sample: every size its colour comes in, out-of-stock sizes disabled (except the one already chosen, so it still shows), and the saved size kept
+// even if the catalogue doesn't list it. No catalogue sizes at all: just the saved size.
+function whSizeOptions(s) {
+  const sizes = (s.sizes || []).map(String);
+  const list = s.size && !sizes.some((x) => x.toUpperCase() === String(s.size).toUpperCase()) ? [String(s.size), ...sizes] : sizes;
+  return list.map((sz) => {
+    const q = s.size_stock ? s.size_stock[sz.toUpperCase()] : undefined;
+    const chosen = !!s.size && sz.toUpperCase() === String(s.size).toUpperCase();
+    return { size: sz, chosen, out: q !== undefined && q <= 0, disabled: q !== undefined && q <= 0 && !chosen };
+  });
+}
 // </warehouse-order-pure>
+function whSizePicker(s) {
+  const opts = whSizeOptions(s);
+  const off = wh.busy || wh.saving ? ' disabled' : '';
+  if (!opts.length) return `<b class="whp-size-fixed">${escapeHtml(s.size || '-')}</b>`;
+  return `<select class="whp-size" aria-label="Size for ${escapeHtml(s.product_name)} ${escapeHtml(s.colour || s.style_code)}" onchange="setWarehouseSampleSize(${Number(s.item_id)}, ${Number(s.style_id)}, this.value)"${off}>${s.size ? '' : '<option value="" selected>Choose size</option>'}${opts.map((o) => `<option value="${escapeHtml(o.size)}"${o.chosen ? ' selected' : ''}${o.disabled ? ' disabled' : ''}>${escapeHtml(o.size)}${o.out ? ' (none)' : ''}</option>`).join('')}</select>`;
+}
+// Saves a new size to the Shoot Plan sample (the same record Manage Samples edits), then asks Tuesday again so the order, PO check and stock follow it.
+async function setWarehouseSampleSize(itemId, styleId, size) {
+  if (!size || wh.busy) return;
+  Object.assign(wh, { saving: true, confirming: false, note: null });
+  try {
+    await api(`/shoot-plan/${itemId}/styles/${styleId}`, { method: 'PATCH', body: JSON.stringify({ size }) });
+    const item = (state.shootPlan || []).find((i) => i.id === itemId);
+    const st = item && (item.styles || []).find((x) => x.style_id === styleId);
+    if (st) st.size = size;
+    toast('Size updated');
+  } catch (e) {
+    wh.note = `That size wasn't saved: ${e.message}`;
+    toast(e.message, true);
+  }
+  wh.saving = false;
+  renderShootPlanStep();
+  scheduleWarehouseOrderLoad(true);
+}
 
-const wh = { week: null, key: null, data: null, at: 0, seq: 0, loading: false, dueDate: null, confirming: false, busy: false, note: null, check: null, linesOpen: false };
+const wh = { week: null, key: null, data: null, at: 0, seq: 0, loading: false, dueDate: null, confirming: false, busy: false, saving: false, note: null, check: null };
 let whTimer = null;
 const WH_TRUCK = '<svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M2 6h11v10H2zM13 9h4l4 4v3h-8z"/><circle cx="6" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/></svg>';
 
@@ -10295,14 +10332,24 @@ function warehouseOrderHtml() {
 function whFormHtml(d) {
   const r = d.review;
   const blockers = whBlockers(d);
-  const ready = !blockers.length && !!r.fingerprint && !!r.customerPo && !wh.loading;
+  const ready = !blockers.length && !!r.fingerprint && !!r.customerPo && !wh.loading && !wh.saving;
   const stockLine = (i) => {
     const s = d.stock && d.stock.lines && d.stock.lines[i];
     if (!s) return '';
     if (s.message) return `<small class="whp-bad">${escapeHtml(s.message)}</small>`;
     return s.available !== null && s.available !== undefined ? `<small>${escapeHtml(String(s.available))} in stock</small>` : '';
   };
-  const lines = r.toOrder.map((l, i) => `<li><span>${escapeHtml(l.productName)}${l.colour ? ` &middot; ${escapeHtml(l.colour)}` : ''} &middot; <b>${escapeHtml(l.size || '-')}</b>${l.quantity > 1 ? ` &times; ${l.quantity}` : ''}</span>${stockLine(i)}</li>`).join('');
+  // One row per sample still to order, each with its own size picker (v1.9.6). Sizes start as the Shoot Plan filled them in (the Assigned to person's size);
+  // changing one saves it to the plan straight away, so the plan, the CSV and the order all agree. Older answers without `samples` fall back to the plain list.
+  const samples = (d.samples || []).filter((s) => s.to_order);
+  const liveStock = (s) => {
+    const i = r.toOrder.findIndex((l) => whSku(l.styleNumber, l.size) === whSku(s.style_code, s.size));
+    return i >= 0 ? stockLine(i) : '';
+  };
+  const lines = samples.length
+    ? samples.map((s) => `<li class="whp-sample"><span class="whp-sname">${escapeHtml(s.product_name)} &middot; <b>${escapeHtml(s.colour || s.style_code)}</b><small class="whp-code">${escapeHtml(s.style_code)}</small></span>
+        <span class="whp-sright">${whSizePicker(s)}${liveStock(s)}</span></li>`).join('')
+    : r.toOrder.map((l, i) => `<li><span>${escapeHtml(l.productName)}${l.colour ? ` &middot; ${escapeHtml(l.colour)}` : ''} &middot; <b>${escapeHtml(l.size || '-')}</b>${l.quantity > 1 ? ` &times; ${l.quantity}` : ''}</span>${stockLine(i)}</li>`).join('');
   const action = wh.busy
     ? `<div class="whp-busy" role="status">Sending to ApparelMagic&hellip; this can take up to a minute. Please keep this page open.</div>`
     : wh.confirming && ready
@@ -10315,7 +10362,7 @@ function whFormHtml(d) {
       <div class="whp-action">${action}</div>
     </div>
     ${blockers.length ? `<ul class="whp-problems">${blockers.map((b) => `<li>${escapeHtml(b)}</li>`).join('')}</ul>` : ''}${unchecked}
-    <details class="whp-lines"${wh.linesOpen ? ' open' : ''} ontoggle="wh.linesOpen = this.open"><summary>What&rsquo;s being ordered (${whPlural(r.totalPieces, 'sample')})</summary><ul>${lines}</ul></details>`;
+    <div class="whp-lines"><div class="whp-lines-h"><b>Check the sizes</b><span>${whPlural(r.totalPieces, 'sample')}. Sizes start from the person each product is assigned to; change any that are wrong before sending.</span></div><ul>${lines}</ul></div>`;
 }
 
 function setWarehouseDueDate(value) {

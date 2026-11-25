@@ -2,6 +2,15 @@
   "scheme": "Three digits, each 0-9, counting up like an odometer: 1.0.0, 1.0.1 ... 1.0.9, then 1.1.0 ... 1.9.9, then 2.0.0. Every change bumps the last digit.",
   "entries": [
     {
+      "version": "1.9.6",
+      "date": "2026-11-25",
+      "title": "Send to Warehouse: colour names and a size picker per sample",
+      "changes": [
+        "Every sample in the Send to Warehouse list shows its colour name (from ApparelMagic when the plan has no colour label) and style code, so colourways of the same product no longer look identical",
+        "Each sample has its own size picker, pre-filled with the Shoot Plan's size; sizes with no warehouse stock are greyed out; a change saves to the Shoot Plan sample and the order re-checks stock"
+      ]
+    },
+    {
       "version": "1.9.5",
       "date": "2026-11-25",
       "title": "Send to Warehouse on the Shoot Plan",

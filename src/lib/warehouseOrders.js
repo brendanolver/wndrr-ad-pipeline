@@ -14,6 +14,7 @@
 // CREATIVE_PIPELINE_API_KEY). Either missing = ordering is off and the page says so; the CSV export keeps working.
 
 const { autoLinkedSql } = require('./shootPlanSelection');
+const apparelmagic = require('./apparelmagic');
 
 const WEEK_RE = /^\d{4}-\d{2}-\d{2}$/;
 const PATH = '/api/creative-pipeline/shoot-orders';
@@ -29,9 +30,9 @@ function settings(env = process.env) {
 // The week's warehouse samples, one line per selected colourway that is not already in the office. Same rule as the page's Warehouse Pick List (app.js
 // shootPlanWarehouseRows): products the plan only links automatically are not part of the selection, and a product marked "in office" as a whole counts for every
 // colourway. One piece each, as the CSV export always has.
-async function weekItems(db, weekStart) {
+async function weekRows(db, weekStart) {
   const { rows } = await db.query(
-    `SELECT COALESCE(NULLIF(trim(spi.product_name), ''), s.name, s.style_code) AS product_name, s.style_code, spis.colour_label, spis.size
+    `SELECT spi.id AS item_id, s.id AS style_id, COALESCE(NULLIF(trim(spi.product_name), ''), s.name, s.style_code) AS product_name, s.style_code, spis.colour_label, spis.size
      FROM shoot_plan_items spi
      JOIN shoot_plan_item_styles spis ON spis.shoot_plan_item_id = spi.id
      JOIN styles s ON s.id = spis.style_id
@@ -42,13 +43,63 @@ async function weekItems(db, weekStart) {
      ORDER BY spi.created_at ASC, spi.id ASC, s.style_code ASC`,
     [weekStart]
   );
-  return rows.map((r) => ({
+  return rows;
+}
+
+// What Tuesday is sent: exactly the saved plan. (The colour is the plan's own label only, never a name looked up from ApparelMagic, so the list Tuesday checks
+// and the list it places can't differ just because a catalogue lookup did.)
+function toItem(r) {
+  return {
     productName: String(r.product_name || '').slice(0, 200),
     styleNumber: r.style_code ? String(r.style_code).trim() : null,
     colour: r.colour_label ? String(r.colour_label).slice(0, 120) : null,
     size: r.size && String(r.size).trim() ? String(r.size).trim().slice(0, 20) : null,
     quantity: 1,
-  }));
+  };
+}
+
+async function weekItems(db, weekStart) {
+  return (await weekRows(db, weekStart)).map(toItem);
+}
+
+// The same SKU key Tuesday uses: the style code then the size, upper case, no spaces.
+const skuKey = (styleCode, size) => `${String(styleCode || '').trim().toUpperCase()}${String(size || '').trim().toUpperCase()}`.replace(/\s+/g, '');
+
+// One row per sample for the page (v1.9.6): which sample it is (to save a new size to), a readable colour (the plan's label, else ApparelMagic's colour name,
+// else the style code), the sizes that colour comes in and the warehouse stock per size, for the size picker. `am` is planningData.fetchAmData()'s result;
+// with ApparelMagic unavailable the sizes list is empty and the stock is unknown.
+function toSample(r, am) {
+  const code = r.style_code ? String(r.style_code).trim() : '';
+  const sizing = am && am.amDetails ? apparelmagic.resolveStyleSizing(am.amDetails, am.amSizeRanges, code) : { sizes: [] };
+  const bySize = am && am.amStock && am.amStock.sizes && am.amStock.sizes.get ? am.amStock.sizes.get(code) : null;
+  const sizeStock = bySize && bySize.size ? Object.fromEntries([...bySize.entries()].map(([k, v]) => [String(k).toUpperCase(), Number(v) || 0])) : null;
+  const colour = (r.colour_label && String(r.colour_label).trim()) || apparelmagic.resolveColourLabel(am && am.amDetails, code) || null;
+  return {
+    item_id: r.item_id,
+    style_id: r.style_id,
+    product_name: String(r.product_name || ''),
+    style_code: code,
+    colour,
+    size: r.size && String(r.size).trim() ? String(r.size).trim() : null,
+    sizes: (sizing && sizing.sizes) || [],
+    size_stock: sizeStock,
+    to_order: false,
+  };
+}
+
+// Which samples are still to order. Tuesday says how many pieces of each SKU are still to order (review.toOrder); the newest samples of that SKU are the ones
+// not yet on an order, so they are marked, newest first. Everything else is already on one of the week's orders.
+function markToOrder(samples, toOrder) {
+  const left = new Map();
+  for (const l of toOrder || []) left.set(skuKey(l.styleNumber, l.size), (left.get(skuKey(l.styleNumber, l.size)) || 0) + (Number(l.quantity) || 0));
+  for (let i = samples.length - 1; i >= 0; i -= 1) {
+    const k = skuKey(samples[i].style_code, samples[i].size);
+    if ((left.get(k) || 0) > 0) {
+      samples[i].to_order = true;
+      left.set(k, left.get(k) - 1);
+    }
+  }
+  return samples;
 }
 
 class TuesdayUnreachable extends Error {}
@@ -89,4 +140,4 @@ async function callTuesday(action, body, deps = {}) {
 const validWeek = (w) => typeof w === 'string' && WEEK_RE.test(w);
 const validDate = (d) => typeof d === 'string' && WEEK_RE.test(d);
 
-module.exports = { settings, weekItems, callTuesday, TuesdayUnreachable, validWeek, validDate, PATH };
+module.exports = { settings, weekRows, weekItems, toItem, toSample, markToOrder, skuKey, callTuesday, TuesdayUnreachable, validWeek, validDate, PATH };
