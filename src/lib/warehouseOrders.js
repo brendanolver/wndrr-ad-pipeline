@@ -73,7 +73,7 @@ function toSample(r, am) {
   const sizing = am && am.amDetails ? apparelmagic.resolveStyleSizing(am.amDetails, am.amSizeRanges, code) : { sizes: [] };
   const bySize = am && am.amStock && am.amStock.sizes && am.amStock.sizes.get ? am.amStock.sizes.get(code) : null;
   const sizeStock = bySize && bySize.size ? Object.fromEntries([...bySize.entries()].map(([k, v]) => [String(k).toUpperCase(), Number(v) || 0])) : null;
-  const colour = (r.colour_label && String(r.colour_label).trim()) || apparelmagic.resolveColourLabel(am && am.amDetails, code) || null;
+  const colour = (r.colour_label && String(r.colour_label).trim()) || apparelmagic.resolveColourName(am && am.amDetails, code) || apparelmagic.resolveColourLabel(am && am.amDetails, code) || null;
   return {
     item_id: r.item_id,
     style_id: r.style_id,

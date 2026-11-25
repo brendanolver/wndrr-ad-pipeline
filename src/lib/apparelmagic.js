@@ -424,6 +424,11 @@ async function fetchStyleCatalogueUncached() {
     // colourway name (e.g. "Pulse Heavy Weight Tee - Faded Black") -- kept
     // separate from productName rather than re-parsed by every caller.
     const colourNameFromDescription = dashIdx >= 0 ? description.slice(dashIdx + 3).trim() || null : null;
+    // The web storefront title carries the same "PRODUCT - COLOUR" split on most rows where description does not (found by Tuesday's Drops/Quick Send,
+    // which read it the same way). Kept as its own field; only the Shoot Plan's Send to Warehouse list reads it (resolveColourName).
+    const webTitle = (row.web_title || '').trim();
+    const webDash = webTitle.lastIndexOf(' - ');
+    const colourNameFromWebTitle = webDash >= 0 ? webTitle.slice(webDash + 3).trim() || null : null;
     const midCode = (row.mid_code || '').trim();
     const launchDateRaw = midCode && midCode !== '0' ? midCode : null;
 
@@ -444,9 +449,10 @@ async function fetchStyleCatalogueUncached() {
       colorCode: row.color_code != null ? String(row.color_code).trim() || null : null,
       sizeRangeId: row.size_range_id != null ? String(row.size_range_id).trim() || null : null,
       colourNameFromDescription,
+      colourNameFromWebTitle,
     });
   }
-  return map; // Map<style_code, { productName, imageUrl, launchDateRaw, launchDate, isCore, category, colorCode, sizeRangeId, colourNameFromDescription }>
+  return map; // Map<style_code, { productName, imageUrl, launchDateRaw, launchDate, isCore, category, colorCode, sizeRangeId, colourNameFromDescription, colourNameFromWebTitle }>
 }
 
 // Resolves a display-friendly colour name for a style, falling back to null
@@ -457,6 +463,14 @@ function resolveColourLabel(amDetails, styleCode) {
   const details = amDetails ? amDetails.get(styleCode) : null;
   if (!details) return null;
   return details.colourNameFromDescription || details.colorCode || null;
+}
+
+// A readable colour NAME for a style (v1.9.7, Shoot Plan > Send to Warehouse only): the web title's colour, else the description's; null when neither has one
+// (the caller then shows the style code). Unlike resolveColourLabel it never returns a bare colour code. Other screens keep using resolveColourLabel.
+function resolveColourName(amDetails, styleCode) {
+  const details = amDetails ? amDetails.get(styleCode) : null;
+  if (!details) return null;
+  return details.colourNameFromWebTitle || details.colourNameFromDescription || null;
 }
 
 // Resolves the sizes selectable for a style, plus whether they read as a
@@ -542,6 +556,7 @@ module.exports = {
   getSalesByStyle,
   getSizeRanges,
   resolveColourLabel,
+  resolveColourName,
   resolveStyleSizing,
   deriveProductCode,
   isWndrrStyleCode,

@@ -96,7 +96,7 @@ test('the week\'s samples are read from the database: selected colourways not in
 
 // A catalogue as planningData.fetchAmData() returns it: details per style (size range, colour), size ranges, and warehouse stock per size.
 const FAKE_AM = {
-  amDetails: new Map([['W26IA004NAV', { sizeRangeId: 'R1', colourNameFromDescription: 'Navy Marle' }], ['W22IK014BLK', { sizeRangeId: 'R1', colourNameFromDescription: 'Faded Black' }], ['W24JK016WBE', { sizeRangeId: 'R2', colorCode: 'WBE' }]]),
+  amDetails: new Map([['W26IA004NAV', { sizeRangeId: 'R1', colourNameFromDescription: 'Navy Marle' }], ['W22IK014BLK', { sizeRangeId: 'R1', colourNameFromDescription: 'Faded Black' }], ['W24JK016WBE', { sizeRangeId: 'R2', colorCode: 'WBE' }], ['W22JK015AIR', { sizeRangeId: 'R1', colourNameFromWebTitle: 'AIR BLUE', colourNameFromDescription: null, colorCode: 'AIR' }]]),
   amSizeRanges: new Map([['R1', { sizes: ['S', 'M', 'L'] }], ['R2', { sizes: ['28', '30', '32'] }]]),
   amStock: { sizes: new Map([['W26IA004NAV', new Map([['S', 4], ['M', 0], ['L', 9]])], ['W22IK014BLK', new Map([['S', 37], ['M', 2]])]]) },
 };
@@ -199,6 +199,7 @@ test('page: the Send to Warehouse panel sits under the summary bar, refreshes wi
 test('each sample shows a readable colour (the plan\'s label, else ApparelMagic\'s colour name, else the style code) and the sizes and stock for its picker', () => {
   const row = (code, label, size) => ({ item_id: 5, style_id: 9, product_name: 'OFFEND BEACH SHORT', style_code: code, colour_label: label, size });
   assert.deepEqual(wo.toSample(row('W22IK014BLK', null, 'S'), FAKE_AM), { item_id: 5, style_id: 9, product_name: 'OFFEND BEACH SHORT', style_code: 'W22IK014BLK', colour: 'Faded Black', size: 'S', sizes: ['S', 'M', 'L'], size_stock: { S: 37, M: 2 }, to_order: false });
+  assert.equal(wo.toSample(row('W22JK015AIR', null, 'S'), FAKE_AM).colour, 'AIR BLUE', 'the web title\'s colour name comes first');
   assert.equal(wo.toSample(row('W24JK016WBE', null, '30'), FAKE_AM).colour, 'WBE', 'colour code when there is no colour name');
   assert.equal(wo.toSample(row('W22IK014BLK', 'Black', 'S'), FAKE_AM).colour, 'Black', 'the plan\'s own label wins');
   const bare = wo.toSample(row('W99XX001ZZZ', null, 'M'), null);
@@ -235,4 +236,15 @@ test('page: the sizes are checked in a visible list, and a change saves to the S
   assert.match(app, /onchange="setWarehouseSampleSize\(\$\{Number\(s\.item_id\)\}, \$\{Number\(s\.style_id\)\}, this\.value\)"/);
   assert.match(app, /await api\(`\/shoot-plan\/\$\{itemId\}\/styles\/\$\{styleId\}`, \{ method: 'PATCH', body: JSON\.stringify\(\{ size \}\) \}\);[\s\S]{0,600}scheduleWarehouseOrderLoad\(true\);/);
   assert.match(app, /const ready = [^;]*!wh\.saving;/, 'no sending while a size is being saved');
+});
+
+test('catalogue: the colour name is read from the web title as well as the description (only the warehouse list uses it)', () => {
+  const am = require('../src/lib/apparelmagic');
+  const details = new Map([['A', { colourNameFromWebTitle: 'FADED BLACK', colourNameFromDescription: 'Black', colorCode: 'BLK' }], ['B', { colourNameFromWebTitle: null, colourNameFromDescription: 'Oyster', colorCode: 'OYS' }], ['C', { colorCode: 'CEG' }]]);
+  assert.equal(am.resolveColourName(details, 'A'), 'FADED BLACK');
+  assert.equal(am.resolveColourName(details, 'B'), 'Oyster');
+  assert.equal(am.resolveColourName(details, 'C'), null, 'never a bare colour code');
+  assert.equal(am.resolveColourLabel(details, 'C'), 'CEG', 'other screens are unchanged');
+  const src = read('src', 'lib', 'apparelmagic.js');
+  assert.match(src, /const colourNameFromWebTitle = webDash >= 0 \? webTitle\.slice\(webDash \+ 3\)\.trim\(\) \|\| null : null;/);
 });
