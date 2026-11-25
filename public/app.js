@@ -9942,6 +9942,8 @@ function renderShootPlanStep() {
   const sum = document.getElementById('shoot-plan-summary');
   if (sum) sum.innerHTML = shootPlanSummaryHtml();
   wireShootPlanTiles();
+  renderWarehouseOrder();
+  scheduleWarehouseOrderLoad();
   renderWeeklyShootPlanConfirmation();
   if (typeof renderProductionHeader === 'function') renderProductionHeader(); // the Planning tray follows the same selection
 }
@@ -10176,6 +10178,205 @@ function downloadApparelMagicCsv() {
   a.download = `apparel-magic-shoot-plan-${today}.csv`;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+// ── Shoot Plan > Send to Warehouse (v1.9.5) ──────────
+// The samples on the Warehouse Pick List (every selected colourway not already in the office) go to the warehouse as ONE ApparelMagic order for the week, under
+// WNDRR SHOOT STOCK, with Customer PO "AD SHOOT <needed-by date>" (" #2" and up for clothing added after the first order). TUESDAY places it with the same checks it
+// uses for its own shoot orders (stock, no double orders, ApparelMagic's copy read back); this app never writes to ApparelMagic itself. The server reads the week's
+// samples from the database, so the page only picks the needed-by date and confirms. See src/lib/warehouseOrders.js and docs/warehouse-orders.md.
+// <warehouse-order-pure>
+// The default needed-by date: the next working day (Saturday and Sunday skipped).
+function whNextWorkingDay(from) {
+  const d = new Date(from.getFullYear(), from.getMonth(), from.getDate() + 1);
+  while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
+  return d;
+}
+const whIso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+function whNiceDate(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || '');
+  if (!m) return iso || '';
+  return new Date(+m[1], +m[2] - 1, +m[3]).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
+}
+const whPlural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+// What stops the order being sent, in the order to fix it: the week's own problems (a missing size, a past date), sending switched off in Tuesday, then stock.
+// Stock that couldn't be looked at doesn't block: Tuesday checks stock again, live, when the order is sent.
+function whBlockers(d) {
+  if (!d || !d.ok || !d.review) return [];
+  const out = [...(d.review.problems || [])];
+  if (d.readiness && !d.readiness.canSend) out.push(...(d.readiness.blockers || ["Sending to the warehouse is switched off in Tuesday right now."]));
+  if (d.stock && !d.stock.ok && d.stock.source !== 'unavailable') {
+    const msgs = (d.stock.lines || []).map((l) => l.message).filter(Boolean);
+    out.push(...(msgs.length ? msgs : [d.stock.failure || "Stock couldn't be confirmed for every sample."]));
+  }
+  return out;
+}
+// </warehouse-order-pure>
+
+const wh = { week: null, key: null, data: null, at: 0, seq: 0, loading: false, dueDate: null, confirming: false, busy: false, note: null, check: null, linesOpen: false };
+let whTimer = null;
+const WH_TRUCK = '<svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M2 6h11v10H2zM13 9h4l4 4v3h-8z"/><circle cx="6" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/></svg>';
+
+function whKey() {
+  return JSON.stringify([planningWeekStart(), wh.dueDate, shootPlanWarehouseRows().map((r) => [r.style_code, r.size])]);
+}
+// Called on every Shoot Plan render: asks again only when the week, the date or the samples changed (or after a minute), so editing samples refreshes the order.
+function scheduleWarehouseOrderLoad(force) {
+  if (!document.getElementById('shoot-plan-warehouse')) return;
+  if (!wh.dueDate) wh.dueDate = whIso(whNextWorkingDay(new Date()));
+  const key = whKey();
+  if (!force && key === wh.key && (wh.loading || (wh.data && Date.now() - wh.at < 60000))) return;
+  clearTimeout(whTimer);
+  whTimer = setTimeout(() => loadWarehouseOrder(), force ? 0 : 350);
+}
+async function loadWarehouseOrder() {
+  const week = planningWeekStart();
+  if (wh.week !== week) Object.assign(wh, { week, data: null, confirming: false, note: null, check: null });
+  wh.key = whKey();
+  wh.loading = true;
+  renderWarehouseOrder();
+  const seq = ++wh.seq;
+  let data;
+  try {
+    data = await api(`/warehouse-orders?week_start=${encodeURIComponent(week)}&due_date=${encodeURIComponent(wh.dueDate || '')}`);
+  } catch (e) {
+    data = { ok: false, configured: true, error: e.message };
+  }
+  if (seq !== wh.seq) return; // a newer request has started
+  Object.assign(wh, { data, at: Date.now(), loading: false });
+  renderWarehouseOrder();
+}
+function renderWarehouseOrder() {
+  const el = document.getElementById('shoot-plan-warehouse');
+  if (el) el.innerHTML = warehouseOrderHtml();
+}
+
+function warehouseOrderHtml() {
+  const d = wh.week === planningWeekStart() ? wh.data : null;
+  const head = (sub, tone = '') => `<div class="whp-head"><span class="whp-ic">${WH_TRUCK}</span><div class="whp-t"><b>Send to Warehouse</b><span class="${tone}">${sub}</span></div></div>`;
+  if (!d) return head(wh.loading ? 'Checking this week&rsquo;s warehouse order&hellip;' : '');
+  if (d.configured === false) return head('Ordering straight into ApparelMagic isn&rsquo;t switched on yet. Use Export CSV above for now.');
+  if (!d.ok) return head(escapeHtml(d.error || "This week's warehouse order couldn't be loaded."), 'whp-bad') + `<div class="whp-row"><button type="button" class="btn btn-ghost btn-sm" onclick="scheduleWarehouseOrderLoad(true)">Try again</button></div>`;
+
+  const r = d.review;
+  const readOnly = state.planningWeekOffset < 0 || d.week_passed;
+  // The last press's message, unless the order panel below already says the same thing.
+  const shownBelow = [r.lastRefusal, r.inFlight && r.inFlight.error];
+  const note = wh.note && !shownBelow.includes(wh.note) ? `<div class="whp-warn" role="alert">${escapeHtml(wh.note)}</div>` : '';
+  const parts = [];
+  for (const o of r.orders.filter((x) => x.state === 'sent')) {
+    parts.push(`<div class="whp-sent"><span class="whp-tick" aria-hidden="true">&#10003;</span><div><b>Sent to the warehouse</b> &middot; ApparelMagic order #${escapeHtml(o.orderRef || '')} &middot; PO ${escapeHtml(o.customerPo)} &middot; ${whPlural(o.pieces, 'sample')} &middot; needed by ${escapeHtml(whNiceDate(o.dueDate))}${o.requestedBy ? ` &middot; sent by ${escapeHtml(o.requestedBy)}` : ''}${o.error ? `<div class="whp-bad">${escapeHtml(o.error)}</div>` : ''}</div></div>`);
+  }
+  if (r.inFlight) {
+    const f = r.inFlight;
+    const c = wh.check;
+    parts.push(`<div class="whp-warn"><b>The order ${escapeHtml(f.customerPo)} needs checking before anything else is sent for this week.</b> ${escapeHtml(f.error || 'It was still being placed.')}
+      <div class="whp-row"><button type="button" class="btn btn-ghost btn-sm" onclick="checkWarehouseOrder('${escapeHtml(f.id)}')"${wh.busy ? ' disabled' : ''}>Check ApparelMagic</button>${c && c.kind === 'none' && c.canRelease ? `<button type="button" class="btn btn-ghost btn-sm" onclick="releaseWarehouseOrder('${escapeHtml(f.id)}')"${wh.busy ? ' disabled' : ''}>Clear it so it can be sent again</button>` : ''}</div>
+      ${c ? `<div class="whp-check">${escapeHtml(c.message)}</div>` : ''}</div>`);
+  } else if (r.lastRefusal) {
+    parts.push(`<div class="whp-warn"><b>The last order didn&rsquo;t go through.</b> ${escapeHtml(r.lastRefusal)}</div>`);
+  }
+
+  let sub = '';
+  if (r.inFlight) {
+    sub = 'An order is waiting to be checked before anything else is sent.';
+  } else if (r.toOrder.length) {
+    sub = r.orders.length ? `${whPlural(r.totalPieces, 'new sample')} added since the last order.` : `${whPlural(r.totalPieces, 'sample')} to send from the warehouse to the office.`;
+    if (readOnly) sub += ' This week has finished, so nothing more can be ordered for it.';
+    else parts.push(whFormHtml(d));
+  } else if (!r.orders.length) {
+    sub = 'No samples need to come from the warehouse this week.';
+  } else {
+    sub = 'Everything on this week&rsquo;s plan has been sent to the warehouse.';
+  }
+  return head(sub) + note + parts.join('');
+}
+
+function whFormHtml(d) {
+  const r = d.review;
+  const blockers = whBlockers(d);
+  const ready = !blockers.length && !!r.fingerprint && !!r.customerPo && !wh.loading;
+  const stockLine = (i) => {
+    const s = d.stock && d.stock.lines && d.stock.lines[i];
+    if (!s) return '';
+    if (s.message) return `<small class="whp-bad">${escapeHtml(s.message)}</small>`;
+    return s.available !== null && s.available !== undefined ? `<small>${escapeHtml(String(s.available))} in stock</small>` : '';
+  };
+  const lines = r.toOrder.map((l, i) => `<li><span>${escapeHtml(l.productName)}${l.colour ? ` &middot; ${escapeHtml(l.colour)}` : ''} &middot; <b>${escapeHtml(l.size || '-')}</b>${l.quantity > 1 ? ` &times; ${l.quantity}` : ''}</span>${stockLine(i)}</li>`).join('');
+  const action = wh.busy
+    ? `<div class="whp-busy" role="status">Sending to ApparelMagic&hellip; this can take up to a minute. Please keep this page open.</div>`
+    : wh.confirming && ready
+      ? `<div class="whp-confirm"><span>Send ${whPlural(r.totalPieces, 'sample')} to the warehouse, needed by <b>${escapeHtml(whNiceDate(wh.dueDate))}</b>? This creates ApparelMagic order <b>${escapeHtml(r.customerPo)}</b> under WNDRR SHOOT STOCK.</span><span class="whp-row"><button type="button" class="btn btn-primary" onclick="sendWarehouseOrder()">Yes, send it</button><button type="button" class="btn btn-ghost" onclick="cancelWarehouseOrder()">Cancel</button></span></div>`
+      : `<button type="button" class="btn btn-primary whp-send" onclick="confirmWarehouseOrder()"${ready ? '' : ' disabled'}>Send ${whPlural(r.totalPieces, 'sample')} to warehouse</button>`;
+  const unchecked = d.stock && d.stock.source === 'unavailable' ? `<div class="whp-muted">Stock couldn&rsquo;t be checked just now. Tuesday checks it again when the order is sent.</div>` : '';
+  return `<div class="whp-form">
+      <label class="whp-field"><span>Needed by</span><input type="date" id="wh-due" min="${whIso(new Date())}" value="${escapeHtml(wh.dueDate || '')}" onchange="setWarehouseDueDate(this.value)"${wh.busy ? ' disabled' : ''}></label>
+      <div class="whp-field"><span>Customer PO</span><b class="whp-po">${escapeHtml(r.customerPo || '-')}</b></div>
+      <div class="whp-action">${action}</div>
+    </div>
+    ${blockers.length ? `<ul class="whp-problems">${blockers.map((b) => `<li>${escapeHtml(b)}</li>`).join('')}</ul>` : ''}${unchecked}
+    <details class="whp-lines"${wh.linesOpen ? ' open' : ''} ontoggle="wh.linesOpen = this.open"><summary>What&rsquo;s being ordered (${whPlural(r.totalPieces, 'sample')})</summary><ul>${lines}</ul></details>`;
+}
+
+function setWarehouseDueDate(value) {
+  wh.dueDate = value || null;
+  wh.confirming = false;
+  wh.note = null;
+  scheduleWarehouseOrderLoad(true);
+}
+function confirmWarehouseOrder() {
+  wh.confirming = true;
+  wh.note = null;
+  renderWarehouseOrder();
+}
+function cancelWarehouseOrder() {
+  wh.confirming = false;
+  renderWarehouseOrder();
+}
+async function sendWarehouseOrder() {
+  const d = wh.data;
+  if (!d || !d.ok || wh.busy || !d.review.fingerprint) return;
+  Object.assign(wh, { busy: true, confirming: false, note: null });
+  renderWarehouseOrder();
+  try {
+    const out = await api('/warehouse-orders/place', { method: 'POST', body: JSON.stringify({ week_start: d.review.weekStart, due_date: wh.dueDate, fingerprint: d.review.fingerprint }) });
+    if (out.ok) toast(`Sent to the warehouse: ApparelMagic order #${out.order.orderRef}`);
+    else { wh.note = out.error || "The order wasn't sent."; toast(wh.note, true); }
+  } catch (e) {
+    wh.note = e.message;
+    toast(e.message, true);
+  }
+  wh.busy = false;
+  scheduleWarehouseOrderLoad(true);
+}
+async function checkWarehouseOrder(orderId) {
+  if (wh.busy) return;
+  Object.assign(wh, { busy: true, check: null, note: null });
+  renderWarehouseOrder();
+  try {
+    const out = await api('/warehouse-orders/check', { method: 'POST', body: JSON.stringify({ week_start: planningWeekStart(), order_id: orderId }) });
+    wh.check = out.ok ? out.check : { kind: 'error', message: out.error };
+    if (out.ok && out.check.kind === 'recorded') toast(out.check.message);
+  } catch (e) {
+    wh.check = { kind: 'error', message: e.message };
+  }
+  wh.busy = false;
+  if (wh.check && wh.check.kind === 'recorded') wh.check = null;
+  scheduleWarehouseOrderLoad(true);
+}
+async function releaseWarehouseOrder(orderId) {
+  if (wh.busy) return;
+  Object.assign(wh, { busy: true, note: null });
+  renderWarehouseOrder();
+  try {
+    const out = await api('/warehouse-orders/release', { method: 'POST', body: JSON.stringify({ week_start: planningWeekStart(), order_id: orderId }) });
+    if (out.ok) { wh.check = null; toast('Cleared. You can send the order again.'); }
+    else wh.check = { kind: 'error', message: out.error };
+  } catch (e) {
+    wh.check = { kind: 'error', message: e.message };
+  }
+  wh.busy = false;
+  scheduleWarehouseOrderLoad(true);
 }
 
 // ── Concept Development ──────────────────────────────

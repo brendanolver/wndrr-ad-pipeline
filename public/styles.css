@@ -6277,6 +6277,35 @@ button.cat2-prod:focus-visible,.cat2-view:focus-visible,.cat2-shoot:focus-visibl
 .sp3-csv-btn{border:0;background:none;color:var(--accent-text);font:inherit;font-size:14px;font-weight:700;cursor:pointer;white-space:nowrap;padding:8px 10px;}
 .sp3-csv-btn:hover:not(:disabled){text-decoration:underline;}
 .sp3-csv-btn:disabled{color:var(--text-muted);cursor:not-allowed;}
+/* Shoot Plan > Send to Warehouse (v1.9.5): the week's ApparelMagic order, placed by Tuesday. */
+.whp{background:#fff;border:1px solid var(--border);border-radius:var(--r-lg);padding:14px 18px;margin:-6px 0 18px;display:flex;flex-direction:column;gap:12px;}
+.whp:empty{display:none;}
+.whp-head{display:flex;align-items:center;gap:14px;}
+.whp-ic{color:var(--accent-text);display:inline-flex;flex:0 0 auto;}
+.whp-t{display:flex;flex-direction:column;gap:2px;min-width:0;}
+.whp-t b{font-size:14.5px;font-weight:700;}
+.whp-t span{font-size:13px;color:var(--text-secondary);}
+.whp-form{display:flex;align-items:flex-end;gap:18px;flex-wrap:wrap;}
+.whp-field{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--text-secondary);font-weight:600;}
+.whp-field input{padding:8px 10px;border:1px solid var(--border-strong);border-radius:var(--r);font:inherit;font-size:14px;color:var(--text);}
+.whp-po{font-size:14px;color:var(--text);padding:8px 0;font-weight:700;letter-spacing:.2px;}
+.whp-action{flex:1 1 260px;display:flex;justify-content:flex-end;}
+.whp-send{font-size:14px;padding:10px 18px;}
+.whp-confirm{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--purple-light);border-radius:var(--r);padding:10px 12px;font-size:13.5px;color:var(--text);}
+.whp-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;}
+.whp-confirm .whp-row{margin-top:0;}
+.whp-busy{font-size:13.5px;color:var(--accent-text);font-weight:600;padding:8px 0;}
+.whp-sent{display:flex;gap:10px;align-items:flex-start;font-size:13.5px;color:var(--text);background:var(--green-light);border-radius:var(--r);padding:10px 12px;}
+.whp-tick{color:var(--green);font-weight:700;}
+.whp-warn{background:var(--amber-light);border:1px solid #f5cf8a;border-radius:var(--r);padding:10px 12px;font-size:13.5px;color:var(--text);}
+.whp-check{margin-top:8px;font-size:13px;color:var(--text-secondary);}
+.whp-problems{margin:0;padding:10px 12px 10px 30px;background:var(--amber-light);border-radius:var(--r);font-size:13px;color:var(--text);}
+.whp-bad{color:var(--red) !important;}
+.whp-muted{font-size:12.5px;color:var(--text-muted);}
+.whp-lines summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--text-secondary);}
+.whp-lines ul{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:4px;}
+.whp-lines li{display:flex;justify-content:space-between;gap:12px;font-size:13px;padding:6px 10px;background:var(--surface2);border-radius:var(--r);}
+.whp-lines small{color:var(--text-muted);white-space:nowrap;}
 .sp3-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;align-items:stretch;}
 @media (max-width:1400px){.sp3-grid{grid-template-columns:repeat(3,minmax(0,1fr));}}
 @media (max-width:1050px){.sp3-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}

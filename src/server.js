@@ -131,6 +131,8 @@ app.use('/api/core-products', requireAuth, requireModuleAccess('planning'), core
 // Core creative plan: Planning users; money is stripped server-side for non-admins; never calls Meta.
 app.use('/api/core-creative-plan', requireAuth, requireModuleAccess('planning'), coreCreativePlanRoutes);
 app.use('/api/shoot-plan', requireAuth, requireModuleAccess('planning'), shootPlanRoutes);
+// Shoot Plan > Warehouse Order: hands the week's samples to Tuesday, which places the ApparelMagic order (this app never writes to ApparelMagic itself).
+app.use('/api/warehouse-orders', requireAuth, requireModuleAccess('planning'), require('./routes/warehouseOrders'));
 app.use('/api/product-image', requireAuth, require('./routes/productImage'));
 app.use('/api/content-creators', requireAuth, contentCreatorRoutes);
 app.use('/api/high-stock-products', requireAuth, requireModuleAccess('planning'), highStockProductRoutes);
